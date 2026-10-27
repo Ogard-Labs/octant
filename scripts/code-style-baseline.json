@@ -51,7 +51,6 @@
     "apps/server/src/persistence/extensionProjection.ts": 1,
     "apps/server/src/persistence/usageAggregation.ts": 3,
     "apps/server/src/process/seatbeltProfile.ts": 2,
-    "apps/server/src/providers/acpProcess.ts": 4,
     "apps/server/src/providers/anthropicMessages.ts": 2,
     "apps/server/src/providers/claudeAgentSdkDecoder.ts": 2,
     "apps/server/src/providers/claudeAgentSdkPort.ts": 5,

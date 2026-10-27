@@ -21,6 +21,7 @@ import { SshRemoteProject, SshRemoteWorktree, SshRemoteWorktreeId } from "./sshR
 import {
   SshConnectionId,
   SshPinnedHostKey,
+  SshRemotePath,
   SshTarget,
   SshTargetId,
   SshTargetPostureAdmission,
@@ -40,6 +41,7 @@ export const SSH_TARGET_EVENT_NAMES = {
   repinned: "ssh-target.repinned@1",
   attested: "ssh-target.attested@1",
   removed: "ssh-target.removed@1",
+  runtimeBinarySet: "ssh-target.runtime-binary-set@1",
 } as const;
 
 export const SSH_REMOTE_PROJECT_AGGREGATE = "ssh-remote-project";
@@ -75,6 +77,18 @@ export type SshTargetAttested = typeof SshTargetAttested.Type;
 export const SshTargetRemoved = Schema.Struct({ targetId: SshTargetId }).annotations(strict);
 export type SshTargetRemoved = typeof SshTargetRemoved.Type;
 
+/**
+ * The person set where one provider instance's runtime is on the target,
+ * from this machine. It replaces any earlier path for that instance, and
+ * goes with the target when the target is removed.
+ */
+export const SshTargetRuntimeBinarySet = Schema.Struct({
+  targetId: SshTargetId,
+  providerInstanceId: ProviderInstanceId,
+  path: SshRemotePath,
+}).annotations(strict);
+export type SshTargetRuntimeBinarySet = typeof SshTargetRuntimeBinarySet.Type;
+
 export const SshRemoteProjectBound = Schema.Struct({
   project: SshRemoteProject,
 }).annotations(strict);
@@ -84,6 +98,7 @@ export const decodeSshTargetRegistered = Schema.decodeUnknownSync(SshTargetRegis
 export const decodeSshTargetRepinned = Schema.decodeUnknownSync(SshTargetRepinned);
 export const decodeSshTargetAttested = Schema.decodeUnknownSync(SshTargetAttested);
 export const decodeSshTargetRemoved = Schema.decodeUnknownSync(SshTargetRemoved);
+export const decodeSshTargetRuntimeBinarySet = Schema.decodeUnknownSync(SshTargetRuntimeBinarySet);
 export const decodeSshRemoteProjectBound = Schema.decodeUnknownSync(SshRemoteProjectBound);
 
 /**

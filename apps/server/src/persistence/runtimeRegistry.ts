@@ -241,6 +241,7 @@ import {
   SshTargetRegistered,
   SshTargetRemoved,
   SshTargetRepinned,
+  SshTargetRuntimeBinarySet,
 } from "@octant/contracts/ssh-target-events";
 import { RemoteAccessProjection } from "./remoteAccessProjection";
 import {
@@ -501,6 +502,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(SSH_TARGET_EVENT_NAMES.repinned, 1, SshTargetRepinned)
     .register(SSH_TARGET_EVENT_NAMES.attested, 1, SshTargetAttested)
     .register(SSH_TARGET_EVENT_NAMES.removed, 1, SshTargetRemoved)
+    .register(SSH_TARGET_EVENT_NAMES.runtimeBinarySet, 1, SshTargetRuntimeBinarySet)
     .register(SSH_REMOTE_PROJECT_EVENT_NAMES.bound, 1, SshRemoteProjectBound)
     .register(SSH_REMOTE_WORKTREE_EVENT_NAMES.created, 1, SshRemoteWorktreeCreated)
     .register(SSH_REMOTE_WORKTREE_EVENT_NAMES.removed, 1, SshRemoteWorktreeRemoved)

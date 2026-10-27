@@ -838,8 +838,11 @@ Project are built, from a local window (Settings › SSH targets) or the local
 CLI, under the same admission; the composer's Project picker lists such a
 Project without offering it for a thread. The provider-sdk seam for placing a
 runtime on a target, its conformance, and the executor's confined runtime
-launches with their own proxy on this host are built; no driver declares
-placement yet, so no provider's runtime runs there. SSH targets, their
+launches with their own proxy on this host are built, and the ACP driver
+declares placement for a profile whose whole launch can be stated on a
+target, at the runtime path the person set for it there; no shipped profile
+can be stated there yet, so no provider's runtime runs on a target. SSH
+targets, their runtime paths, their
 attestation digests, remote bindings, managed worktrees, remote terminals'
 starts and ends, and a placed runtime's egress are journaled. Its
 admission, confinement attestation,
@@ -2509,8 +2512,9 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   the shared conformance harness (chat, child-agent, and context-facts
   suites) before it is selectable. An acquisition may carry a host-supplied
   remote placement, which reaches only a driver that declares
-  `remotePlacement` and only through `acquireProviderConnection`; every other
-  driver reports it unsupported and launches nothing
+  `remotePlacement` and only through `acquireProviderConnection`, and names
+  the runtime path the person set on the target, the only one the driver may
+  launch; every other driver reports it unsupported and launches nothing
   ([Provider runtimes on a target](design/remote-ssh-environments.md#provider-runtimes-on-a-target)).
 - **Probe scheduling.** Operations on one provider instance run one at a time.
   A probe asked for while another probe of that instance is running joins it
@@ -7251,7 +7255,8 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   usage) is the degraded form: the capability exists but is not promised before
   it is seen. Placement on an SSH target is not a capability and has no row:
   it is the driver's own `ProviderDriver.remotePlacement` declaration, never a
-  probe, and no driver declares it yet.
+  probe. The ACP driver makes it only for a profile whose whole launch can be
+  stated on a target, which no shipped profile is yet.
 
   | Capability               | Claude Code                                                  | Codex                                                     | OpenCode                                                          | Pi                                                                                      | ACP agents                                                                    | Ollama                                                           | Harness endpoints                                                                 | Outside harness endpoints                                        | Oh My Pi                              |
   | ------------------------ | ------------------------------------------------------------ | --------------------------------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------- |
