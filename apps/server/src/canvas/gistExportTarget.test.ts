@@ -62,10 +62,15 @@ function fakeGithub(result?: GistCreationResult) {
 function target(
   availability: GistExportAvailability = { kind: "ready", account: "octocat" },
   github = fakeGithub(),
+  hostPlatform: NodeJS.Platform = "darwin",
 ) {
   return {
     github,
-    target: createGistExportTarget({ availability: () => availability, gists: github.gists }),
+    target: createGistExportTarget({
+      availability: () => availability,
+      gists: github.gists,
+      hostPlatform,
+    }),
   };
 }
 
@@ -124,6 +129,30 @@ describe("the GitHub Gist export destination", () => {
     expect(delivery).toMatchObject({ kind: "refused", code: "refused" });
     expect(github.requests).toHaveLength(0);
   });
+
+  it.each([
+    { hostPlatform: "linux", computer: "this computer" },
+    { hostPlatform: "darwin", computer: "this Mac" },
+  ] as const)(
+    "says a filtered document cannot leave the $hostPlatform host's own computer",
+    async (host) => {
+      const { target: gist } = target(
+        { kind: "ready", account: "octocat" },
+        fakeGithub(),
+        host.hostPlatform,
+      );
+
+      const delivery = await gist.exportDocument(
+        document({ body: "key: ghp_abcdefghijklmnopqrstuvwxyz012345\n" }),
+      );
+
+      expect(delivery).toEqual({
+        kind: "refused",
+        code: "refused",
+        message: `The document contains text that cannot leave ${host.computer}.`,
+      });
+    },
+  );
 
   it("refuses and posts nothing when GitHub is not connected", async () => {
     const { github, target: gist } = target({ kind: "not-connected" });
@@ -215,28 +244,52 @@ describe("the gist destination's state from the GitHub connection", () => {
         state: "ready",
         account: { login: "octocat", gitProtocol: "https", scopes: ["gist"] },
       }),
+      "darwin",
     );
 
     expect(ready).toEqual({ kind: "ready", account: "octocat" });
   });
 
   it("reports refused, not not-connected, when the credential store is insecure", () => {
-    const refused = gistExportAvailability(snapshot({ state: "insecure-storage" }));
+    const refused = gistExportAvailability(snapshot({ state: "insecure-storage" }), "darwin");
 
     expect(refused.kind).toBe("refused");
   });
 
+  it.each([
+    { hostPlatform: "linux", computer: "this computer" },
+    { hostPlatform: "darwin", computer: "this Mac" },
+  ] as const)(
+    "says the plain-text credential is on the $hostPlatform host's own computer",
+    (host) => {
+      expect(
+        gistExportAvailability(snapshot({ state: "insecure-storage" }), host.hostPlatform),
+      ).toEqual({
+        kind: "refused",
+        reason: `GitHub is signed in with credentials stored in plain text on ${host.computer}.`,
+      });
+    },
+  );
+
   it("is not-connected when there is no usable GitHub connection", () => {
-    expect(gistExportAvailability(snapshot({ state: "unauthorized" })).kind).toBe("not-connected");
-    expect(gistExportAvailability(snapshot({ state: "unavailable" })).kind).toBe("not-connected");
-    expect(gistExportAvailability(snapshot({ state: "rate-limited" })).kind).toBe("not-connected");
-    expect(gistExportAvailability(snapshot({ state: "external-token" })).kind).toBe(
+    expect(gistExportAvailability(snapshot({ state: "unauthorized" }), "darwin").kind).toBe(
+      "not-connected",
+    );
+    expect(gistExportAvailability(snapshot({ state: "unavailable" }), "darwin").kind).toBe(
+      "not-connected",
+    );
+    expect(gistExportAvailability(snapshot({ state: "rate-limited" }), "darwin").kind).toBe(
+      "not-connected",
+    );
+    expect(gistExportAvailability(snapshot({ state: "external-token" }), "darwin").kind).toBe(
       "not-connected",
     );
   });
 
   it("is not-connected when a ready state carries no account to post as", () => {
-    expect(gistExportAvailability(snapshot({ state: "ready" })).kind).toBe("not-connected");
+    expect(gistExportAvailability(snapshot({ state: "ready" }), "darwin").kind).toBe(
+      "not-connected",
+    );
   });
 });
 
@@ -254,7 +307,7 @@ describe("reading the GitHub connection for the gist destination", () => {
       const answer = answers[reads] ?? Promise.resolve(signedOut);
       reads += 1;
       return answer;
-    });
+    }, "darwin");
     return { gist, reads: () => reads };
   }
 

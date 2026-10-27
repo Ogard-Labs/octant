@@ -6,7 +6,7 @@ import type {
   ProviderObservedState,
 } from "@octant/contracts";
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { credentialStoreName, hostCredentialStore } from "../platform";
+import { credentialStoreName, hostCredentialStore, useHostPlatform } from "../platform";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import type { TransientProviderCredential } from "./useProviderController";
@@ -17,6 +17,7 @@ export function ClaudeCreateAuthenticationFields(props: {
   readonly credentialManagementAvailable: boolean;
   readonly onAuthenticationChange: (authentication: ClaudeAuthentication) => void;
 }) {
+  const hostPlatform = useHostPlatform();
   return (
     <>
       <label>
@@ -47,11 +48,21 @@ export function ClaudeCreateAuthenticationFields(props: {
             />
           </label>
           {!props.credentialManagementAvailable ? (
+            // A host that has said which it is gets only its own route; one
+            // that has not yet gets both rather than a guess.
             <p className="provider-settings__field-guidance">
-              Add this profile without a key. On the Linux host, run{" "}
-              <code>octant provider key set &quot;Profile name&quot;</code> using its exact name,
-              then check the connection. On macOS, open this profile in Octant desktop to add its
-              key. This browser cannot save API keys.
+              Add this profile without a key.{" "}
+              {hostPlatform === "darwin" ? null : (
+                <>
+                  On the Linux host, run{" "}
+                  <code>octant provider key set &quot;Profile name&quot;</code> using its exact
+                  name, then check the connection.{" "}
+                </>
+              )}
+              {hostPlatform === "linux"
+                ? null
+                : "On macOS, open this profile in Octant desktop to add its key. "}
+              This browser cannot save API keys.
             </p>
           ) : null}
         </>

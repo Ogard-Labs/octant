@@ -77,7 +77,7 @@ export function runtimeErrorReason(error: unknown): string | undefined {
     return "the Claude runtime binary was not found";
   if (/\bEACCES\b|permission denied/i.test(text)) return "the Claude runtime could not be started";
   if (/\b401\b|unauthori[sz]ed|not logged in|please log in|authentication/i.test(text)) {
-    return "Claude is not signed in on this Mac";
+    return "Claude is not signed in on this computer";
   }
   if (/\b429\b|rate.?limit/i.test(text)) return "Claude is rate limited";
   if (/\bECONNREFUSED\b|\bETIMEDOUT\b|\bENOTFOUND\b|fetch failed|network/i.test(text)) {

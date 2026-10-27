@@ -1,4 +1,5 @@
 import type { HostPlatform } from "@octant/contracts/host";
+import { hostComputerName } from "@octant/domain";
 import { createContext, useContext } from "react";
 
 /**
@@ -52,7 +53,7 @@ export function useHostPlatform(): HostPlatform | undefined {
 export function thisComputerName(
   hostPlatform: HostPlatform | undefined,
 ): "this Mac" | "this computer" {
-  return hostPlatform === "darwin" ? "this Mac" : "this computer";
+  return hostComputerName(hostPlatform);
 }
 
 /**

@@ -79,7 +79,10 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
     // The gist export destination's GitHub state. It is read on demand when an
     // export lists or prepares destinations, never at startup; see
     // `GistConnection`.
-    const gistConnection = new GistConnection((signal) => githubCapabilityService.snapshot(signal));
+    const gistConnection = new GistConnection(
+      (signal) => githubCapabilityService.snapshot(signal),
+      process.platform,
+    );
     // Areas that hold GitHub pull-request data register here, so a sign-in that
     // can no longer read pull requests reaches them without this area holding
     // them.

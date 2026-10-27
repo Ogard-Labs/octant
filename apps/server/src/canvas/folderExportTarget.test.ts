@@ -83,15 +83,28 @@ function slides(names: ReadonlyArray<string>): CanvasExportRenderedPictures {
   });
 }
 
-function folderTarget(folder: () => FolderExportAvailability) {
+function folderTarget(
+  folder: () => FolderExportAvailability,
+  hostPlatform: NodeJS.Platform = "darwin",
+) {
   return createFolderExportTarget({
     availability: folder,
     files: createCanvasExportFilePort(),
     newTempId: randomUUID,
+    hostPlatform,
   });
 }
 
 describe("the folder export destination", () => {
+  it.each([
+    { hostPlatform: "linux", label: "A folder on this computer" },
+    { hostPlatform: "darwin", label: "A folder on this Mac" },
+  ] as const)("names the $hostPlatform host's own computer in its label", (host) => {
+    const target = folderTarget(() => ({ kind: "not-chosen" }), host.hostPlatform);
+
+    expect(target.contribution.label).toBe(host.label);
+  });
+
   it("writes the rendered document and reports the file it wrote", async () => {
     const folder = privateFolder();
     const target = folderTarget(() => ({ kind: "ready", folder }));

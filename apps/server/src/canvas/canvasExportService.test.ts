@@ -110,6 +110,7 @@ function exportFolder(options?: { readonly chosen?: boolean }): {
       home,
       standingOutsideApproval: false,
       newTempId: randomUUID,
+      hostPlatform: "darwin",
     },
   };
 }

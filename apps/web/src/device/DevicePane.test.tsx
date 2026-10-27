@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { HostPlatformContext } from "../platform";
 import { deviceProblemFor, type DeviceChoice, type DeviceView } from "./deviceModel";
 import { DevicePane, type DevicePaneProps } from "./DevicePane";
 
@@ -593,5 +594,60 @@ describe("DevicePane", () => {
       });
     });
     expect(screen.queryByRole("region", { name: "Diagnostics" })).not.toBeInTheDocument();
+  });
+});
+
+// Each host is seen from a window on the other platform, so copy that read the
+// window's platform instead of the host's would name the wrong computer.
+const HOSTS = [
+  { hostPlatform: "linux", window: "MacIntel", computer: "this computer", elsewhere: /this Mac/ },
+  {
+    hostPlatform: "darwin",
+    window: "Linux x86_64",
+    computer: "this Mac",
+    elsewhere: /this computer/,
+  },
+] as const;
+
+describe.each(HOSTS)("DevicePane on a $hostPlatform host", (host) => {
+  beforeEach(() => {
+    Object.defineProperty(window.navigator, "platform", { value: host.window, configurable: true });
+  });
+  afterEach(() => Reflect.deleteProperty(window.navigator, "platform"));
+
+  function paneOnHost(view: DeviceView) {
+    render(
+      <HostPlatformContext.Provider value={host.hostPlatform}>
+        <DevicePane
+          busy={false}
+          devices={[]}
+          diagnostics={{ facts: [], running: [], recent: [] }}
+          inputAllowed={false}
+          needsApproval={false}
+          onAction={vi.fn()}
+          onInput={vi.fn()}
+          platform="android"
+          view={view}
+        />
+      </HostPlatformContext.Provider>,
+    );
+  }
+
+  it("names the host's computer while it checks for a device", () => {
+    paneOnHost({ kind: "checking" });
+
+    expect(screen.getByText(`Checking ${host.computer}…`)).toBeVisible();
+  });
+
+  it("names the host's computer the setup checks run on", () => {
+    paneOnHost({
+      kind: "setup",
+      title: "Set up the Android Emulator",
+      checks: [{ id: "sdk", label: "Android SDK found", state: "waiting" }],
+    });
+
+    expect(
+      screen.getByText(`Octant checks these on ${host.computer}. Nothing is installed for you.`),
+    ).toBeVisible();
   });
 });

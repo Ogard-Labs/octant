@@ -86,7 +86,10 @@ but they do not own a second palette or visual language.
   kept or runs on the host says "this Mac" and "Keychain" only when the host
   reports macOS, and "this computer" and "credential store" otherwise. The
   window's own platform never decides it: a browser on a Mac can drive a Linux
-  host. Until the host has reported, the neutral words show. The platform is
+  host. Until the host has reported, the neutral words show. Steps that
+  differ by platform, such as a browser's key setup, show only the host's
+  own platform's steps once it has reported, and every platform's before
+  then. The platform is
   a host fact (see "Host platform in copy" under
   [Security and authority](docs/architecture.md#security-and-authority)).
 - **Vocabulary.** `Project`, `thread`, `checkout`, `worktree`, `base branch`,

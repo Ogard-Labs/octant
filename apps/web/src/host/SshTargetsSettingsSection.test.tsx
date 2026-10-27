@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { SshTargetAdministrationBridge, SshTargetOperation } from "../shell/hostBridge";
+import { HostPlatformContext } from "../platform";
 import { SshTargetsSettingsPage } from "./SshTargetsSettingsSection";
 
 const fingerprint = `SHA256:${"Q".repeat(43)}`;
@@ -202,5 +203,41 @@ describe("Settings › SSH targets", () => {
         terminalId: second?.terminalId,
       }),
     );
+  });
+});
+
+// Each host is seen from a window on the other platform, so copy that read the
+// window's platform instead of the host's would name the wrong computer.
+const HOSTS = [
+  { hostPlatform: "linux", window: "MacIntel", computer: "this computer", elsewhere: /this Mac/ },
+  {
+    hostPlatform: "darwin",
+    window: "Linux x86_64",
+    computer: "this Mac",
+    elsewhere: /this computer/,
+  },
+] as const;
+
+describe.each(HOSTS)("Settings › SSH targets on a $hostPlatform host", (host) => {
+  beforeEach(() => {
+    Object.defineProperty(window.navigator, "platform", { value: host.window, configurable: true });
+  });
+  afterEach(() => Reflect.deleteProperty(window.navigator, "platform"));
+
+  it("names the host's computer as the one that reaches the targets and confines their work", async () => {
+    render(
+      <HostPlatformContext.Provider value={host.hostPlatform}>
+        <SshTargetsSettingsPage bridge={bridge().administration} />
+      </HostPlatformContext.Provider>,
+    );
+    await screen.findByRole("group", { name: "Service setting" });
+
+    expect(screen.getByText(/^Machines .* reaches with ssh\./)).toHaveTextContent(
+      `Machines ${host.computer} reaches with ssh. A Code Project can keep its folder on one; Octant admits work there only after the target proves it confines it as ${host.computer} would.`,
+    );
+    expect(screen.getByText(/^A Code Project whose folder is on a target\./)).toHaveTextContent(
+      `A Code Project whose folder is on a target. Its terminals and worktrees run there, under the same confinement as on ${host.computer}.`,
+    );
+    expect(document.body.textContent).not.toMatch(host.elsewhere);
   });
 });

@@ -7,8 +7,9 @@ import type {
 import { commitsByHourExample, hottestFilesExample, repositoryMapExample } from "@octant/domain";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
+import { HostPlatformContext } from "../platform";
 import { CanvasSharePanel } from "./CanvasSharePanel";
 
 const canvasId = "11111111-1111-4111-8111-111111111111" as CanvasId;
@@ -519,5 +520,54 @@ describe("CanvasSharePanel", () => {
     );
     // A revoked row offers no revoke control to press again.
     expect(screen.queryByTestId(`canvas-share-revoke-${snapshotId}`)).toBeNull();
+  });
+});
+
+// Each host is seen from a window on the other platform, so copy that read the
+// window's platform instead of the host's would name the wrong computer.
+const HOSTS = [
+  { hostPlatform: "linux", window: "MacIntel", computer: "this computer", elsewhere: /this Mac/ },
+  {
+    hostPlatform: "darwin",
+    window: "Linux x86_64",
+    computer: "this Mac",
+    elsewhere: /this computer/,
+  },
+] as const;
+
+describe.each(HOSTS)("CanvasSharePanel on a $hostPlatform host", (host) => {
+  beforeEach(() => {
+    Object.defineProperty(window.navigator, "platform", { value: host.window, configurable: true });
+  });
+  afterEach(() => Reflect.deleteProperty(window.navigator, "platform"));
+
+  it("says a share stays on the host's computer", () => {
+    render(
+      <HostPlatformContext.Provider value={host.hostPlatform}>
+        <CanvasSharePanel
+          canvasId={canvasId}
+          expectedSequence={1}
+          newId={() => "3c3c3c3c-3c3c-4c3c-8c3c-3c3c3c3c3c3c"}
+          now={() => now}
+          onOpen={async () => {
+            throw new Error("unused");
+          }}
+          onRevoke={async () => {
+            throw new Error("unused");
+          }}
+          onShare={async () => {
+            throw new Error("unused");
+          }}
+          overview={overview({ sharingEnabled: false })}
+          versionId={versionId}
+        />
+      </HostPlatformContext.Provider>,
+    );
+
+    const description = screen.getByText(/^A share is a read-only snapshot/);
+    expect(description).toHaveTextContent(
+      `It stays on ${host.computer} — nothing is uploaded, and there is no link.`,
+    );
+    expect(description.textContent).not.toMatch(host.elsewhere);
   });
 });

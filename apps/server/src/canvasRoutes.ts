@@ -1186,7 +1186,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
               decodeCanvasPublicLinkSettingsResult({
                 kind: "canvas-public-link-settings-refused",
                 reason: "unauthorized",
-                message: "Public link settings can be changed only from a window on this Mac.",
+                message: "Public link settings can be changed only from a window on this computer.",
               }),
               200,
               origin,
@@ -1245,7 +1245,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
           if (principal.kind !== "local-window") {
             return refusedRevoke(
               "unauthorized",
-              "A public link can be revoked only from a window on this Mac.",
+              "A public link can be revoked only from a window on this computer.",
             );
           }
           const body = await readJson(request);

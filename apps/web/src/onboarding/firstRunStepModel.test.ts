@@ -31,4 +31,19 @@ describe("first-run steps", () => {
       ["model", true],
     ]);
   });
+
+  it.each([
+    { hostPlatform: "linux", summary: "What this computer can actually reach." },
+    { hostPlatform: "darwin", summary: "What this Mac can actually reach." },
+  ] as const)("names the $hostPlatform host's computer in the providers step", (host) => {
+    const steps = buildFirstRunSteps({
+      current: "providers",
+      providersReady: false,
+      projectReady: false,
+      modelChosen: false,
+      hostPlatform: host.hostPlatform,
+    });
+
+    expect(steps[0]?.summary).toBe(host.summary);
+  });
 });

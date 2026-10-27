@@ -3103,15 +3103,17 @@ function LaunchedShell(
         instances: providerController.instances,
         observedByInstance: providerController.observedByInstance,
         discovery: firstRunDiscovery,
+        hostPlatform,
       }),
     [
       providerController.status,
       providerController.instances,
       providerController.observedByInstance,
       firstRunDiscovery,
+      hostPlatform,
     ],
   );
-  const firstRunDiscoveryNotice = describeDiscoveryNotice(firstRunDiscovery);
+  const firstRunDiscoveryNotice = describeDiscoveryNotice(firstRunDiscovery, hostPlatform);
   const recordFirstRunOutcome = useCallback(
     (outcome: FirstRunOnboardingOutcome) =>
       controller.updateSettings({ firstRunOnboarding: outcome }),

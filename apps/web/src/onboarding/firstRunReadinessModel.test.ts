@@ -50,12 +50,14 @@ function searched(candidates: ReadonlyArray<unknown> = []): FirstRunDiscoveryInp
   };
 }
 
+// These run against a macOS host unless a test names another platform.
 function summarize(overrides: Partial<FirstRunReadinessInput> = {}) {
   return summarizeFirstRunReadiness({
     providerStatus: "ready",
     instances: [],
     observedByInstance: new Map(),
     discovery: searched(),
+    hostPlatform: "darwin",
     ...overrides,
   });
 }
@@ -216,10 +218,13 @@ describe("first-run provider readiness", () => {
 
 describe("first-run discovery notice", () => {
   it("names an incomplete scan and offers a retry rather than implying a full search", () => {
-    const cancelled = describeDiscoveryNotice({
-      scanning: false,
-      snapshot: { status: "cancelled" } as DiscoverySnapshot,
-    });
+    const cancelled = describeDiscoveryNotice(
+      {
+        scanning: false,
+        snapshot: { status: "cancelled" } as DiscoverySnapshot,
+      },
+      "darwin",
+    );
 
     expect(cancelled).toEqual({
       tone: "attention",
@@ -228,27 +233,88 @@ describe("first-run discovery notice", () => {
       retryable: true,
     });
     expect(
-      describeDiscoveryNotice({ scanning: false, message: "Discovery scan failed." }),
+      describeDiscoveryNotice({ scanning: false, message: "Discovery scan failed." }, "darwin"),
     ).toMatchObject({ tone: "attention", retryable: true });
-    expect(describeDiscoveryNotice({ scanning: true })).toMatchObject({ tone: "info" });
+    expect(describeDiscoveryNotice({ scanning: true }, "darwin")).toMatchObject({ tone: "info" });
     expect(
-      describeDiscoveryNotice({
-        scanning: false,
-        snapshot: { status: "completed" } as DiscoverySnapshot,
-      }),
+      describeDiscoveryNotice(
+        {
+          scanning: false,
+          snapshot: { status: "completed" } as DiscoverySnapshot,
+        },
+        "darwin",
+      ),
     ).toBeUndefined();
   });
 
   it("says a re-scan is running instead of repeating the outcome it is retrying", () => {
     expect(
-      describeDiscoveryNotice({
-        scanning: true,
-        snapshot: { status: "partial" } as DiscoverySnapshot,
-      }),
+      describeDiscoveryNotice(
+        {
+          scanning: true,
+          snapshot: { status: "partial" } as DiscoverySnapshot,
+        },
+        "darwin",
+      ),
     ).toEqual({
       tone: "info",
       message: "Checking this Mac for installed providers…",
       retryable: false,
     });
+  });
+});
+
+describe.each([
+  {
+    hostPlatform: "linux",
+    computer: "this computer",
+    unlock: "Unlock this computer's credential store or sign in again.",
+  },
+  {
+    hostPlatform: "darwin",
+    computer: "this Mac",
+    unlock: "Unlock the login keychain or sign in again.",
+  },
+] as const)("first-run copy on a $hostPlatform host", (host) => {
+  const onHost = (overrides: Partial<FirstRunReadinessInput>) =>
+    summarize({ hostPlatform: host.hostPlatform, ...overrides });
+
+  it("names the host's computer while its search for providers is unfinished", () => {
+    const scanning = onHost({ discovery: { scanning: true } });
+    const unsearched = onHost({ discovery: { scanning: false } });
+
+    expect(scanning.headline).toBe(`Octant has not finished checking ${host.computer}`);
+    expect(scanning.detail).toBe(
+      `The search for installed providers is still running. Octant claims nothing about ${host.computer} until it finishes.`,
+    );
+    expect(unsearched.detail).toBe(
+      `The search for installed providers has not completed, so Octant cannot say whether one is installed. Check ${host.computer} again to finish it.`,
+    );
+    expect(describeDiscoveryNotice({ scanning: true }, host.hostPlatform)?.message).toBe(
+      `Checking ${host.computer} for installed providers…`,
+    );
+  });
+
+  it("names the host's computer where it found runtimes that are not configured", () => {
+    const summary = onHost({
+      discovery: searched([{ driverKind: "codex", displayName: "Codex" }]),
+    });
+
+    expect(summary.detail).toBe(
+      `Octant detected 1 installed runtime on ${host.computer}. Enable one in provider settings to send a message.`,
+    );
+  });
+
+  it("names the host's credential store when a stored credential cannot be read", () => {
+    const summary = onHost({
+      instances: [instance()],
+      observedByInstance: new Map([
+        [instance().id, observed({ readiness: "ready", credentialStatus: "unavailable" })],
+      ]),
+    });
+
+    expect(summary.providers[0]?.detail).toBe(
+      `Octant cannot read this provider's stored credential. ${host.unlock}`,
+    );
   });
 });

@@ -83,6 +83,16 @@ export function listHosts(
 }
 
 /**
+ * How copy names the host's computer: "this Mac" when the host runs macOS,
+ * "this computer" otherwise or when its platform is not known. The renderer
+ * passes the platform the host reports, and the server the one it runs on.
+ * Neutral wording is never wrong, while borrowing another platform is.
+ */
+export function hostComputerName(platform: HostPlatform | undefined): "this Mac" | "this computer" {
+  return platform === "darwin" ? "this Mac" : "this computer";
+}
+
+/**
  * Validates that a hostId is known and routable. Used by the server to
  * reauthorize creation commands with host identity present.
  */

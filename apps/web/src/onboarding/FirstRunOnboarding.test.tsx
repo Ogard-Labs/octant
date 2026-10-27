@@ -12,7 +12,8 @@ import { buildModelPickerGroups, type PickerGroup } from "@octant/domain";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { HostPlatformContext } from "../platform";
 import { FirstRunOnboarding, type FirstRunOnboardingProps } from "./FirstRunOnboarding";
 import { summarizeFirstRunReadiness } from "./firstRunReadinessModel";
 import {
@@ -97,7 +98,7 @@ const codeProject = {
   lifecycle: "active" as const,
 };
 
-// A scan that ran to completion: only then may the surface claim this Mac has
+// A scan that ran to completion: only then may the surface claim the host has
 // no provider on it.
 const searchedThisMac = {
   scanning: false,
@@ -293,7 +294,7 @@ describe("FirstRunOnboarding", () => {
     await user.click(railStep("Model"));
 
     expect(screen.getByRole("status")).toHaveTextContent(
-      "No provider on this Mac is ready, so there is nothing to choose from yet.",
+      "No provider on this computer is ready, so there is nothing to choose from yet.",
     );
     expect(screen.queryByRole("note")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Open provider settings" }));
@@ -311,7 +312,7 @@ describe("FirstRunOnboarding", () => {
     // The provider is enabled and answered, so it still gets a picker group.
     // What decides this step is whether there is a model to choose.
     expect(screen.getByRole("status")).toHaveTextContent(
-      "No provider on this Mac offered a model, so there is nothing to choose from yet.",
+      "No provider on this computer offered a model, so there is nothing to choose from yet.",
     );
     expect(screen.queryByRole("listbox")).toBeNull();
   });
@@ -731,5 +732,61 @@ describe("FirstRunOnboarding", () => {
     expect(screen.getByRole("heading", { name: "Model" })).toBeVisible();
     expect(props.controller.complete).not.toHaveBeenCalled();
     expect(props.onStartThread).not.toHaveBeenCalled();
+  });
+});
+
+// Each host is seen from a window on the other platform, so copy that read the
+// window's platform instead of the host's would name the wrong computer.
+const HOSTS = [
+  { hostPlatform: "linux", window: "MacIntel", computer: "this computer", elsewhere: /this Mac/ },
+  {
+    hostPlatform: "darwin",
+    window: "Linux x86_64",
+    computer: "this Mac",
+    elsewhere: /this computer/,
+  },
+] as const;
+
+describe.each(HOSTS)("FirstRunOnboarding on a $hostPlatform host", (host) => {
+  beforeEach(() => {
+    Object.defineProperty(window.navigator, "platform", { value: host.window, configurable: true });
+  });
+  afterEach(() => Reflect.deleteProperty(window.navigator, "platform"));
+
+  function mountOnHost(overrides: Partial<FirstRunOnboardingProps> = {}) {
+    render(
+      <HostPlatformContext.Provider value={host.hostPlatform}>
+        <FirstRunOnboarding {...baseProps()} {...overrides} />
+      </HostPlatformContext.Provider>,
+    );
+  }
+
+  it("names the host's computer in the providers step summary", () => {
+    mountOnHost();
+
+    expect(railStep("Providers")).toHaveTextContent(`What ${host.computer} can actually reach.`);
+  });
+
+  it("names the host's computer when no provider there is ready", async () => {
+    const user = userEvent.setup();
+    mountOnHost();
+
+    await user.click(railStep("Model"));
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      `No provider on ${host.computer} is ready, so there is nothing to choose from yet.`,
+    );
+    expect(screen.getByRole("status").textContent).not.toMatch(host.elsewhere);
+  });
+
+  it("names the host's computer when a provider there offered no model", async () => {
+    const user = userEvent.setup();
+    mountOnHost({ codeModelGroups: groupsFor([]) });
+
+    await user.click(railStep("Model"));
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      `No provider on ${host.computer} offered a model, so there is nothing to choose from yet.`,
+    );
   });
 });

@@ -8412,7 +8412,15 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   that names the host's computer or credential store follows it. Before the
   answer arrives, or from a host that sends none, copy uses the neutral "this
   computer" rather than the window's platform, which is wrong exactly for a
-  remote window.
+  remote window. Copy the server writes itself, such as the folder export
+  destination's label and the gist destination's refusal reasons, names the
+  computer from the server's own `process.platform`, injected into the
+  destination as a dependency. A signed-in paired device that lists export
+  destinations therefore reads "this Mac" or "this computer"; it learns
+  nothing a destination path on the same approval card does not already
+  show, and nothing reaches a client before sign-in. Server refusals that
+  name the host's window ("only from a window on this computer") use the
+  neutral name on every host.
 - **Local servers and Running services.** Listener observation is ephemeral,
   scoped to listening sockets of the current user, and never journaled. One
   classifier decides what may be listed at all: a system daemon, another user's

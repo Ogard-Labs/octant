@@ -199,6 +199,7 @@ function harness(options?: {
           home,
           standingOutsideApproval: false,
           newTempId: () => crypto.randomUUID(),
+          hostPlatform: "darwin",
           publicLinks: links,
         },
         id,

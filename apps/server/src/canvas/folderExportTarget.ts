@@ -7,7 +7,11 @@ import {
   type CanvasExportRefusal,
   type CanvasExportRenderedOutput,
 } from "@octant/contracts/canvas-export";
-import { canvasExportPlannedName, freeCanvasExportFileName } from "@octant/domain";
+import {
+  canvasExportPlannedName,
+  freeCanvasExportFileName,
+  hostComputerName,
+} from "@octant/domain";
 import type { CanvasExportTarget } from "@octant/plugin-api/canvas-export";
 import type { CanvasExportFilePort } from "./canvasExportFilePort";
 
@@ -28,8 +32,14 @@ import type { CanvasExportFilePort } from "./canvasExportFilePort";
  * gets a numbered copy beside it, as a single file would.
  */
 
+// The id is stored with every export, so it keeps the name it was first given
+// on every host; only the label a person reads names the host's computer.
 export const FOLDER_EXPORT_TARGET_ID = "folder-on-this-mac";
-export const FOLDER_EXPORT_TARGET_LABEL = "A folder on this Mac";
+
+/** "A folder on this Mac" on a macOS host, "A folder on this computer" elsewhere. */
+export function folderExportTargetLabel(hostPlatform: NodeJS.Platform): string {
+  return `A folder on ${hostComputerName(hostPlatform)}`;
+}
 
 /** What the folder destination can do for one Canvas, read from the host. */
 export type FolderExportAvailability =
@@ -41,6 +51,8 @@ export interface FolderExportTargetDependencies {
   readonly availability: () => FolderExportAvailability;
   readonly files: CanvasExportFilePort;
   readonly newTempId: () => string;
+  /** The platform the server runs on, which names the computer the folder is on. */
+  readonly hostPlatform: NodeJS.Platform;
 }
 
 function refused(code: CanvasExportRefusal["code"], message: string): CanvasExportDelivery {
@@ -55,7 +67,7 @@ export function createFolderExportTarget(
       schemaVersion: 1,
       kind: "canvas-export-contribution",
       targetId: FOLDER_EXPORT_TARGET_ID,
-      label: FOLDER_EXPORT_TARGET_LABEL,
+      label: folderExportTargetLabel(dependencies.hostPlatform),
       formats: ["markdown", "html", "png", "pdf"],
     }),
 
