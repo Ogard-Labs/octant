@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Appearance, StatusBar, StyleSheet, Text, View } from "react-native";
 import Constants from "expo-constants";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
@@ -11,6 +11,7 @@ import { MobileDeepLinkCapture } from "./navigation/mobileDeepLinkCapture";
 import { RootNavigator } from "./navigation/RootNavigator";
 import { createInitialNavigationState, selectMobileRoute } from "./navigation/navigationState";
 import { AppVaultGate } from "./security/AppVaultGate";
+import { mobileScreenshotPrivacy } from "./security/deviceProtection";
 import { createExpoBiometricAuthenticator } from "./security/expoBiometricAuthenticator";
 import { MobileSessionProvider } from "./session/MobileSessionContext";
 import { useDistilledFonts } from "./theme/useDistilledFonts";
@@ -96,6 +97,13 @@ export default function App() {
   // to avoid a light flash on dark phones.
   const bootColors = colorsForScheme(resolveThemeScheme("system", Appearance.getColorScheme()));
   const authenticator = useMemo(() => createExpoBiometricAuthenticator(), []);
+  // The Android module starts with the secure window set; this applies the
+  // session's choice again at launch, so a module that loaded after its
+  // first foreground signal still protects the window before any thread
+  // renders behind the vault.
+  useEffect(() => {
+    void mobileScreenshotPrivacy.getMode().then((mode) => mobileScreenshotPrivacy.apply(mode));
+  }, []);
 
   if (!fonts.ready) {
     return (
