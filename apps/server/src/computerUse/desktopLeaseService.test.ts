@@ -7,6 +7,7 @@ import {
   DESKTOP_ARTIFACT_MAXIMUM_BYTES,
   decodeDesktopHostTag,
   decodeDesktopLeaseId,
+  decodeDesktopPlacementId,
   decodeDesktopProviderId,
   decodeDesktopRecipe,
   decodeEventActor,
@@ -804,6 +805,108 @@ describe("desktop lease service", () => {
         command: { operation: "apps" },
       }),
     ).resolves.toEqual({ status: "refused", reason: "no-provider-configured" });
+  });
+
+  it("refuses a recipe that names a placement its provider does not declare", async () => {
+    const { service, state, backend } = host();
+    state.recipes.set(
+      threadA,
+      decodeDesktopRecipe({ ...recipeFor("fake-desktop"), placementId: "here" }),
+    );
+    await expect(
+      service.acquire({ owner: code(threadA), actor: agentOf(threadA) }),
+    ).resolves.toEqual({ status: "refused", reason: "no-provider-configured" });
+    expect(backend.calls()).not.toContain("acquire");
+  });
+
+  it("leases a provider with placements only in one it declares, on that placement's locality and billing", async () => {
+    const fake = createFakeDesktopProvider({ id: "spaces.example" });
+    const spaces: DesktopProvider = {
+      ...fake.provider,
+      placements: [
+        {
+          id: decodeDesktopPlacementId("here"),
+          displayName: "This machine",
+          locality: "host-local",
+          billed: false,
+        },
+        {
+          id: decodeDesktopPlacementId("other-machine"),
+          displayName: "Your other machine",
+          locality: "cloud",
+          billed: false,
+        },
+        {
+          id: decodeDesktopPlacementId("own-cloud"),
+          displayName: "Your cloud account",
+          locality: "cloud",
+          billed: true,
+        },
+      ],
+    };
+    const { service, state, checkout } = host({ providers: [{ provider: spaces }] });
+    const inPlacement = (placementId: string, credentialRef?: string) =>
+      decodeDesktopRecipe({ ...recipeFor("spaces.example", credentialRef), placementId });
+
+    await expect(
+      service.acquire({ owner: code(threadA), actor: agentOf(threadA) }),
+    ).resolves.toEqual({ status: "refused", reason: "no-provider-configured" });
+    state.recipes.set(threadA, inPlacement("elsewhere"));
+    await expect(
+      service.acquire({ owner: code(threadA), actor: agentOf(threadA) }),
+    ).resolves.toEqual({ status: "refused", reason: "no-provider-configured" });
+    expect(fake.backend.calls()).not.toContain("acquire");
+
+    state.recipes.set(threadA, inPlacement("here", cloudCredential));
+    const here = await service.acquire({ owner: code(threadA), actor: agentOf(threadA) });
+    expect(here).toMatchObject({
+      status: "acquired",
+      lease: { placementId: "here", locality: "host-local", billed: false },
+    });
+    expect(state.asked).toEqual([]);
+
+    // The billed placement asks even under Full access, and a desktop whose
+    // provider set no expiry of its own is not kept, although the provider
+    // itself declares no billing.
+    state.recipes.set(threadB, inPlacement("own-cloud", cloudCredential));
+    const billed = await service.acquire({ owner: code(threadB), actor: agentOf(threadB) });
+    expect(state.asked).toEqual(["billed"]);
+    expect(billed).toMatchObject({
+      status: "not-acquired",
+      lease: { state: "failed", placementId: "own-cloud", locality: "cloud", billed: true },
+    });
+    expect(runningDesktops(fake.backend)).toBe(1);
+
+    // A file leaves the machine for a placement off it, Full access included.
+    state.recipes.set(threadC, inPlacement("other-machine", cloudCredential));
+    const away = await acquired(service, threadC);
+    writeFileSync(join(checkout, "app.bin"), "built app");
+    await expect(
+      service.transfer({
+        owner: code(threadC),
+        actor: agentOf(threadC),
+        leaseId: away,
+        path: "app.bin",
+      }),
+    ).resolves.toMatchObject({ status: "delivered" });
+    expect(state.askedTransfers.map((request) => request.asks)).toEqual(["off-machine"]);
+    expect(state.askedTransfers[0]?.provider).toMatchObject({ locality: "cloud", billed: false });
+    await service.release({ owner: code(threadC), actor: agentOf(threadC), leaseId: away });
+    expect(runningDesktops(fake.backend)).toBe(1);
+
+    // A recipe whose placement alone changed counts as removed.
+    if (here.status !== "acquired") throw new Error("expected a lease");
+    state.recipes.set(threadA, inPlacement("other-machine", cloudCredential));
+    await expect(
+      service.control({
+        owner: code(threadA),
+        actor: agentOf(threadA),
+        leaseId: here.lease.leaseId,
+        command: { operation: "apps" },
+      }),
+    ).resolves.toEqual({ status: "refused", reason: "no-provider-configured" });
+    await service.sweep();
+    expect(runningDesktops(fake.backend)).toBe(0);
   });
 
   it("checks again for a commit that arrives while a sweep is already tearing down", async () => {

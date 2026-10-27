@@ -60,6 +60,18 @@ describe("desktop lease contract", () => {
     expect(() => decodeDesktopLeaseRequested({ ...requested, apiKey: "sk-live" })).toThrow();
   });
 
+  it("carries a recipe's placement into the lease's journal and refuses one that is not an id", () => {
+    expect(decodeDesktopRecipe({ ...recipe, placementId: "this-machine" }).placementId).toBe(
+      "this-machine",
+    );
+    expect(
+      decodeDesktopLeaseRequested({ ...requested, placementId: "own-cloud" }).placementId,
+    ).toBe("own-cloud");
+    for (const placementId of ["", "This Machine", "../cloud", "a".repeat(65)]) {
+      expect(() => decodeDesktopRecipe({ ...recipe, placementId })).toThrow();
+    }
+  });
+
   it("attributes a release a person asked for while teardown records the transition", () => {
     const transitioned = decodeDesktopLeaseTransitioned({
       leaseId,

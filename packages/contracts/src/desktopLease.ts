@@ -31,6 +31,17 @@ export type DesktopProviderId = typeof DesktopProviderId.Type;
 export const DesktopCredentialRef = Schema.UUID.pipe(Schema.brand("DesktopCredentialRef"));
 export type DesktopCredentialRef = typeof DesktopCredentialRef.Type;
 
+/**
+ * One place a provider that declares placements runs a desktop, such as this
+ * machine or the person's own cloud account. The driver declares its
+ * placements in code; a recipe names one, and the lease records it.
+ */
+export const DesktopPlacementId = Schema.String.pipe(
+  Schema.pattern(/^[a-z0-9][a-z0-9.-]{0,63}$/),
+  Schema.brand("DesktopPlacementId"),
+);
+export type DesktopPlacementId = typeof DesktopPlacementId.Type;
+
 /** Chat never leases: a Chat Project has no root to send an artifact from. */
 export const DesktopLeaseMode = Schema.Literal("work", "code");
 export type DesktopLeaseMode = typeof DesktopLeaseMode.Type;
@@ -66,6 +77,12 @@ export const DesktopRecipe = Schema.Struct({
     height: Schema.Int.pipe(Schema.between(240, 4_320)),
   }).annotations(strict),
   credentialRef: Schema.optional(DesktopCredentialRef),
+  /**
+   * The provider's placement this recipe runs in: required for a provider
+   * that declares placements, refused for one that declares none. The host
+   * takes locality and billing from it.
+   */
+  placementId: Schema.optional(DesktopPlacementId),
   network: DesktopNetworkPosture,
   leaseMinutes,
   maximumLeaseMinutes: leaseMinutes,
@@ -152,6 +169,7 @@ export const DesktopLease = Schema.Struct({
   locality: DesktopProviderLocality,
   billed: Schema.Boolean,
   credentialRef: Schema.optional(DesktopCredentialRef),
+  placementId: Schema.optional(DesktopPlacementId),
   state: DesktopLeaseState,
   requestedAt: UtcTimestamp,
   expiresAt: UtcTimestamp,
@@ -174,7 +192,9 @@ export const DESKTOP_LEASE_EVENT_NAMES = {
 /**
  * Journaled before any provider call, with a host-minted id the driver tags
  * the desktop with. It records the credential reference, never the material,
- * so teardown can still find the key after the recipe is removed.
+ * so teardown can still find the key after the recipe is removed. For a
+ * provider that declares placements, `locality` and `billed` are the
+ * placement's, and `placementId` names it.
  */
 export const DesktopLeaseRequested = Schema.Struct({
   leaseId: DesktopLeaseId,
@@ -184,6 +204,7 @@ export const DesktopLeaseRequested = Schema.Struct({
   billed: Schema.Boolean,
   hostTag: DesktopHostTag,
   credentialRef: Schema.optional(DesktopCredentialRef),
+  placementId: Schema.optional(DesktopPlacementId),
   network: DesktopNetworkPosture,
   expiresAt: UtcTimestamp,
   maximumExpiresAt: UtcTimestamp,
@@ -450,6 +471,7 @@ export const decodeDesktopLeaseId = Schema.decodeUnknownSync(DesktopLeaseId);
 export const decodeDesktopHostTag = Schema.decodeUnknownSync(DesktopHostTag);
 export const decodeDesktopProviderId = Schema.decodeUnknownSync(DesktopProviderId);
 export const decodeDesktopCredentialRef = Schema.decodeUnknownSync(DesktopCredentialRef);
+export const decodeDesktopPlacementId = Schema.decodeUnknownSync(DesktopPlacementId);
 export const decodeDesktopRecipe = Schema.decodeUnknownSync(DesktopRecipe);
 export const decodeLeasableDesktopProvider = Schema.decodeUnknownSync(LeasableDesktopProvider);
 export const decodeDesktopLease = Schema.decodeUnknownSync(DesktopLease);

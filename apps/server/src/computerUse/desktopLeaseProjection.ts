@@ -72,6 +72,7 @@ export class DesktopLeaseProjection implements Projection {
           ...(requested.credentialRef === undefined
             ? {}
             : { credentialRef: requested.credentialRef }),
+          ...(requested.placementId === undefined ? {} : { placementId: requested.placementId }),
           state: "requested",
           requestedAt: event.occurredAt,
           expiresAt: requested.expiresAt,
