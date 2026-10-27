@@ -1964,7 +1964,13 @@ flowchart LR
   and kept decoded between reads: a later read decodes only the rows appended
   since, and a thread whose slice shrank (a purge) is read afresh. The kept
   histories are shared by every reader of the journal and bounded at 100,000
-  frames across threads, least recently read dropped first.
+  frames across threads, least recently read dropped first. A Chat thread's
+  events stream holds the same rule: its frames journal on several aggregates —
+  the thread's own events, its work-list and follow-up entries, and the context
+  ledger that settles a compaction — all keyed by the thread id, so the stream
+  reads each slice through the (type, aggregate, sequence) index (migration 89)
+  instead of replaying the global journal, and a held stream that wakes on every
+  machine change decodes only its own thread's rows.
 - **Migrations.** Ordered, forward-only, checksum-verified, applied in
   transactions before the server reports ready. A changed checksum or an
   unknown newer migration fails closed; a store backup is taken before a

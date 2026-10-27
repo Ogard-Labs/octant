@@ -1000,9 +1000,11 @@ describe("Journal", () => {
     );
     // A thread flooded with terminal attaches is almost all operation-result
     // rows. Walking the thread slice and testing each payload's result kind
-    // examined every one of them; each half now reads only its own index.
+    // examined every one of them; each half now reads only its own index. The
+    // aggregate half rides the (type, aggregate, sequence) covering index
+    // (migration 89).
     expect(plan).toContain(
-      "sqlite_autoindex_event_journal_2 (aggregate_type=? AND aggregate_id=?)",
+      "COVERING INDEX event_journal_aggregate_sequence (aggregate_type=? AND aggregate_id=? AND global_sequence>?)",
     );
     expect(plan).toContain(
       "event_journal_thread_result_kind_sequence (aggregate_type=? AND <expr>=? AND <expr>=? AND global_sequence>?)",
