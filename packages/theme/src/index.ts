@@ -8,5 +8,6 @@ export * from "./import";
 export * from "./export";
 export * from "./backgrounds";
 export * from "./typography";
+export * from "./editorColors";
 export * from "./presets";
 export * from "./provider-glyph-colors";

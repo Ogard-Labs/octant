@@ -11,7 +11,8 @@
     "./import": "./src/import.ts",
     "./export": "./src/export.ts",
     "./backgrounds": "./src/backgrounds.ts",
-    "./typography": "./src/typography.ts"
+    "./typography": "./src/typography.ts",
+    "./editor-colors": "./src/editorColors.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

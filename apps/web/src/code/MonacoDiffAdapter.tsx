@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { EditorTypographyProjection } from "@octant/theme/typography";
+import { useEditorColorProjection } from "../theme/ThemeSettingsProvider";
 import { useTypographyProjection } from "../theme/TypographyProvider";
 import type { MonacoDiffRuntime, MonacoDiffSession } from "./MonacoEditorAdapter";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -18,10 +19,12 @@ export interface MonacoDiffAdapterProps {
 export function MonacoDiffAdapter(props: MonacoDiffAdapterProps) {
   const contextualTypography = useTypographyProjection("editor");
   const typography = props.typography ?? contextualTypography;
+  const colors = useEditorColorProjection();
   const [runtimeUnavailable, setRuntimeUnavailable] = useState(false);
   const element = useRef<HTMLDivElement>(null);
   const latestProps = useRef(props);
   const latestTypography = useRef(typography);
+  const latestColors = useRef(colors);
   const session = useRef<MonacoDiffSession | undefined>(undefined);
   const loader = props.loadRuntime ?? loadMonacoDiffRuntime;
 
@@ -33,6 +36,10 @@ export function MonacoDiffAdapter(props: MonacoDiffAdapterProps) {
     latestTypography.current = typography;
   }, [typography]);
 
+  useLayoutEffect(() => {
+    latestColors.current = colors;
+  }, [colors]);
+
   useEffect(() => {
     let disposed = false;
     setRuntimeUnavailable(false);
@@ -40,6 +47,7 @@ export function MonacoDiffAdapter(props: MonacoDiffAdapterProps) {
       .then((runtime) => {
         if (disposed || element.current === null) return;
         const mounted = runtime.mountDiff(element.current, {
+          colors: latestColors.current,
           language: latestProps.current.language,
           modelUriBase: props.modelUriBase,
           original: latestProps.current.original,
@@ -69,6 +77,7 @@ export function MonacoDiffAdapter(props: MonacoDiffAdapterProps) {
     [props.renderSideBySide],
   );
   useEffect(() => session.current?.setTypography?.(typography), [typography]);
+  useEffect(() => session.current?.setColors?.(colors), [colors]);
 
   return (
     <>
