@@ -1230,10 +1230,13 @@ async function appleDeviceApproval(
   if (checked === undefined || checked.kind === "unavailable") {
     return { kind: "refused", reason: "apple-unavailable" };
   }
-  // A lease the thread already holds is not asked for again.
-  if (checked.kind === "allowed") return { kind: "allowed", approval: NOT_REQUIRED };
+  // A lease the thread already holds is not asked for again. An effect the
+  // host would run unasked is still asked here: the host decides against the
+  // thread's Full access, while this turn runs at the narrower posture the
+  // person chose for it, as a Simulator effect does.
+  if (checked.kind === "allowed" && lease) return { kind: "allowed", approval: NOT_REQUIRED };
   const awaitsPerson = lease ? "confirmation-required" : "approval-required";
-  if (checked.reason !== awaitsPerson) {
+  if (checked.kind === "refused" && checked.reason !== awaitsPerson) {
     return {
       kind: "refused",
       reason: checked.reason,

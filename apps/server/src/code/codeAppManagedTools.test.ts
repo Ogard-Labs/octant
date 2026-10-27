@@ -2473,6 +2473,7 @@ describe("a paired iPhone or iPad through the Apple tool", () => {
     threadOverrides: Partial<CodeThread>,
     port: Partial<Record<keyof DevicesPort, unknown>> = {},
     answer: "approved" | "denied" = "approved",
+    stored: Partial<CodeThread> = threadOverrides,
   ) {
     const devices = {
       request: vi.fn(async (..._args: ReadonlyArray<unknown>) => deviceEvidence()),
@@ -2497,11 +2498,16 @@ describe("a paired iPhone or iPad through the Apple tool", () => {
           }
         : { status: "denied" as const },
     );
+    const record = vi.fn(() => ({
+      kind: "recorded" as const,
+      taint: { externalContentIngested: true, ingestedSources: ["octant_apple"] },
+    }));
     const tools = createCodeAppManagedTools({
       windowId,
       thread: thread(threadOverrides),
-      readThread: () => thread(threadOverrides),
+      readThread: () => thread(stored),
       uuid: uuidFactory(),
+      recordExternalContentIngestion: record,
       executeOperation: async () => ({}) as never,
       terminal: { read: async () => ({}) as never },
       apple: {
@@ -2519,7 +2525,7 @@ describe("a paired iPhone or iPad through the Apple tool", () => {
     const call = (input: Record<string, unknown>) =>
       tools.execute({ name: "octant_apple", inputJson: JSON.stringify(input) });
     const sent = (index = 0) => devices.request.mock.calls[index]?.[1] as unknown;
-    return { ask, call, devices, sent };
+    return { ask, call, devices, record, sent };
   }
 
   const leasedAnswer = () =>
@@ -2637,24 +2643,44 @@ describe("a paired iPhone or iPad through the Apple tool", () => {
     });
   });
 
+  it("asks for a device effect in an approval-gated turn of a Full-access thread", async () => {
+    // The host decides against the thread's stored Full access and would run
+    // the effect; the turn the person chose asks first, as a Simulator effect does.
+    const { ask, call, sent } = deviceTools(
+      { executionPolicy: "approval-gated" } as never,
+      { check: vi.fn(async () => ({ kind: "allowed" }) as never) },
+      "approved",
+      { executionPolicy: "full-access" } as never,
+    );
+    await call({ operation: "launch", deviceId, bundleIdentifier });
+    expect(ask.mock.calls[0]?.[0]).toMatchObject({
+      kind: "apple-device-action",
+      request: { kind: "launch", deviceId, bundleIdentifier },
+    });
+    expect(sent()).toMatchObject({ kind: "launch", approval: { kind: "approved" } });
+  });
+
   it("reads a leased device's screen as an image and its app's console as text, unasked", async () => {
     const png = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
-    const { ask, call, devices } = deviceTools({ executionPolicy: "approval-gated" } as never, {
-      request: vi.fn(async (_windowId: unknown, request: unknown) =>
-        (request as { readonly kind: string }).kind === "screenshot"
-          ? deviceEvidence({
-              kind: "screenshot",
-              artifacts: [{ kind: "screenshot", reference: "apple-device-screenshot-1" }],
-            })
-          : deviceEvidence({
-              kind: "logs",
-              bundleIdentifier,
-              artifacts: [{ kind: "log", reference: "apple-device-console-1" }],
-            }),
-      ),
-      readScreenshot: vi.fn(async () => png),
-      readConsole: vi.fn(async () => new TextEncoder().encode("Fixture ready\n")),
-    });
+    const { ask, call, devices, record } = deviceTools(
+      { executionPolicy: "approval-gated" } as never,
+      {
+        request: vi.fn(async (_windowId: unknown, request: unknown) =>
+          (request as { readonly kind: string }).kind === "screenshot"
+            ? deviceEvidence({
+                kind: "screenshot",
+                artifacts: [{ kind: "screenshot", reference: "apple-device-screenshot-1" }],
+              })
+            : deviceEvidence({
+                kind: "logs",
+                bundleIdentifier,
+                artifacts: [{ kind: "log", reference: "apple-device-console-1" }],
+              }),
+        ),
+        readScreenshot: vi.fn(async () => png),
+        readConsole: vi.fn(async () => new TextEncoder().encode("Fixture ready\n")),
+      },
+    );
 
     const screen = await call({ operation: "screenshot", deviceId });
     expect(screen.images).toHaveLength(1);
@@ -2665,6 +2691,15 @@ describe("a paired iPhone or iPad through the Apple tool", () => {
     );
     const logs = await call({ operation: "logs", deviceId, bundleIdentifier });
     expect(logs).toMatchObject({ isError: false, result: { console: "Fixture ready\n" } });
+    // What the app drew and printed is outside content: each read marks the
+    // thread before the model sees it, like a Simulator read.
+    expect(record).toHaveBeenCalledTimes(2);
+    expect(record).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        threadId,
+        provenance: { origin: "tool-result", sourceLabel: "octant_apple" },
+      }),
+    );
     expect(ask).not.toHaveBeenCalled();
     expect(devices.check).not.toHaveBeenCalled();
   });

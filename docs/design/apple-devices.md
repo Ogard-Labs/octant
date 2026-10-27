@@ -259,7 +259,10 @@ access covers neither the device lease nor any distribution step.
   out; only a call whose sole remaining refusal is the missing confirmation
   (`confirmation-required`) or approval (`approval-required`) is asked, and
   any other refusal is returned as it is. A lease the thread already holds is
-  used without asking. The request is decided again when it arrives.
+  used without asking. An effect in a turn that runs below the thread's Full
+  access is still asked, though the host would run it unasked: the turn's
+  posture decides, as for a Simulator effect. The request is decided again
+  when it arrives.
 - `install` takes only the product an Octant build or run produced in that
   thread's private derived-data directory; any other path or archive is refused
   (`invalid-artifact`). `launch`, `terminate`, and `uninstall` take only the
@@ -300,7 +303,8 @@ access covers neither the device lease nor any distribution step.
   the lease whose confirmation said the thread may read the app's console, and
   its `screenshot` call receives the pixels as an image the same way. The host
   hands back a console read or a screenshot only to the thread, on the
-  checkout, that took it.
+  checkout, that took it. Both are outside content: like every successful
+  `octant_apple` result, each marks the thread before the model reads it.
 - The host checks the lease again just before it installs or launches: a
   `run`'s build can outlast the lease it started under, and a device whose
   lease has ended is not touched.
@@ -681,8 +685,10 @@ accounts or hardware; its real-hardware acceptance is separate where noted.
    again, a refusal returned before anyone is asked, effects refused in Plan
    and asked for under approval-gated, the screenshot image and console text),
    the Code runtime's paired-device cases (a paired device's answer refused,
-   the minted receipt one-use, under a Full-access and a Plan turn), and the
-   `AppleDeviceService` `check` and console tests. Provider conformance is
+   the minted receipt one-use, under a Full-access and a Plan turn), the
+   agent-scope cases in `apps/server/src/wiring/devices.test.ts` (a request
+   that names a person or a paired device is refused before any receipt is
+   read), and the `AppleDeviceService` `check` and console tests. Provider conformance is
    unchanged: the tool travels the existing app-managed tool seam, whose
    provider-sdk conformance suites still pass.
 6. **App Store Connect key custody** (container; needs the distribution

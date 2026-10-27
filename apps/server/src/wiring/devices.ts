@@ -5,6 +5,7 @@ import {
   type AppleDeviceRequest,
   type AppleRpcEnvelope,
   type AppleSimulatorId,
+  type CodeThread,
   decodeCodeCheckoutId,
   decodeCodeRelativePath,
   decodeCodeThreadId,
@@ -142,6 +143,88 @@ const APPLE_DEVICE_EFFECT_KINDS: ReadonlySet<AppleDeviceRequest["kind"]> = new S
   "launch",
   "terminate",
 ]);
+
+/**
+ * The context a physical device request acts under, for a pane click through
+ * the device route and for the thread's agent through `octant_apple`.
+ *
+ * A lease start counts only when a person at a local window answered its
+ * confirmation: the host's confirmations are shown by the desktop app, never
+ * to a paired device. A device effect follows the thread's posture like a
+ * Simulator effect: Full access runs it, approval-gated postures need this
+ * window's one-use approval of exactly this request, and Plan is refused by
+ * the device policy.
+ *
+ * The agent's requests come from no window principal, so a receipt counts
+ * only because the Code runtime mints one for a device lease or effect after
+ * a person at a window on this Mac answered it in the thread; a paired
+ * device's answer mints nothing.
+ */
+export function createAppleDeviceScopes(deps: {
+  readonly resolveThread: (
+    windowId: WindowId,
+    request: AppleDeviceRequest,
+  ) => Promise<
+    | {
+        readonly thread: CodeThread;
+        readonly checkout: { readonly id: CodeThread["checkoutId"] };
+        readonly rootPath: string;
+      }
+    | undefined
+  >;
+  readonly effectiveThread: (windowId: WindowId, thread: CodeThread) => CodeThread;
+  readonly approvals: Pick<
+    DeviceApprovalChecks,
+    "validateAppleDeviceLease" | "validateAppleDeviceAction"
+  >;
+}) {
+  const { approvals } = deps;
+  const resolveAppleDeviceContext = async (
+    windowId: WindowId,
+    request: AppleDeviceRequest,
+    mayCarryReceipt: boolean,
+  ): Promise<AppleDeviceExecutionContext | undefined> => {
+    const resolved = await deps.resolveThread(windowId, request);
+    if (resolved === undefined) return undefined;
+    const effectiveThread = deps.effectiveThread(windowId, resolved.thread);
+    const confirmed =
+      request.kind === "use-device" &&
+      request.approval.kind === "approved" &&
+      mayCarryReceipt &&
+      ((await approvals.validateAppleDeviceLease(windowId, request)) ?? false);
+    const effectApproved =
+      APPLE_DEVICE_EFFECT_KINDS.has(request.kind) &&
+      mayCarryReceipt &&
+      (effectiveThread.executionPolicy === "full-access" ||
+        (decidesCodeEffectsByApproval(effectiveThread.executionPolicy) &&
+          request.approval.kind === "approved" &&
+          ((await approvals.validateAppleDeviceAction(windowId, request)) ?? false)));
+    return {
+      authority: request.authority,
+      threadId: resolved.thread.id,
+      checkoutId: resolved.checkout.id,
+      checkoutRoot: resolved.rootPath,
+      executionPolicy: effectiveThread.executionPolicy,
+      approvalValid: confirmed || effectApproved,
+      ...(confirmed
+        ? { approvedBy: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID } as const }
+        : {}),
+    };
+  };
+  return {
+    resolveAppleDeviceScope: (
+      windowId: WindowId,
+      request: AppleDeviceRequest,
+      principal: ClientPrincipal,
+    ) => resolveAppleDeviceContext(windowId, request, principal.kind === "local-window"),
+    // The agent speaks only for itself: a request naming a person is a pane
+    // click, which comes through the route and its principal check.
+    resolveAppleDeviceAgentScope: async (windowId: WindowId, request: AppleDeviceRequest) =>
+      request.requestedBy.kind === "agent"
+        ? await resolveAppleDeviceContext(windowId, request, true)
+        : undefined,
+  };
+}
 
 export type DevicesDependencies = Pick<ServerStart, "persistence"> &
   Pick<
@@ -450,65 +533,12 @@ export function wireDevices(deps: DevicesDependencies) {
           ...(inputGranted ? { inputGranted } : {}),
         };
       };
-      // A physical device request acts in the same thread scope. A lease start
-      // counts only when a person at a local window answered its confirmation:
-      // the host's confirmations are shown by the desktop app, never to a
-      // paired device. A device effect follows the thread's posture like a
-      // Simulator effect: Full access runs it, approval-gated postures need
-      // this window's one-use approval of exactly this request, and Plan is
-      // refused by the device policy.
-      //
-      // The thread's agent asks through the same resolver. Its requests come
-      // from no window principal, so a receipt counts only because the Code
-      // runtime mints one for a device lease or effect after a person at a
-      // window on this Mac answered it in the thread; a paired device's answer
-      // mints nothing.
-      const resolveAppleDeviceContext = async (
-        windowId: WindowId,
-        request: AppleDeviceRequest,
-        mayCarryReceipt: boolean,
-      ): Promise<AppleDeviceExecutionContext | undefined> => {
-        const resolved = await resolveAppleThread(windowId, request);
-        if (resolved === undefined) return undefined;
-        const effectiveThread = codeSessionAuthority.effectiveThread(windowId, resolved.thread);
-        const confirmed =
-          request.kind === "use-device" &&
-          request.approval.kind === "approved" &&
-          mayCarryReceipt &&
-          ((await approvals.validateAppleDeviceLease(windowId, request)) ?? false);
-        const effectApproved =
-          APPLE_DEVICE_EFFECT_KINDS.has(request.kind) &&
-          mayCarryReceipt &&
-          (effectiveThread.executionPolicy === "full-access" ||
-            (decidesCodeEffectsByApproval(effectiveThread.executionPolicy) &&
-              request.approval.kind === "approved" &&
-              ((await approvals.validateAppleDeviceAction(windowId, request)) ?? false)));
-        return {
-          authority: request.authority,
-          threadId: resolved.thread.id,
-          checkoutId: resolved.checkout.id,
-          checkoutRoot: resolved.rootPath,
-          executionPolicy: effectiveThread.executionPolicy,
-          approvalValid: confirmed || effectApproved,
-          ...(confirmed
-            ? { approvedBy: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID } as const }
-            : {}),
-        };
-      };
-      const resolveAppleDeviceScope = (
-        windowId: WindowId,
-        request: AppleDeviceRequest,
-        principal: ClientPrincipal,
-      ) => resolveAppleDeviceContext(windowId, request, principal.kind === "local-window");
-      // The agent speaks only for itself: a request naming a person is a pane
-      // click, which comes through the route and its principal check.
-      const resolveAppleDeviceAgentScope = async (
-        windowId: WindowId,
-        request: AppleDeviceRequest,
-      ) =>
-        request.requestedBy.kind === "agent"
-          ? await resolveAppleDeviceContext(windowId, request, true)
-          : undefined;
+      const { resolveAppleDeviceScope, resolveAppleDeviceAgentScope } = createAppleDeviceScopes({
+        resolveThread: resolveAppleThread,
+        effectiveThread: (windowId, thread) =>
+          codeSessionAuthority.effectiveThread(windowId, thread),
+        approvals,
+      });
       // The thread and checkout whose held screenshots and console reads a
       // caller may read back.
       const resolveAppleDeviceThread = async (
