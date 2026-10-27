@@ -1,22 +1,22 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { NativeHarnessSessionView } from "@octant/contracts";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
-import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { HarnessApprovalLostPanel, HarnessApprovalPanel } from "./HarnessApprovalPanel";
 import "./native-harness.css";
 
 export interface ThreadHarnessApprovalProps {
-  readonly client: Pick<NativeHarnessClient, "session" | "decideApproval" | "command">;
+  readonly client: Pick<NativeHarnessClient, "decideApproval" | "command">;
   readonly threadId: string;
-  /**
-   * The thread list already says this thread waits on the person. It starts the
-   * quick refresh straight away; without it the card reads the session once and
-   * then only while an approval is showing, so an idle thread costs one read.
-   */
-  readonly waiting?: boolean;
-  readonly refreshIntervalMs?: number;
+  /** The thread's session as `ThreadHarnessCards` last read it. */
+  readonly view: NativeHarnessSessionView | null | undefined;
+  readonly reload: () => Promise<unknown>;
+}
+
+/** The lead's own pending approval; a subagent's is the Agents tab's to answer. */
+export function leadApproval(view: NativeHarnessSessionView | null | undefined) {
+  return view?.approvals?.find((entry) => entry.status === "pending" && entry.source === undefined);
 }
 
 /**
@@ -31,49 +31,11 @@ export interface ThreadHarnessApprovalProps {
  * it, and the thread's Needs you row finds it.
  */
 export function ThreadHarnessApproval(props: ThreadHarnessApprovalProps) {
-  const { client, threadId } = props;
-  const [read, setRead] = useState<{
-    readonly threadId: string;
-    readonly view: NativeHarnessSessionView | null;
-  }>();
+  const { client, threadId, view, reload } = props;
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string>();
-  const generation = useRef(0);
-  const inFlight = useRef(false);
 
-  const load = useCallback(async () => {
-    if (inFlight.current) return;
-    inFlight.current = true;
-    const mine = ++generation.current;
-    try {
-      const view = await client.session(threadId);
-      // A response for a thread the card has left must not paint over the one
-      // it shows now.
-      if (generation.current === mine) setRead({ threadId, view });
-    } catch {
-      // Keep what was last read while the host reconnects.
-    } finally {
-      inFlight.current = false;
-    }
-  }, [client, threadId]);
-
-  useEffect(
-    () => () => {
-      generation.current += 1;
-    },
-    [],
-  );
-
-  const view = read?.threadId === threadId ? read.view : undefined;
-  const approval = view?.approvals?.find(
-    (entry) => entry.status === "pending" && entry.source === undefined,
-  );
-  const polling = props.waiting === true || approval !== undefined;
-  useEffect(() => {
-    void load();
-    if (!polling) return;
-    return scheduleVisibleInterval(() => void load(), props.refreshIntervalMs ?? 1_500);
-  }, [load, polling, props.refreshIntervalMs]);
+  const approval = leadApproval(view);
   useEffect(() => setNotice(undefined), [threadId, approval?.id]);
 
   const decide = useCallback(
@@ -94,10 +56,10 @@ export function ThreadHarnessApproval(props: ThreadHarnessApprovalProps) {
         setNotice("The decision was not delivered. Try again.");
       } finally {
         setBusy(false);
-        await load();
+        await reload();
       }
     },
-    [approval, busy, client, threadId, load],
+    [approval, busy, client, threadId, reload],
   );
 
   const resume = useCallback(async () => {
@@ -114,9 +76,9 @@ export function ThreadHarnessApproval(props: ThreadHarnessApprovalProps) {
       setNotice("The session was not resumed. Try again.");
     } finally {
       setBusy(false);
-      await load();
+      await reload();
     }
-  }, [view, busy, client, threadId, load]);
+  }, [view, busy, client, threadId, reload]);
 
   if (view === null || view === undefined || approval === undefined) return null;
   // An approval the journal still holds as pending after a restart has no turn
