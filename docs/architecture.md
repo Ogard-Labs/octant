@@ -274,7 +274,12 @@ links, and store listing stay closed until
 an authorized post-preview track, opens with a separate maintainer action for
 submission. A build counts only after the
 device pass in the [TestFlight runbook](mobile-testflight.md), not when EAS or
-Apple finishes processing it. Android builds, push notifications, capture and
+Apple finishes processing it. Internal Android builds carry the same client
+under the same rules: the manually dispatched `Mobile (Android internal)`
+workflow builds a signed APK from `main` in its own protected
+`mobile-android-internal` environment, EAS holds the keystore, the public log
+names no install link, and testers are maintainer-chosen
+([Android runbook](mobile-android-internal.md)). Push notifications, capture and
 voice input, and store distribution extend this client under
 [Mobile maturity](design/mobile-maturity.md), which grants the phone no
 authority beyond what the host grants.

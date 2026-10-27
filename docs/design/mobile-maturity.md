@@ -19,7 +19,12 @@ not redesign it.
 and drops them with the device), slice 2 (the host builds sealed, redacted
 thread notifications), slice 3 (camera and file capture), and slice 4 (voice
 input through the host) are implemented and verified in the container; their
-physical-device passes are maintainer gates; slices 5 to 9 are not started. The
+physical-device passes are maintainer gates. Slice 5 (Android internal builds)
+is built in part: the workflow, the `android-internal` profile, and the
+Android hardening adapters are in the repository and verified in the
+container, and its EAS build and Android device pass wait on the maintainer
+steps in [Android build rules](#android-build-rules). Slices 6 to 9 are not
+started. The
 maintainer authorized this scope as post-preview work and accepted the
 [maintainer decisions](#maintainer-decisions) below on 2026-10-26. That
 authorizes design, planning, and implementation of the slices below that need
@@ -83,14 +88,14 @@ These rules hold for every phase and are not reopened by any slice:
 | Area              | Current state                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | iOS distribution  | Internal TestFlight through EAS (`apps/mobile/eas.json`, `.github/workflows/mobile-testflight.yml`); App ID enables no optional capability                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| Android           | `app.config.ts` names package `app.octant.mobile`; pinned TLS has an Android implementation (`apps/mobile/modules/octant-pinned-tls/android`). No Android build profile, workflow, or device acceptance                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Android           | Package `app.octant.mobile`, built by the `android-internal` EAS profile (signed APK, internal distribution, keystore in EAS) from the manually dispatched `.github/workflows/mobile-android-internal.yml`; no backup, no overlay or location permission. The in-tree `octant-device-protection` module sets the secure window and reports key storage; pinned TLS (`modules/octant-pinned-tls/android`) is exercised on a JVM against a real listener by the server pairing smoke test. CI resolves the Expo configuration for each release profile. No EAS build or device acceptance yet                                                                                                                                    |
 | Push contracts    | `packages/contracts/src/remotePushNotifications.ts`: registration (token, the phone's notification public key, per-kind preferences and the thread-title opt-in), its receipts, the sealed content (kind, host, thread, mode, title ≤ 80 B, body ≤ 120 B), the delivery envelope, and the journaled delivery receipt                                                                                                                                                                                                                                                                                                                                                                                                           |
 | Push policy       | `packages/domain/src/pushNotificationPolicy.ts` builds display text under [decision M2](#maintainer-decisions) (kind and computer label; a thread title or Automation name only for a phone that opted in) and owns per-kind preferences, deduplication keys, the per-device rate limit, and urgency                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | Push on the host  | `PUT`/`DELETE /api/remote/auth/push-token` (`remoteHttpAuthentication.ts`) store a registration per `{hostId, deviceId}` in the owner-only `remote/push-registrations.json` (`apps/server/src/remote/pushNotificationTokenStore.ts`), as [What the host keeps](#what-the-host-keeps) describes: it survives a restart and is cleared with the device. Ordinary threads in every mode (`threadNotificationDeliveryService.ts`) and Automation runs (`automationNotificationDeliveryService.ts`) seal each notification to the phone (`pushNotificationSealing.ts`) as [Sealing](#sealing) and [Sending](#sending) describe, and hand the envelope to `createUnavailablePushDeliveryTransport`, which never sends, until slice 7 |
 | Push on the phone | `notificationPermissionPort.ts` is the unavailable stub; `PushNotificationsPanel.tsx` offers only clearing a registered token; `deepLinks.ts` parses `octant://hosts/{hostId}/threads/[{mode}/]{threadId}`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | Capture           | Chat, Work, and Code threads attach a camera photo, a library image, or a document-picker file (`apps/mobile/src/inbox/thread/pickAttachment.ts`, `useThreadAttachments.ts`) through each mode's own attachment route (`packages/client-runtime/src/mobileAttachmentClient.ts`), offered only for media the thread's model takes. The listener admits those routes for a paired device (`remoteRoutePolicy.ts`), and the host removes image metadata from every paired upload before a route sees it (`apps/server/src/attachments/imageMetadataRemoval.ts`, applied in `authenticatedProductRoutes.ts`). The camera and photo-library permission strings name both uses; the physical-device camera pass is a maintainer gate |
 | Voice             | The listener forwards `/api/speech/status` and `/api/speech/transcriptions` to a paired device and never `/api/speech/synthesis`; `speechRoutes.ts` holds each device to its own budget and clip bound, as [Voice](#voice) describes. The phone composers draw a microphone only while the host reports transcription `ready` (`apps/mobile/src/voice/`), recording through `expo-audio`; `app.config.ts` names the one microphone use                                                                                                                                                                                                                                                                                         |
-| Hardening ports   | Screenshot privacy and device integrity are unavailable stubs (`screenshotPrivacyPort.ts`, `deviceIntegrityPort.ts`) disclosed in Settings                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Hardening ports   | On Android, screenshot privacy is the secure-window flag and key storage is reported (`deviceProtection.native.ts`); on iOS both are unavailable. Device integrity is an unavailable stub (`deviceIntegrityPort.ts`) on both. Each unavailable port is disclosed in Settings                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 ## Phase B (Android): internal builds of the same client
 
@@ -111,6 +116,57 @@ These rules hold for every phase and are not reopened by any slice:
   iOS, never recorded as passing.
 - Acceptance is the [device acceptance pass](../mobile-testflight.md#device-acceptance-pass)
   on a physical Android device, with the build and device recorded.
+
+#### Android build rules
+
+The operator steps live in the
+[Android runbook](../mobile-android-internal.md).
+
+- The `Mobile (Android internal)` workflow takes no input, runs only by hand,
+  and builds only when dispatched on `main`, in its own `mobile-android-internal`
+  environment holding only `EXPO_TOKEN`. Reason: a separate environment makes
+  an Android build its own maintainer approval, and its token can be revoked
+  without stopping TestFlight.
+- The `android-internal` EAS profile builds a signed APK for internal
+  distribution with `credentialsSource: remote`, a version code from EAS's
+  remote version state, and the same JavaScript configuration as the iOS
+  release. The workflow passes `--freeze-credentials`, so a missing keystore
+  fails the build rather than EAS making a second signing identity.
+- The workflow's public log names no install link and no build id. Reason:
+  anyone holding an internal build's page or APK link can install it, and
+  this repository's logs are public; EAS's output stays on the runner and is
+  printed with links and ids withheld. The maintainer shares the link from
+  EAS with each tester.
+- A mock scenario reaches only a local run or the `development` and `preview`
+  profiles; any other profile, including one added later, gets none.
+- The window carries Android's secure flag (`FLAG_SECURE`) from launch,
+  covering every screen rather than only those showing thread content, so no
+  screen can be missed. The native module starts with the flag set and applies
+  it again whenever the activity returns to the foreground; the app applies the
+  session's choice again at launch. Settings can switch to standard capture for
+  the rest of that launch only, so every launch starts protected. Reason: a
+  per-screen flag fails open on any screen it forgets, and a remembered opt-out
+  would leave a lost phone's recents unprotected.
+- Unlock and high-risk confirmations ask Android for Class 3 biometrics or the
+  device credential, never Class 2 (a camera face unlock). Reason: Face ID and
+  Touch ID are Class 3, so this is parity, not a stronger rule.
+- Secure storage keeps expo-secure-store's keystore-backed encryption. Settings
+  states where the keystore holds a key made the same way (secure hardware or
+  software only), from a probe key made and deleted in one call; a damaged or
+  unknown answer reads as not reported, never as protected. Software-only
+  storage is disclosed and blocks nothing, since the rule is hardware "where
+  the device offers it".
+- Android backup is off (`allowBackup: false`), and the overlay, location, and
+  media-location permissions are removed from the merged manifest.
+- The pinned TLS exchange is the existing in-tree Kotlin source. The server
+  pairing smoke test compiles it with `kotlinc` for a desktop JVM, with a
+  stand-in for `android.util.Base64`, and pairs, streams, and refuses a wrong
+  pin against a real host listener wherever `kotlinc` and `java` are installed.
+- Remaining maintainer steps: create the protected environment with
+  `EXPO_TOKEN`; set up the keystore once in EAS; dispatch the workflow on
+  `main`; run the device pass on a physical Android phone and record the
+  build and device. The Kotlin modules are first compiled for Android by that
+  EAS build.
 
 ## Phase C: host-originated push
 

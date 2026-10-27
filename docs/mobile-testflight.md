@@ -103,9 +103,11 @@ Trust the test certificate only in that Simulator; never disable TLS verificatio
 
 The mobile Vitest suite runs in Node. It cannot validate Hermes cryptography,
 SecureStore, URLSession cookie handling, or UIKit launch behavior. The existing
-key-store and remote-client tests complement this native pass. Screenshot
-capture protection, push notifications, and device-integrity detection currently
-have unavailable native adapters and must not be recorded as passing checks.
+key-store and remote-client tests complement this native pass. On iOS,
+screenshot capture protection, push notifications, and device-integrity
+detection currently have unavailable native adapters and must not be recorded
+as passing checks; the Android build sets the secure-window flag, but push and
+device integrity are unavailable there too.
 The app names those limitations before interaction: unavailable capture settings
 and push enablement are not offered, while clearing a previously registered push
 token remains possible on a connected host. Device-integrity status remains
@@ -140,6 +142,10 @@ is dismissing waits for the active transition; backgrounding invalidates it.
 
 ## Device acceptance pass
 
+The same pass covers Android: install the APK from the EAS internal link
+([Android runbook](mobile-android-internal.md)) and run every item below on a
+physical Android phone, plus the Android items at its end.
+
 - Install from TestFlight, cold launch, terminate, and relaunch.
 - Pair with a real host over its supported HTTPS listener; refuse plain HTTP
   away from loopback.
@@ -173,6 +179,19 @@ is dismissing waits for the active transition; backgrounding invalidates it.
   and other sensitive content.
 - Record the EAS build ID, App Store Connect build number, device and iOS
   version, host revision, and each failed or skipped scenario.
+- Android: with a thread open, take a screenshot and start a screen recording
+  and confirm neither shows Octant content, and confirm the recents preview is
+  blank. Switch Computers › Privacy & security to standard capture, confirm a
+  screenshot now works, then relaunch and confirm the protection is back.
+- Android: confirm Privacy & security says the keys are held in secure
+  hardware (or record that the phone offers none).
+- Android: with only a face unlock that Android rates Class 2 enrolled beside
+  a PIN, confirm unlock and approval ask for the PIN; with a fingerprint
+  enrolled, confirm it is accepted.
+- Android: confirm the app's system settings list no location or overlay
+  permission, and that Android backup offers no Octant data.
+- Android: record the EAS build ID, version code, device, Android version and
+  security patch level, host revision, and each failed or skipped scenario.
 
 Physical-device acceptance remains a maintainer gate. A green repository suite,
 successful EAS archive, Apple upload, or TestFlight processing does not replace
