@@ -109,6 +109,7 @@ describe("sanitizeClaudeEnvironment", () => {
       LANG: "en_US.UTF-8",
       CLAUDE_CONFIG_DIR: "/provider/native-config",
       ...requiredGuards,
+      CLAUDE_CODE_ENTRYPOINT: "octant",
     });
     expect(JSON.stringify(environment)).not.toMatch(
       /ambient-|broker-token|desktop-token|smoke-|otel-sentinel|unrelated-secret|private\/injector/,
@@ -149,6 +150,29 @@ describe("sanitizeClaudeEnvironment", () => {
         ).not.toHaveProperty(umbrella);
       }
     }
+  });
+
+  it("names Octant as the client on every launch, dropping any label the host environment carries", () => {
+    const inherited = { ...hostileHostEnvironment, CLAUDE_CODE_ENTRYPOINT: "sdk-ts" };
+
+    expect(sanitizeClaudeEnvironment("subscription", inherited).CLAUDE_CODE_ENTRYPOINT).toBe(
+      "octant",
+    );
+    expect(
+      sanitizeClaudeEnvironment("subscription", inherited, {
+        configDirectory: "/Users/provider-user/.claude-accounts/work",
+      }).CLAUDE_CODE_ENTRYPOINT,
+    ).toBe("octant");
+    expect(
+      sanitizeClaudeEnvironment(
+        "api-key",
+        { ...inherited, CLAUDE_CODE_ENTRYPOINT: "sdk-cli" },
+        {
+          apiKey: "broker-resolved-api-key-sentinel",
+          configDirectory: "/Users/provider-user/.claude-accounts/api",
+        },
+      ).CLAUDE_CODE_ENTRYPOINT,
+    ).toBe("octant");
   });
 
   it("requires the broker-resolved key for API-key mode without accepting ambient credentials", async () => {
@@ -210,6 +234,7 @@ describe("makeClaudeEnvironmentScope", () => {
         CLAUDE_SECURESTORAGE_CONFIG_DIR: configDirectory,
         ANTHROPIC_API_KEY: "broker-resolved-api-key-sentinel",
         ...requiredGuards,
+        CLAUDE_CODE_ENTRYPOINT: "octant",
       });
       expect(JSON.stringify(acquired.environment)).not.toMatch(
         /ambient-|broker-token|desktop-token|smoke-|otel-sentinel|unrelated-secret|private\/injector/,

@@ -53,6 +53,20 @@ const PASSTHROUGH_VARIABLES = new Set([
  */
 export const REQUIRED_GUARDS = ISOLATED_CLAUDE_LAUNCH_GUARDS;
 
+/**
+ * Every Claude launch names Octant as its client. The runtime sends the
+ * label with each request, and the plan meters read it: the 5-hour window
+ * drains roughly twice as fast per token under the Agent SDK's default
+ * `sdk-*` labels as under a named client (measured across several
+ * accounts and plans, 2026-09-25 through 2026-10-27; Anthropic has not
+ * said whether that weighting is intended). A named client is also the
+ * attribution the runtime's own hosts use, and setting it here drops a
+ * label inherited from a Claude session Octant was itself launched
+ * inside. The Agent SDK honours it: it writes its own `sdk-ts` only when
+ * the variable is unset.
+ */
+const CLAUDE_LAUNCH_CLIENT_IDENTITY = { CLAUDE_CODE_ENTRYPOINT: "octant" } as const;
+
 function failure(category: ProviderFailure["category"], message: string): ProviderFailure {
   return { category, message };
 }
@@ -102,7 +116,11 @@ export function sanitizeClaudeEnvironment(
       authentication,
       ...(overrides.apiKey === undefined ? {} : { apiKey: overrides.apiKey }),
     });
-    Object.assign(environment, packagedSmokeObserverEnvironment(hostEnvironment));
+    Object.assign(
+      environment,
+      packagedSmokeObserverEnvironment(hostEnvironment),
+      CLAUDE_LAUNCH_CLIENT_IDENTITY,
+    );
     return environment;
   }
 
@@ -120,7 +138,12 @@ export function sanitizeClaudeEnvironment(
     environment.ANTHROPIC_API_KEY = overrides.apiKey;
   }
 
-  return { ...environment, ...hostDisableOnlySwitches(hostEnvironment), ...REQUIRED_GUARDS };
+  return {
+    ...environment,
+    ...hostDisableOnlySwitches(hostEnvironment),
+    ...REQUIRED_GUARDS,
+    ...CLAUDE_LAUNCH_CLIENT_IDENTITY,
+  };
 }
 
 export function makeClaudeEnvironmentScope(
