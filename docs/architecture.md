@@ -2603,8 +2603,9 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   a discovery connect for a driver that already has a provider returns that
   provider instead of creating a second one, and leaves its switch unchanged.
   Ollama is set up as an endpoint, never from the scan.
-- **Driver families.** Direct HTTP drivers (OpenAI-compatible, Anthropic-
-  compatible, Azure AI Foundry with an API key or a directory sign-in, Ollama),
+- **Driver families.** Direct HTTP drivers (OpenAI-compatible and Anthropic-
+  compatible, each with a key or the organization's own sign-in, Azure AI
+  Foundry with an API key or a directory sign-in, Ollama),
   image HTTP profiles
   (OpenAI Image and Gemini native image — never selectable as Chat, Work, or
   Code turn drivers), SDK/RPC drivers (Claude Agent SDK, Codex app-server,
@@ -2862,6 +2863,14 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   an instance opted in to it, and only from the host-local
   `octant provider sign-in` command (see "Organization sign-in on a host
   without the desktop app" under [security and authority](#security-and-authority)).
+  An OpenAI-compatible or Anthropic-compatible gateway speaks
+  `directory-oauth` against the organization's own OpenID Connect issuer (the
+  broker's `issuer-oidc` dialect): the issuer is fixed when the instance is
+  created, the broker reads its endpoints from the issuer's discovery document
+  and accepts only endpoints on the issuer's own origin, and the grant binds to
+  the issuer, client, the one gateway scope, and the gateway's origin, with no
+  host list. A gateway signs in on the loopback redirect only; device code
+  stays Azure AI Foundry's opt-in.
   `cloud-iam` is not built.
   Secrets
   Octant holds for an integration use the same host credential path: the host
@@ -4587,7 +4596,9 @@ the model at another size.
   or client, deletes the stored key or pointer (and forgets the sign-in's
   broker grant) the same way, so a pointer is never sent as a key nor a key
   read as a pointer, and the key path refuses a stored value that reads as a
-  directory pointer.
+  directory pointer. A gateway's organization sign-in is bound the same way to
+  its client and scope; its issuer cannot change at all, and a gateway never
+  switches between a key and an organization sign-in after it is created.
   `web-fetch` sends no credential and no model-chosen header, method, or body
   (its arguments are a URL and a size), so a public
   inference host sees an anonymous GET and a local one (Ollama, LM Studio) is a

@@ -1,8 +1,15 @@
-import { decodeDirectoryClientId, decodeDirectoryTenantId } from "@octant/contracts";
+import {
+  decodeDirectoryClientId,
+  decodeDirectoryIssuer,
+  decodeDirectoryIssuerClientId,
+  decodeDirectoryResourceScope,
+  decodeDirectoryTenantId,
+} from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 import {
   encodeDirectoryOAuthCredential,
   readDirectoryOAuthCredential,
+  sameDirectoryOAuthBinding,
   type DirectoryOAuthCredential,
 } from "./directoryOAuth";
 import {
@@ -56,5 +63,55 @@ describe("directory-oauth credential pointer", () => {
     // A pointer never carries token material.
     expect(tampered({ accessToken: "fixture" })).toBeUndefined();
     expect(tampered({ refreshToken: "fixture" })).toBeUndefined();
+  });
+
+  it("round-trips a gateway pointer bound to its own issuer and scope, and never reads it half one kind and half the other", () => {
+    const gateway: DirectoryOAuthCredential = {
+      kind: "directory-oauth",
+      credentialRef: pointer.credentialRef,
+      issuer: decodeDirectoryIssuer("https://login.example.test/oauth2/gateway"),
+      clientId: decodeDirectoryIssuerClientId("0oa1octantDesktop"),
+      scope: decodeDirectoryResourceScope("gateway.models"),
+      endpointOrigin: "https://llm.example.test",
+      accountLabel: "person@example.test",
+    };
+    const stored = encodeDirectoryOAuthCredential(gateway);
+    expect(readDirectoryOAuthCredential(stored)).toEqual(gateway);
+    expect(stored).not.toMatch(/token|secret/i);
+
+    const tampered = (change: Record<string, unknown>) =>
+      readDirectoryOAuthCredential(JSON.stringify({ ...gateway, ...change }));
+    expect(tampered({ issuer: "http://login.example.test" })).toBeUndefined();
+    expect(tampered({ scope: "openid" })).toBeUndefined();
+    expect(tampered({ clientId: "a/b" })).toBeUndefined();
+    // A pointer naming both an issuer and a tenant could be compared as
+    // either, so it is neither.
+    expect(tampered({ tenantId: String(pointer.tenantId) })).toBeUndefined();
+    expect(tampered({ audience: pointer.audience })).toBeUndefined();
+  });
+
+  it("compares a tenant binding and an issuer binding as different, whatever their shared fields", () => {
+    const tenant = {
+      tenantId: pointer.tenantId,
+      clientId: pointer.clientId,
+      audience: pointer.audience,
+      endpointOrigin: pointer.endpointOrigin,
+    };
+    const issuer = {
+      issuer: decodeDirectoryIssuer("https://login.example.test"),
+      clientId: decodeDirectoryIssuerClientId(String(pointer.clientId)),
+      scope: decodeDirectoryResourceScope("gateway.models"),
+      endpointOrigin: pointer.endpointOrigin,
+    };
+    expect(sameDirectoryOAuthBinding(tenant, { ...tenant })).toBe(true);
+    expect(sameDirectoryOAuthBinding(issuer, { ...issuer })).toBe(true);
+    expect(sameDirectoryOAuthBinding(tenant, issuer)).toBe(false);
+    expect(sameDirectoryOAuthBinding(issuer, tenant)).toBe(false);
+    expect(
+      sameDirectoryOAuthBinding(issuer, {
+        ...issuer,
+        scope: decodeDirectoryResourceScope("gateway.admin"),
+      }),
+    ).toBe(false);
   });
 });

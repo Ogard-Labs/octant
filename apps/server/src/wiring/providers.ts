@@ -238,6 +238,7 @@ export function makeConfiguredProviderDriver(
         ...(options.subscriptionOAuth === undefined
           ? {}
           : { subscriptionOAuth: options.subscriptionOAuth }),
+        ...(options.directoryOAuth === undefined ? {} : { directoryOAuth: options.directoryOAuth }),
         ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
       }),
       instance,
@@ -255,6 +256,7 @@ export function makeConfiguredProviderDriver(
         ...(options.subscriptionOAuth === undefined
           ? {}
           : { subscriptionOAuth: options.subscriptionOAuth }),
+        ...(options.directoryOAuth === undefined ? {} : { directoryOAuth: options.directoryOAuth }),
         ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
       }),
       instance,

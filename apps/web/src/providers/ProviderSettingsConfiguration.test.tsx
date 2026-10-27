@@ -327,7 +327,14 @@ describe("HttpConfigurationForm sign-in offer", () => {
         disabled={false}
         instance={{
           ...bound,
-          configuration: { ...bound.configuration, oauthDescriptorId: "chatgpt-plan" as never },
+          configuration: {
+            kind: "openai-compatible-http",
+            baseUrl: bound.configuration.baseUrl,
+            authentication: "bearer",
+            protocol: "responses",
+            manualModelIds: [],
+            oauthDescriptorId: "chatgpt-plan" as never,
+          },
         }}
         onChange={onChange}
         onClearCredential={vi.fn(async () => true)}

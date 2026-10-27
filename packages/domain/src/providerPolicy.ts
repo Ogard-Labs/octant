@@ -16,7 +16,14 @@ import {
   acpAgentProfile,
   isAcpAgentKind,
 } from "@octant/contracts/acp-agent-profiles";
-import { isAzureFoundryDirectoryHost } from "./directorySignIn";
+import { gatewayDirectoryOrigin, isAzureFoundryDirectoryHost } from "./directorySignIn";
+import {
+  DirectoryIssuer,
+  DirectoryIssuerClientId,
+  DirectoryResourceScope,
+  type DirectoryIssuerBinding,
+} from "@octant/contracts/providers";
+import { Schema } from "effect";
 import type {
   AcpAgentConfiguration,
   AcpAgentProviderInstance,
@@ -267,13 +274,25 @@ function normalizeManualModelIds(modelIds: ReadonlyArray<string>): ReadonlyArray
   return [...new Set(normalized)];
 }
 
+/**
+ * A gateway's organization sign-in: its own issuer, the public client it
+ * registered there, and the one scope the gateway requires. Present exactly
+ * for `directory-oauth`.
+ */
+interface GatewayDirectoryInput {
+  readonly issuer: string;
+  readonly clientId: string;
+  readonly scope: string;
+}
+
 export interface OpenAiCompatibleConfigurationInput {
   readonly kind: OpenAiCompatibleProviderConfiguration["kind"];
   readonly baseUrl: string;
   readonly authentication: OpenAiCompatibleProviderConfiguration["authentication"];
   readonly protocol: OpenAiCompatibleProviderConfiguration["protocol"];
   readonly manualModelIds: ReadonlyArray<string>;
-  readonly oauthDescriptorId?: OpenAiCompatibleProviderConfiguration["oauthDescriptorId"];
+  readonly oauthDescriptorId?: string | undefined;
+  readonly directory?: GatewayDirectoryInput;
 }
 
 function normalizeOpenAiCompatibleConfiguration(
@@ -284,12 +303,27 @@ function normalizeOpenAiCompatibleConfiguration(
   if (configuration.authentication === "none" && !isLoopbackHostname(hostname)) {
     reject("invalid-authentication", "Unauthenticated providers must use a loopback endpoint.");
   }
-  return {
-    ...configuration,
+  const shared = {
+    kind: configuration.kind,
     baseUrl,
+    protocol: configuration.protocol,
     manualModelIds: normalizeManualModelIds(
       configuration.manualModelIds,
     ) as OpenAiCompatibleProviderConfiguration["manualModelIds"],
+  };
+  if (configuration.authentication === "directory-oauth") {
+    return {
+      ...shared,
+      authentication: "directory-oauth",
+      directory: gatewayDirectoryBinding(baseUrl, configuration),
+    };
+  }
+  if (configuration.directory !== undefined) {
+    reject("invalid-authentication", "Only an organization sign-in names an issuer.");
+  }
+  return {
+    ...shared,
+    authentication: configuration.authentication,
     ...(configuration.oauthDescriptorId === undefined
       ? {}
       : { oauthDescriptorId: configuration.oauthDescriptorId }),
@@ -303,7 +337,8 @@ export interface AnthropicCompatibleConfigurationInput {
   readonly protocol: AnthropicCompatibleProviderConfiguration["protocol"];
   readonly protocolVersion: string;
   readonly manualModelIds: ReadonlyArray<string>;
-  readonly oauthDescriptorId?: AnthropicCompatibleProviderConfiguration["oauthDescriptorId"];
+  readonly oauthDescriptorId?: string | undefined;
+  readonly directory?: GatewayDirectoryInput;
 }
 
 function normalizeAnthropicCompatibleConfiguration(
@@ -318,19 +353,98 @@ function normalizeAnthropicCompatibleConfiguration(
   if (protocolVersion.length === 0) {
     reject("invalid-base-url", "Anthropic protocol version cannot be empty.");
   }
-  return {
+  const shared = {
     kind: configuration.kind,
     baseUrl,
-    authentication: configuration.authentication,
     protocol: configuration.protocol,
     protocolVersion: protocolVersion as AnthropicCompatibleProviderConfiguration["protocolVersion"],
     manualModelIds: normalizeManualModelIds(
       configuration.manualModelIds,
     ) as AnthropicCompatibleProviderConfiguration["manualModelIds"],
+  };
+  if (configuration.authentication === "directory-oauth") {
+    return {
+      ...shared,
+      authentication: "directory-oauth",
+      directory: gatewayDirectoryBinding(baseUrl, configuration),
+    };
+  }
+  if (configuration.directory !== undefined) {
+    reject("invalid-authentication", "Only an organization sign-in names an issuer.");
+  }
+  return {
+    ...shared,
+    authentication: configuration.authentication,
     ...(configuration.oauthDescriptorId === undefined
       ? {}
       : { oauthDescriptorId: configuration.oauthDescriptorId }),
   };
+}
+
+/**
+ * A gateway sign-in's issuer, client, and scope, refused unless the issuer
+ * is an https address an identity token can name exactly, the client is a
+ * plain id, and the scope is one resource scope. The gateway's own address
+ * must be https: its bearer never travels in the clear, even to loopback. A
+ * catalog subscription sign-in cannot ride along.
+ */
+function gatewayDirectoryBinding(
+  baseUrl: string,
+  configuration: {
+    readonly directory?: GatewayDirectoryInput;
+    readonly oauthDescriptorId?: string | undefined;
+  },
+): DirectoryIssuerBinding {
+  const directory = configuration.directory;
+  if (directory === undefined || !Schema.is(DirectoryIssuer)(directory.issuer)) {
+    return reject(
+      "invalid-authentication",
+      "Organization sign-in needs your organization's issuer: the https address its sign-in tokens name.",
+    );
+  }
+  const { issuer, clientId, scope } = directory;
+  if (!Schema.is(DirectoryIssuerClientId)(clientId)) {
+    return reject(
+      "invalid-authentication",
+      "Organization sign-in needs the client ID your organization registered for Octant: letters, digits, '.', '_', '~', or '-'.",
+    );
+  }
+  if (!Schema.is(DirectoryResourceScope)(scope)) {
+    return reject(
+      "invalid-authentication",
+      "Organization sign-in needs the one scope your gateway requires, such as gateway.models; not openid, profile, offline_access, or email.",
+    );
+  }
+  if (gatewayDirectoryOrigin(baseUrl) === undefined) {
+    reject("invalid-base-url", "Organization sign-in needs an HTTPS gateway address.");
+  }
+  if (configuration.oauthDescriptorId !== undefined) {
+    reject("invalid-authentication", "An organization sign-in is not also a subscription sign-in.");
+  }
+  return { issuer, clientId, scope };
+}
+
+/**
+ * The issuer is where the person types their password, so it is fixed when a
+ * gateway is created: an endpoint created with one never names another, and
+ * an endpoint that does not sign in with its organization never starts to.
+ * The client, scope, and address may change; the server then drops the
+ * grant, and the person signs in again.
+ */
+function keepGatewayIssuer(
+  current: OpenAiCompatibleProviderConfiguration | AnthropicCompatibleProviderConfiguration,
+  next: OpenAiCompatibleProviderConfiguration | AnthropicCompatibleProviderConfiguration,
+): void {
+  const before =
+    current.authentication === "directory-oauth" ? String(current.directory.issuer) : undefined;
+  const after =
+    next.authentication === "directory-oauth" ? String(next.directory.issuer) : undefined;
+  if (before !== after) {
+    reject(
+      "invalid-authentication",
+      "An organization sign-in's issuer is fixed when the endpoint is created. Add a new endpoint to sign in another way.",
+    );
+  }
 }
 
 export interface AzureFoundryConfigurationInput {
@@ -1287,9 +1401,11 @@ export function changeOpenAiCompatibleConfiguration(
   input: OpenAiCompatibleConfigurationInput,
   updatedAt: UtcTimestamp,
 ): OpenAiCompatibleProviderInstance {
+  const configuration = normalizeOpenAiCompatibleConfiguration(input);
+  keepGatewayIssuer(current.configuration, configuration);
   return {
     ...current,
-    configuration: normalizeOpenAiCompatibleConfiguration(input),
+    configuration,
     version: nextVersion(current.version),
     updatedAt,
   };
@@ -1300,9 +1416,11 @@ export function changeAnthropicCompatibleConfiguration(
   input: AnthropicCompatibleConfigurationInput,
   updatedAt: UtcTimestamp,
 ): AnthropicCompatibleProviderInstance {
+  const configuration = normalizeAnthropicCompatibleConfiguration(input);
+  keepGatewayIssuer(current.configuration, configuration);
   return {
     ...current,
-    configuration: normalizeAnthropicCompatibleConfiguration(input),
+    configuration,
     version: nextVersion(current.version),
     updatedAt,
   };

@@ -442,6 +442,7 @@ function wireDescriptor(
     ...(descriptor.endpointOrigin === undefined
       ? {}
       : { endpointOrigin: descriptor.endpointOrigin }),
+    ...(descriptor.issuer === undefined ? {} : { issuer: descriptor.issuer }),
   };
 }
 

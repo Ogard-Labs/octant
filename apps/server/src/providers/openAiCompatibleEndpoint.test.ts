@@ -10,7 +10,13 @@ import {
   requestGeneration,
 } from "./openAiCompatibleEndpoint";
 
-const configuration: OpenAiCompatibleProviderConfiguration = {
+/** An endpoint that sends a stored key or none; an organization sign-in has its own tests. */
+type KeyedConfiguration = Exclude<
+  OpenAiCompatibleProviderConfiguration,
+  { readonly authentication: "directory-oauth" }
+>;
+
+const configuration: KeyedConfiguration = {
   kind: "openai-compatible-http",
   baseUrl: "https://host.example/gateway/v1",
   authentication: "bearer",
@@ -27,7 +33,7 @@ function resolver(credential = "provider-secret"): ProviderCredentialResolver {
 
 function endpoint(
   fetch: CompatibleFetch,
-  overrides: Partial<OpenAiCompatibleProviderConfiguration> = {},
+  overrides: Partial<KeyedConfiguration> = {},
   credentialResolver: ProviderCredentialResolver = resolver(),
   requestBodyBytes?: number,
   responseBodyBytes = 128,

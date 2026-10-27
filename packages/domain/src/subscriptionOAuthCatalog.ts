@@ -1,4 +1,8 @@
 import type { HostOAuthDescriptor, SubscriptionOAuthOffer } from "@octant/contracts/host-oauth";
+import type {
+  AnthropicCompatibleProviderConfiguration,
+  OpenAiCompatibleProviderConfiguration,
+} from "@octant/contracts/providers";
 
 /**
  * Descriptors that offer host-driven sign-in beside an API key.
@@ -6,6 +10,16 @@ import type { HostOAuthDescriptor, SubscriptionOAuthOffer } from "@octant/contra
  */
 export function subscriptionOAuthOffers(): readonly SubscriptionOAuthOffer[] {
   return [openRouterOffer, chatGptPlanOffer];
+}
+
+/**
+ * The catalog sign-in an endpoint expects, if any. An endpoint that signs in
+ * with its organization expects none: it is never also a catalog sign-in.
+ */
+export function subscriptionDescriptorIdOf(
+  configuration: OpenAiCompatibleProviderConfiguration | AnthropicCompatibleProviderConfiguration,
+): string | undefined {
+  return "oauthDescriptorId" in configuration ? configuration.oauthDescriptorId : undefined;
 }
 
 /**

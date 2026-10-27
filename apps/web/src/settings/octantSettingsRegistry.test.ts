@@ -298,6 +298,8 @@ const COMPUTED_SETTING_ROWS: Readonly<Record<string, string>> = {
   "provider-*-directory-tenant": "provider-authentication",
   "provider-*-directory-client": "provider-authentication",
   "provider-*-directory-device-code": "provider-authentication",
+  "provider-*-directory-issuer": "provider-authentication",
+  "provider-*-directory-scope": "provider-authentication",
   "provider-*-api-key": "provider-api-key",
   "provider-*-base-url": "provider-base-url",
   "provider-*-protocol": "provider-protocol",

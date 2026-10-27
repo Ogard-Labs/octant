@@ -1,3 +1,4 @@
+import { subscriptionDescriptorIdOf } from "@octant/domain";
 import { ChevronRight } from "lucide-react";
 import { useId, type ReactNode } from "react";
 import { ChatOnlyVerify } from "../../providers/ChatOnlyVerify";
@@ -23,7 +24,7 @@ export function EndpointMark(props: {
   const descriptorId =
     props.instance.driverKind === "openai-compatible" ||
     props.instance.driverKind === "anthropic-compatible"
-      ? props.instance.configuration.oauthDescriptorId
+      ? subscriptionDescriptorIdOf(props.instance.configuration)
       : undefined;
   const glyph =
     descriptorId === undefined

@@ -1,7 +1,13 @@
-import { decodeDirectoryClientId, decodeDirectoryTenantId } from "@octant/contracts";
+import {
+  decodeDirectoryClientId,
+  decodeDirectoryIssuer,
+  decodeDirectoryIssuerClientId,
+  decodeDirectoryResourceScope,
+  decodeDirectoryTenantId,
+} from "@octant/contracts";
 import { decodeHostOAuthDescriptor } from "@octant/contracts/host-oauth";
 import { describe, expect, it } from "vitest";
-import { azureFoundryDirectoryDescriptor } from "./directorySignIn";
+import { azureFoundryDirectoryDescriptor, gatewayDirectoryDescriptor } from "./directorySignIn";
 
 const directory = {
   tenantId: decodeDirectoryTenantId("6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f"),
@@ -51,5 +57,40 @@ describe("Azure AI Foundry organization sign-in", () => {
     ["embedded credentials", "https://user:pass@contoso.openai.azure.com/openai/v1/"],
   ])("offers no sign-in for %s", (_label, baseUrl) => {
     expect(azureFoundryDirectoryDescriptor({ baseUrl, directory })).toBeUndefined();
+  });
+});
+
+describe("Gateway organization sign-in", () => {
+  const gateway = {
+    issuer: decodeDirectoryIssuer("https://login.example.test/oauth2/gateway"),
+    clientId: decodeDirectoryIssuerClientId("0oa1octantDesktop"),
+    scope: decodeDirectoryResourceScope("gateway.models"),
+  };
+
+  it("binds a sign-in to the gateway's origin and the instance's own issuer, client, and scope", () => {
+    const descriptor = gatewayDirectoryDescriptor({
+      baseUrl: "https://LLM.example.test/v1/",
+      directory: gateway,
+    });
+
+    expect(decodeHostOAuthDescriptor(descriptor)).toEqual({
+      descriptorId: "gateway-directory",
+      dialect: "issuer-oidc",
+      flow: "authorization-code-pkce",
+      clientId: gateway.clientId,
+      issuer: gateway.issuer,
+      endpointOrigin: "https://llm.example.test",
+      scopes: [gateway.scope],
+      termsId: "gateway-directory-1",
+    });
+  });
+
+  it.each([
+    ["plain http", "http://llm.example.test/v1/"],
+    ["loopback http", "http://127.0.0.1:4000/v1/"],
+    ["embedded credentials", "https://user:pass@llm.example.test/v1/"],
+    ["an address that is not a URL", "llm.example.test"],
+  ])("offers no sign-in for %s", (_label, baseUrl) => {
+    expect(gatewayDirectoryDescriptor({ baseUrl, directory: gateway })).toBeUndefined();
   });
 });
