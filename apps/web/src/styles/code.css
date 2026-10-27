@@ -501,6 +501,17 @@ html:not([data-octant-reduced-transparency="true"])
   gap: 2px;
 }
 
+/* The file name takes the room and gives it up first, so Save and Open
+   externally stay on the header line at every width: stacking the header put
+   Save on a centred line of its own at 390px (observed in rendered QA). */
+.code-editor-pane__toolbar > div {
+  flex: 1 1 auto;
+}
+
+.code-editor-pane__toolbar > :not(div) {
+  flex: none;
+}
+
 .code-editor-pane__toolbar span,
 .code-diff-pane__toolbar span {
   color: var(--oct-meta);
@@ -852,13 +863,11 @@ html:not([data-octant-reduced-transparency="true"])
 }
 
 @container workspace (max-width: 520px) {
-  .code-editor-pane__toolbar,
   .code-diff-pane__toolbar {
     align-items: stretch;
     flex-direction: column;
   }
 
-  .code-editor-pane__toolbar > p,
   .code-diff-pane__toolbar > p {
     white-space: normal;
   }

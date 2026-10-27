@@ -866,6 +866,22 @@ describe("ExtensionsSettingsView", () => {
     expect(viewButton(/installed/i)).toHaveAttribute("aria-pressed", "false");
   });
 
+  it("keeps each marketplace search hint short enough to read whole at phone width", async () => {
+    render(<ExtensionsSettingsView client={client()} scope={scope} />);
+    await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
+    fireEvent.click(viewButton(/marketplace/i));
+
+    // Observed at 390px: a field beside Run search has room for about 27
+    // characters, and "Search the extension catalog" (28) was cut off. The
+    // section title already says which catalog the field searches.
+    const hints = [
+      await screen.findByRole("searchbox", { name: /search marketplace/i }),
+      screen.getByRole("searchbox", { name: /search skills\.sh and npm/i }),
+    ].map((field) => field.getAttribute("placeholder") ?? "");
+    expect(hints).toEqual(["Search the catalog", "Search skills.sh and npm"]);
+    for (const hint of hints) expect(hint.length).toBeLessThanOrEqual(24);
+  });
+
   it("searches the marketplace, inspects a package, then requires explicit confirmation before install", async () => {
     const c = client();
     render(<ExtensionsSettingsView client={c} scope={scope} />);

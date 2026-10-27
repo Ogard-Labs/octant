@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
@@ -194,18 +194,30 @@ describe("CodeSettingsView", () => {
     const user = userEvent.setup();
     render(<CodeSettingsView onUpdate={update} settings={settings as never} />);
 
+    const editorSection = screen.getByRole("region", { name: "Editor" });
+    const externalSection = screen.getByRole("region", { name: "External editor" });
+    const threadSection = screen.getByRole("region", { name: "Thread defaults" });
     const services = screen.getByRole("switch", { name: "Language services" });
     await user.click(services);
-    expect(await screen.findByText("Code defaults could not be saved.")).toBeVisible();
+    // The refusal is said beside the switch that asked, not two sections down.
+    expect(
+      await within(editorSection).findByText("Code defaults could not be saved."),
+    ).toBeVisible();
+    expect(within(externalSection).queryByText("Code defaults could not be saved.")).toBeNull();
     expect(services).toBeChecked();
 
     await user.click(screen.getByRole("button", { name: "Side by side" }));
     expect(screen.getByRole("button", { name: "Unified" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(threadSection).getByText("Code defaults could not be saved.")).toBeVisible();
+    expect(screen.getAllByText("Code defaults could not be saved.")).toHaveLength(1);
 
     const field = screen.getByRole("textbox", { name: "External editor executable" });
     await user.type(field, "/opt/editor");
     fireEvent.blur(field);
-    expect(await screen.findByText("Code defaults could not be saved.")).toBeVisible();
+    expect(
+      await within(externalSection).findByText("Code defaults could not be saved."),
+    ).toBeVisible();
+    expect(screen.getAllByText("Code defaults could not be saved.")).toHaveLength(1);
     expect(field).toHaveValue("/opt/editor");
   });
 
@@ -250,7 +262,12 @@ describe("CodeSettingsView", () => {
     await user.click(screen.getByRole("switch", { name: "Language services" }));
 
     expect(update).not.toHaveBeenCalled();
-    expect(screen.getByText("External editor executable must be an absolute path.")).toBeVisible();
+    // Said beside the switch that snapped back, naming the field to finish.
+    expect(
+      within(screen.getByRole("region", { name: "Editor" })).getByText(
+        "External editor executable must be an absolute path.",
+      ),
+    ).toBeVisible();
     expect(screen.getByRole("switch", { name: "Language services" })).toBeChecked();
     expect(field).toHaveValue("editor");
   });

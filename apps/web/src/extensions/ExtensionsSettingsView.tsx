@@ -1164,7 +1164,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                   aria-label="Search marketplace"
                   className="extensions-settings__search-input"
                   onChange={(event) => setMarketplaceQuery(event.currentTarget.value)}
-                  placeholder="Search the extension catalog"
+                  placeholder="Search the catalog"
                   type="search"
                   value={marketplaceQuery}
                 />

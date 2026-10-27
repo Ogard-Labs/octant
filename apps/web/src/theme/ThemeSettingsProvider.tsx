@@ -1,11 +1,17 @@
 import { GLASS_TINT_DEFAULTS, type ThemeSettings } from "@octant/contracts/theme";
 import { enforceSidebarBackgroundAccessibility } from "@octant/domain/theme-policy";
+import {
+  DEFAULT_EDITOR_COLORS,
+  resolveEditorColorProjection,
+  type EditorColorProjection,
+} from "@octant/theme/editor-colors";
 import { resolveEffectiveTokens } from "@octant/theme/fallback";
 import {
   createContext,
   useCallback,
   useContext,
   useLayoutEffect,
+  useMemo,
   useSyncExternalStore,
   type ReactNode,
 } from "react";
@@ -113,12 +119,16 @@ export function ThemeSettingsProvider(props: {
     };
   }, [settingIncreasedContrast, increasedContrast]);
 
+  const applied = useMemo(() => {
+    if (props.settings === undefined) return undefined;
+    const accessible = enforceSidebarBackgroundAccessibility(props.settings);
+    return { accessible, resolved: resolveEffectiveTokens(accessible, systemPrefersDark) };
+  }, [props.settings, systemPrefersDark]);
+
   useLayoutEffect(() => {
     const root = document.documentElement;
-    const settings = props.settings;
-    if (settings === undefined) return;
-    const accessible = enforceSidebarBackgroundAccessibility(settings);
-    const resolved = resolveEffectiveTokens(accessible, systemPrefersDark);
+    if (applied === undefined) return;
+    const { accessible, resolved } = applied;
     const paint = () => {
       for (const [role, color] of Object.entries(resolved.tokens)) {
         if (!(increasedContrast && HIGH_CONTRAST_TEXT_ROLES.has(role))) {
@@ -201,10 +211,28 @@ export function ThemeSettingsProvider(props: {
       leave(mountedPaints, paint);
       mountedPaints.at(-1)?.();
     };
-  }, [props.settings, increasedContrast, systemPrefersDark]);
+  }, [applied, increasedContrast]);
+  const resolved = applied?.resolved;
+  const editorColors = useMemo(
+    () => (resolved === undefined ? undefined : resolveEditorColorProjection(resolved)),
+    [resolved],
+  );
   return (
     <IncreasedContrastContext.Provider value={increasedContrast}>
-      {props.children}
+      <EditorColorContext.Provider value={editorColors}>
+        {props.children}
+      </EditorColorContext.Provider>
     </IncreasedContrastContext.Provider>
   );
+}
+
+const EditorColorContext = createContext<EditorColorProjection | undefined>(undefined);
+
+/**
+ * The colors a code editor draws with in the theme this window resolved, so
+ * an open editor repaints when the theme or the system appearance changes.
+ * Without a theme the stylesheet's own dark default is what the page shows.
+ */
+export function useEditorColorProjection(): EditorColorProjection {
+  return useContext(EditorColorContext) ?? DEFAULT_EDITOR_COLORS;
 }

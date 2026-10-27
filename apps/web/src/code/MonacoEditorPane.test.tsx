@@ -1,10 +1,14 @@
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { MonacoAdapterRuntime } from "./MonacoEditorAdapter";
 import { MonacoEditorPane, type CodeEditorFileProjection } from "./MonacoEditorPane";
 import { codeDebugThreadKey, codeDebugWindowState } from "../debug/codeDebugWindowState";
+
+const codeStyles = readFileSync(resolve(import.meta.dirname, "../styles/code.css"), "utf8");
 
 describe("MonacoEditorPane", () => {
   it("sets a breakpoint from the gutter for the thread's debugging and marks the line the program stopped on", async () => {
@@ -288,6 +292,17 @@ describe("MonacoEditorPane", () => {
     );
     expect(screen.getByRole("alert")).toHaveTextContent("File was deleted.");
     expect(fixture.loadRuntime).not.toHaveBeenCalled();
+  });
+
+  it("keeps Save on the header line beside the file name in a narrow pane", () => {
+    const narrow = /@container workspace \(max-width: 520px\) \{([\s\S]*?)\n\}/.exec(
+      codeStyles,
+    )?.[1];
+    expect(narrow).toBeDefined();
+    // Stacking the header put Save on a line of its own at phone width.
+    expect(narrow).not.toContain(".code-editor-pane__toolbar");
+    expect(codeStyles).toMatch(/\.code-editor-pane__toolbar > div \{[^}]*flex: 1 1 auto;/);
+    expect(codeStyles).toMatch(/\.code-editor-pane__toolbar > :not\(div\) \{[^}]*flex: none;/);
   });
 });
 

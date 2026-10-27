@@ -15,6 +15,7 @@ import {
   DEFAULT_EDITOR_TYPOGRAPHY,
   type EditorTypographyProjection,
 } from "@octant/theme/typography";
+import { DEFAULT_EDITOR_COLORS, type EditorColorProjection } from "@octant/theme/editor-colors";
 
 interface ModelLease {
   readonly disposeWhenUnused: boolean;
@@ -34,6 +35,7 @@ export const mount: MonacoAdapterRuntime["mount"] = (element, options) => {
   const lease = acquireModelLease(key, uri, options.value, options.language);
   setControlledValue(lease, options.value);
   const typography = options.typography ?? DEFAULT_EDITOR_TYPOGRAPHY;
+  applyEditorColors(options.colors ?? DEFAULT_EDITOR_COLORS);
   const editor = monaco.editor.create(element, {
     automaticLayout: true,
     model: lease.model,
@@ -48,7 +50,7 @@ export const mount: MonacoAdapterRuntime["mount"] = (element, options) => {
     fontLigatures: typography.fontLigatures,
     minimap: { enabled: false },
     glyphMargin: options.onToggleBreakpoint !== undefined,
-    theme: "vs-dark",
+    theme: OCTANT_EDITOR_THEME,
   });
   const disposeMenu = installNativeEditorMenu(editor);
   const debugDecorations = editor.createDecorationsCollection();
@@ -89,6 +91,7 @@ export const mount: MonacoAdapterRuntime["mount"] = (element, options) => {
     focus: () => editor.focus(),
     setReadOnly: (readOnly) => editor.updateOptions({ readOnly }),
     setTypography: (next) => updateEditorTypography(editor, next),
+    setColors: applyEditorColors,
     setValue: (value) => setControlledValue(lease, value),
     setLanguageMarkers: (markers) => setLanguageMarkers(lease.model, key, markers),
     revealRange: (range) => {
@@ -405,6 +408,7 @@ export const mountDiff: MonacoDiffRuntime["mountDiff"] = (element, options) => {
   const base = monaco.Uri.parse(options.modelUriBase, true);
   if (base.scheme !== "octant-code") throw new Error("Monaco model URI must be Octant-owned.");
   const typography = options.typography ?? DEFAULT_EDITOR_TYPOGRAPHY;
+  applyEditorColors(options.colors ?? DEFAULT_EDITOR_COLORS);
   const original = monaco.editor.createModel(
     options.original,
     options.language,
@@ -426,7 +430,7 @@ export const mountDiff: MonacoDiffRuntime["mountDiff"] = (element, options) => {
     lineHeight: typography.lineHeight,
     fontLigatures: typography.fontLigatures,
     minimap: { enabled: false },
-    theme: "vs-dark",
+    theme: OCTANT_EDITOR_THEME,
   });
   editor.setModel({ original, modified });
   const disposeOriginalMenu = installNativeEditorMenu(editor.getOriginalEditor());
@@ -444,6 +448,7 @@ export const mountDiff: MonacoDiffRuntime["mountDiff"] = (element, options) => {
       modified.dispose();
     },
     setRenderSideBySide: (sideBySide) => editor.updateOptions({ renderSideBySide: sideBySide }),
+    setColors: applyEditorColors,
     setTypography: (next) => {
       editor.updateOptions({
         fontFamily: next.fontFamily,
@@ -459,6 +464,59 @@ export const mountDiff: MonacoDiffRuntime["mountDiff"] = (element, options) => {
     },
   } satisfies MonacoDiffSession;
 };
+
+/**
+ * Monaco keeps one theme for the whole page, so every editor and diff wears
+ * the same one, and redefining it repaints all of them at once: that is how a
+ * theme switched while files are open reaches them without a remount.
+ */
+const OCTANT_EDITOR_THEME = "octant";
+let appliedEditorColors: EditorColorProjection | undefined;
+
+function applyEditorColors(colors: EditorColorProjection): void {
+  if (appliedEditorColors !== undefined && sameEditorColors(appliedEditorColors, colors)) return;
+  appliedEditorColors = colors;
+  monaco.editor.defineTheme(OCTANT_EDITOR_THEME, {
+    base: colors.mode === "light" ? "vs" : "vs-dark",
+    inherit: true,
+    rules: [],
+    colors: {
+      "editor.background": colors.background,
+      "editor.foreground": colors.foreground,
+      "editorGutter.background": colors.background,
+      "editorLineNumber.foreground": colors.mutedForeground,
+      "editorLineNumber.activeForeground": colors.foreground,
+      "editorCursor.foreground": colors.foreground,
+      "editor.selectionBackground": colors.selection,
+      "editor.inactiveSelectionBackground": colors.selection,
+      "editor.lineHighlightBackground": colors.background,
+      "editor.lineHighlightBorder": colors.lineHighlightBorder,
+      "editorIndentGuide.background1": colors.indentGuide,
+      "editorIndentGuide.activeBackground1": colors.activeIndentGuide,
+      "editorWidget.background": colors.widgetBackground,
+      "editorWidget.foreground": colors.foreground,
+      "editorWidget.border": colors.widgetBorder,
+      "editorHoverWidget.background": colors.widgetBackground,
+      "editorHoverWidget.border": colors.widgetBorder,
+      "editorSuggestWidget.background": colors.widgetBackground,
+      "editorSuggestWidget.border": colors.widgetBorder,
+      "peekViewEditor.background": colors.widgetBackground,
+      "peekViewResult.background": colors.widgetBackground,
+      focusBorder: colors.focusBorder,
+      "editorError.foreground": colors.error,
+      // A fifth of the role, not the role itself: diff text is read on it.
+      "diffEditor.insertedTextBackground": `${colors.inserted}33`,
+      "diffEditor.removedTextBackground": `${colors.removed}33`,
+    },
+  });
+  monaco.editor.setTheme(OCTANT_EDITOR_THEME);
+}
+
+function sameEditorColors(left: EditorColorProjection, right: EditorColorProjection): boolean {
+  return (Object.keys(left) as Array<keyof EditorColorProjection>).every(
+    (key) => left[key] === right[key],
+  );
+}
 
 function updateEditorTypography(
   editor: monaco.editor.IStandaloneCodeEditor,

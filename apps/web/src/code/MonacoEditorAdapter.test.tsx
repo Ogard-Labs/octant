@@ -1,5 +1,7 @@
 import { act, render, screen } from "@testing-library/react";
+import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import { describe, expect, it, vi } from "vitest";
+import { ThemeSettingsProvider } from "../theme/ThemeSettingsProvider";
 import {
   MonacoEditorAdapter,
   type MonacoAdapterRuntime,
@@ -153,6 +155,45 @@ describe("MonacoEditorAdapter", () => {
       />,
     );
     expect(session.setTypography).toHaveBeenLastCalledWith(second);
+  });
+
+  it("follows the app's light or dark theme, including a switch while the editor is open", async () => {
+    const live: MonacoAdapterSession = { ...session(), setColors: vi.fn() };
+    const mount = vi.fn<MonacoAdapterRuntime["mount"]>(() => live);
+    const loadRuntime = vi.fn(async () => ({ mount }));
+    const editor = (
+      <MonacoEditorAdapter
+        ariaLabel="README.md editor"
+        language="markdown"
+        loadRuntime={loadRuntime}
+        modelUri="octant-code://checkout-opaque/file-opaque"
+        onChange={vi.fn()}
+        readOnly
+        value="first"
+      />
+    );
+    const { rerender } = render(
+      <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "light" }}>
+        {editor}
+      </ThemeSettingsProvider>,
+    );
+    await act(async () => void (await loadRuntime.mock.results[0]?.value));
+    expect(mount).toHaveBeenCalledWith(
+      expect.any(HTMLElement),
+      expect.objectContaining({
+        colors: expect.objectContaining({ mode: "light", background: "#ffffff" }),
+      }),
+    );
+
+    rerender(
+      <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "dark" }}>
+        {editor}
+      </ThemeSettingsProvider>,
+    );
+    expect(live.setColors).toHaveBeenLastCalledWith(
+      expect.objectContaining({ mode: "dark", background: "#1a1a1a" }),
+    );
+    expect(mount).toHaveBeenCalledOnce();
   });
 });
 
