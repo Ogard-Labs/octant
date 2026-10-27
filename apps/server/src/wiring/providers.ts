@@ -1234,6 +1234,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       runtimeRegistry: providerRuntimeRegistry,
       isProviderExecutableAvailable,
       isOutsideDriverAdmitted: (instance) => outsideDriverAdmission.isAdmitted(instance),
+      outsideDriverRebindTarget: (instance) => outsideDriverAdmission.rebindTarget(instance),
       outsideDriverListings: () => outsideDriverAdmission.listings(),
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
@@ -1284,12 +1285,19 @@ export function wireProviders(deps: ProvidersDependencies) {
           () => workRequestRuntime,
         ),
     });
-    // Processes first: a stopped driver leaves its own closed observation,
-    // which the provider service then replaces with the block it reports.
-    reconcileOutsideDrivers = async () => {
+    // A newly trusted digest moves its instances first, so the processes
+    // still bound to the old one stop next. Processes before the provider
+    // service: a stopped driver leaves its own closed observation, which the
+    // provider service then replaces with the block it reports.
+    const reconcileOutsideDriverState = async () => {
+      await providerService.rebindOutsideDrivers();
       await outsideDriverAdmission.reconcile(persistence.readProviderInstances());
       providerService.reconcileConfiguredProviders();
     };
+    reconcileOutsideDrivers = reconcileOutsideDriverState;
+    // A host that stopped between a trust and the move it causes makes the
+    // move now; with nothing to move this journals nothing and starts nothing.
+    yield* Effect.promise(() => reconcileOutsideDriverState().catch(() => undefined));
     const probeProviderForThreads: (
       providerInstanceId: ProviderInstance["id"],
     ) => Promise<ProviderProbeResult> = (providerInstanceId) =>

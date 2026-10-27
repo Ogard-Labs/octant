@@ -254,13 +254,13 @@ an agent, or a mention cannot install, trust, switch on, or add one.
 
 When you change the driver, import the folder again and install the new
 version. It arrives held and untrusted, and providers added from the earlier
-version stay blocked, with their history and key, until you remove them and
-add them again from the version you trust.
+version are blocked, with their history and key. Trusting the new version
+moves them to it: their next check starts the new version, and their models
+need **Verify tools** again.
 
 ## Signing
 
 A driver added from a local folder is unsigned developer input, and its review
-says so; trust is bound to the exact contents you reviewed. Drivers from a
-marketplace source will carry a publisher signature whose key is pinned when
-you first trust it, so a later version signed by another key is refused until
-you trust it as a new publisher. Only local folders are accepted today.
+says so; trust is bound to the exact contents you reviewed. Only local
+folders are accepted today: publisher signatures, and drivers from a
+marketplace source, are not supported yet.
