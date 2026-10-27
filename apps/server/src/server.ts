@@ -477,6 +477,7 @@ export function startOctantServer(
       runningWorkTurnAccess,
       sideTasks,
       sshTargetConnections,
+      sshTargetStore,
       threadFollowUpSuggestions,
       toolEgressRules,
       turnMetrics,
@@ -532,6 +533,7 @@ export function startOctantServer(
       persistence,
       projectRootPort,
       projectService,
+      sshTargetStore,
       windowAuthorityStore,
     });
     const {
@@ -688,6 +690,8 @@ export function startOctantServer(
       sideTasks,
       simulatorInputGrants,
       spendCeiling,
+      sshTargetConnections,
+      sshTargetStore,
       threadMentionService: (): ThreadMentionService => threadMentionService,
       threadOutsideContentMarks,
     });

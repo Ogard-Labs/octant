@@ -59,6 +59,7 @@ import type { WorkspaceWiring } from "./workspace";
 import type { HarnessStateWiring } from "./harnessState";
 import type { WorkRequestStateWiring } from "./workRequestState";
 import { bindSshRemoteHarness } from "../sshTarget/sshRemoteHarness";
+import { remoteCodeProjectOf } from "../sshTarget/sshRemoteCodeThreads";
 import type { SshTargetsWiring } from "./sshTargets";
 
 export type HarnessDependencies = Pick<ServerStart, "persistence"> &
@@ -102,7 +103,7 @@ export type HarnessDependencies = Pick<ServerStart, "persistence"> &
   Pick<WorkRequestStateWiring, "runningWorkTurnAccess"> &
   Pick<FoundationsWiring, "codeBoardEventStore" | "workThreadProjection" | "workTurnProjection"> &
   Pick<WorkspaceWiring, "projectService"> &
-  Pick<SshTargetsWiring, "sshTargetConnections">;
+  Pick<SshTargetsWiring, "sshTargetConnections" | "sshTargetStore">;
 
 export function wireHarness(deps: HarnessDependencies) {
   const {
@@ -131,6 +132,7 @@ export function wireHarness(deps: HarnessDependencies) {
     runningWorkTurnAccess,
     sideTasks,
     sshTargetConnections,
+    sshTargetStore,
     threadFollowUpSuggestions,
     toolEgressRules,
     turnMetrics,
@@ -513,6 +515,7 @@ export function wireHarness(deps: HarnessDependencies) {
       runningWorkTurnAccess,
       readThreadTaint: (threadId) =>
         readThreadExternalContentTaint(persistence.connection, threadId),
+      holdsRemoteCodeBinding: (thread) => remoteCodeProjectOf(sshTargetStore, thread) !== undefined,
     }),
     isHarnessProvider: (providerInstanceId) => {
       const instance = persistence.readProviderInstance(providerInstanceId);
