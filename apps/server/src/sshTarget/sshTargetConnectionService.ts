@@ -4,12 +4,18 @@ import { readFileSync, rmSync } from "node:fs";
 import { connect as netConnect, type Socket } from "node:net";
 import { join } from "node:path";
 import type { Duplex } from "node:stream";
-import { Schema } from "effect";
-import type { PermissionPersistence, ProviderExecutionPolicy } from "@octant/contracts/providers";
+import { Effect, Schema, Stream } from "effect";
+import type {
+  PermissionPersistence,
+  ProviderExecutionPolicy,
+  ProviderFailure,
+  ProviderInstanceId,
+} from "@octant/contracts/providers";
 import {
   SshConnectionId,
   SshHostKeyProbeId,
   SshPinnedHostKey,
+  SshRemotePath,
   SshTargetId,
   type SshAdmissionDecision,
   type SshAttestation,
@@ -46,22 +52,33 @@ import {
   type SshExecutorRemoveWorktreeRequest,
   type SshExecutorWorktreeCreatedReply,
   type SshExecutorWorktreeRemovedReply,
+  SshPlacedAccountState,
 } from "@octant/contracts/ssh-executor-protocol";
 import {
   SSH_CANARY_PROBES_BY_POSTURE,
+  SSH_RUNTIME_CANARY_PROBES_BY_POSTURE,
   decideSshAdmission,
   type SshAdmissionSubject,
   type SshTargetConnection,
 } from "@octant/domain/ssh-target-admission-policy";
-import type { ProviderDriver } from "@octant/provider-sdk/driver";
+import { describeSshAdmissionRefusal } from "@octant/domain/ssh-target-recovery";
+import type {
+  ProviderDriver,
+  ProviderPlacedLaunch,
+  ProviderPlacedProcess,
+  ProviderRemotePlacementPosture,
+  ProviderRemoteProcessPlacement,
+} from "@octant/provider-sdk/driver";
 import { childProcessEnvironment } from "../childProcessEnvironment";
 import type { ToolEgressProxyEndpoint } from "../harness/nativeHarnessEgressProxy";
 import {
   ExecutorChannel,
+  type ExecutorPlacedProcess,
   type ExecutorRequestOptions,
   type ExecutorTerminal,
   type ExecutorTerminalListener,
 } from "./executorChannel";
+import type { ProviderRuntimeEgress } from "./providerRuntimeEgress";
 import { joinToStream } from "./executorStreams";
 import {
   SYSTEM_SSH_CLIENT,
@@ -109,6 +126,11 @@ const decodeConnectionId = Schema.decodeUnknownSync(SshConnectionId);
 const decodeTargetId = Schema.decodeUnknownSync(SshTargetId);
 const decodeProbeId = Schema.decodeUnknownSync(SshHostKeyProbeId);
 const decodePinnedHostKey = Schema.decodeUnknownEither(SshPinnedHostKey);
+const decodeRemotePath = Schema.decodeUnknownEither(SshRemotePath);
+const decodeAccountState = Schema.decodeUnknownEither(Schema.Array(SshPlacedAccountState));
+
+/** How long a stopped runtime has to end on the target before this host stops waiting. */
+const PLACED_STOP_WAIT_MS = 10_000;
 
 export interface SshTargetConnectionServiceOptions {
   readonly store: SshTargetStore;
@@ -125,6 +147,12 @@ export interface SshTargetConnectionServiceOptions {
   readonly helloTimeoutMs?: number;
   readonly attestationTimeoutMs?: number;
   readonly readTimeoutMs?: number;
+  /**
+   * The proxy a placed runtime's network goes through on this host. Without
+   * it no runtime is placed in a posture that needs the network; nothing
+   * falls back to the target's own.
+   */
+  readonly runtimeEgress?: ProviderRuntimeEgress;
 }
 
 export type SshTargetAdministrationResult<T> =
@@ -183,6 +211,29 @@ export type SshTargetTerminalOpening =
       readonly terminal: ExecutorTerminal;
       readonly session: SshTargetSession;
     };
+
+/**
+ * Where a provider runtime is placed: on a session of a target, in a bound
+ * root, for one thread and provider instance, in one confined posture.
+ */
+export interface SshTargetPlacementInput {
+  readonly session: Pick<SshTargetSession, "targetId" | "connectionId">;
+  readonly driver: Pick<ProviderDriver, "remotePlacement">;
+  /** The bound root, or a managed worktree of it, as the target names it. */
+  readonly root: string;
+  readonly projectId: string;
+  readonly threadId: string;
+  readonly providerInstanceId: ProviderInstanceId;
+  /** The posture every launch of this placement runs in. */
+  readonly posture: ProviderRemotePlacementPosture;
+  readonly permissionPersistence: PermissionPersistence;
+  /**
+   * The thread's posture now. A launch, and every write to a placed runtime,
+   * reads it; another posture than the placement's ends the runtime, whose
+   * grants were chosen for the posture it started in.
+   */
+  readonly currentPosture: () => ProviderExecutionPolicy | undefined;
+}
 
 /** One connected session of a target, which work bound to it names on every call. */
 export interface SshTargetSession {
@@ -250,6 +301,7 @@ export class SshTargetConnectionService {
   readonly #helloTimeoutMs: number;
   readonly #attestationTimeoutMs: number;
   readonly #readTimeoutMs: number;
+  readonly #runtimeEgress: ProviderRuntimeEgress | undefined;
   readonly #connections = new Map<string, ConnectionRecord>();
   readonly #probes = new Map<string, HeldProbe>();
 
@@ -264,6 +316,7 @@ export class SshTargetConnectionService {
     this.#helloTimeoutMs = options.helloTimeoutMs ?? HELLO_TIMEOUT_MS;
     this.#attestationTimeoutMs = options.attestationTimeoutMs ?? ATTESTATION_TIMEOUT_MS;
     this.#readTimeoutMs = options.readTimeoutMs ?? READ_TIMEOUT_MS;
+    this.#runtimeEgress = options.runtimeEgress;
   }
 
   list(): ReadonlyArray<SshTargetStatus> {
@@ -314,6 +367,172 @@ export class SshTargetConnectionService {
         appToolTransportListensOnLoopback: support?.appToolTransport === "loopback-listener",
       },
     });
+  }
+
+  /**
+   * The remote placement a provider driver launches its runtime through.
+   * Each launch is admitted in the placement's posture at that moment, from
+   * the driver's declaration and this connection's runtime canaries, and
+   * travels only on the session the placement names. A writing posture's
+   * runtime reaches the network only through a proxy of its own on this
+   * host; Plan's runs offline. The runtime stops when the launch's scope
+   * closes, ends with its session, and is stopped when the thread's posture
+   * moves. A refused or lost target fails the launch; nothing runs here
+   * instead.
+   */
+  placement(input: SshTargetPlacementInput): ProviderRemoteProcessPlacement {
+    return {
+      kind: "remote",
+      launch: (launch) =>
+        Effect.acquireRelease(
+          Effect.flatMap(
+            Effect.promise(() => this.#startPlaced(input, launch)),
+            (started) =>
+              started.status === "started" ? Effect.succeed(started) : Effect.fail(started.failure),
+          ),
+          (started) => Effect.promise(() => started.stop()),
+        ).pipe(Effect.map((started) => placedProcess(input, started.process))),
+    };
+  }
+
+  async #startPlaced(
+    input: SshTargetPlacementInput,
+    launch: ProviderPlacedLaunch,
+  ): Promise<
+    | {
+        readonly status: "started";
+        readonly process: ExecutorPlacedProcess;
+        readonly stop: () => Promise<void>;
+      }
+    | { readonly status: "refused"; readonly failure: ProviderFailure }
+  > {
+    const refusedWith = (failure: ProviderFailure) => ({ status: "refused" as const, failure });
+    const { session } = input;
+    const admitted = (): ProviderFailure | undefined => {
+      if (input.currentPosture() !== input.posture) {
+        return {
+          category: "interrupted",
+          message: "The thread's posture changed; the runtime starts again in the new one.",
+        };
+      }
+      const decision = this.admitProviderRuntime(session.targetId, input.driver, {
+        posture: input.posture,
+        permissionPersistence: input.permissionPersistence,
+      });
+      if (decision.status === "refused") {
+        return {
+          category: decision.reason === "runtime-not-attestable" ? "unsupported" : "unavailable",
+          message: describeSshAdmissionRefusal(decision),
+        };
+      }
+      return this.#channelOf(session) === undefined
+        ? { category: "unavailable", message: "The session to the SSH target ended." }
+        : undefined;
+    };
+    const first = admitted();
+    if (first !== undefined) return refusedWith(first);
+    const root = decodeRemotePath(input.root);
+    const executable = decodeRemotePath(launch.executable);
+    const accountState = decodeAccountState(launch.accountState ?? []);
+    if (root._tag === "Left" || executable._tag === "Left" || accountState._tag === "Left") {
+      return refusedWith({
+        category: "invalid-configuration",
+        message: "The runtime's path, arguments, or account state cannot be placed on a target.",
+      });
+    }
+    let egress:
+      | {
+          readonly endpoint: ToolEgressProxyEndpoint;
+          readonly token: string;
+          readonly close: () => Promise<void>;
+        }
+      | undefined;
+    if (input.posture !== "plan") {
+      const started =
+        this.#runtimeEgress === undefined
+          ? undefined
+          : await this.#runtimeEgress.start({
+              threadId: input.threadId,
+              projectId: input.projectId,
+              providerInstanceId: input.providerInstanceId,
+              targetId: session.targetId,
+              connectionId: session.connectionId,
+              resolveAll: (host) => this.resolveOnTarget(session, host),
+              connect: (destination) => this.dialFromTarget(session, destination),
+            });
+      if (started?.status !== "listening") {
+        return refusedWith({
+          category: "unavailable",
+          message: "This host could not start the runtime's network proxy.",
+        });
+      }
+      egress = started;
+    }
+    const closeEgress = async () => {
+      await egress?.close();
+    };
+    // The proxy's start waited; the decision is made again with the request,
+    // on the session it admitted.
+    const second = admitted();
+    const channel = this.#channelOf(session);
+    if (second !== undefined || channel === undefined) {
+      await closeEgress();
+      return refusedWith(
+        second ?? { category: "unavailable", message: "The session to the SSH target ended." },
+      );
+    }
+    const proxy = egress;
+    const opened = await channel.startProcess(
+      {
+        kind: "start-process",
+        root: root.right,
+        posture: input.posture,
+        ...(proxy === undefined
+          ? { network: "none" as const }
+          : { network: "proxied" as const, egressToken: proxy.token }),
+        executable: executable.right,
+        args: launch.args,
+        accountState: accountState.right,
+        home: { project: input.projectId, instance: input.providerInstanceId },
+      },
+      proxy === undefined
+        ? undefined
+        : { onStream: (stream) => joinToStream(connectToProxy(proxy.endpoint), stream) },
+      this.#readTimeoutMs,
+    );
+    if (opened.status !== "started") {
+      await closeEgress();
+      const reason =
+        opened.status === "replied" &&
+        (opened.reply.kind === "process-refused" || opened.reply.kind === "refused")
+          ? opened.reply.reason
+          : undefined;
+      return refusedWith({
+        category: reason === "busy" ? "rate-limited" : "unavailable",
+        message:
+          reason === undefined
+            ? "The SSH target did not start the runtime."
+            : `The SSH target refused to start the runtime (${reason}).`,
+      });
+    }
+    const placed = opened.process;
+    return {
+      status: "started",
+      process: placed,
+      stop: async () => {
+        placed.stop();
+        let timer: NodeJS.Timeout | undefined;
+        await Promise.race([
+          placed.ended,
+          new Promise((resolve) => {
+            timer = setTimeout(resolve, PLACED_STOP_WAIT_MS);
+          }),
+        ]);
+        clearTimeout(timer);
+        placed.stream.abandon();
+        await closeEgress();
+      },
+    };
   }
 
   /**
@@ -815,7 +1034,10 @@ export class SshTargetConnectionService {
         kind: "attest",
         postures: CONFINED_POSTURES.map((posture) => ({
           posture,
-          probes: SSH_CANARY_PROBES_BY_POSTURE[posture],
+          probes: [
+            ...SSH_CANARY_PROBES_BY_POSTURE[posture],
+            ...SSH_RUNTIME_CANARY_PROBES_BY_POSTURE[posture],
+          ],
         })),
       },
       this.#attestationTimeoutMs,
@@ -835,6 +1057,59 @@ export class SshTargetConnectionService {
       remoteUser: outcome.reply.remoteUser,
     };
   }
+}
+
+/**
+ * A placed runtime as its driver speaks to it: its output, its input while
+ * the thread keeps the placement's posture, and its end.
+ */
+function placedProcess(
+  input: SshTargetPlacementInput,
+  placed: ExecutorPlacedProcess,
+): ProviderPlacedProcess {
+  const { stream } = placed;
+  let over = false;
+  void placed.ended.then(() => {
+    over = true;
+  });
+  return {
+    output: Stream.fromAsyncIterable(stream as AsyncIterable<Buffer>, () => undefined).pipe(
+      Stream.map((chunk) => new Uint8Array(chunk)),
+      Stream.catchAll(() => Stream.empty),
+    ),
+    write: (bytes) =>
+      Effect.async<void, ProviderFailure>((resume) => {
+        if (input.currentPosture() !== input.posture) {
+          // Its grants were chosen for the posture it started in.
+          placed.stop();
+          resume(
+            Effect.fail({
+              category: "interrupted",
+              message: "The thread's posture changed; the runtime starts again in the new one.",
+            }),
+          );
+          return;
+        }
+        if (over || stream.destroyed || stream.writableEnded) {
+          resume(Effect.fail({ category: "unavailable", message: "The runtime has ended." }));
+          return;
+        }
+        stream.write(Buffer.from(bytes), (error) =>
+          resume(
+            error === null || error === undefined
+              ? Effect.void
+              : Effect.fail({ category: "unavailable", message: "The runtime has ended." }),
+          ),
+        );
+      }),
+    ended: Effect.promise(() =>
+      placed.ended.then((end) =>
+        end.kind === "exited"
+          ? { kind: "exited" as const, code: end.exitCode ?? null }
+          : { kind: "lost" as const },
+      ),
+    ),
+  };
 }
 
 /** The store refuses only a record whose own payload did not decode: a broken invariant. */

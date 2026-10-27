@@ -46,8 +46,12 @@ export class ExecutorStream extends Duplex {
   #peerClosed = false;
   #silent = false;
 
-  constructor(id: number, link: StreamLink) {
-    super({ allowHalfOpen: true });
+  /**
+   * `autoDestroy` false keeps a stream whose both directions ended until its
+   * owner closes it, for a stream whose end is said by another frame.
+   */
+  constructor(id: number, link: StreamLink, autoDestroy = true) {
+    super({ allowHalfOpen: true, autoDestroy });
     this.id = id;
     this.#link = link;
   }
@@ -185,26 +189,27 @@ export class ExecutorStreams {
   }
 
   /** A new stream this side opens, or undefined past the limit. */
-  open(): ExecutorStream | undefined {
+  open(autoDestroy = true): ExecutorStream | undefined {
     if (this.#streams.size >= this.#maxStreams) return undefined;
     const id = this.#nextLocal;
     this.#nextLocal += 2;
-    return this.#track(id);
+    return this.#track(id, autoDestroy);
   }
 
   /**
    * The stream the other side just opened. Its id must be of the other side's
    * parity and newer than any it opened before; a reused id is a violation.
-   * Past the limit the stream is refused, and the caller closes it.
+   * Past the limit the stream is refused, and the caller closes it. A stream
+   * adopted without `autoDestroy` stays until its owner closes it.
    */
-  adopt(id: number): ExecutorStream | "violated" | "refused" {
+  adopt(id: number, autoDestroy = true): ExecutorStream | "violated" | "refused" {
     if (id % 2 === this.#localParity || id <= this.#highestRemote) return "violated";
     this.#highestRemote = id;
     if (this.#streams.size >= this.#maxStreams) {
       this.#send({ type: "stream-close", stream: id });
       return "refused";
     }
-    return this.#track(id);
+    return this.#track(id, autoDestroy);
   }
 
   receive(frame: SshExecutorStreamFrame): ExecutorStreamReceipt {
@@ -239,13 +244,17 @@ export class ExecutorStreams {
     for (const stream of this.#streams.values()) stream.abandon();
   }
 
-  #track(id: number): ExecutorStream {
-    const stream = new ExecutorStream(id, {
-      send: (frame) => this.#send(frame),
-      forget: (closed) => {
-        if (this.#streams.get(closed) === stream) this.#streams.delete(closed);
+  #track(id: number, autoDestroy = true): ExecutorStream {
+    const stream = new ExecutorStream(
+      id,
+      {
+        send: (frame) => this.#send(frame),
+        forget: (closed) => {
+          if (this.#streams.get(closed) === stream) this.#streams.delete(closed);
+        },
       },
-    });
+      autoDestroy,
+    );
     // A stream's own failure closes it; it never escapes as an unhandled error.
     stream.on("error", () => stream.destroy());
     this.#streams.set(id, stream);

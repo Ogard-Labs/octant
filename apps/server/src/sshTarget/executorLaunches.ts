@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { Schema } from "effect";
 import {
   SSH_EXECUTOR_MAX_COMMAND_OUTPUT_BYTES,
+  SSH_EXECUTOR_MAX_PLACED_PROCESSES,
   SshEgressAddress,
   type SshExecutorCommandRanReply,
   type SshExecutorDialFrame,
@@ -20,7 +21,7 @@ import {
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
 import { postureGrants } from "./executorAttestation";
-import { ExecutorStreams, joinToStream } from "./executorStreams";
+import { ExecutorStreams, joinToStream, type ExecutorStream } from "./executorStreams";
 
 /**
  * The executor's launches of native-harness commands, and the egress of a
@@ -33,18 +34,21 @@ import { ExecutorStreams, joinToStream } from "./executorStreams";
  * with the grants its posture's canaries attested. Its environment is built
  * here on the target; nothing of the host's crosses.
  *
- * A proxied command reaches only its forwarder, a Unix socket in this
- * session's owner-only directory. Each connection to it becomes a stream to
- * the host, where the launch's own egress proxy decides and journals it. The
- * host answers by asking this executor to resolve a name and to open a
- * connection to an address it checked; the executor does both only while that
- * command runs, and opens no TCP listener at all.
+ * A proxied launch, a command or a placed process, reaches only its own
+ * forwarder, a Unix socket in a fresh owner-only directory of this session's.
+ * Each connection to it becomes a stream to the host that names the launch,
+ * where that launch's own egress proxy decides and journals it. The host
+ * answers by asking this executor to resolve a name and to open a connection
+ * to an address it checked; the executor does both only while a proxied
+ * launch runs, and opens no TCP listener at all.
  */
 
-/** The most connections a command holds open to its forwarder, as its proxy allows. */
+/** The most connections one launch holds open to its forwarder, as its proxy allows. */
 const MAX_FORWARDED_CONNECTIONS = 144;
-/** The most connections the host's proxy may have the target open at once. */
-const MAX_DIALED_CONNECTIONS = 144;
+/** The most connections the host's proxies may have the target open at once. */
+export const MAX_DIALED_CONNECTIONS = 144;
+/** A command and every placed process may be proxied at once. */
+const MAX_PROXIED_LAUNCHES = 1 + SSH_EXECUTOR_MAX_PLACED_PROCESSES;
 const RESOLVE_TIMEOUT_MS = 10_000;
 /** The longest Unix socket path the kernel takes, without its terminating zero. */
 const MAX_SOCKET_PATH_BYTES = 107;
@@ -66,39 +70,48 @@ const unavailable: SshExecutorCommandRanReply = {
   stderr: "",
 };
 
+interface ProxiedLaunch {
+  readonly server: Server;
+  readonly directory: string;
+  readonly forwarded: Set<ExecutorStream>;
+}
+
 /**
- * The egress of the one command that may run at a time: its forwarder, the
- * streams it carries, and the target connections the host asked for.
+ * The egress of every proxied launch running now, a command and the placed
+ * processes: each launch's forwarder and the streams it carries, and the
+ * target connections the host asked for.
  */
 export class ExecutorEgress {
   readonly #send: (frame: SshExecutorFrame) => void;
   readonly #forwarded: ExecutorStreams;
-  readonly #dialed: ExecutorStreams;
-  #launch: { readonly server: Server; readonly directory: string } | undefined;
+  readonly #hostOpened: ExecutorStreams;
+  readonly #launches = new Map<number, ProxiedLaunch>();
+  readonly #dialed = new Set<ExecutorStream>();
 
-  constructor(send: (frame: SshExecutorFrame) => void) {
+  /**
+   * `hostOpened` is the session's one registry of the streams the host opens
+   * (even ids): the connections its proxies ask for here, and the placed
+   * processes' streams, so an id is never new twice.
+   */
+  constructor(send: (frame: SshExecutorFrame) => void, hostOpened: ExecutorStreams) {
     this.#send = send;
-    // The executor opens odd streams (forwarded connections) and adopts the
-    // host's even ones (dialed connections); one registry per direction keeps
-    // each limit its own.
+    this.#hostOpened = hostOpened;
     this.#forwarded = new ExecutorStreams({
       send,
       opens: "odd",
-      maxStreams: MAX_FORWARDED_CONNECTIONS,
-    });
-    this.#dialed = new ExecutorStreams({
-      send,
-      opens: "odd",
-      maxStreams: MAX_DIALED_CONNECTIONS,
+      maxStreams: MAX_FORWARDED_CONNECTIONS * MAX_PROXIED_LAUNCHES,
     });
   }
 
   /**
-   * Opens the forwarder for a proxied command in a fresh owner-only directory
-   * of the session's, or undefined when it cannot listen.
+   * Opens the forwarder for proxied launch `launch` (its request id) in a
+   * fresh owner-only directory of the session's, or undefined when it cannot
+   * listen.
    */
-  async open(sessionDirectory: string): Promise<string | undefined> {
-    if (this.#launch !== undefined) return undefined;
+  async open(sessionDirectory: string, launch: number): Promise<string | undefined> {
+    if (this.#launches.has(launch) || this.#launches.size >= MAX_PROXIED_LAUNCHES) {
+      return undefined;
+    }
     let directory: string;
     try {
       directory = mkdtempSync(join(sessionDirectory, "e-"));
@@ -113,40 +126,52 @@ export class ExecutorEgress {
       rmSync(directory, { recursive: true, force: true });
       return undefined;
     }
-    const server = createServer({ allowHalfOpen: true }, (socket) => this.#forward(socket));
+    const entry: ProxiedLaunch = {
+      server: createServer({ allowHalfOpen: true }, (socket) => this.#forward(socket, launch)),
+      directory,
+      forwarded: new Set(),
+    };
+    const { server } = entry;
     const listening = await new Promise<boolean>((resolve) => {
       server.once("error", () => resolve(false));
       server.listen({ path, exclusive: true }, () => resolve(true));
     });
-    if (!listening) {
+    if (!listening || this.#launches.has(launch)) {
       server.close();
       rmSync(directory, { recursive: true, force: true });
       return undefined;
     }
-    this.#launch = { server, directory };
+    this.#launches.set(launch, entry);
     return path;
   }
 
-  /** Ends the command's egress: the forwarder and every stream close. */
-  close(): void {
-    const launch = this.#launch;
-    this.#launch = undefined;
-    this.#forwarded.closeAll();
-    this.#dialed.closeAll();
-    if (launch === undefined) return;
-    launch.server.close();
-    rmSync(launch.directory, { recursive: true, force: true });
+  /**
+   * Ends one launch's egress: its forwarder and every connection it
+   * forwarded close. Once no proxied launch runs, the connections the host
+   * asked for close too.
+   */
+  close(launch: number): void {
+    const entry = this.#launches.get(launch);
+    this.#launches.delete(launch);
+    if (entry !== undefined) {
+      for (const stream of entry.forwarded) stream.destroy();
+      entry.server.close();
+      rmSync(entry.directory, { recursive: true, force: true });
+    }
+    if (this.#launches.size === 0) {
+      for (const stream of this.#dialed) stream.destroy();
+    }
   }
 
   /** The session is gone: everything closes without a word to the host. */
   abandon(): void {
     this.#forwarded.abandonAll();
-    this.#dialed.abandonAll();
-    const launch = this.#launch;
-    this.#launch = undefined;
-    if (launch === undefined) return;
-    launch.server.close();
-    rmSync(launch.directory, { recursive: true, force: true });
+    for (const stream of this.#dialed) stream.abandon();
+    for (const entry of this.#launches.values()) {
+      entry.server.close();
+      rmSync(entry.directory, { recursive: true, force: true });
+    }
+    this.#launches.clear();
   }
 
   receive(
@@ -159,28 +184,45 @@ export class ExecutorEgress {
         void this.#resolve(frame);
         return "accepted";
       default:
-        return (frame.stream % 2 === 1 ? this.#forwarded : this.#dialed).receive(frame);
+        return (frame.stream % 2 === 1 ? this.#forwarded : this.#hostOpened).receive(frame);
     }
   }
 
-  #forward(socket: Socket): void {
+  #forward(socket: Socket, launch: number): void {
     socket.on("error", () => socket.destroy());
-    const stream = this.#launch === undefined ? undefined : this.#forwarded.open();
-    if (stream === undefined) {
+    const entry = this.#launches.get(launch);
+    const stream =
+      entry === undefined || entry.forwarded.size >= MAX_FORWARDED_CONNECTIONS
+        ? undefined
+        : this.#forwarded.open();
+    if (entry === undefined || stream === undefined) {
       socket.destroy();
       return;
     }
-    this.#send({ type: "stream-open", stream: stream.id });
+    entry.forwarded.add(stream);
+    stream.once("close", () => entry.forwarded.delete(stream));
+    this.#send({ type: "stream-open", stream: stream.id, launch });
     joinToStream(socket, stream);
   }
 
   #dial(frame: SshExecutorDialFrame): "accepted" | "violated" {
-    const stream = this.#dialed.adopt(frame.stream);
+    const stream =
+      this.#dialed.size >= MAX_DIALED_CONNECTIONS ? "full" : this.#hostOpened.adopt(frame.stream);
     if (stream === "violated") return "violated";
+    if (stream === "full") {
+      // Past the limit the id is still the host's next, so it is taken and
+      // closed rather than left for a later frame to reuse.
+      const taken = this.#hostOpened.adopt(frame.stream);
+      if (taken === "violated") return "violated";
+      if (taken !== "refused") taken.destroy();
+      return "accepted";
+    }
     if (stream === "refused") return "accepted";
+    this.#dialed.add(stream);
+    stream.once("close", () => this.#dialed.delete(stream));
     // Only an address, never a name: the host's proxy checked this address,
     // and a lookup here could answer differently.
-    if (this.#launch === undefined || isIP(frame.address) === 0) {
+    if (this.#launches.size === 0 || isIP(frame.address) === 0) {
       this.#send({ type: "dialed", stream: frame.stream, connected: false });
       stream.destroy();
       return "accepted";
@@ -222,7 +264,7 @@ export class ExecutorEgress {
 
   async #resolve(frame: SshExecutorResolveFrame): Promise<void> {
     let addresses: ReadonlyArray<string> = [];
-    if (this.#launch !== undefined) {
+    if (this.#launches.size > 0) {
       let timer: NodeJS.Timeout | undefined;
       try {
         const answers = await Promise.race([
@@ -257,6 +299,7 @@ export async function runExecutorCommand(
   request: SshExecutorRunCommandRequest,
   egress: ExecutorEgress,
   signal: AbortSignal,
+  launch: number,
 ): Promise<SshExecutorCommandRanReply> {
   const session = environment.sessionDirectory;
   if (session === undefined) return unavailable;
@@ -270,7 +313,7 @@ export async function runExecutorCommand(
   }
   let proxyPath: string | undefined;
   if (request.network === "proxied") {
-    proxyPath = await egress.open(session);
+    proxyPath = await egress.open(session, launch);
     if (proxyPath === undefined) return unavailable;
   }
   // Once the forwarder is open, every path below must close it and answer:
@@ -324,7 +367,7 @@ export async function runExecutorCommand(
   } catch {
     return unavailable;
   } finally {
-    egress.close();
+    egress.close(launch);
     if (directory !== undefined) await rm(directory, { recursive: true, force: true });
   }
 }

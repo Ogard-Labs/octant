@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Effect, Fiber, Schema, Stream } from "effect";
+import { Effect, Exit, Fiber, Schema, Scope, Stream } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { resolveReportedHostVersion } from "@octant/host-runtime";
 import {
@@ -63,10 +63,16 @@ import type { Journal } from "../persistence/journal";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
+import type { ProviderPlacedProcess } from "@octant/provider-sdk/driver";
+import { PROVIDER_RUNTIME_EGRESS_AGGREGATE } from "@octant/contracts/ssh-target-events";
+import { createProviderRuntimeEgress, type ProviderRuntimeEgress } from "./providerRuntimeEgress";
 import { bindSshRemoteHarness, type SshRemoteHarnessOptions } from "./sshRemoteHarness";
 import { SshRemoteProjectService } from "./sshRemoteProjectService";
 import { SshRemoteTerminalService } from "./sshRemoteTerminalService";
-import { SshTargetConnectionService } from "./sshTargetConnectionService";
+import {
+  SshTargetConnectionService,
+  type SshTargetPlacementInput,
+} from "./sshTargetConnectionService";
 import type { SshTargetStore } from "./sshTargetStore";
 import { openSshTargetTestStore } from "./sshTargetStore.test-support";
 
@@ -200,12 +206,13 @@ function openedStore(): SshTargetStore {
   return store;
 }
 
-function service(buildVersion = developmentBuild) {
+function service(buildVersion = developmentBuild, runtimeEgress?: ProviderRuntimeEgress) {
   return new SshTargetConnectionService({
     store: openedStore(),
     buildVersion,
     sshExecutable: join(root, "ssh"),
     environment: { PATH: "/usr/bin:/bin" },
+    ...(runtimeEgress === undefined ? {} : { runtimeEgress }),
   });
 }
 
@@ -584,6 +591,195 @@ function summarizesHost(payload: unknown, host: string): boolean {
         typeof entry === "object" && entry !== null && "host" in entry && entry.host === host,
     )
   );
+}
+
+/**
+ * A provider runtime as the loopback target runs it: it reads one JSON
+ * request per line and answers each on a line of its own, trying what it is
+ * asked (writing, reading, connecting directly, or fetching through its
+ * proxy variables) and reporting whether it worked.
+ */
+const FIXTURE_RUNTIME = String.raw`#!${process.execPath}
+"use strict";
+const fs = require("node:fs");
+const net = require("node:net");
+const path = require("node:path");
+const readline = require("node:readline");
+process.stderr.write("fixture runtime started\n");
+const answer = (value) => process.stdout.write(JSON.stringify(value) + "\n");
+const lines = readline.createInterface({ input: process.stdin });
+lines.on("line", (line) => {
+  const request = JSON.parse(line);
+  let settled = false;
+  const done = (ok, detail) => {
+    if (settled) return;
+    settled = true;
+    answer({ id: request.id, ok, detail });
+  };
+  try {
+    switch (request.op) {
+      case "echo":
+        return done(true, request.text);
+      case "env":
+        return done(true, process.env[request.name] ?? null);
+      case "write":
+        fs.writeFileSync(request.path, "written by the runtime");
+        return done(true);
+      case "write-home":
+        fs.writeFileSync(path.join(process.env.HOME, "note"), "home");
+        return done(true);
+      case "read":
+        return done(true, fs.readFileSync(request.path, "utf8"));
+      case "list":
+        fs.readdirSync(request.path);
+        return done(true);
+      case "connect": {
+        const socket = net.connect({ host: request.host, port: request.port });
+        socket.once("connect", () => { socket.destroy(); done(true); });
+        socket.once("error", (error) => done(false, error.code));
+        setTimeout(() => { socket.destroy(); done(false, "timeout"); }, 3000);
+        return;
+      }
+      case "fetch": {
+        const proxy = new URL(process.env.HTTPS_PROXY);
+        const credential = Buffer.from(decodeURIComponent(proxy.username) + ":" + decodeURIComponent(proxy.password)).toString("base64");
+        const socket = net.connect({ host: proxy.hostname, port: Number(proxy.port) });
+        let received = "";
+        let tunneled = false;
+        socket.once("error", (error) => done(false, error.code));
+        socket.on("data", (chunk) => {
+          received += chunk.toString("latin1");
+          if (!received.includes("\r\n\r\n")) return;
+          const status = received.split("\r\n")[0];
+          if (!tunneled) {
+            if (!status.includes(" 200 ")) { socket.destroy(); return done(false, received.split("\r\n\r\n")[1] || status); }
+            tunneled = true;
+            received = "";
+            socket.write("GET / HTTP/1.1\r\nHost: " + request.host + "\r\nConnection: close\r\n\r\n");
+            return;
+          }
+          socket.destroy();
+          done(true, status);
+        });
+        socket.write("CONNECT " + request.host + ":443 HTTP/1.1\r\nHost: " + request.host + ":443\r\nProxy-Authorization: Basic " + credential + "\r\n\r\n");
+        setTimeout(() => { socket.destroy(); done(false, "timeout"); }, 10000);
+        return;
+      }
+      default:
+        return done(false, "unknown");
+    }
+  } catch (error) {
+    done(false, error.code ?? String(error));
+  }
+});
+lines.on("close", () => process.exit(0));
+`;
+
+/** The fixture runtime as an executable in `folder`, owned by root, as an installed agent would be. */
+function runtimeBinary(folder: string, mode = 0o755): string {
+  mkdirSync(folder, { recursive: true, mode });
+  chmodSync(folder, mode);
+  const path = join(folder, "agent");
+  writeFileSync(path, FIXTURE_RUNTIME, { mode: 0o755 });
+  return path;
+}
+
+const runtimeInstance = decodeProviderInstanceId("80000000-0000-4000-8000-000000000b01");
+const placedDriver = {
+  remotePlacement: {
+    postures: ["plan", "approval-gated", "auto-accept-edits"],
+    appToolTransport: "stdio",
+  },
+} as const;
+
+function placementFor(
+  connections: SshTargetConnectionService,
+  project: SshRemoteProject,
+  posture: "plan" | "approval-gated",
+  overrides: Partial<SshTargetPlacementInput> = {},
+) {
+  const session = connections.session(project.targetId);
+  if (session === undefined) throw new Error("no session");
+  return connections.placement({
+    session,
+    driver: placedDriver,
+    root: project.remoteRoot,
+    projectId: String(project.id),
+    threadId: randomUUID(),
+    providerInstanceId: runtimeInstance,
+    posture,
+    permissionPersistence: "current-session",
+    currentPosture: () => posture,
+    ...overrides,
+  });
+}
+
+/** A launched fixture runtime, its scope, and a way to ask it one thing at a time. */
+async function launchRuntime(
+  placement: ReturnType<SshTargetConnectionService["placement"]>,
+  launch: { readonly executable: string; readonly args?: ReadonlyArray<string> } & Pick<
+    Parameters<ReturnType<SshTargetConnectionService["placement"]>["launch"]>[0],
+    "accountState"
+  >,
+) {
+  const scope = Effect.runSync(Scope.make());
+  const runtime: ProviderPlacedProcess = await Effect.runPromise(
+    Scope.extend(placement.launch({ ...launch, args: launch.args ?? [] }), scope),
+  );
+  let received = "";
+  Effect.runFork(
+    Stream.runForEach(runtime.output, (chunk) =>
+      Effect.sync(() => {
+        received += Buffer.from(chunk).toString("utf8");
+      }),
+    ),
+  );
+  let next = 0;
+  const ask = async (
+    request: Record<string, unknown>,
+  ): Promise<{ readonly ok: boolean; readonly detail?: unknown }> => {
+    next += 1;
+    const id = next;
+    await Effect.runPromise(runtime.write(Buffer.from(`${JSON.stringify({ ...request, id })}\n`)));
+    for (let attempt = 0; attempt < 400; attempt += 1) {
+      const line = received
+        .split("\n")
+        .filter((candidate) => candidate.length > 0)
+        .map((candidate) => JSON.parse(candidate) as { id: number; ok: boolean; detail?: unknown })
+        .find((candidate) => candidate.id === id);
+      if (line !== undefined) {
+        return line.detail === undefined ? { ok: line.ok } : { ok: line.ok, detail: line.detail };
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new Error(`the runtime did not answer ${JSON.stringify(request)}`);
+  };
+  return {
+    runtime,
+    ask,
+    close: () => Effect.runPromise(Scope.close(scope, Exit.void)),
+  };
+}
+
+function currentSession(
+  connections: SshTargetConnectionService,
+  targetId: SshTargetStatus["target"]["id"],
+) {
+  const session = connections.session(targetId);
+  if (session === undefined) throw new Error("no session");
+  return session;
+}
+
+/** Why a launch through the placement failed, or undefined when it started. */
+async function launchFailure(
+  placement: ReturnType<SshTargetConnectionService["placement"]>,
+  executable: string,
+): Promise<string | undefined> {
+  const exit = await Effect.runPromiseExit(
+    Effect.scoped(placement.launch({ executable, args: [] })),
+  );
+  if (Exit.isSuccess(exit)) return undefined;
+  return exit.cause._tag === "Fail" ? exit.cause.error.message : "failed";
 }
 
 function reasons(status: SshTargetStatus): ReadonlyArray<string> {
@@ -1495,6 +1691,285 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
       ).toMatchObject({ isError: true });
       running.release();
       asking.release();
+    } finally {
+      connections.close();
+      connections.remove(status.target.id);
+    }
+  }, 240_000);
+  it("places a runtime in Plan and approval-gated that echoes beside reads and a command, kept to its root and home, reaching public names only through a journaled proxy here", async () => {
+    const checkout = harnessCheckout("runtime-app");
+    const binary = runtimeBinary(join(root, "runtime-bin"));
+    const outsideFolder = join(root, "nobody-elsewhere");
+    mkdirSync(outsideFolder, { mode: 0o700 });
+    chownSync(outsideFolder, NOBODY, NOBODY);
+    const accountFolder = join(root, "nobody-home", ".agent-state");
+    mkdirSync(accountFolder, { mode: 0o700 });
+    writeFileSync(join(accountFolder, "token"), "signed in on the target");
+    run("chown", ["-R", `${String(NOBODY)}:${String(NOBODY)}`, accountFolder]);
+    const fixture = createHttpServer((_request, response) => {
+      response.end("hello from a public host\n");
+    });
+    await new Promise<void>((resolve) => fixture.listen(0, "127.0.0.1", resolve));
+    const fixtureAddress = fixture.address();
+    const fixturePort =
+      typeof fixtureAddress === "object" && fixtureAddress !== null ? fixtureAddress.port : 0;
+    if (journal === undefined) throw new Error("the journal opens before the tests");
+    const egressDirectory = join(root, "host-runtime-egress");
+    mkdirSync(egressDirectory, { recursive: true, mode: 0o700 });
+    const realEgress = createProviderRuntimeEgress({
+      journal: journal.journal,
+      endpoint: { kind: "unix-socket", parentDirectory: egressDirectory },
+      hostActor: systemActor,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    });
+    // The target's resolver has no record for the fixture's names, so the
+    // test answers them: the public one with a public address the target
+    // then dials the fixture in place of, the other with a private one. The
+    // decisions, their records, and the connection from the target are real.
+    const runtimeEgress: ProviderRuntimeEgress = {
+      start: (scope) =>
+        realEgress.start({
+          ...scope,
+          resolveAll: async (host) =>
+            host === "api.provider.example"
+              ? [FIXTURE_ADDRESS]
+              : host === "private.provider.example"
+                ? ["10.20.30.40"]
+                : scope.resolveAll(host),
+          connect: (destination) =>
+            scope.connect(
+              destination.address === FIXTURE_ADDRESS
+                ? { address: "127.0.0.1", port: fixturePort }
+                : destination,
+            ),
+        }),
+    };
+    const connections = service(developmentBuild, runtimeEgress);
+    const status = await register(connections, target("runtimes", asNobody()));
+    expect(reasons(status)).toEqual(["admitted", "admitted", "admitted"]);
+    try {
+      for (const posture of ["plan", "approval-gated", "auto-accept-edits"] as const) {
+        expect(
+          connections.admitProviderRuntime(status.target.id, placedDriver, {
+            posture,
+            permissionPersistence: "current-session",
+          }),
+        ).toEqual({ status: "admitted" });
+      }
+      const projects = projectsOn(connections);
+      const bound = await projects.bind({
+        targetId: status.target.id,
+        remoteRoot: remotePath(checkout),
+        name: "Runtime app",
+      });
+      if (bound.status !== "ok") throw new Error(`bind refused: ${bound.reason}`);
+      const accountState = [
+        { path: ".agent-state", access: "read-only", variable: "AGENT_STATE" },
+      ] as const;
+      const sshDirectory = join(root, "nobody-home", ".ssh");
+
+      // Plan: offline, the root read-only, its own home writable.
+      const plan = await launchRuntime(placementFor(connections, bound.value, "plan"), {
+        executable: binary,
+        accountState,
+      });
+      expect(await plan.ask({ op: "echo", text: "one" })).toEqual({ ok: true, detail: "one" });
+      // Reads and a command keep their turn beside the running runtime.
+      const [listed, command] = await Promise.all([
+        projects.listDirectory({ projectId: bound.value.id }),
+        connections.runCommand(
+          currentSession(connections, status.target.id),
+          {
+            posture: "approval-gated",
+            permissionPersistence: "current-session",
+            subject: { kind: "octant-launch" },
+          },
+          {
+            kind: "run-command",
+            root: bound.value.remoteRoot,
+            command: "echo beside the runtime",
+            posture: "approval-gated",
+            network: "none",
+            timeoutMs: 30_000,
+          },
+        ),
+      ]);
+      expect(listed.status).toBe("ok");
+      expect(
+        command.status === "replied" &&
+          command.reply.kind === "command-ran" &&
+          Buffer.from(command.reply.stdout, "base64").toString(),
+      ).toBe("beside the runtime\n");
+      expect(await plan.ask({ op: "echo", text: "two" })).toEqual({ ok: true, detail: "two" });
+      expect(await plan.ask({ op: "write", path: join(checkout, "plan-wrote") })).toMatchObject({
+        ok: false,
+      });
+      expect(await plan.ask({ op: "write-home" })).toEqual({ ok: true });
+      expect(await plan.ask({ op: "list", path: sshDirectory })).toMatchObject({ ok: false });
+      expect(await plan.ask({ op: "connect", host: "127.0.0.1", port: sshdPort })).toMatchObject({
+        ok: false,
+      });
+      const stateFolder = await plan.ask({ op: "env", name: "AGENT_STATE" });
+      expect(stateFolder).toEqual({ ok: true, detail: accountFolder });
+      expect(await plan.ask({ op: "read", path: join(accountFolder, "token") })).toEqual({
+        ok: true,
+        detail: "signed in on the target",
+      });
+      expect(await plan.ask({ op: "write", path: join(accountFolder, "token") })).toMatchObject({
+        ok: false,
+      });
+      await plan.close();
+      expect(await Effect.runPromise(plan.runtime.ended)).toMatchObject({ kind: "exited" });
+      expect(existsSync(join(checkout, "plan-wrote"))).toBe(false);
+
+      // Approval-gated: the root writable, the network only this host's proxy.
+      const writing = await launchRuntime(
+        placementFor(connections, bound.value, "approval-gated"),
+        { executable: binary, accountState },
+      );
+      expect(await writing.ask({ op: "write", path: join(checkout, "agent-wrote") })).toEqual({
+        ok: true,
+      });
+      expect(
+        await writing.ask({ op: "write", path: join(outsideFolder, "escaped") }),
+      ).toMatchObject({ ok: false });
+      expect(await writing.ask({ op: "list", path: sshDirectory })).toMatchObject({ ok: false });
+      expect(await writing.ask({ op: "connect", host: "127.0.0.1", port: sshdPort })).toMatchObject(
+        { ok: false },
+      );
+      expect(await writing.ask({ op: "fetch", host: "api.provider.example" })).toEqual({
+        ok: true,
+        detail: "HTTP/1.1 200 OK",
+      });
+      const privateFetch = await writing.ask({ op: "fetch", host: "private.provider.example" });
+      expect(privateFetch).toMatchObject({ ok: false });
+      expect(String(privateFetch.detail)).toContain("private-destination");
+      const loopbackFetch = await writing.ask({ op: "fetch", host: "127.0.0.1" });
+      expect(String(loopbackFetch.detail)).toContain("ip-literal");
+      await writing.close();
+      expect(readFileSync(join(checkout, "agent-wrote"), "utf8")).toBe("written by the runtime");
+      expect(existsSync(join(outsideFolder, "escaped"))).toBe(false);
+
+      // The launch and every decision are journaled on this host, naming the
+      // thread's runtime and the target, and never the content.
+      const recorded = journal.journal.replayAggregateType({
+        aggregateType: PROVIDER_RUNTIME_EGRESS_AGGREGATE,
+        afterSequence: 0,
+        limit: 1_000,
+      });
+      const started = recorded.find(
+        (event) => event.eventName === "provider-runtime-egress.launch-started@1",
+      );
+      expect(started?.payload).toMatchObject({
+        providerInstanceId: runtimeInstance,
+        targetId: status.target.id,
+      });
+      const summary = recorded.find(
+        (event) =>
+          event.eventName === "provider-runtime-egress.launch-summarized@1" &&
+          String(event.aggregateId) === String(started?.aggregateId),
+      );
+      expect(summary?.payload).toMatchObject({
+        entries: expect.arrayContaining([
+          expect.objectContaining({ host: "api.provider.example", decision: "allowed" }),
+          expect.objectContaining({
+            host: "private.provider.example",
+            decision: "refused",
+            reason: "private-destination",
+          }),
+        ]),
+      });
+    } finally {
+      connections.close();
+      connections.remove(status.target.id);
+      await new Promise<void>((resolve) => fixture.close(() => resolve()));
+    }
+  }, 240_000);
+
+  it("refuses a runtime binary inside the root or in a world-writable folder, a linked home, and a fifth runtime", async () => {
+    const checkout = harnessCheckout("runtime-refusals");
+    const binary = runtimeBinary(join(root, "runtime-bin"));
+    const inside = runtimeBinary(join(checkout, "tools"));
+    const open = runtimeBinary(join(root, "runtime-open"), 0o777);
+    const connections = service();
+    const status = await register(connections, target("runtime-refusals", asNobody()));
+    try {
+      const bound = await projectsOn(connections).bind({
+        targetId: status.target.id,
+        remoteRoot: remotePath(checkout),
+        name: "Refusals",
+      });
+      if (bound.status !== "ok") throw new Error(`bind refused: ${bound.reason}`);
+      const plan = placementFor(connections, bound.value, "plan");
+      expect(await launchFailure(plan, inside)).toContain("runtime-binary-not-confinable");
+      expect(await launchFailure(plan, open)).toContain("runtime-binary-not-confinable");
+
+      // Another instance's home, swapped for a link before it was first made.
+      const linkedInstance = decodeProviderInstanceId("80000000-0000-4000-8000-000000000b02");
+      const homes = join(root, "nobody-home", ".local", "state", "octant-runtime-homes");
+      let folder = join(root, "nobody-home");
+      for (const name of [".local", "state", "octant-runtime-homes", String(bound.value.id)]) {
+        folder = join(folder, name);
+        mkdirSync(folder, { recursive: true, mode: 0o700 });
+        chownSync(folder, NOBODY, NOBODY);
+      }
+      symlinkSync(join(root, "nobody-tmp"), join(homes, String(bound.value.id), linkedInstance));
+      expect(
+        await launchFailure(
+          placementFor(connections, bound.value, "plan", { providerInstanceId: linkedInstance }),
+          binary,
+        ),
+      ).toContain("runtime-home-not-confinable");
+
+      const running = [];
+      for (let index = 0; index < 4; index += 1) {
+        running.push(await launchRuntime(plan, { executable: binary }));
+      }
+      expect(await launchFailure(plan, binary)).toContain("busy");
+      for (const placed of running) await placed.close();
+      // With the four gone, another starts.
+      expect(await launchFailure(plan, binary)).toBeUndefined();
+    } finally {
+      connections.close();
+      connections.remove(status.target.id);
+    }
+  }, 240_000);
+
+  it("ends a placed runtime with its session, and runs nothing of it on the next", async () => {
+    const checkout = harnessCheckout("runtime-disconnect");
+    const binary = runtimeBinary(join(root, "runtime-bin"));
+    const connections = service();
+    const status = await register(connections, target("runtime-disconnect", asNobody()));
+    try {
+      const bound = await projectsOn(connections).bind({
+        targetId: status.target.id,
+        remoteRoot: remotePath(checkout),
+        name: "Disconnect",
+      });
+      if (bound.status !== "ok") throw new Error(`bind refused: ${bound.reason}`);
+      const marker = `runtime-marker-${randomUUID()}`;
+      const placement = placementFor(connections, bound.value, "plan");
+      const placed = await launchRuntime(placement, { executable: binary, args: [marker] });
+      expect(await placed.ask({ op: "echo", text: "alive" })).toEqual({
+        ok: true,
+        detail: "alive",
+      });
+      expect(processRunning(marker)).toBe(true);
+
+      process.kill(executorProcess(), "SIGKILL");
+      expect(await Effect.runPromise(placed.runtime.ended)).toEqual({ kind: "lost" });
+      for (let attempt = 0; attempt < 100 && processRunning(marker); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(processRunning(marker)).toBe(false);
+
+      // A new session attests afresh; the old placement is not carried to it.
+      expect((await connections.connect(status.target.id)).status).toBe("ok");
+      expect(await launchFailure(placement, binary)).toContain("session");
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(processRunning(marker)).toBe(false);
+      await placed.close();
     } finally {
       connections.close();
       connections.remove(status.target.id);

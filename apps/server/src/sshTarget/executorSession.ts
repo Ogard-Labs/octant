@@ -7,6 +7,7 @@ import {
   type SshExecutorReply,
   type SshExecutorRequest,
   type SshExecutorResolveFrame,
+  type SshExecutorStopProcessFrame,
   type SshExecutorStreamFrame,
   type SshExecutorTerminalHostFrame,
 } from "@octant/contracts/ssh-executor-protocol";
@@ -21,23 +22,40 @@ import { encodeExecutorFrame, ExecutorFrameReader, executorPreamble } from "./ex
  * nothing on its own initiative, and ends the session on the first frame it
  * cannot read, because a stream that lost its framing cannot be trusted.
  * Requests run one at a time; a `cancel` stops the one in flight. The frames
- * of a running command's egress and of the open terminals go to their
- * handler, which ends the session on one that breaks the protocol.
+ * of a running launch's egress, of the open terminals, and of the placed
+ * processes go to their handler, which ends the session on one that breaks
+ * the protocol.
  */
 
 export type ExecutorPeerFrame =
   | SshExecutorDialFrame
   | SshExecutorResolveFrame
   | SshExecutorStreamFrame
-  | SshExecutorTerminalHostFrame;
+  | SshExecutorTerminalHostFrame
+  | SshExecutorStopProcessFrame;
 
 export interface SshExecutorSessionHandlers {
   /**
    * Answers one request: the attestation, a read, a file tool, a command, a
-   * terminal's opening, or a managed worktree's creation or removal.
+   * terminal's opening, a managed worktree's creation or removal, or a placed
+   * process's start. `id` is the request's, which a launch's forwarded
+   * connections name.
    */
-  readonly answer: (request: SshExecutorRequest, signal: AbortSignal) => Promise<SshExecutorReply>;
-  /** A frame of a running command's egress or an open terminal; `violated` ends the session. */
+  readonly answer: (
+    request: SshExecutorRequest,
+    signal: AbortSignal,
+    id: number,
+  ) => Promise<SshExecutorReply>;
+  /**
+   * The reply to request `id` was written. A placed process's output starts
+   * only now, so none of it can reach the host before the reply that names
+   * its stream.
+   */
+  readonly replied?: (id: number, reply: SshExecutorReply) => void;
+  /**
+   * A frame of a running launch's egress, an open terminal, or a placed
+   * process; `violated` ends the session.
+   */
   readonly receive: (frame: ExecutorPeerFrame) => "accepted" | "violated";
   /** The session is over; nothing more arrives or leaves. */
   readonly end: () => void;
@@ -104,9 +122,12 @@ export async function serveSshExecutor(
           // A request that fails sends no reply; the host stops waiting for
           // it and ends the connection, which is the honest outcome.
           void handlers
-            .answer(frame.request, running.controller.signal)
+            .answer(frame.request, running.controller.signal, running.id)
             .then(
-              (reply) => send({ type: "reply", id: running.id, reply }),
+              (reply) => {
+                send({ type: "reply", id: running.id, reply });
+                if (open) handlers.replied?.(running.id, reply);
+              },
               () => undefined,
             )
             .finally(() => {

@@ -74,6 +74,48 @@ describe("native harness tool egress proxy", () => {
     ]);
   });
 
+  it("lets a placed runtime reach any public name with no rule, and refuses every private answer, address, and single label", async () => {
+    const origin = await tcpFixture();
+    const harness = await startEgressHarness({
+      decision: "public-destinations",
+      resolve: async (host) =>
+        host === "metadata.internal.example" ? ["169.254.169.254"] : ["93.184.216.10"],
+      routes: new Map([["93.184.216.10", origin.port]]),
+    });
+    const allowed = await openTunnel(
+      harness.proxy,
+      "api.provider.example:443",
+      harness.authorization,
+    );
+    expect(allowed.status).toBe(200);
+    expect(await roundTrip(allowed.socket, "ping", 4)).toBe("ping");
+    allowed.socket.end();
+    for (const [target, reason] of [
+      ["metadata.internal.example:80", "private-destination"],
+      ["169.254.169.254:80", "ip-literal"],
+      ["localhost:443", "invalid-name"],
+      ["metadata:80", "invalid-name"],
+    ] as const) {
+      const refused = await openTunnel(harness.proxy, target, harness.authorization);
+      expect(refused.status).toBe(403);
+      expect(refused.answer).toContain(`octant-egress-refused: ${reason}`);
+    }
+    await waitFor(() => origin.connections() === 1);
+    const closed = await harness.proxy.close();
+    expect(closed.status).toBe("summarized");
+    expect(harness.dialed).toEqual([{ address: "93.184.216.10", port: 443 }]);
+    expect(harness.records.summaries[0]?.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ host: "api.provider.example", decision: "allowed" }),
+        expect.objectContaining({
+          host: "metadata.internal.example",
+          decision: "refused",
+          reason: "private-destination",
+        }),
+      ]),
+    );
+  });
+
   it("passes a TLS session whose server name is the CONNECT host", async () => {
     const accepted: Socket[] = [];
     const tlsOrigin = createTlsServer(

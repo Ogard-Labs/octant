@@ -35,6 +35,7 @@ import {
 import { DEFAULT_BWRAP_PATH } from "../process/linuxConfinement";
 import { LINUX_EGRESS_FORWARDER_PORT } from "../process/proxiedNetworkEgress";
 import { siblingSessionDirectoryName } from "./executorRuntimeDirectory";
+import { runtimeLaunchGrants } from "./executorRuntimeGrants";
 
 /**
  * The executor's side of attestation: report the facts the host's admission
@@ -92,23 +93,31 @@ const ran = (command, args) => succeeds(() => {
 switch (probe) {
   case "write-inside-root":
   case "write-outside-root":
+  case "runtime-write-inside-root":
+  case "runtime-write-read-only-account-state":
+  case "runtime-write-outside-root-and-home":
     report(succeeds(() => fs.writeFileSync(target, "octant canary")));
     break;
   case "read-ssh-directory":
+  case "runtime-read-ssh-directory":
     report(succeeds(() => fs.opendirSync(target).closeSync()));
     break;
   case "read-sibling-folder":
   case "read-other-session-runtime":
+  case "runtime-read-other-runtime-home":
     report(succeeds(() => fs.readFileSync(target)));
     break;
   case "fork-after-start":
+  case "runtime-fork-after-start":
     report(ran(process.execPath, ["-e", "0"]));
     break;
   case "exec-after-start":
+  case "runtime-exec-after-start":
     report(ran(target, ["-c", "exit 0"]));
     break;
   case "open-network-socket":
-  case "connect-bypassing-forwarder": {
+  case "connect-bypassing-forwarder":
+  case "runtime-connect-bypassing-proxy": {
     let settled = false;
     const settle = (escaped) => { if (!settled) { settled = true; socket.destroy(); report(escaped); } };
     const socket = net.connect({ host: target, port: Number(port) });
@@ -228,6 +237,11 @@ interface CanaryLayout {
   readonly siblingFile: string;
   readonly otherSessionFile: string;
   readonly otherSessionDirectory: string;
+  /** A stand-in for a placed runtime's own home, and a file in another runtime's beside it. */
+  readonly runtimeHome: string;
+  readonly otherRuntimeHomeFile: string;
+  /** A stand-in for a runtime's account state, granted read-only. */
+  readonly accountState: string;
   /**
    * Where each writing posture's probe gets a forwarder directory of its own,
    * as a proxied command does. Nothing listens on its socket: no probe needs
@@ -302,6 +316,10 @@ function prepareCanaryLayout(
     const outside = join(base, "outside");
     const sibling = join(base, "sibling");
     const egress = join(base, "egress");
+    const runtimeHomes = join(base, "runtime-homes");
+    const runtimeHome = join(runtimeHomes, "own");
+    const otherRuntimeHome = join(runtimeHomes, "other");
+    const accountState = join(base, "account-state");
     const otherSessionDirectory = join(sessionParent, siblingSessionDirectoryName(process.pid));
     for (const directory of [
       base,
@@ -311,6 +329,10 @@ function prepareCanaryLayout(
       outside,
       sibling,
       egress,
+      runtimeHomes,
+      runtimeHome,
+      otherRuntimeHome,
+      accountState,
       otherSessionDirectory,
     ]) {
       mkdirSync(directory, { mode: 0o700 });
@@ -321,6 +343,8 @@ function prepareCanaryLayout(
     writeFileSync(siblingFile, "octant canary", { mode: 0o600 });
     const otherSessionFile = join(otherSessionDirectory, "canary");
     writeFileSync(otherSessionFile, "octant canary", { mode: 0o600 });
+    const otherRuntimeHomeFile = join(otherRuntimeHome, "canary");
+    writeFileSync(otherRuntimeHomeFile, "octant canary", { mode: 0o600 });
     return {
       probeScript,
       probeDirectory,
@@ -330,6 +354,9 @@ function prepareCanaryLayout(
       siblingFile,
       otherSessionFile,
       otherSessionDirectory,
+      runtimeHome,
+      otherRuntimeHomeFile,
+      accountState,
       egressDirectory: egress,
     };
   } catch {
@@ -349,10 +376,15 @@ function probeTarget(
 ): ReadonlyArray<string> | undefined {
   switch (probe) {
     case "write-inside-root":
+    case "runtime-write-inside-root":
       return writable(layout.root) ? [join(layout.root, "written")] : undefined;
     case "write-outside-root":
+    case "runtime-write-outside-root-and-home":
       return writable(join(layout.outsideFile, "..")) ? [layout.outsideFile] : undefined;
-    case "read-ssh-directory": {
+    case "runtime-write-read-only-account-state":
+      return writable(layout.accountState) ? [join(layout.accountState, "written")] : undefined;
+    case "read-ssh-directory":
+    case "runtime-read-ssh-directory": {
       const directory = join(environment.homeDirectory, ".ssh");
       return readableDirectory(directory) ? [directory] : undefined;
     }
@@ -360,12 +392,17 @@ function probeTarget(
       return [layout.siblingFile];
     case "read-other-session-runtime":
       return [layout.otherSessionFile];
+    case "runtime-read-other-runtime-home":
+      return [layout.otherRuntimeHomeFile];
     case "exec-after-start":
+    case "runtime-exec-after-start":
       return executable(POSIX_SHELL) ? [POSIX_SHELL] : undefined;
     case "fork-after-start":
+    case "runtime-fork-after-start":
       return [""];
     case "open-network-socket":
     case "connect-bypassing-forwarder":
+    case "runtime-connect-bypassing-proxy":
       // Inside a proxied capsule the forwarder itself answers on its loopback
       // port, so a server on that port could not tell an escape from it.
       return networkReachable &&
@@ -386,25 +423,51 @@ async function runProbe(
 ): Promise<SshConfinementCanaryOutcome> {
   const target = probeTarget(environment, layout, probe, context.networkReachable);
   if (target === undefined) return "inconclusive";
+  const runtimeProbe = probe.startsWith("runtime-");
+  // Runtimes are placed on Linux targets only, so nothing else can show a
+  // runtime's grants hold.
+  if (runtimeProbe && environment.platform !== "linux") return "inconclusive";
   const nonce = randomBytes(16).toString("hex");
   let launch: ReturnType<ProcessConfinementPort["prepare"]>;
   try {
     const egressSocket = join(mkdtempSync(join(layout.egressDirectory, "p-")), "s");
-    launch = confinement.prepare({
-      executable: environment.runtimeExecutable,
-      args: [layout.probeScript, probe, nonce, ...target],
-      boundRoot: layout.root,
-      temporaryDirectory: layout.temporaryDirectory,
-      readRoots: [layout.probeDirectory],
-      privateHomeAllowPaths: [layout.root, layout.temporaryDirectory, layout.probeDirectory],
-      ...postureGrants(posture),
-      // The writing postures' commands run proxied, so their probes do too;
-      // a capsule that only Plan's probes saw would prove nothing about them.
-      networkEgress:
-        posture === "plan"
-          ? "none"
-          : { kind: "proxied", endpoint: { kind: "unix-socket", path: egressSocket } },
-    });
+    // The writing postures' commands and runtimes run proxied, so their
+    // probes do too; a capsule that only Plan's probes saw would prove
+    // nothing about them.
+    const networkEgress =
+      posture === "plan"
+        ? ("none" as const)
+        : {
+            kind: "proxied" as const,
+            endpoint: { kind: "unix-socket" as const, path: egressSocket },
+          };
+    const args = [layout.probeScript, probe, nonce, ...target];
+    launch = runtimeProbe
+      ? confinement.prepare({
+          executable: environment.runtimeExecutable,
+          args,
+          // A placed runtime's own grant shape, against a scratch home and a
+          // scratch account state granted read-only.
+          ...runtimeLaunchGrants({
+            posture,
+            root: layout.root,
+            home: layout.runtimeHome,
+            temporaryDirectory: layout.temporaryDirectory,
+            binaryFolders: [layout.probeDirectory],
+            accountState: { readPaths: [layout.accountState], writePaths: [] },
+            networkEgress,
+          }),
+        })
+      : confinement.prepare({
+          executable: environment.runtimeExecutable,
+          args,
+          boundRoot: layout.root,
+          temporaryDirectory: layout.temporaryDirectory,
+          readRoots: [layout.probeDirectory],
+          privateHomeAllowPaths: [layout.root, layout.temporaryDirectory, layout.probeDirectory],
+          ...postureGrants(posture),
+          networkEgress,
+        });
   } catch {
     return "inconclusive";
   }

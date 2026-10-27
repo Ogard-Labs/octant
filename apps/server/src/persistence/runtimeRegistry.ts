@@ -224,6 +224,10 @@ import { ExtensionToolGrantProjection } from "./extensionToolGrantProjection";
 import { ExtensionProjectPinProjection } from "./extensionProjectPinProjection";
 import { SshTargetProjection } from "./sshTargetProjection";
 import {
+  PROVIDER_RUNTIME_EGRESS_EVENT_NAMES,
+  ProviderRuntimeEgressDecisionsRecorded,
+  ProviderRuntimeEgressLaunchStarted,
+  ProviderRuntimeEgressLaunchSummarized,
   SSH_REMOTE_PROJECT_EVENT_NAMES,
   SSH_REMOTE_TERMINAL_EVENT_NAMES,
   SSH_REMOTE_WORKTREE_EVENT_NAMES,
@@ -502,6 +506,21 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(SSH_REMOTE_WORKTREE_EVENT_NAMES.removed, 1, SshRemoteWorktreeRemoved)
     .register(SSH_REMOTE_TERMINAL_EVENT_NAMES.started, 1, SshRemoteTerminalStarted)
     .register(SSH_REMOTE_TERMINAL_EVENT_NAMES.ended, 1, SshRemoteTerminalEnded)
+    .register(
+      PROVIDER_RUNTIME_EGRESS_EVENT_NAMES.launchStarted,
+      1,
+      ProviderRuntimeEgressLaunchStarted,
+    )
+    .register(
+      PROVIDER_RUNTIME_EGRESS_EVENT_NAMES.decisionsRecorded,
+      1,
+      ProviderRuntimeEgressDecisionsRecorded,
+    )
+    .register(
+      PROVIDER_RUNTIME_EGRESS_EVENT_NAMES.launchSummarized,
+      1,
+      ProviderRuntimeEgressLaunchSummarized,
+    )
     .register(REMOTE_ACCESS_EVENT_NAMES.hostIdentityInitialized, 1, HostIdentityInitializedV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.deviceRegistered, 1, DeviceRegisteredV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.deviceKeyRotated, 1, DeviceKeyRotatedV1)
