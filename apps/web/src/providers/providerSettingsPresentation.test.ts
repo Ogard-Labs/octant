@@ -16,6 +16,64 @@ describe("provider Settings presentation", () => {
     expect(driverLabel("ideogram-image")).toBe("Ideogram Image");
   });
 
+  it("labels an outside driver as one and explains that it is not admitted, never borrowing a bundled name", () => {
+    expect(driverLabel("outside-harness-endpoint")).toBe("Outside driver");
+    const instance = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-000000000094",
+      displayName: "Local chat server",
+      driverKind: "outside-harness-endpoint",
+      configuration: {
+        kind: "outside-harness-endpoint",
+        driver: {
+          extensionId: "00000000-0000-4000-8000-000000000911",
+          packageId: "00000000-0000-4000-8000-000000000912",
+          componentId: "provider-driver",
+          version: "1.2.0",
+          digest: `sha256:${"a".repeat(64)}`,
+        },
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-07-15T10:00:00.000Z",
+      updatedAt: "2026-07-15T10:00:00.000Z",
+    });
+    const blocked = decodeProviderObservedState({
+      instanceId: instance.id,
+      readiness: "unavailable",
+      processState: "stopped",
+      models: [],
+      capabilities: Object.fromEntries(
+        [
+          "streaming",
+          "resume",
+          "interruption",
+          "approvals",
+          "userQuestions",
+          "reasoning",
+          "usage",
+          "toolActivity",
+          "fileChanges",
+          "diffs",
+          "taskProgress",
+          "nativeChildAgents",
+          "harnessAutoReview",
+          "nativeAttachments",
+          "nativeWebResearch",
+          "appManagedTools",
+          "citations",
+        ].map((capability) => [capability, "unavailable"]),
+      ),
+      reason: "driver-not-admitted",
+      observedAt: "2026-07-15T10:00:00.000Z",
+    });
+    expect(providerRefusalGuidance(instance, blocked)).toEqual({
+      reason: "This provider's driver package is not admitted, so it offers no models.",
+      nextStep:
+        "Octant runs this provider only once its driver package is installed, trusted, and enabled.",
+    });
+  });
+
   it("turns technical readiness states into compact next-action labels", () => {
     expect(providerRowReadinessLabel("unauthenticated", 0)).toBe("Sign in required");
     expect(providerRowReadinessLabel("incompatible", 0)).toBe("Incompatible");

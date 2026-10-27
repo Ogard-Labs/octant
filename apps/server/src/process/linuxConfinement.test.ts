@@ -81,14 +81,14 @@ describe("Linux Full access extension denials", () => {
     expect(launch.command).toBe(bwrapPath);
     expect(launch.args.slice(0, 9)).toEqual([
       "--die-with-parent",
+      "--bind",
+      "/",
+      "/",
       "--dev-bind",
       "/dev",
       "/dev",
       "--proc",
       "/proc",
-      "--bind",
-      "/",
-      "/",
     ]);
     expect(launch.args).toContain("--tmpfs");
     expect(launch.args).toContain(skills);
@@ -173,6 +173,41 @@ describe("Linux Full access extension denials", () => {
       expect(result.stderr).not.toContain("bwrap:");
       expect(result.status).toBe(0);
       expect(result.stdout).toBe("end\n");
+    },
+  );
+
+  it.runIf(process.platform === "linux" && canRunHostBwrap())(
+    "lets the command use /dev/null and /dev/urandom while denied paths stay hidden",
+    () => {
+      const { root, boundRoot } = fixture();
+      const skills = join(boundRoot, "skills");
+      const mcp = join(boundRoot, ".mcp.json");
+      mkdirSync(skills);
+      writeFileSync(join(skills, "SKILL.md"), "hidden");
+      writeFileSync(mcp, "hidden");
+      const shared = join(root, "shared");
+      mkdirSync(shared);
+      writeFileSync(join(shared, "settings.json"), "hidden");
+      const linked = join(boundRoot, "settings.json");
+      symlinkSync(join(shared, "settings.json"), linked);
+      const launch = buildLinuxAllowDefaultDenyLaunch({
+        executable: "/bin/sh",
+        args: [
+          "-c",
+          'echo discarded > /dev/null && head -c 4 /dev/urandom | wc -c && cat "$@"; echo end',
+          "sh",
+          join(skills, "SKILL.md"),
+          mcp,
+          linked,
+        ],
+        cwd: boundRoot,
+        denyPaths: [skills, mcp, linked],
+      });
+      const result = spawnSync(launch.command, [...launch.args], { encoding: "utf8" });
+      expect(result.stderr).not.toContain("bwrap:");
+      expect(result.stderr).not.toContain("/dev/");
+      expect(result.status).toBe(0);
+      expect(result.stdout.replace(/\s+/g, " ").trim()).toBe("4 end");
     },
   );
 

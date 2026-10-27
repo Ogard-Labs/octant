@@ -4,11 +4,18 @@ import {
   type HostOAuthDescriptor,
   type HostOAuthSignInState,
 } from "@octant/contracts/host-oauth";
-import { AZURE_FOUNDRY_DIRECTORY_SIGN_IN, azureFoundryDirectoryDescriptor } from "@octant/domain";
+import {
+  AZURE_FOUNDRY_DIRECTORY_SIGN_IN,
+  GATEWAY_DIRECTORY_SIGN_IN,
+  azureFoundryDirectoryDescriptor,
+  gatewayDirectoryDescriptor,
+} from "@octant/domain";
 import type { PrincipalKind } from "@octant/domain/remote-access-policy";
 import {
   encodeDirectoryOAuthCredential,
   readDirectoryOAuthCredential,
+  sameDirectoryOAuthBinding,
+  type DirectoryOAuthBinding,
   type DirectoryOAuthCredential,
 } from "@octant/provider-sdk/directory-oauth";
 import type {
@@ -17,18 +24,23 @@ import type {
   ProviderOAuthView,
 } from "./providerOAuthRoutes";
 
-/** Whether a sign-in command names the organization (directory) sign-in. */
+/** Whether a sign-in command names an organization (directory or issuer) sign-in. */
 export function isDirectorySignIn(descriptorId: string): boolean {
-  return descriptorId === AZURE_FOUNDRY_DIRECTORY_SIGN_IN.descriptorId;
+  return (
+    descriptorId === AZURE_FOUNDRY_DIRECTORY_SIGN_IN.descriptorId ||
+    descriptorId === GATEWAY_DIRECTORY_SIGN_IN.descriptorId
+  );
 }
 
 /**
- * An organization sign-in for one Azure AI Foundry instance. Unlike a catalog
- * offer, its descriptor is built from the instance's own configuration on
- * every command, never from the request: the tenant, client, and endpoint the
- * broker binds the grant to are the ones the server holds. The directory
- * offers no client-side revocation, so signing out deletes this computer's
- * grant and says the organization session was not ended.
+ * An organization sign-in for one Azure AI Foundry instance (its Microsoft
+ * Entra ID tenant) or one OpenAI-compatible or Anthropic-compatible gateway
+ * (its organization's own issuer). Unlike a catalog offer, its descriptor is
+ * built from the instance's own configuration on every command, never from
+ * the request: the directory, client, resource, and endpoint the broker
+ * binds the grant to are the ones the server holds. Neither directory offers
+ * client-side revocation, so signing out deletes this computer's grant and
+ * says the organization session was not ended.
  */
 export async function dispatchDirectorySignIn(input: {
   readonly dependencies: ProviderOAuthRouteDependencies;
@@ -39,14 +51,18 @@ export async function dispatchDirectorySignIn(input: {
   const { dependencies, command, principal, actorId } = input;
   const target = signInTarget(dependencies, command.instanceId);
   if (target.kind === "refused") return target;
-  const { descriptor, binding } = target;
+  const { descriptor, binding, copy } = target;
+  // The command names the sign-in its panel showed; one that names another
+  // kind's sign-in for this instance is refused, not quietly redirected.
+  if (command.descriptorId !== descriptor.descriptorId)
+    return { kind: "refused", reason: "invalid" };
   const signedOut = (
     termsRequired = dependencies.service.offer(descriptor).oauth.termsRequired,
   ): ProviderOAuthView => ({
     kind: "signed-out",
     termsRequired,
-    termsSummary: AZURE_FOUNDRY_DIRECTORY_SIGN_IN.termsSummary,
-    accountLabel: AZURE_FOUNDRY_DIRECTORY_SIGN_IN.accountLabel,
+    termsSummary: copy.termsSummary,
+    accountLabel: copy.accountLabel,
   });
   if (command.kind === "acknowledge") {
     const recorded = dependencies.service.acknowledgeTerms({
@@ -80,7 +96,8 @@ export async function dispatchDirectorySignIn(input: {
     return finish(input, target, state);
   }
   const pointer = await readPointer(dependencies, command.instanceId);
-  const held = pointer !== undefined && sameBinding(pointer, binding) ? pointer : undefined;
+  const held =
+    pointer !== undefined && sameDirectoryOAuthBinding(pointer, binding) ? pointer : undefined;
   if (command.kind === "status") {
     if (held === undefined) return signedOut();
     const refreshed = await dependencies.service.refresh({
@@ -119,8 +136,8 @@ export async function dispatchDirectorySignIn(input: {
   return {
     kind: "signed-out-locally",
     termsRequired: false,
-    termsSummary: AZURE_FOUNDRY_DIRECTORY_SIGN_IN.termsSummary,
-    accountLabel: AZURE_FOUNDRY_DIRECTORY_SIGN_IN.accountLabel,
+    termsSummary: copy.termsSummary,
+    accountLabel: copy.accountLabel,
   };
 }
 
@@ -128,19 +145,23 @@ type SignInTarget =
   | {
       readonly kind: "target";
       readonly descriptor: HostOAuthDescriptor;
-      readonly binding: DirectoryBindingFacts;
-      /** Whether the instance allows a device-code sign-in from the host-local command. */
+      readonly binding: DirectoryOAuthBinding;
+      /** What the panel says before the directory names the account. */
+      readonly copy: { readonly termsSummary: string; readonly accountLabel: string };
+      /**
+       * Whether the instance allows a device-code sign-in from the host-local
+       * command. Only an Azure AI Foundry instance can opt in; a gateway signs
+       * in on the loopback redirect alone.
+       */
       readonly deviceCodeSignIn: boolean;
     }
   | { readonly kind: "refused"; readonly reason: string };
 
-interface DirectoryBindingFacts {
-  readonly tenantId: string;
-  readonly clientId: string;
-  readonly audience: string;
-  readonly endpointOrigin: string;
-}
-
+/**
+ * The sign-in an instance's own configuration names, with the binding the
+ * pointer will carry: an Azure AI Foundry tenant and its one audience, or a
+ * gateway's own issuer and scope, each at the endpoint's origin.
+ */
 function signInTarget(
   dependencies: ProviderOAuthRouteDependencies,
   instanceId: ProviderInstanceId,
@@ -148,12 +169,49 @@ function signInTarget(
   const instance = dependencies.readInstance?.(instanceId);
   if (instance === undefined) return { kind: "refused", reason: "unknown-instance" };
   if (
-    instance.driverKind !== "azure-foundry" ||
-    instance.configuration.authentication !== "directory-oauth"
+    instance.driverKind === "azure-foundry" &&
+    instance.configuration.authentication === "directory-oauth"
   ) {
-    return { kind: "refused", reason: "unsupported-driver" };
+    const { directory } = instance.configuration;
+    return targetFrom(
+      azureFoundryDirectoryDescriptor(instance.configuration),
+      AZURE_FOUNDRY_DIRECTORY_SIGN_IN,
+      (endpointOrigin) => ({
+        tenantId: directory.tenantId,
+        clientId: directory.clientId,
+        audience: AZURE_FOUNDRY_DIRECTORY_SIGN_IN.audience,
+        endpointOrigin,
+      }),
+      instance.configuration.deviceCodeSignIn === true,
+    );
   }
-  const built = azureFoundryDirectoryDescriptor(instance.configuration);
+  if (
+    (instance.driverKind === "openai-compatible" ||
+      instance.driverKind === "anthropic-compatible") &&
+    instance.configuration.authentication === "directory-oauth"
+  ) {
+    const { directory } = instance.configuration;
+    return targetFrom(
+      gatewayDirectoryDescriptor(instance.configuration),
+      GATEWAY_DIRECTORY_SIGN_IN,
+      (endpointOrigin) => ({
+        issuer: directory.issuer,
+        clientId: directory.clientId,
+        scope: directory.scope,
+        endpointOrigin,
+      }),
+      false,
+    );
+  }
+  return { kind: "refused", reason: "unsupported-driver" };
+}
+
+function targetFrom(
+  built: HostOAuthDescriptor | undefined,
+  copy: { readonly termsSummary: string; readonly accountLabel: string },
+  bindingAt: (endpointOrigin: string) => DirectoryOAuthBinding,
+  deviceCodeSignIn: boolean,
+): SignInTarget {
   if (built === undefined) return { kind: "refused", reason: "endpoint-mismatch" };
   let descriptor: HostOAuthDescriptor;
   try {
@@ -161,20 +219,13 @@ function signInTarget(
   } catch {
     return { kind: "refused", reason: "invalid" };
   }
-  const { tenantId, clientId, audience, endpointOrigin } = descriptor;
-  if (
-    tenantId === undefined ||
-    clientId === undefined ||
-    audience === undefined ||
-    endpointOrigin === undefined
-  ) {
-    return { kind: "refused", reason: "invalid" };
-  }
+  if (descriptor.endpointOrigin === undefined) return { kind: "refused", reason: "invalid" };
   return {
     kind: "target",
     descriptor,
-    binding: { tenantId, clientId, audience, endpointOrigin },
-    deviceCodeSignIn: instance.configuration.deviceCodeSignIn === true,
+    binding: bindingAt(descriptor.endpointOrigin),
+    copy: { termsSummary: copy.termsSummary, accountLabel: copy.accountLabel },
+    deviceCodeSignIn,
   };
 }
 
@@ -197,24 +248,21 @@ async function finish(
     // grant at the first request if it was signed in for another.
     const current = signInTarget(dependencies, command.instanceId);
     if (current.kind === "refused") return current;
-    const accountLabel = state.accountLabel ?? AZURE_FOUNDRY_DIRECTORY_SIGN_IN.accountLabel;
+    const accountLabel = state.accountLabel ?? current.copy.accountLabel;
     await forgetReplacedGrant(input, current.descriptor, state.credentialRef);
     await dependencies.credentials?.set(
       command.instanceId,
       encodeDirectoryOAuthCredential({
         kind: "directory-oauth",
         credentialRef: state.credentialRef,
-        tenantId: current.binding.tenantId as DirectoryOAuthCredential["tenantId"],
-        clientId: current.binding.clientId as DirectoryOAuthCredential["clientId"],
-        audience: current.binding.audience,
-        endpointOrigin: current.binding.endpointOrigin,
+        ...current.binding,
         accountLabel,
       }),
     );
     return { kind: "signed-in", accountLabel };
   }
   if (state.kind === "sign-in-again") {
-    return { kind: "expired", accountLabel: AZURE_FOUNDRY_DIRECTORY_SIGN_IN.accountLabel };
+    return { kind: "expired", accountLabel: target.copy.accountLabel };
   }
   if (state.kind === "refused") return { kind: "refused", reason: state.reason };
   if (state.kind === "awaiting-consent" && state.flow === "authorization-code-pkce") {
@@ -265,15 +313,6 @@ async function forgetReplacedGrant(
       forgetWhenNotRevoked: true,
     })
     .catch(() => undefined);
-}
-
-function sameBinding(pointer: DirectoryOAuthCredential, binding: DirectoryBindingFacts): boolean {
-  return (
-    String(pointer.tenantId) === binding.tenantId &&
-    String(pointer.clientId) === binding.clientId &&
-    pointer.audience === binding.audience &&
-    pointer.endpointOrigin === binding.endpointOrigin
-  );
 }
 
 async function readPointer(

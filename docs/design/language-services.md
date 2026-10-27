@@ -15,11 +15,11 @@ post-preview work on 2026-10-26, when parked backlog work was unlocked. That
 authorizes the design and the slices below; the release-boundary statement in
 `AGENTS.md` and the architecture is updated separately. The maintainer
 accepted this design and its [decisions](#maintainer-decisions) on 2026-10-26.
-**Slices 1 (seam and policy) and 2 (companion and the bundled TypeScript
-server) are built: the host serves diagnostics and definitions, and no editor
-calls it yet.** Slice 3 is next. Monaco editing and the explicit
-external-editor handoff stay the primary Code editing paths and are unchanged
-by every slice.
+**Slices 1 (seam and policy), 2 (companion and the bundled TypeScript
+server), and 3 (editor wiring) are built: the Code editor shows the host's
+diagnostics and jumps to definitions, locally and from a paired device.**
+Slice 4 is next. Monaco editing and the explicit external-editor handoff stay
+the primary Code editing paths and are unchanged by every slice.
 
 ## Outcome
 
@@ -76,7 +76,14 @@ behind its own approval and confinement rules.
   `packages/plugin-host/src/bundledLanguageServers.ts` declares the bundled
   TypeScript server, and `wiring/codeTooling.ts` resolves its binary from the
   pinned `typescript` package. `POST /api/code/language/documents` and
-  `POST /api/code/language/read` serve them; no client calls either yet.
+  `POST /api/code/language/read` serve them.
+- **Editor wiring (slice 3).** The Code client's `syncLanguageDocument` and
+  `readLanguage` call those routes. `apps/web/src/code/useCodeLanguageServices.ts`
+  keeps the editor's file open and reads its diagnostics,
+  `codeLanguageEditor.ts` turns Octant contracts into Monaco's shapes and the
+  editor's states, `monacoRuntime.ts` shows the markers and answers
+  definitions, and `CodeSettingsView.tsx` holds the Settings › Code switch
+  (`bundledLanguageServer` in the Code settings).
 - **Network levels.** `apps/server/src/process/threadEgressPolicy.ts` resolves
   `none`, `provider-endpoints-only`, and `unrestricted`. The
   [harness tool egress rules](../architecture.md#harness-tool-egress-rules)
@@ -297,10 +304,64 @@ design left a choice open.
   `POST /api/code/language/read` are both `code.language.read`: syncing the
   editor's text feeds a read and writes nothing. A paired device with Code
   reach may start a `static` server through them.
-- **Not built yet.** The Settings switch and its `turned-off` refusal (slice
-  3), the bounded `window/logMessage` log and the lifecycle counts under
-  Diagnostics, and removing a cache when its checkout is removed or its
-  component uninstalled.
+- **Not built yet.** The bounded `window/logMessage` log and the lifecycle
+  counts under Diagnostics, and removing a cache when its checkout is removed
+  or its component uninstalled.
+
+### Editor rules
+
+Slice 3 settled these details, taking the more restrictive option where the
+design left a choice open.
+
+- **The switch.** Settings › Code › Editor › Language services is the bundled
+  component's own desired switch on the activation ladder, not a second gate.
+  It is stored as `bundledLanguageServer` in the Code settings, so changing it
+  is the existing journaled `code.settings-updated@1` event; there is no new
+  event. A store without the value reads as on (D2). Off, the component
+  contributes nothing, the host drains its running servers at once (the
+  settings event runs the stop check), and a file only it would read is
+  refused `turned-off`. A file no component declares stays
+  `no-language-server`, so the refusal names only the switch the person
+  holds. A window's update carries the switch only when it changes it; the
+  host keeps the stored value otherwise.
+- **Diagnostics.** Markers show only diagnostics for the editor's own file.
+  While the server serves a file its markers are the only ones on that model:
+  Monaco's worker reads one file without the Project, and its errors (an
+  import it cannot resolve) would contradict the server's. The worker's
+  markers are cleared each time it sets them; once the server stops serving
+  the file they come back with the worker's next check, on the next edit,
+  since Monaco offers no way to ask it for one model. A read-only editor draws them too: Monaco's default
+  hid every diagnostic in Plan.
+- **Definitions.** Monaco merges every provider's definitions, and the worker's
+  answer for an imported name (the import's own binding) turned each jump into
+  a two-entry peek beside the server's location. The worker's definition
+  provider is therefore turned off before any model exists, and Octant's
+  provider answers: from the server while it serves the file, and from the
+  worker, within that file only, while it does not. The worker's jumps into
+  its bundled library files are not offered.
+- **Opening a definition elsewhere.** A target in another checkout file opens
+  through the ordinary file-open path as a Code file tab, which then reveals
+  the target. The renderer holds that place for 30 seconds; a later, unrelated
+  open of the file does not jump. Monaco only ever sees a placeholder link for
+  the target, never a model with its text. A target outside the checkout opens
+  nothing and shows a notice naming only its label.
+- **Syncing drafts.** The editor sends the whole text 300 ms after typing
+  stops, then reads diagnostics again; text typed while the file was opening
+  is sent once the open settles. It reads diagnostics again when focus comes
+  back to the pane from elsewhere, since another file's edits may have
+  changed them. Closing the editor closes the document.
+- **States.** `starting` shows only when the first answer takes over 400 ms; a
+  server still `starting` is asked again each second, and after 30 tries is
+  shown as not answering. `crashed` and `timed-out` offer Retry, which closes
+  and reopens the document, the retry the companion already honours. Because
+  opening resets the crash budget, an edit never reopens a document on its
+  own; only a `too-large` file is opened again when its text changes. A
+  document the host no longer holds (after a restart or the idle close) is
+  reopened once on its own before it is reported. Any other refusal stands:
+  the editor sends no more text until a retry, and focus coming back to an
+  editor whose services are off reopens it, so turning the switch back on
+  needs no reload. A file no server reads shows nothing, and every state
+  leaves editing and saving untouched.
 
 ### Authority
 
@@ -512,6 +573,22 @@ accounts or hardware.
      files in a Code thread, Plan included, locally and from a paired browser.
    - _Verify:_ component tests and rendered QA at pane and dock widths, in
      light and dark themes.
+   - _State:_ built. Component tests cover the markers (Plan included), one
+     debounced change per settled draft, a definition opened in another file at
+     its place, the outside-checkout notice, the off, refused, and
+     unsupported-platform states, and a crash with its Retry; the Settings
+     switch and the host's `turned-off` answer, with its running server
+     stopped, are tested at the view, settings, and service levels. Rendered QA
+     on Linux drove the real Monaco editor and Code client against the real
+     language service and bundled `tsc --lsp --stdio` under Bubblewrap, for a
+     Plan thread, at 900 and 420 px in light and dark: the cross-file type
+     error appeared as a marker with the server's message, F12 and Ctrl-click
+     opened the definition in the other file at its line, F12 on a standard
+     library name showed the outside-checkout notice, and the off state showed
+     with the switch off. The same run as a paired device's caller served it
+     too. The paired-device route's classification is the slice 2 route test;
+     a packaged app on a Mac is slice 4's. The rules are under
+     [Editor rules](#editor-rules).
 4. **Ship the binary.** Container: partly.
    - Include the per-architecture binary in the packaged desktop app and the
      headless artifact (`scripts/package-headless.ts`), signed with the app on

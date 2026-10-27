@@ -754,6 +754,141 @@ describe("provider instance policy", () => {
     ).toThrow("Azure AI Foundry base URL must end with the /openai/v1/ path.");
   });
 
+  it("creates gateways that sign in with the organization's own issuer, and keeps that issuer for the life of the endpoint", () => {
+    const directory = {
+      issuer: "https://login.example.test/oauth2/gateway",
+      clientId: "0oa1octantDesktop",
+      scope: "gateway.models",
+    };
+    const gateway = {
+      kind: "openai-compatible-http",
+      baseUrl: "https://llm.example.test/v1",
+      authentication: "directory-oauth",
+      protocol: "auto",
+      manualModelIds: [],
+      directory,
+    } as const;
+    const anthropicGateway = {
+      kind: "anthropic-compatible-http",
+      baseUrl: "https://llm.example.test/anthropic/v1/",
+      authentication: "directory-oauth",
+      protocol: "auto",
+      protocolVersion: "2023-06-01",
+      manualModelIds: [],
+      directory,
+    } as const;
+    const openAi = createOpenAiCompatibleProvider({
+      id: ids.local,
+      displayName: "Gateway",
+      configuration: gateway,
+      existingInstances: [],
+      expectedVersion: version(0),
+      createdAt,
+    });
+    expect(openAi.configuration).toMatchObject({
+      authentication: "directory-oauth",
+      baseUrl: "https://llm.example.test/v1/",
+      directory,
+    });
+    const anthropic = createAnthropicCompatibleProvider({
+      id: ids.local,
+      displayName: "Gateway Messages",
+      configuration: anthropicGateway,
+      existingInstances: [],
+      expectedVersion: version(0),
+      createdAt,
+    });
+    expect(anthropic.configuration).toMatchObject({ authentication: "directory-oauth", directory });
+
+    // The client, scope, and address may change; the grant is then dropped
+    // by the server. The issuer is where the person types their password, so
+    // it is fixed when the endpoint is created.
+    const changed = changeOpenAiCompatibleConfiguration(
+      openAi,
+      {
+        ...gateway,
+        baseUrl: "https://llm-2.example.test/v1/",
+        directory: { ...directory, clientId: "0oa1other", scope: "gateway.chat" },
+      },
+      createdAt,
+    );
+    expect(changed.configuration).toMatchObject({
+      directory: { issuer: directory.issuer, clientId: "0oa1other", scope: "gateway.chat" },
+    });
+    expect(() =>
+      changeOpenAiCompatibleConfiguration(
+        openAi,
+        { ...gateway, directory: { ...directory, issuer: "https://login.example.test" } },
+        createdAt,
+      ),
+    ).toThrow("issuer is fixed");
+    expect(() =>
+      changeAnthropicCompatibleConfiguration(
+        anthropic,
+        {
+          ...anthropicGateway,
+          directory: { ...directory, issuer: "https://other-login.example.test" },
+        },
+        createdAt,
+      ),
+    ).toThrow("issuer is fixed");
+    // Switching to or from an organization sign-in would set an issuer after
+    // creation, or leave a sign-in the endpoint no longer uses.
+    const { directory: _directory, ...withoutDirectory } = gateway;
+    expect(() =>
+      changeOpenAiCompatibleConfiguration(
+        openAi,
+        { ...withoutDirectory, authentication: "bearer" },
+        createdAt,
+      ),
+    ).toThrow("issuer is fixed");
+    const keyed = createOpenAiCompatibleProvider({
+      id: ids.local,
+      displayName: "Keyed",
+      configuration: { ...withoutDirectory, authentication: "bearer" },
+      existingInstances: [],
+      expectedVersion: version(0),
+      createdAt,
+    });
+    expect(() => changeOpenAiCompatibleConfiguration(keyed, gateway, createdAt)).toThrow(
+      "issuer is fixed",
+    );
+  });
+
+  it("refuses a gateway organization sign-in without an https issuer and address, a client, and one resource scope", () => {
+    const configuration = {
+      kind: "openai-compatible-http" as const,
+      baseUrl: "https://llm.example.test/v1/",
+      authentication: "directory-oauth" as const,
+      protocol: "auto" as const,
+      manualModelIds: [],
+      directory: {
+        issuer: "https://login.example.test/oauth2/gateway",
+        clientId: "0oa1octantDesktop",
+        scope: "gateway.models",
+      },
+    };
+    const create = (change: Record<string, unknown>) => () =>
+      createOpenAiCompatibleProvider({
+        id: ids.local,
+        displayName: "Gateway",
+        configuration: { ...configuration, ...change },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      });
+    const directory = configuration.directory;
+    expect(create({ directory: { ...directory, issuer: "http://login.example.test" } })).toThrow(
+      "issuer",
+    );
+    expect(create({ directory: { ...directory, scope: "openid" } })).toThrow("scope");
+    expect(create({ directory: { ...directory, scope: "a b" } })).toThrow("scope");
+    expect(create({ directory: { ...directory, clientId: "" } })).toThrow("client");
+    // A bearer token never travels over plain http, even to a loopback gateway.
+    expect(create({ baseUrl: "http://127.0.0.1:4000/v1/" })).toThrow("HTTPS");
+    expect(create({ directory: undefined })).toThrow("issuer");
+  });
+
   it("creates and changes an Azure AI Foundry endpoint that signs in with the organization's directory, keeping its tenant and client", () => {
     const directory = {
       tenantId: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f",

@@ -871,6 +871,54 @@ describe("applyMigrations", () => {
     }
   });
 
+  it("lets an outside driver instance land in the provider projection the constraint used to refuse", () => {
+    const connection = openTemporaryDatabase();
+
+    try {
+      applyMigrations(
+        connection,
+        MIGRATIONS.filter((migration) => migration.version < 85),
+        clock,
+      );
+      const insert = (instanceId: string, driverKind: string) =>
+        connection
+          .prepare(`
+            INSERT INTO provider_instance_projection (
+              instance_id, schema_version, driver_kind, enabled, instance_json, aggregate_version
+            ) VALUES (?, 1, ?, 1, '{}', 1)
+          `)
+          .run(instanceId, driverKind);
+      insert("existing-provider", "codex");
+      insert("existing-image-provider", "openai-image");
+      expect(() => insert("outside-provider", "outside-harness-endpoint")).toThrow();
+
+      expect(
+        applyMigrations(
+          connection,
+          MIGRATIONS.filter((migration) => migration.version <= 85),
+          clock,
+        ),
+      ).toEqual({
+        currentVersion: 85,
+        appliedVersions: [85],
+      });
+      expect(() => insert("outside-provider", "outside-harness-endpoint")).not.toThrow();
+      expect(
+        connection
+          .prepare(
+            "SELECT instance_id, driver_kind FROM provider_instance_projection ORDER BY instance_id",
+          )
+          .all(),
+      ).toEqual([
+        { instance_id: "existing-image-provider", driver_kind: "openai-image" },
+        { instance_id: "existing-provider", driver_kind: "codex" },
+        { instance_id: "outside-provider", driver_kind: "outside-harness-endpoint" },
+      ]);
+    } finally {
+      connection.close();
+    }
+  });
+
   it("adds context projections to a version 5 store without rewriting existing journal or provider rows", () => {
     const connection = openTemporaryDatabase();
 

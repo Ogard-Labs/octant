@@ -208,18 +208,24 @@ export type DesktopArtifactTransferGate =
  * which no posture covers, so it always asks. A person sending a file to a
  * host-local desktop has already decided; an agent asks unless the thread runs
  * with Full access. Auto-accept-edits covers edits to the checkout, not
- * sending a file out of it, so it asks as approval-gated does.
+ * sending a file out of it, so it asks as approval-gated does. Once the
+ * thread has read outside content, Full access no longer carries an agent's
+ * transfer: it is a standing approval, and taint stops those for Computer
+ * use, whose `send-file` this is.
  */
 export function decideDesktopArtifactTransfer(input: {
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly locality: DesktopProviderLocality;
   readonly initiator: EventActor["kind"];
+  readonly externalContentIngested: boolean;
 }): DesktopArtifactTransferGate {
   if (input.executionPolicy === "plan") return { kind: "refused", reason: "plan-mode" };
   if (input.locality !== "host-local") return { kind: "ask", asks: "off-machine" };
   if (input.initiator === "local-user" || input.initiator === "remote-device") {
     return { kind: "proceed" };
   }
-  if (input.executionPolicy === "full-access") return { kind: "proceed" };
+  if (input.executionPolicy === "full-access" && !input.externalContentIngested) {
+    return { kind: "proceed" };
+  }
   return { kind: "ask", asks: "in-thread" };
 }

@@ -131,3 +131,67 @@ export function speechStatusOf(
     ),
   };
 }
+
+/**
+ * What a paired device is told. Transcription is the host's own answer; read
+ * aloud stays with the computer, so synthesis is always `unavailable` there,
+ * whatever Settings holds, and the phone never offers a control the host
+ * refuses.
+ */
+export function pairedDeviceSpeechStatusOf(
+  settings: VoiceSettings,
+  instances: ReadonlyArray<ProviderInstance>,
+): { readonly transcription: SpeechCapabilityStatus; readonly synthesis: SpeechCapabilityStatus } {
+  return {
+    transcription: speechStatusOf(settings, instances).transcription,
+    synthesis: {
+      status: "unavailable",
+      reason: "Read-aloud is available only on the computer itself.",
+      settingsTarget: VOICE_SYNTHESIS_TARGET,
+    },
+  };
+}
+
+/**
+ * A paired device's share of the host owner's transcription endpoint: thirty
+ * clips in any rolling hour. A phone clip is at most a minute, so a device can
+ * spend at most half an hour of audio an hour, and a lost or misbehaving phone
+ * cannot run up the owner's bill faster than that before it is revoked.
+ */
+export const REMOTE_TRANSCRIPTION_BUDGET = { maximum: 30, windowMs: 60 * 60_000 } as const;
+
+/** The longest clip a phone records before it stops on its own. */
+export const REMOTE_TRANSCRIPTION_MAX_CLIP_MS = 60_000;
+
+/**
+ * The most audio one paired-device clip may carry. The private listener reads
+ * at most 1 MiB of any request body, and the multipart framing around the clip
+ * needs the rest. A minute of mono AAC at 64 kbit/s is about 480 kB.
+ */
+export const REMOTE_TRANSCRIPTION_MAX_AUDIO_BYTES = 1_000_000;
+
+export type RemoteTranscriptionAdmission =
+  | { readonly kind: "admit"; readonly recent: ReadonlyArray<number> }
+  | {
+      readonly kind: "over-budget";
+      readonly recent: ReadonlyArray<number>;
+      readonly retryAfterMs: number;
+    };
+
+/** `recent` holds the device's admitted clip times (ms) still inside the window. */
+export function admitRemoteTranscription(input: {
+  readonly recent: ReadonlyArray<number>;
+  readonly now: number;
+}): RemoteTranscriptionAdmission {
+  const windowStart = input.now - REMOTE_TRANSCRIPTION_BUDGET.windowMs;
+  const recent = input.recent.filter((admittedAt) => admittedAt > windowStart);
+  const oldest = recent[0];
+  if (oldest !== undefined && recent.length >= REMOTE_TRANSCRIPTION_BUDGET.maximum) {
+    return {
+      kind: "over-budget",
+      recent,
+      retryAfterMs: Math.max(1, oldest + REMOTE_TRANSCRIPTION_BUDGET.windowMs - input.now),
+    };
+  }
+  return { kind: "admit", recent: [...recent, input.now] };
+}

@@ -1,10 +1,13 @@
 import {
-  type AnthropicCompatibleAuthentication,
+  DirectoryIssuer,
+  DirectoryIssuerClientId,
+  DirectoryResourceScope,
   type AnthropicCompatibleProtocol,
   type AnthropicCompatibleProviderConfiguration,
   type AzureFoundryProviderConfiguration,
   type BflImageProviderConfiguration,
   type DirectoryClientId,
+  type DirectoryIssuerBinding,
   type DirectoryTenantId,
   type GeminiImageAspectRatio,
   type GeminiImageProviderConfiguration,
@@ -16,30 +19,71 @@ import {
   type OpenAiImageQuality,
   type OpenAiImageSize,
 } from "@octant/contracts";
+import { Schema } from "effect";
 
+/**
+ * An OpenAI-compatible configuration from its form. A gateway that signs in
+ * with its organization carries the issuer, client, and scope the form holds.
+ */
 export function configurationFrom(data: FormData): OpenAiCompatibleProviderConfiguration {
-  return {
+  const shared = {
     kind: "openai-compatible-http",
     baseUrl: String(data.get("baseUrl") ?? ""),
-    authentication: String(data.get("authentication") ?? "bearer") as "bearer" | "none",
     protocol: String(data.get("protocol") ?? "auto") as OpenAiCompatibleProtocol,
     manualModelIds: parseManualModelIds(String(data.get("manualModelIds") ?? "")),
+  } as const;
+  if (data.get("authentication") === "directory-oauth") {
+    return { ...shared, authentication: "directory-oauth", directory: gatewayDirectoryFrom(data) };
+  }
+  return {
+    ...shared,
+    authentication: data.get("authentication") === "none" ? "none" : "bearer",
   };
 }
 
+/** As `configurationFrom`, for an Anthropic-compatible endpoint. */
 export function anthropicConfigurationFrom(
   data: FormData,
 ): AnthropicCompatibleProviderConfiguration {
-  return {
+  const authentication = data.get("authentication");
+  const shared = {
     kind: "anthropic-compatible-http",
     baseUrl: String(data.get("baseUrl") ?? ""),
-    authentication: String(
-      data.get("authentication") ?? "api-key",
-    ) as AnthropicCompatibleAuthentication,
     protocol: String(data.get("protocol") ?? "auto") as AnthropicCompatibleProtocol,
     protocolVersion: String(data.get("protocolVersion") ?? "2023-06-01"),
     manualModelIds: parseManualModelIds(String(data.get("manualModelIds") ?? "")),
+  } as const;
+  if (authentication === "directory-oauth") {
+    return { ...shared, authentication: "directory-oauth", directory: gatewayDirectoryFrom(data) };
+  }
+  return {
+    ...shared,
+    authentication:
+      authentication === "bearer" || authentication === "none" ? authentication : "api-key",
   };
+}
+
+/**
+ * A gateway's organization sign-in as the form holds it, trimmed. The host
+ * compares the issuer exactly with what its tokens name, so it is not
+ * otherwise rewritten; the host refuses a value that is not one.
+ */
+export function gatewayDirectoryFrom(data: FormData): DirectoryIssuerBinding {
+  const text = (name: string) => String(data.get(name) ?? "").trim();
+  return {
+    issuer: text("issuer") as DirectoryIssuerBinding["issuer"],
+    clientId: text("clientId") as DirectoryIssuerBinding["clientId"],
+    scope: text("scope") as DirectoryIssuerBinding["scope"],
+  };
+}
+
+/** Whether a gateway's issuer, client, and scope are each one the host accepts. */
+export function isGatewayDirectory(directory: DirectoryIssuerBinding): boolean {
+  return (
+    Schema.is(DirectoryIssuer)(directory.issuer) &&
+    Schema.is(DirectoryIssuerClientId)(directory.clientId) &&
+    Schema.is(DirectoryResourceScope)(directory.scope)
+  );
 }
 
 /**

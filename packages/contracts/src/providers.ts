@@ -1,5 +1,12 @@
 import { Schema } from "effect";
 import { AggregateVersion, CorrelationId, UtcTimestamp } from "./events";
+import {
+  ExtensionComponentId,
+  ExtensionContentDigest,
+  ExtensionPackageId,
+  ExtensionPackageVersion,
+  ToolExtensionId,
+} from "./extensionIdentity";
 import { OctantMode } from "./modes";
 import {
   ACP_AGENT_KINDS,
@@ -51,6 +58,10 @@ export const ProviderDriverKind = Schema.Literal(
   "gemini-native-image",
   "bfl-image",
   "ideogram-image",
+  // The one family for every driver package that does not ship with Octant.
+  // Which driver an instance runs is package data in its configuration, never
+  // a new value here, so the exhaustive checks over this set stay closed.
+  "outside-harness-endpoint",
 );
 export type ProviderDriverKind = typeof ProviderDriverKind.Type;
 
@@ -325,31 +336,118 @@ const UniqueManualModelIds = Schema.Array(ProviderModelId).pipe(
   Schema.filter((modelIds) => new Set(modelIds).size === modelIds.length),
 );
 const OAuthDescriptorId = Schema.String.pipe(Schema.pattern(/^[a-z0-9][a-z0-9-]{0,63}$/));
-export const OpenAiCompatibleProviderConfiguration = Schema.Struct({
+/**
+ * An organization's own OpenID Connect issuer, exactly as its identity tokens
+ * name it in `iss` (a trailing slash matters). It is the address the person
+ * signs in at, so it is https with no credentials, query, or fragment.
+ */
+export const DirectoryIssuer = Schema.String.pipe(
+  Schema.filter((value) => {
+    if (value.length > 256 || !value.startsWith("https://") || /[\s?#]/.test(value)) {
+      return false;
+    }
+    try {
+      const url = new URL(value);
+      return url.protocol === "https:" && url.username === "" && url.password === "";
+    } catch {
+      return false;
+    }
+  }),
+  Schema.brand("DirectoryIssuer"),
+);
+export type DirectoryIssuer = typeof DirectoryIssuer.Type;
+/** The public client an organization registered with its own issuer. */
+export const DirectoryIssuerClientId = Schema.String.pipe(
+  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/),
+  Schema.brand("DirectoryIssuerClientId"),
+);
+export type DirectoryIssuerClientId = typeof DirectoryIssuerClientId.Type;
+/** Identity scopes the broker requests itself; none of them names a resource. */
+const DIRECTORY_IDENTITY_SCOPES: ReadonlySet<string> = new Set([
+  "openid",
+  "profile",
+  "offline_access",
+  "email",
+]);
+/**
+ * The one scope an organization's gateway requires (an RFC 6749
+ * scope-token): the resource its issuer's token is for. An identity scope
+ * names no resource, so it is refused.
+ */
+export const DirectoryResourceScope = Schema.String.pipe(
+  Schema.pattern(/^[\x21\x23-\x5B\x5D-\x7E]{1,256}$/),
+  Schema.filter((value) => !DIRECTORY_IDENTITY_SCOPES.has(value)),
+  Schema.brand("DirectoryResourceScope"),
+);
+export type DirectoryResourceScope = typeof DirectoryResourceScope.Type;
+/**
+ * An organization's own issuer, client, and gateway scope for a host-driven
+ * sign-in to its model gateway. None of it is secret: the client is a public
+ * client the organization registered with its own issuer.
+ */
+export const DirectoryIssuerBinding = Schema.Struct({
+  issuer: DirectoryIssuer,
+  clientId: DirectoryIssuerClientId,
+  scope: DirectoryResourceScope,
+}).annotations(strict);
+export type DirectoryIssuerBinding = typeof DirectoryIssuerBinding.Type;
+
+const OpenAiCompatibleConfigurationFields = {
   kind: Schema.Literal("openai-compatible-http"),
   baseUrl: Schema.NonEmptyTrimmedString,
-  authentication: Schema.Literal("bearer", "none"),
   protocol: OpenAiCompatibleProtocol,
   manualModelIds: UniqueManualModelIds,
-  /** Expected host-driven sign-in binding. Absent means no subscription sign-in. */
-  oauthDescriptorId: Schema.optional(OAuthDescriptorId),
-}).annotations(strict);
+};
+/**
+ * `directory-oauth` signs in with the organization's own issuer in place of a
+ * key and names that issuer, client, and scope. It is never also a catalog
+ * subscription sign-in.
+ */
+export const OpenAiCompatibleProviderConfiguration = Schema.Union(
+  Schema.Struct({
+    ...OpenAiCompatibleConfigurationFields,
+    authentication: Schema.Literal("bearer", "none"),
+    /** Expected host-driven sign-in binding. Absent means no subscription sign-in. */
+    oauthDescriptorId: Schema.optional(OAuthDescriptorId),
+  }).annotations(strict),
+  Schema.Struct({
+    ...OpenAiCompatibleConfigurationFields,
+    authentication: Schema.Literal("directory-oauth"),
+    directory: DirectoryIssuerBinding,
+  }).annotations(strict),
+);
 export type OpenAiCompatibleProviderConfiguration =
   typeof OpenAiCompatibleProviderConfiguration.Type;
 export const AnthropicCompatibleProtocol = Schema.Literal("auto", "messages");
 export type AnthropicCompatibleProtocol = typeof AnthropicCompatibleProtocol.Type;
-export const AnthropicCompatibleAuthentication = Schema.Literal("api-key", "bearer", "none");
+export const AnthropicCompatibleAuthentication = Schema.Literal(
+  "api-key",
+  "bearer",
+  "none",
+  "directory-oauth",
+);
 export type AnthropicCompatibleAuthentication = typeof AnthropicCompatibleAuthentication.Type;
-export const AnthropicCompatibleProviderConfiguration = Schema.Struct({
+const AnthropicCompatibleConfigurationFields = {
   kind: Schema.Literal("anthropic-compatible-http"),
   baseUrl: Schema.NonEmptyTrimmedString,
-  authentication: AnthropicCompatibleAuthentication,
   protocol: AnthropicCompatibleProtocol,
   protocolVersion: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
   manualModelIds: UniqueManualModelIds,
-  /** Expected host-driven sign-in binding. Absent means no subscription sign-in. */
-  oauthDescriptorId: Schema.optional(OAuthDescriptorId),
-}).annotations(strict);
+};
+/** As the OpenAI-compatible configuration: `directory-oauth` names the issuer binding. */
+export const AnthropicCompatibleProviderConfiguration = Schema.Union(
+  Schema.Struct({
+    ...AnthropicCompatibleConfigurationFields,
+    authentication: Schema.Literal("api-key", "bearer", "none"),
+    /** Expected host-driven sign-in binding. Absent means no subscription sign-in. */
+    oauthDescriptorId: Schema.optional(OAuthDescriptorId),
+  }).annotations(strict),
+  Schema.Struct({
+    ...AnthropicCompatibleConfigurationFields,
+    authentication: Schema.Literal("directory-oauth"),
+    directory: DirectoryIssuerBinding,
+  }).annotations(strict),
+);
 export type AnthropicCompatibleProviderConfiguration =
   typeof AnthropicCompatibleProviderConfiguration.Type;
 /**
@@ -408,6 +506,26 @@ export const AzureFoundryProviderConfiguration = Schema.Union(
   }).annotations(strict),
 );
 export type AzureFoundryProviderConfiguration = typeof AzureFoundryProviderConfiguration.Type;
+
+/**
+ * The exact package an outside driver instance runs. The instance binds the
+ * version and content digest it was added with: a package with any other
+ * digest is not the driver this instance names, whatever its name.
+ */
+export const OutsideProviderDriverReference = Schema.Struct({
+  extensionId: ToolExtensionId,
+  packageId: ExtensionPackageId,
+  componentId: ExtensionComponentId,
+  version: ExtensionPackageVersion,
+  digest: ExtensionContentDigest,
+}).annotations(strict);
+export type OutsideProviderDriverReference = typeof OutsideProviderDriverReference.Type;
+export const OutsideHarnessEndpointProviderConfiguration = Schema.Struct({
+  kind: Schema.Literal("outside-harness-endpoint"),
+  driver: OutsideProviderDriverReference,
+}).annotations(strict);
+export type OutsideHarnessEndpointProviderConfiguration =
+  typeof OutsideHarnessEndpointProviderConfiguration.Type;
 
 /**
  * Suggested GPT Image model IDs for Settings. Image allowlists are
@@ -719,6 +837,14 @@ export const IdeogramImageProviderInstance = Schema.Struct({
 }).annotations(strict);
 export type IdeogramImageProviderInstance = typeof IdeogramImageProviderInstance.Type;
 
+export const OutsideHarnessEndpointProviderInstance = Schema.Struct({
+  ...ProviderInstanceFields,
+  driverKind: Schema.Literal("outside-harness-endpoint"),
+  configuration: OutsideHarnessEndpointProviderConfiguration,
+}).annotations(strict);
+export type OutsideHarnessEndpointProviderInstance =
+  typeof OutsideHarnessEndpointProviderInstance.Type;
+
 export const ProviderInstance = Schema.Union(
   OpenCodeProviderInstance,
   CodexProviderInstance,
@@ -734,6 +860,7 @@ export const ProviderInstance = Schema.Union(
   GeminiImageProviderInstance,
   BflImageProviderInstance,
   IdeogramImageProviderInstance,
+  OutsideHarnessEndpointProviderInstance,
 );
 export type ProviderInstance = typeof ProviderInstance.Type;
 
@@ -1226,12 +1353,15 @@ export type ProviderProcessDiagnostic = typeof ProviderProcessDiagnostic.Type;
 /**
  * Octant-authored probe refusal. The client maps this closed set to copy and
  * next-step guidance. Free-form driver or provider text is not representable.
+ * `driver-not-admitted`: the instance's driver package is not effective on the
+ * activation ladder, so the instance contributes no models or capabilities.
  */
 export const ProviderRefusalReason = Schema.Literal(
   "runtime-incompatible",
   "authentication-required",
   "runtime-unavailable",
   "no-usable-model",
+  "driver-not-admitted",
 );
 export type ProviderRefusalReason = typeof ProviderRefusalReason.Type;
 
@@ -1375,12 +1505,23 @@ export const ProviderUnauthenticatedReason = Schema.Literal(
 );
 export type ProviderUnauthenticatedReason = typeof ProviderUnauthenticatedReason.Type;
 
-/** The directory binding a probe checked before it asked for a token. None of it is secret. */
-export const ProviderObservedDirectoryBinding = Schema.Struct({
-  tenantId: DirectoryTenantId,
-  clientId: DirectoryClientId,
-  endpointOrigin: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
+/**
+ * The directory binding a probe checked before it asked for a token: a tenant
+ * of the closed directory, or an organization's own issuer. None of it is
+ * secret.
+ */
+export const ProviderObservedDirectoryBinding = Schema.Union(
+  Schema.Struct({
+    tenantId: DirectoryTenantId,
+    clientId: DirectoryClientId,
+    endpointOrigin: Schema.NonEmptyTrimmedString,
+  }).annotations(strict),
+  Schema.Struct({
+    issuer: DirectoryIssuer,
+    clientId: DirectoryIssuerClientId,
+    endpointOrigin: Schema.NonEmptyTrimmedString,
+  }).annotations(strict),
+);
 export type ProviderObservedDirectoryBinding = typeof ProviderObservedDirectoryBinding.Type;
 
 export const ProviderObservedState = Schema.Struct({
@@ -2330,6 +2471,9 @@ export const decodeProviderInstanceId = Schema.decodeUnknownSync(ProviderInstanc
 export const decodeProviderSessionId = Schema.decodeUnknownSync(ProviderSessionId);
 export const decodeDirectoryTenantId = Schema.decodeUnknownSync(DirectoryTenantId);
 export const decodeDirectoryClientId = Schema.decodeUnknownSync(DirectoryClientId);
+export const decodeDirectoryIssuer = Schema.decodeUnknownSync(DirectoryIssuer);
+export const decodeDirectoryIssuerClientId = Schema.decodeUnknownSync(DirectoryIssuerClientId);
+export const decodeDirectoryResourceScope = Schema.decodeUnknownSync(DirectoryResourceScope);
 export const decodeProviderModelId = Schema.decodeUnknownSync(ProviderModelId);
 export const decodeProviderDriverKind = Schema.decodeUnknownSync(ProviderDriverKind);
 export const decodeProviderInstance = Schema.decodeUnknownSync(ProviderInstance);

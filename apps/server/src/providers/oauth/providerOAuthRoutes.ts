@@ -3,7 +3,7 @@ import {
   type ProviderInstance,
   type ProviderInstanceId,
 } from "@octant/contracts";
-import { subscriptionOAuthOffers } from "@octant/domain";
+import { subscriptionDescriptorIdOf, subscriptionOAuthOffers } from "@octant/domain";
 import {
   decodeHostOAuthDescriptor,
   type HostOAuthDescriptor,
@@ -385,6 +385,16 @@ function unmatchedInstance(
   if (!offer.driverKinds.some((kind) => kind === instance.driverKind)) {
     return { kind: "refused", reason: "unsupported-driver" };
   }
+  // An endpoint that signs in with its organization holds that sign-in's
+  // pointer; a catalog sign-in stored over it would leave the organization
+  // grant with no pointer to sign it out.
+  if (
+    (instance.driverKind === "openai-compatible" ||
+      instance.driverKind === "anthropic-compatible") &&
+    instance.configuration.authentication === "directory-oauth"
+  ) {
+    return { kind: "refused", reason: "unsupported-driver" };
+  }
   if (!endpointMatchesOffer(instance, offer)) {
     return { kind: "refused", reason: "endpoint-mismatch" };
   }
@@ -464,7 +474,7 @@ async function storePointer(
   if (
     (instance.driverKind === "openai-compatible" ||
       instance.driverKind === "anthropic-compatible") &&
-    instance.configuration.oauthDescriptorId !== offer.descriptor.descriptorId
+    subscriptionDescriptorIdOf(instance.configuration) !== offer.descriptor.descriptorId
   ) {
     await dependencies.bindDescriptor(instance, offer.descriptor.descriptorId, windowId);
   }

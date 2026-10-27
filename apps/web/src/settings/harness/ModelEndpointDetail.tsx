@@ -5,7 +5,7 @@ import type {
   ProviderModelId,
   ProviderObservedState,
 } from "@octant/contracts";
-import { modelCarriesAppManagedTools } from "@octant/domain";
+import { modelCarriesAppManagedTools, subscriptionDescriptorIdOf } from "@octant/domain";
 import { ChevronLeft } from "lucide-react";
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
@@ -174,7 +174,7 @@ export function ModelEndpointDetail(props: ModelEndpointDetailProps) {
   const signInEndpoint =
     ((instance.driverKind === "openai-compatible" ||
       instance.driverKind === "anthropic-compatible") &&
-      instance.configuration.oauthDescriptorId !== undefined) ||
+      subscriptionDescriptorIdOf(instance.configuration) !== undefined) ||
     isDirectorySignInEndpoint(instance);
   const credential = useCredentialStatus(
     {
@@ -322,7 +322,7 @@ function AccessSection(
                 : { onOpenExternalUrl: props.onOpenExternalUrl })}
             />
           )}
-          {instance.driverKind === "azure-foundry" && (
+          {instance.driverKind !== "ollama" && (
             <DirectoryEndpointSignIn
               consentShown={props.signInConsentShown}
               disabled={props.disabled}
@@ -779,6 +779,9 @@ function authenticationFact(
       : "API key (api-key header)";
   }
   const authentication = instance.configuration.authentication;
+  if (authentication === "directory-oauth") {
+    return "Organization account (bearer token from your organization's sign-in)";
+  }
   if (authentication === "none") return "None";
   if (authentication === "api-key") return "API key (x-api-key header)";
   return "API key (bearer)";
@@ -820,7 +823,11 @@ function DiagnosticsSection(props: ModelEndpointDetailProps & { readonly failing
       : [
           {
             label: "Signed in for",
-            value: `Tenant ${observed.directoryBinding.tenantId} · client ${observed.directoryBinding.clientId} · ${observed.directoryBinding.endpointOrigin}`,
+            value: `${
+              "tenantId" in observed.directoryBinding
+                ? `Tenant ${observed.directoryBinding.tenantId}`
+                : `Issuer ${observed.directoryBinding.issuer}`
+            } · client ${observed.directoryBinding.clientId} · ${observed.directoryBinding.endpointOrigin}`,
           },
         ]),
     {

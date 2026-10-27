@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { SendChatTurnCommand } from "./chat";
 import { CodeAttachmentId, MAX_CODE_TURN_ATTACHMENTS } from "./code";
+import { ComputerUseDestinationSelection } from "./desktopLease";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { ExtensionSelection } from "./extensions";
 import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention";
@@ -59,6 +60,7 @@ export const ThreadMessageQueuePayload = Schema.Union(
       Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32)),
     ),
     computerUseSelection: Schema.optional(ExtensionSelection),
+    computerUseDestination: Schema.optional(ComputerUseDestinationSelection),
     threadMentionIds: Schema.optional(
       Schema.Array(MentionableThreadId).pipe(Schema.maxItems(MAX_THREAD_MENTIONS_PER_TURN)),
     ),

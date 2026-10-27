@@ -1,67 +1,86 @@
-import { DirectoryClientId, DirectoryTenantId, type ProviderFailure } from "@octant/contracts";
+import {
+  DirectoryClientId,
+  DirectoryIssuer,
+  DirectoryIssuerClientId,
+  DirectoryResourceScope,
+  DirectoryTenantId,
+  type ProviderFailure,
+} from "@octant/contracts";
 import { Schema } from "effect";
 
 /**
  * Host-driven directory sign-in for a direct HTTP endpoint: an organization's
- * own OAuth/OIDC tenant issues a bearer for the endpoint's resource.
+ * own OAuth/OIDC directory issues a bearer for the endpoint's resource. The
+ * directory is either a tenant of the closed directory, for a driver kind
+ * whose endpoint accepts one resource on a closed host list, or the
+ * organization's own OpenID Connect issuer, for its own model gateway.
  *
  * The broker holds the refresh token and the validated identity; a driver
  * holds only a pointer and asks the host for one access token per request,
  * naming the binding it expects. The driver checks its own configuration
  * against the pointer before it asks, and the broker checks the binding again
  * before it releases a token, so a mis-set instance never sends a directory
- * bearer to another tenant or host. Nothing here falls back to another kind
- * of authentication.
+ * bearer to another directory or host. Nothing here falls back to another
+ * kind of authentication.
  */
 
 const KIND = "directory-oauth";
 const CREDENTIAL_REF_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const ACCOUNT_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 .@_'-]{0,127}$/;
-const POINTER_KEYS = new Set([
-  "kind",
-  "credentialRef",
-  "tenantId",
-  "clientId",
-  "audience",
-  "endpointOrigin",
-  "accountLabel",
-]);
+const POINTER_KEYS = ["kind", "credentialRef", "clientId", "endpointOrigin", "accountLabel"];
+const TENANT_POINTER_KEYS: ReadonlySet<string> = new Set([...POINTER_KEYS, "tenantId", "audience"]);
+const ISSUER_POINTER_KEYS: ReadonlySet<string> = new Set([...POINTER_KEYS, "issuer", "scope"]);
 /** A token this close to its expiry is refreshed before it is sent. */
 const EXPIRY_SKEW_MS = 15_000;
 
 export const DIRECTORY_OAUTH_CREDENTIAL_KIND = KIND;
 
-/** What a grant was signed in for; the broker refuses access under any other. */
-export interface DirectoryOAuthBinding {
+/** A tenant of the closed directory, signed in for one driver kind's resource. */
+export interface DirectoryOAuthTenant {
   readonly tenantId: DirectoryTenantId;
   readonly clientId: DirectoryClientId;
   /** The one resource the driver kind's endpoint accepts. */
   readonly audience: string;
-  /** The canonical https origin of the endpoint the grant was signed in for. */
-  readonly endpointOrigin: string;
 }
 
+/** An organization's own OpenID Connect issuer, signed in for its gateway's scope. */
+export interface DirectoryOAuthIssuer {
+  readonly issuer: DirectoryIssuer;
+  readonly clientId: DirectoryIssuerClientId;
+  /** The one resource scope the organization's gateway requires. */
+  readonly scope: DirectoryResourceScope;
+}
+
+/** What a grant was signed in for; the broker refuses access under any other. */
+export type DirectoryOAuthBinding = (DirectoryOAuthTenant | DirectoryOAuthIssuer) & {
+  /** The canonical https origin of the endpoint the grant was signed in for. */
+  readonly endpointOrigin: string;
+};
+
 /** The credential store's value for a signed-in instance: references, never material. */
-export interface DirectoryOAuthCredential extends DirectoryOAuthBinding {
+export type DirectoryOAuthCredential = DirectoryOAuthBinding & {
   readonly kind: typeof KIND;
   readonly credentialRef: string;
   readonly accountLabel: string;
-}
+};
 
-/** The instance's own view of where it may send a directory bearer. */
-export interface DirectoryOAuthEndpoint {
-  readonly tenantId: DirectoryTenantId;
-  readonly clientId: DirectoryClientId;
-  /** The one resource this driver kind's endpoint accepts. */
-  readonly audience: string;
-  /** The instance's current base URL. */
-  readonly baseUrl: string;
-  /**
-   * Host suffixes this driver kind's endpoints live under, each starting with
-   * a dot. A base URL whose host ends in none of them receives no bearer.
-   */
-  readonly hostSuffixes: ReadonlyArray<string>;
-}
+/**
+ * The instance's own view of where it may send a directory bearer. A tenant
+ * kind names the host suffixes its endpoints live under, each starting with a
+ * dot, and a base URL under none of them receives no bearer. An
+ * organization's gateway lives on the organization's own host, so it names
+ * none: only the origin its grant was signed in for receives the bearer.
+ */
+export type DirectoryOAuthEndpoint =
+  | (DirectoryOAuthTenant & {
+      /** The instance's current base URL. */
+      readonly baseUrl: string;
+      readonly hostSuffixes: ReadonlyArray<string>;
+    })
+  | (DirectoryOAuthIssuer & {
+      /** The instance's current base URL. */
+      readonly baseUrl: string;
+    });
 
 export type DirectoryOAuthSignInAgainReason =
   | "expired"
@@ -134,12 +153,18 @@ export interface DirectoryOAuthResolveInput {
 }
 
 export function encodeDirectoryOAuthCredential(credential: DirectoryOAuthCredential): string {
+  const directory =
+    "tenantId" in credential
+      ? {
+          tenantId: credential.tenantId,
+          clientId: credential.clientId,
+          audience: credential.audience,
+        }
+      : { issuer: credential.issuer, clientId: credential.clientId, scope: credential.scope };
   return JSON.stringify({
     kind: KIND,
     credentialRef: credential.credentialRef,
-    tenantId: credential.tenantId,
-    clientId: credential.clientId,
-    audience: credential.audience,
+    ...directory,
     endpointOrigin: credential.endpointOrigin,
     accountLabel: credential.accountLabel,
   });
@@ -147,7 +172,8 @@ export function encodeDirectoryOAuthCredential(credential: DirectoryOAuthCredent
 
 /**
  * A stored API key, another kind's pointer, invalid JSON, or a pointer with
- * an unknown field or a loose binding is not this kind.
+ * an unknown field, a loose binding, or the fields of both a tenant and an
+ * issuer is not this kind.
  */
 export function readDirectoryOAuthCredential(value: string): DirectoryOAuthCredential | undefined {
   let parsed: unknown;
@@ -157,15 +183,10 @@ export function readDirectoryOAuthCredential(value: string): DirectoryOAuthCrede
     return undefined;
   }
   if (!isRecord(parsed) || parsed.kind !== KIND) return undefined;
-  if (Object.keys(parsed).some((key) => !POINTER_KEYS.has(key))) return undefined;
-  const { credentialRef, tenantId, clientId, audience, endpointOrigin, accountLabel } = parsed;
+  const { credentialRef, endpointOrigin, accountLabel } = parsed;
   if (
     typeof credentialRef !== "string" ||
     !CREDENTIAL_REF_PATTERN.test(credentialRef) ||
-    !Schema.is(DirectoryTenantId)(tenantId) ||
-    !Schema.is(DirectoryClientId)(clientId) ||
-    typeof audience !== "string" ||
-    !isAudience(audience) ||
     typeof endpointOrigin !== "string" ||
     canonicalHttpsOrigin(endpointOrigin) !== endpointOrigin ||
     typeof accountLabel !== "string" ||
@@ -173,7 +194,91 @@ export function readDirectoryOAuthCredential(value: string): DirectoryOAuthCrede
   ) {
     return undefined;
   }
-  return { kind: KIND, credentialRef, tenantId, clientId, audience, endpointOrigin, accountLabel };
+  const directory = readDirectory(parsed);
+  if (directory === undefined) return undefined;
+  return { kind: KIND, credentialRef, ...directory, endpointOrigin, accountLabel };
+}
+
+/** The tenant or issuer a pointer names, read only from exactly one kind's fields. */
+function readDirectory(
+  parsed: Readonly<Record<string, unknown>>,
+): DirectoryOAuthTenant | DirectoryOAuthIssuer | undefined {
+  const keys = Object.keys(parsed);
+  const { tenantId, issuer, clientId, audience, scope } = parsed;
+  if (
+    keys.length === TENANT_POINTER_KEYS.size &&
+    keys.every((key) => TENANT_POINTER_KEYS.has(key))
+  ) {
+    if (
+      !Schema.is(DirectoryTenantId)(tenantId) ||
+      !Schema.is(DirectoryClientId)(clientId) ||
+      typeof audience !== "string" ||
+      !isAudience(audience)
+    ) {
+      return undefined;
+    }
+    return { tenantId, clientId, audience };
+  }
+  if (
+    keys.length === ISSUER_POINTER_KEYS.size &&
+    keys.every((key) => ISSUER_POINTER_KEYS.has(key))
+  ) {
+    if (
+      !Schema.is(DirectoryIssuer)(issuer) ||
+      !Schema.is(DirectoryIssuerClientId)(clientId) ||
+      !Schema.is(DirectoryResourceScope)(scope)
+    ) {
+      return undefined;
+    }
+    return { issuer, clientId, scope };
+  }
+  return undefined;
+}
+
+/**
+ * Whether two bindings name the same directory, client, resource, and
+ * origin. A tenant binding never equals an issuer binding, whatever fields
+ * they share.
+ */
+export function sameDirectoryOAuthBinding(
+  left: DirectoryOAuthBinding,
+  right: DirectoryOAuthBinding,
+): boolean {
+  if (
+    left.endpointOrigin !== right.endpointOrigin ||
+    String(left.clientId) !== String(right.clientId)
+  ) {
+    return false;
+  }
+  if ("tenantId" in left) {
+    return (
+      "tenantId" in right &&
+      String(left.tenantId) === String(right.tenantId) &&
+      left.audience === right.audience
+    );
+  }
+  return (
+    "issuer" in right &&
+    String(left.issuer) === String(right.issuer) &&
+    String(left.scope) === String(right.scope)
+  );
+}
+
+/** The binding an endpoint expects at this origin. */
+function endpointBinding(endpoint: DirectoryOAuthEndpoint, origin: string): DirectoryOAuthBinding {
+  return "tenantId" in endpoint
+    ? {
+        tenantId: endpoint.tenantId,
+        clientId: endpoint.clientId,
+        audience: endpoint.audience,
+        endpointOrigin: origin,
+      }
+    : {
+        issuer: endpoint.issuer,
+        clientId: endpoint.clientId,
+        scope: endpoint.scope,
+        endpointOrigin: origin,
+      };
 }
 
 /**
@@ -191,23 +296,16 @@ export async function resolveDirectoryOAuthBearer(
   const { credential, endpoint } = input;
   if (credential === undefined) return { kind: "unauthenticated", reason: "missing" };
   const origin = canonicalHttpsOrigin(endpoint.baseUrl);
+  if (origin === undefined) return { kind: "incompatible" };
+  const binding = endpointBinding(endpoint, origin);
   if (
-    origin === undefined ||
-    !hostIsListed(new URL(origin).hostname, endpoint.hostSuffixes) ||
-    origin !== credential.endpointOrigin ||
-    String(credential.tenantId) !== String(endpoint.tenantId) ||
-    String(credential.clientId) !== String(endpoint.clientId) ||
-    credential.audience !== endpoint.audience
+    ("hostSuffixes" in endpoint &&
+      !hostIsListed(new URL(origin).hostname, endpoint.hostSuffixes)) ||
+    !sameDirectoryOAuthBinding(credential, binding)
   ) {
     return { kind: "incompatible" };
   }
   if (input.host === undefined) return { kind: "unavailable" };
-  const binding: DirectoryOAuthBinding = {
-    tenantId: endpoint.tenantId,
-    clientId: endpoint.clientId,
-    audience: endpoint.audience,
-    endpointOrigin: origin,
-  };
   if (input.forceRefresh === true) {
     const refusal = await refresh(input.host, credential.credentialRef);
     if (refusal !== undefined) return refusal;
@@ -257,7 +355,7 @@ export function directoryOAuthFailure(refusal: DirectoryOAuthRefusal): ProviderF
     return {
       category: "incompatible",
       message:
-        "This endpoint's organization sign-in does not match its tenant, client, or address. Sign in again for this endpoint.",
+        "This endpoint's organization sign-in does not match its directory, client, or address. Sign in again for this endpoint.",
     };
   }
   if (refusal.kind === "unavailable") {

@@ -1,14 +1,7 @@
 import { execFileSync } from "node:child_process";
-import {
-  closeSync,
-  existsSync,
-  lstatSync,
-  openSync,
-  readFileSync,
-  readSync,
-  realpathSync,
-} from "node:fs";
+import { closeSync, constants, existsSync, fstatSync, readSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { openConfinedPathSync } from "../confinedPathOpen";
 import {
   makeProcessConfinementLive,
   ProcessConfinementError,
@@ -154,16 +147,19 @@ export function gitLinkedWorktreeMetadataPaths(
   options: GitLinkedWorktreeMetadataOptions = {},
 ): GitLinkedWorktreeMetadataPaths {
   try {
-    const marker = join(checkoutRoot, ".git");
-    const stat = lstatSync(marker);
-    if (stat.isSymbolicLink() || !stat.isFile()) return { readPaths: [], writePaths: [] };
-    const match = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(marker, "utf8"));
+    const canonicalRoot = realpathSync(checkoutRoot);
+    const marker = join(canonicalRoot, ".git");
+    const match = /^gitdir:\s*(.+?)\s*$/m.exec(readGitPointerSync(marker));
     const raw = match?.[1];
     if (raw === undefined || raw === "") return { readPaths: [], writePaths: [] };
-    const gitdir = realpathSync(isAbsolute(raw) ? raw : resolve(checkoutRoot, raw));
+    const gitdir = realpathSync(isAbsolute(raw) ? raw : resolve(canonicalRoot, raw));
     if (basename(dirname(gitdir)) !== "worktrees") return { readPaths: [], writePaths: [] };
     const backlink = realpathSync(resolve(gitdir, readGitPointerSync(join(gitdir, "gitdir"))));
-    if (backlink !== realpathSync(marker)) return { readPaths: [], writePaths: [] };
+    // Compared with the canonical marker path rather than `realpath(marker)`:
+    // the marker is in the agent-writable checkout, and a marker swapped for a
+    // link after it was read made both sides resolve to another repository's
+    // linked-worktree marker, so its metadata passed as this checkout's.
+    if (backlink !== marker) return { readPaths: [], writePaths: [] };
     const commonDirectory = realpathSync(
       resolve(gitdir, readGitPointerSync(join(gitdir, "commondir"))),
     );
@@ -178,11 +174,18 @@ export function gitLinkedWorktreeMetadataPaths(
   }
 }
 
+/**
+ * A Git pointer file's text, read from an open that landed on `path` itself.
+ *
+ * The checkout's own marker is agent-writable, so a separate `lstat` and open
+ * could be split by a swap: the `lstat` saw a regular file and the open
+ * followed a link. Every fact here comes from the one proved open instead.
+ */
 function readGitPointerSync(path: string): string {
-  const stat = lstatSync(path);
-  if (!stat.isFile() || stat.size > 4096) throw new Error("Invalid Git metadata pointer");
-  const fd = openSync(path, "r");
+  const fd = openConfinedPathSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
   try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.size > 4096) throw new Error("Invalid Git metadata pointer");
     const bytes = Buffer.alloc(4097);
     const bytesRead = readSync(fd, bytes, 0, bytes.length, 0);
     if (bytesRead > 4096) throw new Error("Oversized Git metadata pointer");

@@ -10,6 +10,14 @@ export interface ComputerUseHostPort {
     command: ComputerControlCommand,
     signal?: AbortSignal,
   ) => Promise<ComputerControlResult>;
+  /**
+   * Present only when the send bound the task to one of its thread's
+   * disposable desktops. The host reads, hashes, asks for, and journals the
+   * file before the desktop receives it.
+   */
+  readonly disposableDesktop?: {
+    readonly sendFile: (path: string, signal?: AbortSignal) => Promise<ComputerControlResult>;
+  };
 }
 
 export interface ComputerUseToolPlugin {

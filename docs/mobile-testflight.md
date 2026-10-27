@@ -157,6 +157,14 @@ is dismissing waits for the active transition; backgrounding invalidates it.
   Confirm the photo the host stored carries no location or camera model, and
   that a thread whose model takes no images offers no camera.
 - Confirm local-host-required actions remain unavailable on the phone.
+- Dictation: with no transcription endpoint in the host's Settings › Voice,
+  confirm no microphone shows; set one, return to the app, and confirm it
+  does. Grant and then deny the microphone. Dictate a short clip and confirm
+  the words land in the draft unsent; let a clip run to sixty seconds and
+  confirm it stops and transcribes; background the app mid-clip and confirm
+  nothing is sent. On a development build, confirm the app's cache directory
+  holds no `.m4a` afterwards (Xcode's container download on iOS, or
+  `adb shell run-as` on Android).
 - Background the app, let the session age, return, and verify reconnect/replay
   without duplicate turns or queued offline mutations.
 - Make the host stale or unreachable and verify honest read-only presentation.

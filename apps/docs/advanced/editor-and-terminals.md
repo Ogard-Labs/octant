@@ -22,8 +22,11 @@ The Monaco editor is a full editable pane with:
 - Dirty-state protection and external-change detection
 - Restoration of open files and pane layout after restart
 
-Other languages get syntax highlighting and editing fundamentals only; deeper
-tooling is handled through external-editor handoff.
+TypeScript and JavaScript files also get the Project's type errors and go to
+definition across files from a confined language server; see
+[Language services](/advanced/language-services). Other languages get syntax
+highlighting and editing fundamentals only; deeper tooling is handled through
+external-editor handoff.
 
 File states are **dirty**, **saving**, **saved**, **conflicted**,
 **unavailable**, and **closed**.

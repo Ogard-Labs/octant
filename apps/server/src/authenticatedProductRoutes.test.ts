@@ -180,6 +180,24 @@ describe("authenticated product route dispatch", () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 
+  it("dispatches a paired device's dictation and voice status but refuses read-aloud before the route sees it", async () => {
+    const dispatch = vi.fn(async () => Response.json({ ok: true }));
+    const product = createAuthenticatedProductDispatch({ dispatch });
+
+    expect((await product(handoff("/api/speech/status")))?.status).toBe(200);
+    expect((await product(handoff("/api/speech/transcriptions", "POST")))?.status).toBe(200);
+    expect(dispatch).toHaveBeenCalledTimes(2);
+
+    for (const [path, method] of [
+      ["/api/speech/synthesis", "POST"],
+      ["/api/speech/transcriptions", "GET"],
+      ["/api/speech/status", "POST"],
+    ] as const) {
+      expect((await product(handoff(path, method)))?.status).toBe(403);
+    }
+    expect(dispatch).toHaveBeenCalledTimes(2);
+  });
+
   it("refuses a paired device a Project terminal before the route sees it", async () => {
     const dispatch = vi.fn(async () => Response.json({ ok: true }));
     const product = createAuthenticatedProductDispatch({ dispatch });

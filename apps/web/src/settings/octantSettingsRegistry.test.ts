@@ -162,6 +162,7 @@ describe("octantSettingsRegistry", () => {
     expect(code?.settings.map((setting) => setting.id)).toEqual([
       "code-require-git",
       "code-default-diff-layout",
+      "code-language-services",
       "project-view-switcher",
       "code-default-access",
       "code-approval-persistence",
@@ -297,6 +298,8 @@ const COMPUTED_SETTING_ROWS: Readonly<Record<string, string>> = {
   "provider-*-directory-tenant": "provider-authentication",
   "provider-*-directory-client": "provider-authentication",
   "provider-*-directory-device-code": "provider-authentication",
+  "provider-*-directory-issuer": "provider-authentication",
+  "provider-*-directory-scope": "provider-authentication",
   "provider-*-api-key": "provider-api-key",
   "provider-*-base-url": "provider-base-url",
   "provider-*-protocol": "provider-protocol",

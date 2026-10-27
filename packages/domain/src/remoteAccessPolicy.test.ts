@@ -210,6 +210,18 @@ describe("remote access policy", () => {
     ).toEqual({ kind: "allow" });
   });
 
+  it("lets a paired device dictate through the host and keeps read-aloud on the computer", () => {
+    expect(
+      authorizePrincipalAction({ principalKind: "remote-device", action: "speech.transcribe" }),
+    ).toEqual({ kind: "allow" });
+    expect(
+      authorizePrincipalAction({ principalKind: "remote-device", action: "speech.synthesize" }),
+    ).toEqual({ kind: "deny", reason: "local-host-required" });
+    expect(
+      authorizePrincipalAction({ principalKind: "local-window", action: "speech.synthesize" }),
+    ).toEqual({ kind: "allow" });
+  });
+
   it("denies remote principal laundering and local-receipt minting", () => {
     expect(
       authorizePrincipalAction({

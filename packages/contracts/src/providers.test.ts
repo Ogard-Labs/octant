@@ -7,6 +7,7 @@ import {
   decodeProviderDefaults,
   decodeProviderFailure,
   decodeProviderInstance,
+  decodeProviderInstanceCreated,
   decodeProviderInstanceBinaryChanged,
   decodeProviderInstanceConfigurationChanged,
   decodeOllamaHistoryRecorded,
@@ -383,6 +384,133 @@ describe("provider registry contracts", () => {
       decodeProviderInstance({
         ...base,
         configuration: { ...withoutDirectory, authentication: "api-key" },
+      }),
+    ).toThrow();
+  });
+
+  it("decodes a gateway's organization sign-in only with its own issuer, client, and one resource scope", () => {
+    const base = {
+      displayName: "Gateway",
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-10-26T10:00:00.000Z",
+      updatedAt: "2026-10-26T10:00:00.000Z",
+    } as const;
+    const directory = {
+      issuer: "https://login.example.test/oauth2/gateway",
+      clientId: "0oa1octantDesktop",
+      scope: "gateway.models",
+    } as const;
+    const openAi = {
+      kind: "openai-compatible-http",
+      baseUrl: "https://llm.example.test/v1/",
+      authentication: "directory-oauth",
+      protocol: "auto",
+      manualModelIds: [],
+      directory,
+    } as const;
+    const anthropic = {
+      kind: "anthropic-compatible-http",
+      baseUrl: "https://llm.example.test/anthropic/v1/",
+      authentication: "directory-oauth",
+      protocol: "auto",
+      protocolVersion: "2023-06-01",
+      manualModelIds: [],
+      directory,
+    } as const;
+    const instances = [
+      {
+        ...base,
+        id: "80000000-0000-4000-8000-000000000423",
+        driverKind: "openai-compatible",
+        configuration: openAi,
+      },
+      {
+        ...base,
+        id: "80000000-0000-4000-8000-000000000424",
+        driverKind: "anthropic-compatible",
+        configuration: anthropic,
+      },
+    ] as const;
+
+    for (const instance of instances) {
+      const decoded = decodeProviderInstance(instance);
+      expect(decoded.configuration).toEqual(instance.configuration);
+      expect(JSON.stringify(decoded)).not.toMatch(/secret|token/i);
+      const refused = (configuration: Record<string, unknown>) =>
+        expect(() => decodeProviderInstance({ ...instance, configuration })).toThrow();
+      const { directory: _directory, ...withoutDirectory } = instance.configuration;
+      refused(withoutDirectory);
+      // The issuer is where the person types their password, so it must be
+      // an https address the identity token's issuer can equal exactly.
+      for (const issuer of [
+        "http://login.example.test",
+        "https://person:secret@login.example.test",
+        "https://login.example.test/?tenant=a",
+        "https://login.example.test/#a",
+        "login.example.test",
+      ]) {
+        refused({ ...instance.configuration, directory: { ...directory, issuer } });
+      }
+      // One resource scope, never an identity scope or a list.
+      for (const scope of ["openid", "offline_access", "a b", ""]) {
+        refused({ ...instance.configuration, directory: { ...directory, scope } });
+      }
+      refused({ ...instance.configuration, directory: { ...directory, clientId: "a/b" } });
+      // Configuration holds no secret.
+      refused({
+        ...instance.configuration,
+        directory: { ...directory, clientSecret: "secret" },
+      });
+      // A bearer or keyless instance names no directory, and a directory
+      // instance is not also a catalog subscription sign-in.
+      refused({ ...instance.configuration, authentication: "bearer" });
+      refused({ ...instance.configuration, oauthDescriptorId: "openrouter" });
+      // Device-code sign-in is Azure AI Foundry's opt-in alone.
+      refused({ ...instance.configuration, deviceCodeSignIn: true });
+    }
+  });
+
+  it("records which issuer a gateway probe checked, beside a tenant probe's binding", () => {
+    const observed = {
+      instanceId: ids.instance,
+      readiness: "incompatible",
+      processState: "stopped",
+      models: [],
+      capabilities: {
+        streaming: "unavailable",
+        resume: "unsupported",
+        interruption: "unsupported",
+        approvals: "unsupported",
+        userQuestions: "unsupported",
+        reasoning: "unavailable",
+        usage: "unavailable",
+        toolActivity: "unsupported",
+        fileChanges: "unsupported",
+        diffs: "unsupported",
+        taskProgress: "unsupported",
+        nativeChildAgents: "unsupported",
+        harnessAutoReview: "unsupported",
+        nativeAttachments: "unsupported",
+        nativeWebResearch: "unsupported",
+        appManagedTools: "unsupported",
+        citations: "unsupported",
+      },
+      observedAt: "2026-10-26T10:00:00.000Z",
+    } as const;
+    const issuerBinding = {
+      issuer: "https://login.example.test/oauth2/gateway",
+      clientId: "0oa1octantDesktop",
+      endpointOrigin: "https://llm.example.test",
+    };
+    expect(
+      decodeProviderObservedState({ ...observed, directoryBinding: issuerBinding }),
+    ).toMatchObject({ directoryBinding: issuerBinding });
+    expect(() =>
+      decodeProviderObservedState({
+        ...observed,
+        directoryBinding: { ...issuerBinding, tenantId: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f" },
       }),
     ).toThrow();
   });
@@ -1496,6 +1624,112 @@ describe("provider registry contracts", () => {
         }),
       ).toThrow();
     }
+  });
+
+  it("decodes an outside driver instance only with the exact package it binds", () => {
+    const outside = {
+      id: ids.instance,
+      displayName: "Local chat server",
+      driverKind: "outside-harness-endpoint",
+      configuration: {
+        kind: "outside-harness-endpoint",
+        driver: {
+          extensionId: "00000000-0000-4000-8000-000000000911",
+          packageId: "00000000-0000-4000-8000-000000000912",
+          componentId: "provider-driver",
+          version: "1.2.0",
+          digest: `sha256:${"a".repeat(64)}`,
+        },
+      },
+      enabled: false,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: occurredAt,
+      updatedAt: occurredAt,
+    } as const;
+
+    expect(decodeProviderInstance(outside)).toEqual(outside);
+    expect(decodeProviderInstanceCreated({ instance: outside })).toEqual({ instance: outside });
+
+    const { digest: _digest, ...withoutDigest } = outside.configuration.driver;
+    for (const driver of [
+      withoutDigest,
+      { ...outside.configuration.driver, digest: "sha256:abc" },
+      { ...outside.configuration.driver, version: "latest" },
+      { ...outside.configuration.driver, componentId: "Provider Driver" },
+      { ...outside.configuration.driver, entryPoint: "index.js" },
+    ]) {
+      expect(() =>
+        decodeProviderInstance({
+          ...outside,
+          configuration: { ...outside.configuration, driver },
+        }),
+      ).toThrow();
+    }
+    for (const excessField of ["apiKey", "authorization", "binaryPath", "capabilities"] as const) {
+      expect(() =>
+        decodeProviderInstance({
+          ...outside,
+          configuration: { ...outside.configuration, [excessField]: "forbidden" },
+        }),
+      ).toThrow();
+    }
+    // The family cannot borrow a bundled kind, and a bundled kind cannot carry
+    // a package reference.
+    expect(() => decodeProviderInstance({ ...outside, driverKind: "ollama" })).toThrow();
+    expect(() =>
+      decodeProviderInstance({
+        ...outside,
+        configuration: { kind: "ollama-native-http", baseUrl: "http://127.0.0.1:11434" },
+      }),
+    ).toThrow();
+    // Nothing admits an outside driver yet: no command creates or reconfigures one.
+    expect(() =>
+      decodeProviderRegistryCommand({
+        kind: "create-outside-harness-endpoint-provider",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        displayName: outside.displayName,
+        configuration: outside.configuration,
+      }),
+    ).toThrow();
+    expect(() => decodeProviderInstanceConfigurationChanged({ instance: outside })).toThrow();
+  });
+
+  it("reports a driver the activation ladder does not admit as a closed refusal with no models", () => {
+    const blocked = {
+      instanceId: ids.instance,
+      readiness: "unavailable",
+      processState: "stopped",
+      models: [],
+      capabilities: Object.fromEntries(
+        [
+          "streaming",
+          "resume",
+          "interruption",
+          "approvals",
+          "userQuestions",
+          "reasoning",
+          "usage",
+          "toolActivity",
+          "fileChanges",
+          "diffs",
+          "taskProgress",
+          "nativeChildAgents",
+          "harnessAutoReview",
+          "nativeAttachments",
+          "nativeWebResearch",
+          "appManagedTools",
+          "citations",
+        ].map((capability) => [capability, "unavailable"]),
+      ),
+      reason: "driver-not-admitted",
+      observedAt: occurredAt,
+    } as const;
+    expect(decodeProviderObservedState(blocked)).toMatchObject({
+      reason: "driver-not-admitted",
+      models: [],
+    });
   });
 
   it("decodes bounded Octant-owned Ollama history snapshots for journal replay", () => {

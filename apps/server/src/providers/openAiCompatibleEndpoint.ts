@@ -33,6 +33,19 @@ export interface CompatibleHttpLimits {
 
 export type OpenAiCompatibleAuthStrategy = "bearer" | "api-key" | "none";
 
+/**
+ * How a configuration's own credential travels. An organization sign-in's
+ * bearer travels as `Authorization: Bearer`, but only through a caller's
+ * per-request authorization, never from the store.
+ */
+export function openAiCompatibleAuthStrategy(
+  configuration: OpenAiCompatibleProviderConfiguration,
+): OpenAiCompatibleAuthStrategy {
+  return configuration.authentication === "directory-oauth"
+    ? "bearer"
+    : configuration.authentication;
+}
+
 export interface OpenAiCompatibleEndpointOptions {
   readonly instanceId: string;
   readonly configuration: OpenAiCompatibleProviderConfiguration;
@@ -125,7 +138,7 @@ export function makeOpenAiCompatibleEndpoint(
   assertPositiveLimit(limits.responseBodyBytes);
   assertPositiveLimit(limits.streamIdleTimeoutMs);
   const authStrategy: OpenAiCompatibleAuthStrategy =
-    options.authStrategy ?? options.configuration.authentication;
+    options.authStrategy ?? openAiCompatibleAuthStrategy(options.configuration);
   return Object.freeze({
     instanceId: options.instanceId,
     configuration: options.configuration,
@@ -459,6 +472,11 @@ async function performRequest(
       authorized.catch(() => undefined);
       const response = await Promise.race([authorized, deadline.failure]);
       return boundResponse(response, endpoint.limits, callerSignal);
+    }
+    // An organization sign-in sends only the bearer its caller resolves for
+    // each request; without one, nothing stored is sent in its place.
+    if (endpoint.configuration.authentication === "directory-oauth") {
+      throw fail("unauthenticated", "The provider credential is missing or unavailable.");
     }
     const headers = new Headers(init.headers);
     if (endpoint.authStrategy !== "none") {

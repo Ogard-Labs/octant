@@ -532,7 +532,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Code",
       scope: "app",
       keywords:
-        "code defaults access approvals plan read-only full access permission persistence current session external editor executable arguments new threads open in applications vscode cursor zed finder terminal ghostty xcode detected installed diff layout unified side by side review",
+        "code defaults access approvals plan read-only full access permission persistence current session external editor executable arguments new threads open in applications vscode cursor zed finder terminal ghostty xcode detected installed diff layout unified side by side review language services type errors go to definition",
       settings: [
         {
           id: settingId("code-require-git"),
@@ -546,6 +546,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Default diff layout",
           scope: "mode",
           keywords: "diff layout unified side by side review checkout",
+        },
+        {
+          id: settingId("code-language-services"),
+          label: "Language services",
+          scope: "mode",
+          keywords:
+            "language services language server typescript javascript type errors diagnostics problems go to definition lsp editor bundled",
         },
         {
           id: settingId("project-view-switcher"),

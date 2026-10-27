@@ -129,8 +129,13 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     yield* Effect.addFinalizer(() => Effect.sync(unsubscribeProjectTerminalAuthority));
     // Language services: confined language servers started on demand for a
     // Code checkout (docs/design/language-services.md). The bundled
-    // TypeScript server is the only component today; it is on by default and
-    // reads as unavailable on an install that has no binary for this host.
+    // TypeScript server is the only component today; it is on by default,
+    // Settings › Code turns it off, and it reads as unavailable on an install
+    // that has no binary for this host.
+    const bundledLanguageServers = bundledLanguageServerComponents(
+      resolveBundledTypeScriptServerBinary(),
+      () => persistence.readCodeSettings()?.settings.bundledLanguageServer !== false,
+    );
     const languageServerProcesses = new LanguageServerProcessPort({
       receiptDirectory: join(persistence.dataDirectory, "code", "language-server-receipts"),
     });
@@ -144,7 +149,8 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
         resolveRoot: (scopeId, thread, checkout, relativePath) =>
           roots.resolve(scopeId, thread, checkout, relativePath),
       },
-      components: bundledLanguageServerComponents(resolveBundledTypeScriptServerBinary()),
+      components: () => bundledLanguageServers("effective"),
+      turnedOffComponents: () => bundledLanguageServers("turned-off"),
       processes: languageServerProcesses,
       platform: languageServerHostPlatform(process.platform),
       cacheRoot: join(persistence.dataDirectory, "code", "language-server-cache"),
@@ -153,13 +159,16 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     // A previous run's servers are ended before this run starts any.
     yield* Effect.promise(() => languageServerProcesses.reconcile().catch(() => undefined));
     languageService.startSweeping();
-    // An archived or completed thread, or a checkout that went away, stops its
-    // server at once rather than at the next timed sweep.
+    // An archived or completed thread, a checkout that went away, or the
+    // Settings switch turned off stops its server at once rather than at the
+    // next timed sweep.
     const unsubscribeLanguageServerAuthority = persistence.journal.subscribeCommitted((append) => {
       if (
         append.events.some(
           (event) =>
-            event.aggregateType === "code-thread" || event.aggregateType === "code-checkout",
+            event.aggregateType === "code-thread" ||
+            event.aggregateType === "code-checkout" ||
+            event.aggregateType === "code-settings",
         )
       ) {
         void languageService.sweep().catch(() => undefined);
@@ -372,21 +381,27 @@ function resolveBundledTypeScriptServerBinary(): string | undefined {
 }
 
 /**
- * The bundled language servers effective in Code, read on every request so a
- * component that stops being effective stops contributing at once.
+ * The bundled language servers in Code, read on every request so a component
+ * that stops being effective stops contributing at once. `effective` lists
+ * the ones that serve; `turned-off` lists the ones that would serve but for
+ * the person's Settings › Code switch, which is the component's own desired
+ * switch on the activation ladder rather than a second gate beside it.
  */
 function bundledLanguageServerComponents(
   typeScriptBinary: string | undefined,
-): () => ReadonlyArray<CodeLanguageServerComponent> {
+  switchedOn: () => boolean,
+): (which: "effective" | "turned-off") => ReadonlyArray<CodeLanguageServerComponent> {
   const bundled = bundledLanguageServerComponent(BUNDLED_TYPESCRIPT_LANGUAGE_SERVER);
-  return () => {
-    const activation = resolveBundledLanguageServerActivation(
-      BUNDLED_TYPESCRIPT_LANGUAGE_SERVER,
-      "code",
-      { unavailable: typeScriptBinary === undefined },
-    );
+  const servesWith = (componentDesired: boolean) =>
+    resolveBundledLanguageServerActivation(BUNDLED_TYPESCRIPT_LANGUAGE_SERVER, "code", {
+      unavailable: typeScriptBinary === undefined,
+      componentDesired,
+    }).kind === "effective";
+  return (which) => {
+    const on = switchedOn();
+    const listed = which === "effective" ? servesWith(on) : !on && servesWith(true);
     if (
-      activation.kind !== "effective" ||
+      !listed ||
       typeScriptBinary === undefined ||
       bundled.entryPoint !== BUNDLED_TYPESCRIPT_LANGUAGE_SERVER_ENTRY_POINT
     ) {

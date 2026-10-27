@@ -327,15 +327,7 @@ export class ProviderService implements ProviderServiceApi {
         .map((state) => {
           const instance = instanceById.get(String(state.instanceId));
           if (instance === undefined || !this.#isDriverKindAvailable(instance.driverKind)) {
-            const unavailable = decodeProviderObservedState({
-              instanceId: state.instanceId,
-              readiness: "unavailable",
-              processState: "stopped",
-              models: [],
-              capabilities: unavailableCapabilities,
-              message: "This provider driver is not available.",
-              observedAt: state.observedAt,
-            });
+            const unavailable = driverNotAdmittedObservation(state.instanceId, state.observedAt);
             return instance === undefined
               ? unavailable
               : withRuntimeIntegration(instance.driverKind, unavailable);
@@ -834,7 +826,9 @@ export class ProviderService implements ProviderServiceApi {
             // It is forgotten only once the removal is allowed, so a removal
             // refused for active sessions keeps the sign-in.
             if (
-              current.driverKind === "azure-foundry" &&
+              (current.driverKind === "azure-foundry" ||
+                current.driverKind === "openai-compatible" ||
+                current.driverKind === "anthropic-compatible") &&
               current.configuration.authentication === "directory-oauth"
             ) {
               await this.#forgetCredentialForOldEndpoint(current.id);
@@ -1258,7 +1252,10 @@ export class ProviderService implements ProviderServiceApi {
           throw this.#invalid("Enable this provider before probing it.");
         }
         if (!this.#isDriverKindAvailable(instance.driverKind)) {
-          this.#runtime.clearObservedState(instanceId);
+          // Keep the block visible rather than leaving the instance unobserved.
+          this.#runtime.setObservedState(
+            driverNotAdmittedObservation(instanceId, decodeTimestamp(this.#clock())),
+          );
           this.#clearRuntimeUsageLimits?.(instanceId);
           throw this.#unsupported("This provider driver is not available.");
         }
@@ -1457,6 +1454,12 @@ export class ProviderService implements ProviderServiceApi {
     if (isImageProfileDriverKind(instance.driverKind)) {
       this.#runtime.clearObservedState(instance.id);
       return undefined;
+    }
+    // Decided before the factory runs: a driver the activation ladder does not
+    // admit (every outside driver, until its package is admitted) is never
+    // built, so no driver code runs to describe its own block.
+    if (!this.#isDriverKindAvailable(instance.driverKind)) {
+      return driverNotAdmittedObservation(instance.id, decodeTimestamp(this.#clock()));
     }
     if (this.#claudeAccountNeedsOwnConfigDirectory(instance)) {
       return decodeProviderObservedState({
@@ -2136,13 +2139,26 @@ function sameCatalogContent(
  * What a stored credential is bound to, for the endpoint profiles whose
  * credential the host keeps by instance: the base URL a key is sent to and,
  * for Azure AI Foundry, how it signs in and the tenant and client a sign-in
- * holds. Ollama also has a base URL but sends no key.
+ * holds, or for a gateway, the issuer, client, and scope its sign-in holds.
+ * Ollama also has a base URL but sends no key.
  */
 function credentialBinding(instance: ProviderInstance): string | undefined {
   switch (instance.driverKind) {
     case "openai-compatible":
-    case "anthropic-compatible":
-      return instance.configuration.baseUrl;
+    case "anthropic-compatible": {
+      // A gateway's organization sign-in is held for one issuer, client,
+      // scope, and address; a key only for its address.
+      const configuration = instance.configuration;
+      return configuration.authentication === "directory-oauth"
+        ? [
+            configuration.baseUrl,
+            "directory-oauth",
+            String(configuration.directory.issuer),
+            String(configuration.directory.clientId),
+            String(configuration.directory.scope),
+          ].join("\n")
+        : configuration.baseUrl;
+    }
     case "azure-foundry": {
       const configuration = instance.configuration;
       return configuration.authentication === "directory-oauth"
@@ -2608,6 +2624,26 @@ function probeFailureReadiness(
   return "degraded";
 }
 
+/**
+ * What an instance reports while its driver is not effective on the activation
+ * ladder: a closed reason, Octant's own words, and nothing it could offer.
+ */
+function driverNotAdmittedObservation(
+  instanceId: ProviderInstanceId,
+  observedAt: ProviderObservedState["observedAt"],
+): ProviderObservedState {
+  return decodeProviderObservedState({
+    instanceId,
+    readiness: "unavailable",
+    processState: "stopped",
+    models: [],
+    capabilities: unavailableCapabilities,
+    message: "This provider driver is not available.",
+    reason: "driver-not-admitted",
+    observedAt,
+  });
+}
+
 function probeFailureMessage(
   readiness: Exclude<ProviderObservedState["readiness"], "ready" | "checking">,
   reason?: ProviderObservedState["reason"],
@@ -2616,6 +2652,7 @@ function probeFailureMessage(
   if (reason === "authentication-required") return "Provider authentication is required.";
   if (reason === "runtime-unavailable") return "Provider runtime is unavailable.";
   if (reason === "no-usable-model") return "No usable model is available.";
+  if (reason === "driver-not-admitted") return "This provider driver is not available.";
   if (readiness === "unauthenticated") return "Provider authentication is required.";
   if (readiness === "unavailable") return "Provider runtime is unavailable.";
   if (readiness === "incompatible") return "Provider configuration is incompatible.";

@@ -5,6 +5,7 @@ import { ProviderChildActivityEvent } from "./providers";
 import { Schema } from "effect";
 import { AgentRunResultDeliveryMark, MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS } from "./agentRun";
 import { ExtensionSelection } from "./extensions";
+import { ComputerUseDestinationSelection } from "./desktopLease";
 import { AppleActionRequest, AppleDeviceRequest } from "./appleToolchain";
 import { AndroidEmulatorRequest } from "./androidToolchain";
 import {
@@ -672,6 +673,11 @@ const StartProviderTurn = Schema.Struct({
   prompt: CodeEvidenceReference,
   extensionSelections: Schema.optional(Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32))),
   computerUseSelection: Schema.optional(ExtensionSelection),
+  /**
+   * Where the selected Computer tool acts when not on this Mac: one of the
+   * thread's own desktop leases. Valid only beside `computerUseSelection`.
+   */
+  computerUseDestination: Schema.optional(ComputerUseDestinationSelection),
   /**
    * `#thread` mentions this turn points at. Ids only: the host
    * re-derives the sender's Open authority over each thread and reads its

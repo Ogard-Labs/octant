@@ -16,7 +16,7 @@ import { spawn } from "node:child_process";
 import { createServer, type AddressInfo } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   decodeDesktopHostTag,
@@ -26,9 +26,18 @@ import {
   decodeUtcTimestamp,
   type DesktopLeaseId,
   type DesktopRecipe,
+  type ProviderExecutionPolicy,
+  decodeToolActionAuthority,
 } from "@octant/contracts";
+import {
+  decodeComputerControlCommand,
+  decodeComputerUseOwner,
+} from "@octant/contracts/computer-use-plugin";
 import type { DesktopLaunchPort, DesktopProvider } from "@octant/plugin-api/desktop-provider";
 import { runDesktopProviderConformance } from "@octant/plugin-api/desktop-provider-conformance";
+import { computerUseSelection } from "@octant/plugin-host/computer-use";
+import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
+import { createComputerUseToolService } from "./computerUseToolService";
 import {
   createHostLocalDesktopProvider,
   HOST_LOCAL_DESKTOP_PROGRAMS,
@@ -39,7 +48,7 @@ import { catchUpProjection } from "../persistence/projection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import { DEFAULT_BWRAP_PATH } from "../process/linuxConfinement";
-import { createDesktopLeaseService } from "./desktopLeaseService";
+import { createDesktopLeaseService, createLeasedComputerUsePort } from "./desktopLeaseService";
 import { createHostLocalDesktopLaunch } from "./hostLocalDesktopLaunch";
 
 /**
@@ -59,6 +68,12 @@ const recipe: DesktopRecipe = decodeDesktopRecipe({
   idleMinutes: 15,
 });
 const START = Date.parse("2026-10-26T12:00:00.000Z");
+/** A command addressed to an accessibility element, which this desktop has none of. */
+const ELEMENT_CLICK = decodeComputerControlCommand({
+  operation: "click",
+  observationId: randomUUID(),
+  elementIndex: 0,
+});
 
 function executable(path: string): boolean {
   try {
@@ -426,7 +441,12 @@ function openJournal(connection: SqliteConnection) {
 }
 
 /** One host process over a data directory: its journal, launch port, driver, and lease service. */
-function hostOver(connection: SqliteConnection, directory: string, checkout?: string) {
+function hostOver(
+  connection: SqliteConnection,
+  directory: string,
+  checkout?: string,
+  executionPolicy: ProviderExecutionPolicy = "full-access",
+) {
   const { journal, projection } = openJournal(connection);
   const port = createHostLocalDesktopLaunch({
     directory,
@@ -444,7 +464,7 @@ function hostOver(connection: SqliteConnection, directory: string, checkout?: st
     hasScreen: false,
     providers: () => [{ provider, effective: true }],
     recipe: () => recipe,
-    thread: () => ({ active: true, executionPolicy: "full-access" }),
+    thread: () => ({ active: true, executionPolicy }),
     callerMayOpen: () => true,
     computerUseEnabled: () => true,
     confirm: async () => "approved",
@@ -454,7 +474,7 @@ function hostOver(connection: SqliteConnection, directory: string, checkout?: st
     now: () => Date.now(),
     uuid: randomUUID,
   });
-  return { service, projection };
+  return { service, projection, journal };
 }
 
 describe("host-local desktop under real Bubblewrap and Xvfb", () => {
@@ -593,7 +613,7 @@ describe("host-local desktop under real Bubblewrap and Xvfb", () => {
             };
           },
           recipe,
-          unsupportedCommand: { operation: "apps" },
+          unsupportedCommand: ELEMENT_CLICK,
         }),
       ).resolves.toMatchObject({ stoppedWhenCancelled: true, reportedAbsenceOnlyWhenAbsent: true });
       const leftover = await port.listOwned(hostTag);
@@ -601,5 +621,172 @@ describe("host-local desktop under real Bubblewrap and Xvfb", () => {
         await port.stop(leaseId);
       }
     },
+  );
+
+  it.runIf(canRunDesktop && executable("/usr/bin/xev"))(
+    "lets a scripted agent turn send, launch, observe, click, type into, and screenshot a GUI app",
+    async () => {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-host-desktop-")));
+      directories.push(root);
+      const directory = join(root, "desktop-leases");
+      const checkout = join(root, "checkout");
+      mkdirSync(join(checkout, "dist"), { recursive: true });
+      // The app under test: a window that logs every event it receives into the desktop's home.
+      const app = '#!/bin/sh\nexec xev -geometry 320x200+0+0 > "$HOME/events" 2>/dev/null\n';
+      writeFileSync(join(checkout, "dist", "notes-app"), app);
+      const connection = openSqlite(join(root, "octant.sqlite3"));
+      applyMigrations(connection, MIGRATIONS, () => new Date(START).toISOString());
+      const { service, projection } = hostOver(connection, directory, checkout, "approval-gated");
+      const threadId = randomUUID();
+      const person = decodeEventActor({ kind: "local-user", actorId: randomUUID() });
+      const acquired = await service.acquire({ owner: { mode: "code", threadId }, actor: person });
+      if (acquired.status !== "acquired") throw new Error("not acquired");
+      const leaseId = acquired.lease.leaseId;
+
+      const owner = decodeComputerUseOwner({
+        windowId: randomUUID(),
+        threadId,
+        mode: "code",
+        providerInstanceId: randomUUID(),
+        modelId: "scripted",
+        executionPolicy: "approval-gated",
+        leaseId,
+      });
+      const authority = decodeToolActionAuthority({
+        hostId: randomUUID(),
+        mode: "code",
+        projectId: randomUUID(),
+        providerInstanceId: owner.providerInstanceId,
+        extension: { kind: "core" },
+      });
+      const asked: Array<string> = [];
+      const ingested: Array<string> = [];
+      const computer = createComputerUseToolService({
+        leases: createLeasedComputerUsePort(service, projection),
+        settings: () => ({ enabled: true, automaticUpdates: true }),
+        authority: () => authority,
+        ownerIsCurrent: () => true,
+        toolConstraints: () => [],
+        externalContentIngested: () => ingested.length > 0,
+        threadTitle: () => "Notes app",
+        record: () => undefined,
+      });
+      const bound = computer.toolSet(owner, computerUseSelection("scripted"), true, async (q) => {
+        asked.push(q);
+        return "approved";
+      });
+      if (bound === undefined) throw new Error("the send did not bind its desktop");
+      const tools = taintAppManagedToolResults({
+        tools: bound,
+        threadId,
+        recordExternalContentIngestion: (input) => {
+          ingested.push(String(input.contentReference));
+          return { kind: "ignored", reason: "not-tainting" };
+        },
+        uuid: randomUUID,
+      });
+      const turn = (input: Record<string, unknown>) =>
+        tools.execute({ name: "octant_computer", inputJson: JSON.stringify(input) });
+      const observe = async () => {
+        const observed = await turn({ operation: "observe", appId: "notes-app", windowId: 1 });
+        if (
+          typeof observed.result !== "object" ||
+          observed.result === null ||
+          !("observationId" in observed.result) ||
+          typeof observed.result.observationId !== "string"
+        )
+          throw new Error(`no observation: ${JSON.stringify(observed.result)}`);
+        return { observationId: observed.result.observationId, images: observed.images ?? [] };
+      };
+
+      try {
+        await expect(turn({ operation: "send-file", path: "dist/notes-app" })).resolves.toEqual({
+          result: {
+            kind: "sent",
+            name: "notes-app",
+            size: app.length,
+            sha256: createHash("sha256").update(app).digest("hex"),
+          },
+          isError: false,
+        });
+        expect(asked[0]).toContain("dist/notes-app");
+        await expect(turn({ operation: "apps" })).resolves.toMatchObject({
+          result: { kind: "apps", apps: [{ appId: "notes-app" }] },
+        });
+        await expect(turn({ operation: "launch", appId: "notes-app" })).resolves.toMatchObject({
+          result: { kind: "windows", windows: [{ windowId: 1 }] },
+        });
+
+        // The window takes a moment to map; observe until the screen changes.
+        const first = await observe();
+        let shown = first;
+        for (let attempt = 0; attempt < 15; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          shown = await observe();
+          if (JSON.stringify(shown.images) !== JSON.stringify(first.images)) break;
+        }
+        await turn({ operation: "click", observationId: shown.observationId, x: 40, y: 40 });
+        await turn({
+          operation: "type",
+          observationId: shown.observationId,
+          text: "hi",
+        });
+        await turn({ operation: "press", observationId: shown.observationId, key: "Enter" });
+
+        // What the window itself received: the click, each typed key, and Enter.
+        const events = join(directory, "desktops", String(leaseId), "home", "events");
+        const received = () => (existsSync(events) ? readFileSync(events, "utf8") : "");
+        for (let attempt = 0; attempt < 50 && !received().includes("Return"); attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 200));
+        }
+        expect(received()).toContain("ButtonPress event");
+        expect(received()).toMatch(/KeyPress event[^]*keysym 0x[0-9a-f]+, h\)/);
+        expect(received()).toMatch(/KeyPress event[^]*keysym 0x[0-9a-f]+, i\)/);
+        expect(received()).toMatch(/KeyPress event[^]*keysym 0x[0-9a-f]+, Return\)/);
+
+        const screenshot = await observe();
+        expect(screenshot.images).toEqual([
+          { mimeType: "image/png", data: expect.stringMatching(/^iVBORw0KGgo/) },
+        ]);
+
+        // Per-app approval held under taint: every action after the first result asked again.
+        expect(ingested.length).toBeGreaterThan(0);
+        expect(
+          asked.filter((question) => question.startsWith("Allow this one action in notes-app")),
+        ).not.toHaveLength(0);
+        const journaled = connection
+          .prepare(
+            "SELECT event_name, actor_kind, payload_json FROM event_journal WHERE aggregate_id = ? AND event_name IN (?, ?) ORDER BY global_sequence",
+          )
+          .all(String(leaseId), "desktop.artifact-sent@1", "desktop.operated@1") as Array<{
+          event_name: string;
+          actor_kind: string;
+          payload_json: string;
+        }>;
+        expect(
+          journaled.map((row) => [
+            row.actor_kind,
+            row.event_name === "desktop.operated@1"
+              ? (JSON.parse(row.payload_json) as { operation: string }).operation
+              : "sent",
+          ]),
+        ).toEqual([
+          ["agent", "sent"],
+          ["agent", "launch"],
+          ["agent", "click"],
+          ["agent", "type"],
+          ["agent", "press"],
+        ]);
+        expect(journaled.map((row) => row.payload_json).join("")).not.toContain('"hi"');
+      } finally {
+        await tools.close?.();
+        await computer.close();
+        await service.release({ owner: { mode: "code", threadId }, actor: person, leaseId });
+        connection.close();
+      }
+      expect(existsSync(join(directory, "desktops", String(leaseId)))).toBe(false);
+    },
+    // Every action waits on an approval and a screen grab inside a capsule.
+    120_000,
   );
 });

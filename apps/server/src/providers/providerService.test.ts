@@ -794,6 +794,7 @@ describe("ProviderService", () => {
             context: { usage: "not-confirmed", compaction: "not-confirmed" },
           },
           message: "This provider driver is not available.",
+          reason: "driver-not-admitted",
           observedAt: now,
         },
       ],
@@ -821,6 +822,44 @@ describe("ProviderService", () => {
       }),
     ).rejects.toThrow(/not available/);
     expect(createFixture.append).not.toHaveBeenCalled();
+  });
+
+  it("reports an outside driver instance as not admitted, with no models, and never builds its driver", async () => {
+    const driver = vi.fn((): never => {
+      throw new Error("An outside driver must not be built before it is admitted.");
+    });
+    const fixture = serviceFixture({
+      instances: [outsideProvider()],
+      withCatalogPersistence: true,
+      initialCatalog: persistedCatalog(),
+      driver,
+    });
+    // A ready observation left over from elsewhere must not leak models.
+    fixture.runtime.setObservedState(observation());
+
+    const snapshot = await fixture.service.bootstrap(windowId);
+    expect(snapshot.catalogs).toBeUndefined();
+    expect(snapshot.observedStates).toHaveLength(1);
+    const [blocked] = snapshot.observedStates;
+    expect(blocked).toMatchObject({
+      instanceId,
+      readiness: "unavailable",
+      processState: "stopped",
+      models: [],
+      reason: "driver-not-admitted",
+      message: "This provider driver is not available.",
+    });
+    expect(new Set(Object.values(blocked?.capabilities ?? {}))).toEqual(new Set(["unavailable"]));
+
+    await expect(fixture.service.probe(windowId, instanceId)).rejects.toThrow(/not available/);
+    expect(fixture.runtime.observedState(instanceId)).toMatchObject({
+      readiness: "unavailable",
+      models: [],
+      reason: "driver-not-admitted",
+    });
+    await fixture.service.warmEnabledProviders();
+    expect(fixture.probe).not.toHaveBeenCalled();
+    expect(driver).not.toHaveBeenCalled();
   });
 
   it("refuses to probe an image profile and records no observation", async () => {
@@ -5086,6 +5125,30 @@ function provider(overrides: Record<string, unknown> = {}) {
   });
 }
 
+function outsideProvider(overrides: Record<string, unknown> = {}) {
+  return decodeProviderInstance({
+    id: instanceId,
+    displayName: "Local chat server",
+    driverKind: "outside-harness-endpoint",
+    configuration: {
+      kind: "outside-harness-endpoint",
+      driver: {
+        extensionId: "00000000-0000-4000-8000-000000000911",
+        packageId: "00000000-0000-4000-8000-000000000912",
+        componentId: "provider-driver",
+        version: "1.2.0",
+        digest: `sha256:${"a".repeat(64)}`,
+      },
+    },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1,
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  });
+}
+
 function kimiProvider(overrides: Record<string, unknown> = {}) {
   return decodeProviderInstance({
     id: instanceId,
@@ -5595,6 +5658,73 @@ describe("a stored provider key and the base URL it was entered for", () => {
       expectedVersion: version,
     } as never);
     expect(clearProviderCredential).toHaveBeenCalledTimes(6);
+  });
+
+  it("removes a gateway's organization sign-in when its client, scope, or address changes, or it is removed, and refuses another issuer", async () => {
+    const signedIn = {
+      kind: "openai-compatible-http",
+      baseUrl: "https://gateway.example/v1/",
+      authentication: "directory-oauth",
+      protocol: "auto",
+      manualModelIds: ["model-a"],
+      directory: {
+        issuer: "https://login.gateway.example/oauth2/default",
+        clientId: "0oa1octantDesktop",
+        scope: "gateway.models",
+      },
+    } as const;
+    const clearProviderCredential = vi.fn(async () => undefined);
+    const fixture = serviceFixture({
+      instances: [httpProvider({ configuration: signedIn })],
+      clearProviderCredential,
+    });
+    let version = 1;
+    const change = async (configuration: unknown) => {
+      await fixture.service.execute(windowId, {
+        kind: "change-openai-compatible-configuration",
+        instanceId,
+        expectedVersion: version,
+        configuration,
+      } as never);
+      version += 1;
+      return clearProviderCredential.mock.calls.length;
+    };
+    const directory = signedIn.directory;
+
+    // Only the models changed: the sign-in still holds.
+    expect(await change({ ...signedIn, manualModelIds: ["model-b"] })).toBe(0);
+    // Another client, scope, or address drops the grant; it is never rebound.
+    expect(await change({ ...signedIn, directory: { ...directory, clientId: "0oa1other" } })).toBe(
+      1,
+    );
+    expect(
+      await change({
+        ...signedIn,
+        directory: { ...directory, clientId: "0oa1other", scope: "gateway.chat" },
+      }),
+    ).toBe(2);
+    expect(
+      await change({
+        ...signedIn,
+        baseUrl: "https://gateway-2.example/v1/",
+        directory: { ...directory, clientId: "0oa1other", scope: "gateway.chat" },
+      }),
+    ).toBe(3);
+    // The issuer is fixed: the change is refused before anything is removed.
+    await expect(
+      change({
+        ...signedIn,
+        directory: { ...directory, issuer: "https://login.elsewhere.example/oauth2/default" },
+      }),
+    ).rejects.toMatchObject({ failure: { message: expect.stringContaining("issuer is fixed") } });
+    expect(clearProviderCredential).toHaveBeenCalledTimes(3);
+
+    await fixture.service.execute(windowId, {
+      kind: "remove-provider",
+      instanceId,
+      expectedVersion: version,
+    } as never);
+    expect(clearProviderCredential).toHaveBeenCalledTimes(4);
   });
 
   it("keeps an Azure AI Foundry organization sign-in when its removal is refused for active sessions", async () => {

@@ -49,6 +49,7 @@ import {
   type CodeRuntimeWorkId,
   type CodeOperationResult,
   type CodeThread,
+  type ComputerUseDestinationSelection,
   type CodeThreadId,
   type EventActor,
   type PendingRequest,
@@ -269,10 +270,20 @@ export interface CodeOperationRuntimeOptions {
    * stream, so the change feed would otherwise never say it is gone.
    */
   readonly onPendingRequestWithdrawn?: () => void;
+  /**
+   * The turn's Computer tool, bound to the send's destination: this Mac, or
+   * one of the thread's disposable desktops. `ask` asks the turn's person in
+   * the thread, which is where a desktop's approvals are answered.
+   */
   readonly computerUseTools?: (input: {
     readonly windowId: WindowId;
     readonly thread: CodeThread;
     readonly selection: import("@octant/contracts/extensions").ExtensionSelection;
+    readonly destination?: ComputerUseDestinationSelection;
+    readonly ask: (
+      summary: string,
+      signal?: AbortSignal,
+    ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
   }) => AppManagedToolSet | undefined;
   /**
    * A refusal-only `octant_computer` for turns that carry no Computer
@@ -2093,6 +2104,7 @@ interface ActiveTurn {
    */
   pendingForkMerges?: ReadonlyArray<ForkContextDelivered>;
   readonly computerUseSelection?: import("@octant/contracts/extensions").ExtensionSelection;
+  readonly computerUseDestination?: ComputerUseDestinationSelection;
   /** The selected MCP servers' tools, resolved when the turn was accepted. */
   readonly extensionTools?: AppManagedToolSet;
   readonly extensionSelections?: ReadonlyArray<
@@ -2449,6 +2461,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         "This provider cannot carry Octant's Browser tool. Check the provider's connection in Settings, then retry without the Browser selection.",
       );
     }
+    if (command.computerUseDestination !== undefined && command.computerUseSelection === undefined)
+      return failStart("A Computer destination needs the Computer selection in the same message.");
     if (
       command.computerUseSelection !== undefined &&
       (this.#options.supportsAppManagedTools?.(input.thread) !== true ||
@@ -2456,10 +2470,18 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           windowId: input.windowId,
           thread: input.thread,
           selection: command.computerUseSelection,
+          ...(command.computerUseDestination === undefined
+            ? {}
+            : { destination: command.computerUseDestination }),
+          // Admission only checks that the send can bind its destination;
+          // the turn's own tool set asks in its thread.
+          ask: () => Promise.resolve("cancelled"),
         }) === undefined)
     )
       return failStart(
-        "This provider cannot carry Octant's Computer tool. Check the provider's connection in Settings, then retry without the Computer selection.",
+        command.computerUseDestination === undefined
+          ? "This provider cannot carry Octant's Computer tool. Check the provider's connection in Settings, then retry without the Computer selection."
+          : "The selected desktop is not this thread's running desktop, or this provider cannot carry Octant's Computer tool. Choose a running desktop of this thread and retry.",
       );
     const secrets: string[] = [];
     for (const credential of root.credentialReferences) {
@@ -2605,6 +2627,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       ...(command.computerUseSelection === undefined
         ? {}
         : { computerUseSelection: command.computerUseSelection }),
+      ...(command.computerUseDestination === undefined
+        ? {}
+        : { computerUseDestination: command.computerUseDestination }),
       ...(input.extensionTools === undefined ? {} : { extensionTools: input.extensionTools }),
       ...(command.extensionSelections === undefined || command.extensionSelections.length === 0
         ? {}
@@ -3469,6 +3494,15 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               windowId: active.windowId,
               thread: active.thread,
               selection: active.computerUseSelection,
+              ...(active.computerUseDestination === undefined
+                ? {}
+                : { destination: active.computerUseDestination }),
+              ask: (summary, signal) => {
+                const bounded = boundProviderSummary(summary);
+                return bounded === undefined
+                  ? Promise.resolve("cancelled")
+                  : this.#askToolApproval(active, bounded, undefined, signal);
+              },
             }),
         createCodeAppManagedTools({
           windowId: active.windowId,

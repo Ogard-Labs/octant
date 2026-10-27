@@ -257,7 +257,13 @@ export function createProviderDeviceSignInRouteHandler(
       instance.driverKind !== "azure-foundry" ||
       instance.configuration.authentication !== "directory-oauth"
     ) {
-      return refuse("no-organization-sign-in");
+      // A gateway that signs in with its organization's own issuer does so on
+      // the loopback redirect alone; device code is Azure AI Foundry's opt-in.
+      const gateway =
+        (instance.driverKind === "openai-compatible" ||
+          instance.driverKind === "anthropic-compatible") &&
+        instance.configuration.authentication === "directory-oauth";
+      return refuse(gateway ? "device-code-not-enabled" : "no-organization-sign-in");
     }
     if (instance.configuration.deviceCodeSignIn !== true) {
       return refuse("device-code-not-enabled");

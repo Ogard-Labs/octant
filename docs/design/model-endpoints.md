@@ -140,6 +140,30 @@ access (signed in without a role on the resource; no fix, a sentence naming
 the role to ask for), and Sign-in doesn't match (the sign-in is for another
 tenant, client, or address; Sign in again). None offers a key.
 
+### Organization sign-in (a gateway's own issuer)
+
+An OpenAI-compatible or Anthropic-compatible endpoint the person adds by
+address (not a preset) may sign in at the organization's own OpenID Connect
+issuer instead of a key ([Enterprise provider identity](enterprise-provider-identity.md)
+owns the authority and binding rules). Connect's **Sign in with** choice (API
+key, or Organization account (your sign-in provider)) replaces the key field
+with Issuer, Client ID, and Scope. The issuer is trimmed and otherwise saved
+exactly as typed, since the host compares it with what the tokens name; a
+value that is not an https address, a client ID with other than letters,
+digits, `.`, `_`, `~`, or `-`, or an identity scope such as `openid` is
+refused with a sentence naming all three. The endpoint is added with no key
+and reads Sign in to use; the sign-in starts from its detail page.
+
+The detail page uses the same Sign-in panel as Azure AI Foundry, with the
+gateway's own consent line. Name and address shows the issuer as fixed text,
+never as a field, and offers Client ID and Scope; the note says changing the
+client, scope, or address signs the endpoint out and that the issuer is fixed,
+so signing in at another means adding a new endpoint. It offers no key field,
+no key clear button, and no subscription sign-in, and a key endpoint offers no
+way to become an organization one. Diagnostics' "Signed in for" names the
+issuer, client, and origin. Row states are those of the Foundry sign-in; No
+access says the gateway refused the account and names no Azure role.
+
 Octant Harness uses the existing `icons.svg#aperture` brand mark in provider lists
 and model pickers. The mark inherits the theme's text color; the surrounding
 control supplies its accessible name.

@@ -3,11 +3,13 @@ import {
   DESKTOP_LEASE_EVENT_NAMES,
   DesktopArtifactSent,
   DesktopLeaseExtended,
+  DesktopLeaseOperated,
   DesktopLeaseRequested,
   DesktopLeaseTransitioned,
   decodeDesktopArtifactSent,
   decodeDesktopLease,
   decodeDesktopLeaseExtended,
+  decodeDesktopLeaseOperated,
   decodeDesktopLeaseRequested,
   decodeDesktopLeaseTransitioned,
   type DesktopHostTag,
@@ -24,7 +26,8 @@ export function registerDesktopLeaseEvents(registry: EventRegistry): EventRegist
     .register(DESKTOP_LEASE_EVENT_NAMES.requested, 1, DesktopLeaseRequested)
     .register(DESKTOP_LEASE_EVENT_NAMES.transitioned, 1, DesktopLeaseTransitioned)
     .register(DESKTOP_LEASE_EVENT_NAMES.extended, 1, DesktopLeaseExtended)
-    .register(DESKTOP_LEASE_EVENT_NAMES.artifactSent, 1, DesktopArtifactSent);
+    .register(DESKTOP_LEASE_EVENT_NAMES.artifactSent, 1, DesktopArtifactSent)
+    .register(DESKTOP_LEASE_EVENT_NAMES.operated, 1, DesktopLeaseOperated);
 }
 
 export interface DesktopLeaseRecord {
@@ -102,6 +105,12 @@ export class DesktopLeaseProjection implements Projection {
       // A transfer leaves the lease as it was; only the aggregate's version moves.
       const sent = decodeDesktopArtifactSent(event.payload);
       this.#update(sent.leaseId, version, (lease) => lease);
+      return;
+    }
+    if (event.eventName === DESKTOP_LEASE_EVENT_NAMES.operated) {
+      // An input leaves the lease as it was; only the aggregate's version moves.
+      const operated = decodeDesktopLeaseOperated(event.payload);
+      this.#update(operated.leaseId, version, (lease) => lease);
     }
   }
 

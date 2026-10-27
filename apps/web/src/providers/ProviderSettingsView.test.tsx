@@ -1982,6 +1982,63 @@ describe("ProviderSettingsView", () => {
     expect(saves[1]?.[1]).not.toHaveProperty("deviceCodeSignIn");
   });
 
+  it("keeps a gateway's organization sign-in on save with its issuer fixed and no key, and shows who is signed in", async () => {
+    const user = userEvent.setup();
+    const onProviderOAuth = vi.fn(async () => ({
+      kind: "signed-in" as const,
+      accountLabel: "ada@example.test",
+    }));
+    const props = {
+      ...fixture({
+        instance: directoryGatewayProvider(),
+        observed: observation({
+          models: [],
+          directoryBinding: {
+            issuer: "https://login.example.test/oauth2/gateway" as never,
+            clientId: "0oa1octantDesktop" as never,
+            endpointOrigin: "https://llm.example.test",
+          },
+        }),
+      }),
+      onProviderOAuth,
+    };
+    renderExpanded(<ModelEndpointSettingsView {...props} />);
+
+    expect(await screen.findByText("ada@example.test")).toBeVisible();
+    expect(onProviderOAuth).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "status", descriptorId: "gateway-directory" }),
+    );
+    const card = screen.getByLabelText("Company gateway");
+    expect(within(card).queryByLabelText("API key for Company gateway")).not.toBeInTheDocument();
+    expect(
+      within(card).getByText(/Issuer https:\/\/login\.example\.test\/oauth2\/gateway · client/),
+    ).toBeInTheDocument();
+    // The issuer is shown, not offered for editing.
+    expect(within(card).queryByRole("textbox", { name: /Issuer/ })).not.toBeInTheDocument();
+    const scope = within(card).getByLabelText("Scope for Company gateway");
+    await user.clear(scope);
+    await user.type(scope, "gateway.chat");
+    await user.click(
+      within(card).getByRole("button", { name: "Save HTTP settings for Company gateway" }),
+    );
+
+    const [, configuration, credential] = vi.mocked(props.onChangeOpenAiCompatibleConfiguration)
+      .mock.calls[0]!;
+    expect(configuration).toEqual({
+      kind: "openai-compatible-http",
+      baseUrl: "https://llm.example.test/v1/",
+      authentication: "directory-oauth",
+      protocol: "auto",
+      manualModelIds: [],
+      directory: {
+        issuer: "https://login.example.test/oauth2/gateway",
+        clientId: "0oa1octantDesktop",
+        scope: "gateway.chat",
+      },
+    });
+    expect(credential.value).toBe("");
+  });
+
   it("says when the organization wants a Foundry sign-in repeated in person", async () => {
     const onProviderOAuth = vi.fn(async () => ({
       kind: "expired" as const,
@@ -4962,6 +5019,31 @@ function foundryProvider(): ProviderInstance {
     version: 1 as never,
     createdAt: "2026-07-19T10:00:00.000Z" as never,
     updatedAt: "2026-07-19T10:00:00.000Z" as never,
+  };
+}
+
+function directoryGatewayProvider(): ProviderInstance {
+  return {
+    id,
+    displayName: "Company gateway",
+    driverKind: "openai-compatible",
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1 as never,
+    createdAt: "2026-07-19T10:00:00.000Z" as never,
+    updatedAt: "2026-07-19T10:00:00.000Z" as never,
+    configuration: {
+      kind: "openai-compatible-http",
+      baseUrl: "https://llm.example.test/v1/",
+      authentication: "directory-oauth",
+      protocol: "auto",
+      manualModelIds: [],
+      directory: {
+        issuer: "https://login.example.test/oauth2/gateway" as never,
+        clientId: "0oa1octantDesktop" as never,
+        scope: "gateway.models" as never,
+      },
+    },
   };
 }
 

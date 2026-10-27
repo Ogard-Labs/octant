@@ -851,6 +851,32 @@ describe("CodeService commands", () => {
     );
   });
 
+  it("keeps the bundled language server switch a person turned off across later default changes", async () => {
+    const fixture = serviceFixture();
+
+    const turnedOff = await fixture.service.execute(ids.window, {
+      kind: "update-code-settings",
+      expectedVersion: 0,
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+      bundledLanguageServer: false,
+    });
+    expect(turnedOff).toMatchObject({ settings: { bundledLanguageServer: false } });
+    if (turnedOff.kind !== "settings-updated") throw new Error("settings were not updated");
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: turnedOff.settings } as never);
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "update-code-settings",
+        expectedVersion: 1,
+        defaultExecutionPolicy: "plan",
+        defaultPermissionPersistence: "current-session",
+      }),
+    ).resolves.toMatchObject({
+      settings: { defaultExecutionPolicy: "plan", bundledLanguageServer: false },
+    });
+  });
+
   it("keeps the Git requirement a window asks for when it still sends the old default-folder switch", async () => {
     const fixture = serviceFixture();
 

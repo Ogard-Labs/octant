@@ -91,6 +91,7 @@ export class FoundryGrantBroker implements DirectoryOAuthHost {
 
 function matchesFoundryBinding(binding: DirectoryOAuthBinding): boolean {
   return (
+    "tenantId" in binding &&
     String(binding.tenantId) === String(FOUNDRY_TENANT) &&
     String(binding.clientId) === String(FOUNDRY_CLIENT) &&
     binding.audience === AZURE_FOUNDRY_DIRECTORY_SIGN_IN.audience &&

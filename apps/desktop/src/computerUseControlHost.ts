@@ -316,6 +316,14 @@ export function createComputerUseControlHost(options: {
           );
         }
 
+        // Keyboard-focus typing is for a disposable desktop, which has no
+        // elements. Here it would skip the text-field and protected-field
+        // checks an element gets, so it refuses even if a server sends it.
+        if (
+          (command.operation === "type" || command.operation === "press") &&
+          !("elementIndex" in command)
+        )
+          return refused("unsupported", "On this Mac, type and press need an observed element.");
         const old = session.observations.get(command.observationId);
         if (old === undefined || old.generation !== runtime.generation)
           return refused("stale-observation", "Observe this window again before acting.");

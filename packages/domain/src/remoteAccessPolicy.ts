@@ -103,6 +103,10 @@ const REMOTE_APPROVABLE_ACTIONS = new Set([
   // once or deny. Remembering the answer for the Project stays with a local
   // window; the approval service refuses it from a paired device.
   "extension.tool-call.answer-once",
+  // Dictation: the device sends a clip it recorded on an explicit act, the
+  // host transcribes it on its own Voice endpoint within the device's budget,
+  // and the text lands in the device's draft. Nothing is sent for it.
+  "speech.transcribe",
   "preview.open-authorized",
   "settings.read-non-secret",
   "provider.list-models",
@@ -160,6 +164,9 @@ const LOCAL_HOST_ACTIONS = new Set([
   // Taking a thread's outside-content mark away records that a person read
   // what the thread took in, and reopens every gate the mark was holding.
   "thread.external-content.clear",
+  // Read-aloud speaks through the computer's own Voice endpoint for the person
+  // sitting at it; a paired device is not offered it.
+  "speech.synthesize",
 ]);
 
 export function classifyRemoteAction(action: string): RemoteActionDecision {

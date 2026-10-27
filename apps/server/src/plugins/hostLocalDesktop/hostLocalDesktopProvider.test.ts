@@ -17,6 +17,10 @@ import type {
 } from "@octant/plugin-api/desktop-provider";
 import { runDesktopProviderConformance } from "@octant/plugin-api/desktop-provider-conformance";
 import {
+  decodeComputerControlCommand,
+  type ComputerControlResult,
+} from "@octant/contracts/computer-use-plugin";
+import {
   createHostLocalDesktopProvider,
   HOST_LOCAL_DESKTOP_PROGRAMS,
   hostLocalKeysym,
@@ -32,6 +36,12 @@ const recipe: DesktopRecipe = decodeDesktopRecipe({
 });
 const hostTag = decodeDesktopHostTag("e2000000-0000-4000-8000-0000000000aa");
 const encoder = new TextEncoder();
+/** A command addressed to an accessibility element, which this desktop has none of. */
+const ELEMENT_CLICK = decodeComputerControlCommand({
+  operation: "click",
+  observationId: randomUUID(),
+  elementIndex: 0,
+});
 
 /** A PNG header for a `width` by `height` image; the driver reads no further. */
 function pngOf(width: number, height: number): Uint8Array {
@@ -179,7 +189,7 @@ describe("host-local desktop provider", () => {
           };
         },
         recipe,
-        unsupportedCommand: { operation: "apps" },
+        unsupportedCommand: ELEMENT_CLICK,
       }),
     ).resolves.toMatchObject({ stoppedWhenCancelled: true, reportedAbsenceOnlyWhenAbsent: true });
   });
@@ -347,15 +357,113 @@ describe("host-local desktop provider", () => {
     await expect(screen.frame()).resolves.toEqual({ status: "not-connected" });
   });
 
-  it("refuses every agent command until that slice binds them", async () => {
-    const provider = createHostLocalDesktopProvider(fakeLaunchPort().port);
+  it("launches only a file the host sent and acts on the screenshot it returns", async () => {
+    const { port, desktops } = fakeLaunchPort({
+      reply: (line) =>
+        line.startsWith("launch ")
+          ? encoder.encode("launched 42\n")
+          : line === "alive 42"
+            ? encoder.encode("ok\n")
+            : undefined,
+    });
+    const provider = createHostLocalDesktopProvider(port);
     const handle = await acquired(provider);
+    const lines = () => desktops.get(String(handle.leaseId))?.lines ?? [];
+    // What reached the screen, without the checks and frame grabs between.
+    const inputs = () => lines().filter((line) => !line.startsWith("alive") && line !== "frame");
+
     await expect(
-      provider.control(handle, { operation: "launch", appId: "org.example.app" }),
-    ).resolves.toMatchObject({
+      provider.control(handle, { operation: "launch", appId: "app.sh" }),
+    ).resolves.toMatchObject({ kind: "refused", reason: "not-sent" });
+    expect(lines()).toEqual([]);
+
+    await provider.deliver(handle, "app.sh", encoder.encode("#!/bin/sh\n"));
+    await expect(provider.control(handle, { operation: "apps" })).resolves.toEqual({
+      kind: "apps",
+      apps: [{ appId: "app.sh", name: "app.sh" }],
+    });
+    const launched = await provider.control(handle, { operation: "launch", appId: "app.sh" });
+    expect(launched).toMatchObject({ kind: "windows", windows: [{ windowId: 1 }] });
+    expect(lines()).toEqual(["launch app.sh"]);
+
+    const observe = decodeComputerControlCommand({
+      operation: "observe",
+      appId: "app.sh",
+      windowId: 1,
+    });
+    const first = await provider.control(handle, observe);
+    if (first.kind !== "observation") throw new Error(`no observation: ${JSON.stringify(first)}`);
+    expect(first).toMatchObject({
+      elements: [],
+      imageWidth: 640,
+      imageHeight: 480,
+      image: { mimeType: "image/png" },
+    });
+
+    const act = async (command: Record<string, unknown>): Promise<ComputerControlResult> =>
+      provider.control(
+        handle,
+        decodeComputerControlCommand({ observationId: first.observationId, ...command }),
+      );
+    const clicked = await act({ operation: "click", x: 10, y: 20 });
+    expect(clicked.kind).toBe("observation");
+    if (clicked.kind === "observation") expect(clicked.observationId).not.toBe(first.observationId);
+    await act({ operation: "type", text: "hi; $(id)" });
+    await act({ operation: "press", key: "Return" });
+    expect(inputs()).toEqual([
+      "launch app.sh",
+      "move 10 20",
+      "down 10 20 1",
+      "up 10 20 1",
+      `text ${btoa("hi; $(id)")}`,
+      "keydown Return",
+      "keyup Return",
+    ]);
+
+    const sent = inputs().length;
+    await expect(act({ operation: "click", elementIndex: 0 })).resolves.toMatchObject({
       kind: "refused",
       reason: "unsupported",
     });
+    await expect(act({ operation: "click", x: 640, y: 0 })).resolves.toMatchObject({
+      kind: "refused",
+      reason: "invalid-image-position",
+    });
+    await expect(provider.control(handle, ELEMENT_CLICK)).resolves.toMatchObject({
+      kind: "refused",
+      reason: "unsupported",
+    });
+    await expect(
+      provider.control(
+        handle,
+        decodeComputerControlCommand({ operation: "type", observationId: randomUUID(), text: "x" }),
+      ),
+    ).resolves.toMatchObject({ kind: "refused", reason: "stale-observation" });
+    expect(inputs()).toHaveLength(sent);
+  });
+
+  it("reports an app that has exited as not running rather than acting on it", async () => {
+    const { port } = fakeLaunchPort({
+      reply: (line) =>
+        line.startsWith("launch ")
+          ? encoder.encode("launched 7\n")
+          : line.startsWith("alive ")
+            ? encoder.encode("error gone\n")
+            : undefined,
+    });
+    const provider = createHostLocalDesktopProvider(port);
+    const handle = await acquired(provider);
+    await provider.deliver(handle, "app.sh", encoder.encode("#!/bin/sh\n"));
+    await provider.control(handle, { operation: "launch", appId: "app.sh" });
+    await expect(
+      provider.control(
+        handle,
+        decodeComputerControlCommand({ operation: "observe", appId: "app.sh", windowId: 1 }),
+      ),
+    ).resolves.toMatchObject({ kind: "refused", reason: "app-not-running" });
+    await expect(
+      provider.control(handle, { operation: "windows", appId: "app.sh" }),
+    ).resolves.toEqual({ kind: "windows", appId: "app.sh", windows: [] });
   });
 
   it("hands a delivery to the launch port only while its desktop runs", async () => {

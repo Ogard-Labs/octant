@@ -21,6 +21,7 @@ without over-trusting a surface that has not shipped.
 
 - [Files, previews, and selections](/advanced/files) — file authority by mode, secure read-only previews, and structured selections.
 - [Editor and terminals](/advanced/editor-and-terminals) — the Monaco editor, external-editor handoff, and integrated terminals.
+- [Language services](/advanced/language-services) — Project-wide type errors and go to definition from a confined language server.
 
 ## Git, worktrees, and thread boards
 

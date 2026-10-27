@@ -341,6 +341,43 @@ describe("host-local device-code sign-in", () => {
     });
   });
 
+  it("refuses a device code for a gateway that signs in at its organization's own issuer", async () => {
+    const gateway = decodeProviderInstance({
+      id: instanceId,
+      displayName: "Company gateway",
+      driverKind: "openai-compatible",
+      configuration: {
+        kind: "openai-compatible-http",
+        baseUrl: "https://llm.example.test/v1/",
+        authentication: "directory-oauth",
+        protocol: "auto",
+        manualModelIds: [],
+        directory: {
+          issuer: "https://login.example.test/oauth2/gateway",
+          clientId: "0oa1octantDesktop",
+          scope: "gateway.models",
+        },
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-10-26T10:00:00.000Z",
+      updatedAt: "2026-10-26T10:00:00.000Z",
+    });
+    const scene = fixture({ instance: gateway });
+
+    const refused = await scene.send("begin", {
+      instance: "Company gateway",
+      acknowledgeTerms: true,
+    });
+
+    expect(refused).toMatchObject({
+      status: 409,
+      body: { category: "device-code-not-enabled" },
+    });
+    expect(scene.calls).toEqual([]);
+  });
+
   it("never begins a device code from Settings' sign-in route, even when asked for one", async () => {
     const scene = fixture();
     const command = (kind: "acknowledge" | "begin") =>

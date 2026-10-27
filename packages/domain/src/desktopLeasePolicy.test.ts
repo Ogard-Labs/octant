@@ -169,6 +169,7 @@ describe("desktop lease policy", () => {
         executionPolicy: "plan",
         locality: "host-local",
         initiator: "local-user",
+        externalContentIngested: false,
       }),
     ).toEqual({ kind: "refused", reason: "plan-mode" });
     for (const executionPolicy of ["approval-gated", "auto-accept-edits"] as const) {
@@ -177,6 +178,7 @@ describe("desktop lease policy", () => {
           executionPolicy,
           locality: "host-local",
           initiator: "agent",
+          externalContentIngested: false,
         }),
       ).toEqual({ kind: "ask", asks: "in-thread" });
     }
@@ -185,6 +187,7 @@ describe("desktop lease policy", () => {
         executionPolicy: "full-access",
         locality: "host-local",
         initiator: "agent",
+        externalContentIngested: false,
       }),
     ).toEqual({ kind: "proceed" });
     expect(
@@ -192,6 +195,7 @@ describe("desktop lease policy", () => {
         executionPolicy: "approval-gated",
         locality: "host-local",
         initiator: "remote-device",
+        externalContentIngested: false,
       }),
     ).toEqual({ kind: "proceed" });
     for (const initiator of ["agent", "local-user"] as const) {
@@ -200,8 +204,28 @@ describe("desktop lease policy", () => {
           executionPolicy: "full-access",
           locality: "cloud",
           initiator,
+          externalContentIngested: false,
         }),
       ).toEqual({ kind: "ask", asks: "off-machine" });
     }
+  });
+
+  it("asks an agent's transfer under Full access once the thread has read outside content", () => {
+    expect(
+      decideDesktopArtifactTransfer({
+        executionPolicy: "full-access",
+        locality: "host-local",
+        initiator: "agent",
+        externalContentIngested: true,
+      }),
+    ).toEqual({ kind: "ask", asks: "in-thread" });
+    expect(
+      decideDesktopArtifactTransfer({
+        executionPolicy: "plan",
+        locality: "host-local",
+        initiator: "agent",
+        externalContentIngested: true,
+      }),
+    ).toEqual({ kind: "refused", reason: "plan-mode" });
   });
 });
