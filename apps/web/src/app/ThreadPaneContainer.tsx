@@ -137,6 +137,9 @@ export interface ThreadPaneContainerProps {
   readonly activeCodeThreadUsageFallback: Parameters<
     typeof ComposerContextMeterProvider
   >[0]["fallback"];
+  readonly activeThreadUsageReporting?: Parameters<
+    typeof ComposerContextMeterProvider
+  >[0]["usageReporting"];
   readonly activeProject: ProjectController["activeProject"];
   readonly activeMode: OctantMode;
   readonly agentProfiles: ReturnType<typeof useAgentProfiles>;
@@ -239,6 +242,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     activeCodeThreadUsageFallback,
     activeMode,
     activeProject,
+    activeThreadUsageReporting,
     agentProfiles,
     allProjects,
     availabilityByProject,
@@ -446,6 +450,9 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
             {...(activeMode !== "code" || activeCodeThreadUsageFallback === undefined
               ? {}
               : { fallback: activeCodeThreadUsageFallback })}
+            {...(activeThreadUsageReporting === undefined
+              ? {}
+              : { usageReporting: activeThreadUsageReporting })}
             {...(contextController.snapshot === undefined
               ? {}
               : { snapshot: contextController.snapshot })}

@@ -3171,9 +3171,11 @@ Octant sent inside the prompt is counted. Per runtime:
   tokens and the model's `limit.context`) and Pi (assistant `message_end` usage;
   the occupancy is the last message's input, cache and output) report one
   figure and no categories. The ACP driver reports no usage at all, so an ACP
-  thread shows no window, and its Code context meter says the runtime reports
-  no usage (from the runtime's integration `context.usage`) rather than that
-  none has arrived yet. Lists of tools, MCP servers, skills or instruction
+  thread shows no window, and its context meter says the runtime reports no
+  usage (from the runtime's integration `context.usage`) rather than that none
+  has arrived yet. That holds in every mode: a Work or Chat thread is planned by
+  Octant, so its meter still shows Octant's own estimate, and the line stands
+  where a window's share would be. Lists of tools, MCP servers, skills or instruction
   files exist in some runtimes but carry no token weight, so they are not parts.
 
   Pi usage is accumulated from completed assistant messages, not streaming usage
