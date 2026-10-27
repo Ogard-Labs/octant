@@ -1391,6 +1391,41 @@ describe("Kimi Code host-profile extension surfaces", () => {
     expect(existsSync(join(target.canonicalRoot, ".agents"))).toBe(false);
   });
 
+  it("refuses Linux Full access through a setuid Bubblewrap before launching, while approval-gated still starts", async () => {
+    const target = fixture(kimi);
+    const managedHome = join(target.canonicalRoot, "managed-kimi");
+    const hostHome = realpathSync(mkdtempSync(join(tmpdir(), "octant-acp-host-")));
+    directories.push(hostHome);
+    const hostAuthenticationPath = join(hostHome, ".kimi-code");
+    mkdirSync(join(hostAuthenticationPath, "skills"), { recursive: true });
+    chmodSync(target.bwrapPath, 0o4755);
+    const confinement = makeAcpConfinementLive({
+      platform: "linux",
+      sandboxPath: target.bwrapPath,
+      temporaryDirectory: join(target.canonicalRoot, "tmp"),
+      hostAuthenticationPath: realpathSync(hostAuthenticationPath),
+    });
+    const request = {
+      profile: kimi,
+      binaryPath: target.binaryPath,
+      root: target.canonicalRoot,
+      managedHome,
+      mode: "code",
+      environment: {},
+    } as const;
+    const refusal = await failureOf(
+      confinement.prepare({ ...request, executionPolicy: "full-access" }),
+    );
+    expect(refusal.category).toBe("incompatible");
+    expect(refusal.message).toContain(`${target.bwrapPath} is setuid`);
+    expect(refusal.message).toContain("choose a narrower permission than Full access");
+    const gated = await Effect.runPromise(
+      confinement.prepare({ ...request, executionPolicy: "approval-gated" }),
+    );
+    expect(gated.command).toBe(target.bwrapPath);
+    expect(gated.args).toContain("--unshare-all");
+  });
+
   it("uses native sandbox-exec so a Full access child cannot read planted MCP config", async () => {
     if (process.platform !== "darwin") return;
     const target = fixture(kimi);

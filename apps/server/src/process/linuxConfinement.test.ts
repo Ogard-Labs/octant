@@ -19,6 +19,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   buildLinuxAllowDefaultDenyLaunch,
   buildBubblewrapLaunch,
+  bubblewrapPrivilege,
   DEFAULT_BWRAP_PATH,
   requireLinuxConfinement,
 } from "./linuxConfinement";
@@ -119,6 +120,42 @@ describe("Linux Full access extension denials", () => {
     expect(launch.args).not.toContain(missingSkills);
     expect(launch.args).not.toContain(missingAgents);
     expect(launch.args).not.toContain("--tmpfs");
+  });
+
+  it("refuses a setuid Bubblewrap and tells the person what to change", () => {
+    const { boundRoot, bwrapPath, root } = fixture();
+    const skills = join(root, "skills");
+    mkdirSync(skills);
+    // Setuid by its owner, read from the file itself: root here when the
+    // suite runs as root, the test user otherwise.
+    chmodSync(bwrapPath, 0o4755);
+    expect(bubblewrapPrivilege(bwrapPath)).toEqual({
+      status: "setuid",
+      ownerUid: statSync(bwrapPath).uid,
+    });
+    const launch = () =>
+      buildLinuxAllowDefaultDenyLaunch(
+        { executable: "/bin/true", args: ["acp"], cwd: boundRoot, denyPaths: [skills] },
+        { bwrapPath },
+      );
+    expect(launch).toThrow(ProcessConfinementError);
+    expect(launch).toThrow(`${bwrapPath} is setuid`);
+    expect(launch).toThrow(
+      "Enable unprivileged user namespaces and install a Bubblewrap that is not setuid",
+    );
+  });
+
+  it("reports a Bubblewrap without the setuid bit as unprivileged and launches through it", () => {
+    const { boundRoot, bwrapPath, root } = fixture();
+    const skills = join(root, "skills");
+    mkdirSync(skills);
+    chmodSync(bwrapPath, 0o755);
+    expect(bubblewrapPrivilege(bwrapPath)).toEqual({ status: "unprivileged" });
+    const launch = buildLinuxAllowDefaultDenyLaunch(
+      { executable: "/bin/true", args: ["acp"], cwd: boundRoot, denyPaths: [skills] },
+      { bwrapPath },
+    );
+    expect(launch.command).toBe(bwrapPath);
   });
 
   it("fails closed when a deny file cannot be overlaid", () => {
@@ -305,8 +342,9 @@ describe("Linux Full access extension denials", () => {
     async (context) => {
       if ((statSync(DEFAULT_BWRAP_PATH).mode & SETUID_BIT) !== 0) {
         // Measured on bwrap 0.9.0 installed setuid: the capsule stayed in the
-        // host user namespace and read the denied file through both paths.
-        context.skip("a setuid bwrap keeps the capsule in the host user namespace");
+        // host user namespace and read the denied file through both paths,
+        // so Full access refuses such a bwrap before it starts.
+        context.skip("Full access refuses a setuid bwrap");
       }
       const probe = spawnSync(
         ...asOrdinaryUser(DEFAULT_BWRAP_PATH, ["--bind", "/", "/", "/bin/true"]),
@@ -695,6 +733,35 @@ describe("Linux Bubblewrap confinement", () => {
         { bwrapPath: join(root, "missing-bwrap") },
       ),
     ).toThrow(ProcessConfinementError);
+  });
+
+  it("still starts a confined launch through a setuid Bubblewrap in a PID namespace of its own", () => {
+    const { boundRoot, temporaryDirectory, bwrapPath } = fixture();
+    chmodSync(bwrapPath, 0o4755);
+    // Unlike Full access's host-root bind, this capsule's procfs shows only
+    // its own processes, so no other process's /proc root reaches past its
+    // covers whether or not Bubblewrap made a user namespace.
+    const plan = buildBubblewrapLaunch(
+      {
+        executable: "/bin/true",
+        args: [],
+        boundRoot,
+        temporaryDirectory,
+        networkEgress: "none",
+        writeBoundRoot: false,
+        allowProcessExec: false,
+        allowProcessFork: false,
+      },
+      { bwrapPath },
+    );
+    expect(plan.args).toContain("--unshare-all");
+    expect(plan.args).toContain(bwrapPath);
+    const gated = buildBubblewrapLaunch(
+      { executable: "/bin/true", args: [], boundRoot, temporaryDirectory, networkEgress: "allow" },
+      { bwrapPath },
+    );
+    expect(gated.command).toBe(bwrapPath);
+    expect(gated.args.slice(0, 2)).toEqual(["--unshare-all", "--share-net"]);
   });
 
   it.runIf(process.platform === "linux" && canRunHostBwrap())(

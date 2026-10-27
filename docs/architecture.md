@@ -6756,8 +6756,26 @@ mechanisms are:
   capabilities at all, and dropping `CAP_SYS_ADMIN` stopped only `umount`.
   A setuid-root Bubblewrap makes no user namespace for an ordinary user
   either; measured on bwrap 0.9.0 installed setuid, the runtime read the
-  denied file through both processes, and Octant does not refuse such an
-  install. Hiding host processes would take away what Full access grants.
+  denied file through both processes. Octant therefore refuses a setuid
+  Bubblewrap for this bind: before the launch the server reads the setuid
+  bit and owner from the `bwrap` file the kernel would run
+  (`bubblewrapPrivilege`), and a setuid one, whatever its owner, refuses
+  Full access as `incompatible` with a sentence telling the person to enable
+  unprivileged user namespaces and install a Bubblewrap that is not setuid,
+  or to choose a narrower permission. A Full-access launch that is not
+  wrapped is unaffected, since it has no denials to keep. Hiding host
+  processes would take away what Full access grants. The restricted capsule
+  does not depend on the user namespace for this and is not refused for a
+  setuid Bubblewrap: `--unshare-all` gives it a PID namespace and its own
+  `/proc`, so the only `/proc/<pid>/root` it can open is one of its own
+  processes, under the same covers. Measured on bwrap 0.9.0 installed setuid
+  with no user namespace, a covered file read empty through every visible
+  `/proc/<pid>/root` and a same-user host process was not visible. The Plan
+  forwarder's nested capsule starts its own Bubblewrap unprivileged
+  (Bubblewrap sets `no_new_privs` and mounts the bound program `nosuid`) with
+  `--unshare-user`, so it gets a user namespace or fails closed; host-local
+  desktops and SSH executor launches use the restricted capsule, and SSH
+  admission already requires working unprivileged user namespaces.
   The capsule binds `/etc` and `/sys` read-only because
   workloads read them: resolver and `nsswitch` files, TLS roots, `passwd`,
   the dynamic linker cache, `alternatives` links, and login shell startup
@@ -6830,7 +6848,8 @@ mechanisms are:
   extension or host-auth paths to deny (Kimi, for example) launches Full access
   under an allow-default `sandbox-exec` profile or a Bubblewrap host-root bind
   that denies only those paths (`makeAcpConfinementLive`). That wrapper
-  confines nothing else. On Linux a deny path that does not exist is skipped,
+  confines nothing else. On Linux it is refused when `bwrap` is setuid, as
+  above. On Linux a deny path that does not exist is skipped,
   because Bubblewrap would create it in the person's own Project (see
   [Extensions and skills](#extensions-and-skills)). A linked deny path is
   covered at its target, as in the restricted capsule above: measured on

@@ -94,6 +94,18 @@ preserve its data until cleanup is explicitly authorized.
   runs as root: it cannot write a file only root's privileges would let it
   write, such as another user's file in the Project. A Full access thread
   keeps root's privileges.
+- **A Bubblewrap that is not setuid**, for Full access with providers whose
+  sign-in or extension files Octant hides, such as Kimi. Some older
+  distributions install `bwrap` setuid root because they turn off
+  unprivileged user namespaces, and a setuid `bwrap` would leave those files
+  readable to the runtime. Octant checks the file before each such launch
+  and refuses Full access with a message saying why. `ls -l /usr/bin/bwrap`
+  shows an `s` in place of the owner's `x` when it is setuid. To fix it,
+  enable unprivileged user namespaces (on most distributions the
+  `kernel.unprivileged_userns_clone` or `user.max_user_namespaces` sysctl)
+  and install the distribution's Bubblewrap without the setuid bit, or use
+  approval-gated instead. Other permissions do not depend on how `bwrap` is
+  installed and are not refused for it.
 - **`lsof`.** Running services and Local servers use it to find the servers
   your projects started. A stock Ubuntu install lacks it; without it the card
   says Octant could not check this computer for local servers.
