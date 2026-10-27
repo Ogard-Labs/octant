@@ -598,7 +598,7 @@ function normalizeAmazonBedrockConfiguration(
   if (!Schema.is(CloudIamRegion)(region)) {
     reject("invalid-base-url", "Choose an Amazon Bedrock region such as us-east-1.");
   }
-  const startUrl = configuration.cloudIam.startUrl.trim().replace(/\/+$/, "");
+  const startUrl = stripTrailingSlashes(configuration.cloudIam.startUrl.trim());
   const ssoRegion = configuration.cloudIam.ssoRegion.trim();
   const accountId = configuration.cloudIam.accountId.trim();
   const roleName = configuration.cloudIam.roleName.trim();
