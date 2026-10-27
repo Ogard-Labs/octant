@@ -53,7 +53,9 @@ import {
   type SshExecutorRemoveWorktreeRequest,
   type SshExecutorWorktreeCreatedReply,
   type SshExecutorWorktreeRemovedReply,
+  SshDeniedRootEntries,
   SshExecutorStartProcessRequest,
+  SshPlacedVariables,
 } from "@octant/contracts/ssh-executor-protocol";
 import {
   SSH_CANARY_PROBES_BY_POSTURE,
@@ -134,6 +136,8 @@ const placedFields = SshExecutorStartProcessRequest.fields;
 const decodeAccountState = Schema.decodeUnknownEither(placedFields.accountState);
 const decodePlacedArgs = Schema.decodeUnknownEither(placedFields.args);
 const decodePlacedHome = Schema.decodeUnknownEither(placedFields.home);
+const decodePlacedVariables = Schema.decodeUnknownEither(SshPlacedVariables);
+const decodeDeniedRootEntries = Schema.decodeUnknownEither(SshDeniedRootEntries);
 
 /** How long a stopped runtime has to end on the target before this host stops waiting. */
 const PLACED_STOP_WAIT_MS = 10_000;
@@ -492,16 +496,27 @@ export class SshTargetConnectionService {
     const accountState = decodeAccountState(launch.accountState ?? []);
     const args = decodePlacedArgs(launch.args);
     const home = decodePlacedHome({ project: input.projectId, instance: input.providerInstanceId });
+    const fixedVariables = decodePlacedVariables(
+      Object.entries(launch.fixedVariables ?? {}).map(([name, value]) => ({ name, value })),
+    );
+    const deniedRootEntries = decodeDeniedRootEntries(launch.deniedRootEntries ?? []);
     if (
       root._tag === "Left" ||
       executable._tag === "Left" ||
       accountState._tag === "Left" ||
       args._tag === "Left" ||
-      home._tag === "Left"
+      home._tag === "Left" ||
+      fixedVariables._tag === "Left" ||
+      deniedRootEntries._tag === "Left" ||
+      // The target sets an account-state path's variable itself.
+      fixedVariables.right.some((variable) =>
+        accountState.right.some((state) => state.variable === variable.name),
+      )
     ) {
       return refusedWith({
         category: "invalid-configuration",
-        message: "The runtime's path, arguments, or account state cannot be placed on a target.",
+        message:
+          "The runtime's path, arguments, variables, denied entries, or account state cannot be placed on a target.",
       });
     }
     const egress =
@@ -543,6 +558,10 @@ export class SshTargetConnectionService {
         executable: executable.right,
         args: args.right,
         accountState: accountState.right,
+        ...(fixedVariables.right.length === 0 ? {} : { fixedVariables: fixedVariables.right }),
+        ...(deniedRootEntries.right.length === 0
+          ? {}
+          : { deniedRootEntries: deniedRootEntries.right }),
         home: home.right,
       },
       { onStream: (stream) => joinToStream(connectToProxy(egress.endpoint), stream) },

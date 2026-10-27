@@ -1184,6 +1184,7 @@ export function startOctantServer(
       serve,
       sshTargetConnections,
       sshTargetStore,
+      codeOperationRuntime,
       startedAt,
       threadMessageQueue,
       toolEgressRules,

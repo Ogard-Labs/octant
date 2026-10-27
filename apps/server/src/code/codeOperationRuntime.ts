@@ -526,8 +526,9 @@ export interface CodeOperationRuntimeOptions {
   }) => AppManagedToolSet | undefined;
   /**
    * A turn of a thread whose checkout is a remote root: the native harness's
-   * tools on its SSH target, bound to the target's session now, or why the
-   * thread cannot run there. Absent means this host runs no such turn.
+   * tools on its SSH target, or a placed ACP agent's client tools and its
+   * placement there, bound to the target's session now, or why the thread
+   * cannot run there. Absent means this host runs no such turn.
    */
   readonly remoteCodeTurn?: (input: RemoteCodeTurnInput) => RemoteCodeTurnBinding;
   readonly spendCeiling?: {
@@ -2212,9 +2213,10 @@ interface ActiveTurn {
   /** The selected MCP servers' tools, resolved when the turn was accepted. */
   readonly extensionTools?: AppManagedToolSet;
   /**
-   * A remote-bound Project's turn: the harness's tools on the target, bound
-   * to the session it held when the turn was taken on. They are the turn's
-   * whole tool set; nothing of this host's checkout tools joins them.
+   * A remote-bound Project's turn: its tools on the target, and a placed
+   * runtime's placement, bound to the session it held when the turn was
+   * taken on. They are the turn's whole tool set; nothing of this host's
+   * checkout tools joins them.
    */
   readonly remote?: Extract<RemoteCodeTurnBinding, { readonly status: "bound" }>;
   readonly extensionSelections?: ReadonlyArray<
@@ -4046,7 +4048,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                   category: "unauthorized",
                   message: "Provider authority mismatch.",
                 });
-              return acquireProviderConnection(active.driver, acquireInput).pipe(
+              // A runtime placed on the thread's target starts only through
+              // the placement its turn was bound with, on that session.
+              const placement = active.remote?.placement;
+              return acquireProviderConnection(
+                active.driver,
+                placement === undefined ? acquireInput : { ...acquireInput, placement },
+              ).pipe(
                 Effect.tap((connection) =>
                   Effect.sync(() => {
                     active.connection = connection;

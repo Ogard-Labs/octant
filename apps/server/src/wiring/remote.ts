@@ -42,6 +42,7 @@ import { createPrivateListenerAdministrationRouteHandler } from "../remote/priva
 import { createPrivateListenerSetting } from "../remote/privateListenerSetting";
 import { createSelfMadeListenerCertificateStore } from "../remote/selfMadeListenerCertificate";
 import { createSshTargetAdministrationRouteHandler } from "../sshTarget/sshTargetAdministrationRoutes";
+import { targetHoldsRunningTurn } from "../sshTarget/sshRemoteCodeThreads";
 import { SshRemoteProjectService } from "../sshTarget/sshRemoteProjectService";
 import { SshRemoteTerminalService } from "../sshTarget/sshRemoteTerminalService";
 import type { SshTargetsWiring } from "./sshTargets";
@@ -53,6 +54,7 @@ import type { AgentRunsWiring } from "./agentRuns";
 import type { IntegrationsWiring } from "./integrations";
 import type { ComputerUseWiring } from "./computerUse";
 import type { CodeWiring } from "./code";
+import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { ProvidersWiring } from "./providers";
 import type { CodeToolingWiring } from "./codeTooling";
 import type { WorkWiring } from "./work";
@@ -91,7 +93,8 @@ export type RemoteDependencies = Pick<
   Pick<RoutesWiring, "authenticatedProductDispatch"> &
   Pick<FoundationsWiring, "workThreadProjection"> &
   Pick<FoundationsWiring, "providerRuntimeRegistry"> &
-  Pick<SshTargetsWiring, "sshTargetConnections" | "sshTargetStore">;
+  Pick<SshTargetsWiring, "sshTargetConnections" | "sshTargetStore"> &
+  Pick<CodeRuntimeWiring, "codeOperationRuntime">;
 
 export function wireRemote(deps: RemoteDependencies) {
   const {
@@ -354,6 +357,16 @@ export function wireRemote(deps: RemoteDependencies) {
     connections: sshTargetConnections,
     projects: sshRemoteProjects,
     terminals: sshRemoteTerminals,
+    threadRunsOnTarget: (targetId) =>
+      targetHoldsRunningTurn(
+        {
+          projects: () => sshTargetStore.listProjects(),
+          threads: () => persistence.readCodeThreads(),
+          turnInProgress: (threadId) =>
+            deps.codeOperationRuntime?.turnInProgress?.(threadId) === true,
+        },
+        String(targetId),
+      ),
     maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   });
   // One diagnostics composer is shared by the owner control socket (through

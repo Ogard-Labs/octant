@@ -341,12 +341,12 @@ export const SSH_EXECUTOR_MAX_PROCESS_STDERR_BYTES = 65_536;
 /** The most account-state paths one placed process is granted. */
 export const SSH_EXECUTOR_MAX_ACCOUNT_STATE_PATHS = 4;
 
-/**
- * A path relative to the remote user's home, never absolute and never
- * climbing out of it, so it names a folder on the target and none of this
- * host's.
- */
-export const SshHomeRelativePath = Schema.String.pipe(
+/** The most fixed variables, and the most denied root entries, one placed process carries. */
+export const SSH_EXECUTOR_MAX_PLACED_VARIABLES = 32;
+export const SSH_EXECUTOR_MAX_DENIED_ROOT_ENTRIES = 32;
+
+/** A relative path that is never absolute and never climbs out of where it starts. */
+const RelativePath = Schema.String.pipe(
   Schema.minLength(1),
   Schema.maxLength(1_024),
   Schema.filter(
@@ -356,6 +356,13 @@ export const SshHomeRelativePath = Schema.String.pipe(
       path.split("/").every((segment) => segment !== "" && segment !== "." && segment !== ".."),
   ),
 );
+
+/**
+ * A path relative to the remote user's home, never absolute and never
+ * climbing out of it, so it names a folder on the target and none of this
+ * host's.
+ */
+export const SshHomeRelativePath = RelativePath;
 export type SshHomeRelativePath = typeof SshHomeRelativePath.Type;
 
 /**
@@ -386,6 +393,37 @@ export const SshPlacedAccountState = Schema.Struct({
 }).annotations(strict);
 export type SshPlacedAccountState = typeof SshPlacedAccountState.Type;
 
+/**
+ * A variable the runtime's own local launch sets to a constant of its
+ * driver's, such as a switch that turns off auto-update or a Project's own
+ * configuration. Its name follows the account-state variable's rules, and its
+ * value holds no `/`, so it names no folder of this host or the target.
+ */
+export const SshPlacedVariable = Schema.Struct({
+  name: SshAccountStateVariable,
+  value: Schema.String.pipe(
+    Schema.maxLength(1_024),
+    Schema.filter((value) => holdsNoControlCharacter(value) && !value.includes("/")),
+  ),
+}).annotations(strict);
+export type SshPlacedVariable = typeof SshPlacedVariable.Type;
+
+export const SshPlacedVariables = Schema.Array(SshPlacedVariable).pipe(
+  Schema.maxItems(SSH_EXECUTOR_MAX_PLACED_VARIABLES),
+  Schema.filter(
+    (variables) => new Set(variables.map((variable) => variable.name)).size === variables.length,
+  ),
+);
+
+/**
+ * Entries of the bound root the runtime may neither read nor write: files and
+ * folders a runtime loads by itself that would start tools without Octant's
+ * approval. Each is relative to the root and never climbs out of it.
+ */
+export const SshDeniedRootEntries = Schema.Array(RelativePath).pipe(
+  Schema.maxItems(SSH_EXECUTOR_MAX_DENIED_ROOT_ENTRIES),
+);
+
 const PlacedArgument = Schema.String.pipe(
   Schema.maxLength(4_096),
   Schema.filter((value) => !value.includes("\u0000")),
@@ -397,7 +435,9 @@ const PlacedArgument = Schema.String.pipe(
  * host names. In every posture, Plan included, it runs on this host's proxy
  * for the launch, never the target's own network. Its home is one owner-only
  * folder per Project and provider instance on the target; the executor
- * derives the folder, so this host never names a path to write.
+ * derives the folder, so this host never names a path to write. Its fixed
+ * variables are set beside the ones the executor sets, which they cannot
+ * name, and its denied root entries are covered in its capsule.
  */
 export const SshExecutorStartProcessRequest = Schema.Struct({
   kind: Schema.Literal("start-process"),
@@ -410,6 +450,8 @@ export const SshExecutorStartProcessRequest = Schema.Struct({
   accountState: Schema.Array(SshPlacedAccountState).pipe(
     Schema.maxItems(SSH_EXECUTOR_MAX_ACCOUNT_STATE_PATHS),
   ),
+  fixedVariables: Schema.optional(SshPlacedVariables),
+  deniedRootEntries: Schema.optional(SshDeniedRootEntries),
   home: Schema.Struct({ project: Schema.UUID, instance: Schema.UUID }).annotations(strict),
   stream: HostOpenedStreamId,
 }).annotations(strict);

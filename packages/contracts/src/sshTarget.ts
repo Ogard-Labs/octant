@@ -415,6 +415,8 @@ export const SshTargetAdministrationRefusalReason = Schema.Literal(
   "destination-mismatch",
   /** The target already holds the most runtime paths it may. */
   "too-many-runtime-binaries",
+  /** A thread on one of the target's Projects is running a turn there. */
+  "target-in-use",
 );
 export type SshTargetAdministrationRefusalReason = typeof SshTargetAdministrationRefusalReason.Type;
 

@@ -34,7 +34,10 @@ import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import type { SshRemoteHarnessBinding, SshRemoteHarnessInput } from "../sshTarget/sshRemoteHarness";
 import type { NativeHarnessAuthority } from "./nativeHarnessAuthority";
-import { NativeHarnessFileSystem } from "./nativeHarnessFileSystem";
+import {
+  NativeHarnessFileSystem,
+  type NativeHarnessFileSystemPort,
+} from "./nativeHarnessFileSystem";
 import { createNativeHarnessGoalPort } from "./nativeHarnessGoal";
 import {
   createThreadJournalLookup,
@@ -195,6 +198,25 @@ export type NativeHarnessRemoteComposition =
   /** The target does not admit the turn's work now; the decision names why. */
   | Extract<SshRemoteHarnessBinding, { readonly status: "refused" }>;
 
+/**
+ * A remote-bound Code thread's hands on its target without the harness's
+ * tools around them, for a runtime placed there that asks its client for
+ * files and terminals: the same file tools and shell, bound to the session
+ * the target holds now, each call admitted in the turn's posture at that
+ * call.
+ */
+export type NativeHarnessRemoteHands =
+  | {
+      readonly status: "bound";
+      readonly filesystem: Pick<NativeHarnessFileSystemPort, "read" | "write">;
+      readonly shell: NativeHarnessShellPort;
+      /** The turn's posture now, as every call reads it; undefined refuses the call. */
+      readonly executionPolicy: () => ProviderExecutionPolicy | undefined;
+      readonly release: () => void;
+    }
+  | { readonly status: "unavailable" }
+  | Extract<SshRemoteHarnessBinding, { readonly status: "refused" }>;
+
 /** Whose egress rules a proxied command runs under: a child runs under its parent's. */
 export interface HarnessEgressScope {
   readonly threadId: string;
@@ -244,6 +266,18 @@ export interface NativeHarnessComposition {
     readonly secrets?: ReadonlyArray<string>;
     readonly onTargetDisconnected: () => void;
   }) => NativeHarnessRemoteComposition;
+  /**
+   * The file tools and shell `forRemoteCode` would give a thread, alone, for
+   * a provider runtime placed on the target whose client requests run as
+   * these calls. The provider's own tools are its own; none of the
+   * harness's joins them.
+   */
+  readonly remoteHandsForCode: (input: {
+    readonly thread: CodeThread;
+    readonly project: SshRemoteProject;
+    readonly windowId: string;
+    readonly onTargetDisconnected: () => void;
+  }) => NativeHarnessRemoteHands;
   /** A managed child's tools, from its own clamped authority; it never delegates further. */
   readonly forAgentRun: (input: {
     readonly run: AgentRun;
@@ -741,6 +775,29 @@ export function createNativeHarnessComposition(
         },
       });
       return { status: "composed", tools, release: bound.release };
+    },
+    remoteHandsForCode: ({ thread, project, windowId, onTargetDisconnected }) => {
+      if (options.remoteHarness === undefined) return { status: "unavailable" };
+      const executionPolicy = () => options.readCodeExecutionPolicy?.(String(thread.id), windowId);
+      const bound = options.remoteHarness({
+        project,
+        scope: { threadId: String(thread.id), projectId: String(thread.projectId) },
+        posture: () => {
+          const now = executionPolicy();
+          return now === undefined
+            ? undefined
+            : { executionPolicy: now, permissionPersistence: thread.permissionPersistence };
+        },
+        onTargetDisconnected,
+      });
+      if (bound.status === "refused") return bound;
+      return {
+        status: "bound",
+        filesystem: bound.filesystem,
+        shell: bound.shell,
+        executionPolicy,
+        release: bound.release,
+      };
     },
     forAgentRun: ({ run, authority, projectRoot }) => {
       const target = run.routingReceipt.selectedFallback ?? {

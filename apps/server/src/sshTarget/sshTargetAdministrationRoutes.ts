@@ -6,6 +6,7 @@ import {
   SshTargetRegisterRequest,
   SshTargetRepinRequest,
   SshTargetRequest,
+  type SshTargetId,
   type SshTargetList,
 } from "@octant/contracts/ssh-target";
 import {
@@ -86,6 +87,11 @@ export interface SshTargetAdministrationRouteOptions {
   readonly connections: SshTargetConnectionService;
   readonly projects: SshRemoteProjectService;
   readonly terminals: SshRemoteTerminalService;
+  /**
+   * Whether a thread on one of the target's Projects holds a turn now.
+   * Removal ends the target's session, which would end that turn under it.
+   */
+  readonly threadRunsOnTarget: (targetId: SshTargetId) => boolean;
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
 }
@@ -221,6 +227,19 @@ export function createSshTargetAdministrationRouteHandler(
       case SSH_TARGET_ROUTES.remove: {
         const decoded = Schema.decodeUnknownEither(SshTargetRequest)(body.value);
         if (decoded._tag === "Left") return failure("invalid", 400);
+        // Checked and removed in one step, so no turn starts between them;
+        // one that starts after finds the target gone.
+        if (options.threadRunsOnTarget(decoded.right.targetId)) {
+          return Response.json(
+            {
+              status: "refused",
+              reason: "target-in-use",
+              message:
+                "A thread on this target is running. Stop it, or wait for it to end, then remove the target.",
+            },
+            { status: 409 },
+          );
+        }
         const removed = connections.remove(decoded.right.targetId);
         return removed.status === "ok"
           ? new Response(null, { status: 204 })

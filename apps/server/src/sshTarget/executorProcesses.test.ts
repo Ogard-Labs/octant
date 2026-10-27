@@ -46,6 +46,14 @@ process.stdin.on("data", (chunk) => process.stdout.write(chunk));
 process.stdin.on("end", () => process.exit(3));
 `;
 
+/** Reports the variables it was started with on standard error, and exits when its input ends. */
+const VARIABLES_RUNTIME = `#!${process.execPath} --no-warnings
+const { NO_COLOR, AGENT_STATE, HOME } = process.env;
+process.stderr.write(JSON.stringify({ NO_COLOR, AGENT_STATE, HOME }));
+process.stdin.resume();
+process.stdin.on("end", () => process.exit(0));
+`;
+
 let base: string;
 let home: string;
 let root: string;
@@ -83,7 +91,7 @@ afterEach(() => {
   rmSync(base, { recursive: true, force: true });
 });
 
-function processes() {
+function processes(confinement: ProcessConfinementPort = passThrough) {
   const send = (frame: SshExecutorFrame) => frames.push(decodeFrame(frame));
   const hostOpened = new ExecutorStreams({ send, opens: "odd", maxStreams: 32 });
   const egress = new ExecutorEgress(send, hostOpened);
@@ -99,7 +107,7 @@ function processes() {
       path: process.env.PATH,
       language: undefined,
       resolveRoot: async (candidate) => ({ status: "resolved", canonical: candidate }),
-      confinement: passThrough,
+      confinement,
     },
     hostOpened,
     egress,
@@ -281,5 +289,59 @@ describe("executor placed processes", () => {
         ),
       ).toEqual({ kind: "process-refused", reason: "account-state-not-confinable" });
     }
+  });
+
+  it("sets a runtime's fixed variables beside its own, and covers the denied root entries that exist when it starts", async () => {
+    const prepared: Array<Parameters<ProcessConfinementPort["prepare"]>[0]> = [];
+    const recording: ProcessConfinementPort = {
+      prepare: (input) => {
+        prepared.push(input);
+        return passThrough.prepare(input);
+      },
+    };
+    const { placed, hostOpened } = processes(recording);
+    mkdirSync(join(home, ".agent"), { mode: 0o700 });
+    mkdirSync(join(root, ".github", "hooks"), { recursive: true });
+    writeFileSync(join(root, ".mcp.json"), "{}");
+    writeFileSync(join(base, "bin", "agent"), VARIABLES_RUNTIME, { mode: 0o755 });
+    const started = await placed.start(
+      request({
+        accountState: [{ path: ".agent", access: "read-write", variable: "AGENT_STATE" }],
+        fixedVariables: [{ name: "NO_COLOR", value: "1" }],
+        deniedRootEntries: [".mcp.json", ".github/hooks", ".agent/skills"],
+      }),
+      1,
+    );
+    expect(started).toEqual({ kind: "process-started", stream: 2 });
+    placed.replied(1, started);
+    expect(hostOpened.receive({ type: "stream-end", stream: 2 })).toBe("accepted");
+    await waitFor(() => frames.some((frame) => frame.type === "process-ended"));
+    const ended = frames.find((frame) => frame.type === "process-ended");
+    const reported: unknown = JSON.parse(
+      ended?.type === "process-ended" ? Buffer.from(ended.stderr, "base64").toString() : "{}",
+    );
+    expect(reported).toEqual({
+      NO_COLOR: "1",
+      AGENT_STATE: realpathSync(join(home, ".agent")),
+      HOME: expect.stringContaining("octant-runtime-homes"),
+    });
+    // A missing entry holds nothing to load at start, and covering it would
+    // make it in the root, as a local launch on Linux skips it too.
+    const covered = [join(root, ".mcp.json"), join(root, ".github", "hooks")];
+    expect(prepared[0]?.additionalDenyReadPaths).toEqual(covered);
+    expect(prepared[0]?.additionalDenyWritePaths).toEqual(covered);
+
+    // A fixed variable may not take the name an account-state path's variable has.
+    const { placed: next } = processes(recording);
+    expect(
+      await next.start(
+        request({
+          accountState: [{ path: ".agent", access: "read-write", variable: "AGENT_STATE" }],
+          fixedVariables: [{ name: "AGENT_STATE", value: "elsewhere" }],
+          stream: 4,
+        }),
+        2,
+      ),
+    ).toEqual({ kind: "process-refused", reason: "account-state-not-confinable" });
   });
 });

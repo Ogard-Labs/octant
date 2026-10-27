@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Exit, Fiber, Schema, Scope, Stream } from "effect";
 import { decodeProviderInstanceId, type ProviderFailure } from "@octant/contracts";
-import type { ProviderRemoteProcessPlacement } from "@octant/provider-sdk/driver";
+import type {
+  ProviderPlacedLaunch,
+  ProviderRemoteProcessPlacement,
+} from "@octant/provider-sdk/driver";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   SshDestination,
@@ -901,6 +904,8 @@ describe("SSH target connection service", () => {
         placeOn(connections, placementOn(session, "plan")).launch({
           executable: "/opt/agent/bin/agent",
           args: ["--acp"],
+          fixedVariables: { NO_COLOR: "1" },
+          deniedRootEntries: [".mcp.json"],
         }),
         scope,
       ),
@@ -918,7 +923,13 @@ describe("SSH target connection service", () => {
     expect(proxies).toBe(1);
     expect(
       JSON.parse(readFileSync(join(directory, "request.json.start-process"), "utf8")).request,
-    ).toMatchObject({ posture: "plan", network: "proxied", egressToken: "b".repeat(64) });
+    ).toMatchObject({
+      posture: "plan",
+      network: "proxied",
+      egressToken: "b".repeat(64),
+      fixedVariables: [{ name: "NO_COLOR", value: "1" }],
+      deniedRootEntries: [".mcp.json"],
+    });
     await Effect.runPromise(Scope.close(scope, Exit.void));
     expect(requests()).toEqual(["attest", "start-process", "stop-process"]);
     expect(proxiesClosed).toBe(1);
@@ -986,6 +997,31 @@ describe("SSH target connection service", () => {
         ? fiveStates.cause.error
         : undefined,
     ).toMatchObject({ category: "invalid-configuration" });
+    // A fixed variable naming a path, one the target sets itself, or one an
+    // account-state path already names, and a denied entry above the root.
+    const unplaceable: ReadonlyArray<Partial<ProviderPlacedLaunch>> = [
+      { fixedVariables: { AGENT_CONFIG: "/home/person/.agent" } },
+      { fixedVariables: { PATH: "bin" } },
+      {
+        fixedVariables: { AGENT_HOME: "elsewhere" },
+        accountState: [{ path: ".agent", access: "read-write", variable: "AGENT_HOME" }],
+      },
+      { deniedRootEntries: ["../hooks"] },
+    ];
+    for (const fields of unplaceable) {
+      const exit = await Effect.runPromiseExit(
+        Effect.scoped(
+          placeOn(connections, placementOn(session, "plan")).launch({
+            executable: "/opt/agent/bin/agent",
+            args: [],
+            ...fields,
+          }),
+        ),
+      );
+      expect(
+        Exit.isFailure(exit) && exit.cause._tag === "Fail" ? exit.cause.error : undefined,
+      ).toMatchObject({ category: "invalid-configuration" });
+    }
     // Nothing reached the executor, and the session every other launch shares is still up.
     expect(requests()).toEqual(["attest"]);
     expect(connections.session(status.target.id)?.connectionId).toBe(session.connectionId);
