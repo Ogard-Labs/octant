@@ -6033,7 +6033,9 @@ same. This holds in Chat, Work, and Code.
   Desktop tool, a Code Project's stored desktop recipe with its settings
   editor, and E2B, the first of the two named cloud providers (E2B and Cua
   Spaces), are built; Cua Spaces waits on a design for reaching its local
-  daemon. A cloud driver reaches its provider only through the host's
+  daemon, proposed for approval in
+  [Disposable desktops](design/disposable-desktops.md#cua-spaces-through-the-local-daemon-proposed).
+  A cloud driver reaches its provider only through the host's
   HTTPS port, which sends nothing outside the hosts the driver declares and
   attaches the person's key from the credential broker's
   `/v1/desktop-provider-credentials/*` namespace itself; a person confirms
