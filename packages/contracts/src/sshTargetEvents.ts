@@ -12,6 +12,8 @@
 
 import { Schema } from "effect";
 import { CodeTerminalId } from "./code";
+import { UtcTimestamp } from "./events";
+import { ProviderInstanceId } from "./providers";
 import { ProjectTerminalPosture } from "./projectTerminals";
 import { ProjectId } from "./projects";
 import { WindowId } from "./shell";
@@ -23,6 +25,12 @@ import {
   SshTargetId,
   SshTargetPostureAdmission,
 } from "./sshTarget";
+import {
+  MAX_TOOL_EGRESS_DECISION_BATCH_ENTRIES,
+  MAX_TOOL_EGRESS_SUMMARY_ENTRIES,
+  ToolEgressDecisionEntry,
+  ToolEgressLaunch,
+} from "./toolEgress";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
@@ -145,3 +153,53 @@ export const decodeSshRemoteWorktreeCreated = Schema.decodeUnknownSync(SshRemote
 export const decodeSshRemoteWorktreeRemoved = Schema.decodeUnknownSync(SshRemoteWorktreeRemoved);
 export const decodeSshRemoteTerminalStarted = Schema.decodeUnknownSync(SshRemoteTerminalStarted);
 export const decodeSshRemoteTerminalEnded = Schema.decodeUnknownSync(SshRemoteTerminalEnded);
+
+/**
+ * The egress of a provider runtime placed on an SSH target, decided at a
+ * proxy of its own on this host under the runtime rule (any public name; no
+ * private, loopback, or link-local address). Each proxied launch is its own
+ * aggregate, keyed by its launch id. The records are the harness proxy's
+ * shapes without a thread's taint: a runtime's traffic is its own, as
+ * locally, and taints no thread. They name hosts, ports, and counts, never
+ * content.
+ */
+export const PROVIDER_RUNTIME_EGRESS_AGGREGATE = "provider-runtime-egress";
+export const PROVIDER_RUNTIME_EGRESS_EVENT_NAMES = {
+  launchStarted: "provider-runtime-egress.launch-started@1",
+  decisionsRecorded: "provider-runtime-egress.decisions-recorded@1",
+  launchSummarized: "provider-runtime-egress.launch-summarized@1",
+} as const;
+
+/** Whose runtime made the connections: the thread, the provider instance, and the target. */
+export const ProviderRuntimeEgressLaunchStarted = Schema.Struct({
+  launch: ToolEgressLaunch,
+  providerInstanceId: ProviderInstanceId,
+  targetId: SshTargetId,
+  connectionId: SshConnectionId,
+  startedAt: UtcTimestamp,
+}).annotations(strict);
+export type ProviderRuntimeEgressLaunchStarted = typeof ProviderRuntimeEgressLaunchStarted.Type;
+
+export const ProviderRuntimeEgressDecisionsRecorded = Schema.Struct({
+  launch: ToolEgressLaunch,
+  entries: Schema.Array(ToolEgressDecisionEntry).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(MAX_TOOL_EGRESS_DECISION_BATCH_ENTRIES),
+  ),
+}).annotations(strict);
+export type ProviderRuntimeEgressDecisionsRecorded =
+  typeof ProviderRuntimeEgressDecisionsRecorded.Type;
+
+export const ProviderRuntimeEgressLaunchSummarized = Schema.Struct({
+  launch: ToolEgressLaunch,
+  endedAt: UtcTimestamp,
+  bytesSent: Schema.Int.pipe(Schema.nonNegative()),
+  bytesReceived: Schema.Int.pipe(Schema.nonNegative()),
+  malformedRequests: Schema.Int.pipe(Schema.nonNegative()),
+  entries: Schema.Array(ToolEgressDecisionEntry).pipe(
+    Schema.maxItems(MAX_TOOL_EGRESS_SUMMARY_ENTRIES),
+  ),
+  truncated: Schema.Boolean,
+}).annotations(strict);
+export type ProviderRuntimeEgressLaunchSummarized =
+  typeof ProviderRuntimeEgressLaunchSummarized.Type;

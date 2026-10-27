@@ -128,8 +128,10 @@ describe("SSH executor protocol", () => {
       expect(host({ type: "resolve", question: 1, host: name })._tag).toBe("Left");
     }
     const executor = Schema.decodeUnknownEither(SshExecutorFrame);
-    expect(executor({ type: "stream-open", stream: 1 })._tag).toBe("Right");
-    expect(executor({ type: "stream-open", stream: 2 })._tag).toBe("Left");
+    expect(executor({ type: "stream-open", stream: 1, launch: 4 })._tag).toBe("Right");
+    expect(executor({ type: "stream-open", stream: 2, launch: 4 })._tag).toBe("Left");
+    // A forwarded connection names the launch whose forwarder accepted it.
+    expect(executor({ type: "stream-open", stream: 1 })._tag).toBe("Left");
     // The executor never dials or resolves on its own initiative.
     expect(executor({ type: "dial", stream: 2, address: "10.0.0.1", port: 22 })._tag).toBe("Left");
     expect(executor({ type: "stream-credit", stream: 1, bytes: 262_145 })._tag).toBe("Left");
@@ -216,6 +218,109 @@ describe("SSH executor protocol", () => {
         reader,
         operation: { tool: "write", arguments: { path: "a", content: "x", mode: 7 } },
       }),
+    ).toBe("Left");
+  });
+
+  it("starts a placed runtime only at an absolute path, with bounded arguments and home-relative account state", () => {
+    const decode = Schema.decodeUnknownEither(SshExecutorHostFrame);
+    const token = "a".repeat(64);
+    const start = (value: object) =>
+      decode({
+        type: "request",
+        id: 5,
+        request: {
+          kind: "start-process",
+          root: "/home/build/app",
+          posture: "approval-gated",
+          network: "proxied",
+          egressToken: token,
+          executable: "/opt/agent/bin/agent",
+          args: ["--acp"],
+          accountState: [],
+          home: {
+            project: "00000000-0000-4000-8000-000000000001",
+            instance: "00000000-0000-4000-8000-000000000002",
+          },
+          stream: 2,
+          ...value,
+        },
+      })._tag;
+    expect(start({})).toBe("Right");
+    // Plan runs offline; a writing posture only through this host's proxy.
+    expect(start({ posture: "plan", network: "none", egressToken: undefined })).toBe("Right");
+    expect(start({ posture: "plan" })).toBe("Left");
+    expect(start({ network: "none", egressToken: undefined })).toBe("Left");
+    expect(start({ network: "allow", egressToken: undefined })).toBe("Left");
+    expect(start({ posture: "full-access" })).toBe("Left");
+    expect(start({ egressToken: undefined })).toBe("Left");
+    // The program is an absolute path on the target, and the stream one the host opens.
+    expect(start({ executable: "agent" })).toBe("Left");
+    expect(start({ stream: 3 })).toBe("Left");
+    expect(start({ args: Array.from({ length: 65 }, () => "x") })).toBe("Left");
+    expect(start({ args: ["x".repeat(4_097)] })).toBe("Left");
+    expect(start({ args: ["a\u0000b"] })).toBe("Left");
+    const state = (entry: object) => start({ accountState: [entry] });
+    expect(state({ path: ".config/agent", access: "read-write", variable: "AGENT_HOME" })).toBe(
+      "Right",
+    );
+    expect(state({ path: ".agent/credentials.json", access: "read-only" })).toBe("Right");
+    for (const path of ["/etc/agent", "../agent", ".config/../.ssh", "", ".", "a//b"]) {
+      expect(state({ path, access: "read-only" })).toBe("Left");
+    }
+    for (const variable of [
+      "PATH",
+      "HOME",
+      "TMPDIR",
+      "LD_PRELOAD",
+      "DYLD_INSERT_LIBRARIES",
+      "SSH_AUTH_SOCK",
+      "OCTANT_DESKTOP_BRIDGE_SECRET",
+      "HTTPS_PROXY",
+      "no_proxy",
+      "lower case",
+    ]) {
+      expect(state({ path: ".agent", access: "read-only", variable })).toBe("Left");
+    }
+    expect(
+      start({
+        accountState: Array.from({ length: 5 }, (_, index) => ({
+          path: `.agent${String(index)}`,
+          access: "read-only",
+        })),
+      }),
+    ).toBe("Left");
+    // A placed process is stopped by its stream, beside the request slot.
+    expect(decode({ type: "stop-process", stream: 2 })._tag).toBe("Right");
+    expect(decode({ type: "stop-process", stream: 1 })._tag).toBe("Left");
+  });
+
+  it("reads a placed process only as started on its stream, refused with a reason, or ended with its last error output", () => {
+    const decode = Schema.decodeUnknownEither(SshExecutorFrame);
+    expect(
+      decode({ type: "reply", id: 5, reply: { kind: "process-started", stream: 2 } })._tag,
+    ).toBe("Right");
+    expect(
+      decode({ type: "reply", id: 5, reply: { kind: "process-refused", reason: "busy" } })._tag,
+    ).toBe("Right");
+    expect(
+      decode({ type: "reply", id: 5, reply: { kind: "process-refused", reason: "try later" } })
+        ._tag,
+    ).toBe("Left");
+    expect(decode({ type: "process-ended", stream: 2, exitCode: 0, stderr: "" })._tag).toBe(
+      "Right",
+    );
+    expect(
+      decode({ type: "process-ended", stream: 2, signal: "SIGKILL", stderr: "aGk=" })._tag,
+    ).toBe("Right");
+    expect(decode({ type: "process-ended", stream: 2, signal: "kill -9", stderr: "" })._tag).toBe(
+      "Left",
+    );
+    expect(
+      decode({
+        type: "process-ended",
+        stream: 2,
+        stderr: Buffer.alloc(65_540).toString("base64"),
+      })._tag,
     ).toBe("Left");
   });
 });

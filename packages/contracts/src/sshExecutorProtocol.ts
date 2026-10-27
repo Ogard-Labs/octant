@@ -26,6 +26,12 @@
  * output within a window this host grants. A managed worktree is created or
  * removed by naming the Project and a one-folder name; the executor derives
  * the folder from the bound root.
+ *
+ * A provider runtime placed on the target starts with a request that answers
+ * at once (`start-process`), then lives beside the requests on a stream this
+ * host opened: its standard input and output are that stream, and its end is
+ * a `process-ended` frame. Each proxied launch, command or placed process, has
+ * a forwarder of its own, and every connection it forwards names that launch.
  */
 
 import { Schema } from "effect";
@@ -55,6 +61,7 @@ import {
   SshExecutorIdentityFacts,
   SshRemotePath,
   SshRemoteUser,
+  holdsNoControlCharacter,
 } from "./sshTarget";
 import {
   MAX_TOOL_EGRESS_HOST_LENGTH,
@@ -64,8 +71,12 @@ import {
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
-/** The protocol this build speaks. A different version on the other side refuses. */
-export const SSH_EXECUTOR_PROTOCOL_VERSION = 1;
+/**
+ * The protocol this build speaks. A different version on the other side
+ * refuses. Version 2 added placed processes beside the request slot and named
+ * each forwarded connection's launch, after builds with version 1 shipped.
+ */
+export const SSH_EXECUTOR_PROTOCOL_VERSION = 2;
 
 /**
  * Written by the executor before its first frame. The target's login shell can
@@ -311,6 +322,109 @@ export const SshExecutorRemoveWorktreeRequest = Schema.Struct({
 }).annotations(strict);
 export type SshExecutorRemoveWorktreeRequest = typeof SshExecutorRemoveWorktreeRequest.Type;
 
+/**
+ * One byte stream beside the requests: a proxied launch's connection, or a
+ * placed process's standard input and output. The executor opens odd ids,
+ * one per connection a confined launch makes to its forwarder; this host
+ * opens even ids, one per connection its proxy asks the target to make and
+ * one per process it places.
+ */
+export const SshExecutorStreamId = Schema.Int.pipe(Schema.between(1, 2_147_483_647));
+export type SshExecutorStreamId = typeof SshExecutorStreamId.Type;
+
+const HostOpenedStreamId = SshExecutorStreamId.pipe(Schema.filter((stream) => stream % 2 === 0));
+
+/** The most placed processes one session runs at once; another is refused `busy`. */
+export const SSH_EXECUTOR_MAX_PLACED_PROCESSES = 4;
+/** The most of a placed process's standard error its end carries: its last bytes. */
+export const SSH_EXECUTOR_MAX_PROCESS_STDERR_BYTES = 65_536;
+/** The most account-state paths one placed process is granted. */
+export const SSH_EXECUTOR_MAX_ACCOUNT_STATE_PATHS = 4;
+
+/**
+ * A path relative to the remote user's home, never absolute and never
+ * climbing out of it, so it names a folder on the target and none of this
+ * host's.
+ */
+export const SshHomeRelativePath = Schema.String.pipe(
+  Schema.minLength(1),
+  Schema.maxLength(1_024),
+  Schema.filter(
+    (path) =>
+      !path.startsWith("/") &&
+      holdsNoControlCharacter(path) &&
+      path.split("/").every((segment) => segment !== "" && segment !== "." && segment !== ".."),
+  ),
+);
+export type SshHomeRelativePath = typeof SshHomeRelativePath.Type;
+
+/**
+ * The variable that points a runtime at one account-state path. It may not
+ * name Octant's own variables, the SSH client's, the loader's, the proxy's,
+ * or the ones the executor sets itself.
+ */
+export const SshAccountStateVariable = Schema.String.pipe(
+  Schema.pattern(/^[A-Z_][A-Z0-9_]{0,63}$/u),
+  Schema.filter(
+    (name) =>
+      !/^(?:OCTANT_|SSH_|LD_|DYLD_)/u.test(name) &&
+      !/PROXY/u.test(name) &&
+      !["PATH", "HOME", "TMPDIR", "SHELL", "USER", "LOGNAME"].includes(name),
+  ),
+);
+export type SshAccountStateVariable = typeof SshAccountStateVariable.Type;
+
+/**
+ * One path the runtime's driver declares for its sign-in, at the same place
+ * under the target user's home as under this host's. Read-only unless the
+ * runtime's own local launch writes it.
+ */
+export const SshPlacedAccountState = Schema.Struct({
+  path: SshHomeRelativePath,
+  access: Schema.Literal("read-only", "read-write"),
+  variable: Schema.optional(SshAccountStateVariable),
+}).annotations(strict);
+export type SshPlacedAccountState = typeof SshPlacedAccountState.Type;
+
+const PlacedArgument = Schema.String.pipe(
+  Schema.maxLength(4_096),
+  Schema.filter((value) => !value.includes("\u0000")),
+);
+
+/**
+ * Starts a provider runtime in the bound root, confined with the posture's
+ * attested runtime grants, its standard input and output the even stream this
+ * host names. Plan runs it offline, because the forwarder a proxied launch
+ * starts its command from needs the fork and exec Plan denies; a writing
+ * posture runs it on this host's proxy for the launch, never the target's own
+ * network. Its home is one owner-only folder per Project and provider
+ * instance on the target; the executor derives the folder, so this host
+ * never names a path to write.
+ */
+export const SshExecutorStartProcessRequest = Schema.Struct({
+  kind: Schema.Literal("start-process"),
+  root: SshRemotePath,
+  posture: SshConfinedPosture,
+  network: Schema.Literal("none", "proxied"),
+  egressToken: Schema.optional(SshEgressToken),
+  executable: SshRemotePath,
+  args: Schema.Array(PlacedArgument).pipe(Schema.maxItems(64)),
+  accountState: Schema.Array(SshPlacedAccountState).pipe(
+    Schema.maxItems(SSH_EXECUTOR_MAX_ACCOUNT_STATE_PATHS),
+  ),
+  home: Schema.Struct({ project: Schema.UUID, instance: Schema.UUID }).annotations(strict),
+  stream: HostOpenedStreamId,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (request) =>
+        (request.network === "proxied") === (request.egressToken !== undefined) &&
+        (request.network === "none") === (request.posture === "plan"),
+    ),
+  );
+export type SshExecutorStartProcessRequest = typeof SshExecutorStartProcessRequest.Type;
+
 export const SshExecutorRequest = Schema.Union(
   SshExecutorAttestRequest,
   SshExecutorReadRequest,
@@ -319,6 +433,7 @@ export const SshExecutorRequest = Schema.Union(
   SshExecutorOpenTerminalRequest,
   SshExecutorCreateWorktreeRequest,
   SshExecutorRemoveWorktreeRequest,
+  SshExecutorStartProcessRequest,
 );
 export type SshExecutorRequest = typeof SshExecutorRequest.Type;
 
@@ -337,12 +452,14 @@ export const SshExecutorCancelFrame = Schema.Struct({
 export type SshExecutorCancelFrame = typeof SshExecutorCancelFrame.Type;
 
 /**
- * One byte stream of a proxied command. The executor opens odd ids, one per
- * connection the confined command makes to its forwarder; this host opens
- * even ids, one per connection its proxy asks the target to make.
+ * Stops a placed process: its process group gets a terminate, then a kill
+ * five seconds later. The executor answers with `process-ended`.
  */
-export const SshExecutorStreamId = Schema.Int.pipe(Schema.between(1, 2_147_483_647));
-export type SshExecutorStreamId = typeof SshExecutorStreamId.Type;
+export const SshExecutorStopProcessFrame = Schema.Struct({
+  type: Schema.Literal("stop-process"),
+  stream: HostOpenedStreamId,
+}).annotations(strict);
+export type SshExecutorStopProcessFrame = typeof SshExecutorStopProcessFrame.Type;
 
 /** The most bytes one data frame carries, before base64. */
 export const SSH_EXECUTOR_MAX_STREAM_CHUNK_BYTES = 65_536;
@@ -484,6 +601,7 @@ export const SshExecutorHostFrame = Schema.Union(
   SshExecutorResolveFrame,
   SshExecutorStreamFrame,
   SshExecutorTerminalHostFrame,
+  SshExecutorStopProcessFrame,
 );
 export type SshExecutorHostFrame = typeof SshExecutorHostFrame.Type;
 
@@ -683,6 +801,36 @@ export const SshExecutorWorktreeRemovedReply = Schema.Struct({
 }).annotations(strict);
 export type SshExecutorWorktreeRemovedReply = typeof SshExecutorWorktreeRemovedReply.Type;
 
+/** The process runs; its output follows on its stream, and nothing of it came before this reply. */
+export const SshExecutorProcessStartedReply = Schema.Struct({
+  kind: Schema.Literal("process-started"),
+  stream: HostOpenedStreamId,
+}).annotations(strict);
+export type SshExecutorProcessStartedReply = typeof SshExecutorProcessStartedReply.Type;
+
+/**
+ * Why no process started: the session runs its most (`busy`); the binary is
+ * not a regular executable outside the bound root and the remote user's
+ * keys, in folders only the remote user or root can write; the runtime home
+ * is not the remote user's own owner-only real folder; an account-state path
+ * is missing, is or holds a folder no grant may reach, or is another user's;
+ * or the launch could not be confined (`unavailable`).
+ */
+export const SshPlacedProcessRefusalReason = Schema.Literal(
+  "busy",
+  "runtime-binary-not-confinable",
+  "runtime-home-not-confinable",
+  "account-state-not-confinable",
+  "unavailable",
+);
+export type SshPlacedProcessRefusalReason = typeof SshPlacedProcessRefusalReason.Type;
+
+export const SshExecutorProcessRefusedReply = Schema.Struct({
+  kind: Schema.Literal("process-refused"),
+  reason: SshPlacedProcessRefusalReason,
+}).annotations(strict);
+export type SshExecutorProcessRefusedReply = typeof SshExecutorProcessRefusedReply.Type;
+
 export const SshExecutorReply = Schema.Union(
   SshExecutorAttestedReply,
   SshExecutorBusyReply,
@@ -693,6 +841,8 @@ export const SshExecutorReply = Schema.Union(
   SshExecutorTerminalUnavailableReply,
   SshExecutorWorktreeCreatedReply,
   SshExecutorWorktreeRemovedReply,
+  SshExecutorProcessStartedReply,
+  SshExecutorProcessRefusedReply,
 );
 export type SshExecutorReply = typeof SshExecutorReply.Type;
 
@@ -704,13 +854,15 @@ export const SshExecutorReplyFrame = Schema.Struct({
 export type SshExecutorReplyFrame = typeof SshExecutorReplyFrame.Type;
 
 /**
- * A confined command connected to its forwarder: the executor opens stream
- * `stream` for that connection toward this host's proxy. Only while a proxied
- * command runs.
+ * A confined launch connected to its forwarder: the executor opens stream
+ * `stream` for that connection toward this host's proxy for `launch`, the
+ * request that started the command or placed process. Only while that launch
+ * runs.
  */
 export const SshExecutorStreamOpenFrame = Schema.Struct({
   type: Schema.Literal("stream-open"),
   stream: SshExecutorStreamId.pipe(Schema.filter((stream) => stream % 2 === 1)),
+  launch: SshExecutorRequestId,
 }).annotations(strict);
 export type SshExecutorStreamOpenFrame = typeof SshExecutorStreamOpenFrame.Type;
 
@@ -750,6 +902,22 @@ export const SshExecutorTerminalExitedFrame = Schema.Struct({
 }).annotations(strict);
 export type SshExecutorTerminalExitedFrame = typeof SshExecutorTerminalExitedFrame.Type;
 
+/**
+ * A placed process ended: it exited with a code or a signal, and `stderr` is
+ * the last of its standard error, base64-encoded. It follows the last of the
+ * process's output, and it is the end of its stream: nothing more is sent on
+ * that stream, so the host still reads what it holds rather than lose it to a
+ * close.
+ */
+export const SshExecutorProcessEndedFrame = Schema.Struct({
+  type: Schema.Literal("process-ended"),
+  stream: HostOpenedStreamId,
+  exitCode: Schema.optional(Schema.Int),
+  signal: Schema.optional(Schema.String.pipe(Schema.pattern(/^SIG[A-Z0-9]{1,16}$/u))),
+  stderr: Base64.pipe(Schema.maxLength(Math.ceil(SSH_EXECUTOR_MAX_PROCESS_STDERR_BYTES / 3) * 4)),
+}).annotations(strict);
+export type SshExecutorProcessEndedFrame = typeof SshExecutorProcessEndedFrame.Type;
+
 /** Every frame an executor sends. */
 export const SshExecutorFrame = Schema.Union(
   SshExecutorHello,
@@ -760,5 +928,6 @@ export const SshExecutorFrame = Schema.Union(
   SshExecutorStreamFrame,
   SshExecutorTerminalOutputFrame,
   SshExecutorTerminalExitedFrame,
+  SshExecutorProcessEndedFrame,
 );
 export type SshExecutorFrame = typeof SshExecutorFrame.Type;
