@@ -570,6 +570,25 @@ describe("AppleDeviceService", () => {
     });
   });
 
+  it("answers whether a lease would start without starting one", async () => {
+    const devices = service();
+    const wired = byName((await discover(devices)).devices, "Henrik's iPhone");
+    const request = (extra: Record<string, unknown>) =>
+      deviceRequest("use-device", firstThread, { deviceId: wired.deviceId, ...extra });
+    await expect(devices.check(request({}), scopeFor(firstThread))).resolves.toEqual({
+      kind: "refused",
+      reason: "confirmation-required",
+    });
+    await expect(devices.check(request(approval), confirmed(firstThread))).resolves.toEqual({
+      kind: "allowed",
+    });
+    expect(leases.list()).toEqual([]);
+    // A host that is not a Mac answers the same refusal its requests get.
+    await expect(
+      service("linux").check(request(approval), confirmed(firstThread)),
+    ).resolves.toEqual({ kind: "refused", reason: "toolchain-unavailable" });
+  });
+
   it("starts a lease on a locked phone but never on an unavailable one", async () => {
     const devices = service();
     const discovery = await discover(devices);
@@ -907,6 +926,49 @@ describe("AppleDeviceService", () => {
       expect(
         host.calls.some((argv) => argv.includes("terminate") && !argv.includes("--help")),
       ).toBe(false);
+    });
+
+    it("hands an app's console back only to the thread that read it", async () => {
+      const { devices, deviceId } = await leased();
+      await devices.request(
+        deviceRequest("run", firstThread, { deviceId, ...build, ...approval }),
+        approved(),
+      );
+      const app = { deviceId, bundleIdentifier: "sh.octant.SimulatorFixture" };
+      const logs = evidenceOf(
+        await devices.request(deviceRequest("logs", firstThread, app), scopeFor(firstThread)),
+      );
+      const reference = logs.artifacts[0]?.reference ?? "";
+      const read = await devices.readConsole(reference, scopeFor(firstThread));
+      expect(read.kind === "found" ? new TextDecoder().decode(read.bytes) : read).toBe(
+        "Fixture ready on [ID]\n",
+      );
+      await expect(devices.readConsole(reference, scopeFor(secondThread))).resolves.toEqual({
+        kind: "not-found",
+      });
+      // A screenshot or build log is not a console read, whoever holds it.
+      await expect(
+        devices.readConsole(`apple-device-log-${logs.actionId}`, scopeFor(firstThread)),
+      ).resolves.toEqual({ kind: "not-found" });
+    });
+
+    it("answers whether it would build without building, signing, or journaling anything", async () => {
+      const { devices, deviceId } = await leased();
+      await expect(
+        devices.check(
+          deviceRequest("build", firstThread, { deviceId, ...build }),
+          scopeFor(firstThread),
+        ),
+      ).resolves.toEqual({ kind: "refused", reason: "approval-required" });
+      await expect(
+        devices.check(
+          deviceRequest("build", firstThread, { deviceId, ...build, ...approval }),
+          approved(),
+        ),
+      ).resolves.toEqual({ kind: "allowed" });
+      expect(host.calls.some((argv) => argv[0] === "xcodebuild" && argv.length > 3)).toBe(false);
+      expect(host.signingCalls).toEqual([]);
+      expect(host.journal).toEqual([]);
     });
 
     it("installs only a product this thread's build signed, and launches only what it installed", async () => {

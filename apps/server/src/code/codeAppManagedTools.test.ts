@@ -2280,7 +2280,9 @@ describe("Code tool families", () => {
     expect(families).toHaveLength(4);
     // These four definitions serialized to 6,580 bytes before their detailed
     // usage moved behind help. The budget catches a description growing back.
-    expect(JSON.stringify(families).length).toBeLessThanOrEqual(4_400);
+    // A paired device as an Apple destination added its own operations and
+    // parameters (about 250 bytes of schema); its usage lives behind help.
+    expect(JSON.stringify(families).length).toBeLessThanOrEqual(4_600);
   });
 
   it.each(["octant_browser", "octant_terminal", "octant_apple", "octant_android"])(
@@ -2437,3 +2439,244 @@ function uuidFactory() {
   let index = 1;
   return () => `c0000000-0000-4000-8000-${String(index++).padStart(12, "0")}`;
 }
+
+describe("a paired iPhone or iPad through the Apple tool", () => {
+  const deviceId = "a1000000-0000-4000-8000-000000000001";
+  const product = "apple-device-product-c0000000-0000-4000-8000-000000000001";
+  const bundleIdentifier = "sh.octant.SimulatorFixture";
+  type DevicesPort = NonNullable<
+    NonNullable<Parameters<typeof createCodeAppManagedTools>[0]["apple"]>["devices"]
+  >;
+
+  function deviceEvidence(overrides: Record<string, unknown> = {}) {
+    return {
+      kind: "apple-device-evidence",
+      evidence: {
+        actionId: "90000000-0000-4000-8000-000000000001",
+        correlationId: "90000000-0000-4000-8000-000000000002",
+        authority: appleAuthority,
+        kind: "build",
+        deviceId,
+        requestedBy: { kind: "agent" },
+        outcome: "succeeded",
+        diagnostics: [],
+        artifacts: [],
+        cleanup: "complete",
+        durationMs: 40,
+        completedAt: "2026-08-06T08:00:01.000Z",
+        ...overrides,
+      },
+    } as never;
+  }
+
+  function deviceTools(
+    threadOverrides: Partial<CodeThread>,
+    port: Partial<Record<keyof DevicesPort, unknown>> = {},
+    answer: "approved" | "denied" = "approved",
+  ) {
+    const devices = {
+      request: vi.fn(async (..._args: ReadonlyArray<unknown>) => deviceEvidence()),
+      check: vi.fn(
+        async (..._args: ReadonlyArray<unknown>) =>
+          ({ kind: "refused", reason: "approval-required" }) as never,
+      ),
+      readScreenshot: vi.fn(async (..._args: ReadonlyArray<unknown>) => undefined),
+      readConsole: vi.fn(async (..._args: ReadonlyArray<unknown>) => undefined),
+      ...port,
+    } as {
+      readonly request: ReturnType<typeof vi.fn>;
+      readonly check: ReturnType<typeof vi.fn>;
+      readonly readScreenshot: ReturnType<typeof vi.fn>;
+      readonly readConsole: ReturnType<typeof vi.fn>;
+    };
+    const ask = vi.fn(async (_effect: unknown) =>
+      answer === "approved"
+        ? {
+            status: "approved" as const,
+            approvalId: "d0000000-0000-4000-8000-000000000001" as never,
+          }
+        : { status: "denied" as const },
+    );
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: thread(threadOverrides),
+      readThread: () => thread(threadOverrides),
+      uuid: uuidFactory(),
+      executeOperation: async () => ({}) as never,
+      terminal: { read: async () => ({}) as never },
+      apple: {
+        resolveAuthority: () => appleAuthority,
+        discover: vi.fn(),
+        execute: vi.fn(),
+        snapshot: vi.fn(),
+        requestPaneOpen: vi.fn(),
+        readScreenshot: vi.fn(),
+        inputGrantIsOpen: () => false,
+        devices: devices as unknown as DevicesPort,
+      },
+      deviceApproval: { request: ask },
+    });
+    const call = (input: Record<string, unknown>) =>
+      tools.execute({ name: "octant_apple", inputJson: JSON.stringify(input) });
+    const sent = (index = 0) => devices.request.mock.calls[index]?.[1] as unknown;
+    return { ask, call, devices, sent };
+  }
+
+  const leasedAnswer = () =>
+    vi.fn(
+      async () =>
+        ({
+          kind: "apple-device-leased",
+          deviceId,
+          grantedAt: "2026-08-06T08:00:01.000Z",
+        }) as never,
+    );
+  const awaitingConfirmation = () =>
+    vi.fn(async () => ({ kind: "refused", reason: "confirmation-required" }) as never);
+
+  it.each(["full-access", "approval-gated", "plan"] as const)(
+    "lets the agent use a paired device under %s only after the person allows it",
+    async (executionPolicy) => {
+      const declined = deviceTools(
+        { executionPolicy } as never,
+        { check: awaitingConfirmation() },
+        "denied",
+      );
+      const refused = await declined.call({ operation: "use-device", deviceId });
+      expect(refused).toMatchObject({ isError: true, result: { error: "device-approval-denied" } });
+      expect(declined.devices.request).not.toHaveBeenCalled();
+
+      const allowed = deviceTools({ executionPolicy } as never, {
+        check: awaitingConfirmation(),
+        request: leasedAnswer(),
+      });
+      const leased = await allowed.call({ operation: "use-device", deviceId });
+      expect(allowed.ask.mock.calls[0]?.[0]).toMatchObject({
+        kind: "apple-device-lease",
+        request: { kind: "use-device", deviceId, threadId, checkoutId },
+      });
+      // The host receives the agent's own request carrying the person's answer.
+      expect(allowed.sent()).toMatchObject({
+        kind: "use-device",
+        requestedBy: { kind: "agent", threadId },
+        approval: { kind: "approved", approvalId: "d0000000-0000-4000-8000-000000000001" },
+      });
+      expect(leased).toMatchObject({
+        isError: false,
+        result: { deviceId, lease: "this-thread" },
+      });
+    },
+  );
+
+  it("does not ask again for a device the thread already holds", async () => {
+    const { ask, call, sent } = deviceTools({ executionPolicy: "approval-gated" } as never, {
+      check: vi.fn(async () => ({ kind: "allowed" }) as never),
+      request: leasedAnswer(),
+    });
+    await call({ operation: "use-device", deviceId });
+    expect(ask).not.toHaveBeenCalled();
+    expect(sent()).toMatchObject({ approval: { kind: "not-required" } });
+  });
+
+  it("puts nothing to the person that the host would refuse for another reason", async () => {
+    const { ask, call, devices } = deviceTools({ executionPolicy: "approval-gated" } as never, {
+      check: vi.fn(async () => ({ kind: "refused", reason: "destination-leased" }) as never),
+    });
+    const outcome = await call({ operation: "use-device", deviceId });
+    expect(outcome).toMatchObject({ isError: true, result: { error: "destination-leased" } });
+    // The refusal names no other thread.
+    expect(JSON.stringify(outcome.result)).toContain("Another thread is using this device");
+    expect(ask).not.toHaveBeenCalled();
+    expect(devices.request).not.toHaveBeenCalled();
+  });
+
+  it("refuses device effects in Plan before asking anyone or reaching the host", async () => {
+    const { ask, call, devices } = deviceTools({ executionPolicy: "plan" } as never);
+    for (const input of [
+      { operation: "build", deviceId, projectPath: "App.xcodeproj", teamId: "A1B2C3D4E5" },
+      { operation: "run", deviceId, projectPath: "App.xcodeproj", teamId: "A1B2C3D4E5" },
+      { operation: "install", deviceId, product },
+      { operation: "launch", deviceId, bundleIdentifier },
+      { operation: "terminate", deviceId, bundleIdentifier },
+    ]) {
+      expect(await call(input)).toMatchObject({
+        isError: true,
+        result: { error: "plan-mode-read-only" },
+      });
+    }
+    expect(ask).not.toHaveBeenCalled();
+    expect(devices.check).not.toHaveBeenCalled();
+    expect(devices.request).not.toHaveBeenCalled();
+  });
+
+  it("runs a device effect unasked under Full access and asks a person for each one otherwise", async () => {
+    const fullAccess = deviceTools({ executionPolicy: "full-access" } as never);
+    await fullAccess.call({
+      operation: "build",
+      deviceId,
+      projectPath: "App.xcodeproj",
+      scheme: "App",
+      teamId: "A1B2C3D4E5",
+    });
+    expect(fullAccess.ask).not.toHaveBeenCalled();
+    expect(fullAccess.sent()).toMatchObject({
+      kind: "build",
+      teamId: "A1B2C3D4E5",
+      approval: { kind: "not-required" },
+    });
+
+    const gated = deviceTools({ executionPolicy: "approval-gated" } as never);
+    await gated.call({ operation: "install", deviceId, product });
+    expect(gated.ask.mock.calls[0]?.[0]).toMatchObject({
+      kind: "apple-device-action",
+      request: { kind: "install", deviceId, artifact: product },
+    });
+    expect(gated.sent()).toMatchObject({
+      kind: "install",
+      approval: { kind: "approved", approvalId: "d0000000-0000-4000-8000-000000000001" },
+    });
+  });
+
+  it("reads a leased device's screen as an image and its app's console as text, unasked", async () => {
+    const png = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
+    const { ask, call, devices } = deviceTools({ executionPolicy: "approval-gated" } as never, {
+      request: vi.fn(async (_windowId: unknown, request: unknown) =>
+        (request as { readonly kind: string }).kind === "screenshot"
+          ? deviceEvidence({
+              kind: "screenshot",
+              artifacts: [{ kind: "screenshot", reference: "apple-device-screenshot-1" }],
+            })
+          : deviceEvidence({
+              kind: "logs",
+              bundleIdentifier,
+              artifacts: [{ kind: "log", reference: "apple-device-console-1" }],
+            }),
+      ),
+      readScreenshot: vi.fn(async () => png),
+      readConsole: vi.fn(async () => new TextEncoder().encode("Fixture ready\n")),
+    });
+
+    const screen = await call({ operation: "screenshot", deviceId });
+    expect(screen.images).toHaveLength(1);
+    expect(devices.readScreenshot).toHaveBeenCalledWith(
+      windowId,
+      expect.objectContaining({ threadId, checkoutId }),
+      "apple-device-screenshot-1",
+    );
+    const logs = await call({ operation: "logs", deviceId, bundleIdentifier });
+    expect(logs).toMatchObject({ isError: false, result: { console: "Fixture ready\n" } });
+    expect(ask).not.toHaveBeenCalled();
+    expect(devices.check).not.toHaveBeenCalled();
+  });
+
+  it("offers a physical device no Simulator input, boot, or pane", async () => {
+    const { call, devices } = deviceTools({ executionPolicy: "full-access" } as never);
+    for (const operation of ["tap", "boot", "open", "test"]) {
+      expect(await call({ operation, deviceId, x: 1, y: 1 })).toMatchObject({
+        isError: true,
+        result: { error: "not-offered-on-device" },
+      });
+    }
+    expect(devices.request).not.toHaveBeenCalled();
+  });
+});

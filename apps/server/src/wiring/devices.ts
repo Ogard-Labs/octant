@@ -457,10 +457,16 @@ export function wireDevices(deps: DevicesDependencies) {
       // Simulator effect: Full access runs it, approval-gated postures need
       // this window's one-use approval of exactly this request, and Plan is
       // refused by the device policy.
-      const resolveAppleDeviceScope = async (
+      //
+      // The thread's agent asks through the same resolver. Its requests come
+      // from no window principal, so a receipt counts only because the Code
+      // runtime mints one for a device lease or effect after a person at a
+      // window on this Mac answered it in the thread; a paired device's answer
+      // mints nothing.
+      const resolveAppleDeviceContext = async (
         windowId: WindowId,
         request: AppleDeviceRequest,
-        principal: ClientPrincipal,
+        mayCarryReceipt: boolean,
       ): Promise<AppleDeviceExecutionContext | undefined> => {
         const resolved = await resolveAppleThread(windowId, request);
         if (resolved === undefined) return undefined;
@@ -468,11 +474,11 @@ export function wireDevices(deps: DevicesDependencies) {
         const confirmed =
           request.kind === "use-device" &&
           request.approval.kind === "approved" &&
-          principal.kind === "local-window" &&
+          mayCarryReceipt &&
           ((await approvals.validateAppleDeviceLease(windowId, request)) ?? false);
         const effectApproved =
           APPLE_DEVICE_EFFECT_KINDS.has(request.kind) &&
-          principal.kind === "local-window" &&
+          mayCarryReceipt &&
           (effectiveThread.executionPolicy === "full-access" ||
             (decidesCodeEffectsByApproval(effectiveThread.executionPolicy) &&
               request.approval.kind === "approved" &&
@@ -489,18 +495,38 @@ export function wireDevices(deps: DevicesDependencies) {
             : {}),
         };
       };
+      const resolveAppleDeviceScope = (
+        windowId: WindowId,
+        request: AppleDeviceRequest,
+        principal: ClientPrincipal,
+      ) => resolveAppleDeviceContext(windowId, request, principal.kind === "local-window");
+      // The agent speaks only for itself: a request naming a person is a pane
+      // click, which comes through the route and its principal check.
+      const resolveAppleDeviceAgentScope = async (
+        windowId: WindowId,
+        request: AppleDeviceRequest,
+      ) =>
+        request.requestedBy.kind === "agent"
+          ? await resolveAppleDeviceContext(windowId, request, true)
+          : undefined;
+      // The thread and checkout whose held screenshots and console reads a
+      // caller may read back.
+      const resolveAppleDeviceThread = async (
+        windowId: WindowId,
+        scope: Parameters<typeof resolveAppleThread>[1],
+      ) => {
+        const resolved = await resolveAppleThread(windowId, scope);
+        return resolved === undefined
+          ? undefined
+          : { threadId: resolved.thread.id, checkoutId: resolved.checkout.id };
+      };
       const appleDeviceRoutes = createAppleDeviceRouteHandler({
         windowAuthorityStore,
         service: appleDeviceService,
         resolveScope: resolveAppleDeviceScope,
         // A screenshot's pixels are read in the same thread scope, by a local
         // window only; the route refuses every other principal first.
-        resolveThread: async (windowId, request) => {
-          const resolved = await resolveAppleThread(windowId, request);
-          return resolved === undefined
-            ? undefined
-            : { threadId: resolved.thread.id, checkoutId: resolved.checkout.id };
-        },
+        resolveThread: resolveAppleDeviceThread,
       });
       const appleToolchainRoutes = createAppleToolchainRouteHandler({
         windowAuthorityStore,
@@ -658,6 +684,8 @@ export function wireDevices(deps: DevicesDependencies) {
         appleToolchainRoutes,
         resolveAndroidContext,
         resolveAppleContext,
+        resolveAppleDeviceAgentScope,
+        resolveAppleDeviceThread,
       };
     };
     yield* Effect.promise(async () => {
