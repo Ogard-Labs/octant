@@ -157,6 +157,27 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     } catch {
       updated = false;
     }
+    if (!updated) {
+      // A refused switch or pick goes back to what the host kept: left as
+      // chosen, the Language services switch read off while the host still
+      // ran the server, and no later change carried it. Typed text stays so
+      // the person can correct it.
+      if (change.executionPolicy !== undefined) {
+        setExecutionPolicy(props.settings.defaultExecutionPolicy);
+      }
+      if (change.permissionPersistence !== undefined) {
+        setPermissionPersistence(props.settings.defaultPermissionPersistence);
+      }
+      if (change.requireGitRepository !== undefined) {
+        setRequireGitRepository(props.settings.requireGitRepository);
+      }
+      if (change.defaultDiffLayout !== undefined) {
+        setDefaultDiffLayout(props.settings.defaultDiffLayout ?? "unified");
+      }
+      if (change.bundledLanguageServer !== undefined) {
+        setBundledLanguageServer(props.settings.bundledLanguageServer !== false);
+      }
+    }
     setMessage(updated ? undefined : "Code defaults could not be saved.");
   }
 

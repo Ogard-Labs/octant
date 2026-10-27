@@ -1586,7 +1586,14 @@ accounts or hardware.
      library name showed the outside-checkout notice, and the off state showed
      with the switch off. The same run as a paired device's caller served it
      too. The paired-device route's classification is the slice 2 route test;
-     a packaged app on a Mac is slice 4's. The rules are under
+     a packaged app on a Mac is slice 4's. Rendered QA of the Settings ›
+     Code switch on 2026-10-27 (from `46834576e`, Chromium at 1440 and
+     390 px, light and dark through the app's theme provider) showed it on,
+     off, and refused with no horizontal overflow or console errors. It found
+     that a refused change left the switch showing the refused position while
+     the host kept the old one, and no later change sent it. A refused switch
+     or pick now returns to the host's value and typed text stays
+     (`CodeSettingsView.test.tsx`). The rules are under
      [Editor rules](#editor-rules).
 4. **Ship the binary.** Container: partly.
    - Include the per-architecture binary in the packaged desktop app and the
@@ -1632,7 +1639,15 @@ accounts or hardware.
      listener saw no connection. The `macos-15` CI job runs the same test for
      Seatbelt evidence; it has not yet run on a Mac. The inspection preview's
      language-server review is covered in the server test and in Settings
-     (`ExtensionsSettingsView.test.tsx`). The rules are under
+     (`ExtensionsSettingsView.test.tsx`). Rendered QA on 2026-10-27 (from
+     `46834576e`, Chromium at 1440 and 390 px, light and dark) showed the
+     review card for a `static` and a `repo-tooling` server inside Settings,
+     and the installed card effective, blocked by mode, and awaiting review,
+     with no horizontal overflow or console errors. At 390 px it found the
+     digest drawn over its label, the component's kind over its name, and the
+     grant sentence cut off inside a scroll box above Confirm install. Now the
+     label keeps its column, the kind line goes under the name on a phone,
+     and only a package's own text is bounded. The rules are under
      [User-added servers](#user-added-servers).
 6. **`repo-tooling` servers.** Container: yes.
    - Use the shell-command approval per checkout and component, rememberable
@@ -1660,7 +1675,12 @@ accounts or hardware.
      local window, and a paired device is refused before the service
      (`codeRoutes.test.ts`); the editor's approval and the review copy are
      covered in `MonacoEditorPane.test.tsx` and
-     `ExtensionsSettingsView.test.tsx`; a Project erase removes the
+     `ExtensionsSettingsView.test.tsx`. Rendered QA on 2026-10-27 (from
+     `46834576e`, the real Monaco editor in Chromium at 1440 and 390 px,
+     light and dark) showed the approval line with Allow in this checkout and
+     Allow in this Project, an approval that opened the file with one marker,
+     a host refusal naming the local window, and an approval not recorded,
+     with no horizontal overflow or console errors; a Project erase removes the
      approvals, from the running host too, and the egress records
      (`threadPurge.test.ts`). A revoked Project rule, or a thread taking in
      outside content, closes a server's idle tunnel at once,

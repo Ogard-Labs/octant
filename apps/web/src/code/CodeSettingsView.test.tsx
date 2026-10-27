@@ -188,4 +188,24 @@ describe("CodeSettingsView", () => {
     );
     expect(screen.getByRole("switch", { name: "Language services" })).not.toBeChecked();
   });
+
+  it("shows the host's choice again when it refuses a switch or pick, and keeps typed text", async () => {
+    const update = vi.fn(async () => false);
+    const user = userEvent.setup();
+    render(<CodeSettingsView onUpdate={update} settings={settings as never} />);
+
+    const services = screen.getByRole("switch", { name: "Language services" });
+    await user.click(services);
+    expect(await screen.findByText("Code defaults could not be saved.")).toBeVisible();
+    expect(services).toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: "Side by side" }));
+    expect(screen.getByRole("button", { name: "Unified" })).toHaveAttribute("aria-pressed", "true");
+
+    const field = screen.getByRole("textbox", { name: "External editor executable" });
+    await user.type(field, "/opt/editor");
+    fireEvent.blur(field);
+    expect(await screen.findByText("Code defaults could not be saved.")).toBeVisible();
+    expect(field).toHaveValue("/opt/editor");
+  });
 });
