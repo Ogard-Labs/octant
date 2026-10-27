@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { unlinkSync } from "node:fs";
 import {
   mkdir,
   mkdtemp,
@@ -1065,6 +1066,55 @@ describe("AppleDeviceService", () => {
         false,
       );
       expect(host.calls.some((argv) => argv.includes("--console"))).toBe(false);
+    });
+
+    it("refuses a device action whose id another action already used, before building into its directory", async () => {
+      const { devices, deviceId } = await leased();
+      const built = evidenceOf(
+        await devices.request(
+          deviceRequest("build", firstThread, { deviceId, ...build, ...approval }),
+          approved(),
+        ),
+      );
+      const other = byName((await discover(devices, secondThread)).devices, "Studio iPad");
+      await devices.request(
+        deviceRequest("use-device", secondThread, { deviceId: other.deviceId, ...approval }),
+        confirmed(secondThread),
+      );
+      const builds = host.calls.filter((argv) => argv.at(-1) === "build").length;
+      await expect(
+        devices.request(
+          deviceRequest("build", secondThread, {
+            deviceId: other.deviceId,
+            ...build,
+            ...approval,
+            actionId: built.actionId,
+          }),
+          approved(secondThread),
+        ),
+      ).resolves.toMatchObject({ kind: "apple-device-failure", failure: { category: "invalid" } });
+      // The first thread's signed product stays the one its build made.
+      expect(host.calls.filter((argv) => argv.at(-1) === "build")).toHaveLength(builds);
+      expect(host.journal).toHaveLength(1);
+    });
+
+    it("keeps host paths out of the evidence when signing fails on a file it reads", async () => {
+      const { devices, deviceId } = await leased();
+      // Xcode replaces a profile while the app builds, after signing was chosen.
+      host.build = {
+        bundleIdentifier: "sh.octant.SimulatorFixture",
+        whileBuilding: () => unlinkSync(join(root, "profiles", "fixture.mobileprovision")),
+      };
+      const evidence = evidenceOf(
+        await devices.request(
+          deviceRequest("build", firstThread, { deviceId, ...build, ...approval }),
+          approved(),
+        ),
+      );
+      expect(evidence.outcome).toBe("interrupted");
+      const recorded = JSON.stringify([host.journal, [...host.artifacts.values()]]);
+      expect(recorded).toContain("embedded.mobileprovision");
+      expect(recorded).not.toContain(root);
     });
 
     it("ends the console session of the app when its thread's lease ends", async () => {

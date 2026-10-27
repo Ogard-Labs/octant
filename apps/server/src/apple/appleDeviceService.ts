@@ -264,6 +264,13 @@ export class AppleDeviceService {
   /** The latest console session per device and bundle, running or ended. */
   readonly #sessions = new Map<string, ConsoleSession>();
   readonly #stopListening: () => void;
+  /**
+   * Every device action id this host has carried out. A build's derived data,
+   * its product reference, and its journaled plan are all named by the id, so
+   * a reused one would build into another action's directory, possibly another
+   * thread's, and replace the product that thread holds.
+   */
+  readonly #actionIds = new Set<string>();
 
   constructor(options: AppleDeviceServiceOptions) {
     this.#options = options;
@@ -417,6 +424,16 @@ export class AppleDeviceService {
       case "launch":
       case "terminate":
       case "logs":
+        if (this.#actionIds.has(String(request.actionId))) {
+          return decodeAppleDeviceResponse({
+            kind: "apple-device-failure",
+            failure: {
+              category: "invalid",
+              message: "This device action id was already used; issue a new one.",
+            },
+          });
+        }
+        this.#actionIds.add(String(request.actionId));
         return await this.#perform({
           request,
           context,
@@ -491,7 +508,10 @@ export class AppleDeviceService {
       this.#options.realpath,
     );
     const derivedRoot = resolve(this.#options.artifactRoot, `device-derived-${request.actionId}`);
-    await mkdir(derivedRoot, { recursive: true, mode: 0o700 });
+    await mkdir(this.#options.artifactRoot, { recursive: true, mode: 0o700 });
+    // Created here and only here: a directory left by an action before a
+    // restart is never built into again.
+    await mkdir(derivedRoot, { mode: 0o700 });
     const xcodebuild = [
       "xcodebuild",
       projectSelector(projectPathInCheckout),
@@ -886,6 +906,13 @@ export class AppleDeviceService {
     const roots: ReadonlyArray<readonly [string, string]> = [
       [work.context.checkoutRoot, "[PROJECT]"],
       [this.#options.artifactRoot, "[ARTIFACT]"],
+      // A failed signing or devicectl step's error names these host-private
+      // paths, and the profiles live under the person's home directory.
+      [this.#options.signingDirectory, "[SIGNING]"],
+      [this.#options.outputDirectory, "[DEVICECTL]"],
+      ...this.#options.provisioningProfileDirectories.map(
+        (directory) => [directory, "[PROFILES]"] as const,
+      ),
     ];
     const log = sanitized(work.log.join("\n"), roots);
     const notes = work.notes.map((note) => sanitized(note, roots));

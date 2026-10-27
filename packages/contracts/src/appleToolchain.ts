@@ -578,7 +578,17 @@ export const AppleDeviceRequest = Schema.Struct({
    */
   fromThreadId: Schema.optional(CodeThreadId),
   projectPath: Schema.optional(AppleProjectPath),
-  scheme: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
+  /**
+   * Passed to `xcodebuild` after `-scheme` as given, so it never begins with
+   * `-`: no device request may carry an option such as
+   * `-allowProvisioningUpdates` into a build.
+   */
+  scheme: Schema.optional(
+    Schema.NonEmptyTrimmedString.pipe(
+      Schema.maxLength(256),
+      Schema.filter((value) => !value.startsWith("-")),
+    ),
+  ),
   configuration: Schema.optional(AppleBuildConfiguration),
   teamId: Schema.optional(AppleTeamId),
   /** `install` only: a product an Octant build held for this thread, by reference. */

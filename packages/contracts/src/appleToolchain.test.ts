@@ -733,6 +733,14 @@ describe("Apple physical device contracts", () => {
     expect(() =>
       AppleContracts.decodeAppleDeviceRequest({ ...build, allowProvisioningUpdates: true }),
     ).toThrow();
+    // The scheme is the one value the build passes to xcodebuild as given, so
+    // it cannot be spelled as an option.
+    expect(AppleContracts.decodeAppleDeviceRequest({ ...build, scheme: "My App" }).scheme).toBe(
+      "My App",
+    );
+    for (const scheme of ["-allowProvisioningUpdates", "-quiet"]) {
+      expect(() => AppleContracts.decodeAppleDeviceRequest({ ...build, scheme })).toThrow();
+    }
     // Signing is selected by team; a build without one cannot be signed for a device.
     const { teamId: _teamId, ...unsigned } = build;
     expect(() => AppleContracts.decodeAppleDeviceRequest(unsigned)).toThrow();

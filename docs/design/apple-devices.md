@@ -243,7 +243,8 @@ access covers neither the device lease nor any distribution step.
   confirmation, like a lease.
 - A provisioning update is refused by name under every posture
   (`provisioning-updates-not-offered`), and a device request has no field that
-  could carry `-allowProvisioningUpdates`.
+  could carry `-allowProvisioningUpdates`: its scheme, the one value a build
+  passes as given, cannot begin with `-`.
 - `build` needs the lease but not a connected device: it signs for the device
   without touching it.
 - Every refusal that needs nobody's answer (host, distribution gate, remote,
@@ -267,6 +268,10 @@ access covers neither the device lease nor any distribution step.
 - The host checks the lease again just before it installs or launches: a
   `run`'s build can outlast the lease it started under, and a device whose
   lease has ended is not touched.
+- The host carries out each device action id once and refuses a reused one
+  before anything runs: a build's derived-data directory, its product
+  reference, and its journaled plan are named by the id, so a reused id would
+  build into another action's directory and replace the product it holds.
 - What a thread built, installed, and launched is held in host memory, bound
   to the thread and its checkout. A host restart forgets it, so the thread
   builds and installs again; that is the safe direction to forget in.
