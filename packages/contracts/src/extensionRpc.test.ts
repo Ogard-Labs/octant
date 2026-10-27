@@ -128,6 +128,54 @@ describe("extension RPC contracts", () => {
     ).toThrow();
   });
 
+  it("carries the host's mark on a package it wrote for a server added in Settings, and only an affirmative one", () => {
+    const activation = {
+      installed: true,
+      trusted: true,
+      pluginDesired: true,
+      componentDesired: true,
+      compatible: true,
+      policyAllowed: true,
+      quarantined: false,
+      draining: false,
+      broken: false,
+      unavailable: false,
+      interrupted: false,
+      waiting: false,
+    };
+    const packageState = {
+      extensionId,
+      packageId,
+      slug: "connector-linear",
+      stateVersion: 3,
+      version: "1.0.0",
+      digest,
+      source: { kind: "plugin-package", sourceRef: "user-added:connector-linear" },
+      addedInSettings: true,
+      compatibility: {
+        platforms: ["linux"],
+        modes: ["chat", "work", "code"],
+        providerFamilies: [],
+      },
+      activation,
+      components: [],
+      diagnostics: [],
+    };
+    const snapshot = {
+      sequence: 4,
+      snapshotAt: "2026-07-28T12:00:00.000Z",
+      packages: [packageState],
+      collisions: [],
+    };
+    expect(decodeExtensionSnapshot(snapshot).packages[0]?.addedInSettings).toBe(true);
+    expect(() =>
+      decodeExtensionSnapshot({
+        ...snapshot,
+        packages: [{ ...packageState, addedInSettings: false }],
+      }),
+    ).toThrow();
+  });
+
   it("keeps discovered skill state source-qualified and disabled until review", () => {
     const snapshot = decodeExtensionSnapshot({
       sequence: 4,

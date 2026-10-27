@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ExtensionSnapshot } from "@octant/contracts/extension-rpc";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConnectorsView } from "./ConnectorsView";
 
 const EXTENSION = "44000000-0000-4000-8000-000000000002";
@@ -20,6 +20,7 @@ function snapshotWith(packages: ExtensionSnapshot["packages"] = []): ExtensionSn
 function addedPackage(
   slug: string,
   extensionId = EXTENSION,
+  addedInSettings = true,
 ): ExtensionSnapshot["packages"][number] {
   return {
     extensionId,
@@ -29,8 +30,10 @@ function addedPackage(
     version: "1.0.0",
     digest: `sha256:${"a".repeat(64)}`,
     // What the host reports for a package it wrote: inspection rewrites the
-    // installed source to the generic kind, so it never reads "user-added".
+    // installed source to the generic kind, so it never reads "user-added";
+    // the host's own mark says it wrote the package.
     source: { kind: "plugin-package", sourceRef: "local-linear" },
+    ...(addedInSettings ? { addedInSettings: true } : {}),
     activation: { installed: true, trusted: true, pluginDesired: true },
     components: [
       {
@@ -43,8 +46,16 @@ function addedPackage(
   } as never;
 }
 
+function setPlatform(platform: string): void {
+  Object.defineProperty(window.navigator, "platform", { value: platform, configurable: true });
+}
+
 beforeEach(() => {
   localStorage.clear();
+});
+
+afterEach(() => {
+  Reflect.deleteProperty(window.navigator, "platform");
 });
 
 describe("Connectors", () => {
@@ -190,6 +201,54 @@ describe("Connectors", () => {
     );
     const popular = screen.getByRole("region", { name: "Popular" });
     expect(within(popular).getByRole("button", { name: "Connect Linear" })).toBeEnabled();
+  });
+
+  it("does not show a third-party plugin that took a connector's package name as Connected", () => {
+    render(
+      <ConnectorsView
+        actions={null}
+        client={{ addUserMcpServer: vi.fn() as never, mcpServerSignIn: vi.fn() as never }}
+        disabled={false}
+        localHost
+        onConnected={vi.fn()}
+        snapshot={snapshotWith([addedPackage("connector-linear", EXTENSION, false)])}
+      />,
+    );
+    const popular = screen.getByRole("region", { name: "Popular" });
+    expect(within(popular).getByRole("button", { name: "Connect Linear" })).toBeEnabled();
+    expect(
+      within(popular)
+        .queryAllByRole("status")
+        .some((node) => node.textContent === "Connected"),
+    ).toBe(false);
+  });
+
+  it("names the credential store of the computer the key is kept on", async () => {
+    const user = userEvent.setup();
+    const props = {
+      actions: null,
+      client: { addUserMcpServer: vi.fn() as never, mcpServerSignIn: vi.fn() as never },
+      disabled: false,
+      localHost: true,
+      onConnected: vi.fn(),
+      snapshot: snapshotWith(),
+    };
+    // Connect works only from the window on the host, so the platform this
+    // window reports is the host's own. A Linux host read "this Mac's".
+    setPlatform("Linux x86_64");
+    const { unmount } = render(<ConnectorsView {...props} />);
+    await user.click(screen.getByRole("button", { name: "Connect GitHub" }));
+    expect(screen.getByRole("form", { name: "GitHub key" })).toHaveTextContent(
+      "Kept in this computer's credential store.",
+    );
+    unmount();
+
+    setPlatform("MacIntel");
+    render(<ConnectorsView {...props} />);
+    await user.click(screen.getByRole("button", { name: "Connect GitHub" }));
+    expect(screen.getByRole("form", { name: "GitHub key" })).toHaveTextContent(
+      "Kept in this Mac's credential store.",
+    );
   });
 
   it("signs in to the package the add reports, not another one that appeared meanwhile", async () => {

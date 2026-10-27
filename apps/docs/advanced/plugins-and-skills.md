@@ -285,10 +285,11 @@ command stay with the command and are never sent as headers if you switch to
 Address. Only the values of the choice selected when you add the server are
 used.
 
-Mark a value **Secret** to keep it in this Mac's credential store instead of
-the package; Octant cannot show it again. The server appears under Extension
-packages as **Added by you**, installed, trusted and switched on, and its tools
-ask for approval on every call like any plugin's. Removing it deletes the
+Mark a value **Secret** to keep it in this computer's credential store (the
+Keychain on a Mac) instead of the package; Octant cannot show it again. The
+server appears under Extension packages by the name you gave it, as **Added
+by you**, installed, trusted and switched on, and its tools ask for approval
+on every call like any plugin's. Removing it deletes the
 package and its secrets. Adding a server works only from the Octant window on
 this host, not from a paired device, and a browser-hosted Settings cannot keep
 secrets.
@@ -300,24 +301,24 @@ agent can use once you connect them: issue trackers, docs, databases,
 deployment platforms, payments, and more, by category, with a search box.
 The list ships with the app; nothing is fetched to show it. **Connect** adds
 the service's server to this host the way Add MCP server does, then opens
-its sign-in page, or asks for a key the service issues (kept in this Mac's
-credential store), or simply connects when the service asks for nothing. A
-connected entry reads **Connected**, and its server appears under Extension
-packages like any other. **Hide** keeps an entry out of sight on this
-computer; **Show hidden** brings them back. Connecting works only from the
-Octant window on this host.
+its sign-in page, or asks for a key the service issues (kept in this
+computer's credential store), or simply connects when the service asks for
+nothing. A connected entry reads **Connected**, and its server appears under
+Extension packages by the service's name, as **Connector**. **Hide** keeps
+an entry out of sight on this computer; **Show hidden** brings them back.
+Connecting works only from the Octant window on this host.
 
 ### Sign in to a hosted server
 
 A server you added by its address can ask you to sign in instead of taking a
 key. Its component in **Extension packages** then shows **Sign in**. Octant
 reads where the server sends people to sign in, registers itself there,
-opens that page in your browser, and keeps the grant in this Mac's
-credential store; the row says **Signed in through** the issuer, with
-**Sign out**. If the grant stops working you see **Sign in again**. A server
-whose sign-in needs a client id Octant cannot register for itself says so;
-you can still add that server with a key in a header. Signing in and out work
-only from the Octant window on this host.
+opens that page in your browser, and keeps the grant in this computer's
+credential store (the Keychain on a Mac); the row says **Signed in through**
+the issuer, with **Sign out**. If the grant stops working you see **Sign in
+again**. A server whose sign-in needs a client id Octant cannot register for
+itself says so; you can still add that server with a key in a header. Signing
+in and out work only from the Octant window on this host.
 
 ### Found on this Mac
 

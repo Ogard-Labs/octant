@@ -353,6 +353,72 @@ describe("extension inspection and lifecycle API service", () => {
     );
   });
 
+  it("marks only the packages the host wrote for a server added in Settings, whatever their slug", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "octant-user-added-mark-"));
+    try {
+      const registry = new LocalPluginFolderRegistry({ sourceKind: "user-added" });
+      const servers = new UserAddedMcpServerStore({
+        directory: join(directory, "user-added"),
+        registry,
+      });
+      const { source } = await servers.add({
+        name: "Linear",
+        connectorId: "linear",
+        server: { type: "streamable-http", url: "https://mcp.linear.app/mcp", headers: [] },
+      });
+      const registered = registry.get(source.sourceRef);
+      if (registered === undefined) throw new Error("Expected the registered folder.");
+      const written = decodeExtensionPackageManifest(
+        normalizeAgentPluginPackage(registered.packageInput).manifest,
+      );
+      const thirdPartyId = "45000000-0000-4000-8000-000000000009";
+      // A third-party plugin may pick the same `connector-<id>` name; only the
+      // host's record of the folders it wrote can tell the two apart.
+      const installed = {
+        ...emptySnapshot,
+        packages: [
+          { extensionId: written.extensionId, slug: written.slug, source: written.source },
+          {
+            extensionId: thirdPartyId,
+            slug: "connector-linear",
+            source: { kind: "plugin-package", sourceRef: "local-connector-linear" },
+            addedInSettings: true,
+          },
+        ],
+      } as unknown as ExtensionSnapshot;
+      const state = lifecycle([]);
+      state.snapshot = () => installed;
+      state.setPluginDesired = async () => installed;
+      const service = new ExtensionApiService({
+        lifecycle: state,
+        resolver: { resolve: async () => resolvedPackage() },
+        userAddedMcpServers: servers,
+      });
+
+      const marks = (snapshot: ExtensionSnapshot) =>
+        snapshot.packages.map((candidate) => [
+          String(candidate.extensionId),
+          candidate.addedInSettings,
+        ]);
+      const expected = [
+        [String(written.extensionId), true],
+        [thirdPartyId, undefined],
+      ];
+      expect(marks(service.snapshot())).toEqual(expected);
+      const result = await service.execute({
+        kind: "set-plugin-desired",
+        commandVersion: 1,
+        extensionId: thirdPartyId,
+        desired: true,
+        expectedStateVersion: 1,
+      } as never);
+      if (result.kind !== "extension-state-updated") throw new Error("Expected a state update.");
+      expect(marks(result.snapshot)).toEqual(expected);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("removes the generated folder and its secrets when an added MCP server is uninstalled", async () => {
     const directory = await mkdtemp(join(tmpdir(), "octant-user-added-uninstall-"));
     try {

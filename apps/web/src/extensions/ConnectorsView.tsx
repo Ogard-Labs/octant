@@ -13,6 +13,7 @@ import { SettingsSection } from "../settings/primitives";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { thisComputerName } from "../platform";
 import { McpServerSignInControl } from "./McpServerSignInControl";
 
 const HIDDEN_KEY = "octant.connectors.hidden";
@@ -57,14 +58,17 @@ export function ConnectorsView(props: ConnectorsViewProps) {
   const installedFor = (entry: ConnectorCatalogEntry): Connected | undefined => {
     const known = connected[entry.id];
     if (known !== undefined) return known;
-    // The package name is the mark: the host gives `connector-<id>` only to a
-    // catalog add and refuses it to a hand-added server. The installed source
-    // cannot be: the host reports its own packages as `plugin-package`, so a
-    // check for "user-added" showed every connector as unconnected after a
-    // reload. The sign-in control asks the host, which vouches for the package.
+    // A package the host marks as one it wrote, named `connector-<id>`: the
+    // host gives that name only to a catalog add and refuses it to a
+    // hand-added server. The name alone is not enough, since a third-party
+    // plugin may carry it too and showed as Connected with no way to connect;
+    // the installed source cannot tell either, because the host reports its
+    // own packages as `plugin-package`.
     const pkg = snapshot?.packages.find(
       (candidate) =>
-        candidate.activation.installed && candidate.slug === connectorPackageName(entry.id),
+        candidate.activation.installed &&
+        candidate.addedInSettings === true &&
+        candidate.slug === connectorPackageName(entry.id),
     );
     if (pkg === undefined) return undefined;
     return {
@@ -236,7 +240,7 @@ export function ConnectorsView(props: ConnectorsViewProps) {
                               <a href={entry.auth.keyPage} rel="noreferrer" target="_blank">
                                 {new URL(entry.auth.keyPage).host}
                               </a>
-                              . Kept in this Mac's credential store.
+                              . Kept in {thisComputerName()}&apos;s credential store.
                             </span>
                           </form>
                         ) : null}

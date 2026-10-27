@@ -41,6 +41,31 @@ describe("Add MCP server", () => {
     });
   });
 
+  it("names the credential store of the computer a secret is kept on", () => {
+    // Only the window on the host can keep a secret, so the platform it
+    // reports is the host's. A Linux host read "this Mac's".
+    Object.defineProperty(window.navigator, "platform", {
+      value: "Linux x86_64",
+      configurable: true,
+    });
+    try {
+      render(
+        <AddMcpServerDialog
+          client={{ addUserMcpServer: vi.fn() as never }}
+          onAdded={vi.fn()}
+          onClose={vi.fn()}
+          open
+          secretsAvailable
+        />,
+      );
+      expect(
+        screen.getByText(/A secret value is kept in this computer's credential store/),
+      ).toBeInTheDocument();
+    } finally {
+      Reflect.deleteProperty(window.navigator, "platform");
+    }
+  });
+
   it("sends an address server with a header and shows the host's refusal in its own words", async () => {
     const user = userEvent.setup();
     const addUserMcpServer = vi.fn(
