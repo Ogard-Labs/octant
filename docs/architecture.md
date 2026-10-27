@@ -4108,7 +4108,10 @@ session to the new provider. The turn carries a disclosed text handoff built by
 the same selector that admits a child's parent context
 (`admittedParentCodeContext`, purpose `provider-switch`): the thread's own
 accepted prompts and completed replies, at most 24 blocks of 4,000 characters
-including the summary block, each attributed to its provider and model, with
+including the summary block, and, when the probe reported the target model's
+context window, capped to half of it (estimated at four characters per token)
+so a switch to a small-context model does not overflow its window, each
+attributed to its provider and model, with
 the thread's taint and every omission counted (earlier messages, purged or
 oversized bodies, empty bodies, unfinished replies, attachments, truncation).
 Reasoning, tool bodies and attachments are never read. The switching turn's

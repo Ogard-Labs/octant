@@ -158,6 +158,21 @@ export function wireFoundations(deps: FoundationsDependencies) {
           .find((activity) => String(activity.threadId) === String(id)),
       conversation: (input) => codeBoardEventStore.conversation(input),
       readEvidence: (reference) => codeEvidence.read(reference),
+      // A provider switch's handoff is read by the model it switches to, so
+      // its bound comes from that model's context window when the probe
+      // reported it. Other purposes keep the fixed bound.
+      ...(selection.purpose === "provider-switch"
+        ? (() => {
+            const thread = persistence.readCodeThread(threadId);
+            if (thread === undefined) return {};
+            const contextLimit = providerRuntimeRegistry
+              .observedState(thread.providerInstanceId)
+              ?.models.find(
+                (candidate) => String(candidate.id) === String(thread.modelId),
+              )?.contextLimit;
+            return contextLimit === undefined ? {} : { targetContextLimitTokens: contextLimit };
+          })()
+        : {}),
       ...selection,
     });
 

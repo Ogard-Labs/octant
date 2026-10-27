@@ -173,6 +173,44 @@ describe("admitted parent context", () => {
     );
     expect(decodeAgentRunAdmittedContext(result.blocks)).toEqual(result.blocks);
   });
+  it("bounds a provider-switch handoff by the target model's context window", () => {
+    const input = {
+      ...codeInput([codeTurn(1), codeTurn(2), codeTurn(3), codeTurn(4), codeTurn(5), codeTurn(6)]),
+      purpose: "provider-switch" as const,
+      targetContextLimitTokens: 8_000,
+    };
+    const result = admittedParentCodeContext(input);
+    expect(result.status).toBe("available");
+    if (result.status !== "available") return;
+    // 8,000 tokens ≈ 16,000 characters ≈ 4 blocks: one summary and the last
+    // three messages, with the nine earlier messages disclosed as omitted.
+    expect(result.blocks).toHaveLength(4);
+    expect(result.blocks[0]?.text).toContain('"maxBlocks":4');
+    expect(result.omissions.earlierMessages).toBe(9);
+  });
+
+  it("keeps the fixed bound when the target model's window is large or unknown", () => {
+    for (const targetContextLimitTokens of [undefined, 200_000]) {
+      const input = {
+        ...codeInput([
+          codeTurn(1),
+          codeTurn(2),
+          codeTurn(3),
+          codeTurn(4),
+          codeTurn(5),
+          codeTurn(6),
+        ]),
+        purpose: "provider-switch" as const,
+        ...(targetContextLimitTokens === undefined ? {} : { targetContextLimitTokens }),
+      };
+      const result = admittedParentCodeContext(input);
+      expect(result.status).toBe("available");
+      if (result.status !== "available") return;
+      expect(result.blocks[0]?.text).toContain('"maxBlocks":24');
+      expect(result.omissions.earlierMessages).toBe(0);
+    }
+  });
+
   it("reads only Code prompts and completed message evidence, never reasoning or partial replies", () => {
     const input = codeInput();
     const result = admittedParentCodeContext(input);
