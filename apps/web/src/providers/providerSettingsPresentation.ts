@@ -108,6 +108,7 @@ export function driverLabel(driverKind: ProviderInstance["driverKind"]): string 
   if (driverKind === "ollama") return "Ollama";
   if (driverKind === "anthropic-compatible") return "Anthropic-compatible";
   if (driverKind === "azure-foundry") return "Azure AI Foundry";
+  if (driverKind === "amazon-bedrock") return "Amazon Bedrock";
   if (driverKind === "openai-image") return "OpenAI Image";
   if (driverKind === "gemini-native-image") return "Gemini Image";
   if (driverKind === "bfl-image") return "Black Forest Labs Image";

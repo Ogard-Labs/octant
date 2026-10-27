@@ -180,6 +180,10 @@ const COLUMN_SOURCES: Readonly<Record<string, ReadonlyArray<ColumnSource>>> = {
       file: "anthropicCompatibleDriver.ts",
       anchors: ["const initialCapabilities: ProviderCapabilities = {"],
     },
+    {
+      file: "amazonBedrockDriver.ts",
+      anchors: ["const initialCapabilities: ProviderCapabilities = {"],
+    },
   ],
   // An outside driver package ships no capability block Octant reads; its
   // column is the host's ceiling clamp, which no driver claim can exceed.

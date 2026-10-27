@@ -38,6 +38,7 @@ import {
   isCreateAcpAgentProviderCommand,
   changeAnthropicCompatibleConfiguration,
   changeAzureFoundryConfiguration,
+  changeAmazonBedrockConfiguration,
   changeBflImageConfiguration,
   changeIdeogramImageConfiguration,
   changeClaudeConfiguration,
@@ -50,6 +51,7 @@ import {
   changeProviderBinary,
   createAnthropicCompatibleProvider,
   createAzureFoundryProvider,
+  createAmazonBedrockProvider,
   createBflImageProvider,
   createIdeogramImageProvider,
   assignedClaudeAccountConfigDirectory,
@@ -655,6 +657,7 @@ export class ProviderService implements ProviderServiceApi {
             command.kind === "create-openai-compatible-provider" ||
             command.kind === "create-anthropic-compatible-provider" ||
             command.kind === "create-azure-foundry-provider" ||
+            command.kind === "create-amazon-bedrock-provider" ||
             command.kind === "create-openai-image-provider" ||
             command.kind === "create-gemini-native-image-provider" ||
             command.kind === "create-bfl-image-provider" ||
@@ -768,6 +771,12 @@ export class ProviderService implements ProviderServiceApi {
                   configuration: command.configuration,
                 });
                 break;
+              case "create-amazon-bedrock-provider":
+                instance = createAmazonBedrockProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
               case "create-openai-image-provider":
                 instance = createOpenAiImageProvider({
                   ...common,
@@ -826,10 +835,11 @@ export class ProviderService implements ProviderServiceApi {
             // It is forgotten only once the removal is allowed, so a removal
             // refused for active sessions keeps the sign-in.
             if (
-              (current.driverKind === "azure-foundry" ||
+              ((current.driverKind === "azure-foundry" ||
                 current.driverKind === "openai-compatible" ||
                 current.driverKind === "anthropic-compatible") &&
-              current.configuration.authentication === "directory-oauth"
+                current.configuration.authentication === "directory-oauth") ||
+              current.driverKind === "amazon-bedrock"
             ) {
               await this.#forgetCredentialForOldEndpoint(current.id);
             }
@@ -963,6 +973,13 @@ export class ProviderService implements ProviderServiceApi {
               throw this.#unsupported("This provider does not use Azure AI Foundry configuration.");
             }
             instance = changeAzureFoundryConfiguration(current, command.configuration, updatedAt);
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-amazon-bedrock-configuration") {
+            if (current.driverKind !== "amazon-bedrock") {
+              throw this.#unsupported("This provider does not use Amazon Bedrock configuration.");
+            }
+            instance = changeAmazonBedrockConfiguration(current, command.configuration, updatedAt);
             await this.#runtime.invalidateRuntime(current.id);
             eventName = "provider.instance-configuration-changed@1";
           } else if (command.kind === "change-openai-image-configuration") {
@@ -1292,7 +1309,8 @@ export class ProviderService implements ProviderServiceApi {
         const manualModelOrder =
           instance.configuration.kind === "openai-compatible-http" ||
           instance.configuration.kind === "anthropic-compatible-http" ||
-          instance.configuration.kind === "azure-foundry-openai-http"
+          instance.configuration.kind === "azure-foundry-openai-http" ||
+          instance.configuration.kind === "amazon-bedrock-converse-http"
             ? instance.configuration.manualModelIds
             : result.models.filter(({ source }) => source === "manual").map(({ id }) => id);
         const orderedResult =
@@ -1364,7 +1382,7 @@ export class ProviderService implements ProviderServiceApi {
       // uses. Other runtimes bring their own tools and have nothing to prove.
       if (!isNativeHarnessDriverKind(instance.driverKind)) {
         throw this.#invalid(
-          "Tool verification is only available for OpenAI-compatible, Anthropic-compatible, Azure AI Foundry, and Ollama providers.",
+          "Tool verification is only available for OpenAI-compatible, Anthropic-compatible, Azure AI Foundry, Amazon Bedrock, and Ollama providers.",
         );
       }
       if (!instance.enabled) throw this.#invalid("Enable this provider before verifying tools.");
@@ -1386,18 +1404,21 @@ export class ProviderService implements ProviderServiceApi {
       const configuredIds =
         instance.configuration.kind === "openai-compatible-http" ||
         instance.configuration.kind === "anthropic-compatible-http" ||
-        instance.configuration.kind === "azure-foundry-openai-http"
+        instance.configuration.kind === "azure-foundry-openai-http" ||
+        instance.configuration.kind === "amazon-bedrock-converse-http"
           ? instance.configuration.manualModelIds.map((id) => String(id))
           : [];
       const knownIds =
-        instance.driverKind === "azure-foundry"
+        instance.driverKind === "azure-foundry" || instance.driverKind === "amazon-bedrock"
           ? configuredIds
           : [...configuredIds, ...observed.models.map((model) => String(model.id))];
       if (!knownIds.includes(String(modelId))) {
         throw this.#invalid(
           instance.driverKind === "azure-foundry"
             ? "Azure AI Foundry tool verification is only available for configured deployment IDs."
-            : "Tool verification is only available for models this provider lists.",
+            : instance.driverKind === "amazon-bedrock"
+              ? "Amazon Bedrock tool verification is only available for the endpoint's configured models."
+              : "Tool verification is only available for models this provider lists.",
         );
       }
       if (this.#driverProvider === undefined) throw this.#unavailable();
@@ -1624,7 +1645,8 @@ export class ProviderService implements ProviderServiceApi {
       manualModelOrder:
         instance?.configuration.kind === "openai-compatible-http" ||
         instance?.configuration.kind === "anthropic-compatible-http" ||
-        instance?.configuration.kind === "azure-foundry-openai-http"
+        instance?.configuration.kind === "azure-foundry-openai-http" ||
+        instance?.configuration.kind === "amazon-bedrock-converse-http"
           ? instance.configuration.manualModelIds
           : observed.models.filter(({ source }) => source === "manual").map(({ id }) => id),
       ...(observed.verifiedToolModelIds === undefined
@@ -2169,6 +2191,19 @@ function credentialBinding(instance: ProviderInstance): string | undefined {
             String(configuration.directory.clientId),
           ].join("\n")
         : [configuration.baseUrl, configuration.authentication].join("\n");
+    }
+    case "amazon-bedrock": {
+      // A cloud grant is held for one portal, account, and role, and signs
+      // only in one region; moving any of them needs a new sign-in.
+      const { region, cloudIam } = instance.configuration;
+      return [
+        "cloud-iam",
+        String(region),
+        String(cloudIam.startUrl),
+        String(cloudIam.ssoRegion),
+        String(cloudIam.accountId),
+        String(cloudIam.roleName),
+      ].join("\n");
     }
     case "bfl-image":
     case "ideogram-image":

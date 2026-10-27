@@ -507,6 +507,9 @@ function CurrentStep(
     }
   };
   const disabled = pending || props.busy || props.status !== "ready";
+  // Amazon Bedrock signs in only at the organization's single sign-on portal,
+  // from a terminal on the host, and Add endpoint does not offer it yet.
+  const signsInFromHostTerminal = entry.listing.entry.driverKind === "amazon-bedrock";
   const retryLabel = (label: string) => (failure === undefined ? label : "Try again");
 
   let sentence: ReactNode;
@@ -576,6 +579,10 @@ function CurrentStep(
       break;
     }
     case "add-endpoint":
+      if (signsInFromHostTerminal) {
+        sentence = `Settings cannot add ${name} with your organization's single sign-on yet. Until it can, use a Bedrock API key with an OpenAI-compatible endpoint.`;
+        break;
+      }
       sentence = `Add it under Octant Harness › Model endpoints: choose ${name} in Add endpoint and give its address. A key you enter is stored in the system keychain.`;
       action = openEndpoints;
       break;
@@ -599,6 +606,14 @@ function CurrentStep(
       );
       break;
     case "sign-in":
+      if (signsInFromHostTerminal) {
+        sentence =
+          "It signs in at your organization's single sign-on portal: run octant provider sign-in with its name in a terminal on this host, then check again.";
+        action = (
+          <CheckButton {...props} instanceId={next.instanceId} label="Check again" run={run} />
+        );
+        break;
+      }
       sentence =
         state.setup === "endpoint"
           ? "Its last check says it needs a sign-in or a key. Add it on its Model endpoints page; a key is stored in the system keychain, never in the catalog."

@@ -134,6 +134,10 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "Directory sign-in conformance harness, with its fake directory and endpoint, that drivers declaring directory-oauth run in their tests; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the kind is retired.",
   ],
   [
+    "packages/provider-sdk/src/cloudIamConformance.ts",
+    "Cloud-IAM signing conformance harness, with its fake signer and endpoint, that drivers declaring cloud-iam run in their tests; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the kind is retired.",
+  ],
+  [
     "packages/provider-sdk/src/harnessEndpointConformance.ts",
     "Harness-endpoint-port conformance harness that direct-endpoint driver tests run; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the port is retired.",
   ],

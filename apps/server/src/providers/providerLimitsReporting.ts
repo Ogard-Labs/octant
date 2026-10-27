@@ -51,6 +51,8 @@ export function providerLimitsReporting(kind: ProviderDriverKind): ProviderLimit
     case "gemini-native-image":
     case "bfl-image":
     case "ideogram-image":
+    // Bedrock's Converse answers carry no quota headers.
+    case "amazon-bedrock":
     // Octant reads no quota headers on an outside driver's brokered calls.
     case "outside-harness-endpoint":
       return "runtime-does-not-report";

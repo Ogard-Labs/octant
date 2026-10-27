@@ -36,6 +36,7 @@ export function providerToolTransport(
     case "openai-compatible":
     case "anthropic-compatible":
     case "azure-foundry":
+    case "amazon-bedrock":
     case "ollama":
     case "outside-harness-endpoint":
       return "request-tool-calls";

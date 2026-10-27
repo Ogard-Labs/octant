@@ -52,6 +52,13 @@ const NATIVE_PROVIDER_DRIVERS = [
     digestNibble: "d",
     uuidNibble: "0e",
   },
+  // The next seed after the image drivers', so no earlier plugin identity moves.
+  {
+    driverKind: "amazon-bedrock",
+    displayName: "Amazon Bedrock",
+    digestNibble: "19",
+    uuidNibble: "1a",
+  },
 ] as const satisfies ReadonlyArray<BundledDriverSpec>;
 
 /**

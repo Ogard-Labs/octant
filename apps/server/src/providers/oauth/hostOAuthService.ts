@@ -22,12 +22,18 @@ const termsKey = (descriptorId: string, termsId: string) => `${descriptorId}\n${
 
 type Refused = Extract<HostOAuthSignInState, { readonly kind: "refused" }>;
 
+/**
+ * Terms are recorded by descriptor and terms id alone, so a host-driven
+ * sign-in of another family (a cloud sign-in) shares the one record.
+ */
+type TermsKey = Pick<HostOAuthDescriptor, "descriptorId" | "termsId">;
+
 export interface HostOAuthService {
-  readonly offer: (descriptor: HostOAuthDescriptor) => HostOAuthSignInOffer;
+  readonly offer: (descriptor: TermsKey) => HostOAuthSignInOffer;
   readonly acknowledgeTerms: (input: {
     readonly principalKind: PrincipalKind;
     readonly actorId: string;
-    readonly descriptor: HostOAuthDescriptor;
+    readonly descriptor: TermsKey;
   }) =>
     | { readonly kind: "recorded"; readonly acknowledgment: HostOAuthTermsAcknowledgment }
     | Refused;
@@ -141,7 +147,7 @@ export function createHostOAuthService(options: {
   };
 
   const refuse = (
-    descriptor: HostOAuthDescriptor,
+    descriptor: TermsKey,
     reason: "local-host-required" | "terms-required" | "unavailable" | "invalid",
     attemptId?: string,
   ): Refused => {
