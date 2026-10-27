@@ -130,8 +130,10 @@ export function createDesktopDaemonPort(options: DesktopDaemonPortOptions): Desk
  * user. The record is a `passwd` line: seven fields from `getent`, ten from
  * macOS `id -P`, the home second to last in both. macOS `id` reads its
  * argument as a name before a uid, so the record's uid is checked too.
+ * Exported so a test can hold the answer against the system's own, which a
+ * port call cannot show: a lookup that fails refuses every call alike.
  */
-function recordedHomeDirectory(userId: number): Promise<string | undefined> {
+export function recordedHomeDirectory(userId: number): Promise<string | undefined> {
   const lookup = USER_RECORD_LOOKUPS[process.platform];
   if (lookup === undefined) return Promise.resolve(undefined);
   const [program, query] = lookup;

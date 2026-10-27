@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import {
   chmodSync,
   chownSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   renameSync,
@@ -14,7 +15,11 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DesktopDaemonRequest } from "@octant/plugin-api/desktop-provider";
-import { createDesktopDaemonPort, type DesktopDaemonPortOptions } from "./desktopDaemonPort";
+import {
+  createDesktopDaemonPort,
+  recordedHomeDirectory,
+  type DesktopDaemonPortOptions,
+} from "./desktopDaemonPort";
 
 const userId = process.getuid?.() ?? 0;
 const SOCKET = ".cua/cua.sock";
@@ -64,17 +69,11 @@ afterEach(async () => {
 /**
  * A home directory with a real test daemon listening on `socket` under it
  * (`.cua/cua.sock` unless given), mode 0600 as Cua's daemon sets it. It
- * speaks just enough gRPC-Web over HTTP/1.1 to answer the port. The home is
- * a new temporary folder unless `existingHome` is given; there only the
- * socket's own folder is created, and removed afterwards.
+ * speaks just enough gRPC-Web over HTTP/1.1 to answer the port.
  */
-async function daemonHome(
-  answers: Readonly<Record<string, Answer>> = {},
-  socket = SOCKET,
-  existingHome?: string,
-) {
-  const home = existingHome ?? mkdtempSync(join(tmpdir(), "octant-daemon-"));
-  homes.push(existingHome === undefined ? home : join(home, dirname(socket)));
+async function daemonHome(answers: Readonly<Record<string, Answer>> = {}, socket = SOCKET) {
+  const home = mkdtempSync(join(tmpdir(), "octant-daemon-"));
+  homes.push(home);
   mkdirSync(join(home, dirname(socket)), { mode: 0o700 });
   const seen: Array<Seen> = [];
   const server = createServer((request, response) => {
@@ -377,20 +376,32 @@ describe("desktop daemon port", () => {
     });
   });
 
-  it("walks from the home the user database records, whether HOME points elsewhere or is unset", async () => {
-    // One daemon in a decoy home that HOME names, and one at the same path
-    // under the home the user database records. Only the recorded one may
-    // answer. Asking only that the decoy stay silent passed even when the
-    // lookup refused, since both calls then refuse alike, which left macOS
-    // `id -P` unproven. Node's `userInfo()` reads the user database itself.
-    const socket = `.octant-daemon-port-test-${process.pid}-${Date.now()}/daemon.sock`;
-    const decoy = await daemonHome({}, socket);
-    const recorded = await daemonHome({}, socket, userInfo().homedir);
-    const answered = { status: "answered", grpcStatus: 0 };
-    await expect(callWithHome(decoy.home, socket)).resolves.toMatchObject(answered);
-    await expect(callWithHome(undefined, socket)).resolves.toMatchObject(answered);
-    expect(recorded.seen).toHaveLength(2);
-    expect(decoy.seen).toEqual([]);
+  // Under Bun `userInfo()` answers with `$HOME` (observed on Bun 1.4.4), so
+  // it is an independent source only under Node, which `bun run test` uses.
+  it.skipIf(process.versions.bun !== undefined)(
+    "finds the home the user database records for Octant's user",
+    async () => {
+      await expect(recordedHomeDirectory(userId)).resolves.toBe(userInfo().homedir);
+    },
+  );
+
+  it("walks from the home the user database records, whether HOME points elsewhere or is unset", async (context) => {
+    // A path no real home has, so the walk from the real home reads it and
+    // stops at its first missing folder, writing nothing there. A failed
+    // lookup refuses instead, so asking for the missing daemon proves the
+    // walk started from a home, not that both calls refused alike.
+    const recorded = await recordedHomeDirectory(userId);
+    expect(recorded).toBeDefined();
+    const entry = lstatSync(recorded ?? "/");
+    if (entry.uid !== userId || (entry.mode & 0o022) !== 0) {
+      context.skip("the recorded home is not this user's alone, so the port refuses to walk it");
+    }
+    const socket = ".octant-daemon-port-test/daemon.sock";
+    const { home, seen } = await daemonHome({}, socket);
+    const unreachable = { status: "failed", reason: "daemon-unreachable" };
+    await expect(callWithHome(home, socket)).resolves.toEqual(unreachable);
+    await expect(callWithHome(undefined, socket)).resolves.toEqual(unreachable);
+    expect(seen).toEqual([]);
   });
 
   it("refuses when the user database has no record of Octant's user", async () => {
