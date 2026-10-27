@@ -151,4 +151,55 @@ describe("Settings › SSH targets", () => {
       name: "fix-login",
     });
   });
+
+  it("stops the shown terminal when it opens another or leaves the page, so no shell it can no longer reach keeps running", async () => {
+    const user = userEvent.setup();
+    const running = (body: unknown) => {
+      const { terminalId } = body as { readonly terminalId: string };
+      return {
+        status: 200,
+        body: {
+          kind: "project-terminal",
+          terminal: {
+            projectId: project.id,
+            terminalId,
+            state: "running",
+            posture: "approval-gated",
+          },
+        },
+      };
+    };
+    const { administration, sent } = bridge();
+    vi.mocked(administration.sshTargetRequest).mockImplementation(async (operation, body) => {
+      sent.push({ operation, body });
+      if (operation === "terminal") return running(body);
+      if (operation === "list") return { status: 200, body: { targets: [status] } };
+      if (operation === "projects") return { status: 200, body: { projects: [project] } };
+      return { status: 200, body: { worktrees: [] } };
+    });
+    const view = render(<SshTargetsSettingsPage bridge={administration} />);
+    const row = await screen.findByRole("group", { name: "Service setting" });
+    const terminalCommands = () =>
+      sent
+        .filter((request) => request.operation === "terminal")
+        .map((request) => request.body as { readonly kind: string; readonly terminalId: string })
+        .filter((command) => command.kind === "start" || command.kind === "stop");
+
+    await user.click(within(row).getByRole("button", { name: "Open terminal" }));
+    await screen.findByRole("button", { name: "Close terminal" });
+    await user.click(within(row).getByRole("button", { name: "Open terminal" }));
+    await waitFor(() => expect(terminalCommands()).toHaveLength(3));
+    const [first, stopped, second] = terminalCommands();
+    expect(first?.kind).toBe("start");
+    expect(stopped).toMatchObject({ kind: "stop", terminalId: first?.terminalId });
+    expect(second?.kind).toBe("start");
+
+    view.unmount();
+    await waitFor(() =>
+      expect(terminalCommands().at(-1)).toMatchObject({
+        kind: "stop",
+        terminalId: second?.terminalId,
+      }),
+    );
+  });
 });

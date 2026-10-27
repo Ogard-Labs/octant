@@ -37,6 +37,7 @@ import {
   type SshExecutorReadReply,
   type SshExecutorReadRequest,
   type SshExecutorRefusedReply,
+  type SshExecutorTerminalUnavailableReply,
   type SshExecutorReply,
   type SshExecutorRequest,
   type SshExecutorRunCommandRequest,
@@ -167,10 +168,16 @@ export type SshTargetWorktreeOutcome =
       readonly connectionId: SshConnectionId;
     };
 
-/** A terminal's opening: refused, lost, refused by the executor, or open on a session. */
+/**
+ * A terminal's opening: refused, lost, refused or declined by the executor
+ * (it holds its most terminals or cannot open one), or open on a session.
+ */
 export type SshTargetTerminalOpening =
   | Exclude<SshTargetCallOutcome<never>, { readonly status: "replied" }>
-  | { readonly status: "replied"; readonly reply: SshExecutorRefusedReply }
+  | {
+      readonly status: "replied";
+      readonly reply: SshExecutorRefusedReply | SshExecutorTerminalUnavailableReply;
+    }
   | {
       readonly status: "opened";
       readonly terminal: ExecutorTerminal;
@@ -430,7 +437,7 @@ export class SshTargetConnectionService {
     const opening = await record.channel.openTerminal(request, listener, this.#readTimeoutMs);
     if (opening.status === "lost") return { status: "unavailable" };
     if (opening.status === "replied") {
-      return opening.reply.kind === "refused"
+      return opening.reply.kind === "refused" || opening.reply.kind === "terminal-unavailable"
         ? { status: "replied", reply: opening.reply }
         : { status: "unavailable" };
     }

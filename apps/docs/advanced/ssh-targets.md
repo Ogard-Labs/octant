@@ -81,7 +81,8 @@ opened it can type into it. It runs with the confinement the target proved
 for Ask for approvals, and it has **no network**, because a terminal has no
 thread whose egress rules could decide its connections. Its home is a fresh
 folder that ends with the session, so your shell's own dotfiles on the target
-are not read.
+are not read. The page shows one terminal at a time: opening another, or
+leaving the page, stops the one it showed.
 
 If the connection drops, the shell and everything it started end with it, and
 the terminal says it was interrupted. Nothing reconnects it or replays what

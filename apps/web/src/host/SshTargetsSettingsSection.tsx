@@ -100,7 +100,27 @@ export function SshTargetsSettingsSection({
   const [removingTarget, setRemovingTarget] = useState<SshTargetStatus>();
   const [removingWorktree, setRemovingWorktree] = useState<SshRemoteWorktree>();
   const [terminal, setTerminal] = useState<OpenTerminal>();
+  const shownTerminal = useRef<OpenTerminal | undefined>(undefined);
   const removeOpener = useRef<HTMLElement | null>(null);
+
+  // The page shows one terminal and lists none, so a shell it stops showing
+  // could not be reached again and would hold one of the session's terminals
+  // on the target until the session ends. Leaving the page stops it.
+  useEffect(() => {
+    shownTerminal.current = terminal;
+  }, [terminal]);
+  useEffect(
+    () => () => {
+      const open = shownTerminal.current;
+      if (open === undefined) return;
+      void client.terminal({
+        kind: "stop",
+        projectId: open.projectId,
+        terminalId: open.terminalId,
+      });
+    },
+    [client],
+  );
 
   const refresh = useCallback(async () => {
     const [listed, bound, made] = await Promise.all([
@@ -173,8 +193,15 @@ export function SshTargetsSettingsSection({
     }
   };
 
+  const closeTerminal = async (open: OpenTerminal) => {
+    setTerminal(undefined);
+    await client.terminal({ kind: "stop", projectId: open.projectId, terminalId: open.terminalId });
+  };
+
   const openTerminal = async (project: SshRemoteProject, worktree?: SshRemoteWorktree) => {
     setMessage(undefined);
+    // Opening another replaces the one shown, so that one stops first.
+    if (terminal !== undefined) await closeTerminal(terminal);
     const terminalId = decodeCodeTerminalId(crypto.randomUUID());
     const started = await client.terminal({
       kind: "start",
@@ -193,11 +220,6 @@ export function SshTargetsSettingsSection({
       terminalId,
       label: worktree === undefined ? project.name : `${project.name} · ${worktree.branch}`,
     });
-  };
-
-  const closeTerminal = async (open: OpenTerminal) => {
-    setTerminal(undefined);
-    await client.terminal({ kind: "stop", projectId: open.projectId, terminalId: open.terminalId });
   };
 
   const targetOf = (project: SshRemoteProject) =>

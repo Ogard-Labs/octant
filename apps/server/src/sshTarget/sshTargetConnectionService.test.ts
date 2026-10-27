@@ -80,6 +80,7 @@ const answer = (request) => {
     case "run-command":
       return { kind: "command-ran", termination: "exited", exitCode: 0, stdout: Buffer.from("ran on " + request.root).toString("base64"), stderr: "" };
     case "open-terminal":
+      if (mode === "terminals-full") return { kind: "terminal-unavailable" };
       setTimeout(() => process.stdout.write(frame({ type: "terminal-output", terminal: request.terminal, data: Buffer.from("shell in " + request.root + "\r\n$ ").toString("base64") })), 10);
       return { kind: "terminal-opened" };
     case "create-worktree":
@@ -604,6 +605,40 @@ describe("SSH target connection service", () => {
     });
     expect(againProjects.listWorktrees()).toEqual([]);
     again.close();
+  });
+
+  it("tells the person the target opened no terminal, not that its session ended, when the executor holds its most", async () => {
+    const remoteRoot = Schema.decodeUnknownSync(SshRemotePath)("/home/build/app");
+    const connections = service({ mode: "terminals-full" });
+    const projects = new SshRemoteProjectService({
+      store: registry,
+      connections,
+      uuid: () => "88888888-8888-4888-8888-000000000001",
+      clock: () => "2026-10-26T10:00:00.000Z",
+    });
+    const terminals = new SshRemoteTerminalService({ projects, connections, store: registry });
+    const status = await registered(connections);
+    const bound = await projects.bind({ targetId: status.target.id, remoteRoot, name: "App" });
+    if (bound.status !== "ok") throw new Error("bind refused");
+
+    expect(
+      await terminals.execute(decodeWindowId("77777777-7777-4777-8777-777777777777"), {
+        kind: "start",
+        projectId: bound.value.id,
+        terminalId: decodeCodeTerminalId("99999999-9999-4999-8999-999999999993"),
+        columns: 80,
+        rows: 24,
+      }),
+    ).toEqual({
+      kind: "project-terminal-refused",
+      reason: "unavailable",
+      message:
+        "The target opened no terminal: this connection already holds its most, or the target cannot open one. Close a terminal and retry.",
+    });
+    expect(registry.runningTerminals()).toEqual([]);
+    // The session is still there to carry the next request.
+    expect(await projects.gitStatus({ projectId: bound.value.id })).toMatchObject({ status: "ok" });
+    connections.close();
   });
 
   it("binds a turn's tools to the session it started on, tells the turn once when it ends, and sends nothing on the next", async () => {

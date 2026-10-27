@@ -186,9 +186,17 @@ export class SshRemoteTerminalService {
       return refused("unavailable", "The target's session ended. Connect it again and retry.");
     }
     if (opening.status === "replied") {
+      const { reply } = opening;
+      // The session is still there; only this terminal did not open.
+      if (reply.kind === "terminal-unavailable") {
+        return refused(
+          "unavailable",
+          "The target opened no terminal: this connection already holds its most, or the target cannot open one. Close a terminal and retry.",
+        );
+      }
       return refused(
         "unavailable",
-        opening.reply.reason === "root-moved" || opening.reply.reason === "root-unavailable"
+        reply.reason === "root-moved" || reply.reason === "root-unavailable"
           ? "This Project's folder on the target moved or is gone."
           : "The terminal could not open on the target.",
       );

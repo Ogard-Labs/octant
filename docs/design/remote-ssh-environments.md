@@ -710,8 +710,10 @@ settle what the slice needs, each in the fail-closed direction:
 remove` without force: a worktree holding a change, an untracked file, or a
   lock is kept and refuses `worktree-dirty` or `worktree-failed`. The branch
   and its commits stay. A worktree folder the person already deleted leaves
-  only Git's record, which `worktree prune` drops. Removing a target deletes
-  no worktree on it.
+  only Git's record, which the same `worktree remove` drops; `worktree prune`
+  is never run, because it would also drop the record of every other worktree
+  whose folder is missing, such as the person's own on an unmounted volume.
+  Removing a target deletes no worktree on it.
 - **A worktree is its Project's, and its folder is a root.** Creation and
   removal are `ssh-remote-worktree` events naming the connection whose
   executor acted; the journal keeps the canonical folder the executor
@@ -726,7 +728,9 @@ remove` without force: a worktree holding a change, an untracked file, or a
   remote user and platform while attested, fingerprint, and what each confined
   posture admits now with the refusal's recovery; it adds, connects, re-pins,
   and removes targets, binds a folder, creates and removes worktrees, and
-  opens a terminal in the root or a worktree. A key is pinned only after the
+  opens a terminal in the root or a worktree. It shows one terminal and lists
+  none, so opening another or leaving the page stops the one shown rather
+  than leave a shell nothing can reach again. A key is pinned only after the
   person confirms the fingerprint in a dialog that also says what the pin and
   the attestation do not prove. Any other window shows where to do it.
 - **The Project picker lists a remote-bound Project without offering it.**

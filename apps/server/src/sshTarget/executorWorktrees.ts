@@ -89,14 +89,22 @@ export async function removeExecutorWorktree(
   const location = await locateWorktree(environment, request, { create: false });
   if (location.status === "refused") return refused(location.reason);
   // A folder the person already deleted leaves only Git's record of it, which
-  // Git drops itself; there is nothing of theirs left to keep.
-  const args = exists(location.target)
-    ? [...NO_HOOKS, "worktree", "remove", "--", location.target]
-    : [...NO_HOOKS, "worktree", "prune"];
-  const ran = await runGit(environment, location.root, args, GIT_OUTPUT_BYTES, {
-    additionalWriteRoot: location.scope,
-  });
+  // `worktree remove` drops by itself. `worktree prune` is not used: it also
+  // drops the record of every other worktree whose folder is missing now, such
+  // as the person's own on a volume that is not mounted.
+  const missing = !exists(location.target);
+  const ran = await runGit(
+    environment,
+    location.root,
+    [...NO_HOOKS, "worktree", "remove", "--", location.target],
+    GIT_OUTPUT_BYTES,
+    { additionalWriteRoot: location.scope },
+  );
   if (ran.status === "refused") return refused(ran.reason);
+  // Neither the folder nor Git's record is left, so there is nothing to remove.
+  if (ran.exitCode !== 0 && missing && /is not a working tree/iu.test(ran.stderr)) {
+    return { kind: "worktree-removed" };
+  }
   if (ran.exitCode !== 0) {
     return refused(
       /modified or untracked|contains modified|is dirty/iu.test(ran.stderr)
