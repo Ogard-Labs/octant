@@ -185,6 +185,12 @@
   gap: 8px;
 }
 
+/* A target's fingerprint and a remote folder are single unbroken words that
+   outran a narrow card; they break where they must. */
+.settings-view #settings-ssh-targets .setrow-hint {
+  overflow-wrap: anywhere;
+}
+
 .settings-view #settings-navigator-assistant .setrow-control {
   display: grid;
   gap: 8px;

@@ -220,6 +220,11 @@ import {
   type RemoteDeviceControlService,
 } from "./remoteDeviceControls";
 import {
+  sendSshTargetOperation,
+  SshTargetControlFailure,
+  type SshTargetControlRuntime,
+} from "./sshTargetControls";
+import {
   installPairedComputerIpcHandlers,
   type PageStoragePort,
   PairedComputerPins,
@@ -333,6 +338,7 @@ const IPC_CHANNELS = {
   remoteDeviceRevoke: "octant:remote-device:revoke",
   remoteDeviceRevokeAll: "octant:remote-device:revoke-all",
   remoteDeviceReconcileExpired: "octant:remote-device:reconcile-expired",
+  sshTargetRequest: "octant:ssh-targets:request",
   remoteHostIdentityStatus: "octant:remote-host-identity:status",
   remoteHostIdentityRotate: "octant:remote-host-identity:rotate",
   remoteHostIdentityRecover: "octant:remote-host-identity:recover",
@@ -646,6 +652,36 @@ export function installRemoteDeviceIpcHandlers(options: {
   options.handle(IPC_CHANNELS.remoteDeviceReconcileExpired, (event) =>
     run(event, (service) => service.reconcileExpiredDevices()),
   );
+}
+
+/**
+ * Settings › SSH targets: an owned window's request goes to the host's local
+ * SSH target route it names, with that window's own capability.
+ */
+export function installSshTargetIpcHandlers(options: {
+  readonly handle: (
+    channel: string,
+    handler: (event: unknown, ...args: readonly unknown[]) => unknown,
+  ) => void;
+  readonly runtimeFor: (event: unknown) => SshTargetControlRuntime;
+}): void {
+  options.handle(IPC_CHANNELS.sshTargetRequest, async (event, operation, body) => {
+    let runtime: SshTargetControlRuntime;
+    try {
+      runtime = options.runtimeFor(event);
+    } catch {
+      throw new Error("Octant rejected an unauthorized SSH target request.");
+    }
+    try {
+      return await sendSshTargetOperation(runtime, operation, body);
+    } catch (error) {
+      throw new Error(
+        error instanceof SshTargetControlFailure
+          ? error.message
+          : "Octant SSH target controls are unavailable.",
+      );
+    }
+  });
 }
 
 function sanitizeRemoteDeviceControlError(error: unknown): Error {
@@ -3018,6 +3054,21 @@ function installIpcHandlers(): void {
           fetch: globalThis.fetch,
         }),
       });
+    },
+  });
+  installSshTargetIpcHandlers({
+    handle: (channel, handler) => ipcMain.handle(channel, handler),
+    runtimeFor: (event) => {
+      const context = ownedWindowContext(event as IpcMainInvokeEvent);
+      if (activeServerUrl === undefined) {
+        throw new SshTargetControlFailure("Octant SSH target controls are unavailable.");
+      }
+      return {
+        serverUrl: activeServerUrl,
+        desktopBridgeSecret,
+        windowCapability: context.capability,
+        fetch: globalThis.fetch,
+      };
     },
   });
   installHostIdentityIpcHandlers({

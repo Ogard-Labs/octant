@@ -1,5 +1,6 @@
 import type { NativeMenuRequest, NativeMenuOutcome } from "@octant/contracts/shell";
 import { decodeMenuBarOpenThread, type MenuBarOpenThread } from "./menuBar";
+import { isSshTargetOperation } from "./sshTargetControls";
 import { contextBridge, ipcRenderer } from "electron";
 import type { CodeApprovalId, CodeOperationApprovalRequest } from "@octant/contracts";
 import type { OpenInApplicationId } from "@octant/contracts/shell";
@@ -90,6 +91,7 @@ export const IPC_CHANNELS = {
   remoteDeviceRevoke: "octant:remote-device:revoke",
   remoteDeviceRevokeAll: "octant:remote-device:revoke-all",
   remoteDeviceReconcileExpired: "octant:remote-device:reconcile-expired",
+  sshTargetRequest: "octant:ssh-targets:request",
   remoteHostIdentityStatus: "octant:remote-host-identity:status",
   remoteHostIdentityRotate: "octant:remote-host-identity:rotate",
   remoteHostIdentityRecover: "octant:remote-host-identity:recover",
@@ -1226,6 +1228,19 @@ export function createHostBridge(
       };
       ipc.on(IPC_CHANNELS.remoteServerPageSign, receive);
       return () => ipc.removeListener(IPC_CHANNELS.remoteServerPageSign, receive);
+    },
+    sshTargetRequest: async (operation: string, body?: unknown) => {
+      if (!isSshTargetOperation(operation)) {
+        throw new TypeError("Invalid SSH target request.");
+      }
+      const answer = (await ipc.invoke(IPC_CHANNELS.sshTargetRequest, operation, body)) as {
+        readonly status?: unknown;
+        readonly body?: unknown;
+      } | null;
+      if (typeof answer?.status !== "number") {
+        throw new Error("Octant SSH target controls are unavailable.");
+      }
+      return { status: answer.status, body: answer.body };
     },
     getPrivateListenerStatus: async () =>
       decodePrivateListenerStatus(await ipc.invoke(IPC_CHANNELS.privateListenerStatus)),

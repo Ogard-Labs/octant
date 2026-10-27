@@ -473,8 +473,46 @@ export function remoteAccessAdministrationOf(
   };
 }
 
+/**
+ * The local administration of SSH targets a desktop window reaches through
+ * its main process: each operation is one of the host's own local routes,
+ * sent with this window's authority, and the host's answer comes back as it
+ * was given for the caller to decode. A paired browser never has it.
+ */
+export type SshTargetOperation =
+  | "list"
+  | "probe-host-key"
+  | "register"
+  | "repin"
+  | "connect"
+  | "remove"
+  | "projects"
+  | "bind"
+  | "worktrees"
+  | "create-worktree"
+  | "remove-worktree"
+  | "terminal";
+
+export interface SshTargetAdministrationBridge {
+  readonly sshTargetRequest: (
+    operation: SshTargetOperation,
+    body?: unknown,
+  ) => Promise<{ readonly status: number; readonly body: unknown }>;
+}
+
+/** The SSH target administration when this window is a desktop window, else nothing. */
+export function sshTargetAdministrationOf(
+  bridge: OctantHostBridge | undefined,
+): SshTargetAdministrationBridge | undefined {
+  const request = bridge?.sshTargetRequest;
+  return request === undefined ? undefined : { sshTargetRequest: request };
+}
+
 export interface OctantHostBridge
-  extends Partial<RemoteAccessAdministrationBridge>, Partial<PairedComputersBridge> {
+  extends
+    Partial<RemoteAccessAdministrationBridge>,
+    Partial<PairedComputersBridge>,
+    Partial<SshTargetAdministrationBridge> {
   /**
    * Shows a server another paired computer granted this device, served by
    * the desktop's loopback forwarder, in Octant's browser or the default one.

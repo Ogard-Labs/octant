@@ -33,6 +33,7 @@ describe("SettingsSectionId", () => {
       "sync",
       "remote-access",
       "host",
+      "ssh-targets",
       "usage",
     ]);
   });

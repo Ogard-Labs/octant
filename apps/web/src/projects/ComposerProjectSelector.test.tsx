@@ -26,6 +26,41 @@ const projectSelection: ComposerProjectSelection = {
 };
 
 describe("ComposerProjectSelector", () => {
+  it("lists a Project on an SSH target with why it takes no thread yet, and offers binding one", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    const onAddRemote = vi.fn();
+    render(
+      <ComposerProjectSelector
+        entries={[
+          ...entries,
+          {
+            kind: "remote-project",
+            projectId: "00000000-0000-0000-0000-000000000002" as ProjectId,
+            displayName: "Service",
+            location: "build@devbox:/home/build/service",
+            disabledReason: "Threads on SSH targets are not available yet.",
+          },
+          { kind: "add-remote" },
+        ]}
+        onAddFolder={() => {}}
+        onAddRemote={onAddRemote}
+        onSelect={onSelect}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
+    const remote = screen.getByRole("option", { name: /^Service/ });
+    expect(remote).toHaveAttribute("aria-disabled", "true");
+    expect(remote).toHaveTextContent("build@devbox:/home/build/service");
+    expect(remote).toHaveTextContent("Threads on SSH targets are not available yet.");
+    await user.click(remote);
+    expect(onSelect).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("option", { name: "New Project on an SSH target…" }));
+    expect(onAddRemote).toHaveBeenCalledTimes(1);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
   it("offers the default folder as a way to start without choosing a Project", async () => {
     const onSelect = vi.fn();
     render(
