@@ -209,7 +209,12 @@ its sign-in service, since a check signs a request and sends nothing to
 Bedrock. The detail page's Sign-in section reads whether the host holds a
 sign-in: Signed in as the role and account with a Sign out that asks the
 portal to end the session and removes this computer's sign-in, or the
-command to run with Check again; it never offers Sign in, and the page's
+command to run with Check again. The host's answer says only that the
+endpoint names a sign-in, so when the last check was refused for want of one
+(it ended, or the broker no longer holds it) the section says that sign-in no
+longer works and gives the command instead of Signed in as, keeping Sign out
+to clear what is left of it. It never offers
+Sign in, and the page's
 alert is left out for Sign in to use, whose guidance the section already
 gives. Name and address edits the region, portal, portal region, account,
 role, and models, and its note says changing anything but the models signs

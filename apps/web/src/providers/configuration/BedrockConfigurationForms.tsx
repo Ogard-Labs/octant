@@ -133,6 +133,14 @@ type CloudSignInState =
 export function CloudEndpointSignIn(props: {
   readonly instance: BedrockInstance;
   readonly disabled: boolean;
+  /**
+   * The host's last check of this endpoint was refused for want of a sign-in
+   * (it ended, or the broker no longer holds it). The host's status answer
+   * reads only whether this endpoint names a sign-in, not whether the broker
+   * still holds it, so without this the panel said "Signed in as" while the
+   * row said Signed out.
+   */
+  readonly lastCheckRefusedSignIn?: boolean;
   readonly onStateChange?: (state: ProviderOAuthSignInState) => void;
   /** Checks the endpoint again, so its state follows a sign-out at once. */
   readonly onSignedOut?: () => void;
@@ -205,6 +213,7 @@ export function CloudEndpointSignIn(props: {
   };
 
   const busy = state.kind === "checking" || state.kind === "signing-out";
+  const ended = state.kind === "signed-in" && props.lastCheckRefusedSignIn === true;
   const disabled = props.disabled || busy;
   const command = bedrockSignInCommand(props.instance.displayName);
   return (
@@ -218,7 +227,14 @@ export function CloudEndpointSignIn(props: {
         </OctantAlert>
       ) : null}
       {state.kind === "refused" ? <OctantAlert tone="warning">{state.message}</OctantAlert> : null}
-      {state.kind === "signed-in" ? (
+      {state.kind === "signed-in" && ended ? (
+        <p role="status">
+          The last check found the sign-in as{" "}
+          <span className="oct-meta--mono">{state.accountLabel}</span> no longer works. Sign out
+          removes what is left of it on this computer.
+        </p>
+      ) : null}
+      {state.kind === "signed-in" && !ended ? (
         <>
           <p role="status">
             Signed in as <span className="oct-meta--mono">{state.accountLabel}</span>
@@ -238,9 +254,11 @@ export function CloudEndpointSignIn(props: {
           </OctantButton>
         </>
       ) : null}
-      {state.kind === "signed-out" ? (
+      {state.kind === "signed-out" || ended ? (
         <>
-          {state.notice === undefined ? null : <p role="status">{state.notice}</p>}
+          {state.kind === "signed-out" && state.notice !== undefined ? (
+            <p role="status">{state.notice}</p>
+          ) : null}
           <p>
             Sign in from a terminal on {computer}: run <code>{command}</code> and enter the code it
             shows at your organization's access portal. Settings never shows the code. Then check
@@ -248,7 +266,21 @@ export function CloudEndpointSignIn(props: {
           </p>
         </>
       ) : null}
-      {state.kind === "signed-out" || state.kind === "check-failed" || state.kind === "refused" ? (
+      {ended ? (
+        <OctantButton
+          disabled={disabled}
+          onClick={signOut}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          Sign out
+        </OctantButton>
+      ) : null}
+      {state.kind === "signed-out" ||
+      ended ||
+      state.kind === "check-failed" ||
+      state.kind === "refused" ? (
         <OctantButton
           disabled={disabled || !canRun}
           onClick={() => setChecks((count) => count + 1)}

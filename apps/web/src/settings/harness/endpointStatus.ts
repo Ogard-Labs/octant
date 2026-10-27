@@ -39,6 +39,11 @@ export interface EndpointStatus {
   /** What happened and what to do, in one or two plain sentences. */
   readonly sentence?: string;
   readonly fix?: { readonly kind: EndpointFixKind; readonly label: string };
+  /**
+   * The endpoint's Sign-in section already says what to do (an Amazon
+   * Bedrock endpoint not yet signed in), so the detail page adds no alert.
+   */
+  readonly guidedBySignIn?: true;
 }
 
 /** What the host last said about the endpoint's sign-in; absent for keyed endpoints. */
@@ -439,7 +444,13 @@ function cloudSignInStatus(
         fix: checkAgain,
       };
     default:
-      return { tone: "needs-you", label: "Sign in to use", sentence: signIn, fix: checkAgain };
+      return {
+        tone: "needs-you",
+        label: "Sign in to use",
+        sentence: signIn,
+        fix: checkAgain,
+        guidedBySignIn: true,
+      };
   }
 }
 

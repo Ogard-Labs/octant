@@ -601,7 +601,7 @@ describe("directory device-code sign-in", () => {
   function flakyDeviceRuntime(
     store: CredentialStore,
     fake: FakeDirectory,
-    failures: ReadonlyArray<"server-error" | "throttled" | "unreachable"> | "always",
+    failures: ReadonlyArray<"server-error" | "throttled" | "unreachable" | "slow-down"> | "always",
     clock?: { now: number },
   ) {
     const queue = failures === "always" ? [] : [...failures];
@@ -610,6 +610,9 @@ describe("directory device-code sign-in", () => {
     const fetchWithOutage: typeof fetch = async (input, init) => {
       if (typeof init?.body === "string" && init.body.includes("device_code=")) {
         const failure = failures === "always" ? "server-error" : queue.shift();
+        if (failure === "slow-down") {
+          return Response.json({ error: "slow_down", error_codes: [70016] }, { status: 400 });
+        }
         if (failure !== undefined) failedPolls += 1;
         if (failure === "unreachable") throw new TypeError("fetch failed");
         if (failure === "throttled") return new Response("", { status: 429 });
@@ -652,6 +655,26 @@ describe("directory device-code sign-in", () => {
     expect(waits.slice(0, 4)).toEqual([5_000, 10_000, 20_000, 40_000]);
     expect(waits.slice(4).every((wait) => wait === 5_000)).toBe(true);
     expect(store.values.size).toBe(1);
+  });
+
+  it("keeps a slow_down's longer interval through a later outage and after it, as RFC 8628 asks", async () => {
+    const fake = await fakeDirectory();
+    const { runtime, waits } = flakyDeviceRuntime(memoryStore(), fake, [
+      "slow-down",
+      "server-error",
+    ]);
+    const started = await beginDevice(runtime);
+    // The code is entered only after the outage, so a pending answer follows it.
+    const deadline = Date.now() + 2_000;
+    while (waits.length < 4 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+    fake.settleDeviceCode(started.userCode, "approved");
+
+    expect(await waitForSettled(runtime, started.attemptId)).toMatchObject({ kind: "signed-in" });
+    // slow_down adds five seconds for this and every later poll; the outage
+    // doubles that interval once; the next real answer returns to it.
+    expect(waits.slice(0, 4)).toEqual([5_000, 10_000, 20_000, 10_000]);
   });
 
   it("ends an attempt whose code ran out while the directory was failing as unavailable, storing nothing", async () => {

@@ -260,8 +260,7 @@ export function ModelEndpointDetail(props: ModelEndpointDetailProps) {
           as is a Bedrock endpoint's first sign-in, whose guidance that section
           already gives. */}
       {(props.status.sentence === undefined && (fix === undefined || fix.kind === "sign-in")) ||
-      (instance.driverKind === "amazon-bedrock" &&
-        props.status.label === "Sign in to use") ? null : (
+      props.status.guidedBySignIn === true ? null : (
         <div aria-live="polite">
           <OctantAlert
             action={
@@ -343,6 +342,10 @@ function AccessSection(
             <CloudEndpointSignIn
               disabled={props.disabled}
               instance={instance}
+              lastCheckRefusedSignIn={
+                props.observed?.readiness === "unauthenticated" &&
+                props.observed.unauthenticatedReason !== "not-authorized"
+              }
               onSignedOut={() => void props.onProbe(instance.id, { quiet: true })}
               onStateChange={props.onSignInState}
               {...(props.onProviderOAuth === undefined

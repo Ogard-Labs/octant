@@ -59,7 +59,8 @@ export type FakeRefreshAnswer =
   | "server-error"
   | "unreachable";
 
-export type FakeDevicePollFailure = "server-error" | "throttled" | "unreachable";
+/** `hangs` never answers; only the request's own abort signal ends it, as with a stalled connection. */
+export type FakeDevicePollFailure = "server-error" | "throttled" | "unreachable" | "hangs";
 
 export type FakeMintAnswer = "credentials" | "forbidden" | "unauthorized" | "server-error";
 
@@ -110,7 +111,7 @@ export class FakeCloud {
     };
     this.#requests.push(request);
     if (!this.#reachable) throw new TypeError("fetch failed");
-    if (url.host === OIDC_HOST) return this.#oidc(url.pathname, body);
+    if (url.host === OIDC_HOST) return this.#oidc(url.pathname, body, init?.signal ?? undefined);
     if (url.host === PORTAL_HOST) return this.#portal(request);
     if (url.host === MODEL_HOST) return this.#model(request);
     throw new Error(`the fake cloud does not serve ${url.host}`);
@@ -280,7 +281,7 @@ export class FakeCloud {
     return value;
   }
 
-  #oidc(path: string, body: string): Response {
+  #oidc(path: string, body: string, signal: AbortSignal | undefined): Response | Promise<Response> {
     const fields = JSON.parse(body === "" ? "{}" : body) as Record<string, unknown>;
     if (path === "/client/register") {
       const clientId = this.#issue("client-");
@@ -322,6 +323,11 @@ export class FakeCloud {
         if (failure === "unreachable") throw new TypeError("fetch failed");
         if (failure === "throttled") return new Response("", { status: 429 });
         if (failure === "server-error") return new Response("", { status: 503 });
+        if (failure === "hangs") {
+          return new Promise<Response>((_resolve, reject) => {
+            signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+          });
+        }
         const entry = [...this.#devices].find(([key]) =>
           key.startsWith(`${String(fields.deviceCode)}|`),
         );

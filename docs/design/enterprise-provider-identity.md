@@ -471,7 +471,10 @@ conservative reading of decision 4 and the broker operations above:
   nothing in a descriptor or an answer names a host. Polling the device code
   follows slice 2's rule: a poll the portal does not answer, or answers with
   a 429 or a 5xx, is retried with a doubling wait until the code expires, and
-  a code that runs out during the outage reads `unavailable`.
+  a code that runs out during the outage reads `unavailable`. Every portal
+  request is abandoned after 30 seconds and read as no answer, so a stalled
+  connection cannot hold an attempt awaiting consent past its code's expiry
+  or keep Sign out waiting.
 - **One partition.** Regions are the commercial partition's (`us-east-1`
   form); the government, isolated, sovereign, and China partitions sign under
   other hosts and keys and wait for an organization that needs one. The
@@ -565,8 +568,10 @@ conservative reading of decision 4 and the broker operations above:
   ([Providers and model endpoints](model-endpoints.md) owns the rows and
   copy). Settings' `/api/providers/oauth` route answers only `status` (whether
   the instance's stored pointer names a grant for its current binding; the
-  account label is built from the configuration, so no broker call is made)
-  and `sign-out` for the Bedrock descriptor. Sign out is refused for a remote
+  account label is built from the configuration, so no broker call is made;
+  the panel therefore defers to the endpoint's last check, and does not say
+  Signed in as when that check found no grant) and `sign-out` for the Bedrock
+  descriptor. Sign out is refused for a remote
   principal before the pointer is read; otherwise the broker asks the portal
   to end the session and deletes the grant, and only then is the pointer
   deleted and `host-oauth.signed-out` journaled, so a grant the broker could
@@ -910,7 +915,10 @@ fix, and save the role on the endpoint's page with no key. Device-code
 polls that the directory or portal could not answer are retried with a
 doubling wait until the code expires, and settled attempts are forgotten
 five minutes past their deadline, each proved against the HTTP fake
-directory and the in-memory portal.
+directory and the in-memory portal; a portal poll that never answers is
+abandoned and polled again, a directory `slow_down` keeps its longer interval
+through a later outage, and the endpoint's page does not say Signed in as when
+its last check found no grant.
 **Needs the maintainer:** a real-account smoke with an AWS organization using
 IAM Identity Center and billed Bedrock access in one commercial region (for
 example `us-west-2`): a permission set allowing `bedrock:InvokeModel` and

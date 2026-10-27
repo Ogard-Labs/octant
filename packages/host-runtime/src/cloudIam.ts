@@ -32,6 +32,10 @@ const SLOW_DOWN_MS = 5_000;
 // after a wait that doubles with each one in a row, up to this, and never
 // past the code's own expiry.
 const TRANSIENT_POLL_MAX_MS = 60_000;
+// A portal request with no answer by then is read as no answer at all. Without
+// a bound, one hung device-code poll kept its attempt awaiting consent forever,
+// where neither expiry nor pruning could end it.
+const PORTAL_REQUEST_TIMEOUT_MS = 30_000;
 // A settled attempt stays readable this long past its code's expiry, longer
 // than the server follows one, so a late status read still learns how it
 // ended; after that the broker forgets it, so abandoned attempts do not pile up.
@@ -614,6 +618,7 @@ export function createCloudIamRuntime(options: {
           method: "POST",
           redirect: "error",
           headers: { "x-amz-sso_bearer_token": read.grant.session.accessToken },
+          signal: AbortSignal.timeout(PORTAL_REQUEST_TIMEOUT_MS),
         });
         await response.body?.cancel().catch(() => undefined);
       } catch {
@@ -713,6 +718,7 @@ async function mintRoleCredentials(
         method: "GET",
         redirect: "error",
         headers: { "x-amz-sso_bearer_token": sessionToken },
+        signal: AbortSignal.timeout(PORTAL_REQUEST_TIMEOUT_MS),
       },
     );
   } catch {
@@ -904,6 +910,7 @@ async function postJson(
       redirect: "error",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(PORTAL_REQUEST_TIMEOUT_MS),
     });
   } catch {
     return { kind: "unavailable" };

@@ -2135,6 +2135,64 @@ describe("ProviderSettingsView", () => {
     expect(within(row).queryByRole("button", { name: /Sign in/ })).not.toBeInTheDocument();
   });
 
+  it("does not say an Amazon Bedrock endpoint is signed in when the host's last check found its sign-in gone", async () => {
+    // The host's status names the sign-in this endpoint points at; only a
+    // check learns that the broker no longer holds it.
+    const props = {
+      ...fixture({
+        instance: bedrockProvider(),
+        observed: observation({
+          readiness: "unauthenticated",
+          unauthenticatedReason: "expired",
+          credentialStatus: "missing",
+          models: [],
+        }),
+      }),
+      onProviderOAuth: vi.fn(async () => ({
+        kind: "signed-in" as const,
+        accountLabel: "BedrockUser in account 123456789012",
+      })),
+    };
+    renderExpanded(<ModelEndpointSettingsView {...props} />);
+
+    const card = screen.getByLabelText("Contoso Bedrock");
+    expect(await within(card).findByText(/no longer works/)).toBeVisible();
+    expect(within(card).queryByText(/^Signed in as/)).not.toBeInTheDocument();
+    // Sign out still clears what is left of it; Sign in stays the terminal's.
+    expect(within(card).getByRole("button", { name: "Sign out" })).toBeEnabled();
+    expect(within(card).queryByRole("button", { name: /^Sign in/ })).not.toBeInTheDocument();
+    expect(within(card).getAllByText('octant provider sign-in "Contoso Bedrock"')).not.toHaveLength(
+      0,
+    );
+  });
+
+  it("leaves an Amazon Bedrock endpoint's first sign-in to its Sign-in section, with no page alert", async () => {
+    const props = {
+      ...fixture({
+        instance: bedrockProvider(),
+        observed: observation({
+          readiness: "unauthenticated",
+          unauthenticatedReason: "missing",
+          credentialStatus: "missing",
+          models: [],
+        }),
+      }),
+      onProviderOAuth: vi.fn(async () => ({
+        kind: "signed-out" as const,
+        termsRequired: true,
+        accountLabel: "BedrockUser in account 123456789012",
+      })),
+    };
+    renderExpanded(<ModelEndpointSettingsView {...props} />);
+
+    const card = screen.getByLabelText("Contoso Bedrock");
+    expect(
+      await within(card).findByText('octant provider sign-in "Contoso Bedrock"'),
+    ).toBeVisible();
+    // The state beside the name, and no alert repeating the section's guidance.
+    expect(within(card).getAllByText("Sign in to use")).toHaveLength(1);
+  });
+
   it("says when the organization wants a Foundry sign-in repeated in person", async () => {
     const onProviderOAuth = vi.fn(async () => ({
       kind: "expired" as const,
