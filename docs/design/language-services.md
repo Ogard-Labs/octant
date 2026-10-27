@@ -25,8 +25,10 @@ window's approval and networked under the Project's egress rules), and slice 7
 (read-only agent tools for diagnostics and definitions, which never start or
 read through a repository-tooling server) are also built; slice 7's
 real-provider smoke awaits the maintainer. Slice 8's [Debugger addendum](#debugger-addendum) was accepted by the
-maintainer on 2026-10-27; its sub-slice 8a (seam and policy) is built, and
-nothing starts a debug session yet. Monaco editing and the explicit external-editor
+maintainer on 2026-10-27; its sub-slices 8a (seam and policy) and 8b (session
+host) are built: the host installs a reviewed adapter, records a local
+window's confirmation, and runs, controls, and ends sessions behind local-only
+routes that no window calls until 8c's panel. Monaco editing and the explicit external-editor
 handoff stay the primary Code editing paths and are unchanged by every slice.
 
 ## Outcome
@@ -76,6 +78,18 @@ behind its own approval and confinement rules.
   start refusal schemas; and `packages/domain/src/debugSessionStartPolicy.ts`
   and `debugLaunchFileImport.ts` decide a start and map a launch file. The
   rules are under [Debugger seam rules](#debugger-seam-rules).
+- **Debugger session host (8b).** `apps/server/src/extensions/debugAdapterPackage.ts`
+  reads an adapter's folder into the package store and the inspection
+  review names it; `apps/server/src/code/installedDebugAdapters.ts` offers
+  the adapters effective in Code; `debugConfigurationApprovals.ts` journals
+  confirmations; `debugAdapterProcess.ts` launches the capsule with its
+  receipt and `debugSessionEgress.ts` its proxy; `debugAdapterConnection.ts`
+  holds the protocol; `debugSessionResults.ts` turns answers into contracts;
+  `debugSessionRecords.ts` journals each session's start and end; and
+  `codeDebugService.ts` authorizes every request and ends sessions. The
+  local-only routes are `POST /api/code/debug/configurations`, `/approvals`,
+  `/start`, and `/session`. The rules are under
+  [Debugger session rules](#debugger-session-rules).
 - **Language seam (slice 1).** `packages/contracts/src/extensions.ts` declares
   the `language-server` kind and its `languageServer` declaration;
   `packages/plugin-host/src/activation.ts` admits it in Code only;
@@ -1005,8 +1019,13 @@ frame ends the session. Each request has a 10-second deadline and reports
   `stepBack`, `reverseContinue`, `readMemory`, `writeMemory`, `disassemble`,
   and data or instruction breakpoints.
 - **What an adapter may ask.** `runInTerminal` and `startDebugging` get an
-  error and have no effect. Whether a real adapter needs `startDebugging` for
-  child processes is measured in slice 8b; accepting it needs its own rule.
+  error and have no effect. Measured in 8b with debugpy 1.8.22: it never asks
+  for `startDebugging`. It announces a child process with its own
+  `debugpyAttach` event, which is not on the accepted list, so Octant drops it
+  and does not debug the child; with debugpy's `subProcess` on, a Python child
+  then waits for a client that never comes, so a debugpy package sets
+  `subProcess: false` in its `launch` body. Debugging child processes needs
+  its own rule.
 - **Events accepted.** `initialized`, `stopped`, `continued`, `exited`,
   `terminated`, `thread`, `output` (`console`, `stdout`, `stderr`,
   `important`), `breakpoint`, `capabilities`, `invalidated`, `process`, and
@@ -1099,10 +1118,9 @@ the addendum left a choice open.
   order alone is not a change.
 - **Package.** `octant-debug-adapter.json` is read by
   `@octant/plugin-api/debug-adapter-package`, sharing the language server
-  package's authored-manifest rules. Until 8b reads and reviews one, the host
-  refuses a folder holding it ("this host does not install debug adapters
-  yet") rather than reading its other files as a plugin, and a folder holding
-  two Octant package documents is refused.
+  package's authored-manifest rules. A folder holding it is read as a debug
+  adapter and nothing else (8b; until then the host refused it), and a folder
+  holding two Octant package documents is refused.
 - **Configuration.** An absent `cwd` is the checkout's root. `env` is a list
   of `{ key, value }` entries with unique keys, so no key can become an
   object's prototype. Argument and value bounds are UTF-8 bytes, and a NUL is
@@ -1138,6 +1156,108 @@ the addendum left a choice open.
   resolve to host paths, as the file meant. A missing or mistyped value, a
   value out of the configuration's bounds, more than 64 unused fields, or a
   field name over 128 characters is `invalid`.
+
+### Debugger session rules
+
+Sub-slice 8b settled these details, taking the more restrictive option where
+the addendum left a choice open.
+
+- **Configuration digest.** `sha256:` over the canonical text
+  `canonicalDebugConfigurationText` builds in `@octant/domain`: a versioned
+  JSON array of the name, adapter, program, arguments, folder (`null` when
+  absent), environment entries sorted by name, and `stopOnEntry`. Only the
+  environment's order is not an edit; a renamed configuration is a new one,
+  since the record is of what the person confirmed.
+- **Package and review.** An adapter's folder is read as a language server's
+  is: a local folder only, the host states the identity under its own
+  namespace, the binary is the package's only executable file, and the
+  review names the binary, its own digest, the runtimes, the `launch` body,
+  and the debug port, with the grant in words (Settings shows it). An
+  installed adapter is offered only while the activation ladder makes it
+  effective in Code.
+- **Refusal order.** The read-side checks, then `no-debug-adapter` (a
+  configuration naming an adapter that is not effective, reading the same as
+  none so a refusal never says which disabled adapters exist), then the
+  start decision, then `confinement-unavailable`. Listing configurations,
+  confirming, and every request on a session refuse anything but a local
+  window first (`local-host-required`), before reading anything; a start
+  follows the decision's order. The routes answer `403` to a paired device
+  before reading its body, and the remote gate classifies every path under
+  `/api/code/debug/` as having no action, whatever its method.
+- **Native code on macOS.** An adapter that declares the runtime `native` is
+  refused as `unsupported-platform` on macOS. The declaration has no other
+  field that says so; an adapter that needs the task port without declaring
+  it is refused by Seatbelt itself, which grants no task-port rights.
+- **Confirming.** `code.debug-configuration-approved@1` holds the approval id,
+  Project, `shell-commands` class, digest, the configuration, the adapter's
+  package state, and the scope. Every check a start makes runs first with the
+  confirmation taken as given, so Plan refuses and nothing is recorded for a
+  configuration the thread could not start; the paths are contained with links
+  followed, the program a regular file and the folder a directory. A
+  confirmation not appended answers `not-recorded`.
+- **Limits.** A second Start on a thread with a session answers `busy`
+  (`thread-has-session`) and the panel asks to stop the first; a fifth
+  session on a host answers `busy` (`host-limit`). A Start counts toward both
+  from the moment its checks pass, so two at once cannot both run.
+- **Start.** The start record is appended before anything launches; one that
+  cannot be appended means nothing runs (`launch-failed`). A stored binary
+  that no longer matches the reviewed digest runs nothing
+  (`adapter-unverified`). Then `initialize`, `launch` with the body filled,
+  the window's breakpoints once the adapter is `initialized`, the adapter's
+  default exception filters, and `configurationDone`; `launch` is awaited
+  last because adapters (debugpy among them) answer it only after
+  `configurationDone`. An error or a missed deadline anywhere ends the
+  session as `start-failed` and answers `adapter-refused`.
+- **Capsule.** The configuration's environment comes first, so the person may
+  set `PATH` or the locale; `HOME`, `TMPDIR`, and the proxy variables are the
+  host's and come last. Without the person's entries the environment is
+  `PATH=/usr/bin:/bin` and the host's `LANG`. Sibling sessions' state folders
+  are denied, and the state root is cleared at host start, so a crashed run's
+  folder does not outlive it. A debug port on Linux is a free port the host
+  picks (never the egress forwarder's) inside the capsule's namespace; on
+  macOS the profile allows binding, inbound, and outbound on
+  `localhost:<port>` only, which 8d measures.
+- **Network.** The session's egress launch id is its session id, so its
+  records on `code-debug-egress` and its journaled start (which names the
+  configuration digest) are one launch. Decisions use the thread's and its
+  Project's rules with the thread's taint, through the same egress rules a
+  command uses, so a revocation or a taint change rechecks its open tunnels;
+  refusals are proposed on the thread when the session ends. Full access
+  runs on `allow` with no proxy.
+- **Ending.** A session ends once: `disconnect` with `terminateDebuggee`, the
+  capsule's group stopped after five seconds, the end journaled, the output
+  ring cleared. End reasons are `stopped`, `program-exited`,
+  `adapter-exited`, `protocol-violation`, `start-failed`, `thread-inactive`,
+  `plan-read-only`, `network-changed` (the posture crossed Full access),
+  `checkout-unavailable`, `approval-ended` (no confirmation covers the
+  configuration and the adapter as it stands, or the adapter's package
+  changed since the session started, even if confirmed again), `project-erased`,
+  `host-shutdown`, and `host-restarted`, which a host appends at its next
+  start for every session a previous run left open. Every request re-checks
+  these before it runs, and a window reading a session that ended learns why
+  (the last 64 endings are remembered, never their values). The posture is
+  the thread's as the window that pressed Start holds it, because Full access
+  can be that window's own session grant; a grant that lapses without a
+  journal event (the window closed) is noticed at the next request or the
+  minute's sweep.
+- **Answers.** Lines and columns are one-based, as the editor numbers them. A
+  frame's source is placed by its resolved path; one outside the checkout is
+  `elsewhere`, or `adapter-source` with its reference. Host paths are
+  rewritten in frame, thread, and scope names, messages, and output, not in
+  variable values, which are the program's own data. Output entries are cut
+  at 64 KiB, kept in a 1 MiB ring, and answered at most 512 at a time after
+  the window's last sequence, with `outputDropped` when some were lost. The
+  adapter's own stderr is drained and never shown. Only exception filters the
+  adapter advertised are sent. An adapter's error answer reaches the window
+  as one bounded, path-rewritten message.
+- **Launch file.** `POST /api/code/debug/configurations` reads
+  `.vscode/launch.json` through the checkout's containment (a missing file or
+  one that leads out of the checkout is `absent`), as UTF-8 JSON with line
+  and block comments and trailing commas, and maps it with the import
+  policy. A comment between a trailing comma and its bracket reads as
+  `unreadable` rather than guessed at.
+- **Not built yet.** Session counts and end reasons in Diagnostics exports;
+  the Run and debug panel and its user-guide page (8c).
 
 ### Debugger delivery
 
@@ -1191,6 +1311,33 @@ Each sub-slice is its own pull request with this addendum updated in place.
     `startDebugging` and whether `ptrace` works inside the capsule.
   - _Verify:_ server integration and permission-negative tests. The
     `macos-15` CI job runs the same process test for Seatbelt evidence.
+  - _State:_ built for Linux. Under Bubblewrap, through the real companion
+    (`codeDebugServiceProcess.test.ts`), the fixture adapter and program in an
+    approval-gated thread stop at a breakpoint, return the stack (a host path
+    in a frame name rewritten, frames outside the checkout labelled) and
+    variables, evaluate, step, continue, and exit; the program writes the
+    checkout but not the home folder, cannot reach a host listener directly,
+    and its `CONNECT` to `example.com:443` is refused `403` by the session's
+    proxy, journaled on `code-debug-egress`, and proposed on the thread; no
+    variable value or program output is in the journal. Nothing launches
+    before a confirmation; Plan, a paired device (service and route `403`),
+    an edited configuration, and a package switched off and on are refused;
+    Plan, a posture across Full access, a package change, an archived thread,
+    a Project erase, a Stop, and host shutdown each end a running session.
+    The adapter's `runInTerminal` and `startDebugging` are refused and run
+    nothing; `attach` and memory requests do not decode and are not on the
+    connection's closed list (`debugAdapterConnection.test.ts`,
+    `codeRoutes.test.ts`); an oversize frame ends the session; a restarted
+    host reaps the capsule's receipt and closes its open session record.
+    Agents have no tool or route that reaches a session, and the start
+    policy refuses an `agent` starter. _Real adapter:_ debugpy 1.8.22 (MIT,
+    from PyPI, vendored into a scratch package; not committed) on CPython
+    3.13 under Bubblewrap 0.9.0, Linux 6.18, `proxied`: a breakpoint, the
+    stack, locals, `evaluate`, a step, continue, and exit all worked through
+    the session host. It needs no `startDebugging` (above). `ptrace` works
+    inside the capsule: the program attached to its own forked child with
+    `PTRACE_ATTACH`. Awaiting the maintainer: the `macos-15` CI run of the
+    same process test, and the Mac smoke of 8d.
 - **8c. Run and debug panel.** Container: yes.
   - Gutter breakpoints, the configuration list with imported proposals and the
     confirmation card, the session toolbar, call stack, variables, the debug
