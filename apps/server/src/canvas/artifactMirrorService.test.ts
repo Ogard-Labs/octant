@@ -1,9 +1,25 @@
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { CanvasVersion } from "@octant/contracts";
 import type { ArtifactMirrorCommitOutcome } from "@octant/contracts/artifact-mirror";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildArtifactBundle } from "./artifactBundle";
+import { createArtifactMirrorFilePort } from "./artifactMirrorFilePort";
 import {
   ArtifactMirrorService,
+  type ArtifactMirrorFilePort,
   type ArtifactMirrorServiceDependencies,
 } from "./artifactMirrorService";
 
@@ -43,6 +59,8 @@ function harness(
     readonly outsideRootApproved?: boolean;
     readonly planMode?: boolean;
     readonly files?: Map<string, string>;
+    /** The real filesystem port, in place of the in-memory files. */
+    readonly port?: ArtifactMirrorFilePort;
     readonly current?: CanvasVersion;
     readonly commit?: ArtifactMirrorCommitOutcome | "unavailable";
   } = {},
@@ -70,7 +88,7 @@ function harness(
         : options.commit,
   );
   const dependencies: ArtifactMirrorServiceDependencies = {
-    files: {
+    files: options.port ?? {
       write,
       read: async (path) => files.get(path),
       remove,
@@ -306,6 +324,104 @@ describe("mirroring artifacts to files", () => {
         autoCommit: true,
       }),
     ).toMatchObject({ kind: "mirror-refused", reason: "stale-version" });
+  });
+});
+
+const temporaryFolders: Array<string> = [];
+afterEach(() => {
+  for (const folder of temporaryFolders.splice(0)) rmSync(folder, { recursive: true, force: true });
+});
+
+/**
+ * A mirror folder inside a checkout an agent can rename folders in, beside a
+ * host folder the agent could point a link at.
+ */
+function folderInsideCheckout() {
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "octant-mirror-root-")));
+  temporaryFolders.push(base);
+  const parent = join(base, "checkout", "mirror");
+  const root = join(parent, "artifacts");
+  const host = join(base, "host");
+  mkdirSync(root, { recursive: true });
+  mkdirSync(host);
+  writeFileSync(join(host, "notes.md"), "host notes");
+  return {
+    base,
+    root,
+    /** Every name and byte under the host folder, to prove nothing there changed. */
+    host: () => snapshot(host),
+    swapRoot: () => {
+      renameSync(root, `${root}-real`);
+      symlinkSync(host, root);
+    },
+    swapParent: () => {
+      renameSync(parent, `${parent}-real`);
+      symlinkSync(host, parent);
+    },
+  };
+}
+
+function snapshot(directory: string): Record<string, string> {
+  const entries: Record<string, string> = {};
+  for (const name of readdirSync(directory, { recursive: true, encoding: "utf8" })) {
+    const path = join(directory, name);
+    entries[name] = statSync(path).isDirectory() ? "<folder>" : readFileSync(path, "utf8");
+  }
+  return entries;
+}
+
+async function mirrorInto(canonicalRoot: string) {
+  const h = harness({ port: createArtifactMirrorFilePort() });
+  await h.service.execute({
+    kind: "set-artifact-mirror-fallback",
+    expectedVersion: 0,
+    destination: { kind: "global-folder", canonicalRoot },
+  });
+  return h;
+}
+
+describe("mirroring into a folder an agent can rename", () => {
+  // The folder's root was resolved afresh for every write and never compared
+  // with the path the person chose, so a root inside a checkout swapped for a
+  // link to a host folder received the bundle and its sidecars.
+  it("refuses a folder swapped for a link to a host folder after it was chosen", async () => {
+    const folder = folderInsideCheckout();
+    const h = await mirrorInto(folder.root);
+    folder.swapRoot();
+    const before = folder.host();
+
+    const receipt = await h.service.materialize(version());
+
+    expect(receipt).toMatchObject({ outcome: "refused", paths: [] });
+    expect(folder.host()).toEqual(before);
+  });
+
+  it("does not recreate a removed folder under a parent swapped for a link to a host folder", async () => {
+    const folder = folderInsideCheckout();
+    const h = await mirrorInto(folder.root);
+    folder.swapParent();
+    const before = folder.host();
+
+    const receipt = await h.service.materialize(version());
+
+    expect(receipt).toMatchObject({ outcome: "refused", paths: [] });
+    expect(folder.host()).toEqual(before);
+  });
+
+  it("keeps a folder named through a link by its real path and mirrors into it", async () => {
+    const folder = folderInsideCheckout();
+    const linked = join(folder.base, "linked");
+    symlinkSync(folder.root, linked);
+    const h = await mirrorInto(linked);
+
+    const receipt = await h.service.materialize(version());
+
+    expect(h.service.settings().fallback).toEqual({
+      kind: "global-folder",
+      canonicalRoot: folder.root,
+    });
+    expect(receipt.outcome).toBe("written");
+    expect(readdirSync(join(folder.root, "storefront"))).toHaveLength(3);
   });
 });
 

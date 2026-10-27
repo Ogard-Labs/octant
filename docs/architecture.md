@@ -2310,7 +2310,10 @@ flowchart LR
   rewrites that artifact's mirrored files in place (removing old names on
   rename) and journals every outcome as a receipt, including skipped and
   refused; a write failure never unwinds the version. Plan, an unbound or
-  unavailable destination, and an unauthorized one are refused. A repository
+  unavailable destination (including a folder that no longer resolves to the
+  real path it was stored by; see
+  [host reads of a bound root](#security-and-authority)), and an unauthorized
+  one are refused. A repository
   destination writes the working tree only; optional auto-commit (off by
   default, refused without a repository destination) commits only the files
   it just wrote, refuses when other work is staged, and never pushes.
@@ -7349,7 +7352,23 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   which offers Node no descriptor-relative unlink, from a child process whose
   working directory `/bin/pwd -P` reports at that path. On macOS a folder
   create that loses a race against such a swap can leave one empty folder in
-  the host folder; no file is written or removed there. A
+  the host folder; no file is written or removed there. A global-folder
+  destination's root is held to its stored path as the export folder's is. The
+  chosen folder is stored by its real path (a folder named through a link, or
+  one not created yet, by where it resolves), and a materialization whose root
+  no longer resolves to exactly that path is refused as an unavailable
+  destination before anything is written or removed. A folder stored earlier
+  by a path that is not its real path, and the host default
+  `<default folder>/Artifacts` when the default folder is named through a
+  link, refuse the same way until a mirror folder is chosen again; the
+  refusal is recorded only in the mirror receipt. Resolving the root afresh
+  for each use let a folder inside a checkout, swapped itself for a link to a
+  host folder, receive every write the confinement above then held inside the
+  link's target. A missing root is created on demand only beneath a folder
+  still at its own real path; a swap between that check and the create can
+  leave one empty folder in the host folder, never a file. Removals and
+  re-import stay anchored on the stored path through the confined operations
+  above. A
   checkout's `.git` marker is read through the same open; see the confined Git
   rule for the linked-worktree pointers it leads to. The managed-worktree
   identity check, the folder browser's repository test, and managed-clone
