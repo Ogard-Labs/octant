@@ -20,6 +20,7 @@ import {
   type OpenAiImageProviderConfiguration,
   type OllamaProviderConfiguration,
   type OhMyPiProviderConfiguration,
+  type OutsideHarnessEndpointProviderConfiguration,
   type PiProviderConfiguration,
   type PermissionPersistence,
   type ProviderDefaults,
@@ -541,6 +542,58 @@ export function useProviderController(options: ProviderControllerOptions) {
             }
             return false;
           }
+          try {
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
+            return true;
+          } catch {
+            if (mounted.current) {
+              setMessage("The provider was created, but its credential could not be stored.");
+            }
+            return false;
+          }
+        }),
+      );
+    },
+    [client, hostBridge, install, recoverRegistryFailure],
+  );
+  /**
+   * Adds a provider from an admitted outside driver. The host creates it off;
+   * a key the person entered goes to the host's keychain right after, and only
+   * for a provider that sends one.
+   */
+  const createOutsideHarnessEndpoint = useCallback(
+    (
+      displayName: string,
+      configuration: OutsideHarnessEndpointProviderConfiguration,
+      credential: TransientProviderCredential,
+    ) => {
+      const instanceId = decodeProviderInstanceId(crypto.randomUUID());
+      return queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
+        withTransientCredential(credential, async (credentialValue) => {
+          const sendsKey = configuration.key !== undefined && credentialValue.length > 0;
+          if (sendsKey && hostBridge === undefined) {
+            if (mounted.current) setMessage(BROWSER_CANNOT_SAVE_KEYS);
+            return false;
+          }
+          const current = authoritative.current;
+          if (client === undefined || current === undefined) return false;
+          try {
+            applyResult(
+              await client.execute({
+                kind: "create-outside-harness-endpoint-provider",
+                instanceId,
+                expectedVersion: 0 as ProviderDefaults["version"],
+                displayName,
+                configuration,
+              }),
+              current,
+              install,
+            );
+          } catch (error) {
+            await recoverRegistryFailure(error, "Provider configuration could not be created.");
+            return false;
+          }
+          if (!sendsKey || hostBridge === undefined) return true;
           try {
             await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
@@ -2280,6 +2333,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     createClaude,
     createOllama,
     createOpenAiCompatible,
+    createOutsideHarnessEndpoint,
     createAnthropicCompatible,
     createAzureFoundry,
     createOpenAiImage,

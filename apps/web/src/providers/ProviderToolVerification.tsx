@@ -20,6 +20,8 @@ function configuredModelIds(instance: ProviderInstance): ReadonlyArray<ProviderM
     case "anthropic-compatible-http":
     case "azure-foundry-openai-http":
       return instance.configuration.manualModelIds;
+    case "outside-harness-endpoint":
+      return instance.configuration.modelIds;
     default:
       return [];
   }

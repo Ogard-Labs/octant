@@ -42,6 +42,13 @@ export function reportComputerUseDestination(input: {
   return { status: "unavailable", kind: "no-provider-configured" };
 }
 
+/** The providers a report says this host could lease from now; a Project's recipe may name only these. */
+export function leasableProvidersOf(
+  destination: ComputerUseDestinationReport,
+): ReadonlyArray<LeasableDesktopProvider> {
+  return destination.status === "unavailable" ? [] : (destination.leasable ?? []);
+}
+
 /**
  * The Mac runtime's refusal. A leasable provider is not a screen that runtime
  * can drive: until a send binds a lease, there is no destination.

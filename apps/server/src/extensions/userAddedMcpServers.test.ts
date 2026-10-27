@@ -130,6 +130,61 @@ describe("MCP servers added by hand", () => {
     );
   });
 
+  it("lets a sign-in target the hosted server the person added, though its installed source reads plugin-package", async () => {
+    // Observed in a rendered run: Connect on a sign-in connector added the
+    // package and then offered no sign-in, because the host looked for the
+    // "user-added" kind on the installed package, which inspection rewrites.
+    const { store: servers, registry } = await store();
+    const elsewhere = await store();
+    const installed = async (
+      name: string,
+      server: Parameters<typeof servers.add>[0]["server"],
+      writer = { servers, registry },
+    ) => {
+      const { source } = await writer.servers.add({ name, server });
+      const registered = writer.registry.get(source.sourceRef);
+      if (registered === undefined) throw new Error("Expected the registered folder.");
+      const { manifest } = inspectExtensionPackage(
+        normalizeAgentPluginPackage(registered.packageInput),
+      );
+      const [component] = manifest.components;
+      if (component === undefined) throw new Error("Expected the server component.");
+      return {
+        state: { source: manifest.source, components: [{ component }] },
+        componentId: String(component.id),
+        read: () => readFile(join(registered.absolutePath, "mcp.json"), "utf8"),
+      };
+    };
+    const remote = await installed("Remote", {
+      type: "streamable-http",
+      url: "https://mcp.example/mcp",
+      headers: [],
+    });
+    expect(remote.state.source.kind).toBe("plugin-package");
+    await expect(
+      servers.signInAddress(remote.state, remote.componentId, remote.read),
+    ).resolves.toBe("https://mcp.example/mcp");
+
+    const local = await installed("Local tools", {
+      type: "stdio",
+      command: "/usr/local/bin/local-tools",
+      args: [],
+      env: [],
+    });
+    await expect(
+      servers.signInAddress(local.state, local.componentId, local.read),
+    ).resolves.toBeUndefined();
+
+    const notOurs = await installed(
+      "Remote",
+      { type: "streamable-http", url: "https://mcp.example/mcp", headers: [] },
+      { servers: elsewhere.store, registry: elsewhere.registry },
+    );
+    await expect(
+      servers.signInAddress(notOurs.state, notOurs.componentId, notOurs.read),
+    ).resolves.toBeUndefined();
+  });
+
   it("refuses a secret value on a host that has no credential store", async () => {
     const { store: servers, directory } = await store();
     await expect(

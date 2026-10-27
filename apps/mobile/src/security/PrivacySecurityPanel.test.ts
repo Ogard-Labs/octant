@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ThemeProvider } from "../../design-system/theme";
 import { PrivacySecurityPanel } from "./PrivacySecurityPanel";
 import { createUnavailableDeviceIntegrityPort } from "./deviceIntegrityPort";
+import { createUnavailableKeyStorageProtectionPort } from "./keyStorageProtectionPort";
 import { createUnavailableScreenshotPrivacyPort } from "./screenshotPrivacyPort";
 
 vi.mock("react-native", () => vi.importActual("react-native-web"));
@@ -20,6 +21,7 @@ describe("mobile privacy settings", () => {
         children: createElement(PrivacySecurityPanel, {
           hostHealth: "ready",
           integrity: createUnavailableDeviceIntegrityPort(),
+          keyStorage: createUnavailableKeyStorageProtectionPort(),
           screenshotPrivacy: createUnavailableScreenshotPrivacyPort(),
         }),
       }),

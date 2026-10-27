@@ -1,8 +1,15 @@
 import type { ExpoConfig } from "expo/config";
 
 const configuredMockScenario = process.env.OCTANT_MOBILE_MOCK_SCENARIO?.trim();
+// Only a local run or a development-side EAS profile may carry a mock
+// scenario. A release profile (`production`, `android-internal`) or one added
+// later without a decision gets none, whatever the environment holds.
+const easBuildProfile = process.env.EAS_BUILD_PROFILE;
 const allowMockScenario =
-  process.env.NODE_ENV !== "production" && process.env.EAS_BUILD_PROFILE !== "production";
+  process.env.NODE_ENV !== "production" &&
+  (easBuildProfile === undefined ||
+    easBuildProfile === "development" ||
+    easBuildProfile === "preview");
 
 // Both camera uses are named, because the image picker and the pairing scanner
 // each write this one reason. The app asks for no location access at all.
@@ -50,6 +57,21 @@ const config: ExpoConfig = {
   },
   android: {
     package: "app.octant.mobile",
+    // Android backup would copy the app's data off the phone; the keystore
+    // key that encrypts secure storage never leaves it, so a restored copy
+    // is unreadable at best. Nothing is backed up.
+    allowBackup: false,
+    // Expo adds the overlay permission by default and no library here needs
+    // it. Location is never asked for, and without the media-location
+    // permission Android removes a picked photo's location before Octant
+    // reads it.
+    blockedPermissions: [
+      "android.permission.SYSTEM_ALERT_WINDOW",
+      "android.permission.ACCESS_FINE_LOCATION",
+      "android.permission.ACCESS_COARSE_LOCATION",
+      "android.permission.ACCESS_BACKGROUND_LOCATION",
+      "android.permission.ACCESS_MEDIA_LOCATION",
+    ],
   },
   plugins: [
     ["expo-build-properties", { ios: { enableSceneSupport: true } }],

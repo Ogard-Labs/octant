@@ -35,8 +35,9 @@ the provider-sdk process-placement seam, its conformance harness, and this
 host's admission of a placed runtime from its driver's declaration
 ([Provider runtimes on a target](#provider-runtimes-on-a-target)). No
 driver declares remote placement yet, the executor cannot yet start a
-runtime process, and so no runtime has been launched on a target. Slices 7
-and 8 are not built. Remote SSH
+runtime process, and so no runtime has been launched on a target; its
+executor-backed placement was [accepted](#runtime-placement) on 2026-10-27
+and is next. Slices 7 and 8 are not built. Remote SSH
 environments are authorized post-preview work as of 2026-10-26, when the
 maintainer unlocked the parked backlog and accepted the
 [maintainer decisions](#maintainer-decisions) below. That authorizes this design
@@ -697,11 +698,255 @@ The executor does not yet start a runtime process, and no in-tree driver
 declares placement. Starting one is its own change: a protocol request for a
 long-lived confined process whose standard streams are a session stream, the
 grants a runtime needs beyond a command's (its own home on the target, its
-binary's folder, and the target's own account state, read-only), and the
-network a placed runtime gets, which locally is open under the
-provider-endpoint policy and on a target is not yet decided. A wrapped
-runtime's driver (ACP, OpenCode, or Pi) then declares placement and passes
-this conformance against the loopback target before the real-provider smoke.
+binary's folder, and the target's own account state), and the network a
+placed runtime gets, which locally is open under the provider-endpoint policy
+and on a target is not yet decided. A wrapped runtime's driver (ACP, OpenCode,
+or Pi) then declares placement and passes this conformance against the
+loopback target before the real-provider smoke. The three choices are
+settled under [Runtime placement](#runtime-placement).
+
+### Runtime placement
+
+**Status: accepted by the maintainer on 2026-10-27, with every decision as
+recommended.** This section answers the three choices slice 6 left open.
+Nothing here is built yet. Each **Decision** names its rule and the rejected
+alternatives; the rest follows from rules above.
+
+#### R1. A placed process beside the request slot
+
+**Decision R1: a `start-process` request
+that answers at once and leaves a process running on a stream of its own.**
+
+- **Request.** `start-process` names the bound root, the posture, the
+  network (R3), the egress token when proxied, the executable's absolute path
+  on the target, its arguments (at most 64, each at most 4 KiB, no NUL), the
+  account-state grants (R2), and a host-chosen even stream id. The executor
+  checks and launches it through its `ProcessConfinementPort` with the posture's
+  attested runtime grants (R2), then replies `process-started` with that
+  stream, or `refused` with a reason, before any process output. The request
+  slot is free again as soon as it replies, so reads, file tools, and commands
+  keep running one at a time beside the process.
+- **Streams.** The process's standard input and output are that one stream,
+  in both directions, under the existing windows (256 KiB, 64 KiB chunks,
+  credits). Standard error is not streamed: the executor keeps its last
+  64 KiB and sends it with the end. The executor sends `process-ended` with the
+  stream, the exit code or signal, and that tail when the process exits; the
+  host's `stop-process` sends the process group a terminate, then a kill after
+  five seconds. A stream that names no running process, or a process stream
+  used after its end, ends the session, as a stray stream does today.
+- **Bounds.** At most four placed processes per session, because a runtime
+  connection is leased per thread root and posture, not per turn. A fifth is
+  refused `busy` and the driver fails the launch; nothing queues.
+- **Lifetime.** A placed process dies with its session, as every executor
+  launch does (die-with-parent on Linux, the process group on macOS). It ends
+  when the driver's scope closes. A posture change ends it, because its grants
+  were chosen for the posture it started in; the driver acquires again.
+- **Proxied connections name their launch.** `stream-open` gains the request
+  id of the launch whose forwarder accepted the connection, because a command
+  and placed processes can now be proxied at once and each has its own proxy
+  identity on this host. A forwarder exists while its launch runs; `resolve`
+  and `dial` are answered while any proxied launch runs, each tied to its
+  launch's proxy.
+- **Protocol version.** This changes protocol 1's frames after builds with it
+  shipped, so it is protocol 2. The exact build match already refuses any
+  executor of another build, so no compatibility path is added.
+
+Recommended because a runtime lives for a session of many turns, while the one
+request slot exists so that a late answer can never be read as the reply to
+the next request; a stream beside the slot keeps that property and needs only
+the framing and flow control slice 5 already proved.
+
+Rejected:
+
+- **Running the runtime as a `run-command`.** It would hold the only request
+  slot for the runtime's whole life, so the Project's reads and every other
+  tool call would wait, and the ten-minute command bound would kill it.
+- **A second SSH session per runtime.** Each session needs its own
+  attestation (up to three minutes) and its own SSH handshake, which with a
+  hardware key means another touch for every runtime; the one-connection rule
+  also keeps one owner for every process on the target.
+- **Answering requests concurrently in general.** It removes the one-at-a-time
+  rule that keeps replies unambiguous, for every request, to serve one that
+  does not need it.
+
+#### R2. Runtime grants on the target
+
+**Decision R2: the local wrapped runtime's
+grant shape, rebuilt on the target, with the binary and account state checked
+there.** A placed runtime gets a posture's command grants (Plan's for Plan,
+the writing postures' otherwise), with these differences, which match what
+`acpProcess.ts` grants a wrapped runtime on this host:
+
+- **Its own home.** One owner-only folder per provider instance and
+  remote-bound Project, under `octant-runtime-homes` in the remote user's state
+  directory (`$XDG_STATE_HOME`, or `~/.local/state`), is `HOME` and the
+  runtime's only write root outside the bound root. It persists across sessions
+  so a provider's resume cursor can find its session files, as the data table
+  says. A folder there that the remote user does not own, that is a link, or
+  that others can enter is refused, as the runtime directory is. Octant never
+  deletes it on its own; removing the target leaves it, as it leaves the
+  remote root. Keyed by Project so one root's sessions never read another's.
+- **Its binary's folder.** The executor resolves the executable to its real
+  path and grants read on that folder and its parent, as locally. It refuses
+  `runtime-binary-not-confinable` when the binary is not a regular executable
+  file, lies inside the bound root (the repository would choose what runs),
+  inside `~/.ssh` or the executor's folders, or in a folder anyone but the
+  remote user or root can write. The path comes from the person's per-target
+  setting for that provider instance, recorded from a local window with the
+  target, never from the model, the remote root, or the target's own report.
+- **Account state.** The paths the driver's profile already declares for its
+  sign-in on this host (for ACP, `hostAuthentication`), at the same path
+  relative to the target user's home. Each is read-only, unless the same
+  profile's local launch writes it (a directory whose sign-in refreshes a
+  token in place), in which case it is writable on the target too. A path that
+  is or holds `~/.ssh`, the bound root, or the executor's folders is refused.
+  The driver names the variable that points the runtime at it; the executor
+  sets its value, and names starting `OCTANT_`, `SSH_`, `LD_`, or `DYLD_`,
+  and `PATH`, `HOME`, and `TMPDIR`, are refused.
+- **Process grants.** As the local matrix: Plan cannot write the root, exec,
+  or fork (beyond a profile's declared child server re-exec); the writing
+  postures can, as the runtime's own built-in tools need.
+- **Seam.** `ProviderPlacedLaunch` gains `accountState`, at most four
+  home-relative paths (no `..`, never absolute) each with its access and an
+  optional variable name. A home-relative path cannot name a folder of this
+  host, so the seam keeps its rule that nothing of this host crosses.
+- **Attested.** Two canary rows join the attestation, run with the runtime
+  grant shape against a scratch home and a scratch account-state folder:
+  a placed runtime in Plan must fail to write the root or its account state
+  when declared read-only, exec or fork, read `~/.ssh`, or read a sibling of
+  its home; in the writing postures it must fail to write outside the root and
+  its home, read `~/.ssh`, or read another runtime home. A posture whose
+  runtime rows did not all report a refusal refuses placed runtimes
+  `not-attested` while commands in that posture may still be admitted.
+
+Recommended because it is the local matrix's grant on the target, nothing
+wider, and every new grant is one the canaries prove before admission.
+
+Rejected:
+
+- **Account state always read-only**, the earlier sketch. A runtime whose
+  sign-in refreshes a token in its own folder would fail mid-session with an
+  error the person can only clear by signing in on the target again, and the
+  local launch already lets it write that one folder.
+- **The remote user's whole home readable.** It exposes `~/.ssh`, cloud
+  credentials, and every other runtime's state to a process an injected prompt
+  can steer.
+- **A home in the per-session runtime directory.** It is removed at session
+  end, so no provider session could resume after a reconnect.
+
+#### R3. The network a placed runtime gets
+
+**Decision R3: `proxied` through this
+host's proxy, public destinations only, journaled.** In every posture a
+driver declares, Plan included, a placed runtime runs on `proxied`: its
+forwarder carries each connection over the session to a proxy of its own on
+this host, as slice 5's commands do. That proxy decides with a runtime rule
+of its own: any public destination is allowed, and the private-address check
+refuses loopback, private, link-local (the cloud metadata address among them),
+and single-label names, under every rule. Thread and Project rules do not
+apply and no proposal is raised, because inference must not wait on a rule.
+Launches and decisions are journaled as a proxied command's are, on a
+`provider-runtime-egress` aggregate naming the thread, provider instance, and
+target. The runtime's traffic taints no thread: it is the runtime's own, as
+locally; a tool result still taints under its own rules. A runtime that does
+not honour the proxy variables cannot reach its provider and fails its turn;
+nothing falls back to `allow`.
+
+Recommended because the network a target sits in is not this Mac's. Locally a
+wrapped runtime's `allow` reaches the internet and this Mac's own loopback,
+which its confinement already covers. On a target, `allow` would also reach the
+target's private network and, on a cloud machine, the instance metadata
+service, whose role credentials an injected prompt could take, and Octant
+would keep no record of it. Allowing every public host keeps a runtime working
+without a per-provider endpoint list nobody maintains yet. Residual: a runtime
+can still send what it reads to any public host, as it can locally; its
+traffic crosses the SSH session twice, so its throughput is the session's.
+
+Rejected:
+
+- **`allow`, the target's own network, as the local matrix materializes
+  provider-endpoints-only.** Simplest, and equal to the local grant, but it
+  opens the target's private network and metadata service, and leaves no
+  record.
+- **The thread's and Project's harness rules.** Inference would stop at a
+  proposal on every new provider host, and a tainted thread's suspended rules
+  would cut off its own model.
+- **A provider-endpoint list per driver.** No such list exists for local
+  runtimes; inventing one for targets first would make a remote runtime fail
+  where the same runtime works here, on hosts (sign-in refresh, model
+  catalogues) the list missed. If local runtimes later move to such a list,
+  targets follow in that change.
+- **`none`.** A runtime with no network cannot reach its model.
+
+On macOS targets `proxied` waits for slice 8's forwarder, as the writing
+postures' commands do, so a placed runtime is admitted only on Linux targets
+until then.
+
+#### Which runtimes first
+
+**Decision R4: ACP first, with its
+client file and terminal capabilities only.** An ACP agent speaks its protocol
+on standard input and output, so `appToolTransport: "stdio"` is true of it. On
+a target its client file and terminal requests run through the executor's file
+operations and commands, admitted per call as slice 5's tools are; its HTTP
+MCP bridge is a listener and is not offered, so app-managed tools that need it
+report unsupported for remote-bound Projects. OpenCode on a target runs as an
+ACP profile (its own ACP mode), not through its loopback server API, and Pi
+waits until its tool bridge has a transport that is not a loopback listener.
+Rejected: OpenCode's local-server adapter (a loopback HTTP listener on the
+target, which admission refuses); Pi's loopback bridge (the same).
+
+#### Placement threat model
+
+| Threat                                                                   | Holds because                                                                                                                                       | Residual                                                           |
+| ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| A long-lived process makes replies ambiguous                             | It is a stream beside the request slot; requests stay one at a time; a stray process stream ends the session                                        | None                                                               |
+| The repository chooses the runtime binary                                | The path is the person's per-target setting; a binary inside the bound root, or in a folder others can write, is refused                            | The target's administrator can replace any binary, as stated above |
+| The runtime reads the remote user's keys or other runtimes' state        | `~/.ssh` stays denied; homes are per instance and Project; account state is only the profile's declared paths; canaries prove each before admission | A runtime reads its own account state, as locally                  |
+| The runtime reaches the target's private network or the metadata service | `proxied`; the private-address check refuses loopback, private, and link-local destinations                                                         | Any public host is reachable                                       |
+| Runtime traffic leaves no record                                         | Launches and decisions journaled on this host on their own aggregate                                                                                | Hosts and counts, not content                                      |
+| A runtime keeps running unseen                                           | It dies with the session; a scope close or posture change stops it                                                                                  | None                                                               |
+| Another user on the target reaches the runtime                           | No listener: stdio over the session; the forwarder is an owner-only Unix socket; loopback tool transports refused                                   | Root on the target, as stated above                                |
+| A runtime home or account-state path is swapped for a link               | Owner, mode, and link checks before each launch; the grant is the resolved folder                                                                   | A swap after the check is the remote user's own act, out of scope  |
+| Many runtimes exhaust the session                                        | Four placed processes per session, per-stream windows, standard error kept as a bounded tail                                                        | One slow runtime is bounded by its window                          |
+
+#### Placement delivery
+
+Each is its own reviewable change with this section updated in place.
+
+- **6b. Executor runtime launches.** Container.
+  - Protocol 2 with `start-process`, `stop-process`, `process-started`,
+    `process-ended`, and launch-tagged `stream-open`; the runtime home, binary,
+    and account-state checks; the runtime canary rows; the placed launch in
+    `sshTargetConnectionService.ts`'s placement; and the runtime egress rule
+    and its records on this host.
+  - _Accepts when:_ against loopback `sshd`, a fixture runtime placed in Plan
+    and approval-gated echoes over its stream while reads and a command run
+    beside it; it cannot write outside its root and home, read `~/.ssh`, or
+    reach the target's loopback or a private address, and its allowed public
+    connection is journaled on this host; a binary inside the root, a
+    world-writable folder, a linked home, and a fifth process are refused; a
+    lost session ends it, and nothing runs on the next session.
+  - _Verify:_ protocol, executor, connection-service, and loopback smoke tests;
+    `git diff --check`.
+- **6c. ACP declares placement.** Container.
+  - The ACP driver declares Plan, approval-gated, and auto-accept-edits with
+    `stdio`, launches through the placement, and routes its client file and
+    terminal requests through the executor.
+  - _Accepts when:_ an ACP profile backed by a fixture agent passes the
+    placement conformance against loopback `sshd` in every declared posture:
+    started only through the placement at an absolute path, failing the turn
+    when the target refuses, stopping every placed process when its scope
+    closes; and a client file write in Plan is refused before the executor.
+  - _Verify:_ provider-sdk placement conformance, ACP conformance, and the
+    loopback smoke.
+- **6d. Real-provider smoke.** Maintainer.
+  - _Accepts when:_ one real ACP agent, signed in on a Linux target with its
+    own account state, runs a Code turn on a remote-bound Project from this
+    Mac: it reads and edits the remote root, its inference leaves through this
+    host's proxy and is journaled, and a reconnect resumes or rebuilds its
+    session. The result is recorded here with the agent, the versions, and the
+    target's distribution.
 
 ### Credential custody
 
@@ -940,7 +1185,9 @@ agent can implement and verify it in a Linux container with OpenSSH installed an
    access, or a loopback tool listener). Launching a wrapped runtime on a
    target remains, as the executor's own change before a driver declares
    placement; see
-   [Provider runtimes on a target](#provider-runtimes-on-a-target).
+   [Provider runtimes on a target](#provider-runtimes-on-a-target). That
+   change and the driver after it are 6b to 6d under
+   [Runtime placement](#runtime-placement).
 7. **Terminals, managed worktrees, and Settings.** Container for behavior and
    rendered QA in a browser; desktop packaged smoke needs a Mac (maintainer).
    Remote terminals and worktrees under the same admission, the SSH targets

@@ -19,6 +19,7 @@ import {
   decodeProjectRenamed,
   decodeWorkProjectStatusFileChanged,
   decodeProjectBrandKitChanged,
+  decodeCodeProjectDesktopRecipeChanged,
   type EventEnvelope,
   type MemoryEntry,
   type MemoryEntryId,
@@ -177,6 +178,8 @@ const projectDecoders = {
     decodeWorkProjectStatusFileChanged(payload).project,
   "project.brand-kit-changed@1": (payload: unknown) =>
     decodeProjectBrandKitChanged(payload).project,
+  "project.code-desktop-recipe-changed@1": (payload: unknown) =>
+    decodeCodeProjectDesktopRecipeChanged(payload).project,
 } as const;
 
 const memoryDecoders = {

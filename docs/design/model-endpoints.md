@@ -36,6 +36,23 @@ install or trust action, because a bundled driver needs neither. Opening the
 page or a setup runs nothing; at phone width a fact's value moves under its
 name.
 
+### Outside drivers in the catalog
+
+An outside provider driver the host admits (a package from a folder on this
+computer that the person trusted and switched on under Plugins) is listed in a
+third section, Outside drivers, after the bundled two; with none admitted, the
+section is absent and the introduction keeps its bundled-only sentence. A row
+reads "Model endpoint · Outside driver", never Bundled, with the package's name
+and a monogram. Its setup's Add step adds a provider in place: Name, Address,
+How the key is sent (Bearer token, a header of its own, or no key for this
+computer), the key, and Model IDs, then Add provider; the provider is added
+off, and Turn it on and Check the connection follow as for any endpoint. Its
+card from Providers & Models follows, holding the key, the address, the key
+placement, the driver's version and digest, and Verify tools. Package says
+Local folder, unsigned, trusted by the person at this digest, with the driver
+version and digest. [Outside provider drivers](outside-provider-drivers.md#admission-rules)
+owns the rules behind each step.
+
 ### A runtime whose saved binary is gone
 
 A runtime card whose saved binary is missing or reported incompatible, while the

@@ -263,18 +263,14 @@ export function wireWork(deps: WorkDependencies) {
             .filter((request) => request.status === "pending")
         : [];
       const pendingRequest = pendingRequests.at(0);
-      const leadApprovalWaiting = threadAwaitsHarnessApproval(String(threadId));
       const childRuns = persistence.agentRunProjection.parentSummary(
         decodeAgentRunParentThreadId(String(threadId)),
       );
       return boardRuntimeActivityFromTurnsAndSignals({
         turns: workTurnProjection.listForThread(threadId),
-        pendingRequest: pendingRequest !== undefined || leadApprovalWaiting,
-        ...(pendingRequest !== undefined
-          ? { pendingRequestKind: pendingRequest.detail.kind }
-          : leadApprovalWaiting
-            ? { pendingRequestKind: "approval" as const }
-            : {}),
+        pendingRequest: pendingRequest !== undefined,
+        ...(pendingRequest === undefined ? {} : { pendingRequestKind: pendingRequest.detail.kind }),
+        leadApprovalWaiting: threadAwaitsHarnessApproval(String(threadId)),
         childActive: childRuns.filter(
           (run) => isAgentRunActiveStatus(run.lifecycleStatus) && run.lifecycleStatus !== "waiting",
         ).length,

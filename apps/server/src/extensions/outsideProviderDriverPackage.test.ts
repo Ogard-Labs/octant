@@ -402,17 +402,10 @@ describe("an installed outside provider driver", () => {
     ]);
   });
 
-  it("stays quarantined when its source is trusted and its switches are turned on, and after replay", async () => {
+  it("stays quarantined while its switches are turned on, until its source is trusted", async () => {
     const context = await installed();
     const extensionId = context.entry.extensionId;
     const version = () => driverState(context.lifecycle.snapshot()).stateVersion;
-    await context.api.execute({
-      kind: "set-source-trust",
-      commandVersion: 1 as never,
-      extensionId,
-      expectedStateVersion: version(),
-      trusted: true,
-    });
     await context.api.execute({
       kind: "set-plugin-desired",
       commandVersion: 1 as never,
@@ -429,14 +422,56 @@ describe("an installed outside provider driver", () => {
       desired: true,
     });
     expect(driverState(context.lifecycle.snapshot()).activation).toMatchObject({
-      trusted: true,
+      trusted: false,
       pluginDesired: true,
       quarantined: true,
     });
-    const blocked = [{ kind: "blocked", reason: "quarantined" }];
     expect(
       driverState(context.lifecycle.snapshot()).components.map((c) => c.effectiveState),
-    ).toEqual(blocked);
+    ).toEqual([{ kind: "blocked", reason: "quarantined" }]);
+  });
+
+  it("is admitted at the selected digest when its source is trusted, and after replay", async () => {
+    const context = await installed();
+    const extensionId = context.entry.extensionId;
+    const version = () => driverState(context.lifecycle.snapshot()).stateVersion;
+    const trust = (trusted: boolean) =>
+      context.api.execute({
+        kind: "set-source-trust",
+        commandVersion: 1 as never,
+        extensionId,
+        expectedStateVersion: version(),
+        trusted,
+      });
+    await trust(true);
+    // Trust lifts the quarantine; the switches are still the person's to turn on.
+    expect(driverState(context.lifecycle.snapshot()).activation).toMatchObject({
+      trusted: true,
+      quarantined: false,
+    });
+    expect(
+      driverState(context.lifecycle.snapshot()).components.map((c) => c.effectiveState),
+    ).toEqual([{ kind: "blocked", reason: "plugin-disabled" }]);
+    await context.api.execute({
+      kind: "set-plugin-desired",
+      commandVersion: 1 as never,
+      extensionId,
+      expectedStateVersion: version(),
+      desired: true,
+    });
+    await context.api.execute({
+      kind: "set-component-desired",
+      commandVersion: 1 as never,
+      extensionId,
+      expectedStateVersion: version(),
+      componentId: "driver" as never,
+      desired: true,
+    });
+    const admitted = [{ kind: "effective" }];
+    expect(
+      driverState(context.lifecycle.snapshot()).components.map((c) => c.effectiveState),
+    ).toEqual(admitted);
+    expect(driverState(context.lifecycle.snapshot()).digest).toBe(context.entry.digest);
     const projection = context.runtime.projections.get("extensions");
     if (projection === undefined) throw new Error("expected the extension projection");
     rebuildProjection({
@@ -447,7 +482,78 @@ describe("an installed outside provider driver", () => {
     });
     expect(
       driverState(context.lifecycle.snapshot()).components.map((c) => c.effectiveState),
-    ).toEqual(blocked);
+    ).toEqual(admitted);
+
+    // Withdrawn trust quarantines it again, so trusting is again the review step.
+    await trust(false);
+    expect(driverState(context.lifecycle.snapshot()).activation).toMatchObject({
+      trusted: false,
+      quarantined: true,
+    });
+    expect(
+      driverState(context.lifecycle.snapshot()).components.map((c) => c.effectiveState),
+    ).toEqual([{ kind: "blocked", reason: "quarantined" }]);
+  });
+
+  it("keeps a package whose stored version failed verification quarantined through trust", async () => {
+    const context = await installed();
+    const extensionId = context.entry.extensionId;
+    context.lifecycle.recordRuntimeEvidence({
+      kind: "extension-runtime",
+      extensionId,
+      packageId: context.entry.packageId,
+      componentId: "driver",
+      version: context.entry.version,
+      digest: context.entry.digest,
+      state: "quarantined",
+      observedAt: now,
+      reason: "restart-reconciled",
+    });
+    await context.api.execute({
+      kind: "set-source-trust",
+      commandVersion: 1 as never,
+      extensionId,
+      expectedStateVersion: driverState(context.lifecycle.snapshot()).stateVersion,
+      trusted: true,
+    });
+    expect(driverState(context.lifecycle.snapshot()).activation).toMatchObject({
+      trusted: true,
+      quarantined: true,
+    });
+  });
+
+  it("is not broken for every instance by one driver process that crashed", async () => {
+    const context = await installed();
+    const extensionId = context.entry.extensionId;
+    const version = () => driverState(context.lifecycle.snapshot()).stateVersion;
+    for (const command of [
+      { kind: "set-source-trust", trusted: true },
+      { kind: "set-plugin-desired", desired: true },
+      { kind: "set-component-desired", componentId: "driver", desired: true },
+    ] as const) {
+      await context.api.execute({
+        ...command,
+        commandVersion: 1 as never,
+        extensionId,
+        expectedStateVersion: version(),
+      } as never);
+    }
+    context.lifecycle.recordRuntimeEvidence({
+      kind: "extension-runtime",
+      extensionId,
+      packageId: context.entry.packageId,
+      componentId: "driver",
+      version: context.entry.version,
+      digest: context.entry.digest,
+      state: "crashed",
+      observedAt: now,
+      reason: "process-crashed",
+    });
+    // The host's per-instance crash limit decides what a crash costs; the
+    // package stays admitted for the other instances.
+    expect(
+      driverState(context.lifecycle.snapshot()).components.map((c) => c.effectiveState),
+    ).toEqual([{ kind: "effective" }]);
   });
 
   it("is quarantined again and loses its trust when an update or a rollback selects another version", async () => {

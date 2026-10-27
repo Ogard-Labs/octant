@@ -5,7 +5,7 @@
 // app's main process uses them. Only the network seams differ from a real
 // pairing: the listener's Tailscale address is dialled on loopback.
 
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer as createHttpsServer, type Server } from "node:https";
@@ -328,9 +328,10 @@ describe("pairing from an app pairing code with a host that made its own certifi
 // The phone's transport: the shared exchange fetch over a native exchange
 // that dials the judged address, refuses a key outside the pins during the
 // handshake, writes the request only after that, and hands the reply back
-// chunk by chunk. Two exchanges keep that contract here: one in Node, and
-// the phone's own iOS exchange source built for this Mac with swiftc, which
-// runs only where swiftc exists.
+// chunk by chunk. Three exchanges keep that contract here: one in Node; the
+// phone's own iOS exchange source built for this Mac with swiftc, which runs
+// only where swiftc exists; and the phone's own Android exchange source built
+// for a desktop JVM with kotlinc, which runs only where kotlinc and java exist.
 
 const PHONE_MODULE = resolve(
   fileURLToPath(new URL(".", import.meta.url)),
@@ -404,12 +405,28 @@ function nodeExchange(listenerPort: number): Exchange {
   };
 }
 
-/** The phone's iOS exchange, run as a command built from the app's own Swift source. */
-function swiftExchange(binary: string, listenerPort: number): Exchange {
+/**
+ * A phone exchange run as a command built from the app's own native source:
+ * it writes one JSON line for the opening, then one per read.
+ */
+function commandExchange(
+  start: (input: {
+    readonly port: number;
+    readonly serverName: string | null;
+    readonly pins: ReadonlyArray<string>;
+    readonly request: string;
+  }) => ChildProcessWithoutNullStreams,
+  listenerPort: number,
+): Exchange {
   return (request: PinnedListenerExchangeRequest) =>
     new Promise<PinnedListenerExchangeOpening>((resolveOpening, reject) => {
       expect(request.address).toBe(ADDRESS);
-      const child = spawn(binary, [], { stdio: ["pipe", "pipe", "inherit"] });
+      const child = start({
+        port: listenerPort,
+        serverName: request.serverName ?? null,
+        pins: request.pins,
+        request: Buffer.from(request.request).toString("base64"),
+      });
       const reads = readQueue();
       let opened = false;
       let pending = "";
@@ -444,17 +461,39 @@ function swiftExchange(binary: string, listenerPort: number): Exchange {
       });
       child.once("error", reject);
       child.once("close", () => reads.push({ status: "end" }));
-      child.stdin.end(
-        JSON.stringify({
-          // The listener's Tailscale address is dialled on loopback, as above.
-          address: "127.0.0.1",
-          port: listenerPort,
-          serverName: request.serverName ?? null,
-          pins: request.pins,
-          request: Buffer.from(request.request).toString("base64"),
-        }),
-      );
     });
+}
+
+// Both commands dial the listener's Tailscale address on loopback, as above.
+
+/** The phone's iOS exchange, which reads its request as JSON on stdin. */
+function swiftExchange(binary: string, listenerPort: number): Exchange {
+  return commandExchange((input) => {
+    const child = spawn(binary, [], { stdio: ["pipe", "pipe", "inherit"] });
+    child.stdin.end(JSON.stringify({ address: "127.0.0.1", ...input }));
+    return child;
+  }, listenerPort);
+}
+
+/** The phone's Android exchange on a desktop JVM, which reads its request as arguments. */
+function kotlinExchange(jar: string, listenerPort: number): Exchange {
+  return commandExchange((input) => {
+    const child = spawn(
+      "java",
+      [
+        "-jar",
+        jar,
+        "127.0.0.1",
+        String(input.port),
+        input.serverName ?? "",
+        input.pins.join(","),
+        input.request,
+      ],
+      { stdio: ["pipe", "pipe", "inherit"] },
+    );
+    child.stdin.end();
+    return child;
+  }, listenerPort);
 }
 
 function phoneTransport(exchange: Exchange): PinnedListenerTransportPort {
@@ -510,28 +549,59 @@ function hasSwiftc(): boolean {
   }
 }
 
+/** `kotlinc` and `java` on the path, as on a Linux CI runner or a Mac with both installed. */
+function hasKotlinc(): boolean {
+  try {
+    execFileSync("kotlinc", ["-version"], { stdio: "ignore", timeout: 60_000 });
+    execFileSync("java", ["-version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const swiftcFound = hasSwiftc();
+const kotlincFound = hasKotlinc();
 let swiftBinary: string | undefined;
-const swiftBuild = mkdtempSync(join(tmpdir(), "octant-pinned-tls-"));
+let kotlinJar: string | undefined;
+const nativeBuild = mkdtempSync(join(tmpdir(), "octant-pinned-tls-"));
 
 beforeAll(() => {
-  if (!hasSwiftc()) return;
-  const binary = join(swiftBuild, "pinned-tls-exchange");
-  execFileSync(
-    "xcrun",
-    [
-      "swiftc",
-      "-o",
-      binary,
-      join(PHONE_MODULE, "ios/PinnedTlsExchange.swift"),
-      join(PHONE_MODULE, "test/main.swift"),
-    ],
-    { stdio: "inherit", timeout: 240_000 },
-  );
-  if (existsSync(binary)) swiftBinary = binary;
-}, 240_000);
+  if (swiftcFound) {
+    const binary = join(nativeBuild, "pinned-tls-exchange");
+    execFileSync(
+      "xcrun",
+      [
+        "swiftc",
+        "-o",
+        binary,
+        join(PHONE_MODULE, "ios/PinnedTlsExchange.swift"),
+        join(PHONE_MODULE, "test/main.swift"),
+      ],
+      { stdio: "inherit", timeout: 240_000 },
+    );
+    if (existsSync(binary)) swiftBinary = binary;
+  }
+  if (kotlincFound) {
+    const jar = join(nativeBuild, "pinned-tls-exchange.jar");
+    execFileSync(
+      "kotlinc",
+      [
+        join(PHONE_MODULE, "android/src/main/java/sh/octant/pinnedtls/PinnedTlsExchange.kt"),
+        join(PHONE_MODULE, "test/android/Main.kt"),
+        join(PHONE_MODULE, "test/android/Base64.kt"),
+        "-include-runtime",
+        "-d",
+        jar,
+      ],
+      { stdio: "inherit", timeout: 240_000 },
+    );
+    if (existsSync(jar)) kotlinJar = jar;
+  }
+}, 480_000);
 
 afterAll(() => {
-  rmSync(swiftBuild, { recursive: true, force: true });
+  rmSync(nativeBuild, { recursive: true, force: true });
 });
 
 const phoneExchanges: ReadonlyArray<{
@@ -546,7 +616,15 @@ const phoneExchanges: ReadonlyArray<{
       if (swiftBinary === undefined) throw new Error("The iOS exchange was not built.");
       return swiftExchange(swiftBinary, listenerPort);
     },
-    runs: hasSwiftc,
+    runs: () => swiftcFound,
+  },
+  {
+    name: "the phone's Android exchange",
+    exchange: (listenerPort) => {
+      if (kotlinJar === undefined) throw new Error("The Android exchange was not built.");
+      return kotlinExchange(kotlinJar, listenerPort);
+    },
+    runs: () => kotlincFound,
   },
 ];
 

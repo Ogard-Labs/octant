@@ -221,6 +221,22 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
           origin,
         );
       }
+      // A desktop recipe chooses what this host runs and for how long, so it
+      // is set from a window on the host. A paired device may still watch and
+      // operate the desktops a recipe produces.
+      if (
+        command.kind === "change-code-project-desktop-recipe" &&
+        readPrincipalRouteContext(request)?.principal.kind === "remote-device"
+      ) {
+        return response(
+          {
+            category: "unauthorized",
+            message: "A Code Project's desktop recipe is set on the host.",
+          },
+          403,
+          origin,
+        );
+      }
       return response(await dependencies.service.executeProject(windowId, command), 200, origin);
     } catch (error) {
       if (error instanceof ProjectServiceError) return failureResponse(error.failure, origin);

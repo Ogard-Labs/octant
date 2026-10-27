@@ -267,7 +267,7 @@ describe("startOctantServer", () => {
     ).toThrow(/not effective/i);
   });
 
-  it("refuses to construct a driver for an outside driver instance, which nothing admits yet", () => {
+  it("refuses to construct a driver for an outside instance its own admission does not admit, whatever kinds are admitted", () => {
     const instance = decodeProviderInstance({
       id: "80000000-0000-4000-8000-000000000411",
       displayName: "Local chat server",
@@ -281,6 +281,8 @@ describe("startOctantServer", () => {
           version: "1.2.0",
           digest: `sha256:${"a".repeat(64)}`,
         },
+        baseUrl: "http://127.0.0.1:8080/",
+        modelIds: ["local-model"],
       },
       enabled: true,
       environmentPolicy: "inherit-host",
@@ -297,6 +299,20 @@ describe("startOctantServer", () => {
         permissionPersistence: () => "current-session",
       }),
     ).toThrow(/not effective/i);
+    const endpoint = vi.fn(() => {
+      throw new Error("An outside driver must not be built before it is admitted.");
+    });
+    expect(() =>
+      makeConfiguredProviderDriver(instance, {
+        openCodeProcess: { start: () => Effect.die("must not start OpenCode") },
+        codexProcess: { start: () => Effect.die("must not start Codex") },
+        runtimeRegistry: new ProviderRuntimeRegistry(),
+        permissionPersistence: () => "current-session",
+        admittedDriverKinds: new Set<ProviderDriverKind>(["outside-harness-endpoint"]),
+        outsideDrivers: { isAdmitted: () => false, endpoint },
+      }),
+    ).toThrow(/not effective/i);
+    expect(endpoint).not.toHaveBeenCalled();
   });
 
   it.each(["openai-image", "gemini-native-image"] as const)(

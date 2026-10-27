@@ -1033,12 +1033,14 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 
 .project-overview-inspector__content > .project-provider-policy,
 .project-overview-inspector__content > .project-brand-kit,
+.project-overview-inspector__content > .project-desktop-recipe,
 .project-overview-inspector__content > .project-overview__memory {
   margin-top: 0;
 }
 
 .project-overview-inspector__content > .project-provider-policy,
-.project-overview-inspector__content > .project-brand-kit {
+.project-overview-inspector__content > .project-brand-kit,
+.project-overview-inspector__content > .project-desktop-recipe {
   padding-top: 12px;
   border-top: 0;
 }

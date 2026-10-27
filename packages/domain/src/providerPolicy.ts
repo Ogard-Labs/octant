@@ -71,6 +71,8 @@ import type {
   ProviderModelId,
   ProviderModel,
   OpenCodeProviderInstance,
+  OutsideHarnessEndpointProviderConfiguration,
+  OutsideHarnessEndpointProviderInstance,
 } from "@octant/contracts/providers";
 
 export type ProviderPolicyRejectionCode =
@@ -1010,6 +1012,50 @@ export function changeOllamaConfiguration(
     configuration: normalizeOllamaConfiguration(configuration),
     version: nextVersion(provider.version),
     updatedAt,
+  };
+}
+
+interface CreateOutsideHarnessEndpointProviderInput {
+  readonly id: ProviderInstanceId;
+  readonly displayName: string;
+  readonly configuration: OutsideHarnessEndpointProviderConfiguration;
+  readonly existingInstances: ReadonlyArray<ProviderInstance>;
+  readonly expectedVersion: AggregateVersion;
+  readonly createdAt: UtcTimestamp;
+}
+
+/**
+ * A provider from an admitted outside driver. It is always created off: the
+ * driver's process starts only once the person turns it on and checks it.
+ * Its address follows the endpoint rule (HTTPS, or HTTP on loopback), and,
+ * as for any endpoint, one that takes no key must be on loopback.
+ */
+export function createOutsideHarnessEndpointProvider(
+  input: CreateOutsideHarnessEndpointProviderInput,
+): OutsideHarnessEndpointProviderInstance {
+  const { configuration } = input;
+  const baseUrl = normalizeOpenAiCompatibleBaseUrl(configuration.baseUrl);
+  if (configuration.key === undefined && !isLoopbackHostname(new URL(baseUrl).hostname)) {
+    reject("invalid-authentication", "Unauthenticated providers must use a loopback endpoint.");
+  }
+  return {
+    id: input.id,
+    displayName: normalizeName(input.displayName, input.existingInstances),
+    driverKind: "outside-harness-endpoint",
+    configuration: {
+      kind: "outside-harness-endpoint",
+      driver: configuration.driver,
+      baseUrl,
+      ...(configuration.key === undefined ? {} : { key: configuration.key }),
+      modelIds: normalizeManualModelIds(
+        configuration.modelIds,
+      ) as OutsideHarnessEndpointProviderConfiguration["modelIds"],
+    },
+    enabled: false,
+    environmentPolicy: "inherit-host",
+    version: nextVersion(input.expectedVersion),
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
   };
 }
 

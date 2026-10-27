@@ -244,6 +244,51 @@ describe("Project routes", () => {
     );
   });
 
+  it("refuses a paired device's desktop recipe change while a local window keeps the route", async () => {
+    const executeProject = vi.fn(() => ({ kind: "code-project-desktop-recipe-changed" }));
+    const route = routeFixture({ executeProject });
+    const headers = {
+      "content-type": "application/json",
+      "x-octant-window-capability": capability,
+    };
+    const command = JSON.stringify({
+      kind: "change-code-project-desktop-recipe",
+      projectId,
+      expectedVersion: 1,
+      recipe: {
+        providerId: "host-local",
+        screen: { width: 1280, height: 800 },
+        network: "none",
+        leaseMinutes: 30,
+        maximumLeaseMinutes: 240,
+        idleMinutes: 15,
+      },
+    });
+
+    const remote = new Request("http://127.0.0.1/api/projects/commands", {
+      method: "POST",
+      headers,
+      body: command,
+    });
+    bindPrincipalRouteContext(remote, {
+      principal: { kind: "remote-device" } as never,
+      scopeId: windowId,
+    });
+    expect((await route(remote))?.status).toBe(403);
+    expect(executeProject).not.toHaveBeenCalled();
+
+    const local = new Request("http://127.0.0.1/api/projects/commands", {
+      method: "POST",
+      headers,
+      body: command,
+    });
+    expect((await route(local))?.status).toBe(200);
+    expect(executeProject).toHaveBeenCalledWith(
+      windowId,
+      expect.objectContaining({ kind: "change-code-project-desktop-recipe" }),
+    );
+  });
+
   it("rejects missing, forged, and expired capabilities", async () => {
     const { route, now } = routeFixtureWithClock();
     for (const token of [undefined, "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"]) {

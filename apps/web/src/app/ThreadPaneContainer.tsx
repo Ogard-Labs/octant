@@ -125,6 +125,7 @@ export interface ThreadPaneContainerProps {
     | "setProjectColor"
     | "setProjectProviderPolicy"
     | "setProjectBrandKit"
+    | "setProjectDesktopRecipe"
     | "setProjectWorkStatusFile"
     | "setThreadStatsVisible"
     | "setUsageOpen"
@@ -137,6 +138,9 @@ export interface ThreadPaneContainerProps {
   readonly activeCodeThreadUsageFallback: Parameters<
     typeof ComposerContextMeterProvider
   >[0]["fallback"];
+  readonly activeThreadUsageReporting?: Parameters<
+    typeof ComposerContextMeterProvider
+  >[0]["usageReporting"];
   readonly activeProject: ProjectController["activeProject"];
   readonly activeMode: OctantMode;
   readonly agentProfiles: ReturnType<typeof useAgentProfiles>;
@@ -239,6 +243,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     activeCodeThreadUsageFallback,
     activeMode,
     activeProject,
+    activeThreadUsageReporting,
     agentProfiles,
     allProjects,
     availabilityByProject,
@@ -378,6 +383,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     setProjectColor,
     setProjectProviderPolicy,
     setProjectBrandKit,
+    setProjectDesktopRecipe,
     setProjectWorkStatusFile,
     setThreadStatsVisible,
     setUsageOpen,
@@ -446,6 +452,9 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
             {...(activeMode !== "code" || activeCodeThreadUsageFallback === undefined
               ? {}
               : { fallback: activeCodeThreadUsageFallback })}
+            {...(activeThreadUsageReporting === undefined
+              ? {}
+              : { usageReporting: activeThreadUsageReporting })}
             {...(contextController.snapshot === undefined
               ? {}
               : { snapshot: contextController.snapshot })}
@@ -663,6 +672,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
               onProjectColorChange={setProjectColor}
               onProviderPolicyChange={setProjectProviderPolicy}
               onBrandKitChange={setProjectBrandKit}
+              onDesktopRecipeChange={setProjectDesktopRecipe}
               onWorkStatusFileChange={(projectId, enabled) =>
                 setProjectWorkStatusFile(projectId, enabled ? "enabled" : "disabled")
               }
