@@ -478,6 +478,10 @@ export function wireProviders(deps: ProvidersDependencies) {
     const extensionPackageStore = new ExtensionPackageStore({
       dataDirectory: providerDataDirectory,
       uuid: randomUUID,
+      // An outside driver runs on the Bun that runs this server and on nothing
+      // else. A server on another runtime (the packaged app's Electron Node)
+      // authorizes no driver launch.
+      ...(process.versions.bun === undefined ? {} : { outsideDriverRuntime: process.execPath }),
     });
     let recordExtensionRuntimeEvidence: ((event: ExtensionRuntimeEvidence) => void) | undefined;
     const extensionSupervisor =
@@ -701,12 +705,15 @@ export function wireProviders(deps: ProvidersDependencies) {
           ? { stdioSupervisor: extensionSupervisor }
           : {}),
       });
-    const persistedExtensionActivationPolicy = createPersistedExtensionActivationPolicy({
-      readProject: (projectId) => persistence.readProject(projectId),
-      readChatThread: (threadId) => persistence.readChatThread(threadId),
-      readWorkThread: (threadId) => workThreadProjection.read(threadId),
-      readCodeThread: (threadId) => persistence.readCodeThread(threadId),
-    });
+    const persistedExtensionActivationPolicy = createPersistedExtensionActivationPolicy(
+      {
+        readProject: (projectId) => persistence.readProject(projectId),
+        readChatThread: (threadId) => persistence.readChatThread(threadId),
+        readWorkThread: (threadId) => workThreadProjection.read(threadId),
+        readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+      },
+      process.platform,
+    );
     const extensionActivationService = new ExtensionActivationService({
       policy: options.extensionActivationPolicy ?? persistedExtensionActivationPolicy,
       compatibility: (packageState) =>

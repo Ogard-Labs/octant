@@ -21,10 +21,15 @@ Slice 3 (wire protocol and host proxy) is built: the protocol schemas in
 `@octant/contracts/outside-driver-protocol`, a host proxy that implements
 `HarnessEndpointDriver` over an in-memory channel, the brokered `http/request`,
 the ceiling clamp, and closed reasons (see
-[Wire protocol rules](#wire-protocol-rules)). No process carries the channel
-yet and nothing admits an outside driver, so an outside instance reports
-`driver-not-admitted` with no models and runs no turn; slice 4 is next. The
-maintainer authorized this scope as post-preview work and accepted the
+[Wire protocol rules](#wire-protocol-rules)). Slice 4 (confined driver
+process) is built: one supervised process per instance under the driver
+profile from the shared confinement builder, a fixed environment, the
+process's stdio as the proxy's channel, the crash limit, and `host-prohibited`
+on Linux (see [Driver process rules](#driver-process-rules)); its acceptance,
+the escape tests on macOS, is the maintainer's to run. Nothing admits an
+outside driver yet, so an outside instance reports `driver-not-admitted` with
+no models and runs no turn; slice 5 is next. The maintainer authorized
+this scope as post-preview work and accepted the
 [maintainer decisions](#maintainer-decisions) below on 2026-10-26; the release
 boundary in `AGENTS.md` and the architecture is updated separately. Today only
 bundled drivers are admitted. Slices and their evidence are tracked in Linear;
@@ -209,6 +214,77 @@ confirmation.
 - **Bounds.** The supervisor's ready handshake, startup deadline, bounded
   stderr, crash limit (two restarts per minute, then `quarantined`), and a
   per-message size cap. The host owns every request deadline.
+
+### Driver process rules
+
+These rules resolve what the section above left to implementation; each takes
+the fail-closed option.
+
+- **Who chooses the profile.** The extension process port does, for a launch
+  that carries the `outside-driver` sandbox: it builds the profile with the
+  shared confinement builder (`apps/server/src/process/seatbeltProfile.ts`)
+  and sets the environment itself, ignoring whatever environment the caller
+  passed. No caller can widen either.
+- **The grants.** Read: the package root, the runtime's folder and its parent
+  (and, for a Homebrew runtime, the prefix's `Cellar`, `opt`, and
+  `etc/openssl@3`), `/System`, `/usr`, `/private/etc`, `/private/var/db`,
+  `/Library/Apple`, the data devices `/dev/null`, `/dev/zero`, `/dev/random`,
+  and `/dev/urandom`, `/` itself, and metadata of every parent folder of those.
+  These are the extension profile's measured roots less `/bin` and `/sbin`
+  (programs the driver may not exec) and less the rest of `/dev`, since the
+  person's own terminals are devices there their user may read. Write: the
+  process's own temporary folder; the package root is denied writes
+  explicitly. Exec: the runtime alone, by its path and its resolved path. No
+  fork, no network, no Mach service. The builder's own denials (the Keychain,
+  `/private` outside these grants, other people's home folders) apply as for
+  every confined launch. None of this is measured on macOS yet: the escape
+  tests in `outsideDriverProcess.escape.test.ts` are that measurement, and a
+  grant the runtime turns out to need is added only with its observed
+  failure.
+- **The environment.** Exactly `PATH=/usr/bin:/bin`, `LANG=en_US.UTF-8`, and
+  the process's temporary folder as both `TMPDIR` and `HOME`, so a runtime
+  that keeps a cache under its home writes only into the folder removed at
+  stop and learns no path of the person's.
+- **The runtime.** Only the Bun that runs the server
+  ([decision 6](#maintainer-decisions)). The package store authorizes a
+  driver launch only as that runtime with the entry module as its one
+  argument, in the package root, under the `outside-driver` sandbox bound to
+  that root, for an entry the receipt records as not executable. A server on
+  any other runtime starts no driver: the packaged app runs its server on
+  Electron's Node today, so a packaged build refuses every driver start as
+  `runtime-unavailable` until the maintainer chooses to ship a Bun with it or
+  to measure a profile for Electron's Node.
+- **Platforms.** On any host but macOS the component is `host-prohibited` on
+  the activation ladder, which the ladder reports before quarantine or trust,
+  and both the process owner and the process port refuse before a folder or
+  process exists. No Bubblewrap launch is made for a driver: that would be a
+  Linux confinement design of its own.
+- **One process per instance.** The supervisor keys a driver's runtime by its
+  instance, so two instances of one driver never share a process. A second
+  start for an instance whose process is running is refused as
+  `already-running`; a start while the previous process is still ending waits
+  for it to end.
+- **The crash limit.** A process that exits on its own is a crash. The
+  supervisor does not restart a process whose stdio another owner holds, so
+  the driver process owner counts crashes per instance and digest with the
+  supervisor's numbers: the next use may start the driver again, and a third
+  crash within a minute quarantines that instance's driver at that digest.
+  Every later start is refused as `quarantined` until the instance binds
+  another digest or the host restarts. A stop the host asked for (a disable,
+  or the proxy stopping a driver that broke the protocol) is not a crash.
+- **The channel.** The process's stdout is split into lines on bytes, so a
+  character split across reads is never torn. A line still unfinished past
+  the 4 MiB cap is handed to the proxy as it stands, and the proxy's own cap
+  stops the driver as `driver-incompatible`. When the process exits, every
+  pending call fails at once with the closed reason `runtime-unavailable` and
+  the instance reports `unavailable`, rather than each call waiting for its
+  deadline.
+- **Stderr** stays with the supervisor's bounded capture: 64 KiB, past which
+  the process is stopped, which counts as a crash. The host never reads it
+  into a client, a diagnostic, or the journal.
+- **The temporary folder** is made per process, private to the person's user,
+  under the host's temporary root, and removed when the process stops or
+  exits.
 
 ### Wire protocol
 
@@ -464,16 +540,16 @@ put a package in front of the person. Controls marked new are this design's;
 
 | Threat                                                              | Control                                                                                                                                                             |
 | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Exfiltrates prompts, code, or files                                 | New: no network, read only its package, no Project path; only egress is the brokered call to the configured origin                                                  |
+| Exfiltrates prompts, code, or files                                 | New, built (macOS acceptance pending): no network, read only its package, no Project path; only egress is the brokered call to the configured origin                |
 | Steals or replays a credential                                      | New, built for the brokered call: never holds one; host injects the header per request and strips it from responses; broker coordinates absent from the environment |
-| Uses another instance's or provider's credential                    | New: one process and one request channel per instance; built: the lease is keyed by that instance                                                                   |
-| Escapes to the host (files, processes, other extensions)            | New: deny-default Seatbelt without exec or fork; Linux refuses to launch                                                                                            |
+| Uses another instance's or provider's credential                    | New, built: one process and one request channel per instance; the lease is keyed by that instance                                                                   |
+| Escapes to the host (files, processes, other extensions)            | New, built (macOS acceptance pending): deny-default Seatbelt without exec or fork; Linux refuses to launch                                                          |
 | Over-claims capabilities (tools, approvals, resume)                 | New, built: host ceiling clamp; `admitTurn` computed by the host. New: host-run Verify tools                                                                        |
 | Fabricates tool calls or injects instructions in output             | Existing: model output is untrusted; the harness offers, approves, and runs tools under thread authority; taint rules apply                                         |
-| Puts attacker text in Settings or diagnostics                       | New, built: closed reasons only. New: stderr bounded and kept out of clients                                                                                        |
+| Puts attacker text in Settings or diagnostics                       | New, built: closed reasons only; stderr bounded and kept out of clients                                                                                             |
 | Swaps code under a trusted name (update, mirror, typosquat)         | New: digest-bound trust, publisher key pin, quarantined updates that clear verification                                                                             |
 | Points the key at an internal service or attacker host              | Existing endpoint rule, built for the brokered call: HTTPS or loopback HTTP, origin-checked before the key is read; no redirect                                     |
-| Exhausts the host (floods, hangs, crash loops)                      | Existing supervisor bounds; new, built: per-message cap, host-owned deadlines, bounded brokered calls                                                               |
+| Exhausts the host (floods, hangs, crash loops)                      | Existing supervisor bounds; new, built: per-message cap, host-owned deadlines, bounded brokered calls, per-instance crash limit                                     |
 | An agent, mention, routine, or paired device installs or trusts one | Existing and new, built: lifecycle actions only from a local window; structured references stay inert; install stays quarantined                                    |
 | Impersonates a bundled provider                                     | New, built: one reserved family; package-name identity with an outside label; no bundled logo, account profile, or sign-in dialect                                  |
 

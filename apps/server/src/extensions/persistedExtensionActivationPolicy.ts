@@ -26,38 +26,43 @@ export interface ExtensionActivationRecords {
 
 export function createPersistedExtensionActivationPolicy(
   records: ExtensionActivationRecords,
+  platform: string = process.platform,
 ): ExtensionActivationPolicyPort {
-  return createLocalExtensionActivationPolicy({
-    project: (scope) => {
-      if (scope.projectId === null) return { allowed: true, revision: 0 };
-      const project = records.readProject(scope.projectId);
-      return {
-        allowed:
-          project !== undefined && project.lifecycle === "active" && project.type === scope.mode,
-        revision: Number(project?.version ?? 0),
-      };
-    },
-    thread: (scope) => {
-      if (scope.threadId === null) return { allowed: true, revision: 0 };
-      if (scope.mode === "chat") {
-        const thread = records.readChatThread(decodeChatThreadId(scope.threadId));
+  return createLocalExtensionActivationPolicy(
+    {
+      project: (scope) => {
+        if (scope.projectId === null) return { allowed: true, revision: 0 };
+        const project = records.readProject(scope.projectId);
         return {
-          allowed: thread?.lifecycle === "active" && (thread.projectId ?? null) === scope.projectId,
-          revision: Number(thread?.version ?? 0),
+          allowed:
+            project !== undefined && project.lifecycle === "active" && project.type === scope.mode,
+          revision: Number(project?.version ?? 0),
         };
-      }
-      if (scope.mode === "work") {
-        const thread = records.readWorkThread(decodeWorkThreadId(scope.threadId));
+      },
+      thread: (scope) => {
+        if (scope.threadId === null) return { allowed: true, revision: 0 };
+        if (scope.mode === "chat") {
+          const thread = records.readChatThread(decodeChatThreadId(scope.threadId));
+          return {
+            allowed:
+              thread?.lifecycle === "active" && (thread.projectId ?? null) === scope.projectId,
+            revision: Number(thread?.version ?? 0),
+          };
+        }
+        if (scope.mode === "work") {
+          const thread = records.readWorkThread(decodeWorkThreadId(scope.threadId));
+          return {
+            allowed: thread?.lifecycle === "active" && thread.projectId === scope.projectId,
+            revision: Number(thread?.version ?? 0),
+          };
+        }
+        const thread = records.readCodeThread(decodeCodeThreadId(scope.threadId));
         return {
           allowed: thread?.lifecycle === "active" && thread.projectId === scope.projectId,
           revision: Number(thread?.version ?? 0),
         };
-      }
-      const thread = records.readCodeThread(decodeCodeThreadId(scope.threadId));
-      return {
-        allowed: thread?.lifecycle === "active" && thread.projectId === scope.projectId,
-        revision: Number(thread?.version ?? 0),
-      };
+      },
     },
-  });
+    platform,
+  );
 }

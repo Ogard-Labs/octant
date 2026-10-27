@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { spawn as nodeSpawn } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -74,6 +75,105 @@ describe("node extension process port", () => {
     } finally {
       await child.stop().catch(() => undefined);
     }
+  });
+
+  it("launches an outside driver with no network, exec, or fork, a read-only package, and only its fixed environment", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-driver-profile-"));
+    receiptDirectories.push(root);
+    const home = join(root, "home");
+    const packageRoot = join(root, "package");
+    const temporaryDirectory = join(root, "driver-tmp");
+    await Promise.all([home, packageRoot, temporaryDirectory].map((path) => mkdir(path)));
+    let observed:
+      | { command: string; args: ReadonlyArray<string>; env: NodeJS.ProcessEnv | undefined }
+      | undefined;
+    const spawn = ((...input: Parameters<typeof nodeSpawn>) => {
+      const [command, args, options] = input;
+      observed = { command, args, env: options.env };
+      return nodeSpawn(...input);
+    }) as typeof nodeSpawn;
+    const port = createNodeExtensionProcessPort({
+      spawn,
+      shutdownTimeoutMs: 100,
+      platform: "darwin",
+      sandboxPath: process.execPath,
+      homeDirectory: home,
+    });
+    const child = await port.start({
+      ...startInput,
+      command: process.execPath,
+      args: [join(packageRoot, "main.mjs")],
+      cwd: packageRoot,
+      env: { OCTANT_EXTENSION_ID: startInput.extensionId, ANTHROPIC_API_KEY: "sk-host-secret" },
+      readiness: "spawn",
+      sandbox: {
+        kind: "outside-driver",
+        instanceId: "instance-a",
+        packageRoot,
+        temporaryDirectory,
+      },
+    });
+    await child.stop().catch(() => undefined);
+
+    const profile = observed?.args[1] ?? "";
+    expect(observed?.args.slice(2)).toEqual([
+      "--",
+      process.execPath,
+      join(packageRoot, "main.mjs"),
+    ]);
+    expect(profile).toContain("(deny default)");
+    expect(profile).not.toContain("(allow network");
+    expect(profile).not.toContain("(allow process-fork)");
+    expect(profile).not.toContain("(allow process-exec)");
+    // The runtime itself is the only program it may exec, by its own path and
+    // the path that resolves to; `sandbox-exec` judges the launch exec too.
+    const runtimePaths = [...new Set([process.execPath, realpathSync(process.execPath)])].sort();
+    expect(
+      profile
+        .split("\n")
+        .filter((rule) => rule.startsWith("(allow process-exec"))
+        .sort(),
+    ).toEqual(runtimePaths.map((path) => `(allow process-exec (literal "${path}"))`));
+    expect(profile).not.toContain('(allow file-read* (subpath "/dev"))');
+    expect(profile).toContain('(allow file-read* (literal "/dev/urandom"))');
+    expect(profile).toContain(`(allow file-read* (subpath "${packageRoot}"))`);
+    expect(profile).toContain(`(deny file-write* (subpath "${packageRoot}"))`);
+    expect(profile).toContain(`(allow file-write* (subpath "${temporaryDirectory}"))`);
+    expect(
+      profile.split("\n").filter((rule) => rule.startsWith("(allow file-write* (subpath")),
+    ).toEqual([`(allow file-write* (subpath "${temporaryDirectory}"))`]);
+    expect(observed?.env).toEqual({
+      PATH: "/usr/bin:/bin",
+      LANG: "en_US.UTF-8",
+      HOME: temporaryDirectory,
+      TMPDIR: temporaryDirectory,
+    });
+  });
+
+  it("never starts an outside driver on Linux, where extension processes have no confinement", async () => {
+    let spawned = false;
+    const spawn = ((...input: Parameters<typeof nodeSpawn>) => {
+      spawned = true;
+      return nodeSpawn(...input);
+    }) as typeof nodeSpawn;
+    const port = createNodeExtensionProcessPort({
+      spawn,
+      shutdownTimeoutMs: 100,
+      platform: "linux",
+    });
+    await expect(
+      port.start({
+        ...startInput,
+        readiness: "spawn",
+        sandbox: {
+          kind: "outside-driver",
+          instanceId: "instance-a",
+          packageRoot: process.cwd(),
+          temporaryDirectory: tmpdir(),
+        },
+      }),
+    ).rejects.toThrow("could not be started");
+    expect(spawned).toBe(false);
   });
 
   it("lets a Homebrew runtime read its own libraries and OpenSSL config, not the rest of the prefix", async () => {

@@ -222,12 +222,16 @@ and flood the host. The rules live in
 | Closed failures      | A driver's failure is read only as a category and numbers; the host writes every message, and anything else becomes a fixed protocol failure                                | `outsideHarnessEndpointProxy.ts`                                                                              | Exists today    |
 | Capability ceiling   | Probe claims are clamped to the bundled harness endpoints' column; tools reach only models the host verified; `admitTurn`, cancel, and release are answered by the host     | `apps/server/src/providers/outsideDriverCeiling.ts`, `outsideHarnessEndpointProxy.ts`                         | Exists today    |
 | Brokered egress      | The host leases this instance's key, sends it only to the configured origin (checked before the key is read), follows no redirect, and strips the key header from the reply | `outsideHarnessEndpointProxy.ts`, `providerApiKeyPool.ts`                                                     | Exists today    |
-| Confined process     | One deny-default Seatbelt process per instance with no network, no exec, and a minimal environment; Linux never launches one                                                | Extension supervisor (outside driver profile)                                                                 | Newly specified |
+| Confined process     | One deny-default Seatbelt process per instance with no network, no exec, and a minimal environment; Linux never launches one                                                | `apps/server/src/providers/outsideDriverProcess.ts`, `extensions/nodeExtensionProcessPort.ts`                 | Exists today    |
 | Provenance           | Digest-bound trust, a publisher key pinned at first trust, quarantined updates that clear Verify tools                                                                      | Extension lifecycle and package store                                                                         | Newly specified |
 
 The proxy's tests run the harness endpoint conformance kit against it with a misbehaving fixture
 driver, and cover hostile failure text, over-claims, protocol violations, and the brokered call's
-origin, lease, header, and redirect negatives.
+origin, lease, header, and redirect negatives. The confined process's escape tests
+(`outsideDriverProcess.escape.test.ts`) try the network, files outside the package and its folder,
+the home folder and its keychains, another program, and the host's environment from a real Seatbelt
+process; they run on macOS only, and until they pass there the process control is built but not
+accepted.
 
 ## Server-Side Tool-Call Policy Engine
 
@@ -704,7 +708,7 @@ crosses a server authority or sandbox boundary without additional local compromi
 | Extension quarantine, activation ladder, supervised processes        | Exists          | `packages/plugin-host/src/activation.ts`, `apps/server/src/extensions/`                        |
 | Declared-capability ceiling enforced at call resolution              | Newly specified | policy engine + extension manifest data                                                        |
 | Outside driver proxy: strict decoding, closed failures, brokered key | Exists          | `apps/server/src/providers/outsideHarnessEndpointProxy.ts`, `outsideDriverCeiling.ts`          |
-| Outside driver process confinement                                   | Newly specified | extension supervisor (outside driver profile)                                                  |
+| Outside driver process confinement                                   | Exists          | `outsideDriverProcess.ts`, `nodeExtensionProcessPort.ts` (macOS escape acceptance pending)     |
 | Remote principal separation, closed action catalog, clamps           | Exists          | `remoteAccessPolicy.ts`, `clientPrincipal.ts`, `remoteRoutePolicy.ts`, `codePolicy.ts`         |
 | Consolidated audit taxonomy with principal attribution               | Newly specified | `packages/contracts/src/events.ts` or audit payload schemas + owning services                  |
 | Escape suite fixtures and exit gate                                  | Newly specified | `apps/server/src/security/escapeSuite/` (new) + domain policy tests                            |

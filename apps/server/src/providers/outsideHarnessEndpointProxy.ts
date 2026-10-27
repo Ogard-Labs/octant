@@ -64,6 +64,8 @@ export interface OutsideDriverChannel {
   readonly write: (line: string) => void;
   /** Receives each line the driver writes, in order, until the channel stops. */
   readonly onLine: (listener: (line: string) => void) => void;
+  /** Called once if the driver ends on its own, as when its process exits. */
+  readonly onClosed: (listener: () => void) => void;
   /** Stops the driver; no line crosses either way afterwards. */
   readonly stop: () => void;
 }
@@ -155,6 +157,8 @@ const noAgreedProtocol = () =>
   failure("incompatible", "The provider driver does not speak a protocol version Octant speaks.", {
     reason: "driver-incompatible",
   });
+const driverExited = () =>
+  failure("unavailable", "The provider driver stopped.", { reason: "runtime-unavailable" });
 const interrupted = () => failure("interrupted", "The provider request was cancelled.");
 const notAnswered = () => failure("unavailable", "The provider driver did not answer in time.");
 
@@ -224,6 +228,9 @@ class OutsideDriverLink {
     this.#broker = input.broker;
     this.#onStopped = input.onStopped;
     input.channel.onLine((line) => this.#receive(line));
+    // A driver that exits answers nothing more, so its calls fail now rather
+    // than at their deadlines, which for a send is ten minutes away.
+    input.channel.onClosed(() => this.stop(driverExited()));
   }
 
   get stopped(): ProviderFailure | undefined {
@@ -647,7 +654,7 @@ export function makeOutsideHarnessEndpointProxy(
       registry.setObservedState(
         decodeProviderProbeResult({
           instanceId,
-          readiness: "incompatible",
+          readiness: reason.category === "incompatible" ? "incompatible" : "unavailable",
           processState: "stopped",
           models: [],
           capabilities: allUnavailable(),

@@ -11,6 +11,8 @@ export interface InMemoryDriverEnd {
   readonly write: (line: string) => void;
   readonly onLine: (listener: (line: string) => void) => void;
   readonly stopped: () => boolean;
+  /** Ends the driver on its own, as a process that exits would. */
+  readonly exit: () => void;
 }
 
 export function makeInMemoryOutsideDriverChannel(): {
@@ -20,6 +22,7 @@ export function makeInMemoryOutsideDriverChannel(): {
   let stopped = false;
   const toDriver: Array<(line: string) => void> = [];
   const toHost: Array<(line: string) => void> = [];
+  const closed: Array<() => void> = [];
   const deliver = (listeners: ReadonlyArray<(line: string) => void>, line: string) => {
     if (stopped) return;
     queueMicrotask(() => {
@@ -31,6 +34,7 @@ export function makeInMemoryOutsideDriverChannel(): {
     host: {
       write: (line) => deliver(toDriver, line),
       onLine: (listener) => toHost.push(listener),
+      onClosed: (listener) => closed.push(listener),
       stop: () => {
         stopped = true;
       },
@@ -39,6 +43,11 @@ export function makeInMemoryOutsideDriverChannel(): {
       write: (line) => deliver(toHost, line),
       onLine: (listener) => toDriver.push(listener),
       stopped: () => stopped,
+      exit: () => {
+        if (stopped) return;
+        stopped = true;
+        for (const listener of closed) listener();
+      },
     },
   };
 }
