@@ -1,7 +1,7 @@
 import {
   type ArtifactMirrorCommand,
   ArtifactMirrorResult,
-  ArtifactMirrorSettings,
+  ArtifactMirrorView,
 } from "@octant/contracts/artifact-mirror";
 import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
@@ -23,7 +23,8 @@ export class ArtifactMirrorClientFailure extends Error {
 }
 
 export interface ArtifactMirrorClient {
-  settings(signal?: AbortSignal): Promise<ArtifactMirrorSettings>;
+  /** The settings in effect and how each Project's mirror last went. */
+  read(signal?: AbortSignal): Promise<ArtifactMirrorView>;
   execute(command: ArtifactMirrorCommand, signal?: AbortSignal): Promise<ArtifactMirrorResult>;
 }
 
@@ -67,12 +68,12 @@ export function createArtifactMirrorClient(
   };
 
   return {
-    async settings(signal) {
+    async read(signal) {
       const body = await send(
         { method: "GET", ...(signal === undefined ? {} : { signal }) },
         "Artifact mirroring is unavailable.",
       );
-      return decodeHostAnswer(ArtifactMirrorSettings)(readField(body, "settings"));
+      return decodeHostAnswer(ArtifactMirrorView)(body);
     },
 
     async execute(command, signal) {

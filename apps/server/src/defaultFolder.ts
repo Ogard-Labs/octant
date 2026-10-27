@@ -1,7 +1,11 @@
 import { homedir } from "node:os";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { DefaultFolder, type ShellSettings } from "@octant/contracts";
 import { Schema } from "effect";
+import {
+  isInsideHomeDirectory,
+  realPathThroughExistingAncestors,
+} from "./canvas/artifactMirrorFilePort";
 
 const decodeDefaultFolder = Schema.decodeUnknownSync(DefaultFolder);
 
@@ -46,8 +50,15 @@ export type DefaultFolderVerdict =
  * A folder the person named can be anywhere, so it is governed the way the
  * artifact mirror's global folder is (`docs/decisions/0029`): until the
  * standing access-outside-project approval exists, only a folder inside the
- * user's own home is accepted. The path is normalized before the check so a
- * `..` segment cannot name a place outside home that reads as inside it.
+ * user's own home is accepted.
+ *
+ * The folder is stored by its real path, as the mirror's own folder is. The
+ * mirror holds `<default folder>/Artifacts` to the exact path it was given, so
+ * a default folder stored as typed through a link left the host's default
+ * Artifacts folder refused on every write. A folder not created yet keeps its
+ * nearest existing ancestor's real path and the names still to be created.
+ * Resolving also normalizes `.` and `..`, so neither can name a place outside
+ * home that reads as inside it.
  */
 export function judgeDefaultFolder(
   candidate: DefaultFolder,
@@ -56,18 +67,12 @@ export function judgeDefaultFolder(
   if (!isAbsolute(candidate)) {
     return { status: "refused", message: "The default folder must be an absolute path." };
   }
-  const normalized = resolve(candidate);
-  const inside = relative(resolve(home), normalized);
-  if (
-    inside === "" ||
-    inside.startsWith("..") ||
-    isAbsolute(inside) ||
-    inside.includes(`..${sep}`)
-  ) {
+  const real = realPathThroughExistingAncestors(candidate);
+  if (!isInsideHomeDirectory(real, home)) {
     return {
       status: "refused",
       message: "The default folder must be inside your home folder.",
     };
   }
-  return { status: "accepted", folder: decodeDefaultFolder(normalized) };
+  return { status: "accepted", folder: decodeDefaultFolder(real) };
 }

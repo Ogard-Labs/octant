@@ -44,7 +44,7 @@ export function registerArtifactMirrorEvents(registry: EventRegistry): EventRegi
 }
 
 export interface ArtifactMirrorEventStoreOptions {
-  readonly journal: Pick<Journal, "append" | "replayAggregate">;
+  readonly journal: Pick<Journal, "append" | "replayAggregate" | "replayAggregateType">;
   readonly uuid: () => string;
   readonly clock: () => UtcTimestamp;
   readonly actor: { readonly kind: "system" | "local-user"; readonly actorId: string };
@@ -103,6 +103,21 @@ export class ArtifactMirrorEventStore {
       afterVersion: input.afterVersion,
       limit: input.limit,
     });
+  }
+
+  /** One page of every artifact's receipt frames, in journal order, after `afterSequence`. */
+  replayReceipts(input: {
+    readonly afterSequence: number;
+    readonly limit: number;
+  }): ReadonlyArray<{ readonly sequence: number; readonly payload: unknown }> {
+    return this.#options.journal
+      .replayAggregateType({
+        aggregateType: ARTIFACT_MIRROR_AGGREGATE_TYPE,
+        afterSequence: input.afterSequence,
+        limit: input.limit,
+        eventName: ARTIFACT_MIRROR_EVENT_NAMES.written,
+      })
+      .map((event) => ({ sequence: Number(event.globalSequence), payload: event.payload }));
   }
 
   #appendAfter(

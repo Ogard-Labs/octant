@@ -69,6 +69,7 @@ import { ArtifactMirrorEventStore } from "../canvas/artifactMirrorEventStore";
 import {
   createArtifactMirrorFilePort,
   isInsideHomeDirectory,
+  realPathThroughExistingAncestors,
 } from "../canvas/artifactMirrorFilePort";
 import { createArtifactMirrorCommitPort } from "../canvas/artifactMirrorCommitPort";
 import { ArtifactMirrorService } from "../canvas/artifactMirrorService";
@@ -469,10 +470,17 @@ export function wireCanvas(deps: CanvasDependencies) {
     outsideRootApproved: (destination) =>
       destination.kind !== "global-folder" ||
       isInsideHomeDirectory(destination.canonicalRoot, homedir()),
+    // A chosen default folder is stored by its real path. Until one is chosen
+    // the default sits under the home folder, which is named by its real path
+    // here so a home that is itself a link does not leave the default
+    // Artifacts folder refused by the mirror's stored-real-path rule.
     defaultFallback: () => ({
       kind: "global-folder",
       canonicalRoot: join(
-        effectiveDefaultFolder(persistence.readShellSettings()?.settings ?? defaultShellSettings()),
+        effectiveDefaultFolder(
+          persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+          realPathThroughExistingAncestors(homedir()),
+        ),
         DEFAULT_FOLDER_ARTIFACTS_SUBFOLDER,
       ),
     }),

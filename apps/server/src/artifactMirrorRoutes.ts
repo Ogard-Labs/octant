@@ -54,7 +54,7 @@ export function createArtifactMirrorRouteHandler(deps: ArtifactMirrorRouteDepend
         : failure("Artifact mirror request is invalid.", 400, origin);
     }
 
-    if (request.method === "GET") return json({ settings: deps.mirror.settings() }, origin);
+    if (request.method === "GET") return json(deps.mirror.view(), origin);
     if (request.method !== "POST") return undefined;
 
     let body: unknown;

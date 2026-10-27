@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   defaultFolderProjectRoot,
   effectiveDefaultFolder,
@@ -43,5 +46,48 @@ describe("the default folder", () => {
     for (const candidate of ["/Users/ada", "/tmp/octant", "/Users/ada/../grace/Octant", "/"]) {
       expect(judgeDefaultFolder(candidate as never, home)).toMatchObject({ status: "refused" });
     }
+  });
+});
+
+const temporaryFolders: Array<string> = [];
+afterEach(() => {
+  for (const folder of temporaryFolders.splice(0)) rmSync(folder, { recursive: true, force: true });
+});
+
+function realHomeFolder() {
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "octant-default-folder-")));
+  temporaryFolders.push(base);
+  const realHome = join(base, "ada");
+  mkdirSync(join(realHome, "Octant"), { recursive: true });
+  return { base, realHome };
+}
+
+describe("a default folder named through a link", () => {
+  // The mirror holds `<default folder>/Artifacts` to the exact path it was
+  // given, so a default folder stored as typed through a link left the host's
+  // default Artifacts folder refused on every write.
+  it("is stored by its real path", () => {
+    const { realHome } = realHomeFolder();
+    symlinkSync(join(realHome, "Octant"), join(realHome, "Shortcut"));
+
+    expect(judgeDefaultFolder(join(realHome, "Shortcut") as never, realHome)).toEqual({
+      status: "accepted",
+      folder: join(realHome, "Octant"),
+    });
+  });
+
+  it("is accepted under a home folder that is itself a link", () => {
+    const { base, realHome } = realHomeFolder();
+    const linkedHome = join(base, "home-ada");
+    symlinkSync(realHome, linkedHome);
+
+    expect(judgeDefaultFolder(join(realHome, "Octant") as never, linkedHome)).toEqual({
+      status: "accepted",
+      folder: join(realHome, "Octant"),
+    });
+    expect(judgeDefaultFolder(join(linkedHome, "Octant") as never, linkedHome)).toEqual({
+      status: "accepted",
+      folder: join(realHome, "Octant"),
+    });
   });
 });

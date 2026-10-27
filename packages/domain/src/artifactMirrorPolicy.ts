@@ -13,15 +13,12 @@
 
 import type {
   ArtifactMirrorDestination,
+  ArtifactMirrorRefusal,
   ArtifactMirrorSettings,
 } from "@octant/contracts/artifact-mirror";
 import type { OctantMode } from "@octant/contracts/modes";
 
-export type MirrorRefusal =
-  | "destination-unavailable"
-  | "destination-unauthorized"
-  | "project-not-bound"
-  | "plan-mode-is-read-only";
+export type MirrorRefusal = ArtifactMirrorRefusal;
 
 export type ReimportRefusal =
   | "stale-version"
@@ -45,6 +42,23 @@ export function resolveArtifactDestination(
     (candidate) => String(candidate.projectId) === String(projectId),
   );
   return override?.destination ?? settings.fallback;
+}
+
+/** Whether two destinations name the same place. */
+export function isSameArtifactDestination(
+  left: ArtifactMirrorDestination,
+  right: ArtifactMirrorDestination,
+): boolean {
+  switch (left.kind) {
+    case "internal-only":
+      return right.kind === "internal-only";
+    case "global-folder":
+      return right.kind === "global-folder" && left.canonicalRoot === right.canonicalRoot;
+    case "project-repository":
+      return (
+        right.kind === "project-repository" && left.relativeDirectory === right.relativeDirectory
+      );
+  }
 }
 
 export interface ArtifactBundleNaming {

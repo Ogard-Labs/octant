@@ -53,6 +53,7 @@ function setup(
   options: {
     readonly journalAppend?: Journal["append"];
     readonly receiptNotJournaled?: (failure: unknown) => void;
+    readonly outsideRootApproved?: boolean;
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-mirror-journal-"));
@@ -78,7 +79,7 @@ function setup(
       currentVersion: () => undefined,
       projects: { read: () => ({ name: "Storefront" }) },
       defaultFallback: () => ({ kind: "global-folder", canonicalRoot: "/Users/me/Artifacts" }),
-      outsideRootApproved: () => true,
+      outsideRootApproved: () => options.outsideRootApproved ?? true,
       planMode: () => false,
       appendVersionFromBundle: () => ({ kind: "denied", message: "unused" }),
       ...(options.receiptNotJournaled === undefined
@@ -88,6 +89,7 @@ function setup(
         journal: {
           append: options.journalAppend ?? ((input) => journal.append(input)),
           replayAggregate: (cursor) => journal.replayAggregate(cursor),
+          replayAggregateType: (cursor) => journal.replayAggregateType(cursor),
         },
         uuid: randomUUID,
         clock: () => now,
@@ -232,5 +234,26 @@ describe("replaying mirror settings at startup", () => {
       version: 0,
       fallback: { kind: "global-folder", canonicalRoot: "/Users/me/Artifacts" },
     });
+  });
+});
+
+describe("rebuilding each Project's mirror outcome at startup", () => {
+  it("still shows a refused mirror after a restart", async () => {
+    const h = setup({ outsideRootApproved: false });
+
+    await h.service.materialize(version(1, "30000000-0000-4000-8000-000000000001"));
+
+    expect(h.restart().view().projects).toEqual([
+      {
+        projectId,
+        projectName: "Storefront",
+        source: "host",
+        destination: { kind: "global-folder", canonicalRoot: "/Users/me/Artifacts" },
+        outcome: "refused",
+        reason: "destination-unauthorized",
+        detail: "Writing to that folder has not been approved.",
+        observedAt: now,
+      },
+    ]);
   });
 });

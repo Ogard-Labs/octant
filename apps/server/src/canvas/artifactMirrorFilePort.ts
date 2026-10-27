@@ -1,5 +1,6 @@
+import { realpathSync } from "node:fs";
 import { constants, mkdir, realpath } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { openConfinedPath, removeConfinedEntry } from "../confinedPathOpen";
 import { writeConfinedWorkFile } from "../work/workConfinedWrite";
 import { liveWorkFilesystem } from "../work/workFilesystemPort";
@@ -137,9 +138,36 @@ function namesUnderRoot(root: string, absolutePath: string): ReadonlyArray<strin
  * A mirror root anywhere else is reaching outside everything Octant was given,
  * and the approval category that would grant that has no surface yet — so this
  * is what keeps the answer "no" rather than "assumed yes".
+ *
+ * Both sides are compared by their real paths. Folders are stored by their real
+ * path, so on a host whose home folder is itself a link (some Linux setups put
+ * `/home` on another volume) the stored folder never sat under the home as
+ * written, and every folder chosen there was refused as outside home. A folder
+ * inside home that is a link out of it is outside it.
  */
 export function isInsideHomeDirectory(candidate: string, homeDirectory: string): boolean {
-  return isContained(homeDirectory, candidate) && resolve(candidate) !== resolve(homeDirectory);
+  const realCandidate = realPathThroughExistingAncestors(candidate);
+  const realHome = realPathThroughExistingAncestors(homeDirectory);
+  return isContained(realHome, realCandidate) && realCandidate !== realHome;
+}
+
+/**
+ * Where a path really leads: the real path of its nearest existing ancestor,
+ * followed by the names below it that do not exist yet.
+ */
+export function realPathThroughExistingAncestors(path: string): string {
+  const missing: string[] = [];
+  let candidate = resolve(path);
+  for (;;) {
+    try {
+      return join(realpathSync(candidate), ...missing);
+    } catch {
+      const parent = dirname(candidate);
+      if (parent === candidate) return resolve(path);
+      missing.unshift(basename(candidate));
+      candidate = parent;
+    }
+  }
 }
 
 function isContained(root: string, candidate: string): boolean {

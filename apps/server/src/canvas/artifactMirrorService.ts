@@ -5,17 +5,22 @@ import {
   decodeArtifactMirrorReceipt,
   decodeArtifactMirrorResult,
   decodeArtifactMirrorSettings,
+  decodeArtifactMirrorView,
   type ArtifactMirrorCommitOutcome,
   type ArtifactMirrorDestination,
+  type ArtifactMirrorProjectStatus,
   type ArtifactMirrorReceipt,
+  type ArtifactMirrorRefusal,
   type ArtifactMirrorResult,
   type ArtifactMirrorSettings,
+  type ArtifactMirrorView,
 } from "@octant/contracts/artifact-mirror";
 import type { CanvasId, CanvasVersion, ProjectId, UtcTimestamp } from "@octant/contracts";
 import {
   artifactBundlePaths,
   decideArtifactReimport,
   decideMirrorWrite,
+  isSameArtifactDestination,
   mirrorCommitMessage,
   mirrorRefusalText,
   reimportRefusalText,
@@ -112,6 +117,14 @@ export interface ArtifactMirrorServiceDependencies {
       readonly eventName: string;
       readonly payload: unknown;
     }>;
+    /**
+     * One page of every artifact's receipt frames, in journal order, after
+     * `afterSequence`; how each Project's latest outcome survives a restart.
+     */
+    readonly replayReceipts: (input: {
+      readonly afterSequence: number;
+      readonly limit: number;
+    }) => ReadonlyArray<{ readonly sequence: number; readonly payload: unknown }>;
   };
   readonly clock: () => UtcTimestamp;
   /**
@@ -142,6 +155,7 @@ export interface ArtifactMirrorServiceDependencies {
 const ARTIFACT_MIRROR_SETTINGS_AGGREGATE_ID = "0a1f0000-0000-4000-8000-000000000475";
 
 const SETTINGS_REPLAY_BATCH_SIZE = 1_000;
+const RECEIPT_REPLAY_BATCH_SIZE = 1_000;
 
 const INITIAL_SETTINGS = {
   kind: "artifact-mirror-settings" as const,
@@ -163,6 +177,15 @@ export class ArtifactMirrorService {
     string,
     { readonly root: string; readonly paths: ReadonlyArray<string> }
   >();
+  /**
+   * The newest journaled receipt that judged each Project's destination.
+   *
+   * A refusal was recorded only in the journal, so a folder that stopped
+   * resolving to its stored real path stopped mirroring with nothing on
+   * screen. Kept here, rebuilt from the journal at startup, so the settings
+   * read can say which Projects are not being written and why.
+   */
+  readonly #latestByProject = new Map<string, ArtifactMirrorReceipt>();
 
   constructor(dependencies: ArtifactMirrorServiceDependencies) {
     this.#dependencies = dependencies;
@@ -171,6 +194,41 @@ export class ArtifactMirrorService {
       updatedAt: dependencies.clock(),
     });
     this.#replaySettings();
+    this.#replayReceipts();
+  }
+
+  #replayReceipts(): void {
+    let afterSequence = 0;
+    for (;;) {
+      const batch = this.#dependencies.journal.replayReceipts({
+        afterSequence,
+        limit: RECEIPT_REPLAY_BATCH_SIZE,
+      });
+      for (const frame of batch) {
+        afterSequence = frame.sequence;
+        const payload = frame.payload;
+        if (typeof payload !== "object" || payload === null || !("receipt" in payload)) continue;
+        try {
+          this.#recordProjectOutcome(decodeArtifactMirrorReceipt(payload.receipt));
+        } catch {
+          // A receipt that no longer decodes says nothing about the Project now.
+        }
+      }
+      if (batch.length < RECEIPT_REPLAY_BATCH_SIZE) break;
+    }
+  }
+
+  /**
+   * Keep a receipt as its Project's latest outcome when it judged the
+   * destination. A Plan-mode refusal is about the thread, not the folder, and
+   * a refusal journaled before reasons were recorded may have been one, so
+   * neither replaces what the destination last did.
+   */
+  #recordProjectOutcome(receipt: ArtifactMirrorReceipt): void {
+    if (receipt.projectId === null) return;
+    if (receipt.outcome === "refused" && receipt.reason === undefined) return;
+    if (receipt.reason === "plan-mode-is-read-only") return;
+    this.#latestByProject.set(String(receipt.projectId), receipt);
   }
 
   /**
@@ -224,6 +282,37 @@ export class ArtifactMirrorService {
     const defaultFallback = this.#dependencies.defaultFallback;
     if (this.#settings.version !== 0 || defaultFallback === undefined) return this.#settings;
     return { ...this.#settings, fallback: defaultFallback() };
+  }
+
+  /**
+   * The settings in effect and each Project's latest outcome for the
+   * destination it uses now. An outcome recorded for another destination is
+   * left out, so choosing a folder again clears a refusal at once rather than
+   * after the next revision; so is a Project that no longer exists.
+   */
+  view(): ArtifactMirrorView {
+    const settings = this.settings();
+    const projects: ArtifactMirrorProjectStatus[] = [];
+    for (const [projectId, receipt] of this.#latestByProject) {
+      const project = this.#dependencies.projects.read(projectId);
+      if (project === undefined || receipt.projectId === null) continue;
+      const override = settings.overrides.find(
+        (candidate) => String(candidate.projectId) === projectId,
+      );
+      const destination = override?.destination ?? settings.fallback;
+      if (!isSameArtifactDestination(destination, receipt.destination)) continue;
+      projects.push({
+        projectId: receipt.projectId,
+        projectName: project.name,
+        source: override === undefined ? "host" : "project",
+        destination,
+        outcome: receipt.outcome,
+        ...(receipt.reason === undefined ? {} : { reason: receipt.reason }),
+        ...(receipt.detail === undefined ? {} : { detail: receipt.detail }),
+        observedAt: receipt.observedAt,
+      });
+    }
+    return decodeArtifactMirrorView({ settings, projects });
   }
 
   async execute(commandInput: unknown): Promise<ArtifactMirrorResult> {
@@ -319,16 +408,17 @@ export class ArtifactMirrorService {
       outsideRootApproved: this.#dependencies.outsideRootApproved(destination),
       planMode: this.#dependencies.planMode(version),
     });
-    if (decision.decision !== "write") {
+    if (decision.decision === "skip") {
       return this.#receipt(
         version,
         destination,
         [],
-        decision.decision === "skip" ? "skipped" : "refused",
-        decision.decision === "skip"
-          ? "Mirroring is off for this Project."
-          : mirrorRefusalText(decision.reason),
+        "skipped",
+        "Mirroring is off for this Project.",
       );
+    }
+    if (decision.decision === "refuse") {
+      return this.#refusedReceipt(version, destination, decision.reason);
     }
 
     const paths = artifactBundlePaths(
@@ -341,13 +431,7 @@ export class ArtifactMirrorService {
       destination,
     );
     if (paths === undefined || root === undefined) {
-      return this.#receipt(
-        version,
-        destination,
-        [],
-        "refused",
-        mirrorRefusalText("destination-unavailable"),
-      );
+      return this.#refusedReceipt(version, destination, "destination-unavailable");
     }
 
     const files = buildArtifactBundle(version);
@@ -546,6 +630,22 @@ export class ArtifactMirrorService {
     return this.#settings.overrides;
   }
 
+  #refusedReceipt(
+    version: CanvasVersion,
+    destination: ArtifactMirrorDestination,
+    reason: ArtifactMirrorRefusal,
+  ): ArtifactMirrorReceipt {
+    return this.#receipt(
+      version,
+      destination,
+      [],
+      "refused",
+      mirrorRefusalText(reason),
+      undefined,
+      reason,
+    );
+  }
+
   #receipt(
     version: CanvasVersion,
     destination: ArtifactMirrorDestination,
@@ -553,6 +653,7 @@ export class ArtifactMirrorService {
     outcome: ArtifactMirrorReceipt["outcome"],
     detail?: string,
     commit: ArtifactMirrorCommitOutcome = { status: "not-requested" },
+    reason?: ArtifactMirrorRefusal,
   ): ArtifactMirrorReceipt {
     const receipt = decodeArtifactMirrorReceipt({
       canvasId: version.canvasId,
@@ -561,6 +662,7 @@ export class ArtifactMirrorService {
       destination,
       paths,
       outcome,
+      ...(reason === undefined ? {} : { reason }),
       commit,
       ...(detail === undefined ? {} : { detail }),
       observedAt: this.#dependencies.clock(),
@@ -572,6 +674,7 @@ export class ArtifactMirrorService {
         eventName: ARTIFACT_MIRROR_EVENT_NAMES.written,
         payload: { receipt },
       });
+      this.#recordProjectOutcome(receipt);
     } catch (error) {
       this.#dependencies.receiptNotJournaled?.({
         reason: "receipt-not-journaled",

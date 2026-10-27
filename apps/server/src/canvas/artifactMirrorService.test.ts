@@ -72,7 +72,7 @@ function harness(
   const remove = vi.fn(async (path: string) => {
     files.delete(path);
   });
-  const journal = { append: vi.fn(), replay: () => [] };
+  const journal = { append: vi.fn(), replay: () => [], replayReceipts: () => [] };
   const appendVersionFromBundle = vi.fn(
     (_input: { readonly canvasId: unknown; readonly definition: unknown }) =>
       ({ kind: "accepted", versionId: "30000000-0000-4000-8000-0000000000ff" }) as const,
@@ -422,6 +422,41 @@ describe("mirroring into a folder an agent can rename", () => {
     });
     expect(receipt.outcome).toBe("written");
     expect(readdirSync(join(folder.root, "storefront"))).toHaveLength(3);
+  });
+
+  // The refusal was recorded only in the journaled receipt, which nothing on
+  // screen reads, so a folder that stopped resolving to its stored real path
+  // stopped mirroring with nothing shown.
+  it("says in the settings read which Project stopped mirroring, until a folder is chosen again", async () => {
+    const folder = folderInsideCheckout();
+    const h = await mirrorInto(folder.root);
+    folder.swapRoot();
+
+    await h.service.materialize(version());
+
+    expect(h.service.view().projects).toEqual([
+      {
+        projectId,
+        projectName: "Storefront",
+        source: "host",
+        destination: { kind: "global-folder", canonicalRoot: folder.root },
+        outcome: "refused",
+        reason: "destination-unavailable",
+        detail: "The folder this Project mirrors to could not be read.",
+        observedAt: "2026-08-18T10:00:00.000Z",
+      },
+    ]);
+
+    const chosen = join(folder.base, "chosen");
+    await h.service.execute({
+      kind: "set-artifact-mirror-fallback",
+      expectedVersion: 1,
+      destination: { kind: "global-folder", canonicalRoot: chosen },
+    });
+    expect(h.service.view().projects).toEqual([]);
+
+    await h.service.materialize(version());
+    expect(h.service.view().projects).toMatchObject([{ projectId, outcome: "written" }]);
   });
 });
 

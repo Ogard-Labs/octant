@@ -146,6 +146,18 @@ export const ArtifactMirrorCommitOutcome = Schema.Union(
 );
 export type ArtifactMirrorCommitOutcome = typeof ArtifactMirrorCommitOutcome.Type;
 
+/**
+ * Why a materialization wrote nothing although the Project names a destination,
+ * as a code a reader can act on rather than words it can only show.
+ */
+export const ArtifactMirrorRefusal = Schema.Literal(
+  "destination-unavailable",
+  "destination-unauthorized",
+  "project-not-bound",
+  "plan-mode-is-read-only",
+);
+export type ArtifactMirrorRefusal = typeof ArtifactMirrorRefusal.Type;
+
 /** What one materialization did, recorded so a file can be traced to a version. */
 export const ArtifactMirrorReceipt = Schema.Struct({
   canvasId: CanvasId,
@@ -158,6 +170,11 @@ export const ArtifactMirrorReceipt = Schema.Struct({
     Schema.filter((paths) => paths.length <= 8 && new Set(paths).size === paths.length),
   ),
   outcome: Schema.Literal("written", "skipped", "refused", "failed"),
+  /**
+   * Why a refused materialization wrote nothing. Receipts journaled before it
+   * was recorded carry only `detail`.
+   */
+  reason: Schema.optional(ArtifactMirrorRefusal),
   /** Whether the files written were also committed, and why not when they were not. */
   commit: ArtifactMirrorCommitOutcome,
   /** Present on anything but a plain write, in the words the user reads. */
@@ -166,6 +183,7 @@ export const ArtifactMirrorReceipt = Schema.Struct({
 })
   .annotations(strict)
   .pipe(Schema.filter((receipt) => (receipt.outcome === "written") === receipt.paths.length > 0))
+  .pipe(Schema.filter((receipt) => receipt.reason === undefined || receipt.outcome === "refused"))
   .pipe(Schema.filter((receipt) => receipt.outcome === "written" || receipt.detail !== undefined))
   // Nothing was written, so there was nothing to commit: a receipt claiming
   // otherwise would be describing a commit of files that do not exist.
@@ -175,6 +193,35 @@ export const ArtifactMirrorReceipt = Schema.Struct({
     ),
   );
 export type ArtifactMirrorReceipt = typeof ArtifactMirrorReceipt.Type;
+
+/**
+ * What the newest materialization in one Project did, for the destination the
+ * Project uses now.
+ *
+ * The host derives it from the journaled receipts so a mirror that stopped
+ * writing is visible where the destination is chosen, not only in the
+ * journal. A receipt for a destination the Project no longer uses is not one,
+ * and neither is a Plan-mode refusal, which says nothing about the destination.
+ */
+export const ArtifactMirrorProjectStatus = Schema.Struct({
+  projectId: ProjectId,
+  projectName: Schema.NonEmptyTrimmedString,
+  /** Whether the destination is the Project's own choice or the host-wide one. */
+  source: Schema.Literal("project", "host"),
+  destination: ArtifactMirrorDestination,
+  outcome: Schema.Literal("written", "skipped", "refused", "failed"),
+  reason: Schema.optional(ArtifactMirrorRefusal),
+  detail: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512))),
+  observedAt: UtcTimestamp,
+}).annotations(strict);
+export type ArtifactMirrorProjectStatus = typeof ArtifactMirrorProjectStatus.Type;
+
+/** The mirror settings read: the settings in effect and how each Project's mirror last went. */
+export const ArtifactMirrorView = Schema.Struct({
+  settings: ArtifactMirrorSettings,
+  projects: Schema.Array(ArtifactMirrorProjectStatus),
+}).annotations(strict);
+export type ArtifactMirrorView = typeof ArtifactMirrorView.Type;
 
 /**
  * A file the host found differing from what it last wrote.
@@ -260,6 +307,7 @@ export const ARTIFACT_MIRROR_EVENT_NAMES = {
 export const decodeArtifactMirrorSettings = Schema.decodeUnknownSync(ArtifactMirrorSettings);
 export const decodeArtifactMirrorCommand = Schema.decodeUnknownSync(ArtifactMirrorCommand);
 export const decodeArtifactMirrorResult = Schema.decodeUnknownSync(ArtifactMirrorResult);
+export const decodeArtifactMirrorView = Schema.decodeUnknownSync(ArtifactMirrorView);
 export const decodeArtifactMirrorReceipt = Schema.decodeUnknownSync(ArtifactMirrorReceipt);
 export const decodeArtifactMirrorDrift = Schema.decodeUnknownSync(ArtifactMirrorDrift);
 export const decodeArtifactMirrorCommitOutcome = Schema.decodeUnknownSync(

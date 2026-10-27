@@ -145,10 +145,10 @@ export class ShellService implements ShellServiceApi {
       const merged = current.rememberedBrowserOrigins.concat(
         input.origins.filter((origin) => !current.rememberedBrowserOrigins.includes(origin)),
       );
-      const settings = this.#withJudgedDefaultFolder({
-        ...current,
-        rememberedBrowserOrigins: merged,
-      });
+      const settings = this.#withJudgedDefaultFolder(
+        { ...current, rememberedBrowserOrigins: merged },
+        current,
+      );
       const committed = this.#persistence.journal.append({
         aggregate: {
           aggregateType: "shell-settings",
@@ -167,9 +167,15 @@ export class ShellService implements ShellServiceApi {
    * A folder the renderer names is checked here, before it is journaled,
    * because the Project provisioner and the artifact mirror will both create
    * directories under it without asking again.
+   *
+   * Only a newly chosen folder is judged and resolved to its real path. The
+   * stored one was judged when it was chosen; resolving it again on an
+   * unrelated settings change would quietly re-store wherever a link put in
+   * its place since now leads, which the artifact mirror refuses to follow.
    */
-  #withJudgedDefaultFolder(settings: ShellSettings): ShellSettings {
+  #withJudgedDefaultFolder(settings: ShellSettings, current: ShellSettings): ShellSettings {
     if (settings.defaultFolder === undefined) return settings;
+    if (settings.defaultFolder === current.defaultFolder) return settings;
     const verdict = judgeDefaultFolder(settings.defaultFolder, this.#home);
     if (verdict.status === "refused") {
       throw new ShellServiceError({ category: "invalid", message: verdict.message });
@@ -252,7 +258,7 @@ export class ShellService implements ShellServiceApi {
       if (command.kind === "replace-settings") {
         const current = this.#persistence.readShellSettings()?.settings ?? defaultShellSettings();
         const replaced = replaceShellSettings(current, command.settings);
-        const settings = this.#withJudgedDefaultFolder(replaced);
+        const settings = this.#withJudgedDefaultFolder(replaced, current);
         const activeWorkspace = reconcileWorkspaceWithSettings(
           this.#persistence.readWindowWorkspace(command.windowId)?.workspace ??
             defaultWindowWorkspace(command.windowId),
