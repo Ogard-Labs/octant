@@ -2142,7 +2142,15 @@ flowchart LR
   navigation and Project/extension projections instead of independent polling
   timers. An image job queued or finished journals on its own `image-jobs`
   topic, so a thread's generated-image list re-reads when the agent's image
-  tool completes a job rather than on its idle cadence. A running turn's start time and latest step (a tool name and one
+  tool completes a job rather than on its idle cadence. Captures, tool
+  approvals, follow-up offers and message queues use their own metadata-only
+  Machine change topics. A renderer re-reads the authoritative scoped API
+  after a notice, on reconnect or becoming visible, and every thirty seconds
+  as recovery. Hidden windows stop recovery timers. In-memory approval
+  services publish both creation and settlement, including expiry and
+  cancellation; the notice carries no approval body or authority. A notice
+  arriving during a read earns one trailing read. Consumers without the
+  Machine feed retain their bounded polling fallback. A running turn's start time and latest step (a tool name and one
   redacted, truncated argument, or a wait on approval or an answer) ride on the
   same Chat, Work, and Code navigation rows as `executing`, optional and absent
   together outside a live turn. They are held in memory by one process-local
@@ -2383,6 +2391,14 @@ flowchart LR
   resuming, or remove and resubmit the message with the new settings. Local
   authenticated windows share the queue; paired remote queue commands remain
   unavailable until dispatch can revalidate the originating device's grants.
+  A committed queue change or terminal turn event wakes only its thread's
+  dispatcher. Response text and unrelated journal writes do not scan other
+  queues. A recovery pass runs once per second to catch runtime state that
+  settles after its event and retry retained-content cleanup; it reads queue
+  identities without decoding their full state. Overlapping passes share one
+  discovery only, so a queue still waiting on a slow admission never stops a
+  later pass from advancing the others. Per-thread ordering
+  and current-authority checks still precede admission.
   Queuing a future message is distinct from steering a running turn; steering
   remains subject to the active runtime's actual capability.
 
@@ -3652,7 +3668,11 @@ _Journaling._ All on the subject's `context-ledger` aggregate:
   reader; older records keep decoding). It summarizes
   the turns before the latest one, as many of the oldest as fit one request to
   the session's own endpoint with no tools, and nothing is journaled unless the
-  summary came back. Earlier messages stay in the aggregate; resume and replay
+  summary came back. That request carries each message, tool call, tool
+  result, and the earlier summary as at most 4,000 characters; a longer one
+  keeps its opening and its end around a marker saying how many characters
+  were left out, because a fresh Chat or Work session's first message carries
+  the planned history with the person's request at its end. Earlier messages stay in the aggregate; resume and replay
   build requests from the summary and the turns after it, and a later
   compaction supersedes an earlier one. The model reads the summary behind a
   line saying how many of the session's first turns it stands for and that
@@ -3661,8 +3681,9 @@ _Journaling._ All on the subject's `context-ledger` aggregate:
   no folder, is told only of its task list and is not asked by its summary
   request for files or changes. Because the lead keeps its task list only
   through `todo-write` calls, the summary carries the arguments of the latest
-  successful `todo-write` in the summarized turns verbatim (or the list the
-  earlier summary carried) instead of trusting the model to restate it. The
+  successful `todo-write` in the summarized turns verbatim, clipped the same
+  way when longer than 4,000 characters (or the list the earlier summary
+  carried), instead of trusting the model to restate it. The
   same compaction runs automatically mid-turn when a request in any mode would
   otherwise lose whole exchanges (see the native harness loop). A fork copies the latest compaction
   its source had read by the turn it was forked at, including one made

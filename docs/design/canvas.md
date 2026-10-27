@@ -1088,3 +1088,11 @@ page in a frame of the app's own process does look them up.
   `apps/server/src/shellService.test.ts`.
 - Preview: `apps/server/src/canvas/canvasPreviewService.test.ts`,
   `canvasPreviewWarnings.test.ts`, and `canvasPreviewBrowser.smoke.ts`.
+
+## Renderer loading
+
+The shell validates a Canvas before rendering it. Its document and block
+renderers load when a Canvas is first shown, with a local opening status while
+that code loads; a thread without a shown Canvas does not load the block
+renderers or math engine. Comment and version labels stay separate from
+document rendering. This changes loading only, not Canvas authority or validation.

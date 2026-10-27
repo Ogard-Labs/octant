@@ -56,8 +56,9 @@ function visibleLabels(): ReadonlyArray<string> {
 }
 
 describe("bar list block", () => {
-  it("ranks the rows largest first and shows the top rows by default", () => {
+  it("ranks the rows largest first and shows the top rows by default", async () => {
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     const labels = visibleLabels();
     // The largest reading leads; the top eight are drawn before Show all.
@@ -69,6 +70,7 @@ describe("bar list block", () => {
   it("reveals every row through Show all and puts the top rows back", async () => {
     const user = userEvent.setup();
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     await user.click(screen.getByRole("button", { name: "Show all 10" }));
     expect(visibleLabels()).toHaveLength(10);
@@ -81,6 +83,7 @@ describe("bar list block", () => {
   it("keeps a hidden row out of the picture but in the disclosed table", async () => {
     const user = userEvent.setup();
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     const hidden = "packages/contracts/src/canvasIdentity.ts";
     expect(visibleLabels()).not.toContain(hidden);
@@ -90,8 +93,9 @@ describe("bar list block", () => {
     expect(within(table).getByText(hidden)).toBeVisible();
   });
 
-  it("reads a path label with its directory dimmed and its name at full ink", () => {
+  it("reads a path label with its directory dimmed and its name at full ink", async () => {
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     expect(screen.getAllByText("apps/web/src/canvas/blocks/")[0]).toHaveClass(
       "canvas-block__path-dir",
@@ -103,6 +107,7 @@ describe("bar list block", () => {
     const user = userEvent.setup();
     const actionRuntime = runtime();
     render(<CanvasView input={definition()} actionRuntime={actionRuntime} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     const openButtons = screen.getAllByRole("button", { name: "Open file" });
     await user.click(openButtons[0] as HTMLElement);
@@ -115,6 +120,7 @@ describe("bar list block", () => {
   it("flips the ranking to smallest first and back, in the picture and the table", async () => {
     const user = userEvent.setup();
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     await user.click(screen.getByRole("button", { name: "Largest first ↓" }));
     const flipped = screen.getByRole("button", { name: "Smallest first ↑" });
@@ -136,6 +142,7 @@ describe("bar list block", () => {
     const definitionInput = definition();
     const before = JSON.stringify(definitionInput);
     render(<CanvasView input={definitionInput} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     await user.click(screen.getByRole("button", { name: "Show all 10" }));
     await user.click(screen.getByRole("button", { name: "Largest first ↓" }));

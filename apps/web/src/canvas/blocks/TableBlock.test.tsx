@@ -38,8 +38,9 @@ function firstColumn(): ReadonlyArray<string> {
 }
 
 describe("sortable table", () => {
-  it("keeps the author's row order until a header is clicked", () => {
+  it("keeps the author's row order until a header is clicked", async () => {
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     expect(firstColumn()).toEqual([
       "apps/web/src/Table.tsx",
@@ -52,6 +53,7 @@ describe("sortable table", () => {
   it("sorts a number column ascending, then descending, and announces the direction", async () => {
     const user = userEvent.setup();
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     await user.click(screen.getByRole("button", { name: "Requests" }));
     const header = screen.getByRole("columnheader", { name: "Requests" });
@@ -77,6 +79,7 @@ describe("sortable table", () => {
   it("starts a different column ascending and leaves one sorted header at a time", async () => {
     const user = userEvent.setup();
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     await user.click(screen.getByRole("button", { name: "Requests" }));
     await user.click(screen.getByRole("button", { name: "Errors" }));
@@ -98,6 +101,7 @@ describe("filterable table", () => {
   it("narrows the rows to those a text filter matches", async () => {
     const user = userEvent.setup();
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     await user.type(screen.getByRole("searchbox", { name: "Filter rows" }), "domain");
 
@@ -107,6 +111,7 @@ describe("filterable table", () => {
   it("says so when the filter matches no row", async () => {
     const user = userEvent.setup();
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     await user.type(screen.getByRole("searchbox", { name: "Filter rows" }), "nothing-here");
 
@@ -118,6 +123,7 @@ describe("hideable table columns", () => {
   it("hides a column and shows it again from the column control", async () => {
     const user = userEvent.setup();
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     await user.click(screen.getByText("Columns"));
     await user.click(screen.getByRole("checkbox", { name: "Requests" }));
@@ -136,6 +142,7 @@ describe("hideable table columns", () => {
   it("drops the sort when its column is hidden, so no row order is left unexplained", async () => {
     const user = userEvent.setup();
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     await user.click(screen.getByRole("button", { name: "Requests" }));
     expect(firstColumn()[0]).toBe("README.md");
@@ -156,6 +163,7 @@ describe("hideable table columns", () => {
   it("will not hide the last visible column", async () => {
     const user = userEvent.setup();
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     await user.click(screen.getByText("Columns"));
     await user.click(screen.getByRole("checkbox", { name: "Requests" }));
@@ -168,8 +176,9 @@ describe("hideable table columns", () => {
 });
 
 describe("table cell displays", () => {
-  it("draws an in-cell bar scaled to the column's largest reading and keeps the value", () => {
+  it("draws an in-cell bar scaled to the column's largest reading and keeps the value", async () => {
     const { container } = render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     const fills = container.querySelectorAll(".canvas-block__table-bar-fill");
     expect(fills.length).toBe(3);
@@ -178,8 +187,9 @@ describe("table cell displays", () => {
     expect(screen.getByText("1.2M")).toBeVisible();
   });
 
-  it("tints a heat column on the shared scale and still shows every value", () => {
+  it("tints a heat column on the shared scale and still shows every value", async () => {
     const { container } = render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     const tinted = container.querySelectorAll("[data-heat-step]");
     expect(tinted.length).toBe(3);
@@ -187,16 +197,18 @@ describe("table cell displays", () => {
     expect(screen.getByText("9")).toBeVisible();
   });
 
-  it("reads a status column as a badge", () => {
+  it("reads a status column as a badge", async () => {
     const { container } = render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     const badges = container.querySelectorAll(".canvas-block__table .badge");
     expect(badges.length).toBe(3);
     expect(badges[0]?.textContent).toBe("Ready");
   });
 
-  it("draws a path column with the shared path style", () => {
+  it("draws a path column with the shared path style", async () => {
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     expect(screen.getByText("apps/web/src/")).toHaveClass("canvas-block__path-dir");
     expect(screen.getByText("Table.tsx")).toHaveClass("canvas-block__path-name");
@@ -224,6 +236,7 @@ describe("grouped table", () => {
   it("groups rows under a row-group header that names the value and counts its rows", async () => {
     const user = userEvent.setup();
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     await choose(user, "Group rows", "State");
 
@@ -239,6 +252,7 @@ describe("grouped table", () => {
   it("collapses and expands a group from the keyboard and keeps its header", async () => {
     const user = userEvent.setup();
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
     await choose(user, "Group rows", "State");
 
     screen.getByRole("button", { name: /Ready, 2 rows/ }).focus();
@@ -261,6 +275,7 @@ describe("grouped table", () => {
   it("sorts rows within each group and orders the groups by the sort when it is the grouped column", async () => {
     const user = userEvent.setup();
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
     await choose(user, "Group rows", "State");
 
     await user.click(screen.getByRole("button", { name: "Requests" }));
@@ -278,6 +293,7 @@ describe("grouped table", () => {
   it("counts only the rows the filter keeps and drops a group it empties", async () => {
     const user = userEvent.setup();
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
     await choose(user, "Group rows", "State");
 
     await user.type(screen.getByRole("searchbox", { name: "Filter rows" }), "readme");
@@ -289,6 +305,7 @@ describe("grouped table", () => {
   it("shows a chosen per-group sum or average of a number column in each group header", async () => {
     const user = userEvent.setup();
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
     await choose(user, "Group rows", "State");
 
     await choose(user, "Group summary", "Sum of Requests");
@@ -305,6 +322,7 @@ describe("grouped table", () => {
   it("drops a grouping and its summary when a revision removes their column", async () => {
     const user = userEvent.setup();
     const { rerender } = render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
     await choose(user, "Group rows", "State");
     await choose(user, "Group summary", "Sum of Requests");
 
@@ -330,6 +348,7 @@ describe("pinned table columns", () => {
   it("moves a pinned column to the leading edge and marks it to stay put while the table scrolls", async () => {
     const user = userEvent.setup();
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     await user.click(screen.getByText("Columns"));
     const pin = screen.getByRole("button", { name: "Pin State" });
@@ -364,6 +383,7 @@ describe("table view state", () => {
     const input = definition();
     const before = JSON.stringify(input);
     render(<CanvasView input={input} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     await user.click(screen.getByRole("button", { name: "Requests" }));
     await user.type(screen.getByRole("searchbox", { name: "Filter rows" }), "ready");
@@ -410,8 +430,9 @@ describe("comment markers on table rows", () => {
     return marker.closest("tr")?.querySelectorAll("td")[1]?.textContent ?? "";
   }
 
-  it("offers a marker on each row with an id and none on a row without one", () => {
+  it("offers a marker on each row with an id and none on a row without one", async () => {
     render(<CanvasView comments={comments()} input={withRows(vendors.rows)} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     expect(rowOf(screen.getByRole("button", { name: "Comment on row Acme" }))).toBe("Acme");
     expect(rowOf(screen.getByRole("button", { name: "2 open comments on row Globex" }))).toBe(
@@ -420,13 +441,15 @@ describe("comment markers on table rows", () => {
     expect(screen.queryByRole("button", { name: /on row Initech/ })).toBeNull();
   });
 
-  it("draws no comment gutter on a table whose rows carry no id, or where comments are off", () => {
+  it("draws no comment gutter on a table whose rows carry no id, or where comments are off", async () => {
     const { unmount } = render(
       <CanvasView comments={comments()} input={withRows([["Initech", 30]])} />,
     );
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
     expect(screen.queryByRole("columnheader", { name: "Comments" })).toBeNull();
     unmount();
     render(<CanvasView input={withRows(vendors.rows)} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
     expect(screen.queryByRole("button", { name: /on row/ })).toBeNull();
   });
 
@@ -436,6 +459,7 @@ describe("comment markers on table rows", () => {
     const { rerender } = render(
       <CanvasView comments={comments(onOpen)} input={withRows(vendors.rows)} />,
     );
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
     const marked = () => screen.getByRole("button", { name: "2 open comments on row Globex" });
 
     await user.click(screen.getByRole("button", { name: "Price" }));
@@ -476,6 +500,7 @@ describe("comment markers on table rows", () => {
       { id: "initech", cells: ["Initech", 12] },
     ];
     render(<CanvasView comments={comments(onOpen)} input={withRows(keyed)} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     await choose(user, "Group rows", "Price");
     expect(groups(1).map((group) => group.rows)).toEqual([["Globex"], ["Acme", "Initech"]]);
@@ -496,6 +521,7 @@ describe("comment markers on table rows", () => {
   it("keeps the comment gutter at the leading edge ahead of a pinned column", async () => {
     const user = userEvent.setup();
     render(<CanvasView comments={comments()} input={withRows(vendors.rows)} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     await user.click(screen.getByText("Columns"));
     await user.click(screen.getByRole("button", { name: "Pin Price" }));

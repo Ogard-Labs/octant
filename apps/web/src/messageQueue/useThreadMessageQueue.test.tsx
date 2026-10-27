@@ -1,7 +1,12 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { decodeMentionableThreadId, type ThreadMessageQueueResult } from "@octant/contracts";
+import {
+  decodeMentionableThreadId,
+  decodeThreadMessageQueueSnapshot,
+  type ThreadMessageQueueResult,
+} from "@octant/contracts";
 import { useThreadMessageQueue } from "./useThreadMessageQueue";
+import { ThreadActivityRevisionsContext } from "../polling/ThreadActivityRevisions";
 import { createComposerThreadDraftStore } from "../composer/composerThreadDraftStore";
 import { readQueueReceipts } from "./threadMessageQueueReceipts";
 import { queueTestHost } from "./queueTestHost.test-fixture";
@@ -411,5 +416,59 @@ describe("host-owned follow-up queues", () => {
       );
     });
     expect(host.execute).toHaveBeenCalledOnce();
+  });
+
+  it("does not read while hidden, then reads once when the window shows again", async () => {
+    const host = queueTestHost();
+    const scope = { mode: "chat" as const, threadId };
+    let queueRevision = 1;
+    const wrapper = ({ children }: { readonly children: React.ReactNode }) => (
+      <ThreadActivityRevisionsContext.Provider
+        value={{
+          browserCaptures: 0,
+          toolApprovals: 0,
+          threadFollowUps: 0,
+          threadMessageQueue: queueRevision,
+        }}
+      >
+        {children}
+      </ThreadActivityRevisionsContext.Provider>
+    );
+    const view = renderHook(() => useThreadMessageQueue({ ...scope, client: host }), { wrapper });
+    await waitFor(() => expect(view.result.current.available).toBe(true));
+    const initial = host.read.mock.calls.length;
+    expect(initial).toBeGreaterThan(0);
+
+    const setVisible = (visible: boolean) => {
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        value: visible ? "visible" : "hidden",
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+    setVisible(false);
+    try {
+      queueRevision += 1;
+      host.publish(
+        decodeThreadMessageQueueSnapshot({
+          scope: { mode: "chat", threadId: decodeMentionableThreadId(threadId) },
+          version: 9,
+          paused: false,
+          items: [],
+        }),
+      );
+      view.rerender();
+      await new Promise((settle) => setTimeout(settle, 50));
+      expect(host.read).toHaveBeenCalledTimes(initial);
+      expect(view.result.current.snapshot?.version).not.toBe(9);
+
+      setVisible(true);
+      await waitFor(() => {
+        expect(host.read).toHaveBeenCalledTimes(initial + 1);
+        expect(view.result.current.snapshot?.version).toBe(9);
+      });
+    } finally {
+      setVisible(true);
+    }
   });
 });
