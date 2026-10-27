@@ -80,7 +80,11 @@ async function daemonHome(answers: Readonly<Record<string, Answer>> = {}) {
         body: new Uint8Array(Buffer.concat(chunks)),
       };
       seen.push(entry);
-      (answers[request.url ?? ""] ?? echo)(entry, response);
+      // Own keys only: a path such as `/constructor` must not reach a method
+      // every object inherits.
+      const url = request.url ?? "";
+      const answer = Object.hasOwn(answers, url) ? answers[url] : undefined;
+      (answer ?? echo)(entry, response);
     });
   });
   servers.push(server);
