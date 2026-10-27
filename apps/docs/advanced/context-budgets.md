@@ -112,8 +112,9 @@ much was freed and who wrote the summary, or why it could not compact. The
 button is disabled, with the reason, while something you can wait out stands
 in the way, such as a reply that is still running, or a runtime that is not
 ready. Where the runtime keeps its own history and Octant has no compaction
-request for it (the ACP agents), or this version of it is too old, the button
-is replaced by a line saying so; on a paired device it is left out.
+request for it (OpenCode, Pi and the ACP agents), or this version of it is too
+old, the button is replaced by a line saying so; on a paired device it is left
+out.
 
 ## Watching usage
 
