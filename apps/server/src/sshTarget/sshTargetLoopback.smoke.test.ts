@@ -870,7 +870,8 @@ function remoteCodeProduct(input: {
         ? "openai-compatible"
         : provider === "undeclared-runtime"
           ? "codex"
-          : "opencode",
+          : // An ACP agent's kind, so the turn reaches the runtime path's check.
+            "copilot",
     ...(provider === "declared-runtime"
       ? {
           remotePlacement: {

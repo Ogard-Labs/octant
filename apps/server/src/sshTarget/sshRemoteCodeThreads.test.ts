@@ -253,20 +253,24 @@ describe("remote-bound Code threads", () => {
     expect(reached).toEqual(["admit-runtime", "hands", "placement", "release"]);
   });
 
-  it("refuses a runtime that could be placed but does not speak ACP before binding anything", () => {
-    const { reached, options } = seams();
-    const bound = bindRemoteCodeTurn(
-      options,
-      turn(threadOn(remoteCodeCheckout(project)), {
-        kind: "pi",
-        remotePlacement: { postures: ["approval-gated"], appToolTransport: "stdio" },
-      }),
-    );
-    expect(bound).toMatchObject({
-      status: "refused",
-      message: expect.stringContaining("only an ACP agent"),
-    });
-    expect(reached).toEqual(["admit-runtime"]);
+  it("refuses a runtime that could be placed but is not an ACP agent before binding anything", () => {
+    // OpenCode's driver is its own server, not an ACP agent, though the ACP
+    // stack has a profile of the same name.
+    for (const kind of ["pi", "opencode"] as const) {
+      const { reached, options } = seams();
+      const bound = bindRemoteCodeTurn(
+        options,
+        turn(threadOn(remoteCodeCheckout(project)), {
+          kind,
+          remotePlacement: { postures: ["approval-gated"], appToolTransport: "stdio" },
+        }),
+      );
+      expect(bound).toMatchObject({
+        status: "refused",
+        message: expect.stringContaining("only an ACP agent"),
+      });
+      expect(reached).toEqual(["admit-runtime"]);
+    }
   });
 
   it("binds the harness's remote tools for a thread on its binding, and nothing for a thread that is not", () => {
