@@ -30,12 +30,6 @@
   box-shadow: 0 0 0 1px var(--oct-border);
   cursor: default;
   touch-action: none;
-  outline: none;
-}
-
-.desktop-pane__screen:focus-visible,
-.desktop-pane__screen[data-focused="true"] {
-  box-shadow: 0 0 0 2px var(--oct-focus-ring);
 }
 
 .desktop-pane__picture {

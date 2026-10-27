@@ -628,25 +628,28 @@ function DesktopScreen(props: {
     };
   }, [client, threadId, view]);
 
-  // Input: in order, one at a time; a pointer move waiting behind another
-  // input is replaced by the newest one rather than queued.
+  // Input: in order, one at a time. A pointer move still waiting at the end
+  // of the queue is replaced by the newest one rather than queued; once any
+  // other input queues behind it, the next move queues after that input, so
+  // a move made after a press never overtakes the press.
   const queue = useRef(Promise.resolve());
-  const waitingMove = useRef<DesktopInputEvent | undefined>(undefined);
+  const waitingMove = useRef<{ event: DesktopInputEvent } | undefined>(undefined);
   const send = useCallback(
     (event: DesktopInputEvent) => {
+      let slot: { event: DesktopInputEvent } | undefined;
       if (event.kind === "pointer" && event.action === "move") {
-        const alreadyWaiting = waitingMove.current !== undefined;
-        waitingMove.current = event;
-        if (alreadyWaiting) return;
+        if (waitingMove.current !== undefined) {
+          waitingMove.current.event = event;
+          return;
+        }
+        slot = { event };
+        waitingMove.current = slot;
+      } else {
+        waitingMove.current = undefined;
       }
       queue.current = queue.current.then(async () => {
-        let outgoing = event;
-        if (event.kind === "pointer" && event.action === "move") {
-          const latest = waitingMove.current;
-          waitingMove.current = undefined;
-          if (latest === undefined) return;
-          outgoing = latest;
-        }
+        if (slot !== undefined && waitingMove.current === slot) waitingMove.current = undefined;
+        const outgoing = slot?.event ?? event;
         const answer = await client
           .request(decodeDesktopPaneRequest({ kind: "input", threadId, ...view, event: outgoing }))
           .catch(() => undefined);
@@ -672,6 +675,21 @@ function DesktopScreen(props: {
   }, [send]);
   const wheel = useRef({ deltaX: 0, deltaY: 0, x: 0, y: 0 });
   const wheelTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const flushWheel = useCallback(() => {
+    if (wheelTimer.current !== undefined) clearTimeout(wheelTimer.current);
+    wheelTimer.current = undefined;
+    const { deltaX, deltaY, x, y } = wheel.current;
+    wheel.current = { deltaX: 0, deltaY: 0, x, y };
+    const clamp = (delta: number) => Math.max(-10_000, Math.min(10_000, Math.round(delta)));
+    if (clamp(deltaX) === 0 && clamp(deltaY) === 0) return;
+    send({ kind: "scroll", x, y, deltaX: clamp(deltaX), deltaY: clamp(deltaY) });
+  }, [send]);
+  // Gathered typing and scrolling go out before whatever the person does
+  // next, so a click made after a scroll never reaches the desktop first.
+  const flushPending = useCallback(() => {
+    flushText();
+    flushWheel();
+  }, [flushText, flushWheel]);
   useEffect(
     () => () => {
       if (typedTimer.current !== undefined) clearTimeout(typedTimer.current);
@@ -709,19 +727,12 @@ function DesktopScreen(props: {
         ...point,
       };
       if (wheelTimer.current !== undefined) return;
-      wheelTimer.current = setTimeout(() => {
-        wheelTimer.current = undefined;
-        const { deltaX, deltaY, x, y } = wheel.current;
-        wheel.current = { deltaX: 0, deltaY: 0, x, y };
-        const clamp = (delta: number) => Math.max(-10_000, Math.min(10_000, Math.round(delta)));
-        if (clamp(deltaX) === 0 && clamp(deltaY) === 0) return;
-        flushText();
-        send({ kind: "scroll", x, y, deltaX: clamp(deltaX), deltaY: clamp(deltaY) });
-      }, SCROLL_FLUSH_MS);
+      flushText();
+      wheelTimer.current = setTimeout(flushWheel, SCROLL_FLUSH_MS);
     };
     element.addEventListener("wheel", onWheel, { passive: false });
     return () => element.removeEventListener("wheel", onWheel);
-  }, [flushText, pointAt, send]);
+  }, [flushText, flushWheel, pointAt]);
 
   const button = (index: number) =>
     index === 1 ? "middle" : index === 2 ? "right" : ("left" as const);
@@ -732,9 +743,8 @@ function DesktopScreen(props: {
         aria-describedby={captionId}
         aria-label="Desktop screen. Click to use it; keys go to it while it has focus"
         className="desktop-pane__screen"
-        data-focused={focused ? "true" : undefined}
         onBlur={() => {
-          flushText();
+          flushPending();
           setFocused(false);
         }}
         onContextMenu={(event) => event.preventDefault()}
@@ -750,18 +760,19 @@ function DesktopScreen(props: {
           if (intent.kind === "ignore") return;
           if (intent.kind === "leave") {
             event.preventDefault();
-            flushText();
+            flushPending();
             event.currentTarget.blur();
             return;
           }
           event.preventDefault();
           if (intent.kind === "text") {
+            flushWheel();
             typed.current += intent.text;
             if (typedTimer.current !== undefined) clearTimeout(typedTimer.current);
             typedTimer.current = setTimeout(flushText, TEXT_FLUSH_MS);
             return;
           }
-          flushText();
+          flushPending();
           send(intent.event);
         }}
         onKeyUp={(event) => {
@@ -774,6 +785,7 @@ function DesktopScreen(props: {
           });
           if (intent.kind !== "key") return;
           event.preventDefault();
+          flushPending();
           send(intent.event);
         }}
         onPointerDown={(event) => {
@@ -782,7 +794,7 @@ function DesktopScreen(props: {
           if (point === undefined) return;
           event.preventDefault();
           event.currentTarget.setPointerCapture?.(event.pointerId);
-          flushText();
+          flushPending();
           send({ kind: "pointer", action: "down", button: button(event.button), ...point });
         }}
         onPointerMove={(event) => {
@@ -792,6 +804,7 @@ function DesktopScreen(props: {
         onPointerUp={(event) => {
           const point = pointAt(event.clientX, event.clientY);
           if (point === undefined) return;
+          flushPending();
           send({ kind: "pointer", action: "up", button: button(event.button), ...point });
         }}
         ref={surface}

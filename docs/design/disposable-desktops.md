@@ -837,8 +837,9 @@ Rules this slice resolved:
 - **A frame is bounded before anyone decodes it.** The host passes on a frame
   only when its declared size fits the recipe's screen, its bytes fit that
   screen uncompressed, and it is the image it claims to be: a PNG's own
-  header must name the declared size, and a JPEG must start with its marker.
-  Otherwise the answer is `no-frame` and the view stays open.
+  header, or a JPEG's first frame header, must name the declared size, and
+  any other media type is refused. Otherwise the answer is `no-frame` and the
+  view stays open.
 - **A view lapses after 30 seconds unread.** An open view holds idle release
   off, as an open tab does; a window that went away without closing its tab
   stops holding it after 30 seconds. Views per lease are capped at four

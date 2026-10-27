@@ -16,9 +16,10 @@ import {
   type ProviderExecutionPolicy,
 } from "@octant/contracts";
 import { decodeComputerControlCommand } from "@octant/contracts/computer-use-plugin";
-import type { DesktopProvider } from "@octant/plugin-api/desktop-provider";
+import type { DesktopFrame, DesktopProvider } from "@octant/plugin-api/desktop-provider";
 import {
   createFakeDesktopProvider,
+  FAKE_DESKTOP_FRAME,
   type FakeDesktopBackend,
 } from "../../../../packages/plugin-api/src/fakeDesktopProvider";
 import { Journal } from "../persistence/journal";
@@ -1402,6 +1403,56 @@ describe("desktop lease service for a person's Desktop tab", () => {
       width: 1,
       height: 1,
       bytes: new TextEncoder().encode("<svg onload=alert(1)>"),
+    };
+    await expect(service.frame({ ...at(threadA), leaseId, viewId })).resolves.toEqual({
+      status: "no-frame",
+    });
+    // A JPEG's own frame header names its size, which a small file can set
+    // far past the screen; the declared size must match it.
+    const jpeg = (width: number, height: number) =>
+      new Uint8Array([
+        0xff,
+        0xd8,
+        0xff,
+        0xe0,
+        0x00,
+        0x04,
+        0x00,
+        0x00,
+        0xff,
+        0xc0,
+        0x00,
+        0x11,
+        0x08,
+        height >> 8,
+        height & 0xff,
+        width >> 8,
+        width & 0xff,
+      ]);
+    fake.backend.behaviour.frame = {
+      mediaType: "image/jpeg",
+      width: 1,
+      height: 1,
+      bytes: jpeg(60_000, 60_000),
+    };
+    await expect(service.frame({ ...at(threadA), leaseId, viewId })).resolves.toEqual({
+      status: "no-frame",
+    });
+    fake.backend.behaviour.frame = {
+      mediaType: "image/jpeg",
+      width: 1280,
+      height: 800,
+      bytes: jpeg(1280, 800),
+    };
+    await expect(service.frame({ ...at(threadA), leaseId, viewId })).resolves.toMatchObject({
+      status: "frame",
+    });
+    // A driver's media type becomes the answer's content type, so only the
+    // two image types pass, however image-like the bytes are.
+    const html: string = "text/html";
+    fake.backend.behaviour.frame = {
+      ...FAKE_DESKTOP_FRAME,
+      mediaType: html as DesktopFrame["mediaType"],
     };
     await expect(service.frame({ ...at(threadA), leaseId, viewId })).resolves.toEqual({
       status: "no-frame",

@@ -399,26 +399,65 @@ const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] as const;
 
 /**
  * Whether a frame a driver returned may be passed on: no larger than the
- * recipe's screen, in bytes or in pixels, and the image it says it is. A PNG's
- * own header must name the size the driver reported. Nothing here decodes
- * pixels; the bounds come first so nothing later does either on a frame that
- * fails them. A driver is untrusted code, and a renderer is told the media
- * type it may decode.
+ * recipe's screen, in bytes or in pixels, and the image it says it is. The
+ * image's own header must name the size the driver reported: a PNG's IHDR, or
+ * a JPEG's first frame header, since a few kilobytes of JPEG can declare a
+ * picture far larger than the screen. Nothing here decodes pixels; the bounds
+ * come first so nothing later does either on a frame that fails them. A
+ * driver is untrusted code, and a renderer is told the media type it may
+ * decode, so a type outside the two never passes.
  */
 export function desktopFrameFits(frame: DesktopFrame, screen: DesktopRecipe["screen"]): boolean {
   const { width, height, bytes } = frame;
   if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height)) return false;
   if (width < 1 || height < 1 || width > screen.width || height > screen.height) return false;
   if (bytes.byteLength > screen.width * screen.height * 4 + screen.height + 1_048_576) return false;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (frame.mediaType === "image/jpeg") {
-    return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+    const size = jpegFrameSize(bytes, view);
+    return size !== undefined && size.width === width && size.height === height;
   }
+  if (frame.mediaType !== "image/png") return false;
   if (bytes.byteLength < 24 || !PNG_SIGNATURE.every((byte, index) => bytes[index] === byte)) {
     return false;
   }
   if (String.fromCharCode(...bytes.subarray(12, 16)) !== "IHDR") return false;
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   return view.getUint32(16) === width && view.getUint32(20) === height;
+}
+
+/**
+ * The size a JPEG's first start-of-frame segment names, walking the marker
+ * segments before it, or undefined when the bytes reach scan data or end
+ * before one. DHT (C4), JPG (C8), and DAC (CC) share the SOF range but are
+ * not frame headers.
+ */
+function jpegFrameSize(
+  bytes: Uint8Array,
+  view: DataView,
+): { readonly width: number; readonly height: number } | undefined {
+  if (bytes[0] !== 0xff || bytes[1] !== 0xd8) return undefined;
+  let offset = 2;
+  while (offset + 4 <= bytes.byteLength) {
+    if (bytes[offset] !== 0xff) return undefined;
+    const marker = view.getUint8(offset + 1);
+    if (marker === 0xff) {
+      offset += 1;
+      continue;
+    }
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd8)) {
+      offset += 2;
+      continue;
+    }
+    if (marker === 0xd9 || marker === 0xda) return undefined;
+    const length = view.getUint16(offset + 2);
+    if (length < 2) return undefined;
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      if (length < 7 || offset + 9 > bytes.byteLength) return undefined;
+      return { height: view.getUint16(offset + 5), width: view.getUint16(offset + 7) };
+    }
+    offset += 2 + length;
+  }
+  return undefined;
 }
 const sameOwner = (left: DesktopLeaseOwner, right: DesktopLeaseOwner): boolean =>
   left.mode === right.mode && String(left.threadId) === String(right.threadId);

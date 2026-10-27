@@ -3,6 +3,7 @@ import {
   decodeDesktopLease,
   decodeDesktopProviderId,
   decodeDesktopViewId,
+  type DesktopInputEvent,
   type DesktopLease,
   type DesktopPaneAnswer,
   type DesktopPaneRequest,
@@ -134,6 +135,52 @@ describe("Desktop pane", () => {
     );
     expect(kinds(requests).slice(0, 2)).toEqual(["acquire", "open-view"]);
     expect(screen.getByText(/^Live · /)).toBeTruthy();
+  });
+
+  it("sends a person's moves, scrolls, and presses in the order they made them", async () => {
+    const fake = fakeClient({ overview: overviewOf([lease()]) });
+    let releaseFirst: () => void = () => undefined;
+    const firstHeld = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const events: Array<DesktopInputEvent> = [];
+    const client: DesktopPaneClient = {
+      ...fake.client,
+      request: async (request) => {
+        if (request.kind !== "input") return fake.client.request(request);
+        events.push(request.event);
+        if (events.length === 1) await firstHeld;
+        return { status: "delivered" };
+      },
+    };
+    render(<DesktopPane client={client} threadId={threadId} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Show desktop" }));
+    const picture = await screen.findByRole("img", { name: "Desktop live screen" });
+    Object.defineProperty(picture, "naturalWidth", { value: 1280 });
+    Object.defineProperty(picture, "naturalHeight", { value: 800 });
+    picture.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 640, height: 400, right: 640, bottom: 400 }) as DOMRect;
+    fireEvent.load(picture);
+    const surface = screen.getByRole("application");
+    const at = (x: number) => ({ clientX: x, clientY: 10, button: 0, pointerId: 1 });
+
+    fireEvent.pointerDown(surface, at(1));
+    fireEvent.pointerMove(surface, at(2));
+    fireEvent.pointerDown(surface, at(3));
+    fireEvent.pointerMove(surface, at(4));
+    fireEvent.wheel(surface, { ...at(5), deltaY: 120 });
+    fireEvent.pointerDown(surface, at(6));
+    releaseFirst();
+
+    await waitFor(() => expect(events).toHaveLength(6));
+    expect(events.map((event) => [event.kind, "x" in event ? event.x : undefined])).toEqual([
+      ["pointer", 2],
+      ["pointer", 4],
+      ["pointer", 6],
+      ["pointer", 8],
+      ["scroll", 10],
+      ["pointer", 12],
+    ]);
   });
 
   it("does not reconnect to a running desktop when it mounts, until the person shows it", async () => {
