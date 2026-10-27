@@ -138,6 +138,7 @@ jobs:
       # runs only the Linux path, so the ancestor-swap port tests run here too.
       - run: >-
           bun run --cwd apps/server test --
+          src/canvas/artifactMirrorFilePort.test.ts
           src/code/codeDirectoryPort.test.ts
           src/work/workFilesystemPort.test.ts
           src/work/workConfinedWrite.test.ts

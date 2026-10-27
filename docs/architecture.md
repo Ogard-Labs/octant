@@ -7130,7 +7130,21 @@ mechanisms are:
   a link anywhere in that path refuses it too. Artifact mirror re-import reads
   its bundle the same way: the bundle must resolve inside the destination root
   it was written under, and the open must land on that path, because a plain
-  read followed a mirrored folder swapped for a link to a host folder. A
+  read followed a mirrored folder swapped for a link to a host folder. Mirror
+  writes and removals are held inside the destination root the same way.
+  Creating the folders by path and then checking where they resolved compared
+  a folder with itself, so a mirrored folder swapped for such a link received
+  the bundle and its sidecars, and removing a renamed artifact's stale file
+  deleted the host file of that name. A mirror write therefore takes Work's
+  confined write: a file being replaced is opened where the open must land on
+  its canonical path, and a new file and any missing folders are created
+  relative to folders held open from the root down, one no-follow name at a
+  time. A removal unlinks the name relative to a folder proved to sit at its
+  canonical path: on Linux under `/proc/self/fd/N` of a proved open; on macOS,
+  which offers Node no descriptor-relative unlink, from a child process whose
+  working directory `/bin/pwd -P` reports at that path. On macOS a folder
+  create that loses a race against such a swap can leave one empty folder in
+  the host folder; no file is written or removed there. A
   checkout's `.git` marker is read through the same open; see the confined Git
   rule for the linked-worktree pointers it leads to. The managed-worktree
   identity check, the folder browser's repository test, and managed-clone

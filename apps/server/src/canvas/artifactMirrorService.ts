@@ -33,16 +33,23 @@ import { buildArtifactBundle, readArtifactBundle } from "./artifactBundle";
  */
 
 export interface ArtifactMirrorFilePort {
-  /** Write one file, creating parent directories. Absolute path. */
-  readonly write: (absolutePath: string, contents: string) => Promise<void>;
+  /**
+   * Write one file, creating parent directories. Absolute path. Every folder
+   * created and the file written must be inside `root`, the canonical root
+   * the path was composed from; anything else is refused.
+   */
+  readonly write: (absolutePath: string, contents: string, root: string) => Promise<void>;
   /**
    * Read one file back, or report that it cannot be read. A file that does
    * not resolve inside `root`, the canonical root it was written under, is
    * refused.
    */
   readonly read: (absolutePath: string, root: string) => Promise<string | undefined>;
-  /** Remove a file the mirror previously wrote and no longer produces. */
-  readonly remove: (absolutePath: string) => Promise<void>;
+  /**
+   * Remove a file the mirror previously wrote and no longer produces, from
+   * inside `root`, the canonical root it was written under.
+   */
+  readonly remove: (absolutePath: string, root: string) => Promise<void>;
   /** Canonicalize a root, or report that it cannot be reached. */
   readonly resolveRoot: (absolutePath: string) => Promise<string | undefined>;
   /**
@@ -340,12 +347,13 @@ export class ArtifactMirrorService {
     const files = buildArtifactBundle(version);
     const written: string[] = [];
     try {
-      await this.#dependencies.files.write(`${root}/${paths.bundle}`, files.bundle);
+      await this.#dependencies.files.write(`${root}/${paths.bundle}`, files.bundle, root);
       written.push(paths.bundle);
       for (const sidecar of paths.sidecars) {
         await this.#dependencies.files.write(
           `${root}/${sidecar.path}`,
           sidecar.format === "md" ? files.markdown : files.svg,
+          root,
         );
         written.push(sidecar.path);
       }
@@ -364,8 +372,9 @@ export class ArtifactMirrorService {
     const previous = this.#lastWrite.get(String(version.canvasId));
     for (const stale of previous?.paths ?? []) {
       if (previous?.root === root && written.includes(stale)) continue;
+      const staleRoot = previous?.root ?? root;
       await this.#dependencies.files
-        .remove(`${previous?.root ?? root}/${stale}`)
+        .remove(`${staleRoot}/${stale}`, staleRoot)
         .catch(() => undefined);
     }
     this.#lastWrite.set(String(version.canvasId), { root, paths: written });
