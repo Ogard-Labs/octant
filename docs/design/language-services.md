@@ -22,8 +22,8 @@ Slice 4 (ship the binary) is built: packages carry the server, and a signed
 Apple Silicon package awaits the maintainer. Slice 5 (user-added `static`
 servers) and slice 6 (repository-tooling servers, started only after a local
 window's approval and networked under the Project's egress rules) are also
-built. Slice 8's [Debugger addendum](#debugger-addendum) is proposed and
-awaits the maintainer's approval. Monaco editing and the explicit external-editor
+built. Slice 8's [Debugger addendum](#debugger-addendum) was accepted by the
+maintainer on 2026-10-27; its sub-slices are next. Monaco editing and the explicit external-editor
 handoff stay the primary Code editing paths and are unchanged by every slice.
 
 ## Outcome
@@ -646,12 +646,10 @@ design left a choice open.
 
 ## Debugger addendum
 
-**Status: proposed, awaiting the maintainer's approval.** This is slice 8's
-design addendum. No debugger code starts until the maintainer approves it.
-Each choice marked **Proposed decision** names its recommendation and the
-rejected alternatives; the rest follows from rules already accepted above
-(slices 5 and 6) or in the architecture. On approval, the marks become the
-rule and the approval date goes in the status line.
+**Status: accepted by the maintainer on 2026-10-27, with every decision as
+recommended.** This is slice 8's design addendum. Each **Decision** names its
+rule and the rejected alternatives; the rest follows from rules already
+accepted above (slices 5 and 6) or in the architecture.
 
 ### Debugger outcome
 
@@ -711,7 +709,7 @@ person confirms it.
   its digest before the binary path is resolved, and a changed binary does not
   run.
 
-**Proposed decision (needs maintainer approval) DB1: no bundled adapter
+**Decision DB1: no bundled adapter
 first.** Debug adapters arrive only as user-added packages until a real one has
 passed the container and Mac smokes. Recommended because each language's
 adapter needs its own runtime, licence review, and size budget, and the seam
@@ -742,7 +740,7 @@ another product's launch file and is never written back to the repository.
   change under the person after they confirmed it; the record of what they
   approved must not.
 
-**Proposed decision (needs maintainer approval) DB2: read `.vscode/launch.json`
+**Decision DB2: read `.vscode/launch.json`
 as proposals only.** When the person opens the Run and debug panel, the host
 reads that one file in the checkout, if present, as JSON with comments,
 bounded at 256 KiB, and maps each entry to a proposed Octant configuration. The
@@ -805,7 +803,7 @@ format nobody has).
 - **One session per thread.** A thread holds at most one debug session, and a
   host at most four. A second Start on a thread asks to stop the first.
 
-**Proposed decision (needs maintainer approval) DB3: approve per
+**Decision DB3: approve per
 configuration.** Recommended because what runs is the program and its
 arguments, not only the adapter. Rejected: one approval per adapter and
 checkout, as slice 6 does for a language server (it would let any later
@@ -838,7 +836,7 @@ trains people to click through).
 - **No restart on its own.** A crashed adapter is not restarted. Restarting
   would run the program again, which only the person may cause.
 
-**Proposed decision (needs maintainer approval) DB4: adapter and program share
+**Decision DB4: adapter and program share
 one capsule; DAP on stdio; no `runInTerminal`, no `attach`.** Recommended
 because debugging needs the adapter and the program in one process tree (on
 Linux a separate PID namespace hides one from the other; on macOS crossing
@@ -853,7 +851,7 @@ itself started, with its own decision.
 
 ### Session network
 
-**Proposed decision (needs maintainer approval) DB5: the program's network
+**Decision DB5: the program's network
 follows the thread's posture as its commands do.** Approval-gated and
 auto-accept-edits run on `proxied`, decided exactly as that thread's harness
 commands are (`decideToolEgress`, the thread's and the Project's rules, taint
@@ -876,7 +874,7 @@ gives third-party adapter code an open network for every session); `none`
 as a `repo-tooling` server uses (a session belongs to one thread, so that
 thread's rules and taint apply).
 
-**Proposed decision (needs maintainer approval) DB6: the debug port.** On
+**Decision DB6: the debug port.** On
 Linux the capsule's private network namespace keeps loopback between the
 adapter and the program inside the capsule, under every level. On macOS
 Seatbelt's `none` and `proxied` deny loopback, so an adapter that declares
@@ -937,7 +935,7 @@ frame ends the session. Each request has a 10-second deadline and reports
   control, or read a session. Nothing a session shows enters a prompt.
 - **Code only, macOS and Linux.** As the companion.
 
-**Proposed decision (needs maintainer approval) DB7: paired devices neither
+**Decision DB7: paired devices neither
 start, control, nor observe.** The debug routes have no remote action, so the
 remote gate denies them and the routes answer 403 to a device that reached them
 anyway. Recommended because stepping and `evaluate` run the program on the
@@ -947,7 +945,7 @@ new surface in the first slices. Rejected: remote observe now (a later,
 remote-approvable `code.debug.observe` read of the stopped state, without
 `evaluate`, can be proposed once the local panel ships); remote control.
 
-**Proposed decision (needs maintainer approval) DB8: no agent debug tools in
+**Decision DB8: no agent debug tools in
 this addendum.** Recommended because an agent driving a debugger runs the
 program and reads its memory, which needs its own approval and taint design.
 Rejected: a read-only agent tool for the stopped state now.
@@ -1042,22 +1040,6 @@ Each sub-slice is its own pull request with this addendum updated in place.
     session's own; the session's own debug port works; quitting the host ends
     the session's process group; the result is recorded here with the macOS
     and Octant versions.
-
-### Debugger questions for approval
-
-1. DB1: no bundled adapter until one passes both smokes?
-2. DB2: read `.vscode/launch.json` as proposals, with the closed variable set
-   and listed unused fields?
-3. DB3: one approval per configuration digest and adapter package state, with
-   every Start still a local act?
-4. DB4: one capsule, DAP on stdio, `runInTerminal` and `attach` refused?
-5. DB5: `proxied` under the thread's rules below Full access, `allow` under
-   Full access, accepting that local services are out of reach below Full
-   access?
-6. DB6: one host-chosen debug port on macOS, and native macOS debugging refused
-   until measured?
-7. DB7: no paired-device start, control, or observe in the first slices?
-8. DB8: no agent debug tools in this addendum?
 
 ## Settled by existing specifications
 
@@ -1305,8 +1287,8 @@ accounts or hardware.
      repository are proposals the person confirms, never run on their own.
    - _Verify:_ set by the addendum, including a macOS confined-debuggee smoke
      on a Mac.
-   - _State:_ the [Debugger addendum](#debugger-addendum) is proposed and
-     awaits approval; its sub-slices 8a to 8d replace this entry once approved.
+   - _State:_ the [Debugger addendum](#debugger-addendum) was accepted on
+     2026-10-27; its sub-slices 8a to 8d are the delivery plan.
 
 The extension host is not planned (D7). Each slice is reviewable and leaves
 the editor working when the companion is off or refused.
