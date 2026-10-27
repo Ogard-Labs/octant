@@ -33,11 +33,14 @@ export function useThreadHarnessSession(input: {
     readonly view: NativeHarnessSessionView | null;
   }>();
   const generation = useRef(0);
-  const inFlight = useRef(false);
+  // The thread whose read is out. The pane keeps this reader when it switches
+  // threads, so a read still out for the last thread must not stand in for the
+  // first read of the next one, which would then never be asked.
+  const inFlight = useRef<string | undefined>(undefined);
 
   const reload = useCallback(async () => {
-    if (inFlight.current) return undefined;
-    inFlight.current = true;
+    if (inFlight.current === threadId) return undefined;
+    inFlight.current = threadId;
     const mine = ++generation.current;
     try {
       const view = await client.session(threadId);
@@ -49,7 +52,7 @@ export function useThreadHarnessSession(input: {
       // Keep what was last read while the host reconnects.
       return undefined;
     } finally {
-      inFlight.current = false;
+      if (inFlight.current === threadId) inFlight.current = undefined;
     }
   }, [client, threadId]);
 

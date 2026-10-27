@@ -87,7 +87,8 @@ export function ThreadHarnessCards(props: ThreadHarnessCardsProps) {
  * card, refreshes quickly so a decision from another surface clears it here. A
  * running turn refreshes a little slower for its notes, and so does a session
  * whose unreached notes still have to be handed to the next message. A thread
- * whose lead is not the harness is read once.
+ * whose lead is not the harness is read once, unless the thread list says it
+ * waits on the person: that hint alone keeps the quick refresh going.
  */
 function refreshInterval(
   view: NativeHarnessSessionView | null | undefined,

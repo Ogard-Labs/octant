@@ -5102,7 +5102,9 @@ the model at another size.
   lead's approval card, a Work lead's question card, and the steering notes)
   and refreshes it on one timer: quickly while the thread waits on the person
   or shows a card, more slowly while a turn runs or unreached notes wait to be
-  handed on, and not at all for a thread whose lead is not the harness.
+  handed on, and not at all for a thread whose lead is not the harness unless
+  the thread list says it waits on the person. A pane that switches threads
+  reads the new thread at once, even while a read for the last one is out.
   `WorkspaceView.test.tsx` pins the single read when a Work thread opens and
   `ThreadHarnessQuestion.test.tsx` the single timer while every card shows.
 

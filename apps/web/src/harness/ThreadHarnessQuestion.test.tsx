@@ -175,6 +175,26 @@ describe("the agent's question card in a Work thread", () => {
     expect(client.session.mock.calls.length - before).toBeLessThanOrEqual(14);
   });
 
+  it("shows the question of a thread the pane switched to while the last thread's read was still out", async () => {
+    const otherThread = "00000000-0000-4000-8000-000000000030";
+    let releaseFirst: (value: NativeHarnessSessionView | null) => void = () => undefined;
+    const client = clientFor(async () => view());
+    client.session.mockImplementationOnce(
+      () =>
+        new Promise<NativeHarnessSessionView | null>((resolve) => {
+          releaseFirst = resolve;
+        }),
+    );
+    const { rerender } = render(
+      <ThreadHarnessCards client={client as never} threadId={otherThread} />,
+    );
+    await waitFor(() => expect(client.session).toHaveBeenCalledWith(otherThread));
+
+    rerender(<ThreadHarnessCards client={client as never} threadId={threadId} />);
+    releaseFirst(null);
+    expect(await screen.findByRole("region", { name: "Provider question" })).toBeVisible();
+  });
+
   it("says nothing for a subagent's question, which the Agents tab answers", async () => {
     const client = clientFor(async () => view({ questions: [childQuestion] }));
     render(<ThreadHarnessCards client={client as never} threadId={threadId} />);
