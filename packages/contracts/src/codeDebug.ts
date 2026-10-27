@@ -27,9 +27,10 @@ export const MAX_CODE_DEBUG_UNUSED_FIELD_LENGTH = 128;
 
 /**
  * Credential variables the host keeps from every child it starts: provider
- * keys and tokens, and the GitHub token its own `gh` reads. A configuration
- * may not name one, so a value typed or imported under that name never reads
- * as the host's credential, and Octant never has to decide whether to pass it.
+ * keys and tokens, and the GitHub tokens its own `gh` reads, the enterprise
+ * ones included. A configuration may not name one, so a value typed or
+ * imported under that name never reads as the host's credential, and Octant
+ * never has to decide whether to pass it.
  */
 export const HOST_CREDENTIAL_ENVIRONMENT_KEYS = [
   "AI_GATEWAY_API_KEY",
@@ -45,7 +46,9 @@ export const HOST_CREDENTIAL_ENVIRONMENT_KEYS = [
   "CODEX_API_KEY",
   "DEEPSEEK_API_KEY",
   "GEMINI_API_KEY",
+  "GH_ENTERPRISE_TOKEN",
   "GH_TOKEN",
+  "GITHUB_ENTERPRISE_TOKEN",
   "GITHUB_TOKEN",
   "GOOGLE_API_KEY",
   "GROQ_API_KEY",

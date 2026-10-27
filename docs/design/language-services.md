@@ -891,7 +891,7 @@ format nobody has).
   platform, the thread's mode and posture, who caused the start, the approval,
   and whether the configuration's paths still resolve. It returns a launch
   shape or the first refusal in this order: `unsupported-platform`,
-  `plan-read-only`, `local-host-required`, `approval-required`,
+  `mode-prohibited`, `plan-read-only`, `local-host-required`, `approval-required`,
   `configuration-invalid`. The read-side checks of the companion (`no-reach`,
   `thread-inactive`, `checkout-mismatch`, `checkout-unavailable`) run first,
   and `confinement-unavailable` last; nothing launches until all pass.
@@ -1109,7 +1109,8 @@ the addendum left a choice open.
   refused. `OCTANT_` is refused in any letter case, and the credential names
   the host keeps from children are the closed list
   `HOST_CREDENTIAL_ENVIRONMENT_KEYS` in `@octant/contracts/code-debug`
-  (provider keys and tokens, `GH_TOKEN`, `GITHUB_TOKEN`).
+  (provider keys and tokens, and the GitHub CLI's `GH_TOKEN`, `GITHUB_TOKEN`,
+  `GH_ENTERPRISE_TOKEN`, and `GITHUB_ENTERPRISE_TOKEN`).
 - **Start decision.** `decideDebugSessionStart` refuses a thread that is not
   a Code thread as `mode-prohibited`, after `unsupported-platform` and before
   `plan-read-only`, because the kind is Code only. A start from anything but a

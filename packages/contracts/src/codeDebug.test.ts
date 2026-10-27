@@ -85,6 +85,11 @@ describe("Code debug configuration contracts", () => {
       "OCTANT_CREDENTIAL_BROKER_TOKEN",
       "OCTANT_ANYTHING",
       "octant_lowercase",
+      // The GitHub CLI reads each of these as a token; the host keeps them from
+      // the `gh` it runs, so a configuration may not name one either.
+      "GH_ENTERPRISE_TOKEN",
+      "GITHUB_ENTERPRISE_TOKEN",
+      "gh_token",
       ...HOST_CREDENTIAL_ENVIRONMENT_KEYS,
     ]) {
       expect(() =>
