@@ -116,7 +116,7 @@ describe("streaming display beats", () => {
       done.rerender(<AssistantMessageBody body="Done and revised" streaming={false} />);
     });
     expect(screen.getByText("Done and revised")).toBeVisible();
-    expect(vi.getTimerCount()).toBeLessThanOrEqual(baseline);
+    expect(vi.getTimerCount()).toBe(baseline);
   });
 
   it("keeps expanded reasoning open across a beat", () => {
@@ -144,6 +144,7 @@ describe("streaming display beats", () => {
     const base = "Long answer start. " + "x".repeat(16_200);
     const view = render(<AssistantMessageBody body={base} streaming />);
     expect(screen.getByText(base)).toBeVisible();
+    const baseline = vi.getTimerCount();
     act(() => {
       view.rerender(<AssistantMessageBody body={base + " more"} streaming />);
     });
@@ -152,8 +153,13 @@ describe("streaming display beats", () => {
     act(() => vi.advanceTimersByTime(50));
     expect(screen.getByText(base + " more")).toBeVisible();
     act(() => {
-      view.rerender(<AssistantMessageBody body={base + " more"} streaming={false} />);
+      view.rerender(<AssistantMessageBody body={base + " more again"} streaming />);
     });
-    expect(vi.getTimerCount()).toBeLessThanOrEqual(1);
+    expect(vi.getTimerCount()).toBe(baseline + 1);
+    act(() => {
+      view.rerender(<AssistantMessageBody body={base + " more again"} streaming={false} />);
+    });
+    expect(screen.getByText(base + " more again")).toBeVisible();
+    expect(vi.getTimerCount()).toBe(baseline);
   });
 });

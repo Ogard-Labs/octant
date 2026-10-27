@@ -6,6 +6,9 @@ import { ChatRichText } from "../chat/ChatRichText";
 
 export const StreamRepliesContext = createContext(true);
 
+// Above this length a Markdown re-parse is costly enough to slow the beat.
+const LONG_ANSWER_LENGTH = 16_000;
+
 function useStreamingBody(body: string, streaming: boolean): string {
   const [shown, setShown] = useState(body);
   const latest = useRef(body);
@@ -28,7 +31,7 @@ function useStreamingBody(body: string, streaming: boolean): string {
           timer.current = undefined;
           setShown(latest.current);
         },
-        body.length >= 16_000 ? 100 : 50,
+        body.length >= LONG_ANSWER_LENGTH ? 100 : 50,
       );
     }
   }, [body, immediate, shown]);
