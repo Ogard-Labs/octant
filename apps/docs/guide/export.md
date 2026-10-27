@@ -142,7 +142,7 @@ four; the Gist destination takes Markdown only.
 
 ### Pictures: PNG and PDF
 
-PNG and PDF are drawn by a browser on this computer, so a Mac with no Chromium
+PNG and PDF are drawn by a browser on this computer, so a computer with no Chromium
 Octant can use refuses them with a plain message, and Markdown and HTML still
 work. Nothing is drawn on a server.
 

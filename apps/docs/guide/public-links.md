@@ -98,7 +98,7 @@ Canvas** and shows neither.
 
 A link expires after 30 days by default. You can pick 1 to 365 days on the
 approval card. **No expiry** is offered only as an explicit choice. An expired
-link answers that it is gone, and the service deletes its content. Your Mac
+link answers that it is gone, and the service deletes its content. Your computer
 deletes the link's owner secret within an hour of the expiry.
 
 ## Password

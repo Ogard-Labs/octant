@@ -258,8 +258,8 @@ on the same page: one preview runs at a time per thread, and only a few are
 allowed per minute.
 
 Preview needs a browser to draw. Octant uses a Chromium that is already on your
-Mac — Google Chrome, Chromium, or Microsoft Edge — and never a second browser of
-its own. The signed app does not bundle a browser, so on a Mac with none of
+computer — Google Chrome, Chromium, or Microsoft Edge — and never a second browser of
+its own. The signed app does not bundle a browser, so on a computer with none of
 those installed, `preview` still returns the layout warnings but no picture, and
 says so. Some models cannot take a picture in a tool result; for those the
 warnings alone come back, and the result says the model could not be shown an
