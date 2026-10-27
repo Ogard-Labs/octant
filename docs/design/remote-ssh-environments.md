@@ -27,9 +27,15 @@ executor, with their egress decided and journaled on this host
 ([Native harness on a target](#native-harness-on-a-target)): the remote tool
 set (`forRemoteCode` in `apps/server/src/harness/nativeHarnessComposition.ts`,
 `apps/server/src/sshTarget/sshRemoteHarness.ts`) and the executor's launches,
-file tools, and streams. The Code turn runtime does not yet compose that tool
-set for a thread, and no thread can be created in a remote-bound Project, so
-no product route reaches a target's tools; that step, reconnecting on its own,
+file tools, and streams. Since 5b a Code thread can be created in a
+remote-bound Project through the Code commands, and the Code turn runtime
+composes that tool set for a native-harness thread there, refusing every
+other provider before anything launches
+([Remote-bound Code threads](#remote-bound-code-threads),
+`apps/server/src/sshTarget/sshRemoteCodeThreads.ts`). The composer does not
+offer a remote-bound Project yet, and a local window's workspace cannot name
+one, so a local window starts no such thread until that surface lands; a
+paired device can, under the Project's authority. Reconnecting on its own
 and restart recovery of remote turns are not built. Slice 6 is built in part:
 the provider-sdk process-placement seam, its conformance harness, and this
 host's admission of a placed runtime from its driver's declaration
@@ -342,11 +348,10 @@ leaves open:
   session and reads as `target-unreachable`.
 - **When it connects.** The host connects on registration, re-pin, and an
   explicit connect, and a connection that ends is held as `target-unreachable`
-  with no attestation. Reconnecting on its own, with bounded backoff, arrives
-  with the remote threads the Code turn runtime starts, which give it a reason
-  to; slice 5 built the tools those threads run, not the threads. Until then a
-  remote-bound Project whose session was lost refuses reads
-  `target-unreachable`, and the person connects again
+  with no attestation. Reconnecting on its own, with bounded backoff, is not
+  built yet, though remote threads now exist to give it a reason (5b). Until
+  it is, a remote-bound Project whose session was lost refuses reads and new
+  turns `target-unreachable`, and the person connects again
   (`octant ssh-target connect`); nothing reconnects unasked.
 
 **Rationale: an executor, not plain `ssh` commands.** Running each operation as
@@ -552,11 +557,13 @@ direction:
   folder, and the journal records that canonical path, the target, and the
   name. A Project's binding never changes: one binding event per Project, and
   a second under the same id is refused.
-- **A remote-bound Project is its own record until threads run there.** Its
-  events are the `ssh-remote-project` aggregate, apart from local Projects, so
-  no local Files, Git, terminal, or provider path can read a remote root as a
-  folder on this Mac. The composer's Project picker lists it (slice 7) but
-  does not offer it for a thread; remote threads join it to the Project list.
+- **A remote-bound Project is its own record.** Its events are the
+  `ssh-remote-project` aggregate, apart from local Projects, so no local
+  Files, Git, terminal, or provider path can read a remote root as a folder
+  on this Mac. Its threads are ordinary Code threads on a `remote-root`
+  checkout ([Remote-bound Code threads](#remote-bound-code-threads)). The
+  composer's Project picker lists it (slice 7) but does not offer it for a
+  thread yet.
 - **Reads outside a turn run in Plan.** Binding, listing, and reading a file
   are file operations, and Git status and diff are Octant's own launches; each
   is admitted only when this connection holds a passing Plan attestation, the
@@ -597,9 +604,10 @@ direction:
   256 KiB of text after decoding, since bytes that are not UTF-8 grow as they
   decode; a status at most 2,000 entries. A cut listing, diff, or status says
   it is truncated; a larger file is refused `too-large`.
-- **No paired device reads a target in this slice.** The reads sit on the local
-  administration routes, beside binding, until remote-bound Projects join the
-  product routes with their threads.
+- **No paired device reads a target's Files or Git.** The reads sit on the
+  local administration routes, beside binding. A paired device reaches a
+  remote-bound Project only through its threads' turns
+  ([Remote-bound Code threads](#remote-bound-code-threads)).
 
 ### Native harness on a target
 
@@ -661,6 +669,71 @@ the proxy's most security-sensitive code into the executor, or left those
 checks out on targets. Carrying the bytes keeps one implementation and one
 record; the cost is that a command's traffic crosses the SSH session twice,
 which bounds its throughput by the session's.
+
+### Remote-bound Code threads
+
+Since 5b a remote-bound Project holds Code threads, and the Code turn
+runtime (`apps/server/src/code/codeOperationRuntime.ts`) runs their turns
+with the tool set above (`apps/server/src/sshTarget/sshRemoteCodeThreads.ts`).
+These rules settle what the step needs, each in the fail-closed direction:
+
+- **A remote thread is an ordinary Code thread on a `remote-root` checkout.**
+  It lives on this host's journal as any Code thread and is created through
+  the same Code commands (`prepare-code-project-checkout`, then
+  `create-code-thread`). Its checkout is the `remote-root` kind of
+  `CodeCheckoutIdentity`, with no head, and its binding revision, repository,
+  and checkout ids are digests of the Project's binding (Project, target,
+  and canonical root), so a thread created against one binding never names
+  another. No local root authority resolves it, because none knows the
+  Project: a local Files, Git, terminal, test, or checkpoint path reaches
+  nothing.
+- **Only turns run.** A remote thread's start, answers, and cancel run; every
+  other Code operation (terminals, tests, Git, files, pull requests) is
+  refused `unavailable` before any root is resolved. A turn takes no
+  checkpoint and records no changed files, and no Git process of this host
+  observes the path, which on a target names nothing here (and on a loopback
+  target would name the very folder).
+- **The remote tool set is the turn's whole tool set.** Browser, Computer,
+  Canvas, Apple and Android tools, repository tests and Git through the Code
+  service, language tools, delegation, and extensions' tools each read or act
+  on this host, so none joins a remote turn. A send that selects Browser or
+  Computer is refused, and a remote thread cannot start from a fork, whose
+  session seeding acts here. Nor is a remote thread forked: a fork starts
+  from files this host's Git captures, so its fork point is refused
+  `unavailable` before any capture.
+- **Only the native harness runs, checked before anything launches.** A turn
+  whose provider is not the native harness is refused before its runtime is
+  acquired: one whose driver declares no placement in the turn's posture with
+  admission's `runtime-not-attestable` and its recovery, and one that
+  declares it with `unsupported`, because the turn runtime does not start a
+  placed runtime yet (6d's prerequisite). Nothing runs on this host against
+  the remote path instead. A remote-bound Project has no provider policy of
+  its own, so this check is its policy.
+- **No Full access yet.** Full access on a target must be remembered for the
+  Project, and a remote-bound Project has nowhere to remember it, so a thread
+  is not created holding it, even for this session; a turn widened to it
+  later is refused `full-access-not-remembered` by admission.
+- **Project authority is a local Project's.** A local window reaches a
+  remote-bound Project's threads only while its workspace names that Project,
+  and a paired device under the Project's authority, as for a local Project.
+  A paired device cannot add a target, bind a root, or read the root's Files
+  or Git, which stay on the local administration routes. The harness's
+  authority over a call is the thread's binding (the derived root and
+  checkout), and each call still asks the target's admission.
+- **A lost session stops the turn.** When the session the turn's tools are
+  bound to ends, the runtime stops the turn as interrupted with
+  `target-disconnected`, aborting its calls; a session lost before the turn
+  is taken on refuses the start. A new turn binds only to a session that
+  attested anew.
+- **Not built in 5b.** Reconnecting on its own; restart recovery of remote
+  turns (a restart ends every session and leaves an in-flight provider turn
+  waiting as for any turn, so a resumed turn binds again only to a session
+  the person connected and that attested anew, and nothing reconnects
+  unasked); the composer offering a remote-bound Project and a local
+  window's workspace naming one, so no local window starts such a thread
+  yet; refusing a target's removal while one of its threads runs (removal
+  today ends the turn `target-disconnected`); and the turn runtime composing
+  a placed ACP thread.
 
 ### Terminals and managed worktrees
 
@@ -1394,7 +1467,9 @@ direction:
 
 Removing a target is local-only, refuses while a thread in one of its Projects is
 running, and removes the registration and pin. Its Projects' threads stay
-readable on this host, and new work in them refuses `target-removed`.
+readable on this host, and new work in them refuses `target-removed`. The
+refusal while a thread runs is not built yet: removal today ends that turn
+`target-disconnected`.
 
 ### Disconnect, reconnect, and restart
 
@@ -1544,9 +1619,25 @@ agent can implement and verify it in a Linux container with OpenSSH installed an
    host; disconnect interrupts the turn with `target-disconnected` and queues
    nothing. Accepted by a harness turn against loopback `sshd` with a local model
    stub, plus the disconnect test. Built 2026-10-26 as the remote tool set and
-   the executor's side of it; the Code turn runtime composing it for a thread,
-   thread creation in a remote-bound Project, reconnecting on its own, and
-   restart recovery of remote turns remain (see the delivery state). Its
+   the executor's side of it, and on 2026-10-27 (5b) as thread creation in a
+   remote-bound Project and the Code turn runtime composing the tool set for
+   a native-harness thread there
+   ([Remote-bound Code threads](#remote-bound-code-threads)); reconnecting on
+   its own, restart recovery of remote turns, and the composer offering a
+   remote-bound Project remain (see the delivery state). 5b's evidence is
+   `sshTargetLoopback.smoke.test.ts` (a Code thread created in a
+   remote-bound Project through the Code service and its harness turn run
+   through the Code turn runtime over a model stub: a read, an edit, a test,
+   and a fetch on the loopback target with approvals, egress decided and
+   journaled here, no Git of this host called, Full access refused at
+   creation, another Code operation and a fork refused, and a turn narrowed to Plan
+   offered no write or command; a runtime without placement and one with it
+   refused before either is acquired; a paired device creating no Full
+   access thread and writing nothing in Plan, and a window bound elsewhere
+   refused; and a turn stopped `target-disconnected` when the executor dies,
+   a new turn refused while the target is away, and nothing run on the next
+   session) and `sshRemoteCodeThreads.test.ts` (the derived checkout, and
+   the provider refusals before anything is composed). The earlier
    evidence is `sshTargetLoopback.smoke.test.ts` (a native harness turn over a
    model stub that reads, edits, tests, and fetches on the loopback target with
    approvals, its allowed and refused destinations decided and journaled on this
