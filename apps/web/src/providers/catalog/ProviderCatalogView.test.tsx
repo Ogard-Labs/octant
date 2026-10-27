@@ -166,13 +166,17 @@ describe("ProviderCatalogView", () => {
     expect(view.onSetEnabled).not.toHaveBeenCalled();
   });
 
-  it("says Amazon Bedrock cannot be added in Settings yet and offers no Add endpoint for it", () => {
-    render(<ProviderCatalogView {...props()} />);
+  it("sends Amazon Bedrock to Add endpoint, saying it takes no key and signs in from the host's terminal", () => {
+    const view = props();
+    render(<ProviderCatalogView {...view} />);
     openSetup(/^Amazon Bedrock, /);
     expect(
-      screen.getByText(/cannot add Amazon Bedrock with your organization's single sign-on yet/),
+      screen.getByText(
+        /choose Amazon Bedrock in Add endpoint.*sign in from a terminal on this host/,
+      ),
     ).toBeDefined();
-    expect(screen.queryByRole("button", { name: "Open Model endpoints" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Open Model endpoints" }));
+    expect(view.onOpenModelEndpoints).toHaveBeenCalledOnce();
   });
 
   it("says plainly that a bundled driver needs no install or trust step and offers none", () => {

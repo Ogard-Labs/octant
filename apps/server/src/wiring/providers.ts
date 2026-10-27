@@ -1302,12 +1302,24 @@ export function wireProviders(deps: ProvidersDependencies) {
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
       packagedProviderSmokeControl: options.packagedProviderSmokeControl === true,
     });
+    // A cloud sign-in shares the host's terms record and sign-in journal.
+    const cloudIamSignIn: CloudIamSignInDependencies | undefined =
+      cloudIamBroker === undefined || hostOAuth === undefined || oauthJournal === undefined
+        ? undefined
+        : {
+            broker: cloudIamBroker,
+            terms: hostOAuth,
+            journal: oauthJournal,
+            ...(credentialResolver === undefined ? {} : { credentials: credentialResolver }),
+            readInstance: (instanceId) => persistence.readProviderInstance(instanceId),
+          };
     const providerSignInDependencies: ProviderOAuthRouteDependencies | undefined =
       hostOAuth === undefined
         ? undefined
         : {
             service: hostOAuth,
             windowAuthorityStore,
+            cloudIam: cloudIamSignIn,
             ...(credentialResolver === undefined ? {} : { credentials: credentialResolver }),
             ...(options.allowedRendererHttpOrigin === undefined
               ? {}
@@ -1345,17 +1357,6 @@ export function wireProviders(deps: ProvidersDependencies) {
     // The host-local device-code sign-in shares the organization sign-in's
     // dependencies; it answers only the bridge-secret caller `octant provider
     // sign-in` is, and says so even when no broker is running.
-    // A cloud sign-in shares the host's terms record and sign-in journal.
-    const cloudIamSignIn: CloudIamSignInDependencies | undefined =
-      cloudIamBroker === undefined || hostOAuth === undefined || oauthJournal === undefined
-        ? undefined
-        : {
-            broker: cloudIamBroker,
-            terms: hostOAuth,
-            journal: oauthJournal,
-            ...(credentialResolver === undefined ? {} : { credentials: credentialResolver }),
-            readInstance: (instanceId) => persistence.readProviderInstance(instanceId),
-          };
     const deviceSignInRoutes = createProviderDeviceSignInRouteHandler({
       desktopBridgeSecret: options.desktopBridgeSecret,
       windowAuthorityStore,

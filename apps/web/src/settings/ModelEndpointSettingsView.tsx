@@ -373,6 +373,7 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
       }}
       onCreateAnthropicCompatible={afterSubmit(props.onCreateAnthropicCompatible)}
       onCreateAzureFoundry={afterSubmit(props.onCreateAzureFoundry)}
+      onCreateAmazonBedrock={afterSubmit(props.onCreateAmazonBedrock)}
       onCreateOllama={afterSubmit(props.onCreateOllama)}
       onCreateOpenAiCompatible={afterSubmit(props.onCreateOpenAiCompatible)}
       onOpenAdded={(focus) => {

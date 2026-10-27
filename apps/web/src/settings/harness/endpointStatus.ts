@@ -4,6 +4,7 @@ import type {
   ProviderInstance,
   ProviderObservedState,
 } from "@octant/contracts";
+import { amazonBedrockRuntimeHost } from "@octant/domain";
 import { thisComputerName } from "../../platform";
 import type { ProviderProbeFailure } from "../../providers/useProviderController";
 import type { ModelEndpointDriverKind } from "../../providers/providerSettingsPresentation";
@@ -109,6 +110,10 @@ export function endpointStatus(input: EndpointStatusInput): EndpointStatus {
   }
   if (isDirectorySignInEndpoint(instance)) {
     const signedIn = directorySignInStatus(instance, observed, failure);
+    if (signedIn !== undefined) return signedIn;
+  }
+  if (instance.driverKind === "amazon-bedrock") {
+    const signedIn = cloudSignInStatus(instance, input.hostPlatform, observed, failure);
     if (signedIn !== undefined) return signedIn;
   }
   if (failure !== undefined) return failureStatus(input, failure);
@@ -296,6 +301,10 @@ function noModels(message: string | undefined): EndpointStatus {
 
 /** The host and port an endpoint's address names, or the address itself when it cannot be read. */
 export function endpointHost(instance: ModelEndpointInstance): string {
+  // Amazon Bedrock's address is built from its region alone.
+  if (instance.driverKind === "amazon-bedrock") {
+    return amazonBedrockRuntimeHost(instance.configuration.region);
+  }
   const baseUrl = instance.configuration.baseUrl;
   try {
     return new URL(baseUrl).host;
@@ -379,9 +388,70 @@ function directorySignInStatus(
   }
 }
 
+/**
+ * An Amazon Bedrock sign-in's state from the host's own reason. The sign-in
+ * begins only in a terminal on the host, so the one fix is to check again
+ * once the person has run the command the sentence names; undefined leaves
+ * the ordinary reading (ready, cannot connect) in place.
+ */
+function cloudSignInStatus(
+  instance: Extract<ModelEndpointInstance, { driverKind: "amazon-bedrock" }>,
+  hostPlatform: HostPlatform | undefined,
+  observed: ProviderObservedState | undefined,
+  failure: ProviderProbeFailure | undefined,
+): EndpointStatus | undefined {
+  const signIn = `Sign in from a terminal on ${thisComputerName(hostPlatform)}: run octant provider sign-in "${instance.displayName}" and enter the code it shows at your organization's access portal, then check again.`;
+  const checkAgain = { kind: "check-now", label: "Check again" } as const;
+  if (observed?.readiness === "incompatible") {
+    return {
+      tone: "needs-you",
+      label: "Sign-in doesn't match",
+      sentence: `The sign-in is for another portal, account, role, or region. ${signIn}`,
+      fix: checkAgain,
+    };
+  }
+  // A check signs a request and sends nothing, so an unavailable answer is
+  // the host's sign-in service, not Bedrock; the host's sentence says so.
+  if (observed?.readiness === "unavailable" && observed.message !== undefined) {
+    return cannotConnect(observed.message);
+  }
+  if (
+    observed?.readiness !== "unauthenticated" &&
+    failure?.category !== "unauthenticated" &&
+    failure?.reason !== "authentication-required"
+  ) {
+    return undefined;
+  }
+  switch (observed?.unauthenticatedReason) {
+    case "not-authorized":
+      return {
+        tone: "failed",
+        label: "No access",
+        sentence:
+          "You're signed in, but your organization's portal doesn't give your account this role, or the role may not use this model. Ask an administrator for access.",
+      };
+    case "expired":
+    case "revoked":
+      return {
+        tone: "needs-you",
+        label: "Signed out",
+        sentence: `Your organization sign-in ended. ${signIn}`,
+        fix: checkAgain,
+      };
+    default:
+      return { tone: "needs-you", label: "Sign in to use", sentence: signIn, fix: checkAgain };
+  }
+}
+
 /** Whether the endpoint sends a key at all; one that sends none has no key line anywhere. */
 export function endpointTakesKey(instance: ModelEndpointInstance): boolean {
-  if (instance.driverKind === "ollama" || isDirectorySignInEndpoint(instance)) return false;
+  if (
+    instance.driverKind === "ollama" ||
+    instance.driverKind === "amazon-bedrock" ||
+    isDirectorySignInEndpoint(instance)
+  ) {
+    return false;
+  }
   return (
     instance.driverKind === "azure-foundry" || instance.configuration.authentication !== "none"
   );
@@ -401,7 +471,9 @@ export function endpointSubLine(
   }
   const host = endpointHost(instance);
   if (instance.driverKind === "ollama") return `Ollama · ${host}`;
-  if (isDirectorySignInEndpoint(instance)) return `${host} · Organization sign-in`;
+  if (isDirectorySignInEndpoint(instance) || instance.driverKind === "amazon-bedrock") {
+    return `${host} · Organization sign-in`;
+  }
   return `${host} · ${endpointTakesKey(instance) ? "API key" : "No key"}`;
 }
 

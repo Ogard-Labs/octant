@@ -95,6 +95,7 @@ export const MODEL_ENDPOINT_DRIVER_KINDS = [
   "anthropic-compatible",
   "ollama",
   "azure-foundry",
+  "amazon-bedrock",
 ] as const satisfies ReadonlyArray<ProviderInstance["driverKind"]>;
 
 export type ModelEndpointDriverKind = (typeof MODEL_ENDPOINT_DRIVER_KINDS)[number];

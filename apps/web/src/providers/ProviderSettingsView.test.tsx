@@ -2058,6 +2058,83 @@ describe("ProviderSettingsView", () => {
     expect(credential.value).toBe("");
   });
 
+  it("shows who an Amazon Bedrock endpoint is signed in as, signs it out, and saves its role with no key", async () => {
+    const user = userEvent.setup();
+    const onProviderOAuth = vi.fn(async (command: { readonly kind: string }) =>
+      command.kind === "sign-out"
+        ? { kind: "signed-out" as const, termsRequired: false }
+        : { kind: "signed-in" as const, accountLabel: "BedrockUser in account 123456789012" },
+    );
+    const props = {
+      ...fixture({ instance: bedrockProvider(), observed: observation({ models: [] }) }),
+      onProviderOAuth,
+    };
+    renderExpanded(<ModelEndpointSettingsView {...props} />);
+
+    expect(await screen.findByText("BedrockUser in account 123456789012")).toBeVisible();
+    expect(onProviderOAuth).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "status", descriptorId: "amazon-bedrock-cloud-iam" }),
+    );
+    const card = screen.getByLabelText("Contoso Bedrock");
+    expect(within(card).queryByRole("heading", { name: "API key" })).not.toBeInTheDocument();
+    expect(within(card).queryByRole("button", { name: /^Sign in/ })).not.toBeInTheDocument();
+    expect(
+      within(card).getByText(/Role BedrockUser · account 123456789012 · https:\/\/contoso/),
+    ).toBeInTheDocument();
+
+    const role = within(card).getByLabelText("Role for Contoso Bedrock");
+    await user.clear(role);
+    await user.type(role, "BedrockAdmin");
+    await user.click(
+      within(card).getByRole("button", {
+        name: "Save Amazon Bedrock settings for Contoso Bedrock",
+      }),
+    );
+    expect(props.onChangeAmazonBedrockConfiguration).toHaveBeenCalledWith(id, {
+      ...bedrockProvider().configuration,
+      cloudIam: { ...bedrockCloudIam, roleName: "BedrockAdmin" },
+    });
+
+    await user.click(within(card).getByRole("button", { name: "Sign out" }));
+    expect(onProviderOAuth).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "sign-out", descriptorId: "amazon-bedrock-cloud-iam" }),
+    );
+    expect(await within(card).findByText(/no longer holds a sign-in/)).toBeVisible();
+    // Signing in again happens in the host's terminal; Settings names the command.
+    expect(within(card).getByText('octant provider sign-in "Contoso Bedrock"')).toBeVisible();
+    expect(props.onProbe).toHaveBeenCalledWith(id, { quiet: true });
+  });
+
+  it("tells an Amazon Bedrock endpoint that is not signed in to sign in from the host's terminal, offering only Check again", async () => {
+    const props = {
+      ...fixture({
+        instance: bedrockProvider(),
+        observed: observation({
+          readiness: "unauthenticated",
+          unauthenticatedReason: "missing",
+          credentialStatus: "missing",
+          models: [],
+        }),
+      }),
+      onProviderOAuth: vi.fn(async () => ({
+        kind: "signed-out" as const,
+        termsRequired: true,
+        accountLabel: "BedrockUser in account 123456789012",
+      })),
+    };
+    renderProviderSettings(<ModelEndpointSettingsView {...props} />);
+
+    const row = within(screen.getByRole("list", { name: "Model endpoints" })).getByRole("listitem");
+    expect(within(row).getByText("Sign in to use")).toBeVisible();
+    expect(
+      within(row).getByText("bedrock-runtime.us-west-2.amazonaws.com · Organization sign-in"),
+    ).toBeVisible();
+    expect(within(row).getByText(/run octant provider sign-in "Contoso Bedrock"/)).toBeVisible();
+    fireEvent.click(within(row).getByRole("button", { name: /Check again/ }));
+    expect(props.onProbe).toHaveBeenCalledWith(id, { quiet: true });
+    expect(within(row).queryByRole("button", { name: /Sign in/ })).not.toBeInTheDocument();
+  });
+
   it("says when the organization wants a Foundry sign-in repeated in person", async () => {
     const onProviderOAuth = vi.fn(async () => ({
       kind: "expired" as const,
@@ -4801,6 +4878,7 @@ function ControllerBackedProviderSettings(props: {
       onChangeOpenAiCompatibleConfiguration={controller.changeOpenAiCompatibleConfiguration}
       onChangeAnthropicCompatibleConfiguration={controller.changeAnthropicCompatibleConfiguration}
       onChangeAzureFoundryConfiguration={controller.changeAzureFoundryConfiguration}
+      onChangeAmazonBedrockConfiguration={controller.changeAmazonBedrockConfiguration}
       onChangeOpenAiImageConfiguration={controller.changeOpenAiImageConfiguration}
       onChangeGeminiImageConfiguration={controller.changeGeminiImageConfiguration}
       onChangeBflImageConfiguration={controller.changeBflImageConfiguration}
@@ -4815,6 +4893,7 @@ function ControllerBackedProviderSettings(props: {
       onCreateOpenAiCompatible={controller.createOpenAiCompatible}
       onCreateAnthropicCompatible={controller.createAnthropicCompatible}
       onCreateAzureFoundry={controller.createAzureFoundry}
+      onCreateAmazonBedrock={controller.createAmazonBedrock}
       onCreateOpenAiImage={controller.createOpenAiImage}
       onCreateGeminiImage={controller.createGeminiImage}
       onCreateBflImage={controller.createBflImage}
@@ -4989,6 +5068,8 @@ function fixture(
       credential.clear();
       return true;
     }),
+    onChangeAmazonBedrockConfiguration: vi.fn(async () => true),
+    onCreateAmazonBedrock: vi.fn(async () => true),
     onChangeOpenAiImageConfiguration: vi.fn(async (_id, _configuration, credential) => {
       credential.clear();
       return true;
@@ -5301,6 +5382,33 @@ function directoryGatewayProvider(): ProviderInstance {
         clientId: "0oa1octantDesktop" as never,
         scope: "gateway.models" as never,
       },
+    },
+  };
+}
+
+const bedrockCloudIam = {
+  startUrl: "https://contoso.awsapps.com/start" as never,
+  ssoRegion: "us-east-1" as never,
+  accountId: "123456789012" as never,
+  roleName: "BedrockUser" as never,
+};
+
+function bedrockProvider(): Extract<ProviderInstance, { driverKind: "amazon-bedrock" }> {
+  return {
+    id,
+    displayName: "Contoso Bedrock",
+    driverKind: "amazon-bedrock",
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1 as never,
+    createdAt: "2026-07-19T10:00:00.000Z" as never,
+    updatedAt: "2026-07-19T10:00:00.000Z" as never,
+    configuration: {
+      kind: "amazon-bedrock-converse-http",
+      region: "us-west-2" as never,
+      authentication: "cloud-iam",
+      cloudIam: bedrockCloudIam,
+      manualModelIds: ["anthropic.claude-sonnet-4-20250514-v1:0" as never],
     },
   };
 }
