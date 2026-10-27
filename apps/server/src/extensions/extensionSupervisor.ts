@@ -71,6 +71,20 @@ export interface ExtensionSeatbeltSandbox {
 }
 
 /**
+ * The runtime an outside provider driver's entry runs on: the one that runs
+ * this server. `bun` is the server's own Bun (development); `electron-node` is
+ * the packaged app's Electron executable, which runs as Node only with
+ * `ELECTRON_RUN_AS_NODE=1` in its environment.
+ */
+export type OutsideDriverRuntimeKind = "bun" | "electron-node";
+
+export interface OutsideDriverRuntime {
+  readonly kind: OutsideDriverRuntimeKind;
+  /** The runtime's absolute executable path, the launch's whole command. */
+  readonly path: string;
+}
+
+/**
  * An outside provider driver's process: the driver profile (no network, no
  * exec beyond the runtime, no fork, read-only package, one private temporary
  * folder) and a fixed environment, both chosen by the process port rather
@@ -79,6 +93,11 @@ export interface ExtensionSeatbeltSandbox {
  */
 export interface OutsideDriverProcessSandbox {
   readonly kind: "outside-driver";
+  /**
+   * Which runtime the launch's command is, so the process port sets that
+   * runtime's environment; the package store authorizes only the host's own.
+   */
+  readonly runtime: OutsideDriverRuntimeKind;
   readonly instanceId: string;
   readonly packageRoot: string;
   readonly temporaryDirectory: string;

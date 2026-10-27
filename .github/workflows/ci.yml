@@ -176,6 +176,11 @@ jobs:
           src/code/codeLanguageServiceProcess.test.ts
           src/code/installedLanguageServersProcess.test.ts
           src/code/codeDebugServiceProcess.test.ts
+      # The packaged app runs outside provider drivers on Electron's Node, so
+      # the escape tests below also run a driver on the Electron the desktop
+      # app pins. Electron's package downloads its binary only on demand, not
+      # at install, so it is fetched here; without it that case would skip.
+      - run: node node_modules/electron/install.js
       # An outside provider driver runs under its own Seatbelt profile and
       # Linux refuses to start one, so its escape tests (network, files
       # outside its package, the home folder, exec, host variables) skip on
