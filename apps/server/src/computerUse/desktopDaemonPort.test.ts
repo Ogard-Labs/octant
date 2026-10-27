@@ -118,6 +118,7 @@ describe("desktop daemon port", () => {
       grpcStatus: 0,
       grpcMessage: "",
       message,
+      messages: [message],
     });
     await expect(
       port().call(call("/v1/spaces/space-1.key_~x/env/test.env.v1.ComputerService/Screenshot")),
@@ -151,6 +152,7 @@ describe("desktop daemon port", () => {
       grpcStatus: 5,
       grpcMessage: "space not found",
       message: new Uint8Array(0),
+      messages: [],
     });
   });
 
@@ -170,6 +172,7 @@ describe("desktop daemon port", () => {
       grpcStatus: 12,
       grpcMessage: "unimplemented",
       message: new Uint8Array(0),
+      messages: [],
     });
   });
 
@@ -392,6 +395,48 @@ describe("desktop daemon port", () => {
       status: "failed",
       reason: "response-too-large",
     });
+  });
+
+  it("reads a streamed answer whole only when the call says the method streams, bounding it all together", async () => {
+    const twoMessages: Answer = (_request, response) => {
+      response.writeHead(200, { "content-type": "application/grpc-web+proto" });
+      response.end(
+        joined(frame(0, message), frame(0, message.subarray(0, 2)), trailer("grpc-status: 0\r\n")),
+      );
+    };
+    const { port } = await daemonHome({ "/test.daemon.v1.SpaceService/Answer": twoMessages });
+    const streamed = call("/test.daemon.v1.SpaceService/Answer", { stream: true });
+    await expect(port().call(streamed)).resolves.toEqual({
+      status: "answered",
+      grpcStatus: 0,
+      grpcMessage: "",
+      message,
+      messages: [message, message.subarray(0, 2)],
+    });
+    await expect(
+      port().call({ ...streamed, maxResponseBytes: message.byteLength + 1 }),
+    ).resolves.toEqual({ status: "failed", reason: "response-too-large" });
+    await expect(port().call(call("/test.daemon.v1.SpaceService/Answer"))).resolves.toEqual({
+      status: "failed",
+      reason: "response-invalid",
+    });
+    const notBoolean: DesktopDaemonRequest = Object.assign(call(CREATE), { stream: "yes" });
+    await expect(port().call(notBoolean)).resolves.toEqual({
+      status: "refused",
+      reason: "request-invalid",
+    });
+  });
+
+  it("answers a stream the daemon never ends as timed out", async () => {
+    const { port } = await daemonHome({
+      "/test.daemon.v1.SpaceService/Hang": (_request, response) => {
+        response.writeHead(200, { "content-type": "application/grpc-web+proto" });
+        response.write(frame(0, message));
+      },
+    });
+    await expect(
+      port({ timeoutMs: 100 }).call(call("/test.daemon.v1.SpaceService/Hang", { stream: true })),
+    ).resolves.toEqual({ status: "failed", reason: "timed-out" });
   });
 
   it("answers a daemon that never replies as timed out, and a cancelled call as cancelled", async () => {
