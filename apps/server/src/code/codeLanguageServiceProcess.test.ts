@@ -239,6 +239,7 @@ const passthrough: ProcessConfinementPort = {
 function fakeComponent(mode: string, log: string): CodeLanguageServerComponent {
   return {
     componentKey: `fake-${mode}`,
+    approvalKey: `fake-${mode}`,
     languages: ["typescript"],
     launchClass: "static",
     executable: async () => process.execPath,
@@ -305,6 +306,7 @@ describe("Code language service with the bundled TypeScript server", () => {
         receipts: paths.receipts,
         component: {
           componentKey: "bundled-typescript",
+          approvalKey: "bundled-typescript",
           languages: ["typescript", "typescriptreact", "javascript", "javascriptreact"],
           launchClass: "static",
           executable: async () => binary,
@@ -687,6 +689,7 @@ describe("Code language service against a hostile server", () => {
     const launch = () =>
       processes.launch({
         ownerId: "server",
+        launchClass: "static",
         executable: process.execPath,
         args: ["-e", ""],
         installRoot: dirname(process.execPath),

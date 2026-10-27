@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { CodeCheckoutId, CodeFileId, CodeRelativePath, CodeThreadId } from "./code";
+import { ProjectId } from "./projects";
 
 /**
  * Language reads for one file of a Code thread: diagnostics and
@@ -197,6 +198,92 @@ export const CodeLanguageDocumentResult = Schema.Union(
 );
 export type CodeLanguageDocumentResult = typeof CodeLanguageDocumentResult.Type;
 
+/**
+ * How far a person's approval of a `repo-tooling` server reaches: the one
+ * checkout the editor's file is in, or every checkout of the Code Project.
+ */
+export const CodeLanguageApprovalScope = Schema.Literal("checkout", "project");
+export type CodeLanguageApprovalScope = typeof CodeLanguageApprovalScope.Type;
+
+/**
+ * A person at a local window approves the server that would read this file
+ * to run the repository's tooling. It names the file by path, as `open` does,
+ * because a server that needs an approval never opened the document; the host
+ * confines the path and picks the server from it, never from the request.
+ */
+export const CodeLanguageApprovalRequest = Schema.Struct({
+  threadId: CodeThreadId,
+  checkoutId: CodeCheckoutId,
+  path: CodeRelativePath,
+  scope: CodeLanguageApprovalScope,
+}).annotations(strict);
+export type CodeLanguageApprovalRequest = typeof CodeLanguageApprovalRequest.Type;
+
+export const CodeLanguageApprovalResult = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("approved"),
+    threadId: CodeThreadId,
+    checkoutId: CodeCheckoutId,
+    scope: CodeLanguageApprovalScope,
+  }).annotations(strict),
+  /** The server that reads this file is `static`: it falls in no approval category. */
+  Schema.Struct({ status: Schema.Literal("not-required") }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    reason: CodeLanguageRefusalReason,
+  }).annotations(strict),
+  /** The journal did not take the approval, so it is not in force. */
+  Schema.Struct({ status: Schema.Literal("not-recorded") }).annotations(strict),
+);
+export type CodeLanguageApprovalResult = typeof CodeLanguageApprovalResult.Type;
+
+/**
+ * Approvals are journaled on their Project's aggregate. A `repo-tooling`
+ * server's egress records use the payloads harness launches use
+ * (`@octant/contracts` tool egress), on one aggregate per launch, so a
+ * language server's connections are audited exactly as a `proxied` command's
+ * are while the thread egress store, which taints and proposes from its own
+ * records, never reads them.
+ */
+export const CODE_LANGUAGE_SERVER_APPROVAL_AGGREGATE = "code-language-server-approval";
+export const CODE_LANGUAGE_SERVER_EGRESS_AGGREGATE = "code-language-server-egress";
+export const CODE_LANGUAGE_SERVER_EVENT_NAMES = {
+  approvalGranted: "code.language-server-approval-granted@1",
+  egressLaunchStarted: "code.language-server-egress-launch-started@1",
+  egressDecisionsRecorded: "code.language-server-egress-decisions-recorded@1",
+  egressLaunchSummarized: "code.language-server-egress-launch-summarized@1",
+} as const;
+
+/**
+ * The shell-command approval for one server. `component` names the reviewed
+ * package state the person approved (its extension, component, digest, and
+ * lifecycle version), so an update, a switch, or a change of trust is a new
+ * question rather than an approval carried over. It names no thread: the
+ * approval is the checkout's or the Project's, and a thread purge leaves it.
+ */
+export const CodeLanguageServerApprovalGranted = Schema.Struct({
+  approvalId: Schema.UUID,
+  projectId: ProjectId,
+  approvalClass: Schema.Literal("shell-commands"),
+  component: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  scope: Schema.Union(
+    Schema.Struct({ kind: Schema.Literal("checkout"), checkoutId: CodeCheckoutId }).annotations(
+      strict,
+    ),
+    Schema.Struct({ kind: Schema.Literal("project") }).annotations(strict),
+  ),
+}).annotations(strict);
+export type CodeLanguageServerApprovalGranted = typeof CodeLanguageServerApprovalGranted.Type;
+
+export const decodeCodeLanguageApprovalRequest = Schema.decodeUnknownSync(
+  CodeLanguageApprovalRequest,
+);
+export const decodeCodeLanguageApprovalResult = Schema.decodeUnknownSync(
+  CodeLanguageApprovalResult,
+);
+export const decodeCodeLanguageServerApprovalGranted = Schema.decodeUnknownSync(
+  CodeLanguageServerApprovalGranted,
+);
 export const decodeCodeLanguageReadRequest = Schema.decodeUnknownSync(CodeLanguageReadRequest);
 export const decodeCodeLanguageReadResult = Schema.decodeUnknownSync(CodeLanguageReadResult);
 export const decodeCodeLanguageDocumentRequest = Schema.decodeUnknownSync(

@@ -184,7 +184,13 @@ function LanguageServerReview(props: { readonly review: ExtensionPackageReviewLa
           It reads the checkout and keeps a private cache. It cannot write, run other programs, or
           reach the network.
         </p>
-      ) : null}
+      ) : (
+        <p className="extensions-settings__effective">
+          It runs the repository&apos;s own tools. It starts only after you allow it for a checkout
+          or a Project, and then it can write that checkout, run programs, and reach the hosts your
+          Project&apos;s network rules allow. It never runs in Plan or for a paired device.
+        </p>
+      )}
     </div>
   );
 }

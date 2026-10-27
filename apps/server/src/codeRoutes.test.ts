@@ -407,6 +407,68 @@ describe("Code routes", () => {
     );
   });
 
+  it("carries a language server approval from a local window only, and refuses a paired device before the service", async () => {
+    const approve = vi.fn(async () => ({
+      status: "approved",
+      threadId,
+      checkoutId,
+      scope: "checkout",
+    }));
+    const route = routeFixture({}, undefined, undefined, [], {
+      syncDocument: vi.fn(),
+      read: vi.fn(),
+      approve,
+    });
+    const post = (body: unknown) =>
+      request("/api/code/language/approvals", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const approval = { threadId, checkoutId, path: "src/main.go", scope: "checkout" };
+
+    const approved = await route(post(approval));
+    expect(approved?.status).toBe(200);
+    await expect(approved?.json()).resolves.toEqual({
+      status: "approved",
+      threadId,
+      checkoutId,
+      scope: "checkout",
+    });
+    expect(approve).toHaveBeenCalledWith(
+      { scopeId: windowId, principal: "local-window" },
+      approval,
+    );
+
+    // A caller cannot name the window, the server, or a host path.
+    for (const body of [
+      { ...approval, windowId },
+      { ...approval, component: "any" },
+      { ...approval, path: "/etc/passwd" },
+      { ...approval, scope: "host" },
+    ]) {
+      expect((await route(post(body)))?.status).toBe(400);
+    }
+    expect(approve).toHaveBeenCalledOnce();
+
+    const remoteDeviceId = "00000000-0000-4000-8000-000000000942";
+    const remoteRequest = post(approval);
+    bindPrincipalRouteContext(remoteRequest, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: remoteDeviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.invalid",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "00000000-0000-4000-8000-000000000943" as never,
+      }),
+      scopeId: remoteDeviceId as never,
+    });
+    expect((await route(remoteRequest))?.status).toBe(403);
+    expect(approve).toHaveBeenCalledOnce();
+  });
+
   it("reports language services unavailable on a host without them", async () => {
     const response = await routeFixture()(
       request("/api/code/language/read", {
@@ -1914,6 +1976,7 @@ function routeFixture(
   language?: {
     readonly syncDocument: (...args: never[]) => unknown;
     readonly read: (...args: never[]) => unknown;
+    readonly approve?: (...args: never[]) => unknown;
   },
 ) {
   const store = new WindowAuthorityStore();

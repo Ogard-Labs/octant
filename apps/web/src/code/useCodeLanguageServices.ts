@@ -6,6 +6,7 @@ import type {
   CodeThreadId,
 } from "@octant/contracts/code";
 import type {
+  CodeLanguageApprovalScope,
   CodeLanguageDefinitionTarget,
   CodeLanguageDiagnostic,
   CodeLanguageDocumentResult,
@@ -13,7 +14,7 @@ import type {
   CodeLanguageReadResult,
   CodeLanguageRefusalReason,
 } from "@octant/contracts/code-language";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { refusedState, type CodeLanguageEditorState } from "./codeLanguageEditor";
 
 /**
@@ -26,7 +27,21 @@ import { refusedState, type CodeLanguageEditorState } from "./codeLanguageEditor
  * state to show, never an error, and the editor keeps working without it.
  */
 
-export type CodeLanguageClient = Pick<CodeClient, "syncLanguageDocument" | "readLanguage">;
+export type CodeLanguageClient = Pick<
+  CodeClient,
+  "syncLanguageDocument" | "readLanguage" | "approveLanguageServer"
+>;
+
+/** What came of the person's approval of a server that runs the repository's tooling. */
+export type CodeLanguageApprovalOutcome =
+  /** Approved, and the file is opened with the server again. */
+  | "approved"
+  /** The host refused it; the state says why. */
+  | "refused"
+  /** The host did not record it, so it is not in force. */
+  | "not-recorded"
+  /** The request did not reach the host. */
+  | "failed";
 
 export type CodeLanguageDefinitionOutcome =
   | { readonly status: "targets"; readonly targets: ReadonlyArray<CodeLanguageDefinitionTarget> }
@@ -44,6 +59,14 @@ export interface CodeLanguageServices {
   readonly retry: () => void;
   /** Reads diagnostics again, for when other files may have changed them. */
   readonly refresh: () => void;
+  /**
+   * Approves the server that reads this file to run the repository's
+   * tooling, for its checkout or its Project. Absent for a client without the
+   * approval route. The host takes it only from a local window.
+   */
+  readonly approve:
+    | ((scope: CodeLanguageApprovalScope) => Promise<CodeLanguageApprovalOutcome>)
+    | undefined;
 }
 
 export interface CodeLanguageServicesOptions {
@@ -350,5 +373,30 @@ export function useCodeLanguageServices(
   const retry = useCallback(() => setOpenGeneration((generation) => generation + 1), []);
   const refresh = useCallback(() => readRef.current?.(), []);
 
-  return { state, diagnostics, definition, retry, refresh };
+  const approve = useMemo(() => {
+    const request = client.approveLanguageServer?.bind(client);
+    if (request === undefined) return undefined;
+    return async (scope: CodeLanguageApprovalScope): Promise<CodeLanguageApprovalOutcome> => {
+      let result: Awaited<ReturnType<typeof request>>;
+      try {
+        result = await request({ threadId, checkoutId, path, scope });
+      } catch {
+        return "failed";
+      }
+      switch (result.status) {
+        case "approved":
+        // A server that needs no approval after all is opened the same way.
+        case "not-required":
+          retry();
+          return "approved";
+        case "refused":
+          show(refusedState(result.reason));
+          return "refused";
+        case "not-recorded":
+          return "not-recorded";
+      }
+    };
+  }, [checkoutId, client, path, retry, show, threadId]);
+
+  return { state, diagnostics, definition, retry, refresh, approve };
 }

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   CodeLanguageRefusalReason,
+  decodeCodeLanguageApprovalRequest,
+  decodeCodeLanguageApprovalResult,
+  decodeCodeLanguageServerApprovalGranted,
   decodeCodeLanguageDocumentRequest,
   decodeCodeLanguageDocumentResult,
   decodeCodeLanguageReadRequest,
@@ -200,6 +203,62 @@ describe("Code language read contracts", () => {
     ).toBe("refused");
     expect(() =>
       decodeCodeLanguageDocumentResult({ status: "synced", ...scope, path: "src/main.ts" }),
+    ).toThrow();
+  });
+
+  it("approves the server for one file by path, for its checkout or its Project, and nothing wider", () => {
+    const request = {
+      threadId: scope.threadId,
+      checkoutId: scope.checkoutId,
+      path: "src/main.go",
+      scope: "project",
+    };
+    expect(decodeCodeLanguageApprovalRequest(request)).toEqual(request);
+    for (const refused of [
+      { ...request, scope: "host" },
+      { ...request, path: "/etc/passwd" },
+      { ...request, path: "../outside.go" },
+      { ...request, component: "any-server" },
+      { ...request, windowId: scope.threadId },
+    ]) {
+      expect(() => decodeCodeLanguageApprovalRequest(refused)).toThrow();
+    }
+    expect(
+      decodeCodeLanguageApprovalResult({
+        status: "approved",
+        threadId: scope.threadId,
+        checkoutId: scope.checkoutId,
+        scope: "checkout",
+      }).status,
+    ).toBe("approved");
+    expect(decodeCodeLanguageApprovalResult({ status: "not-required" }).status).toBe(
+      "not-required",
+    );
+    expect(
+      decodeCodeLanguageApprovalResult({ status: "refused", reason: "local-host-required" }).status,
+    ).toBe("refused");
+    expect(decodeCodeLanguageApprovalResult({ status: "not-recorded" }).status).toBe(
+      "not-recorded",
+    );
+  });
+
+  it("journals an approval for a Project and names no thread", () => {
+    const granted = {
+      approvalId: "30000000-0000-4000-8000-000000000009",
+      projectId: "40000000-0000-4000-8000-000000000001",
+      approvalClass: "shell-commands",
+      component: "extension:component:sha256:abc@4",
+      scope: { kind: "checkout", checkoutId: scope.checkoutId },
+    };
+    expect(decodeCodeLanguageServerApprovalGranted(granted)).toEqual(granted);
+    expect(() =>
+      decodeCodeLanguageServerApprovalGranted({ ...granted, threadId: scope.threadId }),
+    ).toThrow();
+    expect(() =>
+      decodeCodeLanguageServerApprovalGranted({ ...granted, approvalClass: "network-access" }),
+    ).toThrow();
+    expect(() =>
+      decodeCodeLanguageServerApprovalGranted({ ...granted, scope: { kind: "host" } }),
     ).toThrow();
   });
 });

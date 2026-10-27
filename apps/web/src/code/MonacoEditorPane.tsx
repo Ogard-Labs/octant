@@ -23,6 +23,8 @@ import {
   takeCodeEditorReveals,
 } from "./codeEditorReveal";
 import {
+  approvalOutcomeNotice,
+  LANGUAGE_APPROVAL_TEXT,
   languageStatusText,
   outsideCheckoutNotice,
   toDefinitionLinks,
@@ -60,7 +62,10 @@ export interface MonacoEditorPaneProps {
    * The language methods are optional: without them the editor keeps
    * Monaco's own single-file services and shows no language state.
    */
-  readonly client: Pick<CodeClient, "content" | "save" | "syncLanguageDocument" | "readLanguage">;
+  readonly client: Pick<
+    CodeClient,
+    "content" | "save" | "syncLanguageDocument" | "readLanguage" | "approveLanguageServer"
+  >;
   readonly draftStore?: CodeEditorDraftStore;
   readonly file: CodeEditorFileProjection;
   readonly loadRuntime?: () => Promise<MonacoAdapterRuntime>;
@@ -292,7 +297,29 @@ function AvailableEditor(
       (range) => setReveal({ range }),
     );
   }, [checkoutId, path, ready, threadId]);
-  const languageStatus = languageStatusText(language.state);
+  // Only a local window ever sees this state: the host answers a paired
+  // device and a Plan thread with their own refusals before it.
+  const { approve } = language;
+  const approvalAsked =
+    approve !== undefined &&
+    language.state.kind === "refused" &&
+    language.state.reason === "approval-required";
+  const [approving, setApproving] = useState(false);
+  const approveLanguage = useCallback(
+    (scope: "checkout" | "project") => {
+      if (approve === undefined) return;
+      setApproving(true);
+      setLanguageNotice(undefined);
+      void approve(scope).then((outcome) => {
+        setApproving(false);
+        setLanguageNotice(approvalOutcomeNotice(outcome));
+      });
+    },
+    [approve],
+  );
+  const languageStatus = approvalAsked
+    ? LANGUAGE_APPROVAL_TEXT
+    : languageStatusText(language.state);
   const languageRetry = language.state.kind === "crashed" || language.state.kind === "timed-out";
 
   return (
@@ -373,6 +400,28 @@ function AvailableEditor(
             <OctantButton onClick={retryLanguage} size="sm" type="button" variant="secondary">
               Retry
             </OctantButton>
+          ) : null}
+          {approvalAsked ? (
+            <>
+              <OctantButton
+                disabled={approving}
+                onClick={() => approveLanguage("checkout")}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Allow in this checkout
+              </OctantButton>
+              <OctantButton
+                disabled={approving}
+                onClick={() => approveLanguage("project")}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Allow in this Project
+              </OctantButton>
+            </>
           ) : null}
           {languageNotice === undefined ? null : <p role="status">{languageNotice}</p>}
         </div>

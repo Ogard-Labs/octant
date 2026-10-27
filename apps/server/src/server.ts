@@ -710,6 +710,7 @@ export function startOctantServer(
       roots,
       routeCodeService,
       terminalProcessPort,
+      toolEgressRules,
       version,
       windowAuthorityStore,
     });

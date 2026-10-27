@@ -3,14 +3,16 @@ import { ExtensionPackageManifest, ExtensionProvenance } from "@octant/contracts
 
 /**
  * The public schema for a language server a person adds to Octant themselves.
- * Canonical: docs/design/language-services.md (user-added `static` servers).
+ * Canonical: docs/design/language-services.md (user-added servers and
+ * `repo-tooling` servers).
  *
- * A package holds exactly one `language-server` component of the `static`
- * class: a binary inside the package that Octant starts with no arguments and
- * speaks the Language Server Protocol on stdio. The class decides the
- * confinement, so the schema admits only the class this host can run without
- * an approval: the checkout read-only, the server's own cache the only place
- * it writes, no other program, and no network. Install, trust, enablement,
+ * A package holds exactly one `language-server` component: a binary inside
+ * the package that Octant starts with no arguments and speaks the Language
+ * Server Protocol on stdio. The class decides the confinement. A `static`
+ * server reads the checkout, writes only its own cache, runs no other
+ * program, and reaches no network. A `repo-tooling` server runs the
+ * repository's own tooling, so it starts only after a person's shell-command
+ * approval, never in Plan or for a paired device. Install, trust, enablement,
  * and the package's identity, source, digest, and review are facts the host
  * establishes, so the document an author writes cannot carry them, and any
  * field this schema does not name is refused rather than ignored.
@@ -29,11 +31,16 @@ export const LANGUAGE_SERVER_PACKAGE_DOCUMENT_PATH = "octant-language-server.jso
 const BUNDLED_LANGUAGE_SERVER_SLUGS: ReadonlySet<string> = new Set(["typescript-language-server"]);
 
 /**
- * The capabilities a `static` server may declare: reading the checkout. Any
- * other one names an effect the class's confinement refuses, so a review that
- * listed it would describe something the server can never do.
+ * The capabilities each class may declare. A `static` server only reads the
+ * checkout. A `repo-tooling` server may also run programs and reach the hosts
+ * its Project's rules allow, and nothing more. Any other capability names an
+ * effect the class's confinement refuses, so a review that listed it would
+ * describe something the server can never do.
  */
-const STATIC_CAPABILITIES: ReadonlySet<string> = new Set(["filesystem"]);
+const CLASS_CAPABILITIES: Readonly<Record<"static" | "repo-tooling", ReadonlySet<string>>> = {
+  static: new Set(["filesystem"]),
+  "repo-tooling": new Set(["filesystem", "shell", "network"]),
+};
 
 /**
  * Why a language server package was refused. The set is closed and the host
@@ -47,7 +54,6 @@ export const LanguageServerPackageRefusalReason = Schema.Literal(
   "host-assigned-field",
   "bundled-claim",
   "not-one-language-server",
-  "launch-class-unsupported",
   "declares-capabilities",
   "declares-contributions",
   "not-for-code",
@@ -126,13 +132,10 @@ function entryRefusal(
   ) {
     return "not-one-language-server";
   }
-  // A server that runs the repository's tooling needs the shell-command
-  // approval, which this host does not hold for language servers yet; the
-  // class is never narrowed to `static` on the author's behalf.
-  if (component.languageServer.launchClass !== "static") return "launch-class-unsupported";
+  const allowed = CLASS_CAPABILITIES[component.languageServer.launchClass];
   if (
-    manifest.declaredCapabilities.some((capability) => !STATIC_CAPABILITIES.has(capability)) ||
-    component.declaredCapabilities.some((capability) => !STATIC_CAPABILITIES.has(capability))
+    manifest.declaredCapabilities.some((capability) => !allowed.has(capability)) ||
+    component.declaredCapabilities.some((capability) => !allowed.has(capability))
   ) {
     return "declares-capabilities";
   }

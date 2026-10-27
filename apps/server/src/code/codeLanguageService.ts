@@ -14,6 +14,8 @@ import type {
   WindowId,
 } from "@octant/contracts";
 import type {
+  CodeLanguageApprovalRequest,
+  CodeLanguageApprovalResult,
   CodeLanguageDocumentRequest,
   CodeLanguageDocumentResult,
   CodeLanguageReadRequest,
@@ -124,6 +126,13 @@ const LANGUAGE_BY_EXTENSION: Readonly<Record<string, string>> = {
 export interface CodeLanguageServerComponent {
   /** Names the component across restarts: its extension and component ids. */
   readonly componentKey: string;
+  /**
+   * Names the reviewed package state a shell-command approval covers: the
+   * component with its package digest and lifecycle version. Any later change
+   * to the package gives it a new key, so an approval never carries over to
+   * an update, a switch turned back on, or trust given again.
+   */
+  readonly approvalKey: string;
   readonly languages: ReadonlyArray<string>;
   readonly launchClass: ExtensionLanguageServerClass;
   /**
@@ -159,8 +168,34 @@ export interface CodeLanguageCaller {
   readonly principal: PrincipalKind;
 }
 
+/** The shell-command approvals `repo-tooling` servers need, journaled per Project. */
+export interface CodeLanguageApprovals {
+  readonly holds: (subject: {
+    readonly projectId: ProjectId;
+    readonly checkoutId: CodeCheckoutId;
+    readonly component: string;
+  }) => boolean;
+  readonly record: (subject: {
+    readonly projectId: ProjectId;
+    readonly checkoutId: CodeCheckoutId;
+    readonly component: string;
+    readonly scope: CodeLanguageApprovalRequest["scope"];
+  }) => "recorded" | "not-recorded";
+}
+
 export interface CodeLanguageServiceOptions {
   readonly authority: CodeLanguageAuthority;
+  /**
+   * Absent on a host that records no approvals: every `repo-tooling` server
+   * there is refused `approval-required`, and an approval is not recorded.
+   */
+  readonly approvals?: CodeLanguageApprovals;
+  /**
+   * Whether a thread has taken in outside content. A `repo-tooling` server's
+   * Project rules are suspended while any active thread on its checkout has;
+   * absent, or a read that throws, counts as tainted.
+   */
+  readonly threadTainted?: (threadId: CodeThreadId) => boolean;
   /** The `language-server` components effective in Code right now. */
   readonly components: () => ReadonlyArray<CodeLanguageServerComponent>;
   /**
@@ -212,6 +247,7 @@ interface OpenDocument {
 interface ServerRecord {
   readonly key: string;
   readonly checkoutId: CodeCheckoutId;
+  readonly projectId: ProjectId;
   readonly component: CodeLanguageServerComponent;
   readonly rootPath: string;
   /** A thread on the checkout, to label the file watch the server is fed from. */
@@ -251,6 +287,8 @@ type Served =
 
 export class CodeLanguageService {
   readonly #authority: CodeLanguageAuthority;
+  readonly #approvals: CodeLanguageApprovals | undefined;
+  readonly #threadTainted: (threadId: CodeThreadId) => boolean;
   readonly #components: () => ReadonlyArray<CodeLanguageServerComponent>;
   readonly #turnedOffComponents: () => ReadonlyArray<CodeLanguageServerComponent>;
   readonly #processes: CodeLanguageServiceOptions["processes"];
@@ -270,6 +308,8 @@ export class CodeLanguageService {
 
   constructor(options: CodeLanguageServiceOptions) {
     this.#authority = options.authority;
+    this.#approvals = options.approvals;
+    this.#threadTainted = options.threadTainted ?? (() => true);
     this.#components = options.components;
     this.#turnedOffComponents = options.turnedOffComponents ?? (() => []);
     this.#processes = options.processes;
@@ -414,7 +454,9 @@ export class CodeLanguageService {
    */
   async sweep(): Promise<void> {
     const now = this.#now();
-    const effective = new Set(this.#components().map((component) => component.componentKey));
+    const effective = new Map(
+      this.#components().map((component) => [component.componentKey, component]),
+    );
     const threads = this.#authority.readThreads();
     const stops: Promise<void>[] = [];
     for (const record of this.#servers.values()) {
@@ -425,17 +467,69 @@ export class CodeLanguageService {
         }
       }
       const checkout = this.#authority.readCheckout(record.checkoutId);
+      const current = effective.get(record.component.componentKey);
       const live =
         checkout?.availability === "available" &&
         threads.some(
           (thread) =>
             String(thread.checkoutId) === String(record.checkoutId) && isActiveThread(thread),
         ) &&
-        effective.has(record.component.componentKey);
+        current !== undefined &&
+        // A `repo-tooling` server runs only while an approval covers the
+        // package state it runs as now.
+        (current.launchClass === "static" ||
+          this.#approvalHolds(record.projectId, record.checkoutId, current));
       const idle = record.documents.size === 0 && now - record.lastActivity >= this.#idleMs;
       if (!live || idle) stops.push(this.#retire(record));
     }
     await Promise.all(stops);
+  }
+
+  /**
+   * The person at a local window approves the `repo-tooling` server that
+   * would read this file, for its checkout or for every checkout of its Code
+   * Project. Only the person at the machine may: a paired device is refused
+   * before anything is read. Every other check a read makes runs first, and
+   * Plan refuses, so an approval is never recorded for a server the thread
+   * could not start.
+   */
+  async approve(
+    caller: CodeLanguageCaller,
+    request: CodeLanguageApprovalRequest,
+  ): Promise<CodeLanguageApprovalResult> {
+    if (caller.principal !== "local-window") {
+      return { status: "refused", reason: "local-host-required" };
+    }
+    const authorized = this.#authorize(caller, request.threadId, request.checkoutId);
+    if (authorized.status === "refused") return authorized;
+    const contained = await this.#containedRoot(caller, authorized, request.path);
+    if (contained.status === "refused") return contained;
+    const chosen = this.#componentFor(request.path);
+    if (chosen.status === "refused") return chosen;
+    const { component } = chosen;
+    if (component.launchClass === "static") return { status: "not-required" };
+    const decision = decideLanguageServerLaunch({
+      launchClass: component.launchClass,
+      posture: authorized.thread.executionPolicy,
+      platform: this.#platform,
+      startedBy: caller.principal,
+      shellCommandApproval: "granted",
+    });
+    if (decision.status === "refused") return decision;
+    const recorded =
+      this.#approvals?.record({
+        projectId: authorized.thread.projectId,
+        checkoutId: authorized.checkout.id,
+        component: component.approvalKey,
+        scope: request.scope,
+      }) ?? "not-recorded";
+    if (recorded !== "recorded") return { status: "not-recorded" };
+    return {
+      status: "approved",
+      threadId: request.threadId,
+      checkoutId: request.checkoutId,
+      scope: request.scope,
+    };
   }
 
   /** Stops every server, for host shutdown. */
@@ -576,32 +670,25 @@ export class CodeLanguageService {
     intent: "open" | "existing",
     rootPath?: string,
   ): Promise<Served> {
-    const languageId = languageOf(path);
-    const component =
-      languageId === undefined
-        ? undefined
-        : this.#components().find((candidate) => candidate.languages.includes(languageId));
-    if (component === undefined) {
-      const turnedOff =
-        languageId !== undefined &&
-        this.#turnedOffComponents().some((candidate) => candidate.languages.includes(languageId));
-      return { status: "refused", reason: turnedOff ? "turned-off" : "no-language-server" };
-    }
+    const chosen = this.#componentFor(path);
+    if (chosen.status === "refused") return chosen;
+    const { component } = chosen;
+    // Decided on every request, not only at the start: a paired device or a
+    // Plan thread is refused a running `repo-tooling` server too, because
+    // what it opens is what the server then runs the repository's tooling
+    // on.
     const decision = decideLanguageServerLaunch({
       launchClass: component.launchClass,
       posture: authorized.thread.executionPolicy,
       platform: this.#platform,
       startedBy: caller.principal,
-      // No approval store exists for language servers yet, so a server that
-      // runs repository tooling is never started.
-      shellCommandApproval: "absent",
+      shellCommandApproval:
+        component.launchClass === "repo-tooling" &&
+        this.#approvalHolds(authorized.thread.projectId, authorized.checkout.id, component)
+          ? "granted"
+          : "absent",
     });
     if (decision.status === "refused") return decision;
-    // Only the static launch exists; the class decides confinement, so a
-    // class this host cannot confine is never mapped onto a nearby one.
-    if (decision.shape.launchClass !== "static") {
-      return { status: "refused", reason: "confinement-unavailable" };
-    }
 
     const key = serverKey(authorized.checkout.id, component);
     let record = this.#servers.get(key);
@@ -616,6 +703,7 @@ export class CodeLanguageService {
       record = {
         key,
         checkoutId: authorized.checkout.id,
+        projectId: authorized.thread.projectId,
         component,
         rootPath,
         watchThreadId: authorized.thread.id,
@@ -653,6 +741,58 @@ export class CodeLanguageService {
     return { status: "served", record };
   }
 
+  /** The effective component that reads this file, or why none does. */
+  #componentFor(
+    path: CodeRelativePath,
+  ):
+    | { readonly status: "chosen"; readonly component: CodeLanguageServerComponent }
+    | { readonly status: "refused"; readonly reason: CodeLanguageRefusalReason } {
+    const languageId = languageOf(path);
+    const component =
+      languageId === undefined
+        ? undefined
+        : this.#components().find((candidate) => candidate.languages.includes(languageId));
+    if (component !== undefined) return { status: "chosen", component };
+    const turnedOff =
+      languageId !== undefined &&
+      this.#turnedOffComponents().some((candidate) => candidate.languages.includes(languageId));
+    return { status: "refused", reason: turnedOff ? "turned-off" : "no-language-server" };
+  }
+
+  #approvalHolds(
+    projectId: ProjectId,
+    checkoutId: CodeCheckoutId,
+    component: CodeLanguageServerComponent,
+  ): boolean {
+    try {
+      return (
+        this.#approvals?.holds({ projectId, checkoutId, component: component.approvalKey }) === true
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  /** Whether any active thread on the checkout has taken in outside content. */
+  #checkoutTainted(checkoutId: CodeCheckoutId): boolean {
+    return this.#authority
+      .readThreads()
+      .some(
+        (thread) =>
+          String(thread.checkoutId) === String(checkoutId) &&
+          isActiveThread(thread) &&
+          this.#threadTaintedSafely(thread.id),
+      );
+  }
+
+  #threadTaintedSafely(threadId: CodeThreadId): boolean {
+    try {
+      return this.#threadTainted(threadId);
+    } catch {
+      return true;
+    }
+  }
+
   #ensureStarted(record: ServerRecord): Promise<StartOutcome> {
     if (record.state === "ready") return Promise.resolve("ready");
     if (record.starting !== undefined) return record.starting;
@@ -671,6 +811,16 @@ export class CodeLanguageService {
     if (executable === undefined) return this.#crash(record, generation);
     const outcome = await this.#processes.launch({
       ownerId: record.key,
+      launchClass: record.component.launchClass,
+      ...(record.component.launchClass === "repo-tooling"
+        ? {
+            egress: {
+              projectId: String(record.projectId),
+              threadId: String(record.watchThreadId),
+              checkoutTainted: () => this.#checkoutTainted(record.checkoutId),
+            },
+          }
+        : {}),
       executable,
       args: record.component.args,
       installRoot: record.component.installRoot,

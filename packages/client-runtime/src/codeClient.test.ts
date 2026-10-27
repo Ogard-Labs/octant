@@ -1272,4 +1272,37 @@ describe("code client", () => {
     ).rejects.toMatchObject({ category: "invalid" });
     expect(fetch).toHaveBeenCalledTimes(2);
   });
+
+  it("approves the server for a file by path through the host's approval route", async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(
+      Response.json({
+        status: "approved",
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+        scope: "project",
+      }),
+    );
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+    const approval = {
+      threadId: ids.thread as never,
+      checkoutId: ids.checkout as never,
+      path: "cmd/main.go" as never,
+      scope: "project" as const,
+    };
+
+    await expect(client.approveLanguageServer?.(approval)).resolves.toMatchObject({
+      status: "approved",
+      scope: "project",
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/code/language/approvals`,
+      expect.objectContaining({ method: "POST", body: JSON.stringify(approval) }),
+    );
+
+    // A request that names a server rather than a file never leaves the client.
+    await expect(
+      client.approveLanguageServer?.({ ...approval, component: "any" } as never),
+    ).rejects.toMatchObject({ category: "invalid" });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
 });
