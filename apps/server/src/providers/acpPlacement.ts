@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { isAbsolute, relative } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import { PassThrough, Writable } from "node:stream";
 import type { ProviderFailure } from "@octant/contracts";
 import type {
@@ -8,6 +8,7 @@ import type {
   ProviderRemotePlacementSupport,
   ProviderRemoteProcessPlacement,
 } from "@octant/provider-sdk/driver";
+import { placedLaunchExpressible } from "@octant/provider-sdk/process-placement";
 import { Effect, Either, Fiber, Stream, type Scope } from "effect";
 import { acpNegotiationAccepted, versionAtLeast, type AcpAgentConnection } from "./acpProcess";
 import type { AcpHostAuthentication, AcpProviderProfile } from "./acpProfiles";
@@ -21,10 +22,11 @@ import { AcpFailure, makeAcpClient, type AcpClientCapabilities } from "./acpProt
  * An ACP agent speaks on its standard streams, so on a target it is spoken to
  * over the placed process's stream (`stdio`); its HTTP MCP bridge is a
  * listener and is never offered there. A placed launch names a program, its
- * arguments, and home-relative account state, nothing more, so a profile is
- * placed only where that is its whole local launch: a guard, a variable, a
- * managed file, a host read, or a denied path the local launch applies would
- * otherwise be silently left behind on the target.
+ * arguments, home-relative account state, fixed variables, and denied root
+ * entries, nothing more, so a profile is placed only where that is its whole
+ * local launch: a variable that names a folder, a managed file, a host read,
+ * or a denial in its sign-in folder would otherwise be silently left behind
+ * on the target.
  */
 
 /** The postures Octant confines a runtime in; Full access is never placed. */
@@ -40,6 +42,19 @@ const CONFINED_POSTURES: ReadonlyArray<ProviderRemotePlacementPosture> = [
  */
 const UNUSED_HOME = "/nonexistent/octant-placement";
 
+/**
+ * The folders a placed runtime finds under its own home on the target: the
+ * target sets `HOME` to the runtime's home and no XDG folder, so a local
+ * launch that points these at the managed home names the same folders there.
+ */
+const HOME_DEFAULT_FOLDERS: Readonly<Record<string, string>> = {
+  HOME: "",
+  XDG_CONFIG_HOME: ".config",
+  XDG_CACHE_HOME: ".cache",
+  XDG_DATA_HOME: ".local/share",
+  XDG_STATE_HOME: ".local/state",
+};
+
 /** The handshake crosses the SSH session twice, so it gets more time than a local one. */
 const DEFAULT_PLACED_STARTUP_TIMEOUT_MS = 30_000;
 
@@ -48,6 +63,10 @@ export interface AcpRemotePlacement {
   readonly support: ProviderRemotePlacementSupport;
   readonly args: ReadonlyArray<string>;
   readonly accountState: ReadonlyArray<ProviderPlacedAccountState>;
+  /** The profile's guards, constants it sets in every launch. */
+  readonly fixedVariables: Readonly<Record<string, string>>;
+  /** The Project entries the local launch denies the agent. */
+  readonly deniedRootEntries: ReadonlyArray<string>;
 }
 
 /**
@@ -66,25 +85,31 @@ export function acpRemotePlacement(
   if (profile.authentication.kind !== "provider-owned") return undefined;
   if (authentication !== undefined && authentication !== "provider-owned") return undefined;
   const { process } = profile;
+  const fixedVariables = process.guards;
+  const deniedRootEntries = process.forbiddenRootEntries ?? [];
   if (
-    Object.keys(process.guards).length > 0 ||
     (process.hostReadPaths ?? []).length > 0 ||
     (process.hostDeniedEntries ?? []).length > 0 ||
-    (process.forbiddenRootEntries ?? []).length > 0 ||
+    // The refusal reads the root's files, which on a target name nothing here.
     profile.refusesProject !== undefined
   ) {
     return undefined;
   }
   const accountState = placedAccountState(process.hostAuthentication, home);
   if (accountState === "not-expressible") return undefined;
+  // A profile whose launch a target would refuse declares nothing here instead.
+  if (!placedLaunchExpressible({ accountState, fixedVariables, deniedRootEntries })) {
+    return undefined;
+  }
   const postures = CONFINED_POSTURES.filter(
     (posture) =>
       profile.refuses?.("code", posture) === undefined &&
       // A child server is a fork, which Plan's process filter refuses on a
       // target as it does here, where such a profile is refused Plan.
       !(process.requiresChildServer === true && posture === "plan") &&
-      Object.keys(process.environment({ managedHome: UNUSED_HOME, executionPolicy: posture }))
-        .length === 0 &&
+      namesOnlyHomeDefaults(
+        process.environment({ managedHome: UNUSED_HOME, executionPolicy: posture }),
+      ) &&
       process.managedFiles({ managedHome: UNUSED_HOME, executionPolicy: posture }).length === 0,
   );
   if (postures.length === 0) return undefined;
@@ -92,7 +117,17 @@ export function acpRemotePlacement(
     support: { postures, appToolTransport: "stdio" },
     args: remote.args,
     accountState,
+    fixedVariables,
+    deniedRootEntries,
   };
+}
+
+/** Whether every variable the local launch sets names a folder the runtime's home on the target already gives it. */
+function namesOnlyHomeDefaults(environment: Readonly<Record<string, string>>): boolean {
+  return Object.entries(environment).every(([name, value]) => {
+    const folder = HOME_DEFAULT_FOLDERS[name];
+    return folder !== undefined && value === join(UNUSED_HOME, folder);
+  });
 }
 
 /**
@@ -124,7 +159,10 @@ function placedAccountState(
 export interface AcpPlacedProcessStartInput {
   readonly profile: AcpProviderProfile;
   readonly placement: ProviderRemoteProcessPlacement;
-  readonly launch: Pick<AcpRemotePlacement, "args" | "accountState">;
+  readonly launch: Pick<
+    AcpRemotePlacement,
+    "args" | "accountState" | "fixedVariables" | "deniedRootEntries"
+  >;
   /** The bound root as the target names it. */
   readonly root: string;
   readonly clientCapabilities: AcpClientCapabilities;
@@ -167,6 +205,12 @@ export function makeAcpPlacedProcessLive(
           ...(input.launch.accountState.length === 0
             ? {}
             : { accountState: input.launch.accountState }),
+          ...(Object.keys(input.launch.fixedVariables).length === 0
+            ? {}
+            : { fixedVariables: input.launch.fixedVariables }),
+          ...(input.launch.deniedRootEntries.length === 0
+            ? {}
+            : { deniedRootEntries: input.launch.deniedRootEntries }),
         });
         const stdout = new PassThrough();
         // The output ends when the process does, which the launch's own

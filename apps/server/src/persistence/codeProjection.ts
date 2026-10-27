@@ -886,6 +886,60 @@ export function readCodeThreadView(
   return decodeCodeThreadView({ thread, checkout, lastSequence: thread.version });
 }
 
+/**
+ * Why a remote-bound thread's turn stopped across a restart. Its command died
+ * with the target's session and nothing was queued, as when the session ends
+ * while this host runs.
+ */
+const REMOTE_TURN_ENDED_BY_RESTART =
+  "Octant restarted, which ended the SSH target's session (target-disconnected). Nothing was queued; connect the target again, then send the message again.";
+
+/**
+ * The head of a turn's operation journal while its latest state still reads
+ * running or waiting, or undefined once it settled or never started.
+ */
+function unsettledOperationHead(
+  connection: SqliteConnection,
+  journal: Journal,
+  work: CodeRuntimeWork,
+): number | undefined {
+  const stateRow = connection
+    .prepare(`
+      SELECT aggregate_version FROM event_journal
+      WHERE aggregate_type = 'code-operation' AND aggregate_id = ?
+        AND (json_extract(payload_json, '$.event.kind') IN ('operation-state', 'conversation-turn-started')
+          OR (json_extract(payload_json, '$.event.kind') = 'operation-result'
+            AND json_extract(payload_json, '$.event.result.kind') IN ('provider-turn-state', 'operation-failed')))
+      ORDER BY aggregate_version DESC LIMIT 1
+    `)
+    .get(work.id) as { readonly aggregate_version: number } | undefined;
+  if (stateRow === undefined) return undefined;
+  const latest = journal.replayAggregate({
+    aggregateType: "code-operation",
+    aggregateId: String(work.id),
+    afterVersion: stateRow.aggregate_version - 1,
+    limit: 1,
+  })[0];
+  if (latest === undefined) return undefined;
+  const frame = decodeCodeOperationEventFrame(latest.payload);
+  if (String(frame.threadId) !== String(work.threadId)) return undefined;
+  const event = frame.event;
+  const unsettled =
+    event.kind === "conversation-turn-started" ||
+    (event.kind === "operation-state" &&
+      (event.state === "running" || event.state === "waiting")) ||
+    (event.kind === "operation-result" &&
+      event.result.kind === "provider-turn-state" &&
+      (event.result.state === "running" || event.result.state === "waiting"));
+  if (!unsettled) return undefined;
+  const head = connection
+    .prepare(
+      "SELECT aggregate_version FROM aggregate_heads WHERE aggregate_type = 'code-operation' AND aggregate_id = ?",
+    )
+    .get(work.id) as { readonly aggregate_version: number } | undefined;
+  return head?.aggregate_version;
+}
+
 export function reconcileCodeRestart(input: {
   readonly connection: SqliteConnection;
   readonly journal: Journal;
@@ -919,6 +973,69 @@ export function reconcileCodeRestart(input: {
           },
           occurredAt: input.reconciledAt,
           payload: { kind: "checkout-observed", checkout: reconciled },
+        },
+      ],
+    });
+  }
+
+  // A remote-bound thread's turn ran on an SSH target, and a restart ends
+  // the session it was bound to, so it is a disconnect: the turn stops as
+  // interrupted, as a lost session stops it, rather than wait for a resume
+  // that could bind only to a session the person connects and that attests
+  // anew. Done before the waits below, which would otherwise keep it waiting.
+  const remoteTurns = input.connection
+    .prepare(
+      "SELECT * FROM code_runtime_projection WHERE work_kind = 'provider-turn' AND state IN ('running', 'waiting')",
+    )
+    .all() as ReadonlyArray<CodeRuntimeProjectionRow>;
+  for (const row of remoteTurns) {
+    const work = decodeRuntimeRow(row);
+    const thread = readCodeThread(input.connection, work.threadId);
+    if (thread === undefined) continue;
+    if (readCodeCheckout(input.connection, thread.checkoutId)?.kind !== "remote-root") continue;
+    const system = { kind: "system" as const, actorId: "00000000-0000-4000-8000-000000000021" };
+    input.journal.append({
+      aggregate: { aggregateType: "code-runtime", aggregateId: work.id },
+      expectedVersion: row.aggregate_version,
+      events: [
+        {
+          eventId: uuid(),
+          eventName: "code.runtime-work-updated@1",
+          eventVersion: 1,
+          correlationId,
+          actor: system,
+          occurredAt: input.reconciledAt,
+          payload: {
+            kind: "runtime-work-updated",
+            work: decodeCodeRuntimeWork({ ...work, state: "interrupted" }),
+          },
+        },
+      ],
+    });
+    const head = unsettledOperationHead(input.connection, input.journal, work);
+    if (head === undefined) continue;
+    input.journal.append({
+      aggregate: { aggregateType: "code-operation", aggregateId: String(work.id) },
+      expectedVersion: head,
+      events: [
+        {
+          eventId: uuid(),
+          eventName: "code.operation-event-recorded@1",
+          eventVersion: 1,
+          correlationId,
+          actor: system,
+          occurredAt: input.reconciledAt,
+          payload: decodeCodeOperationEventFrame({
+            threadId: work.threadId,
+            operationId: work.id,
+            cursor: head + 1,
+            occurredAt: input.reconciledAt,
+            event: {
+              kind: "operation-state",
+              state: "interrupted",
+              failure: { category: "failed", message: REMOTE_TURN_ENDED_BY_RESTART },
+            },
+          }),
         },
       ],
     });

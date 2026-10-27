@@ -103,7 +103,9 @@ anything you want to do on the target yourself.
 
 If the target disconnects, the running turn stops as interrupted and the task
 says the target is not connected. It offers no send until the target is
-connected again; nothing reconnects or replays on its own.
+connected again; nothing reconnects or replays on its own. A restart of
+Octant on this computer ends the target's session too, so a turn it cut off
+reads as interrupted afterwards.
 
 ## Terminals
 
@@ -152,14 +154,17 @@ octant ssh-target runtime <target-id> <provider-id> /home/build/.local/bin/agent
 Octant checks the file on the target before every launch: it must be an
 executable that only you or root can change, outside the Project's folder
 and your `~/.ssh`. Setting another path takes effect the next time the
-runtime starts. A remote Project's thread does not start a provider's own
-runtime yet, so nothing runs from this path until it does, and no provider
-Octant ships can run on a target yet.
+runtime starts. GitHub Copilot is the first provider Octant can run there:
+it signs in with the target's own `~/.copilot` (run `copilot login` on the
+target), never with a key from this computer, and the Project files it would
+otherwise load by itself are hidden from it there as on this computer. The
+composer does not offer it for a task on a target yet.
 
 ## Removing a target
 
-**Remove…** on a target ends its session, which stops any turn running in
-one of its Projects, and forgets its pinned key. Its
+**Remove…** on a target ends its session and forgets its pinned key. While a
+task in one of its Projects is running, Octant refuses to remove it; stop the
+task, or wait for it to end, first. Its
 Projects stay listed on this computer and take no new work. Nothing on the target
 is deleted: not the folder, not its worktrees.
 
