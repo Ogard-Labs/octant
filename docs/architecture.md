@@ -8375,7 +8375,9 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   sign-on portal only this way, with no opt-in, since the portal's device
   authorization is its one flow; the broker accepts a verification page only
   on the portal region's device host or the organization's own access portal
-  host. [Enterprise provider identity](design/enterprise-provider-identity.md)
+  host. Settings' sign-in route answers a Bedrock instance's status and Sign
+  out only, refusing a remote principal's Sign out before the pointer is read.
+  [Enterprise provider identity](design/enterprise-provider-identity.md)
   owns the rules.
 - **Cloud request signing.** The credential broker signs cloud requests
   itself ([`cloudIam.ts`](../packages/host-runtime/src/cloudIam.ts),
