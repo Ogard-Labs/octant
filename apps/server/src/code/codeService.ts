@@ -106,6 +106,7 @@ import {
 } from "@octant/domain/agent-profile-policy";
 import { ACCESS_POSTURE_RANK, authorizeCodeOperation } from "@octant/domain/code-policy";
 import { defaultDeliveryBranchIntent } from "@octant/domain/code-worktree-source-policy";
+import { REMOTE_CODE_THREAD_FULL_ACCESS_UNAVAILABLE } from "@octant/domain/ssh-target-recovery";
 import { evaluateCodeDeliveryOutcomeProposal } from "@octant/domain/delivery-target-policy";
 import {
   completedThreadArchiveDue,
@@ -1699,10 +1700,7 @@ export class CodeService {
         // remote-bound Project has nowhere to remember it yet, so no thread
         // there is created holding it, even for this session.
         if (checkout.kind === "remote-root" && thread.executionPolicy === "full-access") {
-          throw this.#failure(
-            "unauthorized",
-            "Full access is not available for a Project on an SSH target. Choose a narrower posture.",
-          );
+          throw this.#failure("unauthorized", REMOTE_CODE_THREAD_FULL_ACCESS_UNAVAILABLE);
         }
         const project = this.#persistence.readProject?.(thread.projectId);
         if (

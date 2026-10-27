@@ -1,5 +1,6 @@
 import type { SshRemoteProjectRefusal } from "@octant/contracts/ssh-remote-project";
-import type { SshAdmissionDecision } from "@octant/contracts/ssh-target";
+import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
+import type { SshAdmissionDecision, SshTargetStatus } from "@octant/contracts/ssh-target";
 
 /** Why a bind, a read, or a worktree change on a remote-bound Project did nothing, in a sentence. */
 export function describeSshRemoteProjectRefusal(refusal: SshRemoteProjectRefusal): string {
@@ -116,3 +117,58 @@ export const REMOTE_CODE_THREAD_CONNECTORS_UNAVAILABLE =
  */
 export const REMOTE_CODE_THREAD_PROVIDER_UNAVAILABLE =
   "Threads on an SSH target run on Octant's own harness for now. Choose a model it runs.";
+
+/** Why a thread on an SSH target is not created holding Full access. */
+export const REMOTE_CODE_THREAD_FULL_ACCESS_UNAVAILABLE =
+  "Full access is not available for a Project on an SSH target. Choose a narrower posture.";
+
+/**
+ * The postures a window offers for a thread on an SSH target. Full access has
+ * nowhere to be remembered for a remote-bound Project, and Auto-accept edits
+ * would write on the target with no checkpoint to return to, since a remote
+ * turn takes none; each write there is approved instead.
+ */
+export const REMOTE_CODE_THREAD_POSTURES = ["plan", "approval-gated"] as const;
+
+/** Whether a native-harness turn could start on a target now, or why not. */
+export type RemoteCodeTurnReadiness =
+  | { readonly status: "ready" }
+  | { readonly status: "unavailable"; readonly message: string };
+
+/**
+ * Whether the host's status of a target admits a turn in `posture` now, as a
+ * window shows it before anyone presses Start. It reads only what the host
+ * reported (the connection and its admission of each confined posture) and
+ * decides nothing: the host admits every turn and every call itself.
+ * `target` is absent when the Project's target is no longer registered.
+ */
+export function remoteCodeTurnReadiness(
+  target: Pick<SshTargetStatus, "connection" | "admission"> | undefined,
+  posture: ProviderExecutionPolicy,
+): RemoteCodeTurnReadiness {
+  if (target === undefined) {
+    return {
+      status: "unavailable",
+      message: describeSshAdmissionRefusal({ status: "refused", reason: "target-removed" }),
+    };
+  }
+  if (posture === "full-access") {
+    return { status: "unavailable", message: REMOTE_CODE_THREAD_FULL_ACCESS_UNAVAILABLE };
+  }
+  if (target.connection !== "connected") {
+    return {
+      status: "unavailable",
+      message: describeSshAdmissionRefusal({ status: "refused", reason: "target-unreachable" }),
+    };
+  }
+  const decision = target.admission.find((entry) => entry.posture === posture)?.decision;
+  if (decision === undefined) {
+    return {
+      status: "unavailable",
+      message: describeSshAdmissionRefusal({ status: "refused", reason: "not-attested", posture }),
+    };
+  }
+  return decision.status === "admitted"
+    ? { status: "ready" }
+    : { status: "unavailable", message: describeSshAdmissionRefusal(decision) };
+}

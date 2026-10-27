@@ -66,6 +66,8 @@ import { wireWorkRequests } from "./wiring/workRequests";
 import { wireRoutes } from "./wiring/routes";
 import { wireRemote } from "./wiring/remote";
 import { wireSshTargets } from "./wiring/sshTargets";
+import { remoteCodeProjectOf } from "./sshTarget/sshRemoteCodeThreads";
+import type { SshTargetStore } from "./sshTarget/sshTargetStore";
 import { wireReplica } from "./wiring/replica";
 
 export { MAX_CHAT_ATTACHMENT_BYTES };
@@ -332,6 +334,10 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
     });
+    // SSH targets are wired after the workspace; a window binds to a
+    // remote-bound Project through their store once it exists, and no
+    // request is served before then.
+    const remoteCodeProjectStore: { store?: SshTargetStore } = {};
     const {
       authorizeWorkThreadForWindow,
       codeBoardPlanProgressSource,
@@ -356,6 +362,13 @@ export function startOctantServer(
       workProjectStatusFiles,
       workProjectStatusReader,
     } = yield* wireWorkspace({
+      remoteCodeProjects: {
+        has: (projectId) =>
+          remoteCodeProjectStore.store?.getProject(String(projectId)) !== undefined,
+        holdsThread: (thread) =>
+          remoteCodeProjectStore.store !== undefined &&
+          remoteCodeProjectOf(remoteCodeProjectStore.store, thread) !== undefined,
+      },
       onWindowRevoked,
       bindingReceiptStore,
       githubCapabilityService,
@@ -435,6 +448,7 @@ export function startOctantServer(
       providerDataDirectory,
       version,
     });
+    remoteCodeProjectStore.store = sshTargetStore;
     const {
       followUpCreation,
       followUpSuggestionRoutes,
