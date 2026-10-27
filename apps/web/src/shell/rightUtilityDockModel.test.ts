@@ -144,6 +144,12 @@ describe("resolving what the right utility dock shows", () => {
         modes: ["code"],
         scope: "thread",
       },
+      {
+        id: "debug",
+        label: "Run and debug",
+        modes: ["code"],
+        scope: "thread",
+      },
     ]);
   });
 

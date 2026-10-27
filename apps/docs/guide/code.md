@@ -242,7 +242,7 @@ or thread. The right sidebar is a compact launcher when empty and a tool strip
 when open. It can host Side Chat, Browser, Files, Canvas, Plan when this thread
 has a current plan artifact, Pull requests for the thread's Project, Delivery
 when a target is enabled, Changes,
-Terminal, Tests, iOS Simulator, Android emulator, or Desktop instead of replacing the Code thread. iOS
+Terminal, Tests, [Run and debug](/advanced/debugging), iOS Simulator, Android emulator, or Desktop instead of replacing the Code thread. iOS
 Simulator is absent until Octant has found an Xcode project and Apple
 toolchain. Android emulator is always launchable on Code; a host without the
 SDK shows the destination as unavailable. When either pane is open it shows a

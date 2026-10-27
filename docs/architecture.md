@@ -228,8 +228,12 @@ the program run in one capsule confined as a terminal, on the session's own
 ends at once when the thread, its posture, its checkout, the confirmation, or
 the Project goes. The routes under `/api/code/debug/` are local-window only
 with no remote action, no agent tool reaches a session, and nothing a session
-shows is journaled. The Run and debug panel that calls them is not built yet
-([Debugger session rules](design/language-services.md#debugger-session-rules)).
+shows is journaled. The Code dock's Run and debug tool calls them: it lists
+and confirms configurations, starts a session with the window's gutter
+breakpoints (held in the renderer, never persisted), and shows the stack,
+variables, and a debug console, deciding no refusal itself
+([Debugger session rules](design/language-services.md#debugger-session-rules),
+[Debugger panel rules](design/language-services.md#debugger-panel-rules)).
 
 **Host resources.** `GET /api/host/resources` is a read-only snapshot of this
 host's load: CPU use averaged over a short sample of the process's CPU times,

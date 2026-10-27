@@ -17,7 +17,8 @@ export type RightUtilityDockSurfaceId =
   | "tests"
   | "ios-simulator"
   | "android-emulator"
-  | "desktop";
+  | "desktop"
+  | "debug";
 
 /**
  * What a panel answers for, and therefore what makes it truthful.
@@ -251,6 +252,13 @@ export const RIGHT_UTILITY_DOCK_SURFACES = [
     modes: ["code"],
     scope: "thread",
   },
+  {
+    // A Code thread's debug sessions; the host refuses every other mode.
+    id: "debug",
+    label: "Run and debug",
+    modes: ["code"],
+    scope: "thread",
+  },
 ] as const satisfies ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
 
 const descriptors: Readonly<Record<RightUtilityDockSurfaceId, RightUtilityDockSurfaceDescriptor>> =
@@ -271,6 +279,7 @@ const descriptors: Readonly<Record<RightUtilityDockSurfaceId, RightUtilityDockSu
     "ios-simulator": RIGHT_UTILITY_DOCK_SURFACES[13],
     "android-emulator": RIGHT_UTILITY_DOCK_SURFACES[14],
     desktop: RIGHT_UTILITY_DOCK_SURFACES[15],
+    debug: RIGHT_UTILITY_DOCK_SURFACES[16],
   };
 
 export function resolveRightUtilityDockSurface(

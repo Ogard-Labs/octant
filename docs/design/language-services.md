@@ -1263,8 +1263,58 @@ the addendum left a choice open.
   and block comments and trailing commas, and maps it with the import
   policy. A comment between a trailing comma and its bracket reads as
   `unreadable` rather than guessed at.
-- **Not built yet.** Session counts and end reasons in Diagnostics exports;
-  the Run and debug panel and its user-guide page (8c).
+- **Not built yet.** Session counts and end reasons in Diagnostics exports.
+
+### Debugger panel rules
+
+Sub-slice 8c settled these details, taking the more restrictive option where
+the addendum left a choice open.
+
+- **Where it lives.** Run and debug is a Code dock tool. It reads the
+  thread and checkout the dock follows and calls the four local-window
+  routes through `@octant/client-runtime/code-debug-client`; it decides no
+  refusal itself. An answer of `403`, which the remote gate and the routes
+  give a paired device, shows that debugging stays on this computer and
+  offers nothing to start or confirm.
+- **Breakpoints.** A line breakpoint is set from the editor's glyph gutter
+  or with F9 on the cursor's line, so the pointer is never the only way.
+  They are held in the renderer's memory for the thread on its checkout,
+  shared by the editor and the panel and never persisted, so a reload
+  starts with none. A toggle past 256 lines in a file or 64 files takes
+  none, since the host would refuse the Start. Start sends them all; while a
+  session runs, each file whose lines change is sent at once with
+  `set-breakpoints`. The panel offers no conditions, exception filters,
+  watches, or hover evaluation yet: the adapter's default exception filters
+  apply, as the host sends them.
+- **The current file.** A launch file's current-file variables are filled
+  from the editor file the person last opened or focused for the thread,
+  and the panel lists again when it changes.
+- **Confirming.** A proposal or a written configuration opens the same card:
+  the adapter, program, each argument, the working folder, each environment
+  entry, whether it pauses at the first line, every field Octant does not
+  use, and that the values are kept in the Project's record. A written
+  configuration is checked against the contract's shape before the card;
+  the host checks paths and everything else when it is confirmed.
+- **One session per thread.** While a session runs, the panel shows it in
+  place of the configuration list, so a person stops it before starting
+  another. A `busy` answer for a session the panel does not hold (another
+  window's, or one from before a reload) says so and offers nothing: no
+  route names a thread's running session, so the panel cannot stop it.
+- **Reading a session.** The panel asks for the state every 400 ms while
+  the program runs and every second while it is paused, one request at a
+  time. At each new revision while paused it reads the stack, the top
+  frame's scopes, and the first scope that is not marked expensive; an
+  expensive scope is read when opened, and nested values open on demand to a
+  depth of eight. What it read is dropped when the program runs again or
+  the session ends; the console keeps its last 1,000 lines in the
+  renderer's memory for the session only.
+- **The stopped place.** At each stop the top frame's checkout file opens
+  through the ordinary file-open path at its line, and the editor marks the
+  line until the program runs or the session ends. A frame outside the
+  checkout opens nothing; an `adapter-source` frame's text is fetched by
+  reference and shown read-only in the panel.
+- **Evaluate.** The console sends what the person typed as `repl` in the
+  selected frame; the adapter's error answer is a console line.
 
 ### Debugger delivery
 
@@ -1354,6 +1404,30 @@ Each sub-slice is its own pull request with this addendum updated in place.
     approval-gated thread; Plan and a paired browser show the refusal.
   - _Verify:_ component tests and rendered QA at pane and dock widths, in light
     and dark themes.
+  - _State:_ built. In the component tests (`RunDebugPanel.test.tsx`) a person
+    reviews a launch file proposal (its unused fields listed, its unmappable
+    sibling with its reason), confirms it for the checkout, starts it with the
+    window's breakpoints, sees the program paused at the breakpoint with its
+    stack (a frame outside the checkout labelled), a variable, and a nested
+    value, evaluates an expression in the selected frame, steps, sets a
+    breakpoint that reaches the running session, and stops; the editor is
+    asked to show each stopped line and clears it at the end. A Plan thread's
+    refusal and a paired browser's `403` show as refusals; a written
+    configuration refuses a malformed environment line and is confirmed for
+    the Project. The editor sets and clears a breakpoint from its gutter and
+    marks the stopped line (`MonacoEditorPane.test.tsx`), and the client
+    reads a `403` as local-only (`codeDebugClient.test.ts`). Rendered QA on
+    Linux drove the real Monaco editor, the panel, and the client against the
+    real session host with the fixture adapter under Bubblewrap in an
+    approval-gated thread, at a 1280 px window with a 420 px dock and a
+    760 px window with a 320 px dock, in light and dark: a gutter
+    breakpoint, a confirmed launch file proposal, a stop at the breakpoint
+    with the editor marking the line, a nested variable, an evaluated
+    expression and an adapter error, a step to the next line, and Stop
+    clearing the mark, with no horizontal overflow. The same run against a
+    Plan thread showed the host's refusal on confirming, and against a
+    paired device's `403` showed that debugging stays on this computer. The
+    rules are under [Debugger panel rules](#debugger-panel-rules).
 - **8d. macOS confined-program smoke.** Container: no; a Mac (the `macos-15`
   CI job where it can, otherwise the maintainer).
   - _Accepts when:_ on Apple Silicon, under Seatbelt, a session's adapter and

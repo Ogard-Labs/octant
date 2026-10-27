@@ -32,6 +32,11 @@ import {
   toLanguagePosition,
 } from "./codeLanguageEditor";
 import { useCodeLanguageServices } from "./useCodeLanguageServices";
+import {
+  codeDebugThreadKey,
+  codeDebugWindowState,
+  useCodeDebugThreadState,
+} from "../debug/codeDebugWindowState";
 
 interface CodeEditorFileFields {
   readonly checkoutId: CodeCheckoutId;
@@ -322,6 +327,31 @@ function AvailableEditor(
     : languageStatusText(language.state);
   const languageRetry = language.state.kind === "crashed" || language.state.kind === "timed-out";
 
+  // Breakpoints are this window's state for the thread, shared with the Run
+  // and debug panel, which sends them at Start and while a session runs.
+  const debugKey = codeDebugThreadKey(String(threadId), String(checkoutId));
+  const debugState = useCodeDebugThreadState(debugKey);
+  const breakpointLines = debugState.breakpoints.get(path);
+  const stoppedLine = debugState.stopped?.path === path ? debugState.stopped.line : undefined;
+  const debugDecorations = useMemo(
+    () => ({
+      breakpoints: breakpointLines ?? [],
+      ...(stoppedLine === undefined ? {} : { stoppedLine }),
+    }),
+    [breakpointLines, stoppedLine],
+  );
+  const toggleBreakpoint = useCallback(
+    (lineNumber: number) => {
+      codeDebugWindowState.toggleBreakpoint(debugKey, path, lineNumber);
+    },
+    [debugKey, path],
+  );
+  // The panel's launch file proposals fill `${file}` from the file the person
+  // last had in front of them.
+  useEffect(() => {
+    if (ready) codeDebugWindowState.setCurrentFile(debugKey, path);
+  }, [debugKey, path, ready]);
+
   return (
     <section
       aria-label={`Code editor for ${props.file.path}`}
@@ -332,6 +362,7 @@ function AvailableEditor(
         // on in Settings; focus moving within the pane is neither.
         const from = event.relatedTarget;
         if (from instanceof Node && event.currentTarget.contains(from)) return;
+        codeDebugWindowState.setCurrentFile(debugKey, path);
         if (language.state.kind === "ready") refreshLanguage();
         else if (language.state.kind === "off") retryLanguage();
       }}
@@ -451,6 +482,8 @@ function AvailableEditor(
             setMessage(undefined);
           }}
           {...(writable ? { onSave: () => void save() } : {})}
+          debugDecorations={debugDecorations}
+          onToggleBreakpoint={toggleBreakpoint}
           readOnly={!writable}
           value={draft}
         />

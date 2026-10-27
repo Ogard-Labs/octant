@@ -43,6 +43,16 @@ export interface MonacoLanguageBridge {
   readonly open: (link: Exclude<MonacoDefinitionLink, { readonly kind: "this-file" }>) => void;
 }
 
+/**
+ * What a debugger shows in the editor's gutter: the window's breakpoints for
+ * this file and, while the program is stopped in it, the line it stopped on.
+ * Lines are one-based.
+ */
+export interface MonacoDebugDecorations {
+  readonly breakpoints: ReadonlyArray<number>;
+  readonly stoppedLine?: number;
+}
+
 export interface MonacoAdapterSession {
   readonly dispose: () => void;
   readonly focus: () => void;
@@ -57,6 +67,7 @@ export interface MonacoAdapterSession {
    */
   readonly setLanguageMarkers?: (markers: ReadonlyArray<MonacoEditorMarker> | undefined) => void;
   readonly revealRange?: (range: MonacoEditorRange) => void;
+  readonly setDebugDecorations?: (decorations: MonacoDebugDecorations) => void;
 }
 
 export interface MonacoAdapterRuntime {
@@ -68,6 +79,11 @@ export interface MonacoAdapterRuntime {
       readonly languageBridge?: MonacoLanguageBridge;
       readonly modelUri: string;
       readonly onChange: (value: string) => void;
+      /**
+       * A click in the gutter, or F9, on a line: the editor shows a gutter
+       * for breakpoints only when this is given.
+       */
+      readonly onToggleBreakpoint?: (lineNumber: number) => void;
       readonly readOnly: boolean;
       readonly typography?: EditorTypographyProjection;
       readonly value: string;
@@ -108,6 +124,8 @@ export interface MonacoEditorAdapterProps {
   readonly modelUri: string;
   readonly onChange: (value: string) => void;
   readonly onSave?: () => void;
+  readonly debugDecorations?: MonacoDebugDecorations;
+  readonly onToggleBreakpoint?: (lineNumber: number) => void;
   readonly readOnly: boolean;
   readonly typography?: EditorTypographyProjection;
   readonly value: string;
@@ -153,6 +171,12 @@ export function MonacoEditorAdapter(props: MonacoEditorAdapterProps) {
               }),
           modelUri: props.modelUri,
           onChange: (nextValue) => latestProps.current.onChange(nextValue),
+          ...(latestProps.current.onToggleBreakpoint === undefined
+            ? {}
+            : {
+                onToggleBreakpoint: (lineNumber: number) =>
+                  latestProps.current.onToggleBreakpoint?.(lineNumber),
+              }),
           readOnly: latestProps.current.readOnly,
           typography: latestTypography.current,
           value: latestProps.current.value,
@@ -165,6 +189,8 @@ export function MonacoEditorAdapter(props: MonacoEditorAdapterProps) {
         mounted.setLanguageMarkers?.(latestProps.current.languageMarkers);
         const reveal = latestProps.current.reveal;
         if (reveal !== undefined) mounted.revealRange?.(reveal.range);
+        const debug = latestProps.current.debugDecorations;
+        if (debug !== undefined) mounted.setDebugDecorations?.(debug);
       })
       .catch(() => {
         if (!disposed) setRuntimeUnavailable(true);
@@ -186,6 +212,11 @@ export function MonacoEditorAdapter(props: MonacoEditorAdapterProps) {
   useEffect(() => {
     if (props.reveal !== undefined) session.current?.revealRange?.(props.reveal.range);
   }, [props.reveal]);
+  useEffect(() => {
+    if (props.debugDecorations !== undefined) {
+      session.current?.setDebugDecorations?.(props.debugDecorations);
+    }
+  }, [props.debugDecorations]);
 
   return (
     <>
