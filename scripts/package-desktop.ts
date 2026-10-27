@@ -209,6 +209,72 @@ export const REQUIRED_STAGED_PACKAGED_FILES = [
   "apps/server/node_modules/yaml/package.json",
 ] as const;
 
+/**
+ * The bundled TypeScript language server (`docs/design/language-services.md`):
+ * the pinned `typescript` package's native package for one target, about
+ * 24 MB. The server resolves it from its own bundle, so it is staged beside
+ * the server's other runtime packages and shipped as published: the binary,
+ * the standard library declarations it reads from its own folder, and the
+ * package's license and third-party notices. It is neither stripped nor
+ * rebuilt.
+ */
+export function bundledLanguageServerPackage(target: {
+  readonly platform: string;
+  readonly arch: string;
+}): string {
+  return `@typescript/typescript-${target.platform}-${target.arch}`;
+}
+
+/** The language server's executable, inside its package. */
+export const BUNDLED_LANGUAGE_SERVER_BINARY = "lib/tsc";
+
+/**
+ * Files every package must carry for the bundled language server, inside its
+ * package folder. A package without them is refused rather than shipped: Node
+ * resolves the binary by walking up from the server bundle, so a package
+ * missing its own copy would serve whichever copy sits above wherever the app
+ * was put.
+ */
+export const BUNDLED_LANGUAGE_SERVER_FILES = [
+  "package.json",
+  "LICENSE",
+  "NOTICE.txt",
+  BUNDLED_LANGUAGE_SERVER_BINARY,
+  "lib/lib.d.ts",
+  "lib/lib.es5.d.ts",
+] as const;
+
+/** Each bundled language server file, under the payload-relative `nodeModules` folder. */
+export function bundledLanguageServerPaths(
+  target: { readonly platform: string; readonly arch: string },
+  nodeModules: string,
+): ReadonlyArray<string> {
+  const root = `${nodeModules}/${bundledLanguageServerPackage(target)}`;
+  return BUNDLED_LANGUAGE_SERVER_FILES.map((file) => `${root}/${file}`);
+}
+
+/**
+ * Copy the language server's native package for `target` into
+ * `destinationNodeModules`, resolved the way the pinned `typescript` package
+ * resolves its own optional dependency, so its version is the lockfile's.
+ */
+export async function stageBundledLanguageServer(input: {
+  readonly repositoryRoot: string;
+  readonly destinationNodeModules: string;
+  readonly target: { readonly platform: string; readonly arch: string };
+  readonly stagedVersions?: Map<string, string>;
+}): Promise<void> {
+  const typescriptManifest = createRequire(
+    resolve(input.repositoryRoot, "apps/server/package.json"),
+  ).resolve("typescript/package.json");
+  await stageRuntimePackages({
+    requesterManifest: typescriptManifest,
+    destinationNodeModules: input.destinationNodeModules,
+    packageNames: [bundledLanguageServerPackage(input.target)],
+    ...(input.stagedVersions === undefined ? {} : { stagedVersions: input.stagedVersions }),
+  });
+}
+
 /** macOS-only node-pty helper; Linux uses forkpty and does not build this binary. */
 export const REQUIRED_DARWIN_PTY_HELPER_FILE =
   "apps/server/node_modules/node-pty/build/Release/spawn-helper" as const;
@@ -252,12 +318,20 @@ export const REQUIRED_PACKAGED_FILES = [
   ...REQUIRED_DARWIN_TERMINAL_LAUNCHER_FILES,
 ] as const;
 
+const DARWIN_LANGUAGE_SERVER_BINARY = `app/apps/server/node_modules/${bundledLanguageServerPackage(
+  DESKTOP_PACKAGE_TARGETS["darwin-arm64"],
+)}/${BUNDLED_LANGUAGE_SERVER_BINARY}`;
+const LINUX_LANGUAGE_SERVER_BINARY = `app/apps/server/node_modules/${bundledLanguageServerPackage(
+  DESKTOP_PACKAGE_TARGETS["linux-x64"],
+)}/${BUNDLED_LANGUAGE_SERVER_BINARY}`;
+
 export const PACKAGED_EXECUTABLE_FILES = [
   "native/octant-keychain-helper",
   "native/octant-code-file-helper",
   "native/octant-device-helper",
   "native/cua-driver",
   "app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
+  DARWIN_LANGUAGE_SERVER_BINARY,
   `${TERMINAL_LAUNCHER_DIRECTORY_NAME}/octant`,
 ] as const;
 
@@ -300,7 +374,7 @@ export async function installTerminalLauncher(
   await writeFile(join(directory, "octant"), terminalLauncherScript(productName), { mode: 0o755 });
   await chmod(join(directory, "octant"), 0o755);
 }
-export const PACKAGED_LINUX_EXECUTABLE_FILES = [] as const;
+export const PACKAGED_LINUX_EXECUTABLE_FILES = [LINUX_LANGUAGE_SERVER_BINARY] as const;
 export const PACKAGED_ARM64_FILES = [
   "native/octant-keychain-helper",
   "native/octant-code-file-helper",
@@ -310,10 +384,12 @@ export const PACKAGED_ARM64_FILES = [
   "app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
   "app/apps/server/node_modules/node-pty/build/Release/pty.node",
   "app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
+  DARWIN_LANGUAGE_SERVER_BINARY,
 ] as const;
 export const PACKAGED_LINUX_NATIVE_FILES = [
   "app/apps/server/node_modules/node-pty/build/Release/pty.node",
   "app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
+  LINUX_LANGUAGE_SERVER_BINARY,
 ] as const;
 export const FORBIDDEN_PACKAGED_FILES = [
   "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-keychain-helper",
@@ -752,6 +828,7 @@ export function validatePackagedPayload(
   const required = [
     ...REQUIRED_STAGED_PACKAGED_FILES,
     ...(target.platform === "darwin" ? [REQUIRED_DARWIN_PTY_HELPER_FILE] : []),
+    ...bundledLanguageServerPaths(target, "apps/server/node_modules"),
   ];
   for (const requiredPath of required) {
     if (!paths.has(requiredPath)) throw new Error(`Packaged payload is missing ${requiredPath}.`);
@@ -820,6 +897,11 @@ export async function stageDesktopRuntime(
   await writeJson(join(stageRoot, "apps/server/package.json"), createServerRuntimeManifest());
 
   await stageExternalRuntimePackages(repositoryRoot, stageRoot);
+  await stageBundledLanguageServer({
+    repositoryRoot,
+    destinationNodeModules: resolve(stageRoot, "apps/server/node_modules"),
+    target,
+  });
   await stageExternalRuntimePackages(repositoryRoot, stageRoot, ["effect"], "desktop");
   if (target.platform === "darwin")
     await stageExternalRuntimePackages(
@@ -1066,6 +1148,9 @@ async function packageLinuxDesktop(
 
   const resourcesRoot = join(finalPackageDir, "resources");
   await prepareManagedTools(repositoryRoot, join(resourcesRoot, "managed-tools"), "linux");
+  for (const relativePath of PACKAGED_LINUX_EXECUTABLE_FILES) {
+    await access(join(resourcesRoot, relativePath), 1);
+  }
   for (const relativePath of PACKAGED_LINUX_NATIVE_FILES) {
     await validatePackagedElf(join(resourcesRoot, relativePath));
   }
