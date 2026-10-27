@@ -228,8 +228,8 @@ inline, including an article, a spec, or an HTML page it wrote as a
 document-size design. An interactive document (a document-size design that
 runs script, such as a calculator or an explorer) waits in the thread for you to
 press **Run**, in the same locked-down frame the sidebar uses, and cannot change
-the Canvas from there. An HTML page you bring into a Canvas as a document can be
-shown inline the same way.
+the Canvas from there. An HTML page you give the agent can be shown inline the
+same way once it puts the page in a Canvas as a document-size design.
 
 A plan, a mockup, or a design at a device size (phone, tablet, desktop, or
 slide) is worked on in the sidebar. When the agent asks to show one inline, the

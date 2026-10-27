@@ -336,7 +336,11 @@ export function InlineThreadCanvas(props: InlineThreadCanvasProps) {
                 Show the whole Canvas
               </OctantButton>
               {props.onOpen === undefined ? null : (
+                // Named apart from the header's open control, which does the
+                // same thing: two buttons with one name in a region read to a
+                // screen reader as a duplicate. The visible words lead the name.
                 <OctantButton
+                  aria-label={`${openLabel}: ${card.title}`}
                   onClick={() => props.onOpen?.(card)}
                   size="sm"
                   type="button"

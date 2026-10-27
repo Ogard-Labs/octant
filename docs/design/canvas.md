@@ -262,7 +262,11 @@ are worked on or reviewed at their own size. When an author asks for `inline`
 with such a block, the host records the request as asked, the Canvas is a
 sidebar Canvas (`effectiveCanvasPresentation`, and the card and the tool result
 say `sidebar`), the reason returns as `presentationNote`, and the thread shows
-it as a preview card that opens it. The agent is told to put a visualization
+it as a preview card that opens it. A definition's `presentation` is therefore
+the request, not the placement: every reader (the card projection, the agent's
+result, `preview`, the dock offer, and the thread) places a Canvas by
+`effectiveCanvasPresentation`, and only the preview-card choice reads the
+recorded request. The agent is told to put a visualization
 that answers the current question inline and to leave longer documents in the
 sidebar. Recording the request rather than `sidebar` is what lets the thread
 tell a refused inline request from a Canvas the author placed in the sidebar,

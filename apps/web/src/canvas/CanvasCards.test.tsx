@@ -659,6 +659,27 @@ describe("Canvas create panel and card list", () => {
       );
     });
 
+    it("offers a Canvas taller than its frame in the sidebar under a name apart from the header's", async () => {
+      const user = userEvent.setup();
+      localStorage.clear();
+      const onOpen = vi.fn();
+      const tall = vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(2000);
+      try {
+        render(<InlineThreadCanvas card={inlineCard()} client={clientWith()} onOpen={onOpen} />);
+        await screen.findByRole("button", { name: "Show the whole Canvas" });
+
+        // The header's icon keeps its own name; the offer under the fade names the Canvas.
+        expect(screen.getAllByRole("button", { name: "Open in sidebar" })).toHaveLength(1);
+        await user.click(screen.getByRole("button", { name: "Open in sidebar: Weekly signups" }));
+        expect(onOpen).toHaveBeenCalledWith(
+          expect.objectContaining({ canvasId: "20000000-0000-4000-8000-000000000002" }),
+        );
+      } finally {
+        tall.mockRestore();
+        localStorage.clear();
+      }
+    });
+
     it("folds to a card on request and stays folded when the thread is opened again", async () => {
       const user = userEvent.setup();
       localStorage.clear();
@@ -676,8 +697,8 @@ describe("Canvas create panel and card list", () => {
       localStorage.clear();
     });
 
-    // A long document with a board: the agent could never ask for it inline,
-    // so the thread first shows it as a row.
+    // A long document with a board the agent placed in the sidebar, so the
+    // thread first shows it as a row.
     const longDefinition = {
       ...definition,
       title: "Launch review",
