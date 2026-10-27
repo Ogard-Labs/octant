@@ -9,7 +9,8 @@ launches go through the shared confinement port, and authority is checked on the
 server ([Architecture: security and authority](../architecture.md#security-and-authority)).
 
 **Delivery state.** Accepted 2026-10-26; slices 1–5 are built, and slice 6
-is built for E2B and not yet for Cua Spaces. The maintainer authorized this
+is built for E2B; its Cua Spaces driver is blocked on a design decision (see
+[Built in slice 6](#built-in-slice-6)). The maintainer authorized this
 scope as post-preview work and accepted the
 [maintainer decisions](#maintainer-decisions) below on 2026-10-26, naming the
 two cloud providers on 2026-10-27; it is not part of the first release, and the
@@ -405,23 +406,20 @@ alternatives considered and the reason for the choice follow it.
    Bubblewrap launch: no new runtime, no account, no cost, Linux hosts only,
    contents are the host's installed apps, kernel-shared isolation. The cloud
    providers, on the person's own account, are **E2B** and **Cua Spaces**
-   (named 2026-10-27): VM isolation and image templates, but an account, a
-   key, billing, and data leaving the machine. Each is its own bundled driver
-   through the same `desktop-provider` seam and the same host HTTPS port, so
-   neither gets a shortcut the other, or a third-party plugin, could not take.
-   E2B is delivered first, then Cua Spaces stacked on it. The host-local
+   (named 2026-10-27): VM isolation and image templates, but an account,
+   billing, and data leaving the machine. Each is its own bundled driver
+   through the same `desktop-provider` seam, so neither gets a shortcut the
+   other, or a third-party plugin, could not take. E2B is delivered first. The host-local
    provider exercises the whole seam, teardown, transfer, and pane in a Linux
    container with no account, so the risky host-owned parts are proven before
    money is involved. Not planned: a host-local OCI container provider
    (rootless Podman), which offers real per-Project images but needs a
    container runtime the person installs and a second confinement mechanism
    Octant must verify; it is reconsidered only if per-Project images prove
-   necessary locally. _Why two cloud providers:_ E2B is a general sandbox
-   service whose desktop is a template it runs Xvfb in, and Cua Spaces is a
-   service built for computer-use agents; offering both keeps the seam honest
-   about what is provider-specific, and a person can use the account they
-   already have. Rejected: one cloud provider only, which would let the seam
-   quietly take one vendor's shape.
+   necessary locally. _Why two cloud providers:_ offering two keeps the seam
+   honest about what is provider-specific, and a person can use the account
+   they already have. Rejected: one cloud provider only, which would let the
+   seam quietly take one vendor's shape.
 2. **Who may acquire a billed lease.** A person confirms every billed lease in
    every posture. Rejected: ordinary posture rules, as for any effect. Spending
    the person's money is not a code effect Full access covers.
@@ -909,8 +907,8 @@ fixture, since no recipe storage exists.
 
 ### Built in slice 6
 
-Slice 6 lands as two stacked changes: the shared cloud pieces with the E2B
-driver, then the Cua Spaces driver on them. This section records the first.
+Slice 6 lands the shared cloud pieces with the E2B driver. The Cua Spaces
+driver is not built; why is recorded at the end of this section.
 
 - **Seam.** `DesktopHttpsPort` and `desktopProviderHostDeclared` in
   `packages/plugin-api/src/desktopProvider.ts`; `DesktopProvider.hosts`;
@@ -1034,6 +1032,25 @@ cannot: that envd answers the process service in Connect's JSON codec, that
 `desktop` template carries `Xvfb`, `xdpyinfo`, `scrot`, `xdotool`, and
 `setsid`, that a killed sandbox answers 404 at once, and how the account's
 plan caps an extension.
+
+**Cua Spaces is blocked on a design decision.** Cua's own documentation
+(read 2026-10-27 from its public repository) gives no endpoint a host can call
+over HTTPS with a stored key. Cua's hosted cloud, the only such API, ended on
+18 October 2026. A Space is now created, listed, given a lifetime
+(`set_lifetime`), and deleted through the local `cua daemon` on the person's
+own machine, over gRPC on a Unix socket (`cua.daemon.v1.SpaceService`). That
+daemon runs Spaces on the machine itself, on the person's other machines, or
+in their own AWS, Google Cloud, or Azure account (linked by OIDC, with no
+stored key) or Hetzner or Modal account (a token Cua seals to their devices).
+The screen, input, and files go through `cua-spacesd` (gRPC or gRPC-Web on
+port 3211, with a per-Space bearer token) and Cua's relay. So the shared
+pieces above do not fit it: there are no declared hosts or API-key header for
+`DesktopHttpsPort`, and no key for the desktop-provider namespace. A Cua
+driver needs a seam port for a provider's local daemon (reached confined, the
+way `DesktopLaunchPort` reaches a capsule), a rule for whose cloud
+credentials that daemon uses, and whether its own lifetime and `cua-expires`
+tag satisfy provider-side expiry when the daemon's host is the one that may
+die. Each of those is a maintainer decision.
 
 ## Rationale
 

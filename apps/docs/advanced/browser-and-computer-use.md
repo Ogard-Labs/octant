@@ -250,8 +250,8 @@ host's; a file reaches it only when the agent sends one.
   keeps trying, starts no new desktop on that provider meanwhile, and
   **Retry** tries again now.
 
-A desktop on a cloud provider (E2B, and later Cua Spaces) runs on your own
-account and bills it, so Octant asks you to confirm each one before it starts
+A desktop on a cloud provider such as E2B runs on your own account and bills
+it, so Octant asks you to confirm each one before it starts
 it, even under Full access; the key stays on this host. This version does not
 offer a cloud provider yet.
 
