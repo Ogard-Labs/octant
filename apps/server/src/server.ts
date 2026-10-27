@@ -209,6 +209,7 @@ export function startOctantServer(
       nativeHarnessSessions,
       onHarnessQuestionAsked,
       onHarnessQuestionSettled,
+      threadAwaitsHarnessQuestion,
     } = wireHarnessState({
       agentRunParentAuthority,
       agentRunPersistence,
@@ -802,6 +803,7 @@ export function startOctantServer(
       guardChatAttachmentPurge,
       workTurnProjection,
       threadAwaitsHarnessApproval,
+      threadAwaitsHarnessQuestion,
       workRequestRuntime,
       workRequestService,
       onWindowRevoked,

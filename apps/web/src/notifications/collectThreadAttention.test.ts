@@ -172,6 +172,26 @@ describe("collecting thread attention", () => {
     ]);
   });
 
+  it("reports a Chat thread whose turn waits on a question as waiting for an answer", () => {
+    expect(
+      collectThreadAttentionSignals({
+        chatThreads: [
+          { threadId: "chat-q", title: "Plan", activity: "attention", awaitingKind: "user-input" },
+        ],
+        workThreads: [],
+        codeThreads: [],
+      }),
+    ).toEqual([
+      {
+        threadId: "chat-q",
+        reason: "question-asked",
+        title: "Plan",
+        detail: "Waiting for your answer.",
+        source: "chat",
+      },
+    ]);
+  });
+
   it("reports a pending Work question as a question", () => {
     expect(
       collectThreadAttentionSignals({

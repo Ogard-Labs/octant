@@ -83,6 +83,7 @@ import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { HarnessWiring } from "./harness";
 import type { ChatWiring } from "./chat";
 import type { CanvasWiring } from "./canvas";
+import type { HarnessStateWiring } from "./harnessState";
 import type { WorkRequestStateWiring } from "./workRequestState";
 
 export type WorkDependencies = Pick<ServerStart, "persistence"> &
@@ -106,6 +107,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "spendCeiling"
     | "threadAwaitsHarnessApproval"
   > &
+  Pick<HarnessStateWiring, "threadAwaitsHarnessQuestion"> &
   Pick<WorkRequestStateWiring, "runningWorkTurns" | "workRequestRuntime" | "workRequestService"> &
   Pick<
     IntegrationsWiring,
@@ -221,6 +223,7 @@ export function wireWork(deps: WorkDependencies) {
     sideTasks,
     spendCeiling,
     threadAwaitsHarnessApproval,
+    threadAwaitsHarnessQuestion,
     threadMentionService,
     threadOutsideContentMarks,
     windowAuthorityStore,
@@ -271,6 +274,7 @@ export function wireWork(deps: WorkDependencies) {
         pendingRequest: pendingRequest !== undefined,
         ...(pendingRequest === undefined ? {} : { pendingRequestKind: pendingRequest.detail.kind }),
         leadApprovalWaiting: threadAwaitsHarnessApproval(String(threadId)),
+        leadQuestionWaiting: threadAwaitsHarnessQuestion(String(threadId)),
         childActive: childRuns.filter(
           (run) => isAgentRunActiveStatus(run.lifecycleStatus) && run.lifecycleStatus !== "waiting",
         ).length,

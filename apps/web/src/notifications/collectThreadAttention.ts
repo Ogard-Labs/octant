@@ -40,6 +40,10 @@ export function collectThreadAttentionSignals(
         reason: "approval-required",
         detail: "Waiting for your approval.",
       });
+    } else if (thread.activity === "attention" && thread.awaitingKind === "user-input") {
+      // A question the turn asked, a provider's or the harness lead's own:
+      // the turn is parked until a person answers.
+      signals.push({ ...shared, reason: "question-asked", detail: "Waiting for your answer." });
     }
   }
   for (const thread of sources.workThreads) {

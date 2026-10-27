@@ -72,7 +72,7 @@ export interface WorkBoardEvidenceSource {
 
 /**
  * Derive board activity from the thread's latest provider turn, a pending
- * request, the lead's own harness approval, and child-run activity.
+ * request, the lead's own harness approval or question, and child-run activity.
  *
  * Only the latest turn speaks for provider activity. A newer turn supersedes
  * every older one, so a stale running or waiting row cannot pin an idle thread.
@@ -94,12 +94,26 @@ export function boardRuntimeActivityFromTurnsAndSignals(input: {
    * wait when both are open.
    */
   readonly leadApprovalWaiting?: boolean;
+  /**
+   * The agent's own harness `ask-user` question blocks its turn on the
+   * person. It parks the thread exactly as a pending Work question does; a
+   * pending Work request, then the lead's approval, names the wait first.
+   */
+  readonly leadQuestionWaiting?: boolean;
   readonly childActive: number;
   readonly childWaiting: number;
 }): WorkBoardRuntimeActivity {
-  const pendingRequest = input.pendingRequest || input.leadApprovalWaiting === true;
+  const pendingRequest =
+    input.pendingRequest ||
+    input.leadApprovalWaiting === true ||
+    input.leadQuestionWaiting === true;
   const pendingRequestKind =
-    input.pendingRequestKind ?? (input.leadApprovalWaiting === true ? "approval" : undefined);
+    input.pendingRequestKind ??
+    (input.leadApprovalWaiting === true
+      ? "approval"
+      : input.leadQuestionWaiting === true
+        ? "user-input"
+        : undefined);
   const latest = input.turns.at(-1);
   const interrupted = latest !== undefined && turnInterrupted(latest);
   // A turn that asked for an approval or an answer keeps its `running` status

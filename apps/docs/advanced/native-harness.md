@@ -62,8 +62,9 @@ also gets one line per tool saying what it is for.
 ## Parity with Claude Code and Codex
 
 Parity means a thread on the harness behaves like one on Claude Code or Codex
-where you can see it: the same tools for the mode, a pending approval asking
-for your attention the way a question does, a task list that shows progress as
+where you can see it: the same tools for the mode, a pending approval or
+question asking for your attention the way a provider's question does, a task
+list that shows progress as
 the lead works, and the same session on web, terminal, and phone. Each release
 checks these before it says the harness is at parity. The checklist is in the
 [architecture](https://github.com/Ogard-Labs/octant/blob/main/docs/architecture.md#native-harness).
@@ -434,8 +435,13 @@ same question can be answered from any surface. The terminal
 shows a Chat thread's question too, read from the turn that asked, and closes
 its prompt with a note when the app answers first. A question nobody answers
 within ten minutes expires and the lead is told to continue with its best
-judgment; interrupting the turn cancels it. Every question and answer is
-journaled with the session.
+judgment; interrupting the turn cancels it. While it waits, the thread says
+it needs you the way a provider's question does: its sidebar mark and the
+pane header say **Needs you** rather than running, the Inbox lists it as
+waiting for your answer, and a Work task files under Waiting on the board.
+Answering, interrupting, or the question expiring clears all of them. Every
+question and answer is journaled with the session (in Chat, with the turn that
+asked).
 
 ## From the terminal
 

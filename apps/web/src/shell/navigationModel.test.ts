@@ -463,6 +463,19 @@ describe("buildSidebarNavigation", () => {
     expect(waiting).not.toHaveProperty("liveStep");
   });
 
+  it("marks a row whose turn waits on a question as needing the person's answer", () => {
+    const [waiting] = buildChatThreadNavigation([
+      {
+        awaitingInput: true,
+        awaitingKind: "user-input",
+        readSequence: 0,
+        threadId: "00000000-0000-4000-8000-000000000101",
+        title: "Planning",
+      },
+    ]);
+    expect(waiting).toMatchObject({ activity: "attention", awaitingKind: "user-input" });
+  });
+
   it("carries a running turn's start time and latest step onto the row, and nothing when idle", () => {
     const [running, idle] = buildChatThreadNavigation([
       {

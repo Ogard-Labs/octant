@@ -391,7 +391,8 @@ mark. The two chips shrink before the title does. While the host projects the
 thread as executing, a "Running" pill with a small spinner follows the chips.
 The host reports that a turn is executing but not when it began, so the pill
 names the state and claims no elapsed time. A thread parked on the agent's own
-approval shows "Needs you" in its place, without the spinner. See
+approval, or on a question its turn asked, shows "Needs you" in its place,
+without the spinner. See
 [Workspace](docs/design/workspace.md).
 
 ### Welcome and composer

@@ -265,9 +265,10 @@ export function useChatController(options: ChatControllerOptions) {
   const [executingByThread, setExecutingByThread] = useState<ReadonlyMap<string, boolean>>(
     new Map(),
   );
-  const [awaitingInputByThread, setAwaitingInputByThread] = useState<ReadonlyMap<string, boolean>>(
-    new Map(),
-  );
+  // What each thread parked on the person is asked; a thread not parked has no entry.
+  const [awaitingKindByThread, setAwaitingKindByThread] = useState<
+    ReadonlyMap<string, "approval" | "user-input">
+  >(new Map());
   const [liveTurnByThread, setLiveTurnByThread] = useState<ReadonlyMap<string, LiveTurnFacts>>(
     new Map(),
   );
@@ -384,16 +385,18 @@ export function useChatController(options: ChatControllerOptions) {
       }
       return changed ? next : current;
     });
-    setAwaitingInputByThread((current) => {
+    setAwaitingKindByThread((current) => {
       let changed = false;
       const next = new Map(current);
       for (const thread of threads) {
         const key = String(thread.id);
-        const awaiting = thread.awaitingInput === true;
-        if ((current.get(key) ?? false) !== awaiting) {
-          next.set(key, awaiting);
-          changed = true;
-        }
+        // An older host reports only the agent's own approval, with no kind.
+        const awaiting =
+          thread.awaitingInput === true ? (thread.awaitingKind ?? "approval") : undefined;
+        if (current.get(key) === awaiting) continue;
+        if (awaiting === undefined) next.delete(key);
+        else next.set(key, awaiting);
+        changed = true;
       }
       return changed ? next : current;
     });
@@ -816,9 +819,10 @@ export function useChatController(options: ChatControllerOptions) {
     const items = [];
     for (const thread of bootstrap.threads) {
       if (thread.lifecycle === "active") {
+        const awaitingKind = awaitingKindByThread.get(String(thread.id));
         items.push({
           ...(executingByThread.get(String(thread.id)) === true ? { executing: true } : {}),
-          ...(awaitingInputByThread.get(String(thread.id)) === true ? { awaitingInput: true } : {}),
+          ...(awaitingKind === undefined ? {} : { awaitingInput: true, awaitingKind }),
           ...liveTurnByThread.get(String(thread.id)),
           ...(followUpByThread.get(String(thread.id)) === undefined
             ? {}
@@ -848,7 +852,7 @@ export function useChatController(options: ChatControllerOptions) {
       markedUnreadThreads.has(item.threadId) ? { ...item, unread: true } : item,
     );
   }, [
-    awaitingInputByThread,
+    awaitingKindByThread,
     bootstrap,
     executingByThread,
     followUpByThread,

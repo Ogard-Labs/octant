@@ -19,12 +19,14 @@ import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import {
   awaitsLeadApproval,
+  awaitsLeadQuestion,
   leadApprovalFor,
   listLeadApprovalRequests,
   type LeadApprovalRowSources,
 } from "./leadApprovalAttention";
 import { NativeHarnessApprovalStore } from "./nativeHarnessApprovals";
 import { registerNativeHarnessEvents } from "./nativeHarnessEvents";
+import { NativeHarnessQuestionStore } from "./nativeHarnessQuestions";
 import { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
 
 const directories: string[] = [];
@@ -73,7 +75,13 @@ function openStores(connection: SqliteConnection, options: { readonly timeoutMs?
     clock: () => now,
     ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
   });
-  return { sessions, approvals };
+  const questions = new NativeHarnessQuestionStore({
+    sessions,
+    uuid,
+    clock: () => now,
+    ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+  });
+  return { sessions, approvals, questions };
 }
 
 function fixture(options: { readonly timeoutMs?: number } = {}) {
@@ -208,6 +216,70 @@ describe("a pending harness approval across a host restart", () => {
     approvals.decide(thread, String(sessions.read(thread)?.approvals?.[0]?.id), "deny");
     await outcome;
     expect(awaitsLeadApproval({ approvals, sessions }, thread)).toBe(false);
+  });
+});
+
+describe("a lead's own pending harness question needs the person", () => {
+  function askQuestion(
+    stores: ReturnType<typeof fixture>,
+    input: { readonly child?: boolean; readonly signal?: AbortSignal } = {},
+  ) {
+    return stores.questions.ask({
+      threadId: thread,
+      mode: "work",
+      projectId: projectId as never,
+      lead,
+      ...(input.child === true ? { source: child } : {}),
+      prompt: "Which report should I update?",
+      options: ["Q3", "Q4"],
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    });
+  }
+
+  it("marks the thread from the moment the lead asks until any surface answers", async () => {
+    const stores = fixture();
+    expect(awaitsLeadQuestion(stores, thread)).toBe(false);
+    const outcome = askQuestion(stores);
+    expect(awaitsLeadQuestion(stores, thread)).toBe(true);
+    expect(awaitsLeadQuestion(stores, otherThread)).toBe(false);
+    // The question stays where it was journaled; nothing copies it elsewhere.
+    const pending = stores.sessions.read(thread)?.questions[0];
+    expect(pending).toMatchObject({ prompt: "Which report should I update?", status: "pending" });
+    expect(stores.questions.answer(thread, String(pending?.id), "Q4")).toBe("answered");
+    await expect(outcome).resolves.toMatchObject({ status: "answered", answer: "Q4" });
+    expect(awaitsLeadQuestion(stores, thread)).toBe(false);
+    expect(stores.sessions.read(thread)?.questions[0]).toMatchObject({
+      status: "answered",
+      answer: "Q4",
+    });
+  });
+
+  it("clears when the turn is cancelled or the question expires", async () => {
+    const cancelled = fixture();
+    const controller = new AbortController();
+    const wait = askQuestion(cancelled, { signal: controller.signal });
+    expect(awaitsLeadQuestion(cancelled, thread)).toBe(true);
+    controller.abort();
+    await expect(wait).resolves.toMatchObject({ status: "cancelled" });
+    expect(awaitsLeadQuestion(cancelled, thread)).toBe(false);
+
+    const expired = fixture({ timeoutMs: 5 });
+    await expect(askQuestion(expired)).resolves.toMatchObject({ status: "expired" });
+    expect(awaitsLeadQuestion(expired, thread)).toBe(false);
+  });
+
+  it("does not count a subagent's question as the thread's own", () => {
+    const stores = fixture();
+    void askQuestion(stores, { child: true });
+    expect(awaitsLeadQuestion(stores, thread)).toBe(false);
+  });
+
+  it("does not count a question no turn waits on any more, as after a restart", () => {
+    const before = fixture();
+    void askQuestion(before);
+    const after = openStores(before.connection);
+    expect(after.sessions.read(thread)?.questions[0]?.status).toBe("pending");
+    expect(awaitsLeadQuestion(after, thread)).toBe(false);
   });
 });
 
