@@ -186,12 +186,17 @@ Its seam and companion are built: the `language-server` component kind, the
 pure launch policy, the read and document contracts, the remote-approvable
 `code.language.read` action, and the server's confined, receipted,
 crash-limited language servers behind `POST /api/code/language/documents` and
-`POST /api/code/language/read`. The bundled TypeScript server is the only
-component. The Monaco editor calls those routes through the Code client: it
-shows the server's diagnostics as markers and opens a definition in another
-file through the ordinary file-open path, locally and from a paired device. A
-Settings › Code switch, stored in the journaled Code settings, turns the
-bundled server off, and the host then answers `turned-off`.
+`POST /api/code/language/read`. Besides the bundled TypeScript server, a
+person can add a `static` server from a local folder holding an
+`octant-language-server.json` package document: it installs through the
+extension package store untrusted and disabled, its review names the binary,
+its digest, its languages, and its class, and it serves only once trusted and
+switched on, verified against that digest at every start. The Monaco editor
+calls those routes through the Code client: it shows the server's diagnostics
+as markers and opens a definition in another file through the ordinary
+file-open path, locally and from a paired device. A Settings › Code switch,
+stored in the journaled Code settings, turns the bundled server off, and the
+host then answers `turned-off`.
 
 **Host resources.** `GET /api/host/resources` is a read-only snapshot of this
 host's load: CPU use averaged over a short sample of the process's CPU times,

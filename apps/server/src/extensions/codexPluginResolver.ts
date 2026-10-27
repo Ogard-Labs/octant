@@ -24,9 +24,17 @@ import {
   type PinnedUpstreamFetchInput,
 } from "./pinnedUpstreamPackageFetcher";
 import { createMarketplaceFetch } from "./marketplaceHttps";
+import {
+  LanguageServerPackageRefusedError,
+  readLanguageServerPackage,
+  type LanguageServerPackageInput,
+} from "./languageServerPackage";
 import type { CuratedBuildIosAppsCatalogSource } from "./curatedBuildIosAppsCatalog";
 
-export type PluginPackageInput = CodexPluginPackageInput | AgentPluginPackageInput;
+export type PluginPackageInput =
+  | CodexPluginPackageInput
+  | AgentPluginPackageInput
+  | LanguageServerPackageInput;
 
 /**
  * A live Agent Plugins catalog source (today npm) that the resolver can search
@@ -238,6 +246,11 @@ export class CodexPluginPackageResolver implements ExtensionPackageResolverPort 
 }
 
 function normalizePluginPackage(input: PluginPackageInput): ResolvedExtensionPackage {
+  if ("layout" in input) {
+    const reading = readLanguageServerPackage(input);
+    if (reading.status === "refused") throw new LanguageServerPackageRefusedError(reading.reason);
+    return reading.resolved;
+  }
   if (isAgentPluginPackageInput(input)) {
     return normalizeAgentPluginPackage(input);
   }

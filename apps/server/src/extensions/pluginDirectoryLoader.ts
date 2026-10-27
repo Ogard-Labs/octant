@@ -10,9 +10,14 @@ import {
   type LoadAgentPluginDirectoryOptions,
   type ReadPluginDirectory,
 } from "./agentPluginFilesystem";
+import { LANGUAGE_SERVER_PACKAGE_DOCUMENT_PATH } from "@octant/plugin-api/language-server-package";
 import { packageSlug } from "./userAddedMcpServers";
 
-export type PluginDirectoryFormat = "agent-plugins" | "codex-plugin" | "claude-plugin";
+export type PluginDirectoryFormat =
+  | "agent-plugins"
+  | "codex-plugin"
+  | "claude-plugin"
+  | "language-server-package";
 
 export interface LoadedPluginDirectory extends ReadPluginDirectory {
   readonly format: PluginDirectoryFormat;
@@ -27,10 +32,21 @@ export interface LoadedPluginDirectory extends ReadPluginDirectory {
  * package (root `plugin.json`), a Codex plugin (`.codex-plugin/plugin.json`),
  * or a Claude Code plugin (`.claude-plugin/plugin.json`, `.mcp.json`, or a
  * `skills/` folder). Undefined means none of them.
+ *
+ * A folder with a language server package's document at its root is read as
+ * that and as nothing else, so a language server never also arrives as skills
+ * or MCP servers, and no other layout is ever read as a language server.
  */
 export function detectPluginDirectoryFormat(
   entries: ReadonlyArray<AgentPluginsPackageEntry>,
 ): PluginDirectoryFormat | undefined {
+  if (
+    entries.some(
+      (entry) => entry.path === LANGUAGE_SERVER_PACKAGE_DOCUMENT_PATH && entry.kind === "file",
+    )
+  ) {
+    return "language-server-package";
+  }
   if (looksLikeAgentPlugin(entries)) return "agent-plugins";
   if (
     entries.some((entry) => entry.path === ".codex-plugin/plugin.json" && entry.kind === "file")
@@ -69,7 +85,9 @@ export async function loadPluginDirectory(
       "Folder is not a plugin: no plugin.json, .codex-plugin/plugin.json, .claude-plugin/plugin.json, .mcp.json or skills/ found.",
     );
   }
-  if (format === "agent-plugins") return { ...read, format, notes: [] };
+  if (format === "agent-plugins" || format === "language-server-package") {
+    return { ...read, format, notes: [] };
+  }
   if (format === "codex-plugin") {
     return {
       ...read,
