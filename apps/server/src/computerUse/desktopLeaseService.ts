@@ -7,6 +7,7 @@ import {
   EventId,
   decodeAggregateVersion,
   decodeDesktopLeaseId,
+  decodeEventActor,
   decodeUtcTimestamp,
   type ComputerControlCommand,
   type ComputerControlResult,
@@ -16,6 +17,8 @@ import {
   type DesktopLease,
   type DesktopLeaseEndReason,
   type DesktopLeaseId,
+  type DesktopLeaseOperated,
+  type DesktopLeaseOperation,
   type DesktopLeaseOwner,
   type DesktopLeaseRefusal,
   type DesktopLeaseRefusalReason,
@@ -31,6 +34,7 @@ import {
 } from "@octant/contracts";
 import {
   cacheBackoffHolds,
+  clampTurnAccessPosture,
   decideDesktopArtifactTransfer,
   decideDesktopLeaseAcquire,
   decideDesktopLeaseExtension,
@@ -47,6 +51,7 @@ import type {
   DesktopProvider,
   DesktopTeardownPort,
 } from "@octant/plugin-api/desktop-provider";
+import type { ComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
 import {
@@ -203,7 +208,24 @@ export interface DesktopLeaseService {
    * host hashed, showed, and journaled are the bytes the driver receives.
    */
   readonly transfer: (
-    caller: DesktopLeaseCaller & { readonly leaseId: DesktopLeaseId; readonly path: string },
+    caller: DesktopLeaseCaller & {
+      readonly leaseId: DesktopLeaseId;
+      readonly path: string;
+      /**
+       * Where this caller's confirmation is asked, when it brings its own: an
+       * agent's turn asks in its thread. Otherwise `confirmTransfer` asks.
+       */
+      readonly confirm?: (request: DesktopTransferConfirmation) => Promise<"approved" | "declined">;
+      /**
+       * An agent's turn as it runs now. A turn may sit below its thread's
+       * posture, and a thread that read outside content no longer lets Full
+       * access carry the agent's transfer; either only adds a question.
+       */
+      readonly turn?: {
+        readonly executionPolicy: ProviderExecutionPolicy;
+        readonly externalContentIngested: boolean;
+      };
+    },
   ) => Promise<DesktopLeaseTransferResult>;
   /** A Desktop tab opened or closed on a lease; an open tab holds idle release off. */
   readonly markTab: (leaseId: DesktopLeaseId, change: "opened" | "closed") => void;
@@ -248,6 +270,29 @@ const refused = (reason: DesktopLeaseRefusalReason): DesktopLeaseRefusal => ({
   status: "refused",
   reason,
 });
+const DRIVER_DID_NOT_ANSWER: ComputerControlResult = {
+  kind: "failed",
+  reason: "driver-error",
+  message: "The desktop provider failed to answer.",
+};
+
+/** The input a command sends, or undefined for one that only reads the screen. */
+function operationOf(command: ComputerControlCommand): DesktopLeaseOperation | undefined {
+  switch (command.operation) {
+    case "launch":
+    case "click":
+    case "type":
+    case "press":
+    case "scroll":
+      return command.operation;
+    case "apps":
+    case "windows":
+    case "observe":
+    case "stop":
+      return undefined;
+  }
+}
+
 const isPerson = (actor: EventActor): boolean =>
   actor.kind === "local-user" || actor.kind === "remote-device";
 const sameOwner = (left: DesktopLeaseOwner, right: DesktopLeaseOwner): boolean =>
@@ -796,21 +841,36 @@ export function createDesktopLeaseService(
     return { status: "operating", record, handle, provider: loaded.provider, thread };
   }
 
-  const control: DesktopLeaseService["control"] = async (caller) => {
-    const admitted = admitOperating(caller);
-    if (admitted.status === "refused") return admitted;
-    const entry = live.get(String(caller.leaseId));
-    if (entry !== undefined) entry.lastActivityAt = options.now();
-    const { provider, handle } = admitted;
-    const result = await driverCall(() => provider.control(handle, caller.command)).catch(
-      (): ComputerControlResult => ({
-        kind: "failed",
-        reason: "driver-error",
-        message: "The desktop provider failed to answer.",
-      }),
-    );
-    return { status: "answered", result };
-  };
+  /**
+   * Commands run in the lease's order, so a release never races one, and are
+   * bounded like a teardown call. An input is journaled with the caller as
+   * actor before the driver gets it, so a command cut off midway is still on
+   * record; reading the screen is not journaled.
+   */
+  const control: DesktopLeaseService["control"] = (caller) =>
+    inOrder(caller.leaseId, async (): Promise<DesktopLeaseControlResult> => {
+      const admitted = admitOperating(caller);
+      if (admitted.status === "refused") return admitted;
+      const { record, provider, handle } = admitted;
+      const operation = operationOf(caller.command);
+      if (operation !== undefined) {
+        const operated: DesktopLeaseOperated = {
+          leaseId: caller.leaseId,
+          owner: record.lease.owner,
+          providerId: record.lease.providerId,
+          operation,
+          ...(caller.command.operation === "launch" ? { appId: caller.command.appId } : {}),
+        };
+        append(record, caller.leaseId, DESKTOP_LEASE_EVENT_NAMES.operated, operated, caller.actor);
+      }
+      const entry = live.get(String(caller.leaseId));
+      if (entry !== undefined) entry.lastActivityAt = options.now();
+      const result = await bounded(
+        () => provider.control(handle, caller.command),
+        DRIVER_DID_NOT_ANSWER,
+      );
+      return { status: "answered", result };
+    });
 
   /**
    * Extensions run in the lease's order, provider call included. Two people
@@ -886,9 +946,13 @@ export function createDesktopLeaseService(
     const first = admitOperating(caller);
     if (first.status === "refused") return first;
     const gate = decideDesktopArtifactTransfer({
-      executionPolicy: first.thread.executionPolicy,
+      executionPolicy: clampTurnAccessPosture({
+        ...(caller.turn === undefined ? {} : { requested: caller.turn.executionPolicy }),
+        thread: first.thread.executionPolicy,
+      }),
       locality: first.provider.locality,
       initiator: caller.actor.kind,
+      externalContentIngested: caller.turn?.externalContentIngested === true,
     });
     if (gate.kind === "refused") return refused(gate.reason);
     const owner = first.record.lease.owner;
@@ -902,15 +966,16 @@ export function createDesktopLeaseService(
     if (read.status === "refused") return read;
     const { artifact, bytes } = read;
     if (gate.kind === "ask") {
-      const answer = await options
-        .confirmTransfer({
+      const confirm = caller.confirm ?? options.confirmTransfer;
+      const answer = await driverCall(() =>
+        confirm({
           owner,
           leaseId: caller.leaseId,
           provider: leasableOf(first.provider),
           asks: gate.asks,
           artifact,
-        })
-        .catch(() => "declined" as const);
+        }),
+      ).catch(() => "declined" as const);
       if (answer !== "approved") return refused("declined");
     }
     return inOrder(caller.leaseId, async (): Promise<DesktopLeaseTransferResult> => {
@@ -1072,5 +1137,105 @@ export function createDesktopLeaseService(
     transfer,
     markTab,
     sweep,
+  };
+}
+
+/**
+ * The host's path to a thread's disposable desktops for one agent turn's
+ * `octant_computer`. Approvals, sensitive-field protection, and taint stay
+ * with the tool binding; this only acts as the owner's agent.
+ */
+export interface LeasedComputerUsePort {
+  /** Whether a send may bind the owner's lease: its own thread's, and running. */
+  readonly bindable: (owner: ComputerUseOwner) => boolean;
+  readonly control: (
+    owner: ComputerUseOwner,
+    command: ComputerControlCommand,
+  ) => Promise<ComputerControlResult>;
+  readonly sendFile: (
+    owner: ComputerUseOwner,
+    path: string,
+    confirm: (request: DesktopTransferConfirmation) => Promise<"approved" | "declined">,
+    /** Whether the owner's thread has read outside content, which stops Full access carrying the send. */
+    externalContentIngested: boolean,
+  ) => Promise<ComputerControlResult>;
+}
+
+const LEASE_REFUSAL_MESSAGE =
+  "The host refused this on the thread's disposable desktop; the reason names why.";
+
+/**
+ * Every call goes through the lease service as the owner's agent, so the
+ * lease's authority is checked again each time and what the agent sends is
+ * journaled as `agent`.
+ */
+export function createLeasedComputerUsePort(
+  service: Pick<DesktopLeaseService, "control" | "transfer">,
+  projection: Pick<DesktopLeaseProjection, "get">,
+): LeasedComputerUsePort {
+  const callerOf = (owner: ComputerUseOwner) => {
+    if (owner.leaseId === undefined) return undefined;
+    return {
+      owner: { mode: owner.mode, threadId: owner.threadId },
+      actor: decodeEventActor({
+        kind: "agent",
+        actorId: owner.providerInstanceId,
+        providerInstanceId: owner.providerInstanceId,
+        threadId: owner.threadId,
+      }),
+      leaseId: owner.leaseId,
+    };
+  };
+  const unbound: ComputerControlResult = {
+    kind: "refused",
+    reason: "no-destination",
+    message: "This turn is not bound to a disposable desktop.",
+  };
+  return {
+    bindable: (owner) => {
+      if (owner.leaseId === undefined) return false;
+      const lease = projection.get(owner.leaseId)?.lease;
+      return (
+        lease !== undefined &&
+        lease.state === "ready" &&
+        lease.owner.mode === owner.mode &&
+        String(lease.owner.threadId) === String(owner.threadId)
+      );
+    },
+    control: async (owner, command) => {
+      const caller = callerOf(owner);
+      if (caller === undefined) return unbound;
+      const answered = await service.control({ ...caller, command });
+      return answered.status === "answered"
+        ? answered.result
+        : { kind: "refused", reason: answered.reason, message: LEASE_REFUSAL_MESSAGE };
+    },
+    sendFile: async (owner, path, confirm, externalContentIngested) => {
+      const caller = callerOf(owner);
+      if (caller === undefined) return unbound;
+      const sent = await service.transfer({
+        ...caller,
+        path,
+        confirm,
+        turn: { executionPolicy: owner.executionPolicy, externalContentIngested },
+      });
+      switch (sent.status) {
+        case "delivered":
+          return {
+            kind: "sent",
+            name: sent.artifact.name,
+            size: sent.artifact.size,
+            sha256: sent.artifact.sha256,
+          };
+        case "not-delivered":
+          return {
+            kind: "failed",
+            reason: "not-delivered",
+            message: "The transfer was recorded, but the desktop did not confirm it has the file.",
+          };
+        case "refused":
+          return { kind: "refused", reason: sent.reason, message: LEASE_REFUSAL_MESSAGE };
+      }
+    },
   };
 }

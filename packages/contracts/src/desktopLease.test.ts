@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   DESKTOP_ARTIFACT_MAXIMUM_BYTES,
+  decodeComputerUseDestinationSelection,
   decodeDesktopArtifactSent,
+  decodeDesktopLeaseOperated,
   decodeDesktopLeaseRequested,
   decodeDesktopLeaseTransitioned,
   decodeDesktopRecipe,
@@ -86,5 +88,31 @@ describe("desktop lease contract", () => {
     expect(() =>
       decodeDesktopArtifactSent({ ...sent, size: DESKTOP_ARTIFACT_MAXIMUM_BYTES + 1 }),
     ).toThrow();
+  });
+
+  it("journals which input an operator sent and refuses the text or key it carried", () => {
+    const operated = {
+      leaseId,
+      owner: { mode: "code", threadId },
+      providerId: "host-local",
+      operation: "launch",
+      appId: "notes-app",
+    } as const;
+    expect(decodeDesktopLeaseOperated(operated)).toEqual(operated);
+    expect(() =>
+      decodeDesktopLeaseOperated({ ...operated, operation: "type", text: "secret" }),
+    ).toThrow();
+    expect(() => decodeDesktopLeaseOperated({ ...operated, operation: "observe" })).toThrow();
+  });
+
+  it("names a send's desktop destination by its lease id alone", () => {
+    expect(decodeComputerUseDestinationSelection({ kind: "desktop-lease", leaseId })).toEqual({
+      kind: "desktop-lease",
+      leaseId,
+    });
+    expect(() =>
+      decodeComputerUseDestinationSelection({ kind: "desktop-lease", leaseId, providerId: "x" }),
+    ).toThrow();
+    expect(() => decodeComputerUseDestinationSelection({ kind: "this-mac" })).toThrow();
   });
 });

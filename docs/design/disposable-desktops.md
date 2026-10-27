@@ -8,18 +8,21 @@ app-managed ([Architecture: extensions and skills](../architecture.md#extensions
 launches go through the shared confinement port, and authority is checked on the
 server ([Architecture: security and authority](../architecture.md#security-and-authority)).
 
-**Delivery state.** Accepted 2026-10-26; slices 1–3 are built and slices
-4–6 are not. The maintainer authorized this scope as post-preview work and
+**Delivery state.** Accepted 2026-10-26; slices 1–4 are built and slices
+5–6 are not. The maintainer authorized this scope as post-preview work and
 accepted the [maintainer decisions](#maintainer-decisions) below on 2026-10-26;
 it is not part of the first release, and the
 [Current Release Boundary](../../AGENTS.md#current-release-boundary) is
 unchanged by this document. The lease contract, the `desktop-provider` seam
 and its conformance suite, the host lease service, the host-local provider,
-and artifact transfer exist; no recipe storage, agent binding, or Desktop pane
-does, so a running host refuses every lease and transfer command as a value
-(see [Built in slice 1](#built-in-slice-1),
-[Built in slice 2](#built-in-slice-2), and
-[Built in slice 3](#built-in-slice-3)).
+artifact transfer, and the agent's binding of `octant_computer` to a lease
+exist; no recipe storage or Desktop pane does, so a running host refuses every
+lease command as a value and no lease exists for a send to bind (see
+[Built in slice 1](#built-in-slice-1),
+[Built in slice 2](#built-in-slice-2),
+[Built in slice 3](#built-in-slice-3), and
+[Built in slice 4](#built-in-slice-4)). Slice 4's real-provider smoke is
+still owed by the maintainer.
 
 **Name.** The product calls it a _disposable desktop_. "Computer" already names
 the Mac computer-use destination and the paired-host Computers card, and a
@@ -62,14 +65,17 @@ somewhere that holds neither.
   Electron main (`apps/desktop/src/computerUseBroker.ts`,
   `computerUseControlHost.ts`). That driver is supported only on Apple Silicon
   macOS (`apps/desktop/src/computerUseDesktopService.ts`). A headless host has
-  no broker, so `apps/server/src/wiring/computerUse.ts` builds no tool service
-  and the runtime reports the lease service's destination: `no-destination` on
-  a Mac without a screen and on a Linux host whose host-local provider is
-  ready (a leasable provider is not a screen the runtime drives),
-  `no-provider-configured` elsewhere.
+  no broker. On Linux, `apps/server/src/wiring/computerUse.ts` still builds the
+  tool service, for sends bound to one of the thread's leases
+  ([Built in slice 4](#built-in-slice-4)); elsewhere it builds none. Either way
+  the host reports the lease service's destination: `leasable` on a Linux host
+  whose host-local provider is ready, `no-destination` on a Mac without a
+  screen, `no-provider-configured` elsewhere. A leasable provider is not a
+  screen: only a send that names a lease binds one.
 - **Command set.** `ComputerControlCommand` has `apps`, `launch`, `windows`,
   `observe`, `click` (by element index, or by `x`/`y` on a screenshot for an
-  image-capable model), `type`, `press`, `scroll`, and `stop`. The older
+  image-capable model), `type`, `press` (by element index, or to keyboard
+  focus, which only a disposable desktop accepts), `scroll`, and `stop`. The older
   `ComputerUseActionKind` in `packages/contracts/src/computerUse.ts` also names
   `drag` and `move-cursor`, which the live command set does not carry.
 - **Actors.** `EventActor` (`packages/contracts/src/events.ts`) already
@@ -637,7 +643,9 @@ Rules this slice resolved:
 - **Who is asked.** Plan refuses. Below Full access an agent's transfer asks
   in the thread, auto-accept-edits included: that posture covers edits to the
   checkout, not sending a file out of it. Full access proceeds to a host-local
-  desktop, and a person sending a file to one is not asked again. A transfer
+  desktop unless the agent's thread has read outside content
+  ([slice 4](#built-in-slice-4)), and a person sending a file to one is not
+  asked again. A transfer
   to a cloud desktop asks a person every time (`off-machine`).
 - **Where it lands.** The file is written whole beside the lease's `home` and
   `inbox`, made read-only (`0444`), and renamed into the inbox under its base
@@ -663,6 +671,118 @@ inside the capsule and cannot be removed, that the port refuses names that
 leave the inbox and leases with no running desktop, and that a transfer
 through the lease service lands in a running desktop's inbox.
 
+### Built in slice 4
+
+- **Contract.** `ComputerUseDestinationSelection` in
+  `packages/contracts/src/desktopLease.ts`, a `desktop-lease` kind and a
+  lease id, is a send's
+  destination: `computerUseDestination` beside `computerUseSelection` on a
+  Code turn's `start-provider-turn` and on a queued Code message.
+  `ComputerUseOwner` carries the bound `leaseId`. `type` and `press` gain a
+  keyboard-focus form with no `elementIndex`. `ComputerSendFileCommand`
+  (`send-file` with a checkout-relative `path`) and the `sent` result carry an
+  agent's transfer. `desktop.operated@1` on the `desktop-lease` aggregate
+  records one input (`launch`, `click`, `type`, `press`, or `scroll`) with
+  its operator as actor and the app a launch started, never the text or key.
+- **Seam.** `ComputerUseHostPort.disposableDesktop.sendFile` in
+  `packages/plugin-api/src/computerUse.ts`, present only for a send bound to
+  a lease. The bundled Computer use plugin then offers the desktop form of
+  `octant_computer`, with `send-file`.
+- **Host.** `apps/server/src/computerUse/computerUseToolService.ts` binds the
+  turn's tool to the send's destination; `createLeasedComputerUsePort` in
+  `desktopLeaseService.ts` reaches the lease as the owner's agent. The lease
+  service's `control` runs in the lease's order, bounded like a teardown call,
+  and journals input before the driver gets it; `transfer` takes the caller's
+  own confirmation. The Code runtime carries the destination from the send to
+  the turn's tool set with the thread's own approval prompt.
+- **Driver.** `apps/server/src/plugins/hostLocalDesktop/hostLocalDesktopControl.ts`
+  translates the command set onto the screen and two more protocol lines,
+  `launch NAME` and `alive PID`. Readiness also requires `mkdir`, `rm`, `cp`,
+  and `chmod`.
+- **Wiring.** An agent caller may open its own thread's lease while it is the
+  thread's current provider; a person still may not until the Desktop pane
+  (slice 5) brings their authority. Acquire confirmation still declines for
+  every caller.
+
+Rules this slice resolved:
+
+- **One destination per send, named by lease id.** `computerUseDestination`
+  is valid only beside `computerUseSelection`; alone, it fails the turn's
+  start. Absent, the destination is this Mac. At admission the host binds
+  only a lease that is the sending thread's own and `ready`, or the turn does
+  not start; every command then goes through the lease service, which checks
+  the lease's authority again. Only Code turns carry a destination; a Work
+  turn cannot name a lease yet (the later Work-mode item).
+- **An agent neither acquires nor releases.** A send binds a lease that
+  already exists, so this slice gives the agent no acquire, extend, or
+  release: acquiring is an effect with its own approval and billing rules,
+  and binding needs nothing from it. With no recipe storage and no Desktop
+  pane, a running host holds no lease to bind yet.
+- **What an app is.** An app is a file the host sent into the lease's inbox,
+  and its `appId` is the file name; a name the command set cannot carry
+  (one with a space, say) is not offered. `launch` copies the file from the
+  read-only inbox into the desktop's private home, makes the copy executable
+  by the desktop's user only, and runs it detached, so nothing in the inbox
+  ever executes. An app has one window, the whole screen (`windowId` 1),
+  while its process runs; a command for an app that exited refuses
+  `app-not-running`.
+- **Observations are screenshots.** An observation is the whole screen as
+  PNG with no elements. `click` takes `x` and `y` on it; `type` and `press`
+  go to keyboard focus, which a click sets; a command addressed to an element
+  refuses `unsupported`. Each action returns a fresh screenshot. Rejected:
+  inventing one "focus" element so the existing element forms could carry
+  text, which would make an observation claim an element the screen does not
+  have. This Mac refuses the keyboard-focus forms (`unsupported`) in the tool
+  service and again in its driver, because there they would skip the
+  text-field and protected-field checks an element gets. Sensitive-field
+  protection applies to what a destination reports; a host-local desktop
+  reports no fields and holds nothing of the host's.
+- **`needs-image-model`.** On a lease, a model whose inputs do not include
+  images is refused `needs-image-model` for every command but `stop`, and for
+  `send-file`, before anything is asked or sent.
+- **Approvals are asked in the thread.** Per-app approval keeps the existing
+  rules: a five-minute app grant, one action at a time once the thread is
+  tainted, and Plan refuses. A desktop's approval is also asked in the
+  thread, where any client that may open the thread can answer it
+  ([decision 3](#maintainer-decisions)); the first answer, there or on a
+  local approval card, decides and withdraws the other. This Mac's approvals
+  stay local. An agent's transfer asks in the thread, with its path, size,
+  SHA-256, and destination, below Full access; a cloud desktop asks every
+  time. The posture is the turn's, which may sit below the thread's, so a
+  turn sent at approval-gated on a Full access thread asks. Once the thread
+  has read outside content, an agent's transfer asks under Full access too:
+  `send-file` is a Computer use action, and taint stops standing approvals,
+  which Full access is.
+- **Agent input is journaled.** `desktop.operated@1` is written before the
+  driver gets the input, with the agent as actor. Reading the screen (apps,
+  windows, observe) is not journaled, and typed text and keys never are.
+  Results taint the thread like any Computer use result.
+- **Stop leaves the lease.** `stop` ends the task's Computer use sessions and
+  grants; the desktop keeps running until its lease ends.
+
+Evidence: under real Bubblewrap with `Xvfb`, `xdotool`, ImageMagick, and
+`xev`, `hostLocalDesktopProcess.test.ts` runs a scripted agent turn through
+the tool service, the agent's lease port, the lease service, and the
+host-local driver: `send-file` asks in the thread and delivers, `launch` asks
+for the app and starts the sent file, an observation returns a screenshot,
+and the app's own event log shows the click, each typed key, and Enter. The
+journal holds `desktop.artifact-sent@1` and `launch`, `click`, `type`, and
+`press` inputs, all with actor `agent` and none with the typed text, and the
+conformance suite still passes over the real launch port, refusing an
+element-addressed click as `unsupported`. `computerUseToolService.test.ts`
+covers binding, the approval asked in the thread, the first of the thread's
+and the local card's answers withdrawing the other, the one-action rule under
+taint, Plan refusal, `needs-image-model`, the transfer question, and this Mac
+refusing keyboard-focus input; `desktopLeaseService.test.ts` covers the
+journaled input, the caller's own confirmation, and a transfer asked at the
+turn's lower posture or under taint; `codeOperationRuntime.test.ts`
+covers a destination reaching the turn's tool set and its approval in the
+thread. `computerUseRuntime.test.ts` and the earlier tool-service tests pass.
+Owed by the maintainer: a real-provider smoke, a turn on a provider
+credential's image-capable model driving a leased desktop through
+`octant_computer`. Until recipe storage exists, that smoke needs a
+development host that supplies a recipe.
+
 ## Rationale
 
 The original plan leaned on execution capsules for isolation and a cloud
@@ -684,7 +804,8 @@ Source entry points: `apps/server/src/computerUse/desktopLeaseService.ts` and
 (the seam), `apps/server/src/computerUse/hostLocalDesktopLaunch.ts` (the
 host-local launch through `apps/server/src/process/linuxConfinement.ts`),
 `apps/server/src/computerUse/desktopArtifactRead.ts` (the transfer's read),
-`apps/server/src/plugins/hostLocalDesktop/` (the host-local driver), and, once
-built, the web Desktop pane. Each slice above lists its
+`apps/server/src/plugins/hostLocalDesktop/` (the host-local driver and its
+agent control), `apps/server/src/computerUse/computerUseToolService.ts` (a
+send's binding to a lease), and, once built, the web Desktop pane. Each slice above lists its
 evidence. Lease negatives, restart reconciliation, and real-`bwrap` permission
 negatives are the load-bearing checks; a cloud smoke is maintainer-run.
