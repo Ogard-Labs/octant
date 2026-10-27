@@ -21,8 +21,11 @@ a device code from `octant provider sign-in`, against fakes; closing it waits
 on its own real-tenant smoke. Slice 3 is built: an OpenAI-compatible or
 Anthropic-compatible gateway can sign in at the organization's own OpenID
 Connect issuer (the broker's `issuer-oidc` dialect) against fakes; closing it
-waits only on the maintainer's real-gateway smoke below. `cloud-iam` and slice
-4 are not built.
+waits only on the maintainer's real-gateway smoke below. Slice 4 is built: an
+Amazon Bedrock endpoint signs in at the organization's single sign-on portal
+with a device code, and the broker signs each Converse request (`cloud-iam`),
+against fakes; closing it waits only on the maintainer's real-account smoke
+below.
 Each slice below lands with its own implementation, tests, and the edits to
 this file that record what it built.
 
@@ -51,9 +54,13 @@ and never falls back to another authentication.
 | `directory-oidc` dialect  | [`hostOAuth.ts`](../../packages/host-runtime/src/hostOAuth.ts), [`fakeDirectory.test-support.ts`](../../packages/host-runtime/src/fakeDirectory.test-support.ts)                                                                                                                                                                                                     | Slice 1b: tenant-built authority, identity-token validation with `tid`, the echoed-scope binding, the binding check on `access`, directory error-code mapping, local sign-out, and an HTTP fake directory (authorize, token, key set) the broker tests drive                                |
 | Device-code sign-in       | [`providerDeviceSignInRoutes.ts`](../../apps/server/src/providers/oauth/providerDeviceSignInRoutes.ts), [`providerSignInCommand.ts`](../../packages/cli/src/providerSignInCommand.ts)                                                                                                                                                                                | Slice 2: `octant provider sign-in <instance>` on the host, the host-local `/api/desktop/provider-sign-in` routes, the broker's directory device authorization, and the per-instance `deviceCodeSignIn` opt-in                                                                               |
 | Gateway issuer sign-in    | [`hostOAuth.ts`](../../packages/host-runtime/src/hostOAuth.ts) (`issuer-oidc`), [`directorySignIn.ts`](../../packages/domain/src/directorySignIn.ts) (`gatewayDirectoryDescriptor`), `DirectoryIssuerBinding` in [`providers.ts`](../../packages/contracts/src/providers.ts), [`gatewayDirectory.test.ts`](../../apps/server/src/providers/gatewayDirectory.test.ts) | Slice 3: the organization's own issuer, found by its discovery document, for one gateway scope; the OpenAI-compatible and Anthropic-compatible drivers send its bearer per request on the same seam, transport, and route as Foundry                                                        |
+| Cloud signer              | [`cloudIam.ts`](../../packages/host-runtime/src/cloudIam.ts), [`sigV4.ts`](../../packages/host-runtime/src/sigV4.ts), [`fakeCloudIam.test-support.ts`](../../packages/host-runtime/src/fakeCloudIam.test-support.ts)                                                                                                                                                 | Slice 4: the `/v1/cloud-iam/*` routes, the single sign-on device authorization, role credentials minted and renewed in the broker, the closed signing table, and Signature Version 4 checked against the cloud's published examples                                                         |
+| `cloud-iam` seam          | [`cloudIam.ts`](../../packages/provider-sdk/src/cloudIam.ts), [`cloudIamConformance.ts`](../../packages/provider-sdk/src/cloudIamConformance.ts), `CloudIamSigningScope` in [`providers.ts`](../../packages/contracts/src/providers.ts)                                                                                                                              | Slice 4: the pointer, `CloudIamHost`, per-request signing with the configuration and scope checks, the one-renewal rule, fixed failure sentences, and `runCloudIamConformance` against an in-memory signer and endpoint                                                                     |
+| Amazon Bedrock driver     | [`amazonBedrockDriver.ts`](../../apps/server/src/providers/amazonBedrockDriver.ts), [`bedrockConverse.ts`](../../apps/server/src/providers/bedrockConverse.ts), [`providerCloudIamSignIn.ts`](../../apps/server/src/providers/oauth/providerCloudIamSignIn.ts), [`cloudIamSignIn.ts`](../../packages/domain/src/cloudIamSignIn.ts)                                   | Slice 4: the Converse stream on the harness endpoint port, each request signed by the broker; the host-local sign-in; the signing scope as product data                                                                                                                                     |
 | Secret absence            | [`directProviderSecretAbsence.test.ts`](../../apps/server/src/providers/directProviderSecretAbsence.test.ts), [`hostOAuthDirectorySecretAbsence.test.ts`](../../packages/host-runtime/src/hostOAuthDirectorySecretAbsence.test.ts)                                                                                                                                   | The pattern for proving a credential reaches no event, failure, diagnostic, or journal record; slice 1b applies it to every broker answer and the console for a directory grant                                                                                                             |
 
-Nothing today signs a cloud request.
+Only the broker signs a cloud request (slice 4), and only inside the scope its
+grant was signed in for.
 
 ## Decisions already settled
 
@@ -130,7 +137,7 @@ dialect and a binding, not a second store or a second refresh path.
 | `/v1/oauth/refresh`                        | Server driver, when access is near expiry | Unchanged single-flight refresh; directory error codes map to sign-in-again reasons                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `/v1/oauth/revoke`                         | Server, for a local principal             | Deletes the local grant. The directory offers no client-side refresh-token revocation, so sign-out is local and Settings says so                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `/v1/credentials/resolve`                  | —                                         | Refuses directory and cloud grant material, as it already refuses subscription grants                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `/v1/cloud-iam/{begin,status,sign,revoke}` | Server                                    | Later slice. `sign` takes a credential ref and the structured request: method, host, path, query, the headers to sign, and a payload hash. The broker checks each field against the binding it stored at sign-in (partition, region, service, host, path prefix, method), builds the canonical request itself, and returns headers; it never signs a caller-supplied digest. No route returns key material                                                                                                                                                                                                                                                                           |
+| `/v1/cloud-iam/{begin,status,sign,revoke}` | Server                                    | Slice 4. `sign` takes a credential ref and the structured request: method, host, path, query, the headers to sign, and a payload hash. The broker checks each field against the binding it stored at sign-in (partition, region, service, host, path prefix, method), builds the canonical request itself, and returns headers; it never signs a caller-supplied digest. No route returns key material                                                                                                                                                                                                                                                                               |
 
 The server-side client grows the binding argument and nothing else; drivers
 see a provider-sdk port, `DirectoryOAuthHost`, shaped like
@@ -436,6 +443,106 @@ Rules slice 2 resolved, each the most conservative reading of decision 2:
   only the command (its window authority) that began the attempt, for that
   instance.
 
+Rules slice 4 resolved for cloud-IAM signing and Amazon Bedrock, each the most
+conservative reading of decision 4 and the broker operations above:
+
+- **Source identity.** The cloud's single sign-on (IAM Identity Center): for
+  each sign-in the broker registers a public client named Octant with the
+  `sso:account:access` scope (so the portal issues a refresh token), starts a
+  device authorization for the instance's access portal, polls for the
+  session, and mints the role's temporary credentials before it stores
+  anything, so a person the portal does not give the account and role holds
+  no grant (`not-authorized`). Every address is built from the portal's
+  region (`oidc.<region>.amazonaws.com`, `portal.sso.<region>.amazonaws.com`);
+  nothing in a descriptor or an answer names a host.
+- **One partition.** Regions are the commercial partition's (`us-east-1`
+  form); the government, isolated, sovereign, and China partitions sign under
+  other hosts and keys and wait for an organization that needs one. The
+  access portal is exactly `https://<name>.awsapps.com/start` or
+  `https://ssoins-<id>.portal.<region>.app.aws`, the account twelve digits,
+  the role a permission-set name.
+- **Closed signing table.** A grant's scope is one row of the broker's own
+  table: partition `aws`, service `bedrock`, host
+  `bedrock-runtime.<region>.amazonaws.com`, path prefix `/model/`, method
+  `POST`. The broker refuses a descriptor naming anything else before any
+  request, and does not read a stored grant whose scope left the table. A
+  probe or listing route on another host would widen the scope, so none is
+  signed (see the probe rule).
+- **What `sign` takes.** Exactly a credential reference, the request's method,
+  host, path, query, headers, and payload hash, and an optional
+  `renewCredentials`; a body carrying any other field (a digest, a canonical
+  request, a date, a region, a service, a scope) is malformed and nothing is
+  signed. Only `content-type` and `accept` may be signed besides the host and
+  the broker's own date and session token. The path must be percent-encoded
+  once, with no empty or dot segment; the query holds at most eight visible
+  ASCII pairs; the hash is 64 hex digits. A request outside the scope is
+  `outside-scope` (read as `incompatible`) before any credential is renewed.
+- **What a signature is.** `authorization`, `x-amz-date`, and
+  `x-amz-security-token`. The role's session token travels in the last
+  because the cloud requires it beside every signature made with temporary
+  credentials; without the secret key it signs nothing, so it is a request
+  credential, not reusable identity material. A driver refuses an answer
+  naming any other header.
+- **Renewal.** Role credentials are renewed five minutes before they expire,
+  and the portal session one minute before, single-flight per grant. A
+  session refresh refused as `invalid_grant` or `expired_token` is `expired`;
+  `invalid_client`, `unauthorized_client`, or `access_denied` is `revoked`;
+  both drop the grant. The portal does not tell an administrator's revocation
+  from a session that ran its course, so a withdrawn refresh token reads
+  `expired`. A 401 from the role endpoint renews the session once; a second is
+  `revoked`. A 403 or 404 there is `not-authorized` and keeps the grant, since
+  an administrator may assign the role again. A 429, a 5xx, or no answer is
+  transient and keeps it. A session without a refresh token ends with its
+  access token.
+- **Bedrock answers.** The transport reads only the `x-amzn-errortype` header
+  of a 400, 401, or 403: `AccessDeniedException` is `not-authorized` and is not
+  renewed; `ExpiredTokenException`, `UnrecognizedClientException`,
+  `InvalidSignatureException`, `IncompleteSignatureException`,
+  `MissingAuthenticationTokenException`, `InvalidClientTokenId`, and
+  `SignatureDoesNotMatch` renew the role credentials once and resend once; a
+  second refusal is `unauthenticated` (`revoked`). The real-account smoke
+  confirms the codes.
+- **Probe.** Bedrock has no free call that needs only the permission a turn
+  needs: listing models needs another permission and lists models the role
+  may not invoke. The probe asks the broker to sign a model request for the
+  first configured model and sends nothing, which proves the sign-in, the
+  role the portal gives, and the scope; a model the role may not invoke reads
+  `not-authorized` on its first turn. Rejected: probing with a billed model
+  request.
+- **Transport.** The Converse stream API on the harness endpoint port, one
+  request attempt, the model id one percent-encoded path segment. It sends no
+  file attachments yet, so every model reads as text-only and an attachment is
+  refused before any request; tool images ride along. A history that called
+  tools is sent as text when the request offers no tools, because Converse
+  refuses tool blocks without a tool list. The models are the instance's own
+  list (1 to 64), never discovered.
+- **Where a sign-in begins.** Only the host-local
+  `/api/desktop/provider-sign-in/*` routes, for the callers slice 2 allows,
+  and with no per-instance opt-in: the portal's device authorization is the
+  only flow (decision 4). The page must be https, on the portal region's
+  `device.sso.<region>.amazonaws.com` or the organization's own access portal
+  host, with no port or credentials and only visible ASCII; the command shows
+  slice 2's warning beside the code. Settings' route never begins one, and a
+  remote principal is refused before any broker call. Terms
+  (`amazon-bedrock-cloud-iam-1`) are acknowledged once per host in the record
+  every host-driven sign-in uses, and the sign-in is journaled in the same
+  public records. A sign-in finished after its instance was removed, or
+  changed to another portal, account, role, or region, is forgotten.
+- **No key on this kind.** An Amazon Bedrock instance signs in only with
+  `cloud-iam`; the Bedrock API-key path stays an OpenAI-compatible instance,
+  which satisfies "an API-key path stays available beside every sign-in".
+- **Changing and removing.** Changing the region, portal, portal region,
+  account, or role, or removing the instance, ends the portal session and
+  deletes the grant before the change is journaled, and refuses the change
+  when that cannot be done; changing only the model list keeps it. Signing out
+  asks the portal to end the session and deletes the grant whatever the
+  portal answers.
+- **Settings.** This slice adds none: an instance is created with the
+  provider registry command and signed in with `octant provider sign-in`;
+  Settings shows its row and readiness under its own label. Add endpoint
+  fields, the Model endpoints rows, and a Sign out button follow in their own
+  change.
+
 ## Expiry, refresh, and revocation
 
 - **Per-request resolution.** The bearer is resolved for each `send`, never once
@@ -482,9 +589,9 @@ and its consumer sign-in delta (O1–O5):
 
 ## Conformance cases
 
-A provider-sdk `runDirectoryOAuthConformance` (and later
-`runCloudIamConformance`) proves these against a fake directory and a fake
-endpoint, reporting outcomes and never the token. Every direct-endpoint driver
+A provider-sdk `runDirectoryOAuthConformance` (and, for `cloud-iam`,
+`runCloudIamConformance`) proves these against a fake directory or signer and
+a fake endpoint, reporting outcomes and never the token. Every direct-endpoint driver
 that declares the kind also passes `runHarnessEndpointConformance`.
 
 The runner proves the driver-facing rows: a driver supplies its audience, two
@@ -498,7 +605,14 @@ remote-principal rows concern the broker and the server, not a driver; slice
 server's principal gate. An issuer fixture (slice 3) is configured with the
 organization's issuer, client, and scope instead of a tenant, so the
 "pointer differs" row compares issuer, client, and scope, and the "base URL"
-row proves the origin alone: a gateway has no host list.
+row proves the origin alone: a gateway has no host list. `runCloudIamConformance`
+proves a cloud driver's rows the same way (a sign-in that ended, a role the
+portal no longer gives, an unreachable broker, a pointer or grant naming
+another portal, account, role, or region, a missing permission, and one
+renewal of refused credentials), and its fake endpoint rebuilds each signature
+from the request it received, so a driver that sends a body other than the one
+signed fails. The four `cloud-iam` rows below concern the broker and the
+server, and slice 4 proves them there.
 
 | Case                                                                                                      | Expected                                                                       |
 | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
@@ -713,13 +827,63 @@ access is answered with 403 (or record the actual status); a refresh after the
 access token expires keeps the endpoint ready; and Sign out leaves the
 endpoint signed out on this computer.
 
-**Slice 4: cloud-IAM signer and Amazon Bedrock.** `/v1/cloud-iam/*`, the
-single-sign-on source identity (decision 4), request signing in host-runtime,
-and a Bedrock transport on the harness endpoint port. _Acceptance:_ the
-`cloud-iam` conformance cases pass; a request outside the binding is refused;
-the broker builds every canonical request from request fields; the server
-process never holds a key. Linux container capable against fakes;
-a real smoke needs an AWS organization and billed Bedrock access.
+**Slice 4: cloud-IAM signer and Amazon Bedrock.** Built. `/v1/cloud-iam/*`,
+the single-sign-on source identity (decision 4), request signing in
+host-runtime, and a Bedrock transport on the harness endpoint port (rules
+above). _Acceptance:_ the `cloud-iam` conformance cases pass; a request
+outside the binding is refused; the broker builds every canonical request from
+request fields; the server process never holds a key. Linux container capable
+against fakes; a real smoke needs an AWS organization and billed Bedrock
+access. _Verification:_ contracts, domain, provider-sdk, host-runtime, server,
+and CLI tests. _Evidence:_ Signature Version 4 reproduces the cloud's
+published signing-key and signature examples; against an in-memory portal
+and a Bedrock endpoint that rebuilds each signature from the request it
+received, the broker signs in with a device code at the portal's own page,
+mints the role before storing anything, stores nothing for a declined or
+expired code or a person without the role, refuses a page off the portal's
+hosts and a descriptor outside the closed table before any request, refuses
+every request outside the scope and every sign body that brings its own
+digest, date, or scope without renewing or signing, produces a signature that
+fails for a changed method, host, path, query, signed header, or payload,
+renews credentials once for concurrent signatures, renews an ended session,
+drops or keeps the grant for each session and role answer, refuses a raw
+resolve and a browser, tokenless, or remote caller, signs out at the portal
+even when it is down, and answers with no client secret, device code, portal
+token, or role key; the reference driver passes every driver-facing
+`runCloudIamConformance` case and drivers that bind to the pointer, send a
+body other than the one signed, give up on refused credentials, or echo the
+signature fail it; the real Bedrock driver passes every driver-facing case,
+`runHarnessEndpointConformance`, and the provider and Chat conformance
+runners; end to end, with the real broker, the host-local route signs an
+instance in, a Chat, a Work, and a Code turn each go out with a signature the
+broker made, and no broker answer, event, failure, readiness, journal record,
+or pointer carries a cloud secret, nor a child environment the broker's
+coordinates or a signature; a sign-in finished after its instance was removed
+or changed is forgotten; provider policy and the contract refuse other
+partitions and look-alike portals; changing the region, portal, account, or
+role, or removing the instance, forgets the grant, and a model list change
+does not; Settings' route never begins a cloud sign-in, and a remote principal
+is refused one before any broker call.
+**Needs the maintainer:** a real-account smoke with an AWS organization using
+IAM Identity Center and billed Bedrock access in one commercial region (for
+example `us-west-2`): a permission set allowing `bedrock:InvokeModel` and
+`bedrock:InvokeModelWithResponseStream` on one model, assigned to the
+maintainer in one account; then, with `OCTANT_BEDROCK_CLOUD_IAM_SMOKE=1`,
+`OCTANT_BEDROCK_SMOKE_START_URL`, `OCTANT_BEDROCK_SMOKE_SSO_REGION`,
+`OCTANT_BEDROCK_SMOKE_REGION`, `OCTANT_BEDROCK_SMOKE_ACCOUNT_ID`,
+`OCTANT_BEDROCK_SMOKE_ROLE_NAME`, `OCTANT_BEDROCK_SMOKE_MODEL`, and optionally
+`OCTANT_BEDROCK_SMOKE_DENIED_MODEL` (a model the permission set does not
+allow) set, run
+`bun run test:evidence -- src/providers/amazonBedrockCloudIamSmoke.integration.test.ts`
+in `apps/server` and enter the printed code in a browser. It confirms: the
+device page the portal returns is on the accepted list (record the
+`verificationUri` it prints); the role is minted, the probe reads ready, and
+a Converse turn streams with the broker's signature; a model the permission
+set does not allow reads `not-authorized` (record the error type Bedrock
+sends); and sign-out deletes the grant. Run it once more with
+`OCTANT_BEDROCK_SMOKE_ROLE_NAME` set to a role the maintainer is not assigned
+and `OCTANT_BEDROCK_SMOKE_EXPECT_NOT_AUTHORIZED=1`: the sign-in must be refused
+`not-authorized` with nothing stored.
 
 **Later, each needing its own maintainer decision:** Google Vertex through a broker relay (decision 5);
 spawning runtimes on enterprise identity (decision 6); an Octant-published

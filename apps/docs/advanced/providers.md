@@ -707,7 +707,32 @@ address signs the endpoint out. The row reads **Sign in again**, **Signed out**,
 **No access** (the gateway refused your account), or **Sign-in doesn't match**
 just as for Azure AI Foundry above, and **Sign out** likewise removes the
 sign-in from this computer only. A gateway signs in through the browser only:
-`octant provider sign-in` with a code is for Azure AI Foundry.
+`octant provider sign-in` with a code is for Azure AI Foundry and Amazon
+Bedrock.
+
+### Amazon Bedrock with your organization's single sign-on
+
+Octant's host can sign Amazon Bedrock requests with your organization's single
+sign-on (AWS IAM Identity Center) instead of a Bedrock API key. You sign in
+once at your organization's access portal; Octant's credential broker keeps
+that sign-in and the temporary credentials it gives for one account and role,
+and signs each request itself. No key is stored in Octant's settings or sent
+anywhere but Amazon Bedrock, and Octant's server never holds one.
+
+Your organization's administrator assigns you a permission set in one account
+that allows `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream`
+on the models you use, and gives you the access portal URL
+(`https://<name>.awsapps.com/start`), the region it runs in, the account ID,
+and the permission set's name. Only the commercial AWS regions are supported.
+
+Settings cannot add this endpoint yet; until it can, use a Bedrock API key
+with an OpenAI-compatible endpoint. An Amazon Bedrock endpoint signs in only
+with [`octant provider sign-in`](../guide/linux-host#sign-in-an-organization-endpoint-with-a-code):
+the command shows a page on `device.sso.<region>.amazonaws.com` or your access
+portal and a code to enter there. Changing the endpoint's region, portal,
+account, or role, or removing it, ends that sign-in. Each model is checked on
+its first request: a model the permission set does not allow reads **No
+access**. The endpoint does not send attached files yet.
 
 ### Presets added with a key
 
