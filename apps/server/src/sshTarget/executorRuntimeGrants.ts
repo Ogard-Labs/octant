@@ -281,10 +281,16 @@ export function runtimeLaunchGrants(input: {
   readonly temporaryDirectory: string;
   readonly binaryFolders: ReadonlyArray<string>;
   readonly accountState: Pick<RuntimeAccountState, "readPaths" | "writePaths">;
+  /** Paths in the root the runtime may neither read nor write. */
+  readonly deniedPaths?: ReadonlyArray<string>;
   readonly networkEgress: OsNetworkEgress;
 }): Omit<ProcessConfinementPrepareInput, "executable" | "args"> {
   const readable = [input.root, input.home, ...input.accountState.readPaths];
+  const denied = input.deniedPaths ?? [];
   return {
+    ...(denied.length === 0
+      ? {}
+      : { additionalDenyReadPaths: denied, additionalDenyWritePaths: denied }),
     boundRoot: input.root,
     temporaryDirectory: input.temporaryDirectory,
     networkEgress: input.networkEgress,
