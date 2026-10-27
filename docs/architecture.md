@@ -825,10 +825,11 @@ target's tools. A person's terminals and managed worktrees on a remote-bound
 Project are built, from a local window (Settings › SSH targets) or the local
 CLI, under the same admission; the composer's Project picker lists such a
 Project without offering it for a thread. The provider-sdk seam for placing a
-runtime on a target, and its conformance, are built; no driver declares it
-and no runtime is launched there yet. SSH targets, their attestation
-digests, remote bindings, managed worktrees, and remote terminals' starts and
-ends are journaled. Its
+runtime on a target, its conformance, and the executor's confined runtime
+launches with their own proxy on this host are built; no driver declares
+placement yet, so no provider's runtime runs there. SSH targets, their
+attestation digests, remote bindings, managed worktrees, remote terminals'
+starts and ends, and a placed runtime's egress are journaled. Its
 admission, confinement attestation,
 transport, and how it differs from a paired host are owned by
 [Remote SSH environments](design/remote-ssh-environments.md).
@@ -5276,6 +5277,15 @@ listener per confined launch:
   name resolves with the target's resolver and the connection leaves from
   the target, while the private check and every decision stay here
   ([Native harness on a target](design/remote-ssh-environments.md#native-harness-on-a-target)).
+- **Provider runtimes on an SSH target.** A runtime placed on a target runs
+  on `proxied` in the writing postures through a proxy of its own on this
+  host that decides under the runtime rule (`decideProviderRuntimeEgress`):
+  any public name, with no thread or Project rule and nothing proposed,
+  and the same private-address check, so the target's own network and a
+  cloud machine's metadata service stay out of reach. Its records are the
+  `provider-runtime-egress` aggregate and taint no thread. In Plan it runs
+  offline
+  ([Runtime placement](design/remote-ssh-environments.md#runtime-placement)).
 - **Environment.** The launch environment adds `HTTPS_PROXY`, `HTTP_PROXY`,
   and `ALL_PROXY` (and their lowercase forms) set to
   `http://octant:<token>@127.0.0.1:<port>`, empty `NO_PROXY`/`no_proxy`, and
