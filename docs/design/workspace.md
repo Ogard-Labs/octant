@@ -342,7 +342,7 @@ Outputs, Background tasks, Running now; see [DESIGN.md](../../DESIGN.md#shell-an
 its title band offers the common tools, Add tool lists the rest, and an open
 dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
 Document, Canvas, artifact-gated Plan, conditional Delivery, Review, Terminal,
-Tests, iOS Simulator, and Android emulator, as mode and capability allow. Chat
+Tests, iOS Simulator, Android emulator, and Desktop, as mode and capability allow. Chat
 admits only the [Agents dock](#subagents) and has no bottom panel. Side
 Chat is a Chat conversation about the pane's thread: it reads that thread's
 conversation, current state, files, and subagent results, and changes none of
@@ -465,6 +465,24 @@ issues the grant, Not now leaves the screen view only, and clicking the screen o
 a key button cannot grant it. Toolbar Home, Lock, Back, and Type text share the
 ordered input queue with taps and typing. The host owns observation,
 input, and evidence safety under the [device transport contract](../architecture.md#device-transport-and-evidence).
+**Desktop** is a Code thread's disposable desktops
+([Disposable desktops](disposable-desktops.md)), always offered on Code. It
+uses the device pane's toolbar, line, and cards. The toolbar names the
+provider, the state in words with elapsed minutes and the end time (never a
+cost), a switch between the thread's two desktops when it has two, **Add 30
+minutes** while the recipe maximum allows, and Release, which asks first. The
+states are setup (what the thread lacks to start one, in one sentence, or
+**Start desktop**), starting, live, not shown (a running desktop this tab is
+not showing, with **Show desktop**), interrupted (the view stopped; **Reconnect**),
+ending, still running (release not verified, with the provider and **Retry**),
+and ended (why, and **Start a new desktop** when one may start). A tab shows a
+screen only after the person starts a desktop in it or presses Show desktop
+or Reconnect: a restored or reloaded tab never reconnects on its own, and the
+host holds no view across a restart. The live screen is a focusable region:
+clicks, the wheel, and keys go to the desktop while it has focus, printable
+characters cross as typed text, and `Mod+Escape` moves focus out without
+sending anything. Closing the tab leaves the desktop running. The host owns
+authority, frames, and attribution under the slice 5 rules there.
 Dock visibility and responsive presentation follow [DESIGN.md](../../DESIGN.md#shell-and-layout).
 
 ### Subagents
