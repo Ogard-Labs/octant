@@ -275,6 +275,8 @@ describe("Cua desktop provider", () => {
       [[], "no-other-machine"],
       [[asleep], "no-other-machine"],
       [[SPARE, second], "other-machine-ambiguous"],
+      // A long listing is read whole, so a machine that answers far down it still counts.
+      [[SPARE, ...Array.from({ length: 300 }, () => asleep), second], "other-machine-ambiguous"],
     ] as const) {
       const other = await harness({ hosts });
       await expect(

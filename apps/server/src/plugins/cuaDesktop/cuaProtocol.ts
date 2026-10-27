@@ -289,11 +289,16 @@ export interface CuaHost {
   readonly online: boolean;
 }
 
-/** `ListHostsResponse`: hosts (1), each with id (1), name (2), via (3), and online (4). */
+/**
+ * `ListHostsResponse`: hosts (1), each with id (1), name (2), via (3), and
+ * online (4). Every host is kept, as the response's byte bound allows: a
+ * listing cut short could hide a second machine that answers, and the driver
+ * would then choose one for a person who confirmed only "your other machine".
+ */
 export function readCuaListHosts(bytes: Uint8Array): ReadonlyArray<CuaHost> | undefined {
   const fields = parse(bytes);
   const hosts = fields === undefined ? undefined : nestedAll(fields, 1);
-  return hosts?.slice(0, 256).map((host) => ({
+  return hosts?.map((host) => ({
     id: text(host, 1),
     name: text(host, 2),
     via: text(host, 3),
