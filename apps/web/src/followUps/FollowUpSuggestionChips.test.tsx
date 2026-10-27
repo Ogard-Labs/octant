@@ -6,7 +6,31 @@ import {
   EnvironmentSuggestedTasks,
   FollowUpSuggestionChips,
   FollowUpSuggestionContext,
+  useComposerSuggestion,
 } from "./FollowUpSuggestionChips";
+import { ThreadActivityRevisionsContext } from "../polling/ThreadActivityRevisions";
+
+function ComposerProbe() {
+  useComposerSuggestion();
+  return null;
+}
+
+function revisions(threadFollowUps: number) {
+  return {
+    browserCaptures: 0,
+    toolApprovals: 0,
+    threadFollowUps,
+    threadMessageQueue: 0,
+  };
+}
+
+function setVisible(visible: boolean) {
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    value: visible ? "visible" : "hidden",
+  });
+  document.dispatchEvent(new Event("visibilitychange"));
+}
 
 const threadId = "00000000-0000-4000-8000-000000000020";
 const suggestionId = "00000000-0000-4000-8000-000000000041";
@@ -187,5 +211,156 @@ describe("FollowUpSuggestionChips", () => {
     );
     await waitFor(() => expect(client.suggestions).toHaveBeenCalled());
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("reads once per follow-up notice, shared by the cards and the composer", async () => {
+    const client = { suggestions: vi.fn(async () => null), preview: vi.fn(), activate: vi.fn() };
+    const offers = {
+      client: client as never,
+      mode: "chat" as const,
+      threadId,
+      onCreated: vi.fn(),
+    };
+    const view = render(
+      <ThreadActivityRevisionsContext.Provider value={revisions(1)}>
+        <FollowUpSuggestionContext value={offers}>
+          <FollowUpSuggestionChips {...offers} />
+          <ComposerProbe />
+        </FollowUpSuggestionContext>
+      </ThreadActivityRevisionsContext.Provider>,
+    );
+    await waitFor(() => expect(client.suggestions).toHaveBeenCalledTimes(1));
+
+    view.rerender(
+      <ThreadActivityRevisionsContext.Provider value={revisions(2)}>
+        <FollowUpSuggestionContext value={offers}>
+          <FollowUpSuggestionChips {...offers} />
+          <ComposerProbe />
+        </FollowUpSuggestionContext>
+      </ThreadActivityRevisionsContext.Provider>,
+    );
+    await waitFor(() => expect(client.suggestions).toHaveBeenCalledTimes(2));
+  });
+
+  it("earns exactly one trailing read when a notice lands during a read", async () => {
+    let release!: (value: null) => void;
+    const blocked = new Promise<null>((resolve) => {
+      release = resolve;
+    });
+    const client = {
+      suggestions: vi
+        .fn()
+        .mockImplementationOnce(() => blocked)
+        .mockResolvedValue(null),
+      preview: vi.fn(),
+      activate: vi.fn(),
+    };
+    const offers = {
+      client: client as never,
+      mode: "chat" as const,
+      threadId: "00000000-0000-4000-8000-000000000021",
+      onCreated: vi.fn(),
+    };
+    const view = render(
+      <ThreadActivityRevisionsContext.Provider value={revisions(1)}>
+        <FollowUpSuggestionContext value={offers}>
+          <FollowUpSuggestionChips {...offers} />
+          <ComposerProbe />
+        </FollowUpSuggestionContext>
+      </ThreadActivityRevisionsContext.Provider>,
+    );
+    await waitFor(() => expect(client.suggestions).toHaveBeenCalledTimes(1));
+
+    view.rerender(
+      <ThreadActivityRevisionsContext.Provider value={revisions(2)}>
+        <FollowUpSuggestionContext value={offers}>
+          <FollowUpSuggestionChips {...offers} />
+          <ComposerProbe />
+        </FollowUpSuggestionContext>
+      </ThreadActivityRevisionsContext.Provider>,
+    );
+    await waitFor(() => expect(client.suggestions).toHaveBeenCalledTimes(1));
+    release(null);
+    await waitFor(() => expect(client.suggestions).toHaveBeenCalledTimes(2));
+  });
+
+  it("makes no reads for notices or reconnects while hidden, then one when visible", async () => {
+    const client = { suggestions: vi.fn(async () => null), preview: vi.fn(), activate: vi.fn() };
+    const offers = {
+      client: client as never,
+      mode: "chat" as const,
+      threadId: "00000000-0000-4000-8000-000000000022",
+      onCreated: vi.fn(),
+    };
+    const view = render(
+      <ThreadActivityRevisionsContext.Provider value={revisions(1)}>
+        <FollowUpSuggestionContext value={offers}>
+          <FollowUpSuggestionChips {...offers} />
+          <ComposerProbe />
+        </FollowUpSuggestionContext>
+      </ThreadActivityRevisionsContext.Provider>,
+    );
+    await waitFor(() => expect(client.suggestions).toHaveBeenCalledTimes(1));
+
+    setVisible(false);
+    try {
+      view.rerender(
+        <ThreadActivityRevisionsContext.Provider value={revisions(2)}>
+          <FollowUpSuggestionContext value={offers}>
+            <FollowUpSuggestionChips {...offers} />
+            <ComposerProbe />
+          </FollowUpSuggestionContext>
+        </ThreadActivityRevisionsContext.Provider>,
+      );
+      window.dispatchEvent(new Event("online"));
+      await new Promise((settle) => setTimeout(settle, 50));
+      expect(client.suggestions).toHaveBeenCalledTimes(1);
+
+      setVisible(true);
+      await waitFor(() => expect(client.suggestions).toHaveBeenCalledTimes(2));
+    } finally {
+      setVisible(true);
+    }
+  });
+
+  it("drops a queued trailing read when its last surface goes away mid-read", async () => {
+    let release!: (value: null) => void;
+    const blocked = new Promise<null>((resolve) => {
+      release = resolve;
+    });
+    const client = {
+      suggestions: vi
+        .fn()
+        .mockImplementationOnce(() => blocked)
+        .mockResolvedValue(null),
+      preview: vi.fn(),
+      activate: vi.fn(),
+    };
+    const offers = {
+      client: client as never,
+      mode: "chat" as const,
+      threadId: "00000000-0000-4000-8000-000000000023",
+      onCreated: vi.fn(),
+    };
+    const view = render(
+      <ThreadActivityRevisionsContext.Provider value={revisions(1)}>
+        <FollowUpSuggestionContext value={offers}>
+          <FollowUpSuggestionChips {...offers} />
+        </FollowUpSuggestionContext>
+      </ThreadActivityRevisionsContext.Provider>,
+    );
+    await waitFor(() => expect(client.suggestions).toHaveBeenCalledTimes(1));
+
+    view.rerender(
+      <ThreadActivityRevisionsContext.Provider value={revisions(2)}>
+        <FollowUpSuggestionContext value={offers}>
+          <FollowUpSuggestionChips {...offers} />
+        </FollowUpSuggestionContext>
+      </ThreadActivityRevisionsContext.Provider>,
+    );
+    view.unmount();
+    release(null);
+    await new Promise((settle) => setTimeout(settle, 50));
+    expect(client.suggestions).toHaveBeenCalledTimes(1);
   });
 });

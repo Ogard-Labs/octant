@@ -65,6 +65,7 @@ export class ThreadMessageQueueService {
   readonly #clock: () => string;
   readonly #locks = new Map<string, Promise<void>>();
   readonly #pendingTicks = new Set<string>();
+  #allScopesTick: Promise<void> | undefined;
   readonly #authorized = new Map<string, LiveAuthorization>();
   readonly #retained = new Map<string, ThreadMessageQueueResource>();
   readonly #controllers = new Map<
@@ -352,17 +353,38 @@ export class ThreadMessageQueueService {
   }
   async tick(scope?: ThreadMessageQueueScope): Promise<void> {
     if (this.#disposed) return;
-    const scopes =
-      scope === undefined
-        ? [
+    if (scope !== undefined) {
+      await this.#tickScopes([scope]);
+      return;
+    }
+    if (this.#allScopesTick !== undefined) return this.#allScopesTick;
+    // Install the promise before reading: several timer/journal wakes in the
+    // same turn must not each scan and decode every pending queue.
+    const discovery = Promise.resolve().then(() =>
+      this.#disposed
+        ? []
+        : [
             ...new Map(
               [
                 ...this.#store.scopes(),
                 ...[...this.#retained.values()].map((resource) => resource.scope),
-              ].map((scope) => [queueId(scope), scope]),
+              ].map((current) => [queueId(current), current]),
             ).values(),
-          ]
-        : [scope];
+          ],
+    );
+    const pass = discovery.then((scopes) => this.#tickScopes(scopes));
+    // Coalescing ends with discovery. A Chat admission resolves only when its
+    // turn is accepted, so sharing the whole pass would let one slow queue
+    // stall the next recovery tick for every other queue; #pendingTicks and
+    // #serial keep a still-running queue from being driven twice.
+    const settled = () => {
+      if (this.#allScopesTick === pass) this.#allScopesTick = undefined;
+    };
+    discovery.then(settled, settled);
+    this.#allScopesTick = pass;
+    return pass;
+  }
+  async #tickScopes(scopes: ReadonlyArray<ThreadMessageQueueScope>): Promise<void> {
     await Promise.all(
       scopes.map(async (current) => {
         const key = queueId(current);
@@ -577,8 +599,11 @@ export class ThreadMessageQueueService {
     });
   }
   async onCommittedAppend(append: CommittedAppend): Promise<void> {
+    const changed = new Map<string, ThreadMessageQueueScope>();
     for (const event of append.events) {
       if (event.eventVersion !== 1) continue;
+      const wakeScope = queueScopeForEvent(event);
+      if (wakeScope !== undefined) changed.set(queueId(wakeScope), wakeScope);
       if (
         event.eventName !== "chat.deleted@1" &&
         event.eventName !== THREAD_RETENTION_EVENT_NAMES.threadPurged
@@ -607,11 +632,19 @@ export class ThreadMessageQueueService {
       await this.#serial(scope, async () => {
         for (const content of retained) await this.#release(content, "purged", true);
       });
+      // Cleanup for the purged scope stays unconditional: its queue still
+      // gets a pass even though no event names it.
+      changed.set(queueId(scope), scope);
     }
-    await this.tick();
+    await Promise.all([...changed.values()].map((scope) => this.tick(scope)));
   }
   async awaitIdle(): Promise<void> {
-    while (this.#locks.size > 0) await Promise.all(this.#locks.values());
+    while (this.#allScopesTick !== undefined || this.#locks.size > 0) {
+      await Promise.all([
+        ...(this.#allScopesTick === undefined ? [] : [this.#allScopesTick.catch(() => undefined)]),
+        ...this.#locks.values(),
+      ]);
+    }
   }
   dispose(): void {
     this.#disposed = true;
@@ -717,3 +750,100 @@ function validContent(content: QueueContent): boolean {
   return true;
 }
 const decodeTime = Schema.decodeUnknownSync(UtcTimestamp);
+
+function eventField(value: unknown, key: string): unknown {
+  return typeof value === "object" && value !== null ? Reflect.get(value, key) : undefined;
+}
+
+/**
+ * The queue a committed event names, when it says something a dispatcher
+ * cares about. Payloads already crossed schema validation, so only the
+ * discriminator and thread identity are read; ordinary streaming deltas and
+ * unrelated journal writes mean no wake.
+ */
+function queueScopeForEvent(
+  event: CommittedAppend["events"][number],
+): ThreadMessageQueueScope | undefined {
+  const payload = event.payload;
+  const scope = (
+    mode: ThreadMessageQueueScope["mode"],
+    threadId: unknown,
+  ): ThreadMessageQueueScope | undefined =>
+    typeof threadId === "string" ? decodeThreadMessageQueueScope({ mode, threadId }) : undefined;
+  switch (event.eventName) {
+    case "thread.message-queue-changed@1": {
+      const current = eventField(eventField(payload, "state"), "scope");
+      return current === undefined ? undefined : decodeThreadMessageQueueScope(current);
+    }
+    case "chat.thread-created@1":
+    case "chat.thread-updated@1":
+      return scope("chat", eventField(eventField(payload, "thread"), "id"));
+    case "chat.turn-created@1":
+      return scope("chat", eventField(eventField(payload, "turn"), "threadId"));
+    case "chat.attempt-updated@1": {
+      const attempt = eventField(payload, "attempt");
+      const outcome = eventField(attempt, "outcome");
+      return outcome === "completed" ||
+        outcome === "failed" ||
+        outcome === "interrupted" ||
+        outcome === "cancelled"
+        ? scope("chat", eventField(attempt, "threadId"))
+        : undefined;
+    }
+    case "work.thread-created@1":
+    case "work.thread-updated@1":
+    case "work.thread-completion-confirmed@1":
+      return scope("work", eventField(eventField(payload, "thread"), "id"));
+    case "work.turn-accepted@1":
+      return scope("work", eventField(payload, "threadId"));
+    case "work.turn-updated@1": {
+      const status = eventField(payload, "status");
+      return status === "completed" || status === "cancelled" || status === "failed"
+        ? scope("work", eventField(payload, "threadId"))
+        : undefined;
+    }
+    case "code.thread-created@1":
+    case "code.thread-updated@1":
+      return scope("code", eventField(eventField(payload, "thread"), "id"));
+    case "code.runtime-work-updated@1": {
+      const work = eventField(payload, "work");
+      const state = eventField(work, "state");
+      return state === "completed" ||
+        state === "failed" ||
+        state === "interrupted" ||
+        state === "ambiguous"
+        ? scope("code", eventField(work, "threadId"))
+        : undefined;
+    }
+    case "code.operation-event-recorded@1": {
+      const frame = eventField(payload, "event");
+      const kind = eventField(frame, "kind");
+      const state = eventField(frame, "state");
+      return kind === "operation-result" ||
+        (kind === "operation-state" &&
+          (state === "completed" || state === "failed" || state === "interrupted"))
+        ? scope("code", eventField(payload, "threadId"))
+        : undefined;
+    }
+    case "context.compaction-completed@1":
+    case "context.compaction-failed@1": {
+      const subject = eventField(
+        event.eventName === "context.compaction-completed@1"
+          ? eventField(payload, "receipt")
+          : payload,
+        "subject",
+      );
+      const kind = eventField(subject, "aggregateType");
+      const id = eventField(subject, "aggregateId");
+      return kind === "chat-thread"
+        ? scope("chat", id)
+        : kind === "work-thread"
+          ? scope("work", id)
+          : kind === "code-thread"
+            ? scope("code", id)
+            : undefined;
+    }
+    default:
+      return undefined;
+  }
+}

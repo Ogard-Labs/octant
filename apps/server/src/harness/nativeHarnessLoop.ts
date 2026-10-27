@@ -1486,10 +1486,21 @@ function carriedTaskList(
   return at === -1 ? undefined : earlier.summary.slice(at + TASK_LIST_LEAD.length).trim();
 }
 
+/**
+ * One item of a compaction request, at most `COMPACTION_ITEM_CHARACTERS` long.
+ * A longer item keeps its opening and its end around a marker saying how much
+ * was left out: a fresh Chat or Work session's first message carries the
+ * host's planned history with the person's request at its end, and keeping
+ * only the opening would summarize the session without that request.
+ */
 function clipCompactionItem(value: string): string {
-  return value.length <= COMPACTION_ITEM_CHARACTERS
-    ? value
-    : `${value.slice(0, COMPACTION_ITEM_CHARACTERS)} [truncated]`;
+  if (value.length <= COMPACTION_ITEM_CHARACTERS) return value;
+  const marker = (omitted: number) => `\n[… ${omitted} characters omitted …]\n`;
+  // The omitted count is below the whole length, so this marker is never shorter.
+  const kept = COMPACTION_ITEM_CHARACTERS - marker(value.length).length;
+  const head = Math.ceil(kept / 2);
+  const tail = kept - head;
+  return `${value.slice(0, head)}${marker(value.length - kept)}${value.slice(value.length - tail)}`;
 }
 
 /**

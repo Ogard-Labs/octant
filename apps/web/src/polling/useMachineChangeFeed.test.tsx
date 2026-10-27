@@ -71,6 +71,52 @@ describe("useMachineChangeFeed", () => {
     await waitFor(() => expect(result.current.imageJobs).toBe(1));
     expect(result.current.chatNavigation).toBe(0);
   });
+
+  it("counts each auxiliary thread topic on its own revision", async () => {
+    let delivered = false;
+    const client: MachineChangeClient = {
+      subscribe: async function* () {
+        if (delivered) return;
+        delivered = true;
+        yield {
+          kind: "changed" as const,
+          sequence: 1,
+          topics: [
+            "browser-captures" as const,
+            "tool-approvals" as const,
+            "thread-follow-ups" as const,
+            "thread-message-queue" as const,
+          ],
+        };
+      },
+    };
+    const { result } = renderHook(() => useMachineChangeFeed(client));
+
+    await waitFor(() => expect(result.current.browserCaptures).toBe(1));
+    expect(result.current.toolApprovals).toBe(1);
+    expect(result.current.threadFollowUps).toBe(1);
+    expect(result.current.threadMessageQueue).toBe(1);
+    expect(result.current.chatNavigation).toBe(0);
+  });
+
+  it("bumps every revision, including the auxiliary topics, when the feed requires a snapshot", async () => {
+    let delivered = false;
+    const client: MachineChangeClient = {
+      subscribe: async function* () {
+        if (delivered) return;
+        delivered = true;
+        yield { kind: "snapshot-required" as const, sequence: 0 };
+      },
+    };
+    const { result } = renderHook(() => useMachineChangeFeed(client));
+
+    await waitFor(() => expect(result.current.browserCaptures).toBe(1));
+    expect(result.current.toolApprovals).toBe(1);
+    expect(result.current.threadFollowUps).toBe(1);
+    expect(result.current.threadMessageQueue).toBe(1);
+    expect(result.current.chatNavigation).toBe(1);
+    expect(result.current.imageJobs).toBe(1);
+  });
 });
 
 function deferred<T>() {

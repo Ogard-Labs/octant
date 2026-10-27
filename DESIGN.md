@@ -812,6 +812,13 @@ extra typed lines and visible notices is intentional (0114). Repository, branch
 and PR actions stay visible below the input. Utility panels keep one resize
 boundary and a compact tab row without a second horizontal divider.
 
+The displayed partial answer coalesces updates on a fifty-millisecond beat, or
+one hundred milliseconds for long answers (at least sixteen thousand text
+units). The first content, a replacement and the finished answer appear
+immediately. Coalescing happens before parsing the whole answer, so Markdown
+references and code fences keep their document-wide meaning; it does not delay
+provider data, journal writes or copy/export.
+
 A thread opens on its newest messages. When earlier ones exist, one row above
 the oldest loaded message offers **Load earlier messages** as a ghost button;
 while a page loads it reads "Loading earlier messages" and stays focusable, a
