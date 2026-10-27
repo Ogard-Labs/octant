@@ -263,10 +263,10 @@ instead of offering the button. A locked phone cannot be captured; unlock it
 first. **Stop using** ends the thread's use of the device. If another thread
 is using it, the pane says so without naming that thread.
 
-The screenshot is kept as evidence on the Mac. A paired phone or a browser
-on another computer sees the device list and its states, but not the
-screenshot itself, and cannot let a thread use a device or capture its
-screen. Building and running your app on the device from the workbench, and
+The screenshot is kept as evidence on the Mac. Physical devices are listed
+only in Octant on that Mac for now: a paired phone or a browser on another
+computer cannot list them, see the screenshot, let a thread use a device, or
+capture its screen. Building and running your app on the device from the workbench, and
 the agent's own device operations, are not offered yet.
 
 ## Honest verification

@@ -616,7 +616,11 @@ accounts or hardware; its real-hardware acceptance is separate where noted.
    remote, product-dispatch, and booted-server negatives, the
    `appleDeviceClient` tests, and the `ApplePhysicalDevices` and
    `useAppleDevices` component tests, which cover every device state and a
-   Mac whose Xcode offers no device screenshot. Still open, on the same Mac
+   Mac whose Xcode offers no device screenshot. The pane asks as the local
+   person, so in a remote browser the route refuses even `discover` and the
+   section shows that refusal; listing devices to a paired client, which the
+   remote rules above allow, needs the renderer to ask as its paired device
+   and is a follow-up. Still open, on the same Mac
    and device as slice 3: `bun run smoke:apple-device` now also captures the
    running fixture app's screen, or confirms the selected Xcode reports no
    device screenshot (`APPLE_DEVICE_SMOKE_SCREENSHOT=unavailable`); the

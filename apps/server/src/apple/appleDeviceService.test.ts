@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { unlinkSync } from "node:fs";
+import { existsSync, unlinkSync } from "node:fs";
 import {
   mkdir,
   mkdtemp,
@@ -1321,6 +1321,29 @@ describe("AppleDeviceService", () => {
         ),
       ).resolves.toEqual({ kind: "apple-device-refused", reason: "locked" });
       expect(screenshotCalls()).toEqual([]);
+    });
+
+    it("does not capture a device whose lease ended after the capture was admitted", async () => {
+      const { devices, deviceId } = await leasedWithScreenshots();
+      const pending = devices.request(
+        deviceRequest("screenshot", firstThread, { deviceId }),
+        scopeFor(firstThread),
+      );
+      // The capture directory is created only once the policy admitted the
+      // capture; the person lets go of the device before devicectl runs.
+      const captures = join(root, "device-captures");
+      while (!existsSync(captures)) await new Promise((resolve) => setImmediate(resolve));
+      await expect(
+        devices.request(
+          deviceRequest("release-device", firstThread, { deviceId }),
+          scopeFor(firstThread),
+        ),
+      ).resolves.toMatchObject({ kind: "apple-device-released" });
+      const answer = await pending;
+      if (answer.kind !== "apple-device-evidence") throw new Error(JSON.stringify(answer));
+      expect(answer.evidence).toMatchObject({ outcome: "failed", artifacts: [] });
+      expect(screenshotCalls()).toEqual([]);
+      expect((await discover(devices)).screenshots).toEqual([]);
     });
 
     it("keeps no capture that is not a PNG and leaves nothing behind", async () => {
