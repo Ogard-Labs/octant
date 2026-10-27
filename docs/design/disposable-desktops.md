@@ -941,7 +941,9 @@ Rules this delivery resolved:
 - **Read afresh on every lease command.** The lease service asks for the
   recipe on each acquire, operating command, and sweep, from the thread's
   Project as stored now. A new screen size or limit applies to the next
-  desktop. Removing the recipe, changing its provider or credential
+  desktop; a running desktop's frames stay bounded by the screen it was
+  acquired with, so shrinking the recipe does not blank it and growing it
+  does not let its driver pass a larger frame. Removing the recipe, changing its provider or credential
   reference, or archiving the Project ends the Project's running desktops at
   the next sweep as `recipe-removed`, through the teardown path that outlives
   revocation.
@@ -964,7 +966,9 @@ then removes the recipe and sees the sweep release the desktop as
 `recipe-removed` and the next start refused `no-provider-configured`; it also
 refuses a provider the host does not offer. Before the lookup existed the
 same acquire was refused `no-provider-configured`. `projectService.test.ts`
-refuses recipes the schema refuses and journals nothing;
+refuses recipes the schema refuses and journals nothing while the host
+offers the provider; `desktopLeaseService.test.ts` keeps a running desktop's
+frames bounded by its own screen after the recipe's screen changes;
 `projectPolicy.test.ts` covers set, replace, remove, the provider and network
 refusals, Work and Chat Projects, and no-ops; `projectRoutes.test.ts` refuses
 a paired device's change and keeps a local window's; `desktopPaneRoutes.test.ts`

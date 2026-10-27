@@ -1,7 +1,9 @@
 import {
+  decodeLeasableDesktopProvider,
   decodeMemoryEntryId,
   decodeProjectId,
   decodeWindowId,
+  type LeasableDesktopProvider,
   type MemoryEntry,
   type Project,
 } from "@octant/contracts";
@@ -1150,7 +1152,18 @@ describe("ProjectService", () => {
   });
 
   it("refuses a desktop recipe the recipe schema refuses and journals nothing", async () => {
-    const fixture = fixtureService({ projects: [codeProject()] });
+    // The host offers the recipe's provider, so only the schema can refuse.
+    const fixture = fixtureService({
+      projects: [codeProject()],
+      offeredDesktopProviders: () => [
+        decodeLeasableDesktopProvider({
+          providerId: "host-local",
+          displayName: "This host",
+          locality: "host-local",
+          billed: false,
+        }),
+      ],
+    });
     const recipe = {
       providerId: "host-local",
       screen: { width: 1280, height: 800 },
@@ -1176,6 +1189,15 @@ describe("ProjectService", () => {
       ).rejects.toMatchObject({ failure: { category: "invalid" } });
     }
     expect(fixture.append).not.toHaveBeenCalled();
+    await expect(
+      fixture.service.executeProject(windowId, {
+        kind: "change-code-project-desktop-recipe",
+        projectId: workId,
+        expectedVersion: 1,
+        recipe,
+      }),
+    ).resolves.toMatchObject({ project: { desktopRecipe: recipe, version: 2 } });
+    expect(fixture.append).toHaveBeenCalledTimes(1);
   });
 
   it("journals one event per Project colour change and refuses it on an archived Project", async () => {
@@ -1463,6 +1485,7 @@ function fixtureService(
       projectName: string,
       today: string,
     ) => Promise<void>;
+    offeredDesktopProviders?: () => ReadonlyArray<LeasableDesktopProvider>;
   } = {},
 ) {
   const projects = [...(options.projects ?? [])];
@@ -1552,6 +1575,9 @@ function fixtureService(
       ...(options.seedWorkProjectStatusFile === undefined
         ? {}
         : { seedWorkProjectStatusFile: options.seedWorkProjectStatusFile }),
+      ...(options.offeredDesktopProviders === undefined
+        ? {}
+        : { offeredDesktopProviders: options.offeredDesktopProviders }),
     }),
   };
 }
