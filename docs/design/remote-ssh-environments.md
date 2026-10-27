@@ -36,8 +36,8 @@ host's admission of a placed runtime from its driver's declaration
 ([Provider runtimes on a target](#provider-runtimes-on-a-target)). No
 driver declares remote placement yet, the executor cannot yet start a
 runtime process, and so no runtime has been launched on a target; its
-executor-backed placement is [proposed](#runtime-placement-proposed) and
-awaits approval. Slices 7 and 8 are not built. Remote SSH
+executor-backed placement was [accepted](#runtime-placement) on 2026-10-27
+and is next. Slices 7 and 8 are not built. Remote SSH
 environments are authorized post-preview work as of 2026-10-26, when the
 maintainer unlocked the parked backlog and accepted the
 [maintainer decisions](#maintainer-decisions) below. That authorizes this design
@@ -703,20 +703,18 @@ placed runtime gets, which locally is open under the provider-endpoint policy
 and on a target is not yet decided. A wrapped runtime's driver (ACP, OpenCode,
 or Pi) then declares placement and passes this conformance against the
 loopback target before the real-provider smoke. The three choices are
-proposed under [Runtime placement](#runtime-placement-proposed).
+settled under [Runtime placement](#runtime-placement).
 
-### Runtime placement (proposed)
+### Runtime placement
 
-**Status: proposed, awaiting the maintainer's approval.** This section answers
-the three choices slice 6 left open. Nothing here is built, and the executor
-starts no runtime until the maintainer approves it. Each **Proposed decision**
-names its recommendation and the rejected alternatives; the rest follows from
-rules above. On approval the marks become the rule and the date goes in this
-status line.
+**Status: accepted by the maintainer on 2026-10-27, with every decision as
+recommended.** This section answers the three choices slice 6 left open.
+Nothing here is built yet. Each **Decision** names its rule and the rejected
+alternatives; the rest follows from rules above.
 
 #### R1. A placed process beside the request slot
 
-**Proposed decision (needs maintainer approval) R1: a `start-process` request
+**Decision R1: a `start-process` request
 that answers at once and leaves a process running on a stream of its own.**
 
 - **Request.** `start-process` names the bound root, the posture, the
@@ -773,7 +771,7 @@ Rejected:
 
 #### R2. Runtime grants on the target
 
-**Proposed decision (needs maintainer approval) R2: the local wrapped runtime's
+**Decision R2: the local wrapped runtime's
 grant shape, rebuilt on the target, with the binary and account state checked
 there.** A placed runtime gets a posture's command grants (Plan's for Plan,
 the writing postures' otherwise), with these differences, which match what
@@ -838,7 +836,7 @@ Rejected:
 
 #### R3. The network a placed runtime gets
 
-**Proposed decision (needs maintainer approval) R3: `proxied` through this
+**Decision R3: `proxied` through this
 host's proxy, public destinations only, journaled.** In every posture a
 driver declares, Plan included, a placed runtime runs on `proxied`: its
 forwarder carries each connection over the session to a proxy of its own on
@@ -886,7 +884,7 @@ until then.
 
 #### Which runtimes first
 
-**Proposed decision (needs maintainer approval) R4: ACP first, with its
+**Decision R4: ACP first, with its
 client file and terminal capabilities only.** An ACP agent speaks its protocol
 on standard input and output, so `appToolTransport: "stdio"` is true of it. On
 a target its client file and terminal requests run through the executor's file
@@ -949,22 +947,6 @@ Each is its own reviewable change with this section updated in place.
     host's proxy and is journaled, and a reconnect resumes or rebuilds its
     session. The result is recorded here with the agent, the versions, and the
     target's distribution.
-
-#### Questions for approval
-
-1. R1: a `start-process` stream beside the request slot, at most four per
-   session, as protocol 2?
-2. R2: the local wrapped runtime's grants on the target, with the account
-   state writable only where the local launch writes it, and the binary path a
-   per-target setting the person records?
-3. R3: `proxied`, public destinations only, journaled, instead of the local
-   `allow`, accepting that a runtime ignoring proxy variables will not work on
-   a target?
-4. R4: ACP first, with no MCP bridge on targets, and OpenCode through its ACP
-   mode rather than its server?
-5. Is a per-instance, per-Project runtime home under the remote user's state
-   directory, never deleted by Octant, the right place for resumable session
-   files?
 
 ### Credential custody
 
@@ -1204,8 +1186,8 @@ agent can implement and verify it in a Linux container with OpenSSH installed an
    target remains, as the executor's own change before a driver declares
    placement; see
    [Provider runtimes on a target](#provider-runtimes-on-a-target). That
-   change and the driver after it are proposed as 6b to 6d under
-   [Runtime placement](#runtime-placement-proposed).
+   change and the driver after it are 6b to 6d under
+   [Runtime placement](#runtime-placement).
 7. **Terminals, managed worktrees, and Settings.** Container for behavior and
    rendered QA in a browser; desktop packaged smoke needs a Mac (maintainer).
    Remote terminals and worktrees under the same admission, the SSH targets
