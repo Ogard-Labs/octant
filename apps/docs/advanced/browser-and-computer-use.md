@@ -252,8 +252,13 @@ host's; a file reaches it only when the agent sends one.
 
 A desktop on a cloud provider such as E2B runs on your own account and bills
 it, so Octant asks you to confirm each one before it starts
-it, even under Full access; the key stays on this host. This version does not
-offer a cloud provider yet.
+it, even under Full access; the key stays on this host. A desktop on another
+of your machines, such as a Cua Space on **Your other machine**, also asks
+each time and says where it runs: if this machine stops, Octant cannot end
+it, and it may keep running there until you delete it. Octant shows and
+drives it only while Cua reaches it end to end, never through the relay's
+HTTPS path, where Cua's relay could read it. This version does not offer a
+cloud provider or another machine yet.
 
 A paired phone or browser that can open the thread can watch and use its
 desktop too.

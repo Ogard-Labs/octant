@@ -11,10 +11,11 @@ server ([Architecture: security and authority](../architecture.md#security-and-a
 **Delivery state.** Accepted 2026-10-26; slices 1–5 and recipe storage are
 built, and slice 6 is built for E2B. Cua Spaces follows the
 [local-daemon design](#cua-spaces-through-the-local-daemon) accepted on
-2026-10-27: its daemon port and its driver for a Space on this machine are
-built, and no host offers it yet (see
-[Built in Cua sub-slice 1](#built-in-cua-sub-slice-1) and
-[Built in Cua sub-slice 2](#built-in-cua-sub-slice-2)). The maintainer
+2026-10-27: its daemon port and its driver for a Space on this machine or on
+the person's other machine are built, and no host offers it yet (see
+[Built in Cua sub-slice 1](#built-in-cua-sub-slice-1),
+[Built in Cua sub-slice 2](#built-in-cua-sub-slice-2), and
+[Built in Cua sub-slice 3](#built-in-cua-sub-slice-3)). The maintainer
 authorized this scope as post-preview work and accepted the
 [maintainer decisions](#maintainer-decisions) below on 2026-10-26, naming the
 two cloud providers on 2026-10-27; it is not part of the first release, and the
@@ -24,7 +25,8 @@ and its conformance suite, the host lease service, the host-local provider,
 artifact transfer, the agent's binding of `octant_computer` to a lease, the
 Desktop pane, a Code Project's stored recipe with its settings editor, the
 cloud HTTPS port, the E2B driver, the local-daemon port, recipe
-placements, and the Cua driver for this machine exist; no host offers E2B
+placements, and the Cua driver for this machine and the person's other
+machine exist; no host offers E2B
 or Cua for leasing yet, so a recipe can name only the host-local provider
 (see
 [Built in slice 1](#built-in-slice-1),
@@ -34,8 +36,8 @@ or Cua for leasing yet, so a recipe can name only the host-local provider
 [Built in slice 5](#built-in-slice-5),
 [Built in slice 6](#built-in-slice-6), and
 [Built: recipe storage](#built-recipe-storage)). Slice 4's real-provider smoke,
-slice 6's E2B live smoke, and Cua sub-slice 2's live smoke are still owed by
-the maintainer.
+slice 6's E2B live smoke, and Cua sub-slices 2 and 3's live smokes are still
+owed by the maintainer.
 
 **Name.** The product calls it a _disposable desktop_. "Computer" already names
 the Mac computer-use destination and the paired-host Computers card, and a
@@ -212,10 +214,15 @@ lease anyway.
   auto-accept-edits ask in the thread. Full access proceeds for a host-local
   provider. For a provider that bills the person, a person confirms every
   billed lease in every posture, Full access included
-  ([decision 2](#maintainer-decisions)). A person who acquires a host-local
-  desktop has already decided and is not asked again; Plan still refuses them,
-  and a billed lease still asks. The host re-checks authority after the answer,
-  and an answer given for one provider or posture never covers another.
+  ([decision 2](#maintainer-decisions)). A person also confirms every lease
+  whose desktop runs off this machine (a placement whose locality is not
+  host-local), in every posture, their own Start included: it runs where they
+  should know of before it starts, and it can outlive this host
+  ([C5](#expiry-and-teardown-when-the-daemons-host-may-die)). A person who
+  acquires a host-local desktop has already decided and is not asked again;
+  Plan still refuses them, and a billed or off-machine lease still asks. The
+  host re-checks authority after the answer, and an answer given for one
+  provider, placement, or posture never covers another.
 - **Reading** the screen (a frame, a screenshot, a window list) needs no
   approval. **Agent input** follows the existing computer-use rules unchanged:
   `@Computer`-style per-send selection, per-application approval, sensitive-field
@@ -1038,7 +1045,9 @@ driver is not built; why is recorded at the end of this section.
   `/v1/desktop-provider-credentials/*` namespace (Keychain service and Secret
   Service attribute `desktop-provider-credentials.v1`), and the wiring reads
   keys from it.
-- **Contract.** The pane's `acquire` carries `confirmedBilledProvider`.
+- **Contract.** The pane's `acquire` carries the provider the person
+  confirmed (`confirmedProvider`, named `confirmedBilledProvider` until
+  [Cua sub-slice 3](#built-in-cua-sub-slice-3) added its placement).
 - **Driver.** `apps/server/src/plugins/e2bDesktop/`: the `e2b` provider and
   its in-sandbox process and file calls. It imports only `@octant/contracts`
   and the seam, and has no network of its own; a test enforces both.
@@ -1082,7 +1091,7 @@ Rules this slice resolved:
   unreleased lease is still destroyed through its own account's listing.
 - **A person's billed confirmation is theirs.** A person confirms a billed
   desktop in their own tab, which names the provider they saw
-  (`confirmedBilledProvider`); the host starts a person's billed lease only
+  (`confirmedProvider`); the host starts a person's billed lease only
   with it and only for that provider, re-checking authority, provider, and
   posture before the call. No other answer stands in for it. An agent still
   acquires nothing.
@@ -1181,8 +1190,10 @@ handle-path check exists. The decisions below are rules; the sub-slices under
 change with this section updated in place. Sub-slice 1, the daemon port, is
 built ([Built in Cua sub-slice 1](#built-in-cua-sub-slice-1)), and so is
 sub-slice 2, the driver for a Space on this machine
-([Built in Cua sub-slice 2](#built-in-cua-sub-slice-2)); no host offers it
-until the maintainer's live smoke passes.
+([Built in Cua sub-slice 2](#built-in-cua-sub-slice-2)), and sub-slice 3,
+the person's other machines
+([Built in Cua sub-slice 3](#built-in-cua-sub-slice-3)); no host offers it
+until the maintainer's live smokes pass.
 
 ### What Cua offers now
 
@@ -1551,7 +1562,8 @@ where Cua documents no `network` `none`.
    and QEMU installed; each must end `PASS`, and `cua spaces list` must then
    show no Space labelled `octant-host`. The smoke also settles the
    unverified items above.
-3. **The person's other machines**. _Accepts
+3. **The person's other machines** (container; built, see
+   [Built in Cua sub-slice 3](#built-in-cua-sub-slice-3)). _Accepts
    when_ a recorded route of `relay_https` refuses the screen and an
    off-machine acquire asks. _Owed by the maintainer:_ the same smoke with a
    second machine set up with `cua host setup --provide-spaces`.
@@ -1817,6 +1829,111 @@ the form `octant-<lease id>` is accepted, that a local Space reports no
 reaches its display, that each screenshot carries a `screenshot_id`, and
 whether the VM's screen matches the recipe's size (a frame larger than the
 recipe is refused). Until it passes, the driver is offered on no host.
+
+### Built in Cua sub-slice 3
+
+- **Driver.** The `cua` provider declares a second placement,
+  `other-machine` ("Your other machine", locality `cloud`, not billed), and
+  two more methods, `SpaceService/ListHosts` and `SpaceService/GetSpaceRoute`
+  (`cuaDesktopProvider.ts`, `cuaProtocol.ts`). No seam change was needed.
+- **Policy.** `decideDesktopLeaseAcquire` takes the lease's locality and asks
+  `off-machine` for every lease off this machine
+  (`packages/domain/src/desktopLeasePolicy.ts`).
+- **Contract and host.** The pane's `acquire` names the provider and
+  placement a person confirmed (`confirmedProvider`, `confirmedPlacement`),
+  and the pane's Start carries the recipe's placement (`placementId`). The
+  lease service starts a person's billed or off-machine lease only with both,
+  and asks an agent's thread `off-machine`, naming the placement.
+- **Pane.** Start on an off-machine placement asks first, naming the
+  provider and placement and saying that if this machine stops, Octant
+  cannot end the desktop, which may keep running there until the person
+  deletes it in the provider (`DesktopPane.tsx`).
+- **Smoke.** `bun run desktop:cloud:smoke cua-other-machine run|kill|restart`.
+
+Rules this sub-slice resolved:
+
+- **An off-machine lease asks the way a billed one does.** The rule is in
+  [Authority](#authority). It reuses the billed confirmation rather than a
+  second path: a person confirms in their own tab, which names the provider
+  and the placement they saw, and an agent's turn asks in its thread. A
+  placement off this machine has locality `cloud`, the locality that already
+  makes a transfer ask `off-machine`; a billed placement asks `billed`, whose
+  confirmation also names where it runs.
+- **Which other machine.** A recipe names the placement, not a machine, so
+  the driver asks `ListHosts` and creates on `host:<id>` only when exactly
+  one of the person's machines that provide Spaces answers. None refuses
+  `no-other-machine`; more than one refuses `other-machine-ambiguous`
+  rather than choosing for a person who confirmed only "your other machine";
+  a host listing that cannot be read, a host Octant cannot name, or a `via`
+  other than `relay` or `direct` fails. Rejected: `on` `auto`, which picks
+  the least-loaded machine and, with a cloud linked, may be a billed pool
+  host; and a machine name in the recipe, a new person-entered field that
+  waits until the recipe editor can list the person's machines.
+- **The same VM, wherever it runs.** A Space on another machine is the same
+  QEMU VM with network `none` as one here (C7), verified from the create's
+  answer. That machine's loopback holds the person's own services there,
+  as this one's holds the Octant server, so a recipe with network is
+  refused for both placements.
+- **A Space reported elsewhere is destroyed.** One on this machine must
+  report no `host`; one on another must report one, and for a relay host the
+  relay machine id that was asked. Any other answer deletes the Space and
+  fails the acquire `space-mismatched`, as a Space placed in a cloud does.
+- **The route is asked before every use, not only before a view.** Cua falls
+  back from the mesh to the relay's HTTPS path when the mesh stops
+  answering, so the driver asks `GetSpaceRoute` before a view opens and
+  again before each frame, input, sent file, and agent command on a Space on
+  another machine. `mesh` (end to end, straight or relayed as ciphertext),
+  `direct`, and `local` are accepted. `relay_https` refuses
+  `relay-reads-session`; `cloud`, an empty transport, any value the driver
+  does not know, an error, or an unreadable answer refuses
+  `route-unverified`; a daemon that does not answer is `not-connected`.
+  The answer and the call after it are two steps, so a fallback between
+  them reaches the next call, not that one. A Space on this machine is never
+  asked: its route is `local`.
+- **A refused screen reaches the person as the provider being unavailable.**
+  The host passes no driver reason to a pane, so a view the route refuses
+  shows `provider-unavailable`, and the agent's command answers `refused`
+  with the route's reason.
+
+Evidence: `cuaDesktopProvider.test.ts` runs the conformance suite, restart
+included, a second time on the `other-machine` placement against the
+recorded daemon, which now also plays the person's machines (`ListHosts`,
+a create on `host:<id>`) and the route to a Space on one of them
+(`GetSpaceRoute`, written from `spaces.proto` at `8fbdf83`: `ListHostsRequest`,
+`SpacesHost`, `GetSpaceRouteRequest`, `GetSpaceRouteResponse`, and
+`Space.host`). It covers a recorded route of `relay_https` refusing the
+screen, a sent file, and an agent command before anything reaches the
+Space; the mesh and `direct` showing frames; a route that falls back to
+`relay_https` while a view is open refusing that view's frames and input;
+`cloud`, empty, and unknown transports refused; a Space here never asked
+its route; the create on the one machine that answers, with none and two
+refused before any create; and a Space reported on another machine than
+asked destroyed. Through the lease service over a journal on disk, an
+off-machine acquire asks: an agent under Full access is asked `off-machine`,
+and a person's Start creates nothing until they confirm the provider and
+that placement. `desktopLeaseService.test.ts` covers the same with a fake
+provider and the pane's Start offering the placement;
+`desktopLeasePolicy.test.ts` covers the gate in every posture; and
+`DesktopPane.test.tsx` covers the question and the confirmation it sends.
+Removing the `relay_https` refusal, the refusal to choose among several
+machines, or the check of where a Space was placed each fails a test. The
+file passes under Node through `bun run test` and under Bun.
+
+Owed by the maintainer: Cua sub-slice 2's smoke, then the same on a second
+Linux machine of the same Cua account, set up with
+`cua host setup --provide-spaces` and QEMU installed, the only one of the
+account's machines providing Spaces and online: from `apps/server` on this
+host, `bun run desktop:cloud:smoke cua-other-machine run`, then
+`… cua-other-machine kill` followed by `… cua-other-machine restart`. Each
+must end `PASS`, and `cua spaces list` on this host must then show no Space
+labelled `octant-host`. If the mesh does not connect, the view refuses and
+`run` ends `FAIL`, which is the intended outcome on that route. The live run
+is what confirms what a recording cannot: that `location` `host:<id>` takes
+the id `ListHosts` reports, that a Space there reports `network` `none`, its
+`host`, and its labels, that `GetSpaceRoute` answers `mesh` or `direct`, that
+`SetSpaceLifetime` and `DeleteSpace` reach it through this daemon, and that
+a complete `ListSpaces` lists it. Until both smokes pass, the driver is
+offered on no host.
 
 ## Rationale
 
