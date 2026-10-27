@@ -5,6 +5,7 @@ import type { SshRemoteProject, SshRemoteWorktree } from "@octant/contracts/ssh-
 import type { SshHostKeyProbe, SshTargetStatus } from "@octant/contracts/ssh-target";
 import { describeSshAdmissionRefusal } from "@octant/domain/ssh-target-recovery";
 import type { XtermAdapterRuntime } from "../code/XtermTerminalAdapter";
+import { thisComputerName, useHostPlatform } from "../platform";
 import { SettingRow, SettingsPanel, SettingsSection, SettingsState } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
@@ -20,7 +21,7 @@ import {
 } from "./sshTargetClient";
 
 /**
- * Settings › SSH targets: the machines this Mac reaches with `ssh`, the Code
+ * Settings › SSH targets: the machines the host reaches with `ssh`, the Code
  * Projects bound to folders on them, their managed worktrees, and a terminal
  * in either. Canonical: docs/design/remote-ssh-environments.md and DESIGN.md
  * § Page shell.
@@ -79,6 +80,7 @@ export function SshTargetsSettingsSection({
   /** Replaces the terminal renderer; only tests do. */
   readonly loadTerminalRuntime?: () => Promise<XtermAdapterRuntime>;
 }) {
+  const computer = thisComputerName(useHostPlatform());
   const destinationId = useId();
   const executorId = useId();
   const bindTargetId = useId();
@@ -229,7 +231,7 @@ export function SshTargetsSettingsSection({
   return (
     <div className="settings-section-stack" id="settings-ssh-targets">
       <SettingsSection
-        description="Machines this Mac reaches with ssh. A Code Project can keep its folder on one; Octant admits work there only after the target proves it confines it as this Mac would."
+        description={`Machines ${computer} reaches with ssh. A Code Project can keep its folder on one; Octant admits work there only after the target proves it confines it as ${computer} would.`}
         title="Targets"
       >
         <div className="setgroup">
@@ -343,7 +345,7 @@ export function SshTargetsSettingsSection({
       </SettingsSection>
 
       <SettingsSection
-        description="A Code Project whose folder is on a target. Its terminals and worktrees run there, under the same confinement as on this Mac."
+        description={`A Code Project whose folder is on a target. Its terminals and worktrees run there, under the same confinement as on ${computer}.`}
         title="Remote Projects"
       >
         <div className="setgroup">

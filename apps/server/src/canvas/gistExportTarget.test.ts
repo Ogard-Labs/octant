@@ -69,6 +69,24 @@ function target(
   };
 }
 
+/**
+ * Runs `read` as if the server ran on `platform`, then restores the real one.
+ * Copy the server writes reaches signed-in paired devices, so it must not
+ * follow the host's platform.
+ */
+async function onHostPlatform<T>(
+  platform: NodeJS.Platform,
+  read: () => T | Promise<T>,
+): Promise<T> {
+  const real = Object.getOwnPropertyDescriptor(process, "platform");
+  Object.defineProperty(process, "platform", { value: platform, configurable: true });
+  try {
+    return await read();
+  } finally {
+    if (real !== undefined) Object.defineProperty(process, "platform", real);
+  }
+}
+
 describe("the GitHub Gist export destination", () => {
   it("posts the rendered document as a secret gist and reports the URL and id it created", async () => {
     const { github, target: gist } = target();
@@ -125,6 +143,23 @@ describe("the GitHub Gist export destination", () => {
     expect(github.requests).toHaveLength(0);
   });
 
+  it.each(["linux", "darwin"] as const)(
+    "refuses a filtered document without disclosing the platform on a %s host",
+    async (platform) => {
+      const delivery = await onHostPlatform(platform, () =>
+        target().target.exportDocument(
+          document({ body: "key: ghp_abcdefghijklmnopqrstuvwxyz012345\n" }),
+        ),
+      );
+
+      expect(delivery).toEqual({
+        kind: "refused",
+        code: "refused",
+        message: "The document contains text that cannot leave this computer.",
+      });
+    },
+  );
+
   it("refuses and posts nothing when GitHub is not connected", async () => {
     const { github, target: gist } = target({ kind: "not-connected" });
 
@@ -138,7 +173,7 @@ describe("the GitHub Gist export destination", () => {
   it("refuses when the credential is stored insecurely, without posting anything", async () => {
     const { github, target: gist } = target({
       kind: "refused",
-      reason: "GitHub is signed in with credentials stored in plain text on this Mac.",
+      reason: "GitHub is signed in with credentials stored in plain text on this computer.",
     });
 
     const delivery = await gist.exportDocument(document({}));
@@ -225,6 +260,20 @@ describe("the gist destination's state from the GitHub connection", () => {
 
     expect(refused.kind).toBe("refused");
   });
+
+  it.each(["linux", "darwin"] as const)(
+    "says where the plain-text credential is without disclosing the platform on a %s host",
+    async (platform) => {
+      const refused = await onHostPlatform(platform, () =>
+        gistExportAvailability(snapshot({ state: "insecure-storage" })),
+      );
+
+      expect(refused).toEqual({
+        kind: "refused",
+        reason: "GitHub is signed in with credentials stored in plain text on this computer.",
+      });
+    },
+  );
 
   it("is not-connected when there is no usable GitHub connection", () => {
     expect(gistExportAvailability(snapshot({ state: "unauthorized" })).kind).toBe("not-connected");

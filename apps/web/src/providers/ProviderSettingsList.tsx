@@ -921,12 +921,20 @@ function ProviderRow(props: ProviderRowProps) {
                 ? setupGuidance
                 : null}
               {browserClaudeKeySetup ? (
+                // A host that has said which it is gets only its own route;
+                // one that has not yet gets both rather than a guess.
                 <p className="provider-card__guidance">
-                  On the Linux host, run{" "}
-                  <code>octant provider key set &quot;Profile name&quot;</code> using this
-                  profile&apos;s exact name, then check the connection. On macOS, open this profile
-                  in Octant desktop to add or replace its key. This browser cannot save or remove
-                  credentials.
+                  {hostPlatform === "darwin" ? null : (
+                    <>
+                      On the Linux host, run{" "}
+                      <code>octant provider key set &quot;Profile name&quot;</code> using this
+                      profile&apos;s exact name, then check the connection.{" "}
+                    </>
+                  )}
+                  {hostPlatform === "linux"
+                    ? null
+                    : "On macOS, open this profile in Octant desktop to add or replace its key. "}
+                  This browser cannot save or remove credentials.
                 </p>
               ) : null}
               {usesCredential && !props.credentialManagementAvailable && !browserClaudeKeySetup ? (

@@ -65,7 +65,7 @@ export function gistExportAvailability(
   if (snapshot.state === "insecure-storage") {
     return {
       kind: "refused",
-      reason: "GitHub is signed in with credentials stored in plain text on this Mac.",
+      reason: "GitHub is signed in with credentials stored in plain text on this computer.",
     };
   }
   if (
@@ -170,7 +170,7 @@ export function createGistExportTarget(
       // absolute paths and no secret-shaped values leave the host. A document
       // that still fails it is refused, never published.
       if (!isCanvasShareSafeText(output.body)) {
-        return refused("refused", "The document contains text that cannot leave this Mac.");
+        return refused("refused", "The document contains text that cannot leave this computer.");
       }
       const visibility = confirmed?.visibility === "public" ? "public" : "secret";
       const fileName = canvasExportPlannedName(output.title, "markdown");

@@ -939,7 +939,7 @@ describe("ProviderSettingsView", () => {
 
     expect(within(create).getByLabelText("Anthropic API key")).toBeDisabled();
     expect(submit).toBeEnabled();
-    expect(within(create).getByText(/octant provider key set/)).toBeVisible();
+    expect(within(create).getByText(/On macOS, open this profile in Octant desktop/)).toBeVisible();
     await user.type(within(create).getByLabelText("Provider name"), "Claude API");
     await user.type(within(create).getByLabelText("Claude binary"), "/usr/local/bin/claude");
     await user.click(submit);
@@ -1387,8 +1387,6 @@ describe("ProviderSettingsView", () => {
       />,
     );
     const card = screen.getByRole("article", { name: "Claude local" });
-    expect(within(card).getByText(/octant provider key set/)).toBeVisible();
-    expect(within(card).getByText(/using this profile.s exact name/)).toBeVisible();
     expect(within(card).getByText(/On macOS, open this profile in Octant desktop/)).toBeVisible();
     expect(within(card).queryByText(/Manage API keys in the Octant host app/)).toBeNull();
     expect(within(card).getByLabelText("Anthropic API key for Claude local")).toBeDisabled();
@@ -1405,7 +1403,7 @@ describe("ProviderSettingsView", () => {
       />,
     );
     const card = screen.getByRole("article", { name: "Claude local" });
-    expect(within(card).getByText(/octant provider key set/)).toBeVisible();
+    expect(within(card).getByText(/On macOS, open this profile in Octant desktop/)).toBeVisible();
     expect(within(card).getByLabelText("Incompatibility details")).toBeVisible();
   });
 
@@ -1539,7 +1537,7 @@ describe("ProviderSettingsView", () => {
     card = screen.getByRole("article", { name: "Claude local" });
     expect(within(card).getByLabelText("Anthropic API key for Claude local")).toBeDisabled();
     expect(within(card).getByRole("button", { name: "Remove Claude local" })).toBeDisabled();
-    expect(within(card).getByText(/octant provider key set/)).toBeVisible();
+    expect(within(card).getByText(/On macOS, open this profile in Octant desktop/)).toBeVisible();
   });
 
   it("shows semantic provider state and never renders runtime secrets or addresses", async () => {
@@ -3979,6 +3977,8 @@ describe.each([
     store: "this computer's credential store",
     storeName: "credential store",
     elsewhere: /Keychain|this Mac/,
+    keySetup: "On the Linux host, run octant provider key set",
+    otherKeySetup: /On macOS/,
   },
   {
     host: "darwin",
@@ -3987,6 +3987,8 @@ describe.each([
     store: "this Mac's Keychain",
     storeName: "Keychain",
     elsewhere: /credential store|this computer/,
+    keySetup: "On macOS, open this profile in Octant desktop",
+    otherKeySetup: /Linux host|octant provider key set/,
   },
 ] as const)("provider forms on a $host host", (platform) => {
   beforeEach(() => {
@@ -4077,6 +4079,42 @@ describe.each([
     expect(guidance.textContent).not.toMatch(platform.elsewhere);
   });
 
+  it("gives a browser only the key setup for the host's own platform on a Claude card", () => {
+    renderExpanded(
+      <ProviderSettingsView
+        {...fixture({
+          instance: claudeProvider("api-key"),
+          credentialManagementAvailable: false,
+          observed: observation({ readiness: "unauthenticated", credentialStatus: "missing" }),
+        })}
+      />,
+      platform.host,
+    );
+    const note = within(screen.getByRole("article", { name: "Claude local" })).getByText(
+      /This browser cannot save or remove credentials\./,
+    );
+    expect(note).toHaveTextContent(platform.keySetup);
+    expect(note.textContent).not.toMatch(platform.otherKeySetup);
+  });
+
+  it("gives a browser only the key setup for the host's own platform when adding Claude", async () => {
+    const user = userEvent.setup();
+    renderExpanded(
+      <ProviderSettingsView {...fixture({ credentialManagementAvailable: false })} />,
+      platform.host,
+    );
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Claude Agent SDK");
+    const create = screen.getByRole("form", { name: "Add Claude provider" });
+    await chooseSelectFieldOption(
+      user,
+      within(create).getByLabelText("Claude authentication"),
+      "Anthropic API key",
+    );
+    const note = within(create).getByText(/This browser cannot save API keys\./);
+    expect(note).toHaveTextContent(platform.keySetup);
+    expect(note.textContent).not.toMatch(platform.otherKeySetup);
+  });
+
   it("names the host's store while checking a saved key and once it is found", async () => {
     const pending = deferred<ProviderCredentialStatus>();
     renderProviderListExpanded(
@@ -4090,6 +4128,30 @@ describe.each([
     expect(within(card).getByText(`Checking the ${platform.storeName}…`)).toBeVisible();
     await act(async () => pending.resolve("stored"));
     expect(await within(card).findByText(`Stored in ${platform.store}`)).toBeVisible();
+  });
+});
+
+describe("browser key setup before the host reports its platform", () => {
+  it("gives both the Linux command and the macOS route while the host's platform is unknown", () => {
+    render(
+      <HostPlatformContext.Provider value={undefined}>
+        <ProviderSettingsView
+          {...fixture({
+            instance: claudeProvider("api-key"),
+            credentialManagementAvailable: false,
+            observed: observation({ readiness: "unauthenticated", credentialStatus: "missing" }),
+          })}
+        />
+      </HostPlatformContext.Provider>,
+    );
+    for (const details of screen.queryAllByRole("button", { name: /^Details for / })) {
+      if (details.getAttribute("aria-expanded") === "false") fireEvent.click(details);
+    }
+    const note = within(screen.getByRole("article", { name: "Claude local" })).getByText(
+      /This browser cannot save or remove credentials\./,
+    );
+    expect(note).toHaveTextContent("On the Linux host, run octant provider key set");
+    expect(note).toHaveTextContent("On macOS, open this profile in Octant desktop");
   });
 });
 

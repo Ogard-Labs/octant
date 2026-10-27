@@ -5,6 +5,7 @@ import {
   type ComputerUseStatus,
 } from "@octant/contracts/computer-use-plugin";
 import type { ShellSettings } from "@octant/contracts/shell";
+import { thisComputerName, useHostPlatform } from "../platform";
 import { getInjectedHostBridge, type OctantHostBridge } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
@@ -24,6 +25,7 @@ export function ComputerUseSettingsView(props: {
   readonly bridge?: ComputerBridge;
 }) {
   const bridge = props.bridge ?? getInjectedHostBridge();
+  const computer = thisComputerName(useHostPlatform());
   const [status, setStatus] = useState<ComputerUseStatus>();
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -107,7 +109,7 @@ export function ComputerUseSettingsView(props: {
           <SettingRow
             settingId="computer-use-enabled"
             label="Computer use"
-            description="Allow tasks to request access to applications on this Mac."
+            description={`Allow tasks to request access to applications on ${computer}.`}
             scope="host"
           >
             <OctantSwitch

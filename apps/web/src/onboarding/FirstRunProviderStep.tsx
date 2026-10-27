@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import type { ProviderInstanceId } from "@octant/contracts";
 import { forwardRef, type ComponentType } from "react";
+import { thisComputerName, useHostPlatform } from "../platform";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
@@ -85,15 +86,17 @@ const CAVEATS: Partial<Record<Exclude<FirstRunReadinessOverall, "ready">, string
 export const FirstRunProviderStep = forwardRef<HTMLButtonElement, FirstRunProviderStepProps>(
   function FirstRunProviderStep(props, ref) {
     const { readiness } = props;
+    const computer = thisComputerName(useHostPlatform());
     const SummaryIcon = SUMMARY_ICONS[readiness.overall];
     const caveat = readiness.overall === "ready" ? undefined : CAVEATS[readiness.overall];
 
     return (
       <div className="first-run__step">
         <p className="first-run__intro">
-          Octant runs on this Mac and talks to the AI providers you choose. If Claude Code or Codex
-          CLI is already installed, first run enables it so a thread can start without visiting
-          Settings; you can turn it off later. Other detected CLIs stay off until you enable them.
+          Octant runs on {computer} and talks to the AI providers you choose. If Claude Code or
+          Codex CLI is already installed, first run enables it so a thread can start without
+          visiting Settings; you can turn it off later. Other detected CLIs stay off until you
+          enable them.
         </p>
 
         {/* The verdict is the section's own second line, not a row: it speaks
@@ -166,7 +169,7 @@ export const FirstRunProviderStep = forwardRef<HTMLButtonElement, FirstRunProvid
             type="button"
             variant="ghost"
           >
-            {props.scanning ? "Checking…" : "Check this Mac again"}
+            {props.scanning ? "Checking…" : `Check ${computer} again`}
           </OctantButton>
         </div>
 

@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { HostPlatformContext } from "../platform";
 import { ComputerUseSettingsView } from "./ComputerUseSettingsView";
 
 const status = {
@@ -47,5 +48,43 @@ describe("Computer use Settings", () => {
     );
     expect(await screen.findByText(/requires the Octant desktop app/)).toBeVisible();
     expect(screen.getByRole("button", { name: "Set up permissions" })).toBeDisabled();
+  });
+});
+
+// Each host is seen from a window on the other platform, so copy that read the
+// window's platform instead of the host's would name the wrong computer.
+const HOSTS = [
+  { hostPlatform: "linux", window: "MacIntel", computer: "this computer", elsewhere: /this Mac/ },
+  {
+    hostPlatform: "darwin",
+    window: "Linux x86_64",
+    computer: "this Mac",
+    elsewhere: /this computer/,
+  },
+] as const;
+
+describe.each(HOSTS)("Computer use Settings on a $hostPlatform host", (host) => {
+  beforeEach(() => {
+    Object.defineProperty(window.navigator, "platform", { value: host.window, configurable: true });
+  });
+  afterEach(() => Reflect.deleteProperty(window.navigator, "platform"));
+
+  it("names the host's computer whose applications a task may ask for, and keeps the macOS permission copy", async () => {
+    render(
+      <HostPlatformContext.Provider value={host.hostPlatform}>
+        <ComputerUseSettingsView
+          settings={{ enabled: true, automaticUpdates: true }}
+          onSettingsChange={() => {}}
+          bridge={{}}
+        />
+      </HostPlatformContext.Provider>,
+    );
+
+    expect(
+      screen.getByText(`Allow tasks to request access to applications on ${host.computer}.`),
+    ).toBeVisible();
+    // Computer use runs only on macOS, so its permission section keeps naming macOS.
+    expect(screen.getByText("macOS permissions")).toBeVisible();
+    expect(await screen.findByText(/requires the Octant desktop app/)).toBeVisible();
   });
 });

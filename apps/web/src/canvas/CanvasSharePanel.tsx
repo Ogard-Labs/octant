@@ -25,6 +25,7 @@ import type {
 } from "@octant/contracts/canvas-share-snapshot";
 import { Ban, Check, Eye, Share2, TriangleAlert } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
+import { thisComputerName, useHostPlatform } from "../platform";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -119,6 +120,7 @@ export interface CanvasSharePanelProps {
 }
 
 export function CanvasSharePanel(props: CanvasSharePanelProps) {
+  const computer = thisComputerName(useHostPlatform());
   const [run, setRun] = useState<ShareRun>({ kind: "idle" });
   const [openedSnapshot, setOpenedSnapshot] = useState<CanvasStaticExportDocument | undefined>(
     undefined,
@@ -282,8 +284,8 @@ export function CanvasSharePanel(props: CanvasSharePanelProps) {
       <h3 className="canvas-share__title">Share</h3>
       <p className="canvas-share__description" id="canvas-share-description">
         A share is a read-only snapshot of this canvas version with credentials, file paths, and
-        live sources stripped out. It stays on this Mac — nothing is uploaded, and there is no link.
-        Only someone this host can sign in may open it, until it expires or you revoke it.
+        live sources stripped out. It stays on {computer} — nothing is uploaded, and there is no
+        link. Only someone this host can sign in may open it, until it expires or you revoke it.
       </p>
       {props.overview.sharingEnabled ? (
         <div className="canvas-share__form">

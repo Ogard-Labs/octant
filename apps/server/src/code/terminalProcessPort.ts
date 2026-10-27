@@ -148,11 +148,11 @@ export function ensureNodePtySpawnHelperExecutable(
     existsSync(join(candidate, "pty.node")),
   );
   if (nativeDirectory === undefined) {
-    throw new Error("The node-pty native runtime is unavailable for this Mac.");
+    throw new Error("The node-pty native runtime is unavailable on this computer.");
   }
   const helperPath = join(nativeDirectory, "spawn-helper");
   if (!existsSync(helperPath) || !statSync(helperPath).isFile()) {
-    throw new Error("The node-pty spawn helper is unavailable for this Mac.");
+    throw new Error("The node-pty spawn helper is unavailable on this computer.");
   }
   const mode = statSync(helperPath).mode;
   if ((mode & 0o111) === 0o111) return;

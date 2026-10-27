@@ -1,5 +1,6 @@
 import { X } from "lucide-react";
 import { useEffect, useId, useRef, useState, type RefObject } from "react";
+import { thisComputerName, useHostPlatform } from "../platform";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { useOrderedDeviceInput, type DeviceInputIntent } from "./deviceInput";
 import type {
@@ -301,6 +302,7 @@ function StageFor(props: {
   readonly act: (action: DeviceAction) => void;
 }) {
   const { view } = props;
+  const computer = thisComputerName(useHostPlatform());
   const blank = { kind: "none" } as const;
   switch (view.kind) {
     case "checking":
@@ -310,7 +312,7 @@ function StageFor(props: {
           caption={
             <>
               <DeviceSpinner />
-              Checking this Mac…
+              Checking {computer}…
             </>
           }
           enqueue={props.enqueue}

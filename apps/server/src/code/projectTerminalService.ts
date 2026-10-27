@@ -141,7 +141,10 @@ export class ProjectTerminalService {
     // thread holds. A Project terminal has no thread to hold one, so a paired
     // device is refused here rather than given a shell with nothing gating it.
     if (caller !== "local-window") {
-      return refused("unauthorized", "Project terminals open only from this Mac's own window.");
+      return refused(
+        "unauthorized",
+        "Project terminals open only from this computer's own window.",
+      );
     }
     if (command.kind === "start") return this.#start(windowId, command);
 

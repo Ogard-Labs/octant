@@ -1,7 +1,10 @@
+import type { HostPlatform } from "@octant/contracts/host";
+import { thisComputerName } from "../platform";
+
 /**
  * The shape of first run.
  *
- * Three steps, in the order a first task needs them: what this Mac can reach,
+ * Three steps, in the order a first task needs them: what the host can reach,
  * the folder the task works in, and the model it starts with. Providers come
  * first because the model is picked from what the provider step found —
  * offering a model list before the host has looked would offer an empty one.
@@ -33,6 +36,8 @@ export interface FirstRunStepInputs {
   readonly providersReady: boolean;
   readonly projectReady: boolean;
   readonly modelChosen: boolean;
+  /** The platform the host reports, which names the computer the providers step searches. */
+  readonly hostPlatform?: HostPlatform | undefined;
 }
 
 const TITLES: Record<FirstRunStepId, string> = {
@@ -41,15 +46,18 @@ const TITLES: Record<FirstRunStepId, string> = {
   model: "Model",
 };
 
-const SUMMARIES: Record<FirstRunStepId, string> = {
-  providers: "What this Mac can actually reach.",
-  project: "The folder your first task works in.",
-  model: "The model your first task starts with.",
-};
+function summaries(hostPlatform: HostPlatform | undefined): Record<FirstRunStepId, string> {
+  return {
+    providers: `What ${thisComputerName(hostPlatform)} can actually reach.`,
+    project: "The folder your first task works in.",
+    model: "The model your first task starts with.",
+  };
+}
 
 export function buildFirstRunSteps(
   inputs: FirstRunStepInputs,
 ): ReadonlyArray<FirstRunStepDescriptor> {
+  const summary = summaries(inputs.hostPlatform);
   const configured: Record<FirstRunStepId, boolean> = {
     providers: inputs.providersReady,
     project: inputs.projectReady,
@@ -58,7 +66,7 @@ export function buildFirstRunSteps(
   return FIRST_RUN_STEP_IDS.map((id) => ({
     id,
     title: TITLES[id],
-    summary: SUMMARIES[id],
+    summary: summary[id],
     configured: configured[id],
     current: id === inputs.current,
   }));

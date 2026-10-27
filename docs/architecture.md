@@ -8414,7 +8414,13 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   that names the host's computer or credential store follows it. Before the
   answer arrives, or from a host that sends none, copy uses the neutral "this
   computer" rather than the window's platform, which is wrong exactly for a
-  remote window.
+  remote window. Copy the server writes itself never follows
+  `process.platform`, because a signed-in paired device can read it:
+  destination labels such as the folder export's, refusal reasons such as the
+  gist destination's, and refusals that name the host's window say "this
+  computer" on every host. Only copy for a macOS-only capability, such as
+  Computer use or the Apple workbench, names the Mac, which tells a reader
+  nothing the capability does not.
 - **Local servers and Running services.** Listener observation is ephemeral,
   scoped to listening sockets of the current user, and never journaled. One
   classifier decides what may be listed at all: a system daemon, another user's

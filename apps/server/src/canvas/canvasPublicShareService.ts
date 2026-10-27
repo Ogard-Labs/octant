@@ -402,7 +402,7 @@ export class CanvasPublicShareService {
       return decodeCanvasPublicShareRevokeResult({
         kind: "refused",
         code: "not-found",
-        message: "That public link is not on this Mac.",
+        message: "That public link is not on this computer.",
       });
     }
     if (held.record.status === "revoked") {
