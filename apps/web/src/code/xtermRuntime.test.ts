@@ -267,6 +267,76 @@ describe("Xterm runtime", () => {
     session.dispose();
   });
 
+  it("moves an open terminal onto the Glass plate and back when the sidebar material changes", async () => {
+    const shell = document.createElement("div");
+    shell.className = "shell shell--material-opaque";
+    const element = document.createElement("div");
+    shell.append(element);
+    document.body.append(shell);
+    const session = mount(element, {
+      colors: darkColors,
+      interactive: false,
+      onData: vi.fn(),
+      onResize: vi.fn(),
+      output: "",
+    });
+    expect(mocks.terminal).toHaveBeenCalledWith(
+      expect.objectContaining({ theme: expect.objectContaining({ background: "#1a1a1a" }) }),
+    );
+
+    // The host answers after mount: the shell turns Glass with no theme change.
+    shell.className = "shell shell--material-translucent";
+    await Promise.resolve();
+    expect(mocks.terminalOptions).toMatchObject({
+      theme: expect.objectContaining({ background: "#343435", cursorAccent: "#343435" }),
+    });
+
+    // The live colours are kept: a later material switch does not bring back
+    // the theme the terminal was mounted with.
+    session.setColors?.(lightColors);
+    shell.className = "shell shell--material-opaque";
+    await Promise.resolve();
+    expect(mocks.terminalOptions).toMatchObject({
+      theme: expect.objectContaining({ background: "#ffffff", cursorAccent: "#ffffff" }),
+    });
+
+    session.dispose();
+    shell.className = "shell shell--material-translucent";
+    await Promise.resolve();
+    expect(mocks.terminalOptions).toMatchObject({
+      theme: expect.objectContaining({ background: "#ffffff" }),
+    });
+    shell.remove();
+  });
+
+  it("drops the Glass plate from an open terminal when reduced transparency is turned on", async () => {
+    const shell = document.createElement("div");
+    shell.className = "shell shell--material-translucent";
+    const element = document.createElement("div");
+    shell.append(element);
+    document.body.append(shell);
+    const session = mount(element, {
+      colors: darkColors,
+      interactive: false,
+      onData: vi.fn(),
+      onResize: vi.fn(),
+      output: "",
+    });
+    session.setColors?.(darkColors);
+    expect(mocks.terminalOptions).toMatchObject({
+      theme: expect.objectContaining({ background: "#343435" }),
+    });
+
+    document.documentElement.dataset.octantReducedTransparency = "true";
+    await Promise.resolve();
+    expect(mocks.terminalOptions).toMatchObject({
+      theme: expect.objectContaining({ background: "#1a1a1a" }),
+    });
+    session.dispose();
+    delete document.documentElement.dataset.octantReducedTransparency;
+    shell.remove();
+  });
+
   it("paints the stylesheet's dark default when no theme reaches the terminal", () => {
     const session = mount(document.createElement("div"), {
       interactive: false,
