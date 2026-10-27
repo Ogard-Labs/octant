@@ -1,5 +1,6 @@
 import {
   LOCAL_HOST_ID,
+  type HostPlatform,
   decodeProviderInstanceId,
   type NativeHarnessRoutingSettings,
   type ProviderModel,
@@ -9,6 +10,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { HostPlatformContext } from "../../platform";
 import type { ModelToolCheck } from "../../providers/useProviderController";
 import { chooseSelectFieldOption } from "../../test/chooseSelectFieldOption.test-support";
 import { endpointPreset } from "./addEndpointSteps";
@@ -192,9 +194,14 @@ function Harness(props: { readonly flow: AddEndpointFlowProps; readonly override
   );
 }
 
-function renderFlow(overrides: Overrides = {}) {
+/** Renders the flow against a host that reports `hostPlatform`, macOS unless named. */
+function renderFlow(overrides: Overrides = {}, hostPlatform: HostPlatform = "darwin") {
   const flow = flowProps(overrides);
-  render(<Harness flow={flow} overrides={overrides} />);
+  render(
+    <HostPlatformContext.Provider value={hostPlatform}>
+      <Harness flow={flow} overrides={overrides} />
+    </HostPlatformContext.Provider>,
+  );
   return flow;
 }
 
@@ -883,6 +890,33 @@ describe("Add endpoint, step by step", () => {
       "Team Azure",
       expect.objectContaining({ kind: "azure-foundry-openai-http" }),
       expect.objectContaining({ value: "" }),
+    );
+  });
+
+  it("names a Linux host's credential store, not this Mac's Keychain, where the key is kept", async () => {
+    const user = userEvent.setup();
+    // The window says Mac; the host that keeps the key runs Linux.
+    Object.defineProperty(window.navigator, "platform", { value: "MacIntel", configurable: true });
+    try {
+      renderFlow({}, "linux");
+      const form = await connect(user, "Azure AI Foundry", {});
+      expect(
+        within(form).getByText(
+          "Saved in this computer's credential store. Octant can't show it again.",
+        ),
+      ).toBeVisible();
+      expect(within(form).queryByText(/Keychain|this Mac/)).not.toBeInTheDocument();
+    } finally {
+      Reflect.deleteProperty(window.navigator, "platform");
+    }
+  });
+
+  it("tells a browser on a Linux host the key is added on this computer", async () => {
+    const user = userEvent.setup();
+    renderFlow({ credentialManagementAvailable: false }, "linux");
+    const form = await connect(user, "Azure AI Foundry", {});
+    expect(within(form).getByTestId("endpoint-key-later")).toHaveTextContent(
+      "then add the key in the Octant desktop app on this computer.",
     );
   });
 });

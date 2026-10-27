@@ -14,6 +14,7 @@ import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { ArrowLeft, Check, Menu, Search, X } from "lucide-react";
 import type { ShellSettings } from "@octant/contracts/shell";
 import {
+  type HostPlatform,
   type ProviderInstanceId,
   type SettingsDeepLink,
   type SettingsSectionId,
@@ -128,7 +129,7 @@ import {
   type BackgroundImageLibrary,
 } from "../settings/AppBackgroundSettings";
 import { SettingsSearchResults, searchResultLink } from "../settings/SettingsSearchResults";
-import { isApplePlatform } from "../platform";
+import { isApplePlatform, thisComputerName, useHostPlatform } from "../platform";
 import { useSettingsRoute } from "../settings/useSettingsRoute";
 import { ExtensionsSettingsView } from "../extensions/ExtensionsSettingsView";
 import type { ThemeController } from "../theme/useThemeController";
@@ -246,7 +247,6 @@ const SECTION_LABELS: Readonly<Partial<Record<SettingsSectionId, string>>> = Obj
 
 const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>> = {
   general: "Choose app-wide defaults, updates, and network behavior.",
-  profile: "Choose how you appear inside Octant. Everything is optional and kept on this Mac.",
   appearance: "Choose how Octant looks. Use a built-in theme or make your own.",
   sidebar: "How the sidebar is laid out and what each thread row in it shows.",
   keybindings: "Change the shortcuts that reach Octant's global surfaces.",
@@ -322,7 +322,19 @@ function currentSettingsLink(link: SettingsDeepLink): SettingsDeepLink {
   return moved === undefined ? link : { ...link, section: moved.to };
 }
 
+/** The profile is kept on the host, so the host's platform names its computer. */
+function sectionDescription(
+  section: SettingsSectionId,
+  hostPlatform: HostPlatform | undefined,
+): string | undefined {
+  if (section === "profile") {
+    return `Choose how you appear inside Octant. Everything is optional and kept on ${thisComputerName(hostPlatform)}.`;
+  }
+  return SECTION_DESCRIPTIONS[section];
+}
+
 export function SettingsView(props: SettingsViewProps) {
+  const hostPlatform = useHostPlatform();
   const capabilities: SettingsNativeCapabilities = {
     nativeBoundsAvailable: props.nativeBoundsAvailable,
     sidebarVibrancySupported: props.sidebarVibrancySupported,
@@ -485,6 +497,7 @@ export function SettingsView(props: SettingsViewProps) {
   const activeSectionScope = availableSections.find(
     (section) => section.id === route.activeSection,
   )?.scope;
+  const activeSectionDescription = sectionDescription(route.activeSection, hostPlatform);
   const subPage = hasQuery
     ? undefined
     : route.activeSection === "harness"
@@ -622,15 +635,14 @@ export function SettingsView(props: SettingsViewProps) {
                       scope sits outside its ellipsis, so a long one never hides
                       the scope. */}
                   {!hasQuery &&
-                  (SECTION_DESCRIPTIONS[route.activeSection] !== undefined ||
-                    activeSectionScope !== undefined) ? (
+                  (activeSectionDescription !== undefined || activeSectionScope !== undefined) ? (
                     <p className="settings-view__description">
-                      {SECTION_DESCRIPTIONS[route.activeSection] === undefined ? null : (
+                      {activeSectionDescription === undefined ? null : (
                         <span
                           className="settings-view__description-text"
-                          title={SECTION_DESCRIPTIONS[route.activeSection]}
+                          title={activeSectionDescription}
                         >
-                          {SECTION_DESCRIPTIONS[route.activeSection]}
+                          {activeSectionDescription}
                         </span>
                       )}
                       {activeSectionScope === undefined ? null : (

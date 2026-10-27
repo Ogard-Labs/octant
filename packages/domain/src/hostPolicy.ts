@@ -1,4 +1,4 @@
-import type { HostHealth, HostId, HostIdentity } from "@octant/contracts/host";
+import type { HostHealth, HostId, HostIdentity, HostPlatform } from "@octant/contracts/host";
 import { LOCAL_HOST_DISPLAY_NAME, LOCAL_HOST_ID } from "@octant/contracts/host";
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -70,11 +70,16 @@ export function selectHost(request: HostSelectionRequest): HostSelectionResult {
 
 /**
  * Returns the full list of known hosts for the v1 selector UI.
- * In v1 this is always exactly one healthy local entry.
+ * In v1 this is always exactly one healthy local entry. The caller supplies the
+ * platform it runs on; this module does no I/O, so it cannot read it.
  */
-export function listHosts(displayName = LOCAL_HOST_DISPLAY_NAME): ReadonlyArray<HostIdentity> {
+export function listHosts(
+  displayName = LOCAL_HOST_DISPLAY_NAME,
+  platform?: HostPlatform,
+): ReadonlyArray<HostIdentity> {
   const localHost = KNOWN_HOSTS.get(LOCAL_HOST_ID);
-  return localHost === undefined ? [] : [{ ...localHost, displayName }];
+  if (localHost === undefined) return [];
+  return [{ ...localHost, displayName, ...(platform === undefined ? {} : { platform }) }];
 }
 
 /**

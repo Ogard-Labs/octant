@@ -182,12 +182,22 @@ describe("endpoint row state", () => {
   it("sends a browser to the desktop app for a missing key, with no fix it cannot do", () => {
     const result = status({
       keysHere: false,
+      hostPlatform: "darwin",
       failure: failure("unauthenticated", "The provider credential is missing or unavailable."),
     });
     expect(result.label).toBe("Needs key");
     expect(result.tone).toBe("needs-you");
     expect(result.sentence).toBe("Add its API key in the Octant desktop app on this Mac.");
     expect(result.fix).toBeUndefined();
+  });
+
+  it("names the host's computer, not a Mac, when a browser on a Linux host needs a key", () => {
+    const result = status({
+      keysHere: false,
+      hostPlatform: "linux",
+      failure: failure("unauthenticated", "The provider credential is missing or unavailable."),
+    });
+    expect(result.sentence).toBe("Add its API key in the Octant desktop app on this computer.");
   });
 
   it("keeps saying Needs key in a browser after a reload, when only the observation is left", () => {

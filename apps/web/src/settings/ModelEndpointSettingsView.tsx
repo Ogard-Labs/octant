@@ -8,6 +8,7 @@ import type { SubscriptionOAuthOffer } from "@octant/contracts/host-oauth";
 import { isNativeHarnessDriverKind, modelCarriesAppManagedTools } from "@octant/domain";
 import { Plus } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useHostPlatform } from "../platform";
 import { boundSubscriptionOffer } from "../providers/configuration/HttpConfigurationForms";
 import { isModelEndpointDriverKind } from "../providers/providerSettingsPresentation";
 import type { ProviderSettingsViewProps } from "../providers/ProviderSettingsView";
@@ -67,6 +68,7 @@ interface OpenDetail {
  * them differs.
  */
 export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps): ReactNode {
+  const hostPlatform = useHostPlatform();
   const [detail, setDetail] = useState<OpenDetail>();
   const [returnFocusTo, setReturnFocusTo] = useState<ProviderInstanceId>();
   const [adding, setAdding] = useState(false);
@@ -157,6 +159,7 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
       observed: props.observedByInstance.get(instance.id),
       checking,
       keysHere: props.credentialManagementAvailable,
+      hostPlatform,
       ...(failure === undefined ? {} : { failure }),
       ...(signIn === undefined ? {} : { signIn }),
       ...(presentationOffer === undefined ? {} : { signInOffer: presentationOffer }),

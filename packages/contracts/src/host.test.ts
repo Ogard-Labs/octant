@@ -94,6 +94,21 @@ describe("HostIdentity", () => {
   it("rejects missing required fields", () => {
     expect(() => decodeHostIdentity({ hostId: "local" })).toThrow();
   });
+
+  it("carries the platform the host runs on, so copy can name its computer", () => {
+    const report = {
+      hostId: "local",
+      displayName: "This computer",
+      health: "healthy",
+      capabilities: ["chat", "work", "code"],
+    };
+    expect(decodeHostIdentity({ ...report, platform: "linux" }).platform).toBe("linux");
+    expect(decodeHostIdentity({ ...report, platform: "darwin" }).platform).toBe("darwin");
+    // A host built before the platform was reported still decodes; copy then
+    // stays neutral rather than guessing from the window.
+    expect(decodeHostIdentity(report).platform).toBeUndefined();
+    expect(() => decodeHostIdentity({ ...report, platform: "macos" })).toThrow();
+  });
 });
 
 describe("GlobalEntityReference", () => {

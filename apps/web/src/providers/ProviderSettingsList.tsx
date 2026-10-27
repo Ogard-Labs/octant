@@ -25,6 +25,7 @@ import { CheckCircle2, ChevronDown, ChevronRight, ChevronUp } from "lucide-react
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ProviderToolVerification } from "./ProviderToolVerification";
 import { ModelContextWindowField } from "./ModelContextWindowField";
+import { useHostPlatform } from "../platform";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
@@ -637,6 +638,7 @@ interface ProviderRowProps {
 }
 
 function ProviderRow(props: ProviderRowProps) {
+  const hostPlatform = useHostPlatform();
   const [configurationOpen, setConfigurationOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(props.needsAttention);
   const [renameSaved, setRenameSaved] = useState(false);
@@ -876,7 +878,12 @@ function ProviderRow(props: ProviderRowProps) {
           checked={props.instance.enabled}
           disabled={disabled || enableBlocked}
           {...(enableBlocked
-            ? { disabledReason: providerDetectionBlockedReason(props.discoverySnapshot) }
+            ? {
+                disabledReason: providerDetectionBlockedReason(
+                  props.discoverySnapshot,
+                  hostPlatform,
+                ),
+              }
             : {})}
           label={`Enable ${name}`}
           onCheckedChange={() => void toggleEnabled()}
