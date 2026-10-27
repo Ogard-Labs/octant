@@ -1720,7 +1720,9 @@ Rules this sub-slice resolved:
   ever journaled, and a host that never leased from Cua makes no call to
   the socket, not even a restart listing. A listing makes the daemon wait
   for Cua's relay, and a host that never chose Cua has nothing there to
-  find. macOS loads it once Cua is offered there.
+  find. macOS loads it once Cua is offered there. Since a recipe can name
+  only a provider the host lists, offering Cua must also list the driver
+  before any Cua lease exists.
 - **The daemon a lease used is recorded and kept.** The `requested` event
   records the declared socket path and the user id whose home holds it. A
   provider that declares a daemon is never leased on a host that has no user
@@ -1791,9 +1793,10 @@ next start and destroy it. Removing each of the driver's checks in turn
 lifetime margin, cloud placement, a create in progress) fails at least one
 test. The file passes under Node through `bun run test` and under Bun
 (`bun --bun x vitest run --project unit src/plugins/cuaDesktop` in
-`apps/server`). `desktopLeaseService.test.ts` covers a daemon-run provider leased on
-its placement with no key, a key refused, the daemon recorded, a host with
-no user id refused, and teardown kept `release-failed` under another user
+`apps/server`). The method-list test also shows that no call carries the
+daemon's loopback token or a Space's token. `desktopLeaseService.test.ts`
+covers a daemon-run provider leased on its placement with no key, a key
+refused, the daemon recorded, a host with no user id refused, and teardown kept `release-failed` under another user
 until the same daemon answers. `projectPolicy.test.ts` covers a saved
 placement, network on a host-local placement, a cloud placement with no
 key, and a key refused; `ProjectDesktopRecipeSection.test.tsx` covers

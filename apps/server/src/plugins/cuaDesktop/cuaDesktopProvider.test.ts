@@ -38,6 +38,8 @@ import {
   mapOf,
   messageOf,
   numberOf,
+  RECORDED_LOOPBACK_TOKEN,
+  RECORDED_SPACE_TOKEN,
   RecordedCuaDaemon,
   textOf,
   type RecordedCuaScenario,
@@ -336,7 +338,7 @@ describe("Cua desktop provider", () => {
     expect(daemon.calls()).toEqual([]);
   });
 
-  it("declares only the daemon methods it uses, sends only those, and never a caller's identity", async () => {
+  it("declares only the daemon methods it uses, sends only those, and never a caller's identity or a token the daemon hands out", async () => {
     expect(CUA_DESKTOP_DAEMON).toEqual({
       socketPath: ".cua/cua.sock",
       methods: [
@@ -380,12 +382,23 @@ describe("Cua desktop provider", () => {
     await provider.control(result.handle, { operation: "launch", appId: "app" });
     await provider.release(result.handle);
     await provider.verifyGone(result.handle);
+    const decoder = new TextDecoder();
     for (const call of daemon.calls()) {
       expect(desktopDaemonMethodDeclared(call.method, CUA_DESKTOP_DAEMON.methods)).toBe(true);
       expect(call.headers["x-cua-host-caller"]).toBeUndefined();
       expect(call.headers["x-cua-share-caller"]).toBeUndefined();
       expect(call.headers.authorization).toBeUndefined();
+      // GetInfo offers the daemon's loopback token and ConnectSpace the
+      // Space's; both stay in the daemon, so no call carries either anywhere.
+      const sent = [
+        call.method,
+        JSON.stringify(call.headers),
+        ...call.request.map((field) => (field.wire === "bytes" ? decoder.decode(field.value) : "")),
+      ].join("\n");
+      expect(sent).not.toContain(RECORDED_LOOPBACK_TOKEN);
+      expect(sent).not.toContain(RECORDED_SPACE_TOKEN);
     }
+    expect(JSON.stringify(result)).not.toContain(RECORDED_SPACE_TOKEN);
   });
 
   it("answers ready only for a daemon release it was written for that runs Spaces", async () => {
