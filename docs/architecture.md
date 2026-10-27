@@ -5030,15 +5030,26 @@ the model at another size.
      composition call site still supplies each port.
   2. **Approval attention.** A pending approval raises the same attention as
      a pending question: the thread's state, the Inbox, and the sidebar mark,
-     and it shows inline in the thread. Not yet pinned by a test.
+     and it shows inline in the thread. `workThreadBoardService.test.ts` pins
+     that a Work thread parked on the lead's approval, live or after a
+     restart, reads exactly as one parked on a question (same state, same
+     board column), differing only in naming the wait an approval;
+     `chatService.test.ts` and `codeService.test.ts` pin the Chat and Code
+     navigation rows, `leadApprovalAttention.test.ts` and
+     `pendingRequestRoutes.test.ts` the Inbox row,
+     `collectThreadAttention.test.ts` the sidebar mark, and
+     `ThreadHarnessApproval.test.tsx` the inline card.
   3. **Task list.** `todo-write` records pending, in-progress, and done
      without a plan approval. Not yet pinned at the offered-set level beyond
      item 1; the progress states are covered by `nativeHarnessTodo.test.ts`.
   4. **One session everywhere.** The same session state is visible in web,
      terminal, and phone.
   5. **Terminal focus escape.** A keyboard user can leave the terminal pane
-     with a documented chord, and the pane says so. Not yet pinned; pinned
-     when the terminal focus escape lands, in the existing xterm tests.
+     with a documented chord (Mod+Escape to the next control,
+     Mod+Shift+Escape to the previous one, rebindable), and the pane says so.
+     `XtermTerminalAdapter.test.tsx` pins the chord, that Tab and a bare
+     Escape stay with the shell, and that the pane names a way out even when
+     another action has taken the chord.
 
 Follow-up suggestions are every provider's, not the harness's
 (`apps/server/src/followUps`). Every Chat, Work, and Code turn, on any
