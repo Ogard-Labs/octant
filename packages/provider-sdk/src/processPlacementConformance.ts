@@ -52,7 +52,9 @@ const isProviderFailure = Schema.is(ProviderFailure);
  * anything. A driver that declares it must, in every posture it declares, run
  * a turn whose runtime starts only through the placement, at an absolute
  * path; must fail, not fall back to this host, when the target refuses the
- * launch; and must stop every process it placed when its scope closes.
+ * launch; and must stop every process it placed when its scope closes. A
+ * placed runtime is the one the person set for the target: a launch that
+ * names any other path fails.
  */
 export async function runRemotePlacementConformance(
   fixture: ProviderRemotePlacementConformanceFixture,
@@ -136,10 +138,15 @@ async function holdsPlacementInPosture(
     placed.executables().every((executable) => executable.startsWith("/")),
     "a placed launch named its runtime by a relative path",
   );
+  assert(
+    placed.executables().every((executable) => executable === fixture.target.executable),
+    "a placed launch named another runtime than the one set for this target",
+  );
   assert(placed.open() === 0, "a process placed on the target outlived its scope");
 
   const refusing: ProviderRemoteProcessPlacement = {
     kind: "remote",
+    executable: fixture.target.executable,
     launch: () =>
       Effect.fail({ category: "unavailable", message: "The target refused the launch." }),
   };
@@ -182,6 +189,7 @@ function countingPlacement(target: ProviderRemoteProcessPlacement) {
   const executables: string[] = [];
   const placement: ProviderRemoteProcessPlacement = {
     kind: "remote",
+    executable: target.executable,
     launch: (launch) =>
       Effect.acquireRelease(
         target.launch(launch).pipe(

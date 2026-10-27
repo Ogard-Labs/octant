@@ -19,11 +19,14 @@ import type {
   SshRemoteWorktree,
   SshRemoteWorktreeId,
 } from "@octant/contracts/ssh-remote-project";
+import type { ProviderInstanceId } from "@octant/contracts/providers";
 import {
+  SSH_TARGET_MAX_RUNTIME_BINARIES,
   SshAttestationFacts,
   type SshAttestation,
   type SshConnectionId,
   type SshPinnedHostKey,
+  type SshRuntimeBinary,
   type SshTarget,
   type SshTargetId,
   type SshTargetPostureAdmission,
@@ -54,6 +57,7 @@ import {
   readSshRemoteWorktree,
   readSshRemoteWorktrees,
   readSshTarget,
+  readSshTargetRuntimeBinaries,
   readSshTargets,
 } from "../persistence/sshTargetProjection";
 import type { SqliteConnection } from "../persistence/sqlitePort";
@@ -190,6 +194,34 @@ export class SshTargetStore {
       factsDigest: sshAttestationFactsDigest(attestation.facts),
       admission,
     });
+  }
+
+  /** The runtime paths the person set on a target, one per provider instance. */
+  runtimeBinaries(targetId: SshTargetId): ReadonlyArray<SshRuntimeBinary> {
+    return readSshTargetRuntimeBinaries(this.#connection, String(targetId));
+  }
+
+  /**
+   * Records where one provider instance's runtime is on a registered target,
+   * replacing any earlier path for it. A target that already holds the most
+   * paths it may takes a replacement only.
+   */
+  setRuntimeBinary(
+    targetId: SshTargetId,
+    providerInstanceId: ProviderInstanceId,
+    path: SshRuntimeBinary["path"],
+  ): SshTargetStoreWrite | "too-many" {
+    const held = this.runtimeBinaries(targetId);
+    const replaces = held.some(
+      (binary) => String(binary.providerInstanceId) === String(providerInstanceId),
+    );
+    if (!replaces && held.length >= SSH_TARGET_MAX_RUNTIME_BINARIES) return "too-many";
+    return this.#append(
+      SSH_TARGET_AGGREGATE,
+      String(targetId),
+      SSH_TARGET_EVENT_NAMES.runtimeBinarySet,
+      { targetId, providerInstanceId, path },
+    );
   }
 
   /** Removes the registration and its pin. Bound Projects stay, and refuse new work. */

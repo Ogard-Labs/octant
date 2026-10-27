@@ -63,13 +63,18 @@ export interface AcpConfinementPort {
   readonly prepare: (input: AcpConfinementInput) => Effect.Effect<AcpLaunchSpec, ProviderFailure>;
 }
 
-export interface AcpConnection {
+/** An ACP agent the driver speaks to, on this host or placed on a remote target. */
+export interface AcpAgentConnection {
   readonly version: string;
-  readonly pid: number;
   readonly root: string;
   readonly initialized: AcpInitializeResult;
   readonly acp: AcpClient;
   readonly exited: Promise<void>;
+}
+
+/** An ACP agent running on this host, whose process the runtime registry tracks. */
+export interface AcpConnection extends AcpAgentConnection {
+  readonly pid: number;
 }
 
 export interface AcpProcessStartInput {
@@ -643,17 +648,34 @@ function parseVersion(
 ): { readonly version: string; readonly supported: boolean } | undefined {
   const match = profile.process.versionPattern.exec(output);
   if (match === null) return undefined;
-  const current = [Number(match[1]), Number(match[2]), Number(match[3])];
-  const minimum = profile.process.minimumVersion;
-  let supported = true;
-  for (let index = 0; index < current.length; index += 1) {
-    if (current[index]! > minimum[index]!) break;
-    if (current[index]! < minimum[index]!) {
-      supported = false;
-      break;
-    }
-  }
-  return { version: `${match[1]}.${match[2]}.${match[3]}`, supported };
+  const current = [Number(match[1]), Number(match[2]), Number(match[3])] as const;
+  return {
+    version: `${match[1]}.${match[2]}.${match[3]}`,
+    supported: versionAtLeast(current, profile.process.minimumVersion),
+  };
+}
+
+/** Whether a major, minor, patch version is at least the minimum. */
+export function versionAtLeast(
+  current: readonly [number, number, number],
+  minimum: readonly [number, number, number],
+): boolean {
+  const [major, minor, patch] = current;
+  const [minimumMajor, minimumMinor, minimumPatch] = minimum;
+  if (major !== minimumMajor) return major > minimumMajor;
+  if (minor !== minimumMinor) return minor > minimumMinor;
+  return patch >= minimumPatch;
+}
+
+/** Whether an agent's `initialize` answer is the ACP version and agent the profile names. */
+export function acpNegotiationAccepted(
+  profile: AcpProviderProfile,
+  initialized: AcpInitializeResult,
+): boolean {
+  const identityMatches = profile.process.verifyAgentInfo
+    ? profile.process.verifyAgentInfo(initialized)
+    : initialized.agentInfo?.name === profile.process.agentName;
+  return initialized.protocolVersion === 1 && identityMatches;
 }
 
 function resolveNpmPackageVersion(
@@ -1058,10 +1080,7 @@ function acquireConnection(
         initialize().then(
           (initialized) => {
             if (settled || child.pid === undefined) return;
-            const identityMatches = profile.process.verifyAgentInfo
-              ? profile.process.verifyAgentInfo(initialized)
-              : initialized.agentInfo?.name === profile.process.agentName;
-            if (initialized.protocolVersion !== 1 || !identityMatches) {
+            if (!acpNegotiationAccepted(profile, initialized)) {
               finishFailure({
                 ...failure("incompatible", `${name} ACP negotiation was incompatible.`),
                 diagnostic: {

@@ -1,7 +1,7 @@
 import { unlink, writeFile } from "node:fs/promises";
 import { accessSync, constants, statSync } from "node:fs";
 import { spawn, type ChildProcess } from "node:child_process";
-import { basename, delimiter, join } from "node:path";
+import { basename, delimiter, join, posix } from "node:path";
 import { tmpdir } from "node:os";
 import { TextDecoder } from "node:util";
 import { Schema } from "effect";
@@ -17,6 +17,10 @@ import {
   AcpClientWriteTextFileInput,
 } from "@octant/provider-sdk";
 import type { CodeThread, WindowId } from "@octant/contracts";
+import { SSH_EXECUTOR_MAX_COMMAND_BYTES } from "@octant/contracts/ssh-executor-protocol";
+import { classifyPathContainment } from "@octant/domain";
+import type { NativeHarnessFileSystemPort } from "../harness/nativeHarnessFileSystem";
+import type { NativeHarnessShellPort, NativeHarnessShellRun } from "../harness/nativeHarnessTools";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import {
   isAbsolutePosixPath,
@@ -532,6 +536,287 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
         return errorResult("tool-interrupted");
       }
       return { result };
+    }
+    return kill(input.terminalId, name === ACP_CLIENT_TOOL_NAMES.terminalRelease);
+  };
+
+  return {
+    definitions,
+    close: async () => {
+      await Promise.all([...terminals.keys()].map((id) => kill(id, true)));
+      terminals.clear();
+    },
+    execute: async ({ name, inputJson, signal }) => {
+      if (name === ACP_CLIENT_TOOL_NAMES.readTextFile) {
+        const input = decodeInput(AcpClientReadTextFileInput)(inputJson);
+        return input === undefined ? errorResult("invalid-input") : read(input);
+      }
+      if (name === ACP_CLIENT_TOOL_NAMES.writeTextFile) {
+        const input = decodeInput(AcpClientWriteTextFileInput)(inputJson);
+        return input === undefined ? errorResult("invalid-input") : write(input);
+      }
+      if (ACP_CLIENT_TERMINAL_TOOL_NAMES.includes(name)) return terminal(name, inputJson, signal);
+      return errorResult("tool-unavailable");
+    },
+  };
+}
+
+/**
+ * The turn's hands on an SSH target, as the remote native harness binds them:
+ * each call is admitted in the turn's posture at that call and travels only
+ * on the session the turn started on.
+ */
+export interface RemoteCodeAcpClientToolsOptions {
+  /** The bound root (or a managed worktree of it) as the target names it. */
+  readonly root: string;
+  readonly thread: Pick<CodeThread, "executionPolicy">;
+  readonly readExecutionPolicy: () => CodeThread["executionPolicy"];
+  readonly filesystem: Pick<NativeHarnessFileSystemPort, "read" | "write">;
+  readonly shell: NativeHarnessShellPort;
+  readonly uuid: () => string;
+}
+
+interface RemoteTerminal {
+  readonly stop: AbortController;
+  readonly outputLimit: number;
+  readonly finished: Promise<NativeHarnessShellRun>;
+  ended: NativeHarnessShellRun | undefined;
+}
+
+/** A word the target's `/bin/sh` reads back exactly as it was given. */
+function shellWord(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+/** The last `limit` bytes of `text`, cut on a character boundary. */
+function tailOf(text: string, limit: number): { readonly text: string; readonly cut: boolean } {
+  const bytes = Buffer.from(text, "utf8");
+  if (bytes.length <= limit) return { text, cut: false };
+  return {
+    text: new TextDecoder().decode(utf8Boundary(bytes.subarray(bytes.length - limit))),
+    cut: true,
+  };
+}
+
+function exitStatusOf(run: NativeHarnessShellRun): {
+  readonly exitCode?: number;
+  readonly signal?: string;
+} {
+  switch (run.status) {
+    case "ran":
+      return run.exitCode === undefined ? {} : { exitCode: run.exitCode };
+    // The executor kills a command at its bound, and stops a cancelled one.
+    case "timed-out":
+      return { signal: "SIGKILL" };
+    case "cancelled":
+      return { signal: "SIGTERM" };
+    case "unavailable":
+      return {};
+  }
+}
+
+/**
+ * The ACP client file and terminal tools of a Code thread whose Project is
+ * bound to a folder on an SSH target. Canonical:
+ * docs/design/remote-ssh-environments.md § Runtime placement (R4).
+ *
+ * The agent runs on the target, and so do its client requests: a file read
+ * or write is the remote harness's file tool on the bound root, and a
+ * terminal is one harness command through the executor, under the egress the
+ * command's posture gets. A write or a terminal in Plan is refused here,
+ * before anything is asked of the target.
+ *
+ * The executor answers a command once it ended, so a terminal's output reads
+ * empty, without an exit status, until then; the agent's wait for its exit
+ * returns the output with it. A command holds the session's one request
+ * while it runs, so the Project's other reads wait for it, as for any
+ * harness command on the target.
+ */
+export function createRemoteCodeAcpClientTools(
+  options: RemoteCodeAcpClientToolsOptions,
+): AppManagedToolSet {
+  const definitions =
+    options.thread.executionPolicy === "plan"
+      ? [readDefinition]
+      : [readDefinition, writeDefinition, ...terminalDefinitions];
+  const terminals = new Map<string, RemoteTerminal>();
+
+  const fileRefusal = (reason: string) =>
+    errorResult(
+      reason === "path-escapes-root"
+        ? "path-outside-checkout"
+        : reason === "file-too-large"
+          ? "file-oversized"
+          : reason === "not-a-file"
+            ? "path-not-a-file"
+            : reason === "target-unavailable"
+              ? "target-unavailable"
+              : "file-unreadable",
+    );
+
+  const read = async (input: AcpClientReadTextFileInput) => {
+    if (
+      (input.line !== undefined && input.line < 1) ||
+      (input.limit !== undefined && input.limit < 1)
+    )
+      return errorResult("invalid-input");
+    if (!isAbsolutePosixPath(input.path)) return errorResult("path-outside-checkout");
+    // The harness read returns a bounded run of lines; a whole file is read
+    // run after run, up to the same bound a local read has.
+    const lines: string[] = [];
+    let bytesRead = 0;
+    let offset = (input.line ?? 1) - 1;
+    for (;;) {
+      const wanted = input.limit === undefined ? undefined : input.limit - lines.length;
+      const result = await options.filesystem.read({
+        path: input.path,
+        offset,
+        ...(wanted === undefined ? {} : { limit: wanted }),
+      });
+      if (result.kind === "refused") return fileRefusal(result.reason);
+      if (result.kind !== "file") return errorResult("file-unreadable");
+      for (const line of result.lines) {
+        bytesRead += bytes(line) + 1;
+        if (bytesRead > MAX_FILE_BYTES + 1) return errorResult("file-oversized");
+        lines.push(line);
+      }
+      const done =
+        result.nextLine === undefined ||
+        result.nextLine <= offset ||
+        (input.limit !== undefined && lines.length >= input.limit);
+      if (done) break;
+      offset = result.nextLine;
+    }
+    return { result: { content: lines.join("\n") } };
+  };
+
+  const write = async (input: AcpClientWriteTextFileInput) => {
+    if (options.readExecutionPolicy() === "plan") return errorResult("read-only-posture");
+    if (!isAbsolutePosixPath(input.path)) return errorResult("path-outside-checkout");
+    if (bytes(input.content) > MAX_FILE_BYTES) return errorResult("content-oversized");
+    const result = await options.filesystem.write({ path: input.path, content: input.content });
+    return result.kind === "written" ? { result: {} } : fileRefusal(result.reason);
+  };
+
+  const create = (input: AcpClientTerminalCreateInput) => {
+    if (terminals.size >= MAX_TERMINALS) return errorResult("terminal-limit");
+    const cwd = posix.normalize(input.cwd ?? options.root);
+    if (!isAbsolutePosixPath(cwd) || classifyPathContainment(options.root, cwd) !== "contained")
+      return errorResult("cwd-outside-checkout");
+    const exports: string[] = [];
+    if (input.env !== undefined) {
+      if (input.env.length > MAX_ENVIRONMENT_ENTRIES) return errorResult("invalid-environment");
+      for (const entry of input.env) {
+        // A placed command's proxy variables carry its launch's egress
+        // token, so the agent may not point them elsewhere.
+        if (
+          !/^[A-Za-z_][A-Za-z0-9_]*$/.test(entry.name) ||
+          bytes(entry.value) > MAX_ENVIRONMENT_VALUE_BYTES ||
+          entry.name === "TMPDIR" ||
+          entry.name === "PATH" ||
+          entry.name === "HOME" ||
+          entry.name.toUpperCase().includes("PROXY")
+        )
+          return errorResult("invalid-environment");
+        exports.push(`export ${entry.name}=${shellWord(entry.value)}`);
+      }
+    }
+    const outputLimit = Math.min(
+      input.outputByteLimit ?? DEFAULT_OUTPUT_BYTES,
+      DEFAULT_OUTPUT_BYTES,
+    );
+    if (outputLimit < 1) return errorResult("invalid-input");
+    // ACP agents send the model's shell line as `command` without `args`;
+    // with `args` the words are passed exactly, as an argv is locally.
+    const run =
+      input.args === undefined
+        ? input.command
+        : `exec ${[input.command, ...input.args].map(shellWord).join(" ")}`;
+    const script = [`cd -- ${shellWord(cwd)} || exit 126`, ...exports, run].join("\n");
+    if (bytes(script) > SSH_EXECUTOR_MAX_COMMAND_BYTES) return errorResult("invalid-input");
+    const stop = new AbortController();
+    const terminal: RemoteTerminal = {
+      stop,
+      outputLimit,
+      ended: undefined,
+      finished: options.shell
+        .run({
+          command: script,
+          cwd: options.root,
+          timeoutMs: MAX_TERMINAL_LIFETIME_MS,
+          signal: stop.signal,
+        })
+        .catch(
+          (): NativeHarnessShellRun => ({ status: "unavailable", output: "", truncated: false }),
+        )
+        .then((ended) => {
+          terminal.ended = ended;
+          return ended;
+        }),
+    };
+    const id = options.uuid();
+    terminals.set(id, terminal);
+    return { result: { terminalId: id } };
+  };
+
+  const ended = (terminal: RemoteTerminal, run: NativeHarnessShellRun) => {
+    const output = tailOf(run.output, terminal.outputLimit);
+    return {
+      output: output.text,
+      truncated: output.cut || run.truncated,
+      exitStatus: exitStatusOf(run),
+    };
+  };
+
+  const kill = async (terminalId: string, release: boolean) => {
+    const terminal = terminals.get(terminalId);
+    if (terminal === undefined) return errorResult("terminal-unknown");
+    terminal.stop.abort();
+    await terminal.finished;
+    if (release) terminals.delete(terminalId);
+    return { result: {} };
+  };
+
+  const terminal = async (name: string, inputJson: string, signal?: AbortSignal) => {
+    if (name === ACP_CLIENT_TOOL_NAMES.terminalCreate) {
+      if (options.readExecutionPolicy() === "plan") return errorResult("read-only-posture");
+      const input = decodeInput(AcpClientTerminalCreateInput)(inputJson);
+      return input === undefined ? errorResult("invalid-input") : create(input);
+    }
+    const schema =
+      name === ACP_CLIENT_TOOL_NAMES.terminalOutput
+        ? AcpClientTerminalOutputInput
+        : name === ACP_CLIENT_TOOL_NAMES.terminalWaitForExit
+          ? AcpClientTerminalWaitForExitInput
+          : name === ACP_CLIENT_TOOL_NAMES.terminalKill
+            ? AcpClientTerminalKillInput
+            : AcpClientTerminalReleaseInput;
+    const input = decodeInput(schema)(inputJson);
+    if (input === undefined) return errorResult("invalid-input");
+    const record = terminals.get(input.terminalId);
+    if (record === undefined) return errorResult("terminal-unknown");
+    if (name === ACP_CLIENT_TOOL_NAMES.terminalOutput) {
+      return {
+        result:
+          record.ended === undefined
+            ? { output: "", truncated: false }
+            : ended(record, record.ended),
+      };
+    }
+    if (name === ACP_CLIENT_TOOL_NAMES.terminalWaitForExit) {
+      if (signal?.aborted) {
+        await kill(input.terminalId, false);
+        return errorResult("tool-interrupted");
+      }
+      const abort = new Promise<"interrupted">((resolve) =>
+        signal?.addEventListener("abort", () => resolve("interrupted"), { once: true }),
+      );
+      const result = await Promise.race([record.finished, abort]);
+      if (result === "interrupted") {
+        await kill(input.terminalId, false);
+        return errorResult("tool-interrupted");
+      }
+      return { result: exitStatusOf(result) };
     }
     return kill(input.terminalId, name === ACP_CLIENT_TOOL_NAMES.terminalRelease);
   };

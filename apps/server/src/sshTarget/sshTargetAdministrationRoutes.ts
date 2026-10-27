@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { Schema } from "effect";
 import {
   SshHostKeyProbeRequest,
+  SshRuntimeBinarySetRequest,
   SshTargetRegisterRequest,
   SshTargetRepinRequest,
   SshTargetRequest,
@@ -40,6 +41,10 @@ import type {
  * device never reaches them, because the remote gateway keeps every
  * `/api/desktop` path local and holds no bridge secret to present.
  *
+ * Where a provider's runtime is on a target is set here too, so the path a
+ * placed runtime launches is the person's, never a paired device's, the
+ * model's, or the target's own report.
+ *
  * Binding a remote root is local in the same way. The reads of a bound root,
  * its managed worktrees, and a person's terminals on it sit here too until
  * remote-bound Projects join the product routes with their threads: until
@@ -56,6 +61,7 @@ export const SSH_TARGET_ROUTES = {
   repin: "/api/desktop/ssh-targets/repin",
   connect: "/api/desktop/ssh-targets/connect",
   remove: "/api/desktop/ssh-targets/remove",
+  runtimeBinary: "/api/desktop/ssh-targets/runtime-binary",
   projects: "/api/desktop/ssh-targets/projects",
   bind: "/api/desktop/ssh-targets/projects/bind",
   files: "/api/desktop/ssh-targets/projects/files",
@@ -161,6 +167,11 @@ export function createSshTargetAdministrationRouteHandler(
         const decoded = Schema.decodeUnknownEither(SshTargetRequest)(body.value);
         if (decoded._tag === "Left") return failure("invalid", 400);
         return answer(await connections.connect(decoded.right.targetId));
+      }
+      case SSH_TARGET_ROUTES.runtimeBinary: {
+        const decoded = Schema.decodeUnknownEither(SshRuntimeBinarySetRequest)(body.value);
+        if (decoded._tag === "Left") return failure("invalid", 400);
+        return answer(connections.setRuntimeBinary(decoded.right));
       }
       case SSH_TARGET_ROUTES.bind: {
         const decoded = Schema.decodeUnknownEither(SshRemoteProjectBindRequest)(body.value);

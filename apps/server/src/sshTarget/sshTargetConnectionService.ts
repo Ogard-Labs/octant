@@ -29,6 +29,7 @@ import {
   type SshTargetAdministrationRefusalReason,
   type SshTargetConnectionState,
   type SshTargetPlatform,
+  type SshRuntimeBinarySetRequest,
   type SshTargetRegisterRequest,
   type SshTargetRepinRequest,
   type SshTargetStatus,
@@ -240,6 +241,14 @@ export interface SshTargetPlacementInput {
   readonly currentPosture: () => ProviderExecutionPolicy | undefined;
 }
 
+/**
+ * A provider runtime's place on a target, or why there is none: a runtime is
+ * placed only at the path the person set for its provider instance there.
+ */
+export type SshTargetPlacement =
+  | { readonly status: "placed"; readonly placement: ProviderRemoteProcessPlacement }
+  | { readonly status: "refused"; readonly failure: ProviderFailure };
+
 /** One connected session of a target, which work bound to it names on every call. */
 export interface SshTargetSession {
   readonly targetId: SshTargetId;
@@ -383,25 +392,53 @@ export class SshTargetConnectionService {
    * own on this host. The runtime stops when the launch's scope
    * closes, ends with its session, and is stopped when the thread's posture
    * moves. A refused or lost target fails the launch; nothing runs here
-   * instead.
+   * instead. The runtime is the one the person set for the provider instance
+   * on this target: without one there is no placement, and a launch of any
+   * other path, or after the person changed it, is refused.
    */
-  placement(input: SshTargetPlacementInput): ProviderRemoteProcessPlacement {
+  placement(input: SshTargetPlacementInput): SshTargetPlacement {
+    const executable = this.#runtimeBinary(input);
+    if (executable === undefined) {
+      return {
+        status: "refused",
+        failure: {
+          category: "invalid-configuration",
+          message:
+            "Set where this provider's runtime is on the SSH target before it runs there: octant ssh-target runtime <target> <provider instance> <path>.",
+        },
+      };
+    }
     return {
-      kind: "remote",
-      launch: (launch) =>
-        Effect.acquireRelease(
-          Effect.flatMap(
-            Effect.promise(() => this.#startPlaced(input, launch)),
-            (started) =>
-              started.status === "started" ? Effect.succeed(started) : Effect.fail(started.failure),
-          ),
-          (started) => Effect.promise(() => started.stop()),
-        ).pipe(Effect.map((started) => placedProcess(input, started.process))),
+      status: "placed",
+      placement: {
+        kind: "remote",
+        executable,
+        launch: (launch) =>
+          Effect.acquireRelease(
+            Effect.flatMap(
+              Effect.promise(() => this.#startPlaced(input, executable, launch)),
+              (started) =>
+                started.status === "started"
+                  ? Effect.succeed(started)
+                  : Effect.fail(started.failure),
+            ),
+            (started) => Effect.promise(() => started.stop()),
+          ).pipe(Effect.map((started) => placedProcess(input, started.process))),
+      },
     };
+  }
+
+  /** The runtime path the person set for this placement's provider instance on its target. */
+  #runtimeBinary(input: SshTargetPlacementInput): string | undefined {
+    return this.#store
+      .runtimeBinaries(input.session.targetId)
+      .find((binary) => String(binary.providerInstanceId) === String(input.providerInstanceId))
+      ?.path;
   }
 
   async #startPlaced(
     input: SshTargetPlacementInput,
+    executablePath: string,
     launch: ProviderPlacedLaunch,
   ): Promise<
     | {
@@ -420,6 +457,12 @@ export class SshTargetConnectionService {
           message: "The thread's posture changed; the runtime starts again in the new one.",
         };
       }
+      if (this.#runtimeBinary(input) !== executablePath) {
+        return {
+          category: "interrupted",
+          message: "The runtime's path on the target changed; the runtime starts again there.",
+        };
+      }
       const decision = this.admitProviderRuntime(session.targetId, input.driver, {
         posture: input.posture,
         permissionPersistence: input.permissionPersistence,
@@ -434,6 +477,14 @@ export class SshTargetConnectionService {
         ? { category: "unavailable", message: "The session to the SSH target ended." }
         : undefined;
     };
+    // A driver launches the person's path and no other: one from the model,
+    // the remote root, or the target's own report never reaches the executor.
+    if (launch.executable !== executablePath) {
+      return refusedWith({
+        category: "invalid-configuration",
+        message: "A runtime on an SSH target runs only from the path set for it there.",
+      });
+    }
     const first = admitted();
     if (first !== undefined) return refusedWith(first);
     const root = decodeRemotePath(input.root);
@@ -862,6 +913,31 @@ export class SshTargetConnectionService {
     return this.connect(target.id);
   }
 
+  /**
+   * Records where one provider instance's runtime is on a target, as the
+   * person set it from this machine. It is a path, not a check: the executor
+   * checks the file it names before every launch, on whichever session asks.
+   */
+  setRuntimeBinary(
+    request: SshRuntimeBinarySetRequest,
+  ): SshTargetAdministrationResult<SshTargetStatus> {
+    const target = this.#store.get(request.targetId);
+    if (target === undefined) return refusal("unknown-target", "No such SSH target.");
+    const written = this.#store.setRuntimeBinary(
+      target.id,
+      request.providerInstanceId,
+      request.path,
+    );
+    if (written === "too-many") {
+      return refusal(
+        "too-many-runtime-binaries",
+        "This target already holds a runtime path for as many providers as it may.",
+      );
+    }
+    journaled(written);
+    return { status: "ok", value: this.#status(target) };
+  }
+
   /** Ends any session to the target and its attestation, then connects and attests anew. */
   async connect(targetId: SshTargetId): Promise<SshTargetAdministrationResult<SshTargetStatus>> {
     const target = this.#store.get(targetId);
@@ -960,6 +1036,7 @@ export class SshTargetConnectionService {
           subject: { kind: "octant-launch" },
         }),
       })),
+      runtimeBinaries: this.#store.runtimeBinaries(target.id),
     };
   }
 

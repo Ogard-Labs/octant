@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 import type { EventEnvelope } from "@octant/contracts/events";
 import { SshRemoteProject, SshRemoteWorktree } from "@octant/contracts/ssh-remote-project";
-import { SshTarget } from "@octant/contracts/ssh-target";
+import { SshRuntimeBinary, SshTarget } from "@octant/contracts/ssh-target";
 import {
   SSH_REMOTE_PROJECT_AGGREGATE,
   SSH_REMOTE_PROJECT_EVENT_NAMES,
@@ -21,6 +21,7 @@ import {
   decodeSshTargetRegistered,
   decodeSshTargetRemoved,
   decodeSshTargetRepinned,
+  decodeSshTargetRuntimeBinarySet,
 } from "@octant/contracts/ssh-target-events";
 import type { Projection } from "./projection";
 import type { SqliteConnection } from "./sqlitePort";
@@ -45,6 +46,7 @@ export class SshTargetProjection implements Projection {
   reset(connection: SqliteConnection): void {
     connection.exec(`
       DELETE FROM ssh_target_projection;
+      DELETE FROM ssh_target_runtime_binary_projection;
       DELETE FROM ssh_remote_project_projection;
       DELETE FROM ssh_remote_worktree_projection;
       DELETE FROM ssh_remote_terminal_projection;
@@ -179,6 +181,34 @@ function applyTargetEvent(connection: SqliteConnection, event: EventEnvelope): v
       const { targetId } = decodeSshTargetRemoved(event.payload);
       assertAggregate(String(targetId), aggregateId);
       connection.prepare("DELETE FROM ssh_target_projection WHERE target_id = ?").run(aggregateId);
+      // A runtime path is the target's; a target registered again later starts without one.
+      connection
+        .prepare("DELETE FROM ssh_target_runtime_binary_projection WHERE target_id = ?")
+        .run(aggregateId);
+      return;
+    }
+    case SSH_TARGET_EVENT_NAMES.runtimeBinarySet: {
+      const set = decodeSshTargetRuntimeBinarySet(event.payload);
+      assertAggregate(String(set.targetId), aggregateId);
+      if (readTargetRow(connection, aggregateId) === undefined) return;
+      connection
+        .prepare(
+          `INSERT INTO ssh_target_runtime_binary_projection (
+            target_id, provider_instance_id, path, aggregate_version, last_sequence
+          ) VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT (target_id, provider_instance_id) DO UPDATE SET
+            path = excluded.path,
+            aggregate_version = excluded.aggregate_version,
+            last_sequence = excluded.last_sequence
+          WHERE excluded.aggregate_version > ssh_target_runtime_binary_projection.aggregate_version`,
+        )
+        .run(
+          aggregateId,
+          String(set.providerInstanceId),
+          set.path,
+          event.aggregateVersion,
+          event.globalSequence,
+        );
       return;
     }
   }
@@ -300,6 +330,27 @@ export function readSshTarget(
 ): SshTargetRecord | undefined {
   const row = readTargetRow(connection, targetId);
   return row === undefined ? undefined : recordFromRow(row);
+}
+
+const decodeRuntimeBinary = Schema.decodeUnknownSync(SshRuntimeBinary);
+
+/** The runtime paths the person set on a target, one per provider instance, oldest first. */
+export function readSshTargetRuntimeBinaries(
+  connection: SqliteConnection,
+  targetId: string,
+): ReadonlyArray<SshRuntimeBinary> {
+  const rows = connection
+    .prepare(
+      `SELECT provider_instance_id, path FROM ssh_target_runtime_binary_projection
+       WHERE target_id = ? ORDER BY last_sequence`,
+    )
+    .all(targetId) as ReadonlyArray<{
+    readonly provider_instance_id: string;
+    readonly path: string;
+  }>;
+  return rows.map((row) =>
+    decodeRuntimeBinary({ providerInstanceId: row.provider_instance_id, path: row.path }),
+  );
 }
 
 export function readSshRemoteProjects(
