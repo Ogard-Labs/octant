@@ -9,14 +9,16 @@ import type { CodeLanguageServerComponent } from "./codeLanguageService";
 /**
  * Language servers a person installed through the extension package store,
  * as components the Code language service may start. Canonical:
- * docs/design/language-services.md (user-added `static` servers).
+ * docs/design/language-services.md (user-added servers).
  *
  * A server contributes only while the activation ladder makes it effective in
  * Code: installed, not quarantined, its source trusted, the plugin and the
  * component switched on, and compatible with this host. Installing it alone
  * never does, so a server nobody reviewed never starts. The binary is
  * resolved at each start from the stored version, and only after that version
- * verifies against the digest the person reviewed.
+ * verifies against the digest the person reviewed. A `repo-tooling` server
+ * also needs a person's approval for the checkout before it starts, which the
+ * language service asks for.
  */
 
 export interface InstalledLanguageServerStore {
@@ -84,11 +86,16 @@ export function installedLanguageServerComponents(
           continue;
         }
         const componentId = String(component.id);
+        // The digest is part of the key, so an update is a new server with
+        // its own cache rather than the old binary's process and files.
+        const componentKey = `${target.extensionId}:${componentId}:${target.digest}`;
         components.push({
           order: `${packageState.slug ?? ""}\0${target.extensionId}\0${componentId}`,
-          // The digest is part of the key, so an update is a new server with
-          // its own cache rather than the old binary's process and files.
-          componentKey: `${target.extensionId}:${componentId}:${target.digest}`,
+          componentKey,
+          // The package's lifecycle version moves with every change a person
+          // makes to it, so an approval given before a switch, a change of
+          // trust, or an update does not cover what runs after it.
+          approvalKey: `${componentKey}@${String(packageState.stateVersion)}`,
           languages: declaration.languages,
           launchClass: declaration.launchClass,
           executable: () => options.store.verifiedEntryPoint(target, componentId),

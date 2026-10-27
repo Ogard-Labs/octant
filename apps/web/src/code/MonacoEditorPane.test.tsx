@@ -499,6 +499,88 @@ describe("MonacoEditorPane language services", () => {
     await waitFor(() => expect(screen.queryByText(/Language services/)).toBeNull());
   });
 
+  it("asks the person to approve a server that runs the repository's tooling, and opens the file with it once they do", async () => {
+    const code = languageClient({
+      open: [
+        { status: "refused", reason: "approval-required" },
+        { status: "synced", ...scope },
+      ],
+      diagnostics: [{ status: "diagnostics", ...scope, diagnostics: [], truncated: false }],
+    });
+    const approveLanguageServer = vi.fn(async () => ({
+      status: "approved" as const,
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+      scope: "checkout" as const,
+    }));
+    render(
+      <MonacoEditorPane
+        client={Object.assign(code, { approveLanguageServer })}
+        file={textFile()}
+        languageTiming={timing}
+        loadRuntime={languageRuntime().loadRuntime}
+      />,
+    );
+
+    expect(
+      await screen.findByText(
+        "This language server runs the repository's own tools. Allowing it lets it write this checkout, run programs, and reach the hosts your Project's network rules allow.",
+      ),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Allow in this Project" })).toBeVisible();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Allow in this checkout" }));
+
+    expect(await screen.findByText("No problems found")).toBeVisible();
+    expect(approveLanguageServer).toHaveBeenCalledWith({
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+      path: "src/index.ts",
+      scope: "checkout",
+    });
+    expect(code.syncLanguageDocument.mock.calls.map(([request]) => request.kind)).toEqual([
+      "open",
+      "open",
+    ]);
+  });
+
+  it("offers no approval from a client without the approval route, and says when one was not recorded", async () => {
+    // A client without the approval route only names the refusal.
+    const { unmount } = render(
+      <MonacoEditorPane
+        client={languageClient({ open: [{ status: "refused", reason: "approval-required" }] })}
+        file={textFile()}
+        languageTiming={timing}
+        loadRuntime={languageRuntime().loadRuntime}
+      />,
+    );
+    expect(
+      await screen.findByText(
+        "Language services are unavailable: this server needs an approval first.",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Allow in this checkout" })).toBeNull();
+    unmount();
+
+    const approveLanguageServer = vi.fn(async () => ({ status: "not-recorded" as const }));
+    render(
+      <MonacoEditorPane
+        client={Object.assign(
+          languageClient({ open: [{ status: "refused", reason: "approval-required" }] }),
+          { approveLanguageServer },
+        )}
+        file={textFile()}
+        languageTiming={timing}
+        loadRuntime={languageRuntime().loadRuntime}
+      />,
+    );
+    await userEvent
+      .setup()
+      .click(await screen.findByRole("button", { name: "Allow in this Project" }));
+    expect(
+      await screen.findByText("The approval could not be recorded, so the server did not start."),
+    ).toBeVisible();
+  });
+
   it("shows a starting server, then a crashed one with a retry that opens the file again", async () => {
     const code = languageClient({
       open: [

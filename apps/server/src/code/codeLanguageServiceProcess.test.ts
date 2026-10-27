@@ -42,6 +42,7 @@ import {
   type CodeLanguageServerComponent,
   type CodeLanguageServiceOptions,
 } from "./codeLanguageService";
+import type { LanguageServerEgress } from "./languageServerEgress";
 import { LanguageServerProcessPort } from "./languageServerProcess";
 
 const scopeId = "10000000-0000-4000-8000-000000000001" as WindowId;
@@ -161,6 +162,8 @@ function harness(input: {
   readonly now?: () => number;
   readonly limits?: CodeLanguageServiceOptions["limits"];
   readonly watcher?: CodeLanguageServiceOptions["watcher"];
+  readonly approvals?: CodeLanguageServiceOptions["approvals"];
+  readonly egress?: LanguageServerEgress;
 }): Harness {
   const state = {
     thread: codeThread(),
@@ -174,6 +177,7 @@ function harness(input: {
   const processes = new LanguageServerProcessPort({
     confinement: input.confinement,
     ...(input.receipts === undefined ? {} : { receiptDirectory: input.receipts }),
+    ...(input.egress === undefined ? {} : { egress: input.egress }),
   });
   const service = new CodeLanguageService({
     authority: {
@@ -203,6 +207,7 @@ function harness(input: {
     ...(input.now === undefined ? {} : { now: input.now }),
     ...(input.limits === undefined ? {} : { limits: input.limits }),
     ...(input.watcher === undefined ? {} : { watcher: input.watcher }),
+    ...(input.approvals === undefined ? {} : { approvals: input.approvals }),
   });
   services.push(service);
   const scope = () => ({ threadId: state.thread.id, checkoutId: state.checkout.id });
@@ -252,6 +257,7 @@ const passthrough: ProcessConfinementPort = {
 function fakeComponent(mode: string, log: string): CodeLanguageServerComponent {
   return {
     componentKey: `fake-${mode}`,
+    approvalKey: `fake-${mode}`,
     languages: ["typescript"],
     launchClass: "static",
     executable: async () => process.execPath,
@@ -318,6 +324,7 @@ describe("Code language service with the bundled TypeScript server", () => {
         receipts: paths.receipts,
         component: {
           componentKey: "bundled-typescript",
+          approvalKey: "bundled-typescript",
           languages: ["typescript", "typescriptreact", "javascript", "javascriptreact"],
           launchClass: "static",
           executable: async () => binary,
@@ -408,6 +415,7 @@ describe("Code language service with the bundled TypeScript server", () => {
         receipts: paths.receipts,
         component: {
           componentKey: "bundled-typescript",
+          approvalKey: "bundled-typescript",
           languages: ["typescript", "typescriptreact", "javascript", "javascriptreact"],
           launchClass: "static",
           executable: async () => binary,
@@ -602,11 +610,15 @@ describe("Code language service authority", () => {
 });
 
 describe("Code language service reads for an agent", () => {
-  function fake(component?: Partial<CodeLanguageServerComponent>) {
+  function fake(
+    component?: Partial<CodeLanguageServerComponent>,
+    options: Pick<Parameters<typeof harness>[0], "approvals" | "egress"> = {},
+  ) {
     const paths = workspace();
     const log = join(paths.root, "server.log");
     const test = harness({
       ...paths,
+      ...options,
       component: { ...fakeComponent("normal", log), ...component },
       confinement: passthrough,
     });
@@ -642,12 +654,37 @@ describe("Code language service reads for an agent", () => {
     expect(test.launches()).toBe(0);
   });
 
-  it("never starts a server that runs repository tooling, even outside Plan", async () => {
-    const { test } = fake({ launchClass: "repo-tooling" });
+  it("never starts or reads through a server that runs repository tooling, even one a local approval covers", async () => {
+    const { test, log } = fake(
+      { launchClass: "repo-tooling" },
+      {
+        approvals: { holds: () => true, record: () => "recorded" },
+        egress: {
+          start: async () => ({
+            status: "listening",
+            endpoint: { kind: "loopback", port: 9 },
+            token: "language-server-egress",
+            close: async () => undefined,
+          }),
+        },
+      },
+    );
     test.state.thread = codeThread({ executionPolicy: "full-access" });
     test.state.threads = [test.state.thread];
-    expect(await test.agent("b.ts")).toEqual({ status: "refused", reason: "local-host-required" });
+    const refused = { status: "refused", reason: "local-host-required" };
+    expect(await test.agent("b.ts")).toEqual(refused);
     expect(test.launches()).toBe(0);
+
+    // The person at the machine opens a file, so the approved server runs;
+    // the agent is still refused it, and its read sends the server nothing.
+    const fileId = syncedFileId(await test.open("a.ts"));
+    expect(test.launches()).toBe(1);
+    expect(await test.agent("b.ts")).toEqual(refused);
+    expect(await test.agent("a.ts", { line: 0, character: 16 })).toEqual(refused);
+    // The editor's own read goes through, and answers after everything sent before it.
+    expect((await test.definition(fileId, 0, 16)).status).toBe("definition");
+    expect(test.launches()).toBe(1);
+    expect(logged(log).filter((entry) => entry.method === "textDocument/didOpen")).toHaveLength(1);
   });
 
   it("reads the saved file and never replaces the text an editor holds", async () => {
@@ -884,6 +921,7 @@ describe("Code language service against a hostile server", () => {
     const launch = () =>
       processes.launch({
         ownerId: "server",
+        launchClass: "static",
         executable: process.execPath,
         args: ["-e", ""],
         installRoot: dirname(process.execPath),

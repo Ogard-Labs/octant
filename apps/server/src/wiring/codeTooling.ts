@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { lstat, realpath } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
@@ -22,6 +22,8 @@ import {
 import { createCodeRouteHandler, MAX_CODE_FILE_BODY_SIZE } from "../codeRoutes";
 import { createCodeLanguageAgentTools } from "../code/codeLanguageAgentTools";
 import { CodeLanguageService, type CodeLanguageServerComponent } from "../code/codeLanguageService";
+import { LanguageServerApprovalStore } from "../code/languageServerApprovals";
+import { createLanguageServerEgress } from "../code/languageServerEgress";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { LanguageServerProcessPort } from "../code/languageServerProcess";
 import { installedLanguageServerComponents } from "../code/installedLanguageServers";
@@ -59,6 +61,7 @@ import type { WorkspaceWiring } from "./workspace";
 import type { CodeWiring } from "./code";
 import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { FoundationsWiring } from "./foundations";
+import type { IntegrationsWiring } from "./integrations";
 import type { ProvidersWiring } from "./providers";
 
 export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence" | "version"> &
@@ -74,6 +77,7 @@ export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence
     "codeOperationRuntime" | "contributeCodeTools" | "routeCodeService" | "terminalProcessPort"
   > &
   Pick<FoundationsWiring, "browserAuthority"> &
+  Pick<IntegrationsWiring, "toolEgressRules"> &
   Pick<ProvidersWiring, "extensionLifecycleService" | "extensionPackageStore">;
 
 export function wireCodeTooling(deps: CodeToolingDependencies) {
@@ -95,6 +99,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     roots,
     routeCodeService,
     terminalProcessPort,
+    toolEgressRules,
     version,
     windowAuthorityStore,
   } = deps;
@@ -161,8 +166,45 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       compatible: (compatibility) =>
         isExtensionCompatibilityCompatible(compatibility, version, process.platform),
     });
+    // A `repo-tooling` server needs a person's journaled approval for its
+    // checkout or Project, and reaches the network only through its own
+    // egress proxy under the Project's rules: loopback on macOS, a Unix
+    // socket in a private directory on Linux. Other platforms run no
+    // language server at all.
+    const languageServerApprovals = new LanguageServerApprovalStore({
+      journal: persistence.journal,
+      personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    });
+    const languageServerEgressDirectory = join(
+      persistence.dataDirectory,
+      "code",
+      "language-server-egress",
+    );
+    const languageServerEgressEndpoint =
+      process.platform === "darwin"
+        ? ({ kind: "loopback" } as const)
+        : process.platform === "linux"
+          ? ({ kind: "unix-socket", parentDirectory: languageServerEgressDirectory } as const)
+          : undefined;
+    if (languageServerEgressEndpoint?.kind === "unix-socket") {
+      mkdirSync(languageServerEgressDirectory, { recursive: true, mode: 0o700 });
+    }
     const languageServerProcesses = new LanguageServerProcessPort({
       receiptDirectory: join(persistence.dataDirectory, "code", "language-server-receipts"),
+      ...(languageServerEgressEndpoint === undefined
+        ? {}
+        : {
+            egress: createLanguageServerEgress({
+              journal: persistence.journal,
+              projectRules: (projectId) => toolEgressRules.projectRules(projectId),
+              endpoint: languageServerEgressEndpoint,
+              hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+              uuid: randomUUID,
+              clock: () => new Date().toISOString(),
+            }),
+          }),
     });
     const languageService = new CodeLanguageService({
       authority: {
@@ -174,6 +216,8 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
         resolveRoot: (scopeId, thread, checkout, relativePath) =>
           roots.resolve(scopeId, thread, checkout, relativePath),
       },
+      approvals: languageServerApprovals,
+      threadTainted: (threadId) => toolEgressRules.threadTainted(String(threadId)),
       components: () => [...bundledLanguageServers("effective"), ...installedLanguageServers()],
       turnedOffComponents: () => bundledLanguageServers("turned-off"),
       processes: languageServerProcesses,
@@ -395,6 +439,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       codeExternalEditorRoutes,
       codeOperationApprovalRoutes,
       codeRoutes,
+      languageServerApprovals,
       localServerRoutes,
       projectTerminals,
       remoteServerGrantLocalRoutes,
@@ -449,9 +494,12 @@ function bundledLanguageServerComponents(
     ) {
       return [];
     }
+    const componentKey = `${bundled.manifest.extensionId}:${bundled.component.id}`;
     return [
       {
-        componentKey: `${bundled.manifest.extensionId}:${bundled.component.id}`,
+        componentKey,
+        // The bundled server is `static`, which no approval covers.
+        approvalKey: componentKey,
         languages: bundled.languageServer.languages,
         launchClass: bundled.languageServer.launchClass,
         executable: async () => typeScriptBinary,

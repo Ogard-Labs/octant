@@ -109,6 +109,12 @@ describe("authenticated product route dispatch", () => {
         classifyProductAction(new Request(`https://octant.example${path}`, { method: "POST" })),
       ).toBe("code.language.read");
     }
+    // Approving a server that runs the repository's tooling has no remote action.
+    expect(
+      classifyProductAction(
+        new Request("https://octant.example/api/code/language/approvals", { method: "POST" }),
+      ),
+    ).toBeUndefined();
     expect(
       classifyProductAction(
         new Request("https://octant.example/api/providers/commands", { method: "POST" }),

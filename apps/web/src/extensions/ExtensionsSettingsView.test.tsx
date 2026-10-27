@@ -1973,7 +1973,7 @@ describe("local Agent Plugin import", () => {
     expect(screen.getByText(/bundled skill instructions/i)).toBeVisible();
   });
 
-  it("names a language server's binary, digest, languages, and class, and what it cannot do, before install", async () => {
+  async function reviewLanguageServer(launchClass: "static" | "repo-tooling") {
     const snapshot = installedSnapshot({ activation: baseActivation({ installed: false }) });
     const c = client({ snapshot });
     const binaryDigest = `sha256:${"c".repeat(64)}`;
@@ -2002,7 +2002,7 @@ describe("local Agent Plugin import", () => {
               declaredCapabilities: ["filesystem"],
               languageServer: {
                 languages: ["lua"],
-                launchClass: "static",
+                launchClass,
                 binary: "bin/lua-language-server",
                 binaryDigest,
               },
@@ -2027,11 +2027,24 @@ describe("local Agent Plugin import", () => {
     expect(within(review).getByText("bin/lua-language-server")).toBeVisible();
     expect(within(review).getByText(binaryDigest)).toBeVisible();
     expect(within(review).getByText("lua")).toBeVisible();
-    expect(within(review).getByText("static")).toBeVisible();
+    expect(within(review).getByText(launchClass)).toBeVisible();
+    expect(screen.getByRole("button", { name: /confirm install/i })).toBeInTheDocument();
+  }
+
+  it("names a language server's binary, digest, languages, and class, and what it cannot do, before install", async () => {
+    await reviewLanguageServer("static");
     expect(
       screen.getByText(/it cannot write, run other programs, or reach the network\./i),
     ).toBeVisible();
-    expect(screen.getByRole("button", { name: /confirm install/i })).toBeInTheDocument();
+  });
+
+  it("says before install that a server running the repository's tooling asks for an approval and what that approval grants", async () => {
+    await reviewLanguageServer("repo-tooling");
+    expect(
+      screen.getByText(
+        /it runs the repository's own tools\. it starts only after you allow it for a checkout or a project, and then it can write that checkout, run programs, and reach the hosts your project's network rules allow\. it never runs in plan or for a paired device\./i,
+      ),
+    ).toBeVisible();
   });
 });
 

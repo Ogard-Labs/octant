@@ -53,15 +53,27 @@ describe("language server package schema", () => {
     }
   });
 
-  it("refuses a server that would need more than the static class grants", () => {
+  it("accepts a server that runs the repository's tooling, declaring the shell and the network its class grants", () => {
+    const tooling = (capabilities: ReadonlyArray<string>) => ({
+      manifest: manifest(
+        { declaredCapabilities: capabilities },
+        {
+          declaredCapabilities: capabilities,
+          languageServer: { languages: ["lua"], launchClass: "repo-tooling" },
+        },
+      ),
+    });
+    expect(readLanguageServerPackageDocument(tooling(["filesystem"])).status).toBe("accepted");
     expect(
-      refusal({
-        manifest: manifest(
-          {},
-          { languageServer: { languages: ["lua"], launchClass: "repo-tooling" } },
-        ),
-      }),
-    ).toBe("launch-class-unsupported");
+      readLanguageServerPackageDocument(tooling(["filesystem", "shell", "network"])).status,
+    ).toBe("accepted");
+    // The class grants no credentials, Browser, or other application.
+    for (const capability of ["credentials", "browser", "external-application", "mcp"]) {
+      expect(refusal(tooling(["filesystem", capability]))).toBe("declares-capabilities");
+    }
+  });
+
+  it("refuses a server that would need more than the static class grants", () => {
     expect(
       refusal({
         manifest: manifest(

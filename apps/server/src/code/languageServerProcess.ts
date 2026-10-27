@@ -7,23 +7,34 @@ import {
   reconcileProcessReceipts,
   type OwnedProcessReceiptHandle,
 } from "../process/nodeOwnedProcessReceipt";
+import type { ExtensionLanguageServerClass } from "@octant/contracts/extensions";
+import { proxiedLaunchEnvironment } from "../process/proxiedNetworkEgress";
 import {
   makeProcessConfinementLive,
   ProcessConfinementError,
+  type ConfinedProcessLaunch,
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
+import type {
+  LanguageServerEgress,
+  LanguageServerEgressScope,
+  LanguageServerEgressStart,
+} from "./languageServerEgress";
 
 /**
- * Launches one `static` language server as a confined child of the host.
- * Canonical: docs/design/language-services.md § Launch classes.
+ * Launches one language server as a confined child of the host. Canonical:
+ * docs/design/language-services.md § Launch classes.
  *
- * The launch is the class's whole grant and nothing more: the checkout bound
- * read-only, the server's own install readable, its private cache the only
- * writable place, no network, and no program but its own binary (Linux also
- * loads the no-fork filter Plan uses; Seatbelt denies exec). The environment
- * is built from nothing, so no provider key, token, or `OCTANT_*` value
- * reaches the child. A durable receipt lets a restarted host reap a server
- * the previous run left behind.
+ * The launch is the class's whole grant and nothing more. A `static` server
+ * gets the checkout bound read-only, its own install readable, its private
+ * cache the only writable place, no network, and no program but its own
+ * binary (Linux also loads the no-fork filter Plan uses; Seatbelt denies
+ * exec). A `repo-tooling` server, which starts only after a person's
+ * approval, may also write the checkout and run programs, confined as a
+ * terminal is, and reaches the network only through its own egress proxy
+ * under its Project's rules. The environment is built from nothing, so no
+ * provider key, token, or `OCTANT_*` value reaches the child. A durable
+ * receipt lets a restarted host reap a server the previous run left behind.
  */
 
 const RECEIPT_SUPERVISOR = "language-server";
@@ -36,12 +47,16 @@ const MINIMAL_PATH = "/usr/bin:/bin";
 export interface LanguageServerLaunchInput {
   /** Stable owner of the receipt: one server per checkout, component, and class. */
   readonly ownerId: string;
+  /** The class decides the confinement; a launch is never given a nearby one. */
+  readonly launchClass: ExtensionLanguageServerClass;
+  /** Whose rules a `repo-tooling` launch's proxy applies; a `static` launch has no network. */
+  readonly egress?: LanguageServerEgressScope;
   /** Absolute, resolved path of the server binary the component names. */
   readonly executable: string;
   readonly args: ReadonlyArray<string>;
   /** The component's own install, readable so the server finds its bundled files. */
   readonly installRoot: string;
-  /** The canonical checkout root, bound read-only. */
+  /** The canonical checkout root: read-only for `static`, writable for `repo-tooling`. */
   readonly checkoutRoot: string;
   /** This server's private cache directory; the only place it may write. */
   readonly cacheDirectory: string;
@@ -60,12 +75,21 @@ export interface LanguageServerProcess {
 
 export type LanguageServerLaunchOutcome =
   | { readonly status: "launched"; readonly process: LanguageServerProcess }
-  /** No usable Seatbelt or Bubblewrap on this host; nothing was started. */
+  /**
+   * No usable Seatbelt or Bubblewrap on this host, or, for `repo-tooling`, no
+   * egress proxy to confine its network to; nothing was started.
+   */
   | { readonly status: "confinement-unavailable" }
   | { readonly status: "failed" };
 
 export interface LanguageServerProcessPortOptions {
   readonly confinement?: ProcessConfinementPort;
+  /**
+   * Starts the egress proxy a `repo-tooling` launch reaches the network
+   * through. A host without one cannot confine that class's network, so it
+   * refuses the class rather than running it with no network or an open one.
+   */
+  readonly egress?: LanguageServerEgress;
   readonly receiptDirectory?: string;
   readonly processIdentity?: (pid: number) => Promise<string | undefined>;
   readonly spawn?: (
@@ -77,12 +101,14 @@ export interface LanguageServerProcessPortOptions {
 
 export class LanguageServerProcessPort {
   readonly #confinement: ProcessConfinementPort;
+  readonly #egress: LanguageServerEgress | undefined;
   readonly #receiptDirectory: string | undefined;
   readonly #processIdentity: ((pid: number) => Promise<string | undefined>) | undefined;
   readonly #spawn: NonNullable<LanguageServerProcessPortOptions["spawn"]>;
 
   constructor(options: LanguageServerProcessPortOptions = {}) {
     this.#confinement = options.confinement ?? makeProcessConfinementLive();
+    this.#egress = options.egress;
     this.#receiptDirectory = options.receiptDirectory;
     this.#processIdentity = options.processIdentity;
     this.#spawn =
@@ -107,33 +133,68 @@ export class LanguageServerProcessPort {
     ]) {
       if (!isAbsolute(path)) return { status: "failed" };
     }
+    const tooling = input.launchClass === "repo-tooling";
+    const egressScope = input.egress;
+    if (tooling && (this.#egress === undefined || egressScope === undefined)) {
+      return { status: "confinement-unavailable" };
+    }
     const temporaryDirectory = join(input.cacheDirectory, "tmp");
     try {
       await prepareCacheDirectory(input.cacheRoot, input.cacheDirectory, temporaryDirectory);
     } catch {
       return { status: "failed" };
     }
-    let launch: { readonly command: string; readonly args: ReadonlyArray<string> };
+    // A `repo-tooling` server reaches the network only through a proxy of its
+    // own; one that cannot be started, or whose start cannot be journaled,
+    // means the server does not run.
+    let network: Extract<LanguageServerEgressStart, { status: "listening" }> | undefined;
+    if (tooling && this.#egress !== undefined && egressScope !== undefined) {
+      const started = await this.#egress
+        .start(egressScope)
+        .catch((): LanguageServerEgressStart => ({ status: "refused" }));
+      if (started.status !== "listening") return { status: "failed" };
+      network = started;
+    }
+    const closeNetwork = async () => {
+      await network?.close().catch(() => undefined);
+    };
+    const shared = {
+      executable: input.executable,
+      args: input.args,
+      boundRoot: input.checkoutRoot,
+      temporaryDirectory,
+      additionalWriteRoots: [input.cacheDirectory],
+      readRoots: [input.installRoot],
+      privateHomeAllowPaths: [input.checkoutRoot, input.installRoot, input.cacheDirectory],
+      // Seatbelt needs the system's own libraries readable to start any
+      // binary; the home folder and the default private paths stay denied.
+      allowFileReadStar: true,
+      additionalDenyReadPaths: [input.cacheRoot],
+      isolatedRoots: [input.cacheRoot],
+    };
+    let launch: ConfinedProcessLaunch;
     try {
-      launch = this.#confinement.prepare({
-        executable: input.executable,
-        args: input.args,
-        boundRoot: input.checkoutRoot,
-        writeBoundRoot: false,
-        temporaryDirectory,
-        additionalWriteRoots: [input.cacheDirectory],
-        readRoots: [input.installRoot],
-        privateHomeAllowPaths: [input.checkoutRoot, input.installRoot, input.cacheDirectory],
-        // Seatbelt needs the system's own libraries readable to start any
-        // binary; the home folder and the default private paths stay denied.
-        allowFileReadStar: true,
-        networkEgress: "none",
-        allowProcessExec: false,
-        allowProcessFork: false,
-        additionalDenyReadPaths: [input.cacheRoot],
-        isolatedRoots: [input.cacheRoot],
-      });
+      launch = this.#confinement.prepare(
+        network === undefined
+          ? {
+              ...shared,
+              writeBoundRoot: false,
+              networkEgress: "none",
+              allowProcessExec: false,
+              allowProcessFork: false,
+            }
+          : {
+              ...shared,
+              // The person's approval is what lets it write the checkout and
+              // run the repository's tooling, as a terminal there would.
+              writeBoundRoot: true,
+              networkEgress: { kind: "proxied", endpoint: network.endpoint },
+              allowProcessExec: true,
+              allowProcessFork: true,
+            },
+      );
     } catch (error) {
+      await closeNetwork();
       if (error instanceof ProcessConfinementError) return { status: "confinement-unavailable" };
       return { status: "failed" };
     }
@@ -142,9 +203,17 @@ export class LanguageServerProcessPort {
     try {
       child = this.#spawn(launch.command, launch.args, {
         cwd: input.checkoutRoot,
-        env: { HOME: input.cacheDirectory, TMPDIR: temporaryDirectory, PATH: MINIMAL_PATH },
+        env: {
+          HOME: input.cacheDirectory,
+          TMPDIR: temporaryDirectory,
+          PATH: MINIMAL_PATH,
+          ...(network === undefined
+            ? {}
+            : proxiedLaunchEnvironment(network.endpoint, network.token)),
+        },
       });
     } catch {
+      await closeNetwork();
       return { status: "failed" };
     }
     const exited = new Promise<void>((resolve) => {
@@ -155,6 +224,7 @@ export class LanguageServerProcessPort {
     const { stdin, stdout, stderr, pid } = child;
     if (stdin === null || stdout === null || pid === undefined) {
       killGroup(pid, "SIGKILL");
+      await closeNetwork();
       return { status: "failed" };
     }
     // The server's own stderr carries nothing Octant shows; draining it keeps
@@ -181,11 +251,19 @@ export class LanguageServerProcessPort {
       // Without a durable receipt a host restart could not reap this child,
       // so it does not run at all.
       await stopGroup(pid, exited);
+      await closeNetwork();
       return { status: "failed" };
     }
     // A static server cannot fork, and the sandbox runtime ends its capsule
-    // with it (`--die-with-parent`), so the leader's exit is the group's.
-    void exited.then(() => receipt.remove());
+    // with it (`--die-with-parent`), so the leader's exit is the group's. A
+    // `repo-tooling` server may leave children in its group, so the group is
+    // ended before its receipt goes; its proxy then closes and records the
+    // launch's summary.
+    void exited.then(async () => {
+      if (tooling) killGroup(pid, "SIGKILL");
+      await receipt.remove();
+      await closeNetwork();
+    });
 
     return {
       status: "launched",
@@ -195,7 +273,9 @@ export class LanguageServerProcessPort {
         exited,
         kill: async () => {
           await stopGroup(pid, exited);
+          if (tooling) killGroup(pid, "SIGKILL");
           await receipt.remove();
+          await closeNetwork();
         },
       },
     };

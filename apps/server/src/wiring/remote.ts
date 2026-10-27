@@ -77,7 +77,7 @@ export type RemoteDependencies = Pick<
     | "providerDataDirectory"
     | "providerService"
   > &
-  Pick<CodeToolingWiring, "remoteServerGrants"> &
+  Pick<CodeToolingWiring, "languageServerApprovals" | "remoteServerGrants"> &
   Pick<WorkWiring, "threadExportService" | "threadMessageQueue"> &
   Pick<CanvasWiring, "canvasRoutes" | "canvasPublicShareService"> &
   Pick<AutomationWiring, "pushNotificationTokenStore"> &
@@ -99,6 +99,7 @@ export function wireRemote(deps: RemoteDependencies) {
     credentialBroker,
     credentialResolver,
     generatedImageStore,
+    languageServerApprovals,
     options,
     persistence,
     providerDataDirectory,
@@ -401,7 +402,10 @@ export function wireRemote(deps: RemoteDependencies) {
       canvasPublicShareService.forget(canvasIds);
     },
     purgeCanvasFiles: (canvasIds) => removeMirrorFiles(persistence.connection, canvasIds),
-    forgetProjectData: (projectId) => toolEgressRules.forgetProject(projectId),
+    forgetProjectData: (projectId) => {
+      toolEgressRules.forgetProject(projectId);
+      languageServerApprovals.forgetProject(decodeProjectId(projectId));
+    },
     purgeThreadArtifacts: async ({ mode, threadId }) => {
       const released = await threadMessageQueue.purgeThread(
         decodeThreadMessageQueueScope({ mode, threadId }),

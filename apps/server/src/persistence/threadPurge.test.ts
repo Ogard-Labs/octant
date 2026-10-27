@@ -14,6 +14,7 @@ import {
   decodeBrowserThreadId,
   decodeChatThread,
   decodeChatThreadId,
+  decodeCodeCheckoutId,
   decodeCodeThreadId,
   decodeEventActor,
   decodeImageGenerationScopeId,
@@ -22,6 +23,11 @@ import {
   ReplayCursor,
 } from "@octant/contracts";
 import { decodeHostExportUsageRow } from "@octant/contracts";
+import {
+  CODE_LANGUAGE_SERVER_APPROVAL_AGGREGATE,
+  CODE_LANGUAGE_SERVER_EGRESS_AGGREGATE,
+  CODE_LANGUAGE_SERVER_EVENT_NAMES,
+} from "@octant/contracts/code-language";
 import { decodeThreadRetentionThreadId } from "@octant/contracts/thread-retention";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
@@ -34,6 +40,7 @@ import { ChatAttachmentStore } from "../chat/chatAttachmentStore";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { CodeAttachmentStore } from "../code/codeAttachmentStore";
+import { LanguageServerApprovalStore } from "../code/languageServerApprovals";
 import { GeneratedImageStore } from "../image/generatedImageStore";
 import { WorkAttachmentStore } from "../work/workAttachmentStore";
 import { writeChatContent } from "./chatProjection";
@@ -549,6 +556,82 @@ describe("thread purge sweep", () => {
       .prepare(`SELECT aggregate_type FROM event_journal WHERE payload_json LIKE ?`)
       .all(`%${thread.marker}%`);
     expect(remaining).toEqual([]);
+  });
+
+  it("erases a Project's language server approvals and egress records with the Project, and only that Project's", () => {
+    const harness = openHarness();
+    const otherProjectId = "c3630000-0000-4000-8000-000000000011";
+    const approvals = new LanguageServerApprovalStore({
+      journal: harness.journal,
+      personActor: decodeEventActor({
+        kind: "local-user",
+        actorId: "c3630000-0000-4000-8000-000000000012",
+      }),
+      uuid: randomUUID,
+      clock: () => now,
+    });
+    const launches = new Map<string, string>();
+    for (const project of [projectId, otherProjectId]) {
+      expect(
+        approvals.record({
+          projectId: decodeProjectId(project),
+          checkoutId: decodeCodeCheckoutId("c3630000-0000-4000-8000-000000000013"),
+          component: "extension:language-server:sha256:abc@1",
+          scope: "project",
+        }),
+      ).toBe("recorded");
+      const launchId = randomUUID();
+      launches.set(project, launchId);
+      harness.journal.append({
+        aggregate: {
+          aggregateType: CODE_LANGUAGE_SERVER_EGRESS_AGGREGATE,
+          aggregateId: launchId,
+        },
+        expectedVersion: 0,
+        events: [
+          {
+            eventId: randomUUID(),
+            eventName: CODE_LANGUAGE_SERVER_EVENT_NAMES.egressLaunchStarted,
+            eventVersion: 1,
+            correlationId: randomUUID(),
+            actor: { kind: "system", actorId: "c3630000-0000-4000-8000-000000000014" },
+            occurredAt: now,
+            payload: {
+              launch: { launchId, threadId: threads.code.id, projectId: project },
+              startedAt: now,
+              threadTainted: false,
+            },
+          },
+        ],
+      } as never);
+    }
+    const remaining = () =>
+      harness.connection
+        .prepare(
+          `SELECT aggregate_type, aggregate_id FROM event_journal
+           WHERE aggregate_type IN (?, ?) ORDER BY aggregate_type, aggregate_id`,
+        )
+        .all(CODE_LANGUAGE_SERVER_APPROVAL_AGGREGATE, CODE_LANGUAGE_SERVER_EGRESS_AGGREGATE);
+
+    erasePurgedProjectData({ connection: harness.connection, projectId, canvasIds: [] });
+
+    expect(remaining()).toEqual([
+      { aggregate_type: CODE_LANGUAGE_SERVER_APPROVAL_AGGREGATE, aggregate_id: otherProjectId },
+      {
+        aggregate_type: CODE_LANGUAGE_SERVER_EGRESS_AGGREGATE,
+        aggregate_id: launches.get(otherProjectId),
+      },
+    ]);
+    const erased = {
+      projectId: decodeProjectId(projectId),
+      checkoutId: decodeCodeCheckoutId("c3630000-0000-4000-8000-000000000013"),
+      component: "extension:language-server:sha256:abc@1",
+    };
+    // The host forgets them as it erases them, so they stop being in force
+    // at once and the Project's next approval is recorded afresh.
+    approvals.forgetProject(erased.projectId);
+    expect(approvals.holds(erased)).toBe(false);
+    expect(approvals.record({ ...erased, scope: "checkout" })).toBe("recorded");
   });
 
   it("leaves a managed worktree in place whose receipt names a path outside the managed worktree directory", async () => {

@@ -462,6 +462,31 @@ export class ToolEgressRules {
   }
 
   /**
+   * A Code Project's own rules, for a launch that serves the Project's
+   * checkout rather than one thread: a `repo-tooling` language server. Read
+   * afresh for every decision, like a thread launch's, and empty while the
+   * Project's revocations cannot be read.
+   */
+  projectRules(projectId: string): ReadonlyArray<ToolEgressRule> {
+    this.#sweepExpiredRules();
+    if (this.#unreadableAggregates.has(aggregateKey(TOOL_EGRESS_PROJECT_AGGREGATE, projectId))) {
+      return [];
+    }
+    return [...(this.#projectRules.get(projectId)?.values() ?? [])].map((rule) => ({
+      id: rule.ruleId,
+      scope: rule.scope,
+      host: rule.host,
+      port: rule.port,
+      expiresAt: rule.expiresAt,
+    }));
+  }
+
+  /** Whether a thread counts as tainted for egress, including a launch whose mark is not yet written. */
+  threadTainted(threadId: string): boolean {
+    return this.#tainted(threadId);
+  }
+
+  /**
    * What a marked thread's command confirmation lists: the hosts its thread
    * and Project rules name, preselected, then its open proposals, unticked.
    * Taint suspends those rules, so none of these reaches the command unless
