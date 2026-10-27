@@ -294,6 +294,39 @@ describe("SSH target connection service", () => {
     ).toEqual({ status: "refused", reason: "target-removed" });
   });
 
+  it("admits a placed provider runtime only in a posture its driver declares, and refuses a driver that declares none", async () => {
+    const connections = service();
+    const status = await registered(connections);
+    const declared = {
+      remotePlacement: { postures: ["plan"], appToolTransport: "stdio" },
+    } as const;
+    const decide = (
+      driver: Parameters<SshTargetConnectionService["admitProviderRuntime"]>[1],
+      posture: "plan" | "approval-gated" | "full-access",
+    ) =>
+      connections.admitProviderRuntime(status.target.id, driver, {
+        posture,
+        permissionPersistence: "project-default",
+      });
+    const notAttestable = { status: "refused", reason: "runtime-not-attestable" };
+
+    expect(decide(declared, "plan")).toEqual({ status: "admitted" });
+    // The attestation passes every confined posture; the driver's declaration
+    // is what refuses these.
+    expect(decide({}, "plan")).toEqual(notAttestable);
+    expect(decide(declared, "approval-gated")).toEqual(notAttestable);
+    expect(decide(declared, "full-access")).toEqual(notAttestable);
+    expect(
+      decide(
+        { remotePlacement: { postures: ["plan"], appToolTransport: "loopback-listener" } },
+        "plan",
+      ),
+    ).toEqual(notAttestable);
+
+    connections.close();
+    expect(decide(declared, "plan")).toEqual({ status: "refused", reason: "target-unreachable" });
+  });
+
   it("binds a remote root and reads through the attested session, and on an unattested target refuses both before any frame", async () => {
     const remoteRoot = Schema.decodeUnknownSync(SshRemotePath)("/home/build/app");
     const requests = () =>

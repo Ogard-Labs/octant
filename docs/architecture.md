@@ -791,7 +791,9 @@ confinement attestation, binding a remote root with Files, Git status, and
 diff reads through the executor, and the native harness's file tools,
 commands, and egress for a remote-bound Project's turn are built; the Code
 turn runtime does not yet start a thread there, so no product route reaches a
-target's tools. SSH targets, their attestation digests, and remote bindings
+target's tools. The provider-sdk seam for placing a runtime on a target, and
+its conformance, are built; no driver declares it and no runtime is launched
+there yet. SSH targets, their attestation digests, and remote bindings
 are journaled. Its
 admission, confinement attestation,
 transport, and how it differs from a paired host are owned by
@@ -2431,7 +2433,11 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   `start`, `resume`, `send`, `interrupt`, `stop`, `answerApproval`,
   `answerUserInput`, and `answerTool`, with optional current-turn `steer`. Every driver passes
   the shared conformance harness (chat, child-agent, and context-facts
-  suites) before it is selectable.
+  suites) before it is selectable. An acquisition may carry a host-supplied
+  remote placement, which reaches only a driver that declares
+  `remotePlacement` and only through `acquireProviderConnection`; every other
+  driver reports it unsupported and launches nothing
+  ([Provider runtimes on a target](design/remote-ssh-environments.md#provider-runtimes-on-a-target)).
 - **Probe scheduling.** Operations on one provider instance run one at a time.
   A probe asked for while another probe of that instance is running joins it
   and shares its result, unless an enable or configuration change queued after
@@ -7019,7 +7025,9 @@ mechanisms are:
   that value is refined once the driver probes or runs. A refinement that
   upgrades a declaration (`unavailable` to `supported` after a reply reports
   usage) is the degraded form: the capability exists but is not promised before
-  it is seen.
+  it is seen. Placement on an SSH target is not a capability and has no row:
+  it is the driver's own `ProviderDriver.remotePlacement` declaration, never a
+  probe, and no driver declares it yet.
 
   | Capability               | Claude Code                                                  | Codex                                                     | OpenCode                                                          | Pi                                                                                      | ACP agents                                                                    | Ollama                                                           | Harness endpoints                                                                 | Outside harness endpoints                                        | Oh My Pi                              |
   | ------------------------ | ------------------------------------------------------------ | --------------------------------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------- |

@@ -34,6 +34,11 @@ export interface ProviderProbeInput {
 
 export interface ProviderAcquireInput {
   readonly instanceId: ProviderInstanceId;
+  /**
+   * The folder the runtime works in. Without a placement it is a folder on
+   * this host; with a remote placement it is the bound root as the target
+   * names it, and never a folder on this host.
+   */
   readonly projectRoot: string;
   readonly mode?: "chat" | "work" | "code";
   /** Context used by the server-owned Work request projection subscriber. */
@@ -42,6 +47,80 @@ export interface ProviderAcquireInput {
     readonly threadId: WorkThreadId;
     readonly sessionId: ProviderSessionId;
   };
+  /**
+   * Where the runtime's processes run. Absent means on this host, where every
+   * driver launches them today. A remote placement reaches only a driver that
+   * declares `remotePlacement`, through `acquireProviderConnection`.
+   */
+  readonly placement?: ProviderRemoteProcessPlacement;
+}
+
+/**
+ * The postures a runtime can be placed on a remote target in: the ones Octant
+ * confines. Octant wraps no runtime in Full access, so none is placed there.
+ */
+export type ProviderRemotePlacementPosture = Exclude<ProviderExecutionPolicy, "full-access">;
+
+/**
+ * A driver's declaration that its runtime can run on a remote target the host
+ * reaches, such as an SSH target. The host admits a placed runtime only in a
+ * posture listed here, and only where its own admission policy admits it.
+ */
+export interface ProviderRemotePlacementSupport {
+  /**
+   * The postures in which the runtime runs under Octant's confinement. A
+   * runtime that rests on its own sandbox in a posture leaves it out, because
+   * a target's attestation cannot speak for a sandbox Octant did not apply.
+   */
+  readonly postures: ReadonlyArray<ProviderRemotePlacementPosture>;
+  /**
+   * How the host's app-managed tools reach the runtime. A listener on the
+   * target's loopback is refused until it is reviewed for other users there.
+   */
+  readonly appToolTransport: "stdio" | "loopback-listener" | "none";
+}
+
+/**
+ * One runtime process a driver asks to start on the target. Its working
+ * directory is the bound root and its environment is built on the target, so
+ * no field here can carry a folder or a credential from this host.
+ */
+export interface ProviderPlacedLaunch {
+  /** The runtime's absolute path on the target. */
+  readonly executable: string;
+  readonly args: ReadonlyArray<string>;
+}
+
+/**
+ * How a placed process ended: it exited on the target, or the host lost the
+ * session that carried it, and it ended with that session.
+ */
+export type ProviderPlacedProcessEnd =
+  | { readonly kind: "exited"; readonly code: number | null }
+  | { readonly kind: "lost" };
+
+/** A runtime process on the target, spoken to over its standard streams. */
+export interface ProviderPlacedProcess {
+  /** The process's standard output, in order, until it ends. */
+  readonly output: Stream.Stream<Uint8Array>;
+  /** Writes to the process's standard input; fails once the process has ended. */
+  readonly write: (bytes: Uint8Array) => Effect.Effect<void, ProviderFailure>;
+  /** Resolves when the process has ended. */
+  readonly ended: Effect.Effect<ProviderPlacedProcessEnd>;
+}
+
+/**
+ * A host-supplied place on a remote target where a driver starts its runtime.
+ * The host admits each launch in the posture of that moment and confines it
+ * on the target, and the process stops when the launch's scope closes. A
+ * refused or lost target fails the launch; a driver never runs the runtime on
+ * this host instead.
+ */
+export interface ProviderRemoteProcessPlacement {
+  readonly kind: "remote";
+  readonly launch: (
+    launch: ProviderPlacedLaunch,
+  ) => Effect.Effect<ProviderPlacedProcess, ProviderFailure, Scope.Scope>;
 }
 
 export interface ProviderSessionStart {
@@ -149,6 +228,12 @@ export interface ProviderDriver {
    */
   readonly conversationOwnership?: "provider" | "host" | "host-resumable";
   readonly kind: ProviderDriverKind;
+  /**
+   * Present only on a driver whose runtime can run on a remote target. A
+   * driver without it reports remote placement unsupported, and the host
+   * never hands it a remote placement.
+   */
+  readonly remotePlacement?: ProviderRemotePlacementSupport;
   readonly contextFacts?: ProviderContextFactsSource;
   /** Optional read-only local history reader owned by the configured driver. */
   readonly localUsageHistory?: ProviderLocalUsageHistorySource;
