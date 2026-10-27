@@ -2206,6 +2206,41 @@ describe("Installed cards at phone width", () => {
   });
 });
 
+describe("Install review at phone width", () => {
+  const styles = () =>
+    readFileSync(resolve(process.cwd(), "src/styles/extensions-settings.css"), "utf8").replace(
+      /\s+/g,
+      " ",
+    );
+
+  it("keeps each review label in its own column so a long digest wraps beside it", () => {
+    // Observed at 390px: the digest's value column took the whole row, the
+    // label column was 0px wide, and "Binary digest" was drawn over the digest.
+    expect(styles()).toMatch(
+      /\.extensions-settings__compatibility > div \{[^}]*grid-template-columns: auto minmax\(0, 1fr\);/,
+    );
+  });
+
+  it("bounds only a package's own text, never what trusting a language server grants", () => {
+    // Observed at 390px: the whole language-server review scrolled inside a
+    // 42vh box, so its grant sentence was cut off above Confirm install.
+    const css = styles();
+    const review = /\.extensions-settings__instruction-review \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(review).not.toMatch(/max-height|overflow/);
+    expect(css).toMatch(
+      /\.extensions-settings__instruction-review pre \{[^}]*max-height: min\(42vh, 420px\);[^}]*overflow: auto;/,
+    );
+  });
+
+  it("puts a reviewed component's kind under its name on a phone", () => {
+    // Observed at 390px: the kind line kept its column beside the name and the
+    // two were drawn over each other.
+    expect(styles()).toMatch(
+      /@media \(max-width: 640px\) \{ \.extensions-settings__preview \.extensions-settings__component \{[^}]*grid-template-columns: minmax\(0, 1fr\);/,
+    );
+  });
+});
+
 describe("Sign in to a server you added", () => {
   it("offers Sign in on the card of a hosted server the host reports as a plain plugin package", async () => {
     // The host rewrites a generated package's installed source to
