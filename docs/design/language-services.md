@@ -20,9 +20,11 @@ server), and 3 (editor wiring) are built: the Code editor shows the host's
 diagnostics and jumps to definitions, locally and from a paired device.**
 Slice 4 (ship the binary) is built: packages carry the server, and a signed
 Apple Silicon package awaits the maintainer. Slice 5 (user-added `static`
-servers) and slice 6 (repository-tooling servers, started only after a local
-window's approval and networked under the Project's egress rules) are also
-built. Slice 8's [Debugger addendum](#debugger-addendum) was accepted by the
+servers), slice 6 (repository-tooling servers, started only after a local
+window's approval and networked under the Project's egress rules), and slice 7
+(read-only agent tools for diagnostics and definitions, which never start or
+read through a repository-tooling server) are also built; slice 7's
+real-provider smoke awaits the maintainer. Slice 8's [Debugger addendum](#debugger-addendum) was accepted by the
 maintainer on 2026-10-27; its sub-slices are next. Monaco editing and the explicit external-editor
 handoff stay the primary Code editing paths and are unchanged by every slice.
 
@@ -100,6 +102,12 @@ behind its own approval and confinement rules.
   `languageServerEgress.ts` gives each start its own `proxied` egress proxy
   under the Project's rules, and the editor offers **Allow in this checkout**
   and **Allow in this Project** when the host answers `approval-required`.
+- **Agent read tools (slice 7).** `apps/server/src/code/codeLanguageAgentTools.ts`
+  offers `octant_code_diagnostics` and `octant_code_definition` to every Code
+  turn whose provider carries Octant's tools, and
+  `CodeLanguageService.readForAgent` answers them for the saved file through
+  the same checks and per-request launch decision as an editor's read, as a
+  start the person at the machine did not make.
 - **Network levels.** `apps/server/src/process/threadEgressPolicy.ts` resolves
   `none`, `provider-endpoints-only`, and `unrestricted`. The
   [harness tool egress rules](../architecture.md#harness-tool-egress-rules)
@@ -604,6 +612,63 @@ design left a choice open.
   that answered runs the package's binary and that stopping the host stops it.
   It takes `desktop` (the packaged app for this host) or `headless` (an
   artifact tarball).
+
+### Agent read rules
+
+Slice 7 settled these details, taking the more restrictive option where the
+design left a choice open.
+
+- **Tools.** `octant_code_diagnostics` and `octant_code_definition` are the
+  closed catalog's `code-diagnostics` and `code-definition`
+  (`packages/contracts/src/toolCatalog.ts`); their argument schemas and
+  definitions are in `@octant/contracts/code-language`. Both are Code only,
+  `filesystem`, and `project-file-reads`, so Plan keeps them, no posture asks,
+  and a marked thread is not asked afresh: they read only what the thread can
+  already read, through a server that cannot write, run other programs, or
+  reach the network. Their results mark nothing, as a file read marks
+  nothing. A profile allowlist names them by these tool names.
+- **Transport.** They travel through the provider SDK's ordinary app-managed
+  tool transport (`apps/server/src/code/codeLanguageAgentTools.ts`, added to
+  every Code turn through the runtime's contributed tools), so every runtime
+  that carries Octant's tools carries them. A provider without app-managed
+  tools is never offered them and refuses a turn that carries them as
+  `unsupported`. The SDK's chat conformance now also fails a driver that asks
+  for a tool its turn did not offer, since the host answers no other name.
+- **By path, as saved.** An agent names a file by its checkout-relative path,
+  as its other file tools do; it holds no editor document, so it has no file
+  reference. The read answers for the file as saved, and lines and columns
+  are one-based, as the agent's own reads and searches number them; the host
+  converts them. Reason: an agent reads and edits the saved file, so an answer
+  for other text, or counted from zero, points at the wrong line.
+- **Never an editor's draft.** When an editor holds the file with text other
+  than the saved file's, the read answers `unsaved-edits` and changes nothing:
+  the person's draft is neither replaced on the server nor read out to a
+  provider. A file only agents hold is brought up to the saved text on the
+  next read, and an agent's hold closes under the ten-minute idle rule. When
+  the last editor closes a file, the agents' holds on it close too, so a
+  draft the person discards is not kept on the server for the agent's reads
+  of other files; the agent's next read reopens the saved file. An answer
+  computed while an editor changed the file's text is `unsaved-edits`.
+  Residual: a diagnostic for a saved file can still name something from
+  another file's unsaved draft, since one server reads the whole checkout.
+- **Checks.** Each call is decoded against its schema, wrapped as a
+  `ToolActionRequest` under the thread's authority as it stands, and passed
+  through the tool-call choke point. The language service then runs every
+  check an editor's read passes, in the same order, on the turn's window as
+  it stands when the call runs (the standing authority other Project-scoped
+  app-managed tools use). A refused read starts nothing.
+- **Starts.** The launch decision is asked on every read as a request the
+  person at the machine did not make, as a paired device's is, so an agent can
+  start a `static` server and never starts or reads through a `repo-tooling`
+  one (`local-host-required`, in every posture), even one already running
+  under a person's approval. Reason: running repository tooling stays the person's act
+  at the machine (D4), and an agent's call is not that act. An agent's read
+  never resets the crash budget either; reopening the file in the editor stays
+  the person's retry.
+- **Answers.** Results keep the editor's bounds, and a definition outside the
+  checkout is only its label. `starting`, `crashed`, `timed-out`, `too-large`,
+  `unsaved-edits`, and each refusal come back as a tool error with one
+  sentence saying what to do next. Slice 7 adds no journal events.
 
 ### Data lifecycle and privacy
 
@@ -1278,6 +1343,25 @@ accounts or hardware.
      the tools.
    - _Verify:_ provider-sdk conformance. A real-provider smoke needs the
      maintainer's provider sign-in.
+   - _State:_ built; the real-provider smoke is the maintainer's. The provider
+     SDK's chat conformance carries both reads to a Code session in Plan and
+     answers one, proves a provider without app-managed tools refuses them
+     before sending, and fails a driver that asks for a tool the turn did not
+     offer (`chatConformance.test.ts`); every in-tree adapter's conformance
+     passes with that check. The Code runtime offers a Plan turn both reads
+     and answers one through the language service, and offers neither to a
+     provider without app-managed tools (`codeOperationRuntime.test.ts`). On
+     Linux the bundled `tsc --lsp --stdio` under Bubblewrap answered an
+     agent's diagnostics and cross-file definition for a saved file in a Plan
+     thread, and its next read saw a saved fix
+     (`codeLanguageServiceProcess.test.ts`); the same suite covers refusals
+     before any launch, a `repo-tooling` server never started or read through
+     even while a local approval covers it and the editor runs it, an editor's
+     draft left in place, a file too large, and the crash budget. Still to
+     run: one Code turn in Plan on a signed-in Claude Code and a signed-in
+     Codex provider, asking the agent to read a type error and a definition
+     through the two tools. The rules are under
+     [Agent read rules](#agent-read-rules).
 8. **Debugger.** Container: design yes, implementation yes for Linux.
    - First a design addendum in this spec, approved before any code.
    - The addendum covers a `debug-adapter` component kind using the Debug

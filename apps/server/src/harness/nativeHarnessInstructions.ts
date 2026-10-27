@@ -49,6 +49,8 @@ const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
   octant_board: "read this Project's work board",
   octant_browser: "drive the built-in browser: open pages, read them, click, type, screenshot",
   octant_canvas: "write substantial deliverables as a Canvas document the user can open",
+  octant_code_definition: "find where a name in a saved checkout file is defined",
+  octant_code_diagnostics: "read the language server's errors and warnings for a saved file",
   octant_computer: "operate macOS apps on the user's desktop",
   octant_create_image: "generate an image; it costs money, so only when asked",
   octant_github: "read the repository's issues, pull requests, and projects",

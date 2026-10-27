@@ -111,6 +111,25 @@ describe("Desktop pane", () => {
     expect(kinds(requests)).toEqual([]);
   });
 
+  it("says a thread in Plan cannot start a desktop, before and after one ended, and offers no Start", async () => {
+    const plan = { status: "refused", reason: "plan-mode" } as const;
+    const fake = fakeClient({ overview: overviewOf([], plan) });
+    render(<DesktopPane client={fake.client} threadId={threadId} />);
+    expect(await screen.findByText("No desktop to start")).toBeTruthy();
+    expect(screen.getByText("A thread in Plan can't start a desktop.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Start desktop" })).toBeNull();
+    cleanup();
+
+    const ended = fakeClient({
+      overview: overviewOf([lease({ state: "released", endReason: "released" })], plan),
+    });
+    render(<DesktopPane client={ended.client} threadId={threadId} />);
+    expect(await screen.findByText("Desktop ended")).toBeTruthy();
+    expect(screen.getByText(/A thread in Plan can't start a desktop\.$/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Start a new desktop" })).toBeNull();
+    expect([...kinds(fake.requests), ...kinds(ended.requests)]).toEqual([]);
+  });
+
   it("starts a desktop, shows it live, and sends the person's click on the screen", async () => {
     const { client, requests, frame } = fakeClient({ overview: overviewOf([]) });
     render(<DesktopPane client={client} threadId={threadId} />);

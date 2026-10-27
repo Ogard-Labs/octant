@@ -488,6 +488,16 @@ export interface CodeOperationRuntimeOptions {
   }) => AppManagedToolSet | undefined;
   /** Lets the model offer out-of-scope work as a side task the person may start. */
   readonly sideTasks?: (input: { readonly thread: CodeThread }) => AppManagedToolSet | undefined;
+  /**
+   * Tool sets that areas built after this runtime add to each turn, such as
+   * the language server's reads. `readThread` is the thread as the turn's
+   * window sees it when a call runs, the running turn's posture included.
+   */
+  readonly contributedTools?: (input: {
+    readonly windowId: WindowId;
+    readonly thread: CodeThread;
+    readonly readThread: () => CodeThread | undefined;
+  }) => AppManagedToolSet | undefined;
   /** Lets the model author a Canvas bound to this thread's checkout. */
   readonly canvas?: (input: {
     readonly windowId: WindowId;
@@ -3571,6 +3581,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             }),
         }),
         this.#options.siblingThreads?.({ windowId: active.windowId, thread: active.thread }),
+        this.#options.contributedTools?.({
+          windowId: active.windowId,
+          thread: active.thread,
+          readThread: () => this.#effectiveThread(active.windowId, active.thread.id),
+        }),
         this.#options.sideTasks?.({ thread: active.thread }),
         this.#options.canvas?.({ windowId: active.windowId, thread: active.thread }),
         this.#options.agents?.({ windowId: active.windowId, thread: active.thread }),

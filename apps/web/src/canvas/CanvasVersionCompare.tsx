@@ -1,5 +1,5 @@
 import type { CanvasDefinition } from "@octant/contracts/canvas";
-import { canvasBlockLabel } from "./CanvasDocument";
+import { canvasBlockLabel } from "./canvasBlockLabel";
 
 type CanvasBlockEntry = CanvasDefinition["blocks"][number];
 

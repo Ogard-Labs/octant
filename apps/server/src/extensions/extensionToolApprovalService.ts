@@ -76,6 +76,12 @@ export class ExtensionToolApprovalService {
         threadId: string,
         projectId: string | undefined,
       ) => boolean;
+      /**
+       * The waiting set changed: a prompt became listable or left the list
+       * for an answer, a cancel, an expiry, or a revocation. Wired only at
+       * composition so the service stays free of the change feed.
+       */
+      readonly onChanged?: () => void;
     },
   ) {
     this.#ttlMs = Math.max(1_000, Math.min(options.ttlMs ?? DEFAULT_APPROVAL_TTL_MS, 10 * 60_000));
@@ -127,6 +133,7 @@ export class ExtensionToolApprovalService {
         const current = this.#pending.get(approvalId);
         if (current === undefined) return;
         this.#pending.delete(approvalId);
+        this.options.onChanged?.();
         clearTimeout(current.timer);
         if (current.signal !== undefined && current.onAbort !== undefined) {
           current.signal.removeEventListener("abort", current.onAbort);
@@ -146,6 +153,7 @@ export class ExtensionToolApprovalService {
         ...(input.signal === undefined ? {} : { signal: input.signal }),
         ...(onAbort === undefined ? {} : { onAbort }),
       });
+      this.options.onChanged?.();
       input.signal?.addEventListener("abort", onAbort!, { once: true });
       if (input.signal?.aborted) settle(false);
     });

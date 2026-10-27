@@ -13,6 +13,12 @@ import {
   type ThreadMessageQueueClient,
 } from "./threadMessageQueueClient";
 
+import { documentIsVisible } from "../polling/documentVisibility";
+import {
+  THREAD_ACTIVITY_RECOVERY_MS,
+  useThreadActivityRevision,
+} from "../polling/ThreadActivityRevisions";
+import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 import {
   queueDraftDigest,
   readQueueReceipts,
@@ -154,18 +160,21 @@ export function useThreadMessageQueue(options: {
       "An earlier queue change needs confirmation. Check queue before adding another message; your draft is kept.",
     );
   }, [host, scope]);
-  const refresh = useCallback(async () => {
-    if (client === undefined || scope === undefined) return;
-    recover();
-    try {
-      const next = await client.read(scope);
-      if (active.current !== scope) return;
-      apply(next);
-      setAvailable(true);
-    } catch {
-      if (active.current === scope) setAvailable(false);
-    }
-  }, [apply, client, recover, scope]);
+  const refresh = useCallback(
+    async (signal?: AbortSignal) => {
+      if (client === undefined || scope === undefined) return;
+      recover();
+      try {
+        const next = await client.read(scope);
+        if (signal?.aborted === true || active.current !== scope) return;
+        apply(next);
+        setAvailable(true);
+      } catch {
+        if (signal?.aborted !== true && active.current === scope) setAvailable(false);
+      }
+    },
+    [apply, client, recover, scope],
+  );
   useEffect(() => {
     active.current = scope;
     current.current = undefined;
@@ -176,24 +185,26 @@ export function useThreadMessageQueue(options: {
     setBusy(false);
     setUncertain(false);
     setMessage(undefined);
-    void refresh();
-    const timer = window.setInterval(() => {
-      if (document.visibilityState !== "hidden") void refresh();
-    }, 3000);
-    const reconnect = () => void refresh();
-    window.addEventListener("online", reconnect);
+    // Visibility recovery belongs to useVisibleRefresh; focus and storage
+    // stay here because they are queue-specific wake sources.
+    const reconnect = () => {
+      if (documentIsVisible()) void refresh();
+    };
     window.addEventListener("focus", reconnect);
     window.addEventListener("storage", reconnect);
-    document.addEventListener("visibilitychange", reconnect);
     return () => {
-      window.clearInterval(timer);
-      window.removeEventListener("online", reconnect);
       window.removeEventListener("focus", reconnect);
       window.removeEventListener("storage", reconnect);
-      document.removeEventListener("visibilitychange", reconnect);
       if (active.current === scope) active.current = undefined;
     };
   }, [refresh, scope]);
+  const queueRevision = useThreadActivityRevision("threadMessageQueue");
+  const refreshWithSignal = useCallback(async (signal: AbortSignal) => refresh(signal), [refresh]);
+  useVisibleRefresh(
+    refreshWithSignal,
+    queueRevision,
+    queueRevision === undefined ? 3_000 : THREAD_ACTIVITY_RECOVERY_MS,
+  );
 
   const execute = useCallback(
     async (request: PendingCommand, fresh = false): Promise<QueueAcknowledgment> => {
