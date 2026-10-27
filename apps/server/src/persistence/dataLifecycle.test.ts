@@ -522,6 +522,10 @@ describe("removeAllLocalData", () => {
     }).catch((failure: unknown) => failure);
 
     expect(error).toMatchObject({ name: "CredentialCleanupBlocked", status: "indeterminate" });
+    // A paired device on another platform can read this guidance.
+    expect((error as CredentialCleanupBlocked).recoveryGuidance).toBe(
+      "The credential cleanup outcome could not be confirmed. Local store files remain staged; retry complete local-data removal to reconcile before using this store.",
+    );
     const stagingDirectory = readdirSync(directory).find((entry) =>
       entry.startsWith(".octant-remove-"),
     );

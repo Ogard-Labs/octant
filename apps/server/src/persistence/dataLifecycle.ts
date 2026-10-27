@@ -483,7 +483,7 @@ export async function removeAllLocalDataWithCredentialPurge(input: {
             | "partial"
             | "failed"),
       recoveryGuidance: stagedOutcomeIsUncertain
-        ? "The Keychain cleanup outcome could not be confirmed. Local store files remain staged; retry complete local-data removal to reconcile before using this store."
+        ? "The credential cleanup outcome could not be confirmed. Local store files remain staged; retry complete local-data removal to reconcile before using this store."
         : (credentialCleanup.recoveryGuidance ?? "Retry complete local-data removal."),
     });
   }
