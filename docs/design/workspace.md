@@ -351,15 +351,19 @@ them ([authority](../architecture.md#security-and-authority)). Its notice says
 what the source offers once the host names the source's mode. Document shows the
 Markdown or text file the Code thread's turn most recently wrote, read through
 the host-authorized file open; the renderer offers a written document, or a
-Canvas the thread's agent authored in Work or Code and did not ask to show
-inline, in the dock once per document, never after the person closed its tab,
+Canvas the thread's agent authored in Work or Code that the thread does not
+draw inline, in the dock once per document, never after the person closed its tab,
 and never by moving focus. Every Canvas a thread wrote appears at the end of
 the turn that wrote it, on the reply's card face. One the agent asked to show
 inline is drawn there read-only, within a fixed height that fades out instead
 of scrolling, and is never offered in the dock, because it is already in front
-of the person; any other is a single row (a live miniature, its title, one
-line of facts) that opens it. The person may expand any Canvas in place,
-including one shown as a row: **Expand in thread** on the frame or the row, or
+of the person. One the agent asked to show inline that holds a plan, a mockup,
+or a device-size design is a sidebar Canvas, shown as a preview card (the live
+miniature across the column, its title and facts beneath) that opens it; any
+other is a single row (a live miniature, its title, one line of facts) that
+opens it ([Canvas: Presentation](canvas.md#presentation-and-schema-versions)).
+The person may expand any Canvas in place,
+including one shown as a row: **Expand in thread** on the frame, the card, or the row, or
 **Show the whole Canvas** under a faded one. Expanded, the frame grows with
 its content up to about the thread viewport instead of fading. The thread
 keeps the wheel until the person focuses the region inside the frame (a click

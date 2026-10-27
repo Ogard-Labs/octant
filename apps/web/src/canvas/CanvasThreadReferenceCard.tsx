@@ -22,6 +22,13 @@ export interface CanvasThreadReferenceCardProps {
   readonly onOpen?: (card: Card) => void;
   /** Draws the whole Canvas in place of the row; offered only inside a thread. */
   readonly onExpand?: () => void;
+  /**
+   * Inside a thread, a Canvas whose author asked for it inline but which holds
+   * a block worked on in the sidebar (a plan, a mockup, or a device-size
+   * design) is shown as a preview card: the same read-only miniature, drawn
+   * across the column instead of in a tile, and still the control that opens it.
+   */
+  readonly previewWhenAskedInline?: boolean;
 }
 
 /** What a person reads for a card that is not simply ready to open. */
@@ -49,9 +56,16 @@ export function CanvasThreadReferenceCard({
   client,
   onOpen,
   onExpand,
+  previewWhenAskedInline,
 }: CanvasThreadReferenceCardProps) {
   const loaded = useCanvasDefinition(client, card, client !== undefined);
   const digest = loaded.kind === "ready" ? canvasDigest(loaded.definition) : undefined;
+  const shownAs =
+    previewWhenAskedInline === true &&
+    loaded.kind === "ready" &&
+    loaded.definition.presentation === "inline"
+      ? "preview"
+      : "row";
   const facts = [
     card.status === "ready" ? (digest?.label ?? "Canvas") : STATUS_WORDS[card.status],
     ...(digest?.facts ?? []),
@@ -130,7 +144,12 @@ export function CanvasThreadReferenceCard({
   // miniature is a real document with its own controls, and a button may not
   // hold other interactive content.
   return (
-    <div className="canvas-ref" data-kind={digest?.kind} data-testid="canvas-card">
+    <div
+      className="canvas-ref"
+      data-kind={digest?.kind}
+      data-shown-as={shownAs}
+      data-testid="canvas-card"
+    >
       {onOpen === undefined ? null : (
         <OctantButton
           aria-label={`Open ${card.title}`}

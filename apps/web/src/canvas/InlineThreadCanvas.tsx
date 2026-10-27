@@ -90,7 +90,9 @@ export function rememberCanvasExpanded(
 
 /**
  * How the thread shows one Canvas. `rest` is how the thread first shows it:
- * a capped, faded teaser when the agent asked for inline, otherwise a row.
+ * a capped, faded teaser when the agent asked for inline, a preview card when
+ * it asked for inline but the Canvas holds a block worked on in the sidebar,
+ * otherwise a row.
  * `card` folds an inline Canvas to its header. `expanded` draws the whole
  * Canvas in place, for any Canvas, at the person's request.
  */
@@ -192,6 +194,7 @@ export function InlineThreadCanvas(props: InlineThreadCanvasProps) {
           focusToggleOnShow.current = true;
           show("expanded");
         }}
+        previewWhenAskedInline
         {...(props.onOpen === undefined ? {} : { onOpen: props.onOpen })}
       />
     );
@@ -319,7 +322,9 @@ export function InlineThreadCanvas(props: InlineThreadCanvasProps) {
               {...(designRunRuntime === undefined ? {} : { designRunRuntime })}
             />
           </div>
-          {/* Outside the faded body, so the offer itself is never faded. */}
+          {/* Outside the faded body, so the offer itself is never faded. A
+              visualization taller than the cap may read better at the
+              sidebar's size, so opening it is offered beside expanding it. */}
           {clipped ? (
             <div className="thread-canvas__more">
               <OctantButton
@@ -330,6 +335,16 @@ export function InlineThreadCanvas(props: InlineThreadCanvasProps) {
               >
                 Show the whole Canvas
               </OctantButton>
+              {props.onOpen === undefined ? null : (
+                <OctantButton
+                  onClick={() => props.onOpen?.(card)}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  {openLabel}
+                </OctantButton>
+              )}
             </div>
           ) : null}
         </div>
@@ -340,8 +355,9 @@ export function InlineThreadCanvas(props: InlineThreadCanvasProps) {
 
 /**
  * The Canvases a turn wrote, after the row that turn ends on: one the agent
- * asked to show inline drawn in place, any other as the row that opens it.
- * Either can be expanded in the thread.
+ * asked to show inline drawn in place (or, when it holds a plan, a mockup, or
+ * a device-size design, a preview card that opens it), any other as the row
+ * that opens it. Each can be expanded in the thread.
  */
 export function ThreadCanvases(props: {
   readonly cards: ReadonlyArray<CanvasThreadReferenceCard> | undefined;
