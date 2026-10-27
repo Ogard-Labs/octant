@@ -30,7 +30,9 @@ import {
   type DesktopLeaseTransitioned,
   type DesktopPaneRefusal,
   type DesktopPaneStart,
+  type DesktopPlacementId,
   type DesktopProviderId,
+  type DesktopProviderLocality,
   type DesktopRecipe,
   type DesktopViewId,
   type EventActor,
@@ -499,21 +501,57 @@ function teardownPortOf(provider: DesktopTeardownPort): DesktopTeardownPort {
   };
 }
 
-/** A recipe whose provider or credential reference changed counts as removed. */
+/** A recipe whose provider, credential reference, or placement changed counts as removed. */
 function recipeStillCovers(recipe: DesktopRecipe | undefined, lease: DesktopLease): boolean {
   return (
     recipe !== undefined &&
     String(recipe.providerId) === String(lease.providerId) &&
-    String(recipe.credentialRef ?? "") === String(lease.credentialRef ?? "")
+    String(recipe.credentialRef ?? "") === String(lease.credentialRef ?? "") &&
+    String(recipe.placementId ?? "") === String(lease.placementId ?? "")
   );
 }
 
-function leasableOf(provider: DesktopProvider): LeasableDesktopProvider {
+/** Where a lease runs and whether it bills. */
+interface DesktopLeaseTerms {
+  readonly locality: DesktopProviderLocality;
+  readonly billed: boolean;
+  readonly placementId?: DesktopPlacementId;
+}
+
+/**
+ * A recipe's terms: its placement's for a provider that declares placements,
+ * the provider's own otherwise. Undefined when the recipe names a placement
+ * the provider does not declare, names none for a provider that declares
+ * some, or names one for a provider that declares none, so a recipe never
+ * leases on terms nobody chose.
+ */
+function recipeTerms(
+  provider: DesktopProvider,
+  recipe: DesktopRecipe,
+): DesktopLeaseTerms | undefined {
+  const placements = provider.placements ?? [];
+  if (placements.length === 0) {
+    return recipe.placementId === undefined
+      ? { locality: provider.locality, billed: provider.billed }
+      : undefined;
+  }
+  const placement = placements.find(
+    (entry) => String(entry.id) === String(recipe.placementId ?? ""),
+  );
+  return placement === undefined
+    ? undefined
+    : { locality: placement.locality, billed: placement.billed, placementId: placement.id };
+}
+
+function leasableOf(
+  provider: DesktopProvider,
+  terms: Pick<DesktopLeaseTerms, "locality" | "billed"> = provider,
+): LeasableDesktopProvider {
   return {
     providerId: provider.id,
     displayName: provider.displayName.trim().slice(0, 128) || String(provider.id),
-    locality: provider.locality,
-    billed: provider.billed,
+    locality: terms.locality,
+    billed: terms.billed,
   };
 }
 
@@ -860,6 +898,7 @@ export function createDesktopLeaseService(
     readonly thread: DesktopLeaseThread;
     readonly recipe: DesktopRecipe;
     readonly provider: DesktopProvider;
+    readonly terms: DesktopLeaseTerms;
   };
 
   function admitAcquire(caller: DesktopLeaseCaller): Admitted | DesktopLeaseRefusal {
@@ -875,9 +914,11 @@ export function createDesktopLeaseService(
     if (recipe === undefined) return refused("no-provider-configured");
     const loaded = registered(String(recipe.providerId));
     if (loaded === undefined) return refused("no-provider-configured");
+    const terms = recipeTerms(loaded.provider, recipe);
+    if (terms === undefined) return refused("no-provider-configured");
     // A cloud desktop runs on the person's own account, so a recipe that
     // names no credential for one configures nothing that could run.
-    if (loaded.provider.locality === "cloud" && recipe.credentialRef === undefined) {
+    if (terms.locality === "cloud" && recipe.credentialRef === undefined) {
       return refused("no-provider-configured");
     }
     if (!loaded.effective) return refused("provider-disabled");
@@ -885,10 +926,10 @@ export function createDesktopLeaseService(
     const fits = desktopLeaseFits({
       holdings: projection.list().map((record) => record.lease),
       owner,
-      locality: loaded.provider.locality,
+      locality: terms.locality,
     });
     if (!fits) return refused("lease-limit");
-    return { status: "admitted", owner, thread, recipe, provider: loaded.provider };
+    return { status: "admitted", owner, thread, recipe, provider: loaded.provider, terms };
   }
 
   function refuseCaller(
@@ -914,7 +955,7 @@ export function createDesktopLeaseService(
     if (status.status !== "ready") return refused("provider-unavailable");
     const gate = decideDesktopLeaseAcquire({
       executionPolicy: first.thread.executionPolicy,
-      billed: first.provider.billed,
+      billed: first.terms.billed,
       initiator: caller.actor.kind,
     });
     if (gate.kind === "refused") return refused(gate.reason);
@@ -929,7 +970,7 @@ export function createDesktopLeaseService(
           : await options
               .confirm({
                 owner: first.owner,
-                provider: leasableOf(first.provider),
+                provider: leasableOf(first.provider, first.terms),
                 asks: gate.asks,
                 leaseMinutes: first.recipe.leaseMinutes,
               })
@@ -937,19 +978,21 @@ export function createDesktopLeaseService(
       if (answer !== "approved") return refused("declined");
     }
     // Authority may have changed while a person was deciding, and an answer
-    // given for one provider never covers another.
+    // given for one provider or placement never covers another.
     const admitted = admitAcquire(caller);
     if (admitted.status === "refused") return admitted;
     if (
       String(admitted.provider.id) !== String(first.provider.id) ||
-      admitted.provider.billed !== first.provider.billed ||
+      String(admitted.terms.placementId ?? "") !== String(first.terms.placementId ?? "") ||
+      admitted.terms.billed !== first.terms.billed ||
+      admitted.terms.locality !== first.terms.locality ||
       admitted.thread.executionPolicy !== first.thread.executionPolicy
     ) {
       return refused("declined");
     }
     if (caller.signal?.aborted === true) return refused("declined");
 
-    const { owner, recipe, provider } = admitted;
+    const { owner, recipe, provider, terms } = admitted;
     const leaseId = decodeDesktopLeaseId(options.uuid());
     const now = options.now();
     const expiresAt = now + recipe.leaseMinutes * 60_000;
@@ -957,10 +1000,11 @@ export function createDesktopLeaseService(
       leaseId,
       owner,
       providerId: provider.id,
-      locality: provider.locality,
-      billed: provider.billed,
+      locality: terms.locality,
+      billed: terms.billed,
       hostTag,
       ...(recipe.credentialRef === undefined ? {} : { credentialRef: recipe.credentialRef }),
+      ...(terms.placementId === undefined ? {} : { placementId: terms.placementId }),
       network: recipe.network,
       expiresAt: iso(expiresAt),
       maximumExpiresAt: iso(now + recipe.maximumLeaseMinutes * 60_000),
@@ -1018,7 +1062,7 @@ export function createDesktopLeaseService(
       }
       const providerExpiresAt =
         result.providerExpiresAt === undefined ? undefined : Date.parse(result.providerExpiresAt);
-      if (!desktopProviderExpiryHolds({ billed: provider.billed, expiresAt, providerExpiresAt })) {
+      if (!desktopProviderExpiryHolds({ billed: terms.billed, expiresAt, providerExpiresAt })) {
         // A billed desktop that could outlive this host is never kept.
         live.delete(String(leaseId));
         const lease = transition(leaseId, "failed", caller.actor, {
@@ -1179,7 +1223,9 @@ export function createDesktopLeaseService(
         ...(caller.turn === undefined ? {} : { requested: caller.turn.executionPolicy }),
         thread: first.thread.executionPolicy,
       }),
-      locality: first.provider.locality,
+      // The lease recorded where its desktop runs, its placement's for a
+      // provider that has placements.
+      locality: first.record.lease.locality,
       initiator: caller.actor.kind,
       externalContentIngested: caller.turn?.externalContentIngested === true,
     });
@@ -1200,7 +1246,7 @@ export function createDesktopLeaseService(
         confirm({
           owner,
           leaseId: caller.leaseId,
-          provider: leasableOf(first.provider),
+          provider: leasableOf(first.provider, first.record.lease),
           asks: gate.asks,
           artifact,
         }),
@@ -1330,11 +1376,11 @@ export function createDesktopLeaseService(
     if (admitted.status === "refused") return admitted;
     const gate = decideDesktopLeaseAcquire({
       executionPolicy: admitted.thread.executionPolicy,
-      billed: admitted.provider.billed,
+      billed: admitted.terms.billed,
       initiator: caller.actor.kind,
     });
     if (gate.kind === "refused") return refused(gate.reason);
-    return { status: "available", provider: leasableOf(admitted.provider) };
+    return { status: "available", provider: leasableOf(admitted.provider, admitted.terms) };
   }
 
   /** A view the caller holds on this lease, with the lease still operable by them. */

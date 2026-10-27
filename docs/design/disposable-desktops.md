@@ -9,8 +9,10 @@ launches go through the shared confinement port, and authority is checked on the
 server ([Architecture: security and authority](../architecture.md#security-and-authority)).
 
 **Delivery state.** Accepted 2026-10-26; slices 1–5 and recipe storage are
-built, and slice 6 is built for E2B; its Cua Spaces driver is blocked on a
-design decision (see [Built in slice 6](#built-in-slice-6)). The maintainer
+built, and slice 6 is built for E2B. Cua Spaces follows the
+[local-daemon design](#cua-spaces-through-the-local-daemon) accepted on
+2026-10-27: its daemon port is built and its driver is not yet (see
+[Built in Cua sub-slice 1](#built-in-cua-sub-slice-1)). The maintainer
 authorized this scope as post-preview work and accepted the
 [maintainer decisions](#maintainer-decisions) below on 2026-10-26, naming the
 two cloud providers on 2026-10-27; it is not part of the first release, and the
@@ -19,7 +21,8 @@ unchanged by this document. The lease contract, the `desktop-provider` seam
 and its conformance suite, the host lease service, the host-local provider,
 artifact transfer, the agent's binding of `octant_computer` to a lease, the
 Desktop pane, a Code Project's stored recipe with its settings editor, the
-cloud HTTPS port, and the E2B driver exist; no host offers E2B for leasing yet,
+cloud HTTPS port, the E2B driver, the local-daemon port, and recipe
+placements exist; no host offers E2B for leasing yet,
 so a recipe can name only the host-local provider (see
 [Built in slice 1](#built-in-slice-1),
 [Built in slice 2](#built-in-slice-2),
@@ -354,7 +357,11 @@ launch port for a host-local provider, and an authenticated HTTPS call port for 
 cloud provider. Each port is added to the seam with the slice whose driver
 needs it (2 and 6). The HTTPS port, `DesktopHttpsPort`, reaches only the hosts
 a driver declares in its code (`hosts`), attaches the person's key itself, and
-answers every call as a value ([Built in slice 6](#built-in-slice-6)). A cloud
+answers every call as a value ([Built in slice 6](#built-in-slice-6)). The
+local-daemon port, `DesktopDaemonPort`, reaches only the Unix socket and the
+methods a driver declares (`daemon`), and a provider may declare the
+placements a recipe chooses among (`placements`)
+([Built in Cua sub-slice 1](#built-in-cua-sub-slice-1)). A cloud
 desktop's handle names the credential reference of the account it lives in,
 and `listOwned(hostTag, credentialRef)` lists one account; a provider that
 needs a credential answers `failed` without one, because `listed` is the
@@ -1165,7 +1172,9 @@ person's other machines; billed cloud placements wait for C5's condition. Cua
 ships on Linux hosts first; on macOS, transfer stays refused until its own
 handle-path check exists. The decisions below are rules; the sub-slices under
 [Delivery sub-slices](#delivery-sub-slices) are the delivery plan, each its own
-change with this section updated in place.
+change with this section updated in place. Sub-slice 1, the daemon port, is
+built ([Built in Cua sub-slice 1](#built-in-cua-sub-slice-1)); no Cua driver
+exists yet.
 
 ### What Cua offers now
 
@@ -1535,6 +1544,127 @@ where Cua documents no `network` `none`.
 4. **Billed cloud placements**, only after C5's condition holds or the
    maintainer chooses its alternative (b).
 
+### Built in Cua sub-slice 1
+
+- **Seam.** `DesktopDaemonPort`, `DesktopDaemonDeclaration`
+  (`DesktopProvider.daemon`), and `desktopDaemonMethodDeclared` in
+  `packages/plugin-api/src/desktopProvider.ts`; `DesktopPlacement`
+  (`DesktopProvider.placements`); and the protobuf wire reader and writer
+  (`packages/plugin-api/src/protobufWire.ts`), exported from the same
+  `@octant/plugin-api/desktop-provider` entry a driver already imports.
+- **Host.** `apps/server/src/computerUse/desktopDaemonPort.ts` is the port.
+  No driver declares a daemon yet, so the wiring builds none; the module is
+  a reviewed island in `scripts/check-module-wiring.ts` until the Cua driver
+  is wired. The lease service leases a provider with placements on its
+  recipe's placement.
+- **Contract.** `DesktopPlacementId`; `placementId` on `DesktopRecipe`,
+  `desktop.lease-requested@1`, and `DesktopLease`.
+- **Policy.** `changeCodeProjectDesktopRecipe` refuses a recipe that names
+  a placement.
+
+Rules this sub-slice resolved:
+
+- **A daemon call carries four fields and nothing else.** The request is
+  the method, one unframed message, the response bound, and a signal. A
+  request with any other field, `headers` among them, refuses
+  `request-invalid`, because a driver that is not type-checked can send any
+  shape. The host sends `content-type: application/grpc-web+proto`,
+  `content-length`, and `grpc-timeout` set to the port's own bound; the HTTP
+  client adds only `Host` and `Connection`.
+- **A malformed answer fails as `response-invalid`.** C1 listed three
+  failures; a fourth is needed for a daemon that answers something other than
+  one gRPC-Web answer: an HTTP status other than 200, another content type
+  (`grpc-web-text` included), two messages to a unary call, a compressed or
+  cut-off frame, no status, or bytes after the trailer frame. A status in the
+  response headers with an empty body, as gRPC sends for an error before any
+  message, is an answer.
+- **What a declared method matches.** A path starts with `/` and matches a
+  declaration segment by segment. A `*` stands for exactly one segment of
+  letters, digits, `.`, `_`, `~`, or `-` that is not `.` or `..`, so a
+  percent-escape, a query, an empty segment, or an extra segment never
+  matches. A declaration with two `*` or an empty segment declares nothing.
+- **Every directory from the home down is checked, not only the parent.**
+  The home directory and each directory below it to the socket are read with
+  `lstat` and must be directories, not symlinks, owned by Octant's user, with
+  no group or other write bit; a group-writable directory is refused like one
+  any user can write, since the host cannot tell who is in the group. A
+  declared path must be relative, made of plain name segments, and contain no
+  `.` or `..`. A host that has no user id, such as Windows, refuses
+  `socket-unsafe`. Directories above the home are not checked, so a home
+  under a symlinked `/home` still works.
+- **Where the walk starts, and what a swap could do.** The home is the one
+  `os.userInfo()` reports. Under Node, which runs the packaged desktop's
+  server, that is the one the operating system records whatever `$HOME`
+  says; Bun, which runs the development and headless servers, reports
+  `$HOME` when it is set (observed on Bun 1.4.4), so there C1's "no
+  environment override" holds only for the declared path, not for the home
+  it is under. The owner and mode checks apply from that directory down
+  either way, so the walk still ends only at a socket Octant's own user
+  controls. The checks and the connect are two steps on a path, because
+  Node can neither connect through an opened directory nor ask a socket for
+  its peer: between them, only Octant's user, who can already reach the
+  daemon, or whoever can write a directory above the home, normally only
+  root, could swap a component.
+- **A missing socket is a daemon that is not running.** A path component
+  that does not exist answers `failed` `daemon-unreachable`, so the driver
+  can report "start the daemon"; any other error reading a component refuses
+  `socket-unsafe`.
+- **The response bound is per message.** The one message may be as large as
+  the smaller of the driver's bound and one uncompressed frame of the largest
+  screen; reading stops 16 KiB past that, which leaves room for frame
+  prefixes and the trailer. The status message reaches the driver
+  percent-decoded and cut to 1,024 characters.
+- **The host applies a placement wherever it applied the provider's
+  terms.** A provider that declares placements leases only through a recipe
+  that names one of them, and a recipe that names a placement for a provider
+  that declares none, or one it does not declare, refuses
+  `no-provider-configured` before any provider call. The placement's
+  locality and billing then decide the host-local cap, the posture gate, the
+  billed confirmation, the provider-expiry check, and the pane's Start;
+  a transfer asks by the locality the lease journaled. A recipe whose
+  placement changed counts as removed.
+- **No recipe names a placement until the editor offers one.** The
+  providers a recipe may name (`recipe-providers`) carry no placements yet,
+  so a save that names a placement is refused rather than judged by its
+  provider's own locality. Offering placements, C4's "a credential or a
+  daemon placement" rule for a cloud recipe, and recording the daemon in
+  `desktop.lease-requested@1` arrive with the first driver that declares
+  placements; until then a cloud placement still needs a credential
+  reference.
+
+Evidence: `desktopDaemonPort.test.ts` starts a test daemon on a real Unix
+socket in a temporary home and covers declared calls answered (a status
+error and a status sent in the headers included), with the daemon seeing
+only the host's headers; undeclared methods (`Shutdown`, `CallSpaceTool`,
+`/mcp`, extra and empty segments, `..`, a query, a percent-escape) and loose
+declarations; a symlinked socket and a symlinked directory; a socket with
+group or other bits; a directory others or the group can write, the home
+included; another user's socket and directory (the two cases that need
+`chown` run only as root, which this container is, and an unprivileged run
+still covers another user's directory and socket together); declared paths
+that are absolute or escape; a missing socket; driver headers, the
+`x-cua-host-caller` and `x-cua-share-caller` caller headers among them;
+requests over 4 MiB; responses over the driver's bound, the host's bound,
+and a stream that claims a huge message; a time-out; cancellation before,
+during the socket checks, and while waiting; and seven malformed answers.
+Removing each check in turn fails at least one of these tests. The same file
+passes under Bun 1.4.4, which runs the development and headless servers
+(`bun --bun x vitest run --project unit src/computerUse/desktopDaemonPort.test.ts`
+in `apps/server`), as well as under Node, which runs the packaged desktop's
+server, through `bun run test`.
+`protobufWire.test.ts` covers protobuf's documented encodings, a negative
+`int64`, round trips of every wire type, and malformed input answered as a
+value. `desktopLeaseService.test.ts` covers a placement the provider does not
+declare, a missing one, locality and billing taken from the placement (a
+billed placement asks and is not kept without a provider expiry), a transfer
+asking for a placement off the machine, and a changed placement ending the
+lease; `projectPolicy.test.ts` covers the refused save; and
+`desktopLease.test.ts` covers the contract.
+
+Nothing in this sub-slice is owed by the maintainer. The port has never
+spoken to Cua's daemon: that a real daemon answers it is settled by
+sub-slice 2's live smoke.
+
 ## Rationale
 
 The original plan leaned on execution capsules for isolation and a cloud
@@ -1560,6 +1690,9 @@ host-local launch through `apps/server/src/process/linuxConfinement.ts`),
 `packages/plugin-api/src/desktopScreenshotControl.ts` (agent control of a
 screen-only desktop), `apps/server/src/computerUse/desktopHttpsPort.ts` and
 `apps/server/src/plugins/e2bDesktop/` (the cloud port and the E2B driver),
+`apps/server/src/computerUse/desktopDaemonPort.ts` and
+`packages/plugin-api/src/protobufWire.ts` (the local-daemon port and the
+seam's protobuf wire helper),
 `apps/server/src/computerUse/computerUseToolService.ts` (a send's binding to
 a lease), `apps/server/src/desktopPaneRoutes.ts`, and the web Desktop pane
 (`apps/web/src/desktop/`). Each slice above lists its

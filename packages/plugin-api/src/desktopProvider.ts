@@ -17,6 +17,7 @@ import type {
   DesktopHostTag,
   DesktopInputEvent,
   DesktopLeaseId,
+  DesktopPlacementId,
   DesktopProviderId,
   DesktopProviderLocality,
   DesktopRecipe,
@@ -125,6 +126,19 @@ export type DesktopListOwnedResult =
   | { readonly status: "failed"; readonly reason: string }
   | { readonly status: "not-connected" };
 
+/**
+ * One place a provider runs a desktop, with its own consequences: a desktop on
+ * this machine leaves nothing off it, one on another machine leaves through
+ * the provider's relay, and one in the person's cloud bills. A recipe names
+ * one, and the host takes the lease's locality and billing from it.
+ */
+export interface DesktopPlacement {
+  readonly id: DesktopPlacementId;
+  readonly displayName: string;
+  readonly locality: DesktopProviderLocality;
+  readonly billed: boolean;
+}
+
 export interface DesktopProvider {
   readonly kind: DesktopProviderContributionKind;
   readonly id: DesktopProviderId;
@@ -133,11 +147,24 @@ export interface DesktopProvider {
   /** Whether a lease spends the person's money. A person confirms every billed lease. */
   readonly billed: boolean;
   /**
+   * The closed list of placements the provider offers, fixed in the driver's
+   * code. A provider that declares any is leased only through a recipe that
+   * names one of them; one that declares none is leased with its own
+   * `locality` and `billed`.
+   */
+  readonly placements?: ReadonlyArray<DesktopPlacement>;
+  /**
    * The HTTPS hosts a cloud provider's API answers on, fixed in the driver's
    * code. The host's {@link DesktopHttpsPort} sends nothing anywhere else. A
    * host-local provider declares none.
    */
   readonly hosts?: ReadonlyArray<string>;
+  /**
+   * The provider's local control daemon, fixed in the driver's code. The
+   * host's {@link DesktopDaemonPort} connects to nothing else and sends no
+   * other method.
+   */
+  readonly daemon?: DesktopDaemonDeclaration;
   /** Whether the provider can be used on this host now. Performs no work. */
   readonly status: () => Promise<DesktopProviderStatusResult>;
   /** Creates one desktop tagged with the lease id and host tag. */
@@ -346,6 +373,115 @@ export function desktopProviderHostDeclared(url: string, hosts: ReadonlyArray<st
     return hostname === host;
   });
 }
+
+/**
+ * Where a provider's local control daemon listens and what a driver may ask
+ * it. `socketPath` is relative to the home directory of the user Octant runs
+ * as (`.cua/cua.sock`). Each method is a request path the daemon serves, such
+ * as `/cua.daemon.v1.SpaceService/CreateSpace`; one segment may be `*` for a
+ * value the daemon minted, such as a session key.
+ */
+export interface DesktopDaemonDeclaration {
+  readonly socketPath: string;
+  readonly methods: ReadonlyArray<string>;
+}
+
+/**
+ * One unary gRPC-Web call. The host frames `message`, writes every header
+ * itself, and takes none from the driver, so a driver cannot send a
+ * credential or a header the daemon trusts as a caller's identity.
+ */
+export interface DesktopDaemonRequest {
+  readonly method: string;
+  /** One serialized protobuf message, unframed. */
+  readonly message: Uint8Array;
+  /** The largest response message this call needs. The host's own bound still applies. */
+  readonly maxResponseBytes: number;
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * `answered` is any gRPC status, errors included, with the response message
+ * (empty when the daemon sent none) and the status message as the daemon
+ * wrote it. `refused` is the host declining before anything was sent: a
+ * method the driver did not declare, a socket that fails the host's checks,
+ * a message over the bound, or a request carrying anything but the fields
+ * above. `failed` is the daemon not answering, too slowly, too much, or with
+ * something that is not one gRPC-Web answer.
+ */
+export type DesktopDaemonResult =
+  | {
+      readonly status: "answered";
+      readonly grpcStatus: number;
+      readonly grpcMessage: string;
+      readonly message: Uint8Array;
+    }
+  | {
+      readonly status: "refused";
+      readonly reason:
+        | "method-not-declared"
+        | "socket-unsafe"
+        | "request-too-large"
+        | "request-invalid";
+    }
+  | {
+      readonly status: "failed";
+      readonly reason:
+        | "daemon-unreachable"
+        | "timed-out"
+        | "response-too-large"
+        | "response-invalid";
+    }
+  | { readonly status: "cancelled" };
+
+/**
+ * The capability-scoped port a driver receives in place of a socket. It
+ * reaches only the Unix socket the driver declares, under the home of the
+ * user Octant runs as, after checking who owns it and its directories; never
+ * the daemon's loopback TCP listener or a token file. It sends only declared
+ * methods, bounds every call in time and bytes, and answers as a value.
+ */
+export interface DesktopDaemonPort {
+  readonly call: (request: DesktopDaemonRequest) => Promise<DesktopDaemonResult>;
+}
+
+const DAEMON_LITERAL_SEGMENT = /^[A-Za-z0-9._-]{1,256}$/;
+const DAEMON_MINTED_SEGMENT = /^[A-Za-z0-9._~-]{1,256}$/;
+
+/**
+ * Whether `method` is one of `methods`: the same segments, where a declared
+ * `*` stands for exactly one segment of letters, digits, `.`, `_`, `~`, or
+ * `-` that is not `.` or `..`. A declaration with an empty segment or more
+ * than one `*` declares nothing.
+ */
+export function desktopDaemonMethodDeclared(
+  method: string,
+  methods: ReadonlyArray<string>,
+): boolean {
+  if (!method.startsWith("/") || method.length > 1_024) return false;
+  const called = method.slice(1).split("/");
+  return methods.some((declared) => {
+    if (!declared.startsWith("/")) return false;
+    const segments = declared.slice(1).split("/");
+    if (segments.filter((segment) => segment === "*").length > 1) return false;
+    if (segments.length !== called.length) return false;
+    return segments.every((segment, index) => {
+      const value = called[index];
+      if (value === undefined || value === "." || value === "..") return false;
+      if (segment === "*") return DAEMON_MINTED_SEGMENT.test(value);
+      return segment !== "." && segment !== ".." && DAEMON_LITERAL_SEGMENT.test(segment)
+        ? value === segment
+        : false;
+    });
+  });
+}
+
+export {
+  ProtobufWriter,
+  readProtobuf,
+  type ProtobufField,
+  type ProtobufReadResult,
+} from "./protobufWire";
 
 export {
   maxDesktopFrameBytes,
