@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
-import { lstat, realpath } from "node:fs/promises";
+import { lstat, realpath, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -21,6 +21,13 @@ import {
 } from "@octant/plugin-host/language-servers";
 import { createCodeRouteHandler, MAX_CODE_FILE_BODY_SIZE } from "../codeRoutes";
 import { createCodeLanguageAgentTools } from "../code/codeLanguageAgentTools";
+import { CodeDebugService } from "../code/codeDebugService";
+import { DebugAdapterProcessPort } from "../code/debugAdapterProcess";
+import { DebugConfigurationApprovalStore } from "../code/debugConfigurationApprovals";
+import { createDebugSessionEgress } from "../code/debugSessionEgress";
+import { DebugSessionRecords } from "../code/debugSessionRecords";
+import { installedDebugAdapterComponents } from "../code/installedDebugAdapters";
+import { CODE_DEBUG_CONFIGURATION_AGGREGATE } from "@octant/contracts/code-debug";
 import { CodeLanguageService, type CodeLanguageServerComponent } from "../code/codeLanguageService";
 import { LanguageServerApprovalStore } from "../code/languageServerApprovals";
 import { createLanguageServerEgress } from "../code/languageServerEgress";
@@ -260,6 +267,104 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     });
     yield* Effect.addFinalizer(() => Effect.sync(unsubscribeLanguageServerAuthority));
     yield* Effect.addFinalizer(() => Effect.promise(() => languageService.close()));
+    // Debug sessions (docs/design/language-services.md, Debugger addendum):
+    // adapters a person installed and reviewed, configurations a person at a
+    // local window confirmed, and sessions only that person starts. Below Full
+    // access a session's program reaches the network through its own proxy
+    // under its thread's rules, the proxy harness commands use; a host with
+    // no proxy refuses such a session.
+    const debugConfigurationApprovals = new DebugConfigurationApprovalStore({
+      journal: persistence.journal,
+      personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    });
+    const debugSessionRecords = new DebugSessionRecords({
+      journal: persistence.journal,
+      personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    });
+    const debugEgressDirectory = join(persistence.dataDirectory, "code", "debug-egress");
+    const debugEgressEndpoint =
+      process.platform === "darwin"
+        ? ({ kind: "loopback" } as const)
+        : process.platform === "linux"
+          ? ({ kind: "unix-socket", parentDirectory: debugEgressDirectory } as const)
+          : undefined;
+    if (debugEgressEndpoint?.kind === "unix-socket") {
+      mkdirSync(debugEgressDirectory, { recursive: true, mode: 0o700 });
+    }
+    const debugProcesses = new DebugAdapterProcessPort({
+      receiptDirectory: join(persistence.dataDirectory, "code", "debug-session-receipts"),
+      ...(debugEgressEndpoint === undefined
+        ? {}
+        : {
+            egress: createDebugSessionEgress({
+              journal: persistence.journal,
+              rules: toolEgressRules,
+              endpoint: debugEgressEndpoint,
+              hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+              uuid: randomUUID,
+              clock: () => new Date().toISOString(),
+            }),
+          }),
+    });
+    const debugStateRoot = join(persistence.dataDirectory, "code", "debug-session-state");
+    const debugService = new CodeDebugService({
+      authority: {
+        readThread: persistence.readCodeThread,
+        readCheckout: persistence.readCodeCheckout,
+        canAccessProject: canAccessCodeProject,
+        effectiveThread: (scopeId, thread) => codeSessionAuthority.effectiveThread(scopeId, thread),
+        resolveRoot: (scopeId, thread, checkout, relativePath) =>
+          roots.resolve(scopeId, thread, checkout, relativePath),
+      },
+      approvals: debugConfigurationApprovals,
+      adapters: installedDebugAdapterComponents({
+        snapshot: () => extensionLifecycleService.snapshot(),
+        store: extensionPackageStore,
+        compatible: (compatibility) =>
+          isExtensionCompatibilityCompatible(compatibility, version, process.platform),
+      }),
+      processes: {
+        launch: (input) => debugProcesses.launch(input),
+        proxies: debugProcesses.proxies,
+      },
+      records: debugSessionRecords,
+      platform: languageServerHostPlatform(process.platform),
+      stateRoot: debugStateRoot,
+      uuid: randomUUID,
+    });
+    // A previous run's capsules are ended, and its open session records
+    // closed, before this run starts any session.
+    // A session's state folder is its program's HOME, removed when it ends;
+    // one a crashed run left is removed before any session starts.
+    yield* Effect.promise(() => debugProcesses.reconcile().catch(() => undefined));
+    yield* Effect.promise(() =>
+      rm(debugStateRoot, { recursive: true, force: true }).catch(() => undefined),
+    );
+    debugSessionRecords.endLeftOpen();
+    debugService.startSweeping();
+    // A thread archived, completed, or moved to Plan or across Full access, a
+    // checkout gone, an adapter's package changed, or a confirmation the
+    // journal no longer holds ends a session at once.
+    const unsubscribeDebugAuthority = persistence.journal.subscribeCommitted((append) => {
+      if (
+        append.events.some(
+          (event) =>
+            event.aggregateType === "code-thread" ||
+            event.aggregateType === "code-checkout" ||
+            event.aggregateType === EXTENSION_AGGREGATE_TYPE ||
+            event.aggregateType === CODE_DEBUG_CONFIGURATION_AGGREGATE,
+        )
+      ) {
+        void debugService.sweep().catch(() => undefined);
+      }
+    });
+    yield* Effect.addFinalizer(() => Effect.sync(unsubscribeDebugAuthority));
+    yield* Effect.addFinalizer(() => Effect.promise(() => debugService.close()));
     // The same reads as app-managed tools on each Code turn whose provider
     // carries them, Plan included (decision D5). Each call is checked at the
     // tool-call choke point, then by the service on the turn's window.
@@ -280,6 +385,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       service: routeCodeService,
       ...(projectTerminals === undefined ? {} : { projectTerminals }),
       language: languageService,
+      debug: debugService,
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
       maxFileBodySize: MAX_CODE_FILE_BODY_SIZE,
@@ -453,6 +559,8 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       codeExternalEditorRoutes,
       codeOperationApprovalRoutes,
       codeRoutes,
+      debugConfigurationApprovals,
+      debugService,
       languageServerApprovals,
       localServerRoutes,
       projectTerminals,

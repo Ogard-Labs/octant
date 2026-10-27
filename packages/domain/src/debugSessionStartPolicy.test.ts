@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { CodeCheckoutId } from "@octant/contracts/code";
+import { decodeCodeRelativePath, type CodeCheckoutId } from "@octant/contracts/code";
 import {
   CodeDebugStartRefusalReason,
+  decodeCodeDebugConfiguration,
+  type CodeDebugConfiguration,
   type CodeDebugConfigurationDigest,
 } from "@octant/contracts/code-debug";
 import type { ExtensionComponentId, ExtensionContentDigest } from "@octant/contracts/extensions";
@@ -9,6 +11,7 @@ import type { OctantMode } from "@octant/contracts/modes";
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import type { ToolExtensionId } from "@octant/contracts/tool-actions";
 import {
+  canonicalDebugConfigurationText,
   decideDebugSessionStart,
   type DebugAdapterPackageState,
   type DebugConfigurationApproval,
@@ -107,6 +110,7 @@ function request(overrides: Partial<DebugSessionStartRequest> = {}): DebugSessio
     approvals: [covering],
     configurationPaths: "resolve",
     debugPorts: 0,
+    adapterRuntimes: ["node"],
     ...overrides,
   };
 }
@@ -198,6 +202,44 @@ describe("debug session start policy", () => {
               : "host-chosen-localhost-port",
         );
       }
+    }
+  });
+
+  it("refuses an adapter that debugs native code on macOS until its Seatbelt rights are measured, and starts it on Linux", () => {
+    const native = { adapterRuntimes: ["native", "rust"] };
+    expect(decideDebugSessionStart(request({ ...native, platform: "macos" }))).toEqual({
+      status: "refused",
+      reason: "unsupported-platform",
+    });
+    expect(decideDebugSessionStart(request({ ...native, platform: "linux" })).status).toBe(
+      "launch",
+    );
+    expect(decideDebugSessionStart(request({ platform: "macos" })).status).toBe("launch");
+  });
+
+  it("digests a configuration by what it runs, so environment order is not an edit and every other change is", () => {
+    const base = decodeCodeDebugConfiguration({
+      name: "Run",
+      adapter: "10000000-0000-4000-8000-000000000001/adapter",
+      program: "src/main.py",
+      args: ["--port", "8080"],
+      env: [
+        { key: "A", value: "1" },
+        { key: "B", value: "2" },
+      ],
+      stopOnEntry: false,
+    });
+    const text = canonicalDebugConfigurationText(base);
+    expect(canonicalDebugConfigurationText({ ...base, env: [...base.env].reverse() })).toBe(text);
+    for (const edited of [
+      { ...base, name: "Run it" },
+      { ...base, args: ["8080", "--port"] },
+      { ...base, program: decodeCodeRelativePath("src/other.py") },
+      { ...base, cwd: decodeCodeRelativePath("src") },
+      { ...base, stopOnEntry: true },
+      { ...base, env: base.env.slice(0, 1) },
+    ] satisfies ReadonlyArray<CodeDebugConfiguration>) {
+      expect(canonicalDebugConfigurationText(edited)).not.toBe(text);
     }
   });
 

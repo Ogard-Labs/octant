@@ -78,7 +78,13 @@ export type RemoteDependencies = Pick<
     | "providerDataDirectory"
     | "providerService"
   > &
-  Pick<CodeToolingWiring, "languageServerApprovals" | "remoteServerGrants"> &
+  Pick<
+    CodeToolingWiring,
+    | "debugConfigurationApprovals"
+    | "debugService"
+    | "languageServerApprovals"
+    | "remoteServerGrants"
+  > &
   Pick<WorkWiring, "threadExportService" | "threadMessageQueue"> &
   Pick<CanvasWiring, "canvasRoutes" | "canvasPublicShareService"> &
   Pick<AutomationWiring, "pushNotificationTokenStore"> &
@@ -100,6 +106,8 @@ export function wireRemote(deps: RemoteDependencies) {
     credentialBroker,
     credentialResolver,
     generatedImageStore,
+    debugConfigurationApprovals,
+    debugService,
     languageServerApprovals,
     options,
     persistence,
@@ -415,6 +423,10 @@ export function wireRemote(deps: RemoteDependencies) {
     forgetProjectData: (projectId) => {
       toolEgressRules.forgetProject(projectId);
       languageServerApprovals.forgetProject(decodeProjectId(projectId));
+      // The erase removed this Project's confirmations and session records;
+      // its running sessions end now rather than at the next sweep.
+      debugConfigurationApprovals.forgetProject(decodeProjectId(projectId));
+      void debugService.endProject(decodeProjectId(projectId)).catch(() => undefined);
     },
     purgeThreadArtifacts: async ({ mode, threadId }) => {
       const released = await threadMessageQueue.purgeThread(
