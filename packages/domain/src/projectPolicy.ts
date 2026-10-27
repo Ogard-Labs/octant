@@ -362,6 +362,12 @@ export function changeCodeProjectDesktopRecipe(
     if (provider === undefined) {
       reject("invalid-desktop-recipe", "That desktop provider isn't available on this host");
     }
+    // A placement decides locality and billing, and so the network and key
+    // rules below. The offered providers carry no placements yet, so a
+    // placement is refused rather than judged by its provider's own terms.
+    if (recipe.placementId !== undefined) {
+      reject("invalid-desktop-recipe", "That desktop placement isn't available on this host");
+    }
     if (provider.locality === "host-local" && recipe.network === "allow") {
       reject("invalid-desktop-recipe", "A desktop on this host cannot have network access yet");
     }
@@ -394,6 +400,7 @@ function sameDesktopRecipe(
     left.screen.width === right.screen.width &&
     left.screen.height === right.screen.height &&
     String(left.credentialRef ?? "") === String(right.credentialRef ?? "") &&
+    String(left.placementId ?? "") === String(right.placementId ?? "") &&
     left.network === right.network &&
     left.leaseMinutes === right.leaseMinutes &&
     left.maximumLeaseMinutes === right.maximumLeaseMinutes &&

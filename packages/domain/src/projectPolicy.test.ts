@@ -1,5 +1,6 @@
 import {
   decodeDesktopCredentialRef,
+  decodeDesktopPlacementId,
   decodeDesktopRecipe,
   decodeLeasableDesktopProvider,
 } from "@octant/contracts/desktop-lease";
@@ -324,6 +325,18 @@ describe("Project creation and lifecycle", () => {
       expect(
         changeCodeProjectDesktopRecipe(project, keyed, [cloud], updatedAt).desktopRecipe,
       ).toEqual(keyed);
+    });
+
+    it("refuses a recipe that names a placement, which no offered provider carries yet", () => {
+      const project = makeProject(ids.code, "0/1", { type: "code" });
+      expect(() =>
+        changeCodeProjectDesktopRecipe(
+          project,
+          { ...recipe, placementId: decodeDesktopPlacementId("this-machine") },
+          [hostLocal],
+          updatedAt,
+        ),
+      ).toThrow(ProjectPolicyRejected);
     });
 
     it("refuses a Work or Chat Project and a change that changes nothing", () => {
