@@ -1446,7 +1446,9 @@ describe("useCodeController", () => {
       await result.current.sendFollowUp("continue");
     });
     await waitFor(() => expect(result.current.turnStatus).toBe("waiting"));
-    expect(result.current.turnError).toBe("Mistral Vibe resume identity does not match this Project.");
+    expect(result.current.turnError).toBe(
+      "Mistral Vibe resume identity does not match this Project.",
+    );
     expect(result.current.turnErrorCategory).toBe("stale");
   });
 

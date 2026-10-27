@@ -655,8 +655,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // Keyed on the journaled failure category, not on the absence of a request
   // or a limit, which a future provider could park without refusing a resume.
   const parkedTurn =
-    props.controller.turnStatus === "waiting" &&
-    props.controller.turnErrorCategory === "stale";
+    props.controller.turnStatus === "waiting" && props.controller.turnErrorCategory === "stale";
   const busy =
     props.controller.turnStatus === "sending" ||
     props.controller.turnStatus === "running" ||
