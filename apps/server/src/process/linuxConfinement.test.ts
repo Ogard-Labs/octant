@@ -8,12 +8,13 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   buildLinuxAllowDefaultDenyLaunch,
@@ -24,6 +25,9 @@ import {
 import { LINUX_EGRESS_FORWARDER_PORT, LINUX_EGRESS_FORWARDER_SOURCE } from "./proxiedNetworkEgress";
 import { ProcessConfinementError } from "./seatbeltProfile";
 
+const SETPRIV_PATH = "/usr/bin/setpriv";
+const ORDINARY_UID = 65_534;
+const SETUID_BIT = 0o4000;
 const directories: string[] = [];
 
 afterEach(() => {
@@ -291,7 +295,99 @@ describe("Linux Full access extension denials", () => {
       expect(result.stdout).toBe("end\n");
     },
   );
+
+  it.runIf(
+    process.platform === "linux" &&
+      canRunHostBwrap() &&
+      (process.getuid?.() !== 0 || existsSync(SETPRIV_PATH)),
+  )(
+    "keeps an ordinary user's denied folder out of reach through the /proc root of that user's other processes",
+    async (context) => {
+      if ((statSync(DEFAULT_BWRAP_PATH).mode & SETUID_BIT) !== 0) {
+        // Measured on bwrap 0.9.0 installed setuid: the capsule stayed in the
+        // host user namespace and read the denied file through both paths.
+        context.skip("a setuid bwrap keeps the capsule in the host user namespace");
+      }
+      const probe = spawnSync(
+        ...asOrdinaryUser(DEFAULT_BWRAP_PATH, ["--bind", "/", "/", "/bin/true"]),
+        { encoding: "utf8" },
+      );
+      if (probe.status !== 0) {
+        context.skip(`bwrap cannot start as an ordinary user here: ${probe.stderr.trim()}`);
+      }
+      const { root, boundRoot } = fixture();
+      chmodSync(root, 0o755);
+      const skills = join(boundRoot, "skills");
+      mkdirSync(skills, { mode: 0o755 });
+      const secret = join(skills, "SKILL.md");
+      writeFileSync(secret, "hidden", { mode: 0o644 });
+      const outside = spawnSync(...asOrdinaryUser("/bin/cat", [secret]), { encoding: "utf8" });
+      if (outside.stdout !== "hidden") {
+        context.skip(`the ordinary user cannot read the test folder: ${outside.stderr.trim()}`);
+      }
+      // Another of the same user's processes, living in the host mount
+      // namespace where nothing covers the folder.
+      const holder = spawn(...asOrdinaryUser("/bin/sh", ["-c", "echo ready; exec sleep 60"]), {
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      try {
+        await new Promise<void>((resolve, reject) => {
+          holder.once("error", reject);
+          holder.stdout.once("data", () => resolve());
+        });
+        const launch = buildLinuxAllowDefaultDenyLaunch({
+          executable: "/bin/sh",
+          args: [
+            "-c",
+            [
+              'cat "$1" 2>/dev/null && echo "read directly"',
+              'for pid in "$PPID" "$2"; do',
+              '  cat "/proc/$pid/root$1" 2>/dev/null && echo "read through $pid"',
+              "done",
+              "echo end",
+            ].join("\n"),
+            "sh",
+            secret,
+            String(holder.pid),
+          ],
+          cwd: boundRoot,
+          denyPaths: [skills],
+        });
+        const result = spawnSync(...asOrdinaryUser(launch.command, launch.args), {
+          encoding: "utf8",
+        });
+        // An unprivileged Bubblewrap puts the capsule in a user namespace of
+        // its own. Reading another process's /proc root needs CAP_SYS_PTRACE
+        // over that process's user namespace, which a capsule never holds over
+        // the host's, so the same uid is not enough.
+        expect(result.stderr).not.toContain("bwrap:");
+        expect(result.status).toBe(0);
+        expect(result.stdout).toBe("end\n");
+      } finally {
+        holder.kill("SIGKILL");
+      }
+    },
+  );
 });
+
+/** Runs a command as an ordinary user, dropping root to `nobody` first. */
+function asOrdinaryUser(
+  command: string,
+  args: ReadonlyArray<string>,
+): [command: string, args: string[]] {
+  if (process.getuid?.() !== 0) return [command, [...args]];
+  return [
+    SETPRIV_PATH,
+    [
+      `--reuid=${String(ORDINARY_UID)}`,
+      `--regid=${String(ORDINARY_UID)}`,
+      "--clear-groups",
+      "--",
+      command,
+      ...args,
+    ],
+  ];
+}
 
 describe("Linux Bubblewrap confinement", () => {
   it("keeps a linked launcher visible through its parent without overlaying the link", () => {
