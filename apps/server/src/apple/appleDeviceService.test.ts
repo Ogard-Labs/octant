@@ -1,8 +1,21 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { unlinkSync } from "node:fs";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   decodeAppleDeviceRequest,
+  type AppleDeviceEvidence,
   type AppleDeviceRecord,
   type AppleDeviceRequest,
   type AppleDeviceResponse,
@@ -10,7 +23,7 @@ import {
 import type { AppleDeviceExecutionScope } from "@octant/domain";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AppleDeviceLeases, APPLE_DEVICE_DISCONNECT_GRACE_MS } from "./appleDeviceLeases";
-import { AppleDeviceService } from "./appleDeviceService";
+import { AppleDeviceService, type AppleDeviceExecutionContext } from "./appleDeviceService";
 import { AppleRuntimeStore } from "./appleRuntimeStore";
 import { parseDevicectlDeviceList, parseDevicectlLockState } from "./devicectl";
 import type { AppleProcessResult } from "./appleToolchainService";
@@ -74,14 +87,18 @@ function deviceRequest(
   });
 }
 
+/** The checkout each thread builds from; every test gets its own. */
+let checkoutRoot = "";
+
 function scopeFor(
   thread: typeof firstThread,
   extra: Partial<AppleDeviceExecutionScope> = {},
-): AppleDeviceExecutionScope {
+): AppleDeviceExecutionContext {
   return {
     authority: authority as never,
     threadId: thread.threadId as never,
     checkoutId: thread.checkoutId as never,
+    checkoutRoot,
     executionPolicy: "approval-gated",
     approvalValid: false,
     ...extra,
@@ -104,29 +121,88 @@ interface Host {
   readonly slowHelp: Set<string>;
   xcode: "selected" | "missing";
   listing: string;
+  /** What the fake project builds, and whether a build script swaps the app for a link. */
+  build: { bundleIdentifier: string; plantLinkTo?: string; whileBuilding?: () => void };
+  installAnswer: string;
+  /** Launches that ran under the signing port, which has no network. */
+  readonly signingCalls: Array<ReadonlyArray<string>>;
+  identities: string;
+  /** The entitlements each `codesign` of the app read, at the time it ran. */
+  readonly entitlements: string[];
+  readonly artifacts: Map<string, string>;
+  readonly journal: AppleDeviceEvidence[];
 }
 
+const ok = (stdout = ""): AppleProcessResult => ({
+  termination: "exited",
+  exitCode: 0,
+  stdout: new TextEncoder().encode(stdout),
+  stderr: new Uint8Array(),
+  parserFailed: false,
+  cleanupUncertain: false,
+});
+const failed: AppleProcessResult = { ...ok(), exitCode: 1 };
+
+// A build log line and console output that name the device's UDID, as an
+// ambiguous destination list or an app's own print can.
+const UDID = "00008140-000A1B2C3D4E801C";
+const PRODUCT_DIRECTORY = join("Build", "Products", "Debug-iphoneos");
+
 function fakeExecute(host: Host) {
-  return async (input: { readonly argv: ReadonlyArray<string> }): Promise<AppleProcessResult> => {
+  return async (
+    input: {
+      readonly argv: ReadonlyArray<string>;
+      readonly onOutput?: (chunk: Uint8Array) => void;
+    },
+    signal?: AbortSignal,
+  ): Promise<AppleProcessResult> => {
     host.calls.push(input.argv);
-    const ok = (stdout = ""): AppleProcessResult => ({
-      termination: "exited",
-      exitCode: 0,
-      stdout: new TextEncoder().encode(stdout),
-      stderr: new Uint8Array(),
-      parserFailed: false,
-      cleanupUncertain: false,
-    });
-    const failed: AppleProcessResult = { ...ok(), exitCode: 1 };
     const [tool, ...rest] = input.argv;
     if (tool === "xcode-select") {
       return host.xcode === "selected"
         ? ok("/Applications/Xcode.app/Contents/Developer\n")
         : failed;
     }
-    if (tool === "xcodebuild") return ok();
+    if (tool === "xcodebuild") {
+      const derived = input.argv[input.argv.indexOf("-derivedDataPath") + 1] ?? "";
+      if (input.argv.includes("-showBuildSettings")) {
+        return ok(
+          JSON.stringify([
+            {
+              target: "SimulatorFixture",
+              buildSettings: {
+                TARGET_BUILD_DIR: join(derived, PRODUCT_DIRECTORY),
+                WRAPPER_NAME: "SimulatorFixture.app",
+                PRODUCT_BUNDLE_IDENTIFIER: host.build.bundleIdentifier,
+              },
+            },
+          ]),
+        );
+      }
+      if (input.argv.at(-1) === "build") {
+        host.build.whileBuilding?.();
+        const product = join(derived, PRODUCT_DIRECTORY, "SimulatorFixture.app");
+        if (host.build.plantLinkTo === undefined) {
+          await mkdir(join(product, "Frameworks", "Fixture.framework"), { recursive: true });
+        } else {
+          await mkdir(join(derived, PRODUCT_DIRECTORY), { recursive: true });
+          await symlink(host.build.plantLinkTo, product);
+        }
+        return ok(`note: Using the first of multiple matching destinations: { id:${UDID} }\n`);
+      }
+      return ok();
+    }
     if (tool !== "xcrun" || rest[0] !== "devicectl") return failed;
     const args = rest.slice(1);
+    if (args.slice(0, 3).join(" ") === "device process launch" && args.includes("--console")) {
+      input.onOutput?.(new TextEncoder().encode(`Fixture ready on ${UDID}\n`));
+      // The console session stays attached until it is interrupted.
+      return await new Promise((resolveSession) => {
+        signal?.addEventListener("abort", () =>
+          resolveSession({ ...ok(), termination: "cancelled", exitCode: null }),
+        );
+      });
+    }
     if (args.at(-1) === "--help") {
       const subcommand = args.slice(0, -1).join(" ");
       if (host.slowHelp.delete(subcommand)) {
@@ -156,8 +232,63 @@ function fakeExecute(host: Host) {
       );
       return ok();
     }
+    if (args.slice(0, 3).join(" ") === "device install app") {
+      await writeFile(output, await fixture(host.installAnswer));
+      return host.installAnswer === "install-app.json" ? ok() : failed;
+    }
     return failed;
   };
+}
+
+function fakeSigning(host: Host) {
+  return async (input: { readonly argv: ReadonlyArray<string> }): Promise<AppleProcessResult> => {
+    host.signingCalls.push(input.argv);
+    if (input.argv[0] === "security") return ok(host.identities);
+    if (input.argv[0] !== "codesign") return failed;
+    const entitlements = input.argv.indexOf("--entitlements");
+    if (entitlements >= 0) {
+      host.entitlements.push(await readFile(input.argv[entitlements + 1] ?? "", "utf8"));
+    }
+    return ok();
+  };
+}
+
+const TEAM = "A1B2C3D4E5";
+const CERTIFICATE = new TextEncoder().encode("fixture development certificate");
+const FINGERPRINT = createHash("sha1").update(CERTIFICATE).digest("hex").toUpperCase();
+
+/** A provisioning profile as Xcode installs it: a CMS envelope around an XML property list. */
+function provisioningProfile(applicationIdentifier: string): Uint8Array {
+  const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>AppIDName</key><string>Octant &amp; Fixture</string>
+  <key>DeveloperCertificates</key>
+  <array><data>${Buffer.from(CERTIFICATE).toString("base64")}</data></array>
+  <key>Entitlements</key>
+  <dict>
+    <key>application-identifier</key><string>${applicationIdentifier}</string>
+    <key>com.apple.developer.team-identifier</key><string>${TEAM}</string>
+    <key>get-task-allow</key><true/>
+    <key>keychain-access-groups</key><array><string>${TEAM}.*</string></array>
+  </dict>
+  <key>ExpirationDate</key><date>2027-10-26T12:00:00Z</date>
+  <key>Name</key><string>iOS Team Provisioning Profile: *</string>
+  <key>Platform</key><array><string>iOS</string></array>
+  <key>ProvisionedDevices</key><array><string>${UDID}</string></array>
+  <key>TeamIdentifier</key><array><string>${TEAM}</string></array>
+  <key>UUID</key><string>7B1E0F9A-3C2D-4E5F-8A9B-0C1D2E3F4A5B</string>
+  <key>Version</key><integer>1</integer>
+</dict>
+</plist>`;
+  return new Uint8Array(
+    Buffer.concat([
+      Buffer.from([0x30, 0x82, 0x2f, 0x1e, 0x06, 0x09, 0x2a, 0x86]),
+      Buffer.from(plist, "utf8"),
+      Buffer.from([0xa0, 0x82, 0x0b, 0x9f, 0x30, 0x82]),
+    ]),
+  );
 }
 
 describe("AppleDeviceService", () => {
@@ -181,9 +312,23 @@ describe("AppleDeviceService", () => {
       slowHelp: new Set(),
       xcode: "selected",
       listing: await fixture("list-devices.json"),
+      build: { bundleIdentifier: "sh.octant.SimulatorFixture" },
+      installAnswer: "install-app.json",
+      signingCalls: [],
+      identities: `  1) ${FINGERPRINT} "Apple Development: Jane Doe (Z9Y8X7W6V5)"\n     1 valid identities found\n`,
+      entitlements: [],
+      artifacts: new Map(),
+      journal: [],
     };
     clock = 1_000_000;
     leases = new AppleDeviceLeases(() => clock);
+    checkoutRoot = join(root, "checkout");
+    await mkdir(join(checkoutRoot, "SimulatorFixture.xcodeproj"), { recursive: true });
+    await mkdir(join(root, "profiles"), { recursive: true });
+    await writeFile(
+      join(root, "profiles", "fixture.mobileprovision"),
+      provisioningProfile(`${TEAM}.*`),
+    );
   });
 
   afterEach(async () => {
@@ -194,9 +339,19 @@ describe("AppleDeviceService", () => {
   function service(platform: NodeJS.Platform = "darwin", store = new AppleRuntimeStore(root)) {
     return new AppleDeviceService({
       execute: fakeExecute(host),
+      executeSigning: fakeSigning(host),
       outputDirectory: join(root, "devicectl"),
+      artifactRoot: join(root, "artifacts"),
+      signingDirectory: join(root, "signing"),
+      provisioningProfileDirectories: [join(root, "profiles"), join(root, "missing")],
       identities: store,
       leases,
+      realpath,
+      writeArtifact: async (reference, bytes) => {
+        host.artifacts.set(reference, new TextDecoder().decode(bytes));
+      },
+      recordEvidence: (evidence) => host.journal.push(evidence),
+      launchSettleMs: 5,
       now: () => new Date(clock).toISOString(),
       newId: () => {
         idNumber += 1;
@@ -546,7 +701,7 @@ describe("AppleDeviceService", () => {
     expect(leases.list()).toEqual([]);
   });
 
-  it("answers only discovery, status, and the lease from this host", async () => {
+  it("refuses a launch of an app the thread never installed, provisioning updates, and uploads", async () => {
     const devices = service();
     const wired = byName((await discover(devices)).devices, "Henrik's iPhone");
     await devices.request(
@@ -574,6 +729,429 @@ describe("AppleDeviceService", () => {
     await expect(
       devices.request(deviceRequest("upload", firstThread, approval), confirmed(firstThread)),
     ).resolves.toEqual({ kind: "apple-device-refused", reason: "distribution-not-enabled" });
+  });
+
+  describe("the thread's own app on a leased device", () => {
+    const build = { projectPath: "SimulatorFixture.xcodeproj", teamId: TEAM };
+    // An approval-gated thread whose window holds this request's one-use approval.
+    const approved = (thread = firstThread) => scopeFor(thread, { approvalValid: true });
+
+    async function leased(name = "Henrik's iPhone", thread = firstThread) {
+      const devices = service();
+      const device = byName((await discover(devices, thread)).devices, name);
+      const answer = await devices.request(
+        deviceRequest("use-device", thread, { deviceId: device.deviceId, ...approval }),
+        confirmed(thread),
+      );
+      expect(answer.kind).toBe("apple-device-leased");
+      return { devices, deviceId: device.deviceId };
+    }
+
+    function evidenceOf(answer: AppleDeviceResponse): AppleDeviceEvidence {
+      if (answer.kind !== "apple-device-evidence") throw new Error(JSON.stringify(answer));
+      return answer.evidence;
+    }
+
+    it("builds the app unsigned, then signs that bundle with the person's identity for the team, offline", async () => {
+      const { devices, deviceId } = await leased();
+      const evidence = evidenceOf(
+        await devices.request(
+          deviceRequest("build", firstThread, { deviceId, ...build, ...approval }),
+          approved(),
+        ),
+      );
+      expect(evidence).toMatchObject({
+        kind: "build",
+        outcome: "succeeded",
+        bundleIdentifier: "sh.octant.SimulatorFixture",
+        signing: { teamId: TEAM, identity: FINGERPRINT },
+      });
+      const xcodebuild = host.calls.filter((argv) => argv[0] === "xcodebuild" && argv.length > 3);
+      expect(xcodebuild.map((argv) => argv.at(-1))).toEqual(["-json", "build"]);
+      for (const argv of xcodebuild) {
+        expect(argv).toContain("CODE_SIGNING_ALLOWED=NO");
+        expect(argv).toContain("generic/platform=iOS");
+      }
+      // Signing ran only under the port with no network, never as a build step.
+      expect(host.calls.some((argv) => argv[0] === "codesign" || argv[0] === "security")).toBe(
+        false,
+      );
+      expect(host.signingCalls.map((argv) => argv[0])).toEqual([
+        "security",
+        "codesign",
+        "codesign",
+      ]);
+      for (const argv of host.signingCalls.slice(1)) {
+        expect(argv).toEqual(expect.arrayContaining(["--sign", FINGERPRINT, "--timestamp=none"]));
+      }
+      expect(host.signingCalls[1]?.at(-1)).toMatch(/Fixture\.framework$/);
+      expect(host.signingCalls[2]?.at(-1)).toMatch(/SimulatorFixture\.app$/);
+      // The profile's entitlements, with its wildcard app ID narrowed to this app.
+      expect(host.entitlements[0]).toContain(`<string>${TEAM}.sh.octant.SimulatorFixture</string>`);
+      expect(host.entitlements[0]).toContain("<key>get-task-allow</key><true/>");
+      // The entitlements file is gone once the signature is made.
+      expect(await readdir(join(root, "signing"))).toEqual([]);
+      const product = join(
+        root,
+        "artifacts",
+        `device-derived-${evidence.actionId}`,
+        PRODUCT_DIRECTORY,
+        "SimulatorFixture.app",
+      );
+      expect((await stat(join(product, "embedded.mobileprovision"))).isFile()).toBe(true);
+      // Octant never asks Apple to change provisioning, under any launch.
+      for (const argv of [...host.calls, ...host.signingCalls]) {
+        expect(argv).not.toContain("-allowProvisioningUpdates");
+      }
+    });
+
+    it("journals which identity signed which product, and nothing that names the person or the device", async () => {
+      const { devices, deviceId } = await leased();
+      await devices.request(
+        deviceRequest("build", firstThread, { deviceId, ...build, ...approval }),
+        approved(),
+      );
+      expect(host.journal).toHaveLength(1);
+      const recorded = JSON.stringify([host.journal, [...host.artifacts.values()]]);
+      expect(recorded).toContain(FINGERPRINT);
+      for (const secret of ["Jane Doe", "Z9Y8X7W6V5", root, ...HARDWARE_IDENTIFIERS]) {
+        expect(recorded).not.toContain(secret);
+      }
+      expect(recorded).not.toContain(CORE_DEVICE_IDENTIFIERS[0]);
+    });
+
+    it("runs the fixture app on the device from an approval-gated thread, reads its console, and stops it", async () => {
+      const { devices, deviceId } = await leased();
+      const run = evidenceOf(
+        await devices.request(
+          deviceRequest("run", firstThread, { deviceId, ...build, ...approval }),
+          approved(),
+        ),
+      );
+      expect(run).toMatchObject({
+        kind: "run",
+        outcome: "succeeded",
+        bundleIdentifier: "sh.octant.SimulatorFixture",
+        product: `apple-device-product-${run.actionId}`,
+      });
+      const launch = host.calls.find((argv) => argv.includes("--console"));
+      expect(launch).toEqual([
+        "xcrun",
+        "devicectl",
+        "device",
+        "process",
+        "launch",
+        "--device",
+        CORE_DEVICE_IDENTIFIERS[0],
+        "--terminate-existing",
+        "--console",
+        "sh.octant.SimulatorFixture",
+      ]);
+      const app = { deviceId, bundleIdentifier: "sh.octant.SimulatorFixture" };
+      const logs = evidenceOf(
+        await devices.request(deviceRequest("logs", firstThread, app), scopeFor(firstThread)),
+      );
+      expect(logs.outcome).toBe("succeeded");
+      const consoleReference = logs.artifacts[0]?.reference ?? "";
+      expect(host.artifacts.get(consoleReference)).toBe("Fixture ready on [ID]\n");
+      // What the app printed is kept by reference; only its size is journaled.
+      expect(JSON.stringify(logs.diagnostics)).not.toContain("Fixture ready");
+
+      expect(
+        evidenceOf(
+          await devices.request(
+            deviceRequest("terminate", firstThread, { ...app, ...approval }),
+            approved(),
+          ),
+        ).outcome,
+      ).toBe("succeeded");
+      // Nothing is left to stop, and nothing is ever stopped by name.
+      await expect(
+        devices.request(
+          deviceRequest("terminate", firstThread, { ...app, ...approval }),
+          approved(),
+        ),
+      ).resolves.toEqual({ kind: "apple-device-refused", reason: "process-not-owned" });
+      expect(
+        host.calls.some((argv) => argv.includes("terminate") && !argv.includes("--help")),
+      ).toBe(false);
+    });
+
+    it("installs only a product this thread's build signed, and launches only what it installed", async () => {
+      const { devices, deviceId } = await leased();
+      const built = evidenceOf(
+        await devices.request(
+          deviceRequest("build", firstThread, { deviceId, ...build, ...approval }),
+          approved(),
+        ),
+      );
+      for (const artifact of ["apple-device-product-elsewhere", "Applications-Other.app"]) {
+        await expect(
+          devices.request(
+            deviceRequest("install", firstThread, { deviceId, artifact, ...approval }),
+            approved(),
+          ),
+        ).resolves.toEqual({ kind: "apple-device-refused", reason: "invalid-artifact" });
+      }
+      await expect(
+        devices.request(
+          deviceRequest("launch", firstThread, {
+            deviceId,
+            bundleIdentifier: "sh.octant.SimulatorFixture",
+            ...approval,
+          }),
+          approved(),
+        ),
+      ).resolves.toEqual({ kind: "apple-device-refused", reason: "foreign-bundle" });
+      expect(
+        evidenceOf(
+          await devices.request(
+            deviceRequest("install", firstThread, {
+              deviceId,
+              artifact: built.product,
+              ...approval,
+            }),
+            approved(),
+          ),
+        ).outcome,
+      ).toBe("succeeded");
+      // The person's other apps stay out of reach.
+      await expect(
+        devices.request(
+          deviceRequest("launch", firstThread, {
+            deviceId,
+            bundleIdentifier: "com.apple.mobilesafari",
+            ...approval,
+          }),
+          approved(),
+        ),
+      ).resolves.toEqual({ kind: "apple-device-refused", reason: "foreign-bundle" });
+
+      // Another thread, on a device of its own, cannot redeem this thread's product.
+      const other = byName((await discover(devices, secondThread)).devices, "Studio iPad");
+      await devices.request(
+        deviceRequest("use-device", secondThread, { deviceId: other.deviceId, ...approval }),
+        confirmed(secondThread),
+      );
+      await expect(
+        devices.request(
+          deviceRequest("install", secondThread, {
+            deviceId: other.deviceId,
+            artifact: built.product,
+            ...approval,
+          }),
+          approved(secondThread),
+        ),
+      ).resolves.toEqual({ kind: "apple-device-refused", reason: "invalid-artifact" });
+    });
+
+    it("asks for each effect's approval in an approval-gated thread and refuses every effect in Plan", async () => {
+      const { devices, deviceId } = await leased();
+      const before = host.calls.length;
+      await expect(
+        devices.request(
+          deviceRequest("build", firstThread, { deviceId, ...build }),
+          scopeFor(firstThread),
+        ),
+      ).resolves.toEqual({ kind: "apple-device-refused", reason: "approval-required" });
+      await expect(
+        devices.request(
+          deviceRequest("run", firstThread, { deviceId, ...build, ...approval }),
+          scopeFor(firstThread, { executionPolicy: "plan", approvalValid: true }),
+        ),
+      ).resolves.toEqual({ kind: "apple-device-refused", reason: "read-only-policy" });
+      // Only the discovery each request makes ran; nothing was built or signed.
+      expect(host.calls.slice(before).some((argv) => argv.at(-1) === "build")).toBe(false);
+      expect(host.signingCalls).toEqual([]);
+    });
+
+    it("needs no approval in Full access, but still the lease", async () => {
+      const devices = service();
+      const device = byName((await discover(devices)).devices, "Henrik's iPhone");
+      const request = deviceRequest("build", firstThread, { deviceId: device.deviceId, ...build });
+      const fullAccess = scopeFor(firstThread, { executionPolicy: "full-access" });
+      await expect(devices.request(request, fullAccess)).resolves.toEqual({
+        kind: "apple-device-refused",
+        reason: "lease-required",
+      });
+      await devices.request(
+        deviceRequest("use-device", firstThread, { deviceId: device.deviceId, ...approval }),
+        confirmed(firstThread),
+      );
+      expect(evidenceOf(await devices.request(request, fullAccess)).outcome).toBe("succeeded");
+    });
+
+    it("names the step to take in Xcode when the keychain or profiles cannot sign the app, before building", async () => {
+      const { devices, deviceId } = await leased();
+      host.identities = "     0 valid identities found\n";
+      const evidence = evidenceOf(
+        await devices.request(
+          deviceRequest("build", firstThread, { deviceId, ...build, ...approval }),
+          approved(),
+        ),
+      );
+      expect(evidence.outcome).toBe("failed");
+      expect(evidence.signing).toBeUndefined();
+      expect(evidence.diagnostics.map((diagnostic) => diagnostic.message).join("\n")).toContain(
+        "no valid development signing identity",
+      );
+      expect(host.calls.some((argv) => argv.at(-1) === "build")).toBe(false);
+
+      host.identities = `  1) ${FINGERPRINT} "Apple Development: Jane Doe (Z9Y8X7W6V5)"\n`;
+      host.build = { bundleIdentifier: "com.example.Unprovisioned" };
+      await writeFile(
+        join(root, "profiles", "fixture.mobileprovision"),
+        provisioningProfile(`${TEAM}.sh.octant.*`),
+      );
+      const unprovisioned = evidenceOf(
+        await devices.request(
+          deviceRequest("build", firstThread, { deviceId, ...build, ...approval }),
+          approved(),
+        ),
+      );
+      expect(unprovisioned.diagnostics.at(-1)?.message).toContain(
+        "Octant does not create profiles",
+      );
+    });
+
+    it("does not sign an app a build script swapped for a link to another app", async () => {
+      const { devices, deviceId } = await leased();
+      const elsewhere = join(root, "Elsewhere.app");
+      await mkdir(elsewhere);
+      host.build = { bundleIdentifier: "sh.octant.SimulatorFixture", plantLinkTo: elsewhere };
+      const evidence = evidenceOf(
+        await devices.request(
+          deviceRequest("build", firstThread, { deviceId, ...build, ...approval }),
+          approved(),
+        ),
+      );
+      expect(evidence.outcome).toBe("failed");
+      expect(host.signingCalls.filter((argv) => argv[0] === "codesign")).toEqual([]);
+      expect(await readdir(elsewhere)).toEqual([]);
+    });
+
+    it("keeps devicectl's own words, which can name the device, out of an install's evidence", async () => {
+      const { devices, deviceId } = await leased();
+      host.installAnswer = "install-app-failed.json";
+      const evidence = evidenceOf(
+        await devices.request(
+          deviceRequest("run", firstThread, { deviceId, ...build, ...approval }),
+          approved(),
+        ),
+      );
+      expect(evidence.outcome).toBe("failed");
+      expect(evidence.diagnostics.at(-1)?.message).toBe(
+        "devicectl could not install the app (com.apple.dt.CoreDeviceError 3002).",
+      );
+      const recorded = JSON.stringify([host.journal, [...host.artifacts.values()]]);
+      for (const identifier of HARDWARE_IDENTIFIERS) expect(recorded).not.toContain(identifier);
+      expect(host.calls.some((argv) => argv.includes("--console"))).toBe(false);
+    });
+
+    it("touches the device no more once the lease ends while the app is still building", async () => {
+      const { devices, deviceId } = await leased();
+      host.build = {
+        bundleIdentifier: "sh.octant.SimulatorFixture",
+        whileBuilding: () => leases.release(String(deviceId), firstThread.threadId),
+      };
+      const evidence = evidenceOf(
+        await devices.request(
+          deviceRequest("run", firstThread, { deviceId, ...build, ...approval }),
+          approved(),
+        ),
+      );
+      expect(evidence.outcome).toBe("failed");
+      expect(evidence.diagnostics.at(-1)?.message).toContain("lease on the device ended");
+      expect(host.calls.some((argv) => argv.includes("install") && !argv.includes("--help"))).toBe(
+        false,
+      );
+      expect(host.calls.some((argv) => argv.includes("--console"))).toBe(false);
+    });
+
+    it("refuses a device action whose id another action already used, before building into its directory", async () => {
+      const { devices, deviceId } = await leased();
+      const built = evidenceOf(
+        await devices.request(
+          deviceRequest("build", firstThread, { deviceId, ...build, ...approval }),
+          approved(),
+        ),
+      );
+      const other = byName((await discover(devices, secondThread)).devices, "Studio iPad");
+      await devices.request(
+        deviceRequest("use-device", secondThread, { deviceId: other.deviceId, ...approval }),
+        confirmed(secondThread),
+      );
+      const builds = host.calls.filter((argv) => argv.at(-1) === "build").length;
+      await expect(
+        devices.request(
+          deviceRequest("build", secondThread, {
+            deviceId: other.deviceId,
+            ...build,
+            ...approval,
+            actionId: built.actionId,
+          }),
+          approved(secondThread),
+        ),
+      ).resolves.toMatchObject({ kind: "apple-device-failure", failure: { category: "invalid" } });
+      // The first thread's signed product stays the one its build made.
+      expect(host.calls.filter((argv) => argv.at(-1) === "build")).toHaveLength(builds);
+      expect(host.journal).toHaveLength(1);
+    });
+
+    it("keeps host paths out of the evidence when signing fails on a file it reads", async () => {
+      const { devices, deviceId } = await leased();
+      // Xcode replaces a profile while the app builds, after signing was chosen.
+      host.build = {
+        bundleIdentifier: "sh.octant.SimulatorFixture",
+        whileBuilding: () => unlinkSync(join(root, "profiles", "fixture.mobileprovision")),
+      };
+      const evidence = evidenceOf(
+        await devices.request(
+          deviceRequest("build", firstThread, { deviceId, ...build, ...approval }),
+          approved(),
+        ),
+      );
+      expect(evidence.outcome).toBe("interrupted");
+      const recorded = JSON.stringify([host.journal, [...host.artifacts.values()]]);
+      expect(recorded).toContain("embedded.mobileprovision");
+      expect(recorded).not.toContain(root);
+    });
+
+    it("ends the console session of the app when its thread's lease ends", async () => {
+      const { devices, deviceId } = await leased();
+      await devices.request(
+        deviceRequest("run", firstThread, { deviceId, ...build, ...approval }),
+        approved(),
+      );
+      await devices.request(
+        deviceRequest("release-device", firstThread, { deviceId }),
+        scopeFor(firstThread),
+      );
+      // The thread no longer holds the device, so it reads nothing more of it.
+      await expect(
+        devices.request(
+          deviceRequest("logs", firstThread, {
+            deviceId,
+            bundleIdentifier: "sh.octant.SimulatorFixture",
+          }),
+          scopeFor(firstThread),
+        ),
+      ).resolves.toEqual({ kind: "apple-device-refused", reason: "lease-required" });
+      await devices.request(
+        deviceRequest("use-device", firstThread, { deviceId, ...approval }),
+        confirmed(firstThread),
+      );
+      const logs = evidenceOf(
+        await devices.request(
+          deviceRequest("logs", firstThread, {
+            deviceId,
+            bundleIdentifier: "sh.octant.SimulatorFixture",
+          }),
+          scopeFor(firstThread),
+        ),
+      );
+      expect(logs.diagnostics.at(-1)?.message).toContain("is no longer running (cancelled)");
+    });
   });
 });
 

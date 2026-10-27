@@ -506,7 +506,7 @@ describe("authenticated product route dispatch", () => {
     expect(dispatch).toHaveBeenCalledTimes(3);
   });
 
-  it("dispatches a paired device's physical device read but never a device lease", async () => {
+  it("dispatches a paired device's physical device read but never a device lease or action", async () => {
     const dispatch = vi.fn(async () => Response.json({ ok: true }));
     const product = createAuthenticatedProductDispatch({ dispatch });
 
@@ -518,12 +518,12 @@ describe("authenticated product route dispatch", () => {
     expect((await product(handoff("/api/apple/devices", "POST")))?.status).toBe(200);
     expect(dispatch).toHaveBeenCalledTimes(1);
 
-    expect(
-      classifyProductAction(
-        new Request("https://octant.example/api/apple/device-leases", { method: "POST" }),
-      ),
-    ).toBeUndefined();
-    expect((await product(handoff("/api/apple/device-leases", "POST")))?.status).toBe(403);
+    for (const path of ["/api/apple/device-leases", "/api/apple/device-actions"]) {
+      expect(
+        classifyProductAction(new Request(`https://octant.example${path}`, { method: "POST" })),
+      ).toBeUndefined();
+      expect((await product(handoff(path, "POST")))?.status).toBe(403);
+    }
     expect(dispatch).toHaveBeenCalledTimes(1);
   });
 

@@ -1094,7 +1094,7 @@ describe("startOctantServer", () => {
     let routeHandler: ((request: Request) => Response | Promise<Response>) | undefined;
     const capability = "A".repeat(43);
     const windowId = "00000000-0000-4000-8000-000000000483";
-    const deviceRequest = (kind: "discover" | "use-device") => ({
+    const deviceRequest = (kind: "discover" | "use-device" | "build") => ({
       actionId: "00000000-0000-4000-8000-000000000484",
       correlationId: "00000000-0000-4000-8000-000000000485",
       authority: {
@@ -1109,6 +1109,7 @@ describe("startOctantServer", () => {
       kind,
       requestedBy: { kind: "local-user", actorId: "00000000-0000-4000-8000-000000000002" },
       ...(kind === "discover" ? {} : { deviceId: "00000000-0000-4000-8000-00000000048b" }),
+      ...(kind === "build" ? { projectPath: "App.xcodeproj", teamId: "A1B2C3D4E5" } : {}),
       timeoutMs: 30_000,
       approval: { kind: "not-required" },
     });
@@ -1141,6 +1142,7 @@ describe("startOctantServer", () => {
           for (const [path, kind] of [
             ["/api/apple/devices", "discover"],
             ["/api/apple/device-leases", "use-device"],
+            ["/api/apple/device-actions", "build"],
           ] as const) {
             const response = yield* Effect.promise(() =>
               Promise.resolve(

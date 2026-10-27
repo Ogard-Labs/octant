@@ -208,6 +208,12 @@ export interface RepositoryTestProcessInput {
    * reaches it when it also carries the path in `additionalWriteRoots`.
    */
   readonly isolatedRoots?: ReadonlyArray<string>;
+  /**
+   * Each chunk of stdout and stderr as it arrives, on top of the result's
+   * bounded capture. A physical device's console session is the caller: it
+   * runs as long as the app does, and its output is read while it runs.
+   */
+  readonly onOutput?: (chunk: Uint8Array) => void;
 }
 
 export interface RepositoryTestArtifactReadInput {
@@ -453,8 +459,18 @@ export class RepositoryTestProcessPort {
     }
 
     const output = new CombinedOutputCapture(this.#maxOutputBytes);
-    child.stdout.on("data", (chunk) => output.append("stdout", chunk));
-    child.stderr.on("data", (chunk) => output.append("stderr", chunk));
+    const forward = (chunk: unknown) => {
+      if (input.onOutput === undefined) return;
+      input.onOutput(chunk instanceof Uint8Array ? chunk : new TextEncoder().encode(String(chunk)));
+    };
+    child.stdout.on("data", (chunk) => {
+      output.append("stdout", chunk);
+      forward(chunk);
+    });
+    child.stderr.on("data", (chunk) => {
+      output.append("stderr", chunk);
+      forward(chunk);
+    });
     const closed = observeClose(child);
     const receiptAttempt = persistProcessReceipt(
       {

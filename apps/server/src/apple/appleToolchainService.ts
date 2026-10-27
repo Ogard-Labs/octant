@@ -1726,7 +1726,7 @@ function isBuildRequest(request: AppleActionRequest): request is AppleBuildReque
   );
 }
 
-async function confinedProjectPath(
+export async function confinedProjectPath(
   checkoutRoot: string,
   projectPath: string,
   realpath: (path: string) => Promise<string>,
@@ -1741,7 +1741,7 @@ async function confinedProjectPath(
   return candidate;
 }
 
-function projectSelector(path: string): "-project" | "-workspace" | "-packagePath" {
+export function projectSelector(path: string): "-project" | "-workspace" | "-packagePath" {
   if (path.endsWith(".xcworkspace")) return "-workspace";
   if (path.endsWith("Package.swift")) return "-packagePath";
   return "-project";
