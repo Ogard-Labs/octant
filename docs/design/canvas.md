@@ -249,12 +249,29 @@ version, but the strict definition schema refuses an unknown field, so a
 runtime rolled back past them refuses a document that uses them rather than
 drawing it as plain text.
 The pure `canvasInlineRefusal` policy admits an author's `inline` request for
-reading blocks at any length within the ordinary block budget, and for a
-`design` of the `document` size that runs no script, which is an article or
-spec and reads like one. It refuses a request that holds a `diagram`, `plan`,
-`mockup`, a device-size `design` (phone, tablet, desktop, or slide), or a
-`design` that runs script. When an author asks for `inline` with such a block,
-the host records `sidebar` and returns the reason as `presentationNote`. The refusal bounds only the author's unprompted request: a
+visualizations and reading blocks at any length within the ordinary block
+budget: every chart type, dashboards, tables, math, diagrams (a `diagram`
+board included, drawn read-only), and a `design` of the `document` size,
+including one that runs script. A document-size design is a page as wide as
+the column, so an article, a spec, or an HTML page brought into a Canvas as a
+document reads in the thread; a running one is drawn in the same sandboxed
+frame, under the same page policy and bridge limits, as in the sidebar, and
+waits for the person's **Run**. It refuses a request that holds a `plan`, a
+`mockup`, or a device-size `design` (phone, tablet, desktop, or slide), which
+are worked on or reviewed at their own size. When an author asks for `inline`
+with such a block, the host records the request as asked, the Canvas is a
+sidebar Canvas (`effectiveCanvasPresentation`, and the card and the tool result
+say `sidebar`), the reason returns as `presentationNote`, and the thread shows
+it as a preview card that opens it. A definition's `presentation` is therefore
+the request, not the placement: every reader (the card projection, the agent's
+result, `preview`, the dock offer, and the thread) places a Canvas by
+`effectiveCanvasPresentation`, and only the preview-card choice reads the
+recorded request. The agent is told to put a visualization
+that answers the current question inline and to leave longer documents in the
+sidebar. Recording the request rather than `sidebar` is what lets the thread
+tell a refused inline request from a Canvas the author placed in the sidebar,
+which stays a row; a host that predates this recorded `sidebar`, so such a
+Canvas stays a row there. The refusal bounds only the author's unprompted request: a
 person may expand any Canvas in its thread, and that view preference never
 reaches the server
 (see [Canvas documents, designs, and prototypes](../architecture.md#canvas-documents-designs-and-prototypes)).
@@ -352,7 +369,13 @@ revision or a person's edit, is listed as `sidebar`.
 The renderer places every Canvas after the last row of the turn the person
 opened at or before `canvasCreatedAt`. An inline one is drawn there read-only:
 it gets no layout, plan, comment or action runtime, so nothing drawn inline can
-journal a version. Any other is a row that opens it. A card from an older host,
+journal a version; a board pans and zooms but its nodes do not move, and a
+running design's bridge can only resize its frame, report an error, or keep it
+alive, as in the sidebar. A sidebar Canvas whose definition records an inline
+request is a preview card: its live miniature, inert, drawn across the column
+above its title, and the whole card opens it. Any other is a row that opens it.
+Sizing in the column is in [Canvas visuals](canvas-visuals.md#data-visualisation).
+A card from an older host,
 or one no loaded turn can place, stays in the thread's card list.
 
 ## Charts and dashboards
@@ -892,9 +915,9 @@ and it does not carry Octant's fonts; the tokens' own fallbacks apply. A share r
 command runs only on this host. That refusal, and any block or field the share
 contract does not carry, are checked before the snapshot is journaled and
 reach the owner as an `unsafe-payload` denial: the Canvas cannot be shared, not
-a malformed request. A device-size design, and any design that runs script, is
-always a sidebar Canvas for the author's own request; a `document` design that
-runs none may be asked for `inline`. An authored
+a malformed request. A device-size design is always a sidebar Canvas for the
+author's own request (a preview card in the thread); a `document` design, with
+or without script, may be asked for `inline`. An authored
 revision declares the current schema version on the version and its
 definition, so a Canvas written under an earlier version moves forward and can
 gain a design; a version append never moves a Canvas back. Agents writing

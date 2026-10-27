@@ -1828,6 +1828,24 @@ describe("createCanvasAgentTools", () => {
       expect(description).toContain("grants no file, shell, Git, or network access");
     });
 
+    it("tells the agent a visualization answering the question goes inline and a longer document stays in the sidebar", () => {
+      for (const set of [tools().set, boundTools("work").set, boundTools("code").set]) {
+        const description = set.definitions[0]?.description ?? "";
+        expect(description).toContain("A visualization that answers the current question");
+        for (const visual of [
+          "a chart",
+          "a small dashboard",
+          "a diagram",
+          "an interactive visual",
+        ]) {
+          expect(description).toContain(visual);
+        }
+        expect(description).toContain("goes inline");
+        expect(description).toContain("Longer documents");
+        expect(description).toContain("stay in the sidebar");
+      }
+    });
+
     it("lists the thread's Canvases with the sequence a revision must name", async () => {
       const threadReferenceCards = vi.fn(() => [{ canvasId: "canvas-1", title: "Plan" }]);
       const get = vi.fn(() => ({
