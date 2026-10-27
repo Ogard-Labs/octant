@@ -687,6 +687,17 @@ export type AppleDeviceRefusalReason = typeof AppleDeviceRefusalReason.Type;
 export const AppleDeviceLeaseHolder = Schema.Literal("this-thread", "another-thread");
 export type AppleDeviceLeaseHolder = typeof AppleDeviceLeaseHolder.Type;
 
+/**
+ * The latest screenshot the asking thread took of one device, by reference.
+ * Only that thread's local window can read its pixels.
+ */
+export const AppleDeviceScreenshot = Schema.Struct({
+  deviceId: AppleDeviceId,
+  reference: AppleEvidenceReference,
+  capturedAt: UtcTimestamp,
+}).annotations(strict);
+export type AppleDeviceScreenshot = typeof AppleDeviceScreenshot.Type;
+
 /** What `discover` answers: the host's paired iPhones and iPads and its device tooling. */
 export const AppleDeviceDiscovery = Schema.Struct({
   devices: Schema.Array(AppleDeviceRecord).pipe(Schema.maxItems(64)),
@@ -694,6 +705,11 @@ export const AppleDeviceDiscovery = Schema.Struct({
   leases: Schema.Array(
     Schema.Struct({ deviceId: AppleDeviceId, holder: AppleDeviceLeaseHolder }).annotations(strict),
   ).pipe(Schema.maxItems(64)),
+  /**
+   * The asking thread's latest screenshot of each device it captured. Optional
+   * and additive: a host that predates device screenshots omits it.
+   */
+  screenshots: Schema.optional(Schema.Array(AppleDeviceScreenshot).pipe(Schema.maxItems(64))),
   discoveredAt: UtcTimestamp,
 }).annotations(strict);
 export type AppleDeviceDiscovery = typeof AppleDeviceDiscovery.Type;
@@ -716,7 +732,7 @@ export const AppleDeviceSigning = Schema.Struct({
 }).annotations(strict);
 export type AppleDeviceSigning = typeof AppleDeviceSigning.Type;
 
-/** The device operations that leave evidence: the effects, and the console read. */
+/** The device operations that leave evidence: the effects, the console read, and a screenshot. */
 export const AppleDeviceEvidenceKind = Schema.Literal(
   "build",
   "run",
@@ -724,6 +740,7 @@ export const AppleDeviceEvidenceKind = Schema.Literal(
   "launch",
   "terminate",
   "logs",
+  "screenshot",
 );
 export type AppleDeviceEvidenceKind = typeof AppleDeviceEvidenceKind.Type;
 

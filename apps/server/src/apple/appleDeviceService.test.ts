@@ -16,6 +16,7 @@ import { join } from "node:path";
 import {
   decodeAppleDeviceRequest,
   type AppleDeviceEvidence,
+  type AppleDeviceId,
   type AppleDeviceRecord,
   type AppleDeviceRequest,
   type AppleDeviceResponse,
@@ -130,7 +131,12 @@ interface Host {
   /** The entitlements each `codesign` of the app read, at the time it ran. */
   readonly entitlements: string[];
   readonly artifacts: Map<string, string>;
+  readonly artifactBytes: Map<string, Uint8Array>;
   readonly journal: AppleDeviceEvidence[];
+  /** What `devicectl device screenshot` writes to the path it is given. */
+  screen: Uint8Array;
+  /** The options `devicectl device screenshot --help` lists. */
+  screenshotHelp: string;
 }
 
 const ok = (stdout = ""): AppleProcessResult => ({
@@ -212,7 +218,22 @@ function fakeExecute(host: Host) {
         // An unknown subcommand falls back to its parent's help.
         return ok(usage(args.slice(0, -2).join(" ")));
       }
-      return ok(usage(subcommand, subcommand === "device process launch" ? "  --console" : ""));
+      return ok(
+        usage(
+          subcommand,
+          subcommand === "device process launch"
+            ? "  --console"
+            : subcommand === "device screenshot"
+              ? host.screenshotHelp
+              : "",
+        ),
+      );
+    }
+    if (args.slice(0, 2).join(" ") === "device screenshot") {
+      const destination = args[args.indexOf("--destination") + 1];
+      if (destination === undefined) return failed;
+      await writeFile(destination, host.screen);
+      return ok();
     }
     const output = args[args.indexOf("--json-output") + 1];
     if (output === undefined) return failed;
@@ -252,6 +273,11 @@ function fakeSigning(host: Host) {
     return ok();
   };
 }
+
+/** A device screen as `devicectl` would write it: a PNG signature and a few bytes. */
+const PNG = new Uint8Array([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4, 5, 6, 7, 8,
+]);
 
 const TEAM = "A1B2C3D4E5";
 const CERTIFICATE = new TextEncoder().encode("fixture development certificate");
@@ -318,7 +344,10 @@ describe("AppleDeviceService", () => {
       identities: `  1) ${FINGERPRINT} "Apple Development: Jane Doe (Z9Y8X7W6V5)"\n     1 valid identities found\n`,
       entitlements: [],
       artifacts: new Map(),
+      artifactBytes: new Map(),
       journal: [],
+      screen: PNG,
+      screenshotHelp: "  --destination <path>",
     };
     clock = 1_000_000;
     leases = new AppleDeviceLeases(() => clock);
@@ -341,6 +370,7 @@ describe("AppleDeviceService", () => {
       execute: fakeExecute(host),
       executeSigning: fakeSigning(host),
       outputDirectory: join(root, "devicectl"),
+      captureDirectory: join(root, "device-captures"),
       artifactRoot: join(root, "artifacts"),
       signingDirectory: join(root, "signing"),
       provisioningProfileDirectories: [join(root, "profiles"), join(root, "missing")],
@@ -349,7 +379,9 @@ describe("AppleDeviceService", () => {
       realpath,
       writeArtifact: async (reference, bytes) => {
         host.artifacts.set(reference, new TextDecoder().decode(bytes));
+        host.artifactBytes.set(reference, bytes);
       },
+      readArtifact: async (reference) => host.artifactBytes.get(reference),
       recordEvidence: (evidence) => host.journal.push(evidence),
       launchSettleMs: 5,
       now: () => new Date(clock).toISOString(),
@@ -1151,6 +1183,154 @@ describe("AppleDeviceService", () => {
         ),
       );
       expect(logs.diagnostics.at(-1)?.message).toContain("is no longer running (cancelled)");
+    });
+  });
+
+  describe("screenshots of a leased device", () => {
+    async function leasedWithScreenshots(name = "Henrik's iPhone", thread = firstThread) {
+      host.offers.add("device screenshot");
+      const devices = service();
+      const device = byName((await discover(devices, thread)).devices, name);
+      const answer = await devices.request(
+        deviceRequest("use-device", thread, { deviceId: device.deviceId, ...approval }),
+        confirmed(thread),
+      );
+      expect(answer.kind).toBe("apple-device-leased");
+      return { devices, deviceId: device.deviceId };
+    }
+
+    const screenshotCalls = () =>
+      host.calls.filter((argv) => argv[3] === "screenshot" && !argv.includes("--help"));
+
+    async function capture(devices: AppleDeviceService, deviceId: AppleDeviceId) {
+      const answer = await devices.request(
+        deviceRequest("screenshot", firstThread, { deviceId }),
+        scopeFor(firstThread),
+      );
+      if (answer.kind !== "apple-device-evidence") throw new Error(JSON.stringify(answer));
+      return answer.evidence;
+    }
+
+    it("captures the screen with the selected Xcode's own tooling and keeps it as evidence by reference", async () => {
+      const { devices, deviceId } = await leasedWithScreenshots();
+      // A read inside the lease: it runs under Plan and asks nobody.
+      const answer = await devices.request(
+        deviceRequest("screenshot", firstThread, { deviceId }),
+        scopeFor(firstThread, { executionPolicy: "plan" }),
+      );
+      if (answer.kind !== "apple-device-evidence") throw new Error(JSON.stringify(answer));
+      const reference = `apple-device-screenshot-${answer.evidence.actionId}`;
+      expect(answer.evidence).toMatchObject({
+        kind: "screenshot",
+        outcome: "succeeded",
+        deviceId,
+        artifacts: [{ kind: "screenshot", reference }],
+      });
+      expect(screenshotCalls()).toEqual([
+        [
+          "xcrun",
+          "devicectl",
+          "device",
+          "screenshot",
+          "--device",
+          CORE_DEVICE_IDENTIFIERS[0],
+          "--destination",
+          expect.stringContaining(join(root, "device-captures")),
+        ],
+      ]);
+      expect(host.artifactBytes.get(reference)).toEqual(PNG);
+      expect(host.journal.map((evidence) => evidence.kind)).toEqual(["screenshot"]);
+      // The raw capture does not stay behind in the capture directory.
+      expect(await readdir(join(root, "device-captures"))).toEqual([]);
+      // The thread's discovery points at its latest screenshot, and the thread
+      // that took it, on its own checkout, can read the pixels.
+      const discovery = await discover(devices);
+      expect(discovery.screenshots).toEqual([
+        { deviceId, reference, capturedAt: new Date(clock).toISOString() },
+      ]);
+      await expect(devices.readScreenshot(reference, scopeFor(firstThread))).resolves.toEqual({
+        kind: "found",
+        bytes: PNG,
+      });
+    });
+
+    it("shows a screenshot to no other thread or checkout, and keeps only each device's latest", async () => {
+      const { devices, deviceId } = await leasedWithScreenshots();
+      const first = (await capture(devices, deviceId)).artifacts[0]?.reference ?? "";
+      const latest = (await capture(devices, deviceId)).artifacts[0]?.reference ?? "";
+      expect((await discover(devices)).screenshots?.map((shot) => shot.reference)).toEqual([
+        latest,
+      ]);
+      await expect(devices.readScreenshot(first, scopeFor(firstThread))).resolves.toEqual({
+        kind: "not-found",
+      });
+      expect((await discover(devices, secondThread)).screenshots).toEqual([]);
+      await expect(devices.readScreenshot(latest, scopeFor(secondThread))).resolves.toEqual({
+        kind: "not-found",
+      });
+      await expect(
+        devices.readScreenshot(latest, {
+          ...scopeFor(firstThread),
+          checkoutId: secondThread.checkoutId as never,
+        }),
+      ).resolves.toEqual({ kind: "not-found" });
+    });
+
+    it("reports screenshots unavailable when the selected Xcode offers no device screenshot", async () => {
+      const devices = service();
+      const wired = byName((await discover(devices)).devices, "Henrik's iPhone");
+      await devices.request(
+        deviceRequest("use-device", firstThread, { deviceId: wired.deviceId, ...approval }),
+        confirmed(firstThread),
+      );
+      await expect(
+        devices.request(
+          deviceRequest("screenshot", firstThread, { deviceId: wired.deviceId }),
+          scopeFor(firstThread),
+        ),
+      ).resolves.toEqual({ kind: "apple-device-refused", reason: "operation-unavailable" });
+      expect(screenshotCalls()).toEqual([]);
+    });
+
+    it("does not count a screenshot whose help lacks the destination option the host passes", async () => {
+      host.offers.add("device screenshot");
+      host.screenshotHelp = "  --output <path>";
+      expect((await discover(service())).tooling).not.toContain("screenshot");
+    });
+
+    it("captures nothing without the lease or from a locked phone", async () => {
+      host.offers.add("device screenshot");
+      const devices = service();
+      const discovery = await discover(devices);
+      const wired = byName(discovery.devices, "Henrik's iPhone");
+      await expect(
+        devices.request(
+          deviceRequest("screenshot", firstThread, { deviceId: wired.deviceId }),
+          scopeFor(firstThread),
+        ),
+      ).resolves.toEqual({ kind: "apple-device-refused", reason: "lease-required" });
+      const locked = byName(discovery.devices, "Test iPhone (locked)");
+      await devices.request(
+        deviceRequest("use-device", firstThread, { deviceId: locked.deviceId, ...approval }),
+        confirmed(firstThread),
+      );
+      await expect(
+        devices.request(
+          deviceRequest("screenshot", firstThread, { deviceId: locked.deviceId }),
+          scopeFor(firstThread),
+        ),
+      ).resolves.toEqual({ kind: "apple-device-refused", reason: "locked" });
+      expect(screenshotCalls()).toEqual([]);
+    });
+
+    it("keeps no capture that is not a PNG and leaves nothing behind", async () => {
+      const { devices, deviceId } = await leasedWithScreenshots();
+      host.screen = new TextEncoder().encode("not an image at all");
+      const evidence = await capture(devices, deviceId);
+      expect(evidence).toMatchObject({ kind: "screenshot", outcome: "failed", artifacts: [] });
+      expect(host.artifactBytes.size).toBe(0);
+      expect(await readdir(join(root, "device-captures"))).toEqual([]);
+      expect((await discover(devices)).screenshots).toEqual([]);
     });
   });
 });

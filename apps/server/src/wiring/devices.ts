@@ -186,6 +186,9 @@ export function wireDevices(deps: DevicesDependencies) {
     // `devicectl` writes its answers here, and a device listing names every
     // paired device's hardware identifiers, so it is private the same way.
     const devicectlOutputDirectory = join(providerDataDirectory, "apple-runtime", "devicectl");
+    // A physical device's screen lands here before it becomes evidence; only
+    // its own capture launch may write it, as with the Simulator's captures.
+    const deviceCaptureDirectory = join(providerDataDirectory, "apple-runtime", "device-captures");
     // The entitlements a device signature reads. Private like the others: no
     // build, Simulator, or `devicectl` launch reaches it.
     const appleSigningDirectory = join(providerDataDirectory, "apple-runtime", "signing");
@@ -225,7 +228,7 @@ export function wireDevices(deps: DevicesDependencies) {
         : { injectSimulatorInput: simulatorInputThroughDesktop(simulatorDevice) }),
       observeSimulators: (simulators) => simulatorInputGrants.closeUnlessBooted(simulators),
       captureDirectory: appleCaptureDirectory,
-      isolatedRoots: [devicectlOutputDirectory, appleSigningDirectory],
+      isolatedRoots: [devicectlOutputDirectory, deviceCaptureDirectory, appleSigningDirectory],
       // A host sweeps only the captures named for its own data directory, so
       // two hosts pointed at one directory never clear each other's files.
       captureOwner: createHash("sha256").update(providerDataDirectory).digest("hex").slice(0, 16),
@@ -272,6 +275,7 @@ export function wireDevices(deps: DevicesDependencies) {
       execute: (input, signal) => appleProcess.execute(input, signal),
       executeSigning: (input, signal) => appleSigningProcess.execute(input, signal),
       outputDirectory: devicectlOutputDirectory,
+      captureDirectory: deviceCaptureDirectory,
       artifactRoot: appleRuntimeStore.artifactRoot,
       signingDirectory: appleSigningDirectory,
       // Where Xcode installs the person's provisioning profiles, the newer
@@ -285,6 +289,7 @@ export function wireDevices(deps: DevicesDependencies) {
       leases: appleDeviceLeases,
       realpath,
       writeArtifact: (reference, bytes) => appleRuntimeStore.writeArtifact(reference, bytes),
+      readArtifact: (reference) => appleRuntimeStore.readArtifact(reference),
       recordEvidence: recordAppleEvidence,
       now: () => new Date().toISOString(),
       newId: randomUUID,
@@ -488,6 +493,14 @@ export function wireDevices(deps: DevicesDependencies) {
         windowAuthorityStore,
         service: appleDeviceService,
         resolveScope: resolveAppleDeviceScope,
+        // A screenshot's pixels are read in the same thread scope, by a local
+        // window only; the route refuses every other principal first.
+        resolveThread: async (windowId, request) => {
+          const resolved = await resolveAppleThread(windowId, request);
+          return resolved === undefined
+            ? undefined
+            : { threadId: resolved.thread.id, checkoutId: resolved.checkout.id };
+        },
       });
       const appleToolchainRoutes = createAppleToolchainRouteHandler({
         windowAuthorityStore,

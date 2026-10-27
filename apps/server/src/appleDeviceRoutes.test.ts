@@ -25,6 +25,7 @@ const remotePerson = {
   deviceId: "22222222-2222-4222-8222-222222222222",
 };
 const deviceId = "50000000-0000-4000-8000-000000000009";
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
 
 function body(kind: AppleDeviceRequest["kind"], requestedBy: unknown = person) {
   return {
@@ -87,7 +88,18 @@ function routes() {
   const resolveScope = vi.fn(async (_windowId: unknown, request: AppleDeviceRequest) =>
     scope(request),
   );
+  const resolveThread = vi.fn(
+    async (
+      _windowId: unknown,
+      request: Pick<AppleDeviceRequest, "authority" | "threadId" | "checkoutId">,
+    ) => ({ threadId: request.threadId, checkoutId: request.checkoutId }),
+  );
   const service = {
+    readScreenshot: vi.fn(async (reference: string) =>
+      reference === "apple-device-screenshot-1"
+        ? { kind: "found" as const, bytes: PNG }
+        : { kind: "not-found" as const },
+    ),
     request: vi.fn(async (request: AppleDeviceRequest) =>
       request.kind === "discover"
         ? {
@@ -106,9 +118,10 @@ function routes() {
     windowAuthorityStore: store,
     service,
     resolveScope,
+    resolveThread,
     now: () => 2,
   });
-  return { handler, service, resolveScope };
+  return { handler, service, resolveScope, resolveThread };
 }
 
 describe("Apple device routes", () => {
@@ -165,9 +178,17 @@ describe("Apple device routes", () => {
     expect(service.request).toHaveBeenCalledTimes(1);
   });
 
-  const actionKinds = ["build", "run", "install", "launch", "terminate", "logs"] as const;
+  const actionKinds = [
+    "build",
+    "run",
+    "install",
+    "launch",
+    "terminate",
+    "logs",
+    "screenshot",
+  ] as const;
 
-  it("takes the app's build, install, launch, stop, and console read only on the local action route", async () => {
+  it("takes the app's build, install, launch, stop, console read, and a screenshot only on the local action route", async () => {
     const { handler, service } = routes();
     for (const kind of actionKinds) {
       expect((await handler(post("/api/apple/devices", body(kind))))?.status).toBe(400);
@@ -183,7 +204,7 @@ describe("Apple device routes", () => {
     expect(service.request).toHaveBeenCalledTimes(actionKinds.length);
   });
 
-  it("lets a paired device start nothing on a device, not even a console read", async () => {
+  it("lets a paired device start nothing on a device, not even a console read or a screenshot", async () => {
     const { handler, service, resolveScope } = routes();
     for (const kind of actionKinds) {
       for (const requestedBy of [remotePerson, person]) {
@@ -195,6 +216,56 @@ describe("Apple device routes", () => {
     }
     expect(resolveScope).not.toHaveBeenCalled();
     expect(service.request).not.toHaveBeenCalled();
+  });
+
+  const screenshotRead = (reference = "apple-device-screenshot-1") => {
+    const {
+      kind: _kind,
+      requestedBy: _requestedBy,
+      deviceId: _deviceId,
+      ...scope
+    } = body("status");
+    const { actionId: _a, correlationId: _c, timeoutMs: _t, approval: _p, ...thread } = scope;
+    return { kind: "apple-artifact-request", ...thread, reference };
+  };
+
+  it("hands a local window the pixels of its thread's latest device screenshot", async () => {
+    const { handler, service, resolveThread } = routes();
+    const response = await handler(post("/api/apple/device-screenshots", screenshotRead()));
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get("content-type")).toBe("image/png");
+    expect(response?.headers.get("cache-control")).toBe("private, no-store");
+    expect(new Uint8Array((await response?.arrayBuffer()) ?? new ArrayBuffer(0))).toEqual(PNG);
+    expect(resolveThread).toHaveBeenCalledWith(
+      windowId,
+      expect.objectContaining({ threadId: "50000000-0000-4000-8000-000000000007" }),
+      expect.objectContaining({ kind: "local-window" }),
+    );
+    expect(service.readScreenshot).toHaveBeenCalledWith(
+      "apple-device-screenshot-1",
+      expect.objectContaining({ threadId: "50000000-0000-4000-8000-000000000007" }),
+    );
+    // A reference the thread does not hold reads as nothing at all.
+    const other = await handler(
+      post("/api/apple/device-screenshots", screenshotRead("apple-device-screenshot-2")),
+    );
+    expect(other?.status).toBe(404);
+    expect(other?.headers.get("content-type")).not.toBe("image/png");
+  });
+
+  it("never hands a device screenshot to a paired device or a window outside the thread", async () => {
+    const { handler, service, resolveThread } = routes();
+    const remote = await handler(post("/api/apple/device-screenshots", screenshotRead(), true));
+    expect(remote?.status).toBe(403);
+    expect(resolveThread).not.toHaveBeenCalled();
+    resolveThread.mockResolvedValueOnce(undefined as never);
+    const outside = await handler(post("/api/apple/device-screenshots", screenshotRead()));
+    expect(outside?.status).toBe(403);
+    // A device request is not a screenshot read, and the read takes nothing else.
+    expect((await handler(post("/api/apple/device-screenshots", body("screenshot"))))?.status).toBe(
+      400,
+    );
+    expect(service.readScreenshot).not.toHaveBeenCalled();
   });
 
   it("refuses a window that cannot reach the thread", async () => {
