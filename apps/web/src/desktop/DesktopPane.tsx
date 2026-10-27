@@ -498,7 +498,11 @@ function DesktopStage(props: {
                 },
               }
             : {})}
-          lede={endedMessage(state.lease)}
+          lede={
+            state.start.status === "available"
+              ? endedMessage(state.lease)
+              : `${endedMessage(state.lease)} ${startRefusalMessage(state.start.reason)}`
+          }
           title="Desktop ended"
         />
       );
