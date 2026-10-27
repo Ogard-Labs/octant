@@ -91,6 +91,8 @@ export * from "./hostControlPolicy";
 export * from "./hostExportPolicy";
 export * from "./hostPolicy";
 export * from "./hostCreateSelectionPolicy";
+export * from "./debugLaunchFileImport";
+export * from "./debugSessionStartPolicy";
 export * from "./languageServerLaunchPolicy";
 export * from "./remoteAccessPolicy";
 export * from "./remotePairingCode";

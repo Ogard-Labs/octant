@@ -46,6 +46,7 @@ const modeKinds: Readonly<Record<OctantMode, ReadonlySet<ExtensionComponent["kin
     "integration",
     // Code only: Work has no developer environment and Chat has no folder.
     "language-server",
+    "debug-adapter",
     ...rendererKinds,
     ...providerDriverKind,
     ...desktopProviderKind,

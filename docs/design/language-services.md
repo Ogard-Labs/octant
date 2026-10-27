@@ -25,7 +25,8 @@ window's approval and networked under the Project's egress rules), and slice 7
 (read-only agent tools for diagnostics and definitions, which never start or
 read through a repository-tooling server) are also built; slice 7's
 real-provider smoke awaits the maintainer. Slice 8's [Debugger addendum](#debugger-addendum) was accepted by the
-maintainer on 2026-10-27; its sub-slices are next. Monaco editing and the explicit external-editor
+maintainer on 2026-10-27; its sub-slice 8a (seam and policy) is built, and
+nothing starts a debug session yet. Monaco editing and the explicit external-editor
 handoff stay the primary Code editing paths and are unchanged by every slice.
 
 ## Outcome
@@ -66,8 +67,15 @@ behind its own approval and confinement rules.
   supervises reviewed executable components: ready handshake, bounded output,
   crash budget (two restarts a minute), receipts, drain-then-stop. Component
   kinds live in `packages/contracts/src/extensions.ts`
-  (`ExtensionComponentKind`). Slice 1 added the `language-server` kind; there
-  is no debug-adapter kind.
+  (`ExtensionComponentKind`). Slice 1 added the `language-server` kind and
+  sub-slice 8a the `debug-adapter` kind.
+- **Debugger seam (8a).** `packages/contracts/src/extensions.ts` declares the
+  `debug-adapter` kind and its `debugAdapter` declaration;
+  `@octant/plugin-api/debug-adapter-package` is the public package document;
+  `packages/contracts/src/codeDebug.ts` holds the configuration, proposal, and
+  start refusal schemas; and `packages/domain/src/debugSessionStartPolicy.ts`
+  and `debugLaunchFileImport.ts` decide a start and map a launch file. The
+  rules are under [Debugger seam rules](#debugger-seam-rules).
 - **Language seam (slice 1).** `packages/contracts/src/extensions.ts` declares
   the `language-server` kind and its `languageServer` declaration;
   `packages/plugin-host/src/activation.ts` admits it in Code only;
@@ -883,7 +891,7 @@ format nobody has).
   platform, the thread's mode and posture, who caused the start, the approval,
   and whether the configuration's paths still resolve. It returns a launch
   shape or the first refusal in this order: `unsupported-platform`,
-  `plan-read-only`, `local-host-required`, `approval-required`,
+  `mode-prohibited`, `plan-read-only`, `local-host-required`, `approval-required`,
   `configuration-invalid`. The read-side checks of the companion (`no-reach`,
   `thread-inactive`, `checkout-mismatch`, `checkout-unavailable`) run first,
   and `confinement-unavailable` last; nothing launches until all pass.
@@ -1073,6 +1081,64 @@ Rejected: a read-only agent tool for the stopped state now.
 | Credentials reach the program                                                     | Allow-listed environment; `OCTANT_*` and stripped credential keys refused in a configuration                                                                   | A value the person typed into `env` is theirs to choose                                    |
 | Resource exhaustion                                                               | Frame cap, request deadline, bounded output, frames, variables, and sources; one session per thread and four per host; receipts reaped after a restart         | No OS memory cap on macOS; the person stops a runaway program                              |
 
+### Debugger seam rules
+
+Sub-slice 8a settled these details, taking the more restrictive option where
+the addendum left a choice open.
+
+- **Launch body.** Any `{{` or `}}` in a string that is not exactly one whole
+  placeholder is refused, an unknown `{{name}}` included, and an object key
+  holds neither. The body must contain `{{program}}`, so the program the
+  person confirmed is the one that runs. `{{debugPort}}` appears exactly when
+  `debugPorts` is `1`: a declared port the adapter never receives is a grant
+  nothing uses. The body is plain JSON (finite numbers, no `__proto__` key,
+  nested at most 16 deep), and the 8 KiB bound is its UTF-8 JSON text.
+  `importTypes` entries match `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`; plugin-host
+  normalization sorts and de-duplicates them and `runtimes`.
+- **Updates.** Two launch bodies are compared with their keys sorted, so key
+  order alone is not a change.
+- **Package.** `octant-debug-adapter.json` is read by
+  `@octant/plugin-api/debug-adapter-package`, sharing the language server
+  package's authored-manifest rules. Until 8b reads and reviews one, the host
+  refuses a folder holding it ("this host does not install debug adapters
+  yet") rather than reading its other files as a plugin, and a folder holding
+  two Octant package documents is refused.
+- **Configuration.** An absent `cwd` is the checkout's root. `env` is a list
+  of `{ key, value }` entries with unique keys, so no key can become an
+  object's prototype. Argument and value bounds are UTF-8 bytes, and a NUL is
+  refused. `OCTANT_` is refused in any letter case, and the credential names
+  the host keeps from children are the closed list
+  `HOST_CREDENTIAL_ENVIRONMENT_KEYS` in `@octant/contracts/code-debug`
+  (provider keys and tokens, and the GitHub CLI's `GH_TOKEN`, `GITHUB_TOKEN`,
+  `GH_ENTERPRISE_TOKEN`, and `GITHUB_ENTERPRISE_TOKEN`).
+- **Start decision.** `decideDebugSessionStart` refuses a thread that is not
+  a Code thread as `mode-prohibited`, after `unsupported-platform` and before
+  `plan-read-only`, because the kind is Code only. A start from anything but a
+  local window, a paired device or an agent, is `local-host-required`. The
+  policy decides coverage itself: an approval covers a start only for the
+  same configuration digest, extension, component, package digest, and
+  lifecycle version, in its checkout or its Project. The launch shape names
+  one capsule for adapter and program, `proxied-under-thread-rules` below Full
+  access and `allow` under it, and the debug port: none, inside the capsule's
+  namespace on Linux, or one host-chosen `localhost` port on macOS. The
+  contract's start refusals list the read-side checks first, then the
+  decision's reasons, then `confinement-unavailable`.
+- **Import mapping.** The host passes the parsed file, the checkout's
+  folder, the editor's current file, and the effective adapters. A file with
+  no `configurations` list is unreadable, and at most 64 entries are proposed,
+  with `truncated` set past that. An entry whose `type` more than one
+  effective adapter imports is unmappable (`adapter-ambiguous`) rather than
+  given to one. A variable outside the closed set anywhere in an entry,
+  unused fields included, makes it unmappable, because the entry asked the
+  editor to read host state or run a command. A current-file variable with no
+  file open is `needs-open-file`. A relative program or folder is taken from
+  the checkout's root, and an absolute one maps only inside the checkout;
+  these checks are lexical, and the host contains the result again with
+  symlinks resolved. Path variables in arguments and environment values
+  resolve to host paths, as the file meant. A missing or mistyped value, a
+  value out of the configuration's bounds, more than 64 unused fields, or a
+  field name over 128 characters is `invalid`.
+
 ### Debugger delivery
 
 Each sub-slice is its own pull request with this addendum updated in place.
@@ -1092,6 +1158,21 @@ Each sub-slice is its own pull request with this addendum updated in place.
     or raises `debugPorts` is quarantined.
   - _Verify:_ focused contract, domain, and plugin-host tests; typecheck
     consumers; `style:check`.
+  - _State:_ built. The start policy's refusal order holds for every
+    platform, mode, posture, starter, approval state (none, this checkout, the
+    Project, another checkout, an edited configuration, a changed package),
+    and configuration state (`debugSessionStartPolicy.test.ts`). Unknown
+    fields, in-string and unknown placeholders, a body without the program,
+    and an unfilled or undeclared port fail to decode (`extensions.test.ts`),
+    as do configurations with host paths, escapes, or reserved environment
+    names (`codeDebug.test.ts`). The mapping maps only `launch` entries one
+    adapter imports, lists unused fields, and refuses `${command:}`-style
+    variables and outside-checkout paths (`debugLaunchFileImport.test.ts`).
+    Installed through the lifecycle service, an adapter stays untrusted and
+    disabled and is `mode-prohibited` in Chat and Work, and an update that
+    changes its launch body or raises its ports is quarantined
+    (`extensionLifecycleService.test.ts`). The rules are under
+    [Debugger seam rules](#debugger-seam-rules).
 - **8b. Session host.** Container: yes for Linux.
   - The server reads the package, records approvals, launches the capsule with
     its receipt and egress proxy, holds the DAP connection with its closed
@@ -1399,7 +1480,8 @@ accounts or hardware.
    - _Verify:_ set by the addendum, including a macOS confined-debuggee smoke
      on a Mac.
    - _State:_ the [Debugger addendum](#debugger-addendum) was accepted on
-     2026-10-27; its sub-slices 8a to 8d are the delivery plan.
+     2026-10-27; its sub-slices 8a to 8d are the delivery plan, and 8a is
+     built.
 
 The extension host is not planned (D7). Each slice is reviewable and leaves
 the editor working when the companion is off or refused.

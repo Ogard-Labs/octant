@@ -61,6 +61,15 @@ export function normalizeExtensionManifest(
                 languages: sortedUnique(component.languageServer.languages),
               },
             }),
+        ...(component.debugAdapter === undefined
+          ? {}
+          : {
+              debugAdapter: {
+                ...component.debugAdapter,
+                runtimes: sortedUnique(component.debugAdapter.runtimes),
+                importTypes: sortedUnique(component.debugAdapter.importTypes),
+              },
+            }),
       }))
       .sort((left, right) => left.id.localeCompare(right.id)),
   };

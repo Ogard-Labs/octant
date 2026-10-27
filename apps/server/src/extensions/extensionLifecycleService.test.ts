@@ -155,6 +155,23 @@ function targetFor(value: ReturnType<typeof inspection>): ExtensionVersionRefere
   };
 }
 
+function debugAdapterComponent(declaration: Record<string, unknown> = {}) {
+  return {
+    id: "server",
+    kind: "debug-adapter",
+    displayName: "Node debugger",
+    declaredCapabilities: [],
+    entryPoint: "runtime/main.mjs",
+    debugAdapter: {
+      runtimes: ["node"],
+      launchArguments: { program: "{{program}}", args: "{{args}}" },
+      importTypes: ["node"],
+      debugPorts: 0,
+      ...declaration,
+    },
+  };
+}
+
 function appendLifecycle(
   context: Awaited<ReturnType<typeof setup>>,
   payload:
@@ -440,6 +457,121 @@ describe("journaled extension lifecycle and startup reconciliation", () => {
       activation: { trusted: false, pluginDesired: false, quarantined: true },
       components: [{ activation: { componentDesired: false } }],
     });
+  });
+
+  it("installs a debug adapter without trusting, enabling, or offering it outside Code", async () => {
+    const context = await setup();
+    const installed = await context
+      .makeService()
+      .install(
+        inspection("1.0.0", "debug adapter", [], debugAdapterComponent(), ["chat", "work", "code"]),
+      );
+    expect(installed.packages[0]).toMatchObject({
+      activation: { installed: true, trusted: false, pluginDesired: false },
+      components: [
+        {
+          activation: { componentDesired: false },
+          effectiveState: { kind: "blocked", reason: "untrusted" },
+        },
+      ],
+    });
+    appendLifecycle(context, { kind: "source-trust-changed", trusted: true });
+    appendLifecycle(context, { kind: "plugin-desired-state-changed", desired: true });
+    appendLifecycle(context, {
+      kind: "component-desired-state-changed",
+      componentId: "server",
+      desired: true,
+    });
+    const enabled = context.makeService().snapshot();
+    const activation = new ExtensionActivationService({
+      policy: LOCAL_EXTENSION_ACTIVATION_POLICY,
+      catalogStatus: () => "available",
+    });
+    const resolved = (mode: "chat" | "work" | "code") =>
+      activation.resolve(enabled, {
+        scope: {
+          hostId: LOCAL_HOST_ID,
+          mode,
+          projectId: null,
+          threadId: null,
+          providerFamily: "openai-compatible" as never,
+        },
+      }).packages[0]?.components[0]?.effectiveState;
+    expect(resolved("chat")).toEqual({ kind: "blocked", reason: "mode-prohibited" });
+    expect(resolved("work")).toEqual({ kind: "blocked", reason: "mode-prohibited" });
+    expect(resolved("code")).toEqual({ kind: "effective" });
+  });
+
+  it("asks for review again when an update changes a debug adapter's launch body or raises its ports", async () => {
+    const reviewedAndEnabled = async (component: Record<string, unknown>) => {
+      const context = await setup();
+      await context.makeService().install(inspection("1.0.0", "adapter 1", [], component));
+      appendLifecycle(context, { kind: "source-trust-changed", trusted: true });
+      appendLifecycle(context, { kind: "plugin-desired-state-changed", desired: true });
+      appendLifecycle(context, {
+        kind: "component-desired-state-changed",
+        componentId: "server",
+        desired: true,
+      });
+      return context;
+    };
+    const quarantined = {
+      activation: { trusted: false, pluginDesired: false, quarantined: true },
+      components: [{ activation: { componentDesired: false } }],
+    };
+
+    // Labels and import types choose nothing, and key order is not a change.
+    const relabelled = await reviewedAndEnabled(debugAdapterComponent());
+    const sameBody = await relabelled.makeService().update(
+      inspection(
+        "1.1.0",
+        "adapter 1.1",
+        [],
+        debugAdapterComponent({
+          runtimes: ["bun", "node"],
+          importTypes: ["node", "pwa-node", "node-terminal"],
+          launchArguments: { args: "{{args}}", program: "{{program}}" },
+        }),
+      ),
+    );
+    expect(sameBody.packages[0]?.components[0]?.effectiveState).toEqual({ kind: "effective" });
+
+    const changedBody = await reviewedAndEnabled(debugAdapterComponent());
+    expect(
+      (
+        await changedBody.makeService().update(
+          inspection(
+            "2.0.0",
+            "adapter 2",
+            [],
+            debugAdapterComponent({
+              launchArguments: {
+                program: "{{program}}",
+                args: "{{args}}",
+                runtimeExecutable: "/usr/local/bin/node",
+              },
+            }),
+          ),
+        )
+      ).packages[0],
+    ).toMatchObject(quarantined);
+
+    const raisedPorts = await reviewedAndEnabled(debugAdapterComponent());
+    expect(
+      (
+        await raisedPorts.makeService().update(
+          inspection(
+            "2.0.0",
+            "adapter 2",
+            [],
+            debugAdapterComponent({
+              launchArguments: { program: "{{program}}", args: "{{args}}", port: "{{debugPort}}" },
+              debugPorts: 1,
+            }),
+          ),
+        )
+      ).packages[0],
+    ).toMatchObject(quarantined);
   });
 
   it("rejects desired state for unknown components without writing an event", async () => {

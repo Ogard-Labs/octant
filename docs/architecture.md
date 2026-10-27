@@ -215,6 +215,13 @@ turn (Plan included) whose provider carries Octant's tools; they read the saved
 file, never an editor's draft, and never start or read through a server that
 runs repository tooling, approved or not
 ([agent read rules](design/language-services.md#agent-read-rules)).
+Of the debugger, only the seam is built: the `debug-adapter` component kind
+(Code only, quarantined like any executable component), the
+`octant-debug-adapter.json` package document, which the host refuses to
+install until it can review one, the pure start policy, the configuration
+schema, and the mapping from a repository launch file to proposals. Nothing
+starts a debug session yet
+([Debugger seam rules](design/language-services.md#debugger-seam-rules)).
 
 **Host resources.** `GET /api/host/resources` is a read-only snapshot of this
 host's load: CPU use averaged over a short sample of the process's CPU times,
@@ -5687,7 +5694,7 @@ proofs that suite already holds:
 (`skill-instructions`, `mcp-server`, `mcp-tool`, `mcp-prompt`, `mcp-resource`,
 `hook`, `app`, `agent`, `apple-development-adapter`, `board`, `integration`,
 `ui-surface`, `appearance-pack`, `preview-viewer`, `provider-driver`, `replica-store`,
-`desktop-provider`, `language-server` (Code only)), composer addressing
+`desktop-provider`, `language-server` and `debug-adapter` (Code only)), composer addressing
 (`@plugin`, `@plugin/component`, `$skill`), and the activation ladder. The
 manifest and component schemas themselves (`ExtensionPackageManifest`,
 component kinds, declared capabilities, and renderer contribution points)
