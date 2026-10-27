@@ -520,16 +520,19 @@ describe("CodeThreadWorkspace", () => {
     if (mic !== null) expect(follows(model, mic)).toBe(true);
   });
 
-  it.each(["running", "waiting"])("disables the model picker while a turn is busy: %s", (turnStatus) => {
-    render(
-      <CodeThreadWorkspace
-        controller={controller({ turnStatus: turnStatus as "running" | "waiting" })}
-        providerGroups={[providerGroup()]}
-        threadId={threadId}
-      />,
-    );
-    expect(screen.getByRole("button", { name: "Provider and model" })).toBeDisabled();
-  });
+  it.each(["running", "waiting"])(
+    "disables the model picker while a turn is busy: %s",
+    (turnStatus) => {
+      render(
+        <CodeThreadWorkspace
+          controller={controller({ turnStatus: turnStatus as "running" | "waiting" })}
+          providerGroups={[providerGroup()]}
+          threadId={threadId}
+        />,
+      );
+      expect(screen.getByRole("button", { name: "Provider and model" })).toBeDisabled();
+    },
+  );
 
   it("leaves the model picker enabled while idle", () => {
     render(
