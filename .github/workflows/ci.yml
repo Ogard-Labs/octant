@@ -148,6 +148,11 @@ jobs:
       # request, and this job deliberately does not package a release.
       - run: bun run --cwd scripts test
       # Language services: the bundled TypeScript server answers a two-file
-      # fixture under Seatbelt. The Linux server shards run the same test under
-      # Bubblewrap; this is its macOS evidence.
-      - run: bun run --cwd apps/server test -- src/code/codeLanguageServiceProcess.test.ts
+      # fixture under Seatbelt, and a hostile server a person added cannot run
+      # another program, reach the network, or write the checkout. The Linux
+      # server shards run the same tests under Bubblewrap; this is their macOS
+      # evidence.
+      - run: >-
+          bun run --cwd apps/server test --
+          src/code/codeLanguageServiceProcess.test.ts
+          src/code/installedLanguageServersProcess.test.ts

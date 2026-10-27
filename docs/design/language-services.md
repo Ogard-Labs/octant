@@ -19,9 +19,9 @@ accepted this design and its [decisions](#maintainer-decisions) on 2026-10-26.
 server), and 3 (editor wiring) are built: the Code editor shows the host's
 diagnostics and jumps to definitions, locally and from a paired device.**
 Slice 4 (ship the binary) is built: packages carry the server, and a signed
-Apple Silicon package awaits the maintainer. Monaco editing and the explicit
-external-editor handoff stay the primary Code editing paths and are unchanged
-by every slice.
+Apple Silicon package awaits the maintainer. Slice 5 (user-added `static`
+servers) is also built. Monaco editing and the explicit external-editor
+handoff stay the primary Code editing paths and are unchanged by every slice.
 
 ## Outcome
 
@@ -86,6 +86,11 @@ behind its own approval and confinement rules.
   editor's states, `monacoRuntime.ts` shows the markers and answers
   definitions, and `CodeSettingsView.tsx` holds the Settings › Code switch
   (`bundledLanguageServer` in the Code settings).
+- **User-added servers (slice 5).** `@octant/plugin-api/language-server-package`
+  is the public package document; `apps/server/src/extensions/languageServerPackage.ts`
+  reads a local folder that holds one into the package store, and
+  `apps/server/src/code/installedLanguageServers.ts` offers the installed
+  servers the activation ladder makes effective in Code to the companion.
 - **Network levels.** `apps/server/src/process/threadEgressPolicy.ts` resolves
   `none`, `provider-endpoints-only`, and `unrestricted`. The
   [harness tool egress rules](../architecture.md#harness-tool-egress-rules)
@@ -369,6 +374,65 @@ design left a choice open.
   editor whose services are off reopens it, so turning the switch back on
   needs no reload. A file no server reads shows nothing, and every state
   leaves editing and saving untouched.
+
+### User-added servers
+
+Slice 5 settled these details, taking the more restrictive option where the
+design left a choice open.
+
+- **Package.** A person adds a server as a folder with
+  `octant-language-server.json` at its root, imported from Settings › Skills &
+  Extensions › Marketplace with the native folder picker, so the folder's path
+  stays with the desktop and the server. The document is
+  `{ manifest }`, an ordinary package manifest without the facts only the host
+  states: an author who writes `extensionId`, `packageId`, `digest`, `source`,
+  or `provenance.reviewed` is refused, not overwritten. The host derives the
+  identity from the folder and the slug, so a folder can never take the
+  bundled server's identity or another package's, and records it unreviewed.
+  A folder with the document is read as a language server and as nothing
+  else. Other sources are refused until a marketplace package can carry a
+  publisher signature.
+- **What a package may hold.** Exactly one `language-server` component of the
+  `static` class, Code only, for no provider family, declaring at most the
+  `filesystem` capability, with no contributions, whose entry point is a file
+  in the package. The binary is the package's only executable file; another
+  is refused, because the server may run its own binary and nothing else. The
+  slug and `builtin:` entry points of the bundled server are refused.
+  `repo-tooling` is refused at inspection rather than installed to be refused
+  at launch, because its approval does not exist until slice 6, and the class
+  is never narrowed to `static` for the author. The package store's bounds
+  apply (16 MiB per file, 64 MiB per package).
+- **Launch.** The server starts with no arguments: the schema has no field for
+  them, so nothing but the binary decides how it runs. It is confined exactly
+  as the bundled server is, with its stored package version as the read-only
+  install root.
+- **Review.** The inspection preview names the binary by its path in the
+  package, the binary file's own SHA-256 digest (beside the package digest,
+  so it can be checked against the author's release), the languages, the
+  class, and, for `static`, that the server reads the checkout, keeps a
+  private cache, and cannot write, run other programs, or reach the network.
+  Confirm install stores it untrusted with its switches off.
+- **Effective.** The companion offers an installed server only while the
+  ladder makes it effective in Code: installed, not quarantined, trusted, the
+  plugin and component switched on, compatible with this host's platform and
+  app version. Withdrawing any of them commits an extension event, which runs
+  the stop check at once and stops a running server. Project and thread
+  policy is the read's own authority check, so it is not asked twice.
+- **Verified at every start.** The binary's path is resolved from the stored
+  version only after the whole version verifies against its digest. A binary
+  changed after review does not run; the start counts against the crash
+  budget and reads as `crashed`, and the next host start quarantines the
+  version.
+- **Identity per digest.** An installed server's key includes its package
+  digest, so an update starts a new server with its own cache rather than
+  serving from the old binary's process or files.
+- **Which server reads a file.** Octant's extension table now lists the
+  common languages by the protocol specification's identifiers (C and C++,
+  C#, CSS, Dart, Elixir, Erlang, Go, HTML, Java, JSON, Lua, Markdown,
+  Objective-C, PHP, Python, Ruby, Rust, Scala, SCSS, shell, SQL, Swift, XML,
+  YAML); `.h` reads as C. When more than one effective server declares a
+  file's language, the bundled server serves it, then installed servers by
+  package name, so install order never decides.
 
 ### Authority
 
@@ -661,13 +725,28 @@ accounts or hardware.
      covers the Linux AppImage's portable folder where its packaging can
      reach that host. The rules are under [Packaging rules](#packaging-rules).
 5. **User-added `static` servers.** Container: yes.
-   - Install through the existing package store, quarantined. The review card
-     names the binary, digest, languages, class, and "cannot write, run other
-     programs, or reach the network". Then enable.
+   - Install through the existing package store, untrusted and switched off.
+     The review card names the binary, digest, languages, class, and "cannot
+     write, run other programs, or reach the network". Then enable.
    - _Accepts when:_ an unreviewed server never starts, and a server that tries
      to exec or connect fails under confinement.
    - _Verify:_ extension lifecycle and supervisor tests, plus a hostile fixture
      server.
+   - _State:_ built. A package folder imported through the local folder
+     registry and installed through the extension lifecycle stays out of the
+     companion while untrusted, with only its plugin switched on, and until its
+     component is on; withdrawn trust stops it; and a binary changed in the
+     store after review never runs (`installedLanguageServersProcess.test.ts`).
+     On Linux a hostile fixture server, installed, trusted, and enabled the
+     same way and started by the real companion under Bubblewrap in a Plan
+     thread, could not start a child (`EPERM` from the no-fork filter),
+     connect to a listener on the host's loopback or to an internet address,
+     or write the checkout (`EROFS`); it wrote only its cache, and the host's
+     listener saw no connection. The `macos-15` CI job runs the same test for
+     Seatbelt evidence; it has not yet run on a Mac. The inspection preview's
+     language-server review is covered in the server test and in Settings
+     (`ExtensionsSettingsView.test.tsx`). The rules are under
+     [User-added servers](#user-added-servers).
 6. **`repo-tooling` servers.** Container: yes.
    - Use the shell-command approval per checkout and component, rememberable
      per Project from a local window only. Plan refuses. The class can write to

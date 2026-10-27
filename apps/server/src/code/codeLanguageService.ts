@@ -69,7 +69,9 @@ const FRAME_ENVELOPE_BYTES = 64 * 1024;
 /**
  * Octant's own table from file name to Language Server Protocol language.
  * Repository configuration never changes which language a file is, so it
- * never chooses which server reads it.
+ * never chooses which server reads it. The identifiers are the ones the
+ * protocol's specification lists, so a server a person adds declares the same
+ * names. A `.h` header reads as C.
  */
 const LANGUAGE_BY_EXTENSION: Readonly<Record<string, string>> = {
   ".ts": "typescript",
@@ -80,6 +82,42 @@ const LANGUAGE_BY_EXTENSION: Readonly<Record<string, string>> = {
   ".mjs": "javascript",
   ".cjs": "javascript",
   ".jsx": "javascriptreact",
+  ".c": "c",
+  ".h": "c",
+  ".cc": "cpp",
+  ".cpp": "cpp",
+  ".cxx": "cpp",
+  ".hh": "cpp",
+  ".hpp": "cpp",
+  ".hxx": "cpp",
+  ".cs": "csharp",
+  ".css": "css",
+  ".dart": "dart",
+  ".ex": "elixir",
+  ".exs": "elixir",
+  ".erl": "erlang",
+  ".go": "go",
+  ".html": "html",
+  ".java": "java",
+  ".json": "json",
+  ".lua": "lua",
+  ".md": "markdown",
+  ".m": "objective-c",
+  ".mm": "objective-cpp",
+  ".php": "php",
+  ".py": "python",
+  ".pyi": "python",
+  ".rb": "ruby",
+  ".rs": "rust",
+  ".scala": "scala",
+  ".scss": "scss",
+  ".sh": "shellscript",
+  ".bash": "shellscript",
+  ".sql": "sql",
+  ".swift": "swift",
+  ".xml": "xml",
+  ".yaml": "yaml",
+  ".yml": "yaml",
 };
 
 /** An effective `language-server` component, resolved by the host. */
@@ -88,7 +126,13 @@ export interface CodeLanguageServerComponent {
   readonly componentKey: string;
   readonly languages: ReadonlyArray<string>;
   readonly launchClass: ExtensionLanguageServerClass;
-  readonly executable: string;
+  /**
+   * The absolute path of the binary to run, resolved at every start. An
+   * installed server's resolves only once its stored package still matches
+   * the digest the person reviewed; undefined means it does not, and the
+   * start fails without running anything.
+   */
+  readonly executable: () => Promise<string | undefined>;
   readonly args: ReadonlyArray<string>;
   readonly installRoot: string;
   /** The diagnostic source label used when the server's own label is unusable. */
@@ -622,9 +666,12 @@ export class CodeLanguageService {
   async #start(record: ServerRecord): Promise<StartOutcome> {
     const generation = ++record.generation;
     record.state = "starting";
+    const executable = await record.component.executable().catch(() => undefined);
+    if (record.generation !== generation) return "crashed";
+    if (executable === undefined) return this.#crash(record, generation);
     const outcome = await this.#processes.launch({
       ownerId: record.key,
-      executable: record.component.executable,
+      executable,
       args: record.component.args,
       installRoot: record.component.installRoot,
       checkoutRoot: record.rootPath,

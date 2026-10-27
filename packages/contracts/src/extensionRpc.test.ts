@@ -337,6 +337,51 @@ describe("extension RPC contracts", () => {
       }),
     ).toThrow();
   });
+
+  it("names a language server's binary, its digest, languages, and class in review, and never a host path", () => {
+    const entry = {
+      extensionId,
+      packageId,
+      slug: "lua-language",
+      displayName: "Lua",
+      version: "1.0.0",
+      digest,
+      source: { kind: "local-folder", sourceRef: "local-folder-lua" },
+    };
+    const component = {
+      id: "language-server",
+      kind: "language-server",
+      displayName: "Lua",
+      declaredCapabilities: ["filesystem"],
+      languageServer: {
+        languages: ["lua"],
+        launchClass: "static",
+        binary: "bin/lua-language-server",
+        binaryDigest: `sha256:${"b".repeat(64)}`,
+      },
+    };
+    const preview = (languageServer: unknown) => ({
+      kind: "package-inspected",
+      preview: {
+        entry,
+        review: { ...reviewFixture, components: [{ ...component, languageServer }] },
+        diagnostics: [],
+      },
+    });
+    const result = decodeExtensionCommandResult(preview(component.languageServer));
+    if (result.kind !== "package-inspected") throw new Error("Expected an inspected package.");
+    expect(result.preview.review.components[0]?.languageServer).toEqual(component.languageServer);
+    for (const binary of ["/opt/lsp/bin/server", "bin/../../server", "bin\\server", ""]) {
+      expect(() =>
+        decodeExtensionCommandResult(preview({ ...component.languageServer, binary })),
+      ).toThrow();
+    }
+    expect(() =>
+      decodeExtensionCommandResult(
+        preview({ ...component.languageServer, launchClass: "trusted" }),
+      ),
+    ).toThrow();
+  });
 });
 
 const reviewFixture = {

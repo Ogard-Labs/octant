@@ -1972,6 +1972,67 @@ describe("local Agent Plugin import", () => {
     expect(screen.getByText("Inspect the complete diff before making changes.")).toBeVisible();
     expect(screen.getByText(/bundled skill instructions/i)).toBeVisible();
   });
+
+  it("names a language server's binary, digest, languages, and class, and what it cannot do, before install", async () => {
+    const snapshot = installedSnapshot({ activation: baseActivation({ installed: false }) });
+    const c = client({ snapshot });
+    const binaryDigest = `sha256:${"c".repeat(64)}`;
+    c.importLocalPluginReceipt = vi.fn(async () => ({
+      kind: "package-inspected",
+      preview: {
+        entry: {
+          extensionId: extensionId as never,
+          packageId: packageId as never,
+          slug: "lua-language" as never,
+          displayName: "Lua",
+          version: "1.0.0" as never,
+          digest: digest as never,
+          source: {
+            kind: "local-folder",
+            sourceRef: "local-cccccccccccccccccccccccccccccccc" as never,
+          },
+        },
+        review: previewReview({
+          declaredCapabilities: ["filesystem"],
+          components: [
+            {
+              id: "language-server",
+              kind: "language-server",
+              displayName: "Lua language server",
+              declaredCapabilities: ["filesystem"],
+              languageServer: {
+                languages: ["lua"],
+                launchClass: "static",
+                binary: "bin/lua-language-server",
+                binaryDigest,
+              },
+            },
+          ],
+        } as never),
+        diagnostics: [],
+      },
+    })) as never;
+
+    render(
+      <ExtensionsSettingsView
+        client={c}
+        pickLocalPluginFolder={async () => ({ receiptId: "R".repeat(43), displayName: "lua" })}
+        scope={scope}
+      />,
+    );
+    fireEvent.click(await findViewButton(/marketplace/i));
+    fireEvent.click(await screen.findByRole("button", { name: /import local agent plugin/i }));
+
+    const review = await screen.findByLabelText("Language server review");
+    expect(within(review).getByText("bin/lua-language-server")).toBeVisible();
+    expect(within(review).getByText(binaryDigest)).toBeVisible();
+    expect(within(review).getByText("lua")).toBeVisible();
+    expect(within(review).getByText("static")).toBeVisible();
+    expect(
+      screen.getByText(/it cannot write, run other programs, or reach the network\./i),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: /confirm install/i })).toBeInTheDocument();
+  });
 });
 
 describe("Use in a Project", () => {

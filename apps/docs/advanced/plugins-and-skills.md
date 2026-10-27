@@ -195,6 +195,57 @@ and set `"command": "${PLUGIN_ROOT}/.venv/bin/python"` with the package's script
 or `["-m", "<module>"]` as `args`. A virtual environment built from Homebrew
 Python runs under the sandbox.
 
+### Add a language server
+
+A Code thread's editor can read type errors and definitions from a language
+server you add, next to the TypeScript server Octant bundles. Put the server
+in a folder with an `octant-language-server.json` at its root and import the
+folder from **Marketplace** with the native folder picker:
+
+```json
+{
+  "manifest": {
+    "manifestVersion": 1,
+    "slug": "lua-language",
+    "displayName": "Lua",
+    "version": "3.13.0",
+    "provenance": { "publisher": "Example", "canonicalUrl": "https://example.com/lua" },
+    "license": { "kind": "spdx", "identifier": "MIT" },
+    "compatibility": { "platforms": ["macos", "linux"], "modes": ["code"], "providerFamilies": [] },
+    "declaredCapabilities": ["filesystem"],
+    "components": [
+      {
+        "id": "language-server",
+        "kind": "language-server",
+        "displayName": "Lua",
+        "declaredCapabilities": ["filesystem"],
+        "entryPoint": "bin/lua-language-server",
+        "languageServer": { "languages": ["lua"], "launchClass": "static" }
+      }
+    ]
+  }
+}
+```
+
+The folder holds exactly one language server, and its binary is the only
+executable file in it. Octant starts the binary with no arguments and talks to
+it over stdin and stdout. Octant sets the package's identity, source, digest,
+and review state itself, so the file must not state them. A server that runs
+the repository's own tools (`repo-tooling`) is refused for now.
+
+**Review before installing** names the binary, its own SHA-256 digest (compare
+it with the one the server's author publishes), the languages it reads, and
+its class. A `static` server reads the checkout and keeps a private cache; it
+cannot write, run other programs, or reach the network. **Confirm install**
+stores it disabled. It serves nothing until you **Trust source**, **Enable
+plugin**, and **Enable component** under **Installed**, and it stops as soon
+as you take any of those back. Before each start Octant checks the stored
+binary against the digest you reviewed and does not run one that changed.
+
+Octant decides a file's language from its extension, not from the
+repository. When the bundled server and yours both read a language, the
+bundled one serves it.
+
 ### Add an MCP server by hand
 
 **Settings → Skills & Extensions → Add MCP server…** connects a server

@@ -43,6 +43,9 @@ const SYNTHESIS_PATH = "/api/speech/synthesis";
 const TRANSCRIPTION_BODY_LIMIT = SPEECH_TRANSCRIPTION_MAX_AUDIO_BYTES + 65_536;
 const PAIRED_TRANSCRIPTION_BODY_LIMIT = REMOTE_TRANSCRIPTION_MAX_AUDIO_BYTES + 65_536;
 const SYNTHESIS_BODY_LIMIT = 65_536;
+// Paired devices together may hold every transcription slot but one, so the
+// computer's own dictation never answers busy because phones are sending.
+const PAIRED_TRANSCRIPTION_SLOTS = SPEECH_HOST_CONCURRENCY - 1;
 
 export interface SpeechRouteDependencies {
   readonly readVoiceSettings: () => VoiceSettings;
@@ -69,9 +72,10 @@ export interface SpeechRouteDependencies {
  * person to send it.
  *
  * A paired device reaches status and transcription only. Each device sends one
- * clip at a time within its own budget, counted in memory from admission, so
- * a phone cannot hold every host slot or run up the owner's endpoint; it is
- * told read-aloud is unavailable and refused it if it asks anyway.
+ * clip at a time within its own budget, counted in memory from admission, and
+ * paired devices together leave one host slot for the computer's own windows,
+ * so phones cannot crowd out local dictation or run up the owner's endpoint;
+ * a device is told read-aloud is unavailable and refused it if it asks anyway.
  */
 export function createSpeechRouteHandler(dependencies: SpeechRouteDependencies) {
   const now = dependencies.now ?? Date.now;
@@ -188,6 +192,10 @@ export function createSpeechRouteHandler(dependencies: SpeechRouteDependencies) 
         503,
         origin,
       );
+    }
+    // Checked before admission so a busy refusal spends none of the budget.
+    if (pairedDeviceId !== undefined && pairedClipsInFlight.size >= PAIRED_TRANSCRIPTION_SLOTS) {
+      return busy(origin);
     }
 
     const release = gates.transcription.tryAcquire();

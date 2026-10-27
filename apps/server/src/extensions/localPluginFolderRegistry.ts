@@ -110,24 +110,41 @@ export class LocalPluginFolderRegistry {
       ...(entry.content === undefined ? {} : { content: entry.content }),
     }));
     const packageInput: PluginPackageInput =
-      loaded.format === "codex-plugin"
+      loaded.format === "language-server-package"
         ? {
+            layout: "language-server-package",
             source,
             format: "directory",
             archiveBytes: loaded.archiveBytes,
-            manifest: loaded.codexManifest,
-            entries,
+            // A language server may run its one binary and nothing else, so
+            // its files keep their execute permission for inspection to judge.
+            entries: loaded.entries.map((entry) => ({
+              path: entry.path,
+              kind: entry.kind === "directory" ? "directory" : "file",
+              ...(entry.content === undefined ? {} : { content: entry.content }),
+              ...(entry.executable === true ? { executable: true } : {}),
+            })),
             appVersion: this.#appVersion,
             platform: this.#platform,
           }
-        : {
-            source,
-            format: "directory",
-            archiveBytes: loaded.archiveBytes,
-            entries,
-            appVersion: this.#appVersion,
-            platform: this.#platform,
-          };
+        : loaded.format === "codex-plugin"
+          ? {
+              source,
+              format: "directory",
+              archiveBytes: loaded.archiveBytes,
+              manifest: loaded.codexManifest,
+              entries,
+              appVersion: this.#appVersion,
+              platform: this.#platform,
+            }
+          : {
+              source,
+              format: "directory",
+              archiveBytes: loaded.archiveBytes,
+              entries,
+              appVersion: this.#appVersion,
+              platform: this.#platform,
+            };
     const registered: RegisteredLocalPluginFolder = {
       source,
       absolutePath: loaded.pluginRoot,

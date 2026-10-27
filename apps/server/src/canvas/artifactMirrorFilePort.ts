@@ -1,5 +1,6 @@
-import { mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { constants, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { openConfinedPath } from "../confinedPathOpen";
 import type { ArtifactMirrorFilePort } from "./artifactMirrorService";
 
 /**
@@ -41,9 +42,25 @@ export function createArtifactMirrorFilePort(): ArtifactMirrorFilePort {
       await writeFile(absolutePath, contents, "utf8");
     },
 
-    async read(absolutePath) {
+    async read(absolutePath, root) {
+      // A repository destination is the Code checkout or Work folder an agent
+      // can rename folders in. A plain read followed an ancestor of the bundle
+      // swapped for a link to a host folder holding the same names, and handed
+      // host bytes to re-import. The path is resolved and contained first, and
+      // the open must land on that canonical path.
       try {
-        return await readFile(absolutePath, "utf8");
+        const canonicalPath = await realpath(absolutePath);
+        if (!isContained(root, canonicalPath)) return undefined;
+        const file = await openConfinedPath(
+          canonicalPath,
+          constants.O_RDONLY | constants.O_NONBLOCK,
+        );
+        try {
+          if (!(await file.stat()).isFile()) return undefined;
+          return await file.readFile("utf8");
+        } finally {
+          await file.close().catch(() => undefined);
+        }
       } catch {
         return undefined;
       }

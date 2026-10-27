@@ -190,12 +190,17 @@ Its seam and companion are built: the `language-server` component kind, the
 pure launch policy, the read and document contracts, the remote-approvable
 `code.language.read` action, and the server's confined, receipted,
 crash-limited language servers behind `POST /api/code/language/documents` and
-`POST /api/code/language/read`. The bundled TypeScript server is the only
-component. The Monaco editor calls those routes through the Code client: it
-shows the server's diagnostics as markers and opens a definition in another
-file through the ordinary file-open path, locally and from a paired device. A
-Settings › Code switch, stored in the journaled Code settings, turns the
-bundled server off, and the host then answers `turned-off`.
+`POST /api/code/language/read`. Besides the bundled TypeScript server, a
+person can add a `static` server from a local folder holding an
+`octant-language-server.json` package document: it installs through the
+extension package store untrusted and disabled, its review names the binary,
+its digest, its languages, and its class, and it serves only once trusted and
+switched on, verified against that digest at every start. The Monaco editor
+calls those routes through the Code client: it shows the server's diagnostics
+as markers and opens a definition in another file through the ordinary
+file-open path, locally and from a paired device. A Settings › Code switch,
+stored in the journaled Code settings, turns the bundled server off, and the
+host then answers `turned-off`.
 
 **Host resources.** `GET /api/host/resources` is a read-only snapshot of this
 host's load: CPU use averaged over a short sample of the process's CPU times,
@@ -6940,7 +6945,16 @@ mechanisms are:
   anyone who can write the checkout, the grant requires Git's reciprocal
   record: the `gitdir` sits in a `worktrees` directory, its `gitdir` file
   points back at this marker, and its `commondir` resolves to the main
-  repository's `.git`. On macOS each ancestor of the two paths gets literal
+  repository's `.git`. The host reads every pointer through an open that must
+  land on its canonical path (as for host reads of a bound root) and compares
+  the backlink with the canonical marker path rather than resolving the marker
+  again: a marker that passed a first look and was then swapped for a link to
+  another linked worktree's marker made the pointer read and `realpath(marker)`
+  both follow it, so that repository's metadata was granted, writable for a
+  mutation. The `gitdir` and `commondir` files sit outside the bound root and
+  their contents are untrusted by design; each path they name is resolved and
+  checked structurally, so a link there yields nothing their writer could not
+  write directly. On macOS each ancestor of the two paths gets literal
   `file-read-metadata` only, for Git's component-by-component walk, plus
   literal reads of the two xcode-select links the `/usr/bin/git` shim needs;
   on Linux the same paths are bound, and only when they exist. Write on that
@@ -7122,7 +7136,18 @@ mechanisms are:
   because listings report its kind and size without opening the file: a path
   `stat` after the swap put a host file's size in the Files panel. An entry
   the host process cannot open is therefore not listed. Canvas refresh opens its source through the same open, so
-  a link anywhere in that path refuses it too. A Linux listing enumerates the held directory through
+  a link anywhere in that path refuses it too. Artifact mirror re-import reads
+  its bundle the same way: the bundle must resolve inside the destination root
+  it was written under, and the open must land on that path, because a plain
+  read followed a mirrored folder swapped for a link to a host folder. A
+  checkout's `.git` marker is read through the same open; see the confined Git
+  rule for the linked-worktree pointers it leads to. The managed-worktree
+  identity check, the folder browser's repository test, and managed-clone
+  verification never read a marker themselves: Git reads it, and each acts only
+  on an answer it checks again (the gitdir's backlink and an unchanged marker
+  inode, a reported top level equal to the browsed folder, a common directory
+  inside a staging folder Octant created), so a swapped marker yields a refusal
+  rather than host bytes or a grant. A Linux listing enumerates the held directory through
   `/proc/self/fd/N`; a macOS listing resolves the path once more, so every name
   it yields is re-resolved and a name present in both the root and the
   swapped-in folder is the remaining residual there. Hard links are not
