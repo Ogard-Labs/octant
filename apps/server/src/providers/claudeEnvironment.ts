@@ -57,7 +57,7 @@ export const REQUIRED_GUARDS = ISOLATED_CLAUDE_LAUNCH_GUARDS;
  * Every Claude launch names Octant as its client. The runtime sends the
  * label with each request, and the plan meters read it: the 5-hour window
  * drains roughly twice as fast per token under the Agent SDK's default
- * `sdk-*` labels as under any named client (measured across several
+ * `sdk-*` labels as under a named client (measured across several
  * accounts and plans, 2026-09-25 through 2026-10-27; Anthropic has not
  * said whether that weighting is intended). A named client is also the
  * attribution the runtime's own hosts use, and setting it here drops a

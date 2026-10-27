@@ -7056,6 +7056,11 @@ mechanisms are:
   entrypoint), so from Octant it is absent with or without the umbrella. A
   host that exports `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` itself keeps
   the umbrella on every launch; only that disabling value crosses.
+  Every Claude launch also names Octant as its client: both launch shapes set
+  `CLAUDE_CODE_ENTRYPOINT=octant`, and an inherited label never crosses. The
+  runtime sends the label with every request, and the plan meters read it;
+  the measurements and the revisit condition live with the launch-environment
+  rules in [Provider runtimes](design/provider-runtimes.md).
   A confined Claude Plan launch reads the assigned leaf of that account's
   state directory (`~/.claude` or `~/.claude-accounts/<instanceId>`) and
   writes only `sessions/` and its own session in `projects/`: the

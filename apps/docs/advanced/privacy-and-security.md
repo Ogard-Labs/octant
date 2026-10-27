@@ -225,6 +225,12 @@ Remote Control stay out because Octant starts the runtime without them. If
 you export `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` yourself, Octant
 passes it through.
 
+Octant also names itself as the launching client: every Claude launch sets
+`CLAUDE_CODE_ENTRYPOINT=octant`. The runtime already sends a client label
+with each request; Octant's launches now carry Octant's name instead of the
+generic SDK one, and Anthropic's plan metering reads that label. The label
+is attribution only: no Project content rides on it.
+
 ## Remote transport
 
 Remote access is HTTPS-only with browser-trusted certificates; certificate

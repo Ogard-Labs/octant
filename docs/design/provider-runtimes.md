@@ -89,7 +89,7 @@ Every Claude launch names Octant as its client: both launch shapes set
 environment never crosses (the passthrough list drops it with the rest of the
 host's `CLAUDE_*` variables). The runtime sends the label with every request,
 and the plan meters read it: the 5-hour window drains roughly twice as fast
-per token under the Agent SDK's default `sdk-*` labels as under any named
+per token under the Agent SDK's default `sdk-*` labels as under a named
 client, measured by several parties across accounts and plans
 (2026-09-25 through 2026-10-27; Anthropic has not said whether the weighting
 is intended, and the Agent SDK writes its own `sdk-ts` only when the variable
