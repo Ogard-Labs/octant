@@ -831,9 +831,9 @@ Rules this slice resolved:
   request, so every frame is authorized like a screenshot: the lease service
   re-checks the thread, the caller's window or device, the recipe, the
   driver, and the Computer use setting before reading it, and nothing is
-  stored. A held stream would have needed its own re-check loop, and the
-  remote listener bounds each response's size. A tab reads about four frames
-  a second while its window shows and one every ten seconds while hidden.
+  stored. A held stream would have needed its own re-check loop. A tab reads
+  about four frames a second while its window shows and one every ten seconds
+  while hidden.
 - **A frame is bounded before anyone decodes it.** The host passes on a frame
   only when its declared size fits the recipe's screen, its bytes fit that
   screen uncompressed, and it is the image it claims to be: a PNG's own
