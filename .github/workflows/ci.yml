@@ -172,3 +172,14 @@ jobs:
           src/code/codeLanguageServiceProcess.test.ts
           src/code/installedLanguageServersProcess.test.ts
           src/code/codeDebugServiceProcess.test.ts
+      # An outside provider driver runs under its own Seatbelt profile and
+      # Linux refuses to start one, so its escape tests (network, files
+      # outside its package, the home folder, exec, host variables) skip on
+      # the server shards and only run here. The Cua daemon port finds the
+      # home with `/usr/bin/id -P` on macOS and `getent` on Linux; its home
+      # test needs the daemon under the recorded home to answer, so this is
+      # the evidence the macOS lookup returns a home.
+      - run: >-
+          bun run --cwd apps/server test --
+          src/providers/outsideDriverProcess.escape.test.ts
+          src/computerUse/desktopDaemonPort.test.ts

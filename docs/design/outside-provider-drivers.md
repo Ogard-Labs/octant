@@ -26,7 +26,8 @@ process) is built: one supervised process per instance under the driver
 profile from the shared confinement builder, a fixed environment, the
 process's stdio as the proxy's channel, the crash limit, and `host-prohibited`
 on Linux (see [Driver process rules](#driver-process-rules)); its acceptance,
-the escape tests on macOS, is the maintainer's to run. Slice 5 (admission end
+the escape tests on macOS, runs in the `macos-15` CI job (pending its first
+run there). Slice 5 (admission end
 to end) is built: trusting the source admits the selected digest, a provider
 is added from an effective driver (off, at a local window), its first check
 starts the driver's process, the host runs Verify tools through the proxy,
@@ -244,7 +245,8 @@ the fail-closed option.
   fork, no network, no Mach service. The builder's own denials (the Keychain,
   `/private` outside these grants, other people's home folders) apply as for
   every confined launch. None of this is measured on macOS yet: the escape
-  tests in `outsideDriverProcess.escape.test.ts` are that measurement, and a
+  tests in `outsideDriverProcess.escape.test.ts` are that measurement, run by
+  the `macos-15` CI job (pending its first run there), and a
   grant the runtime turns out to need is added only with its observed
   failure.
 - **The environment.** Exactly `PATH=/usr/bin:/bin`, `LANG=en_US.UTF-8`, and
@@ -702,7 +704,7 @@ and verify it without macOS, accounts, or hardware.
 | 1   | Outside family identity                | `outside-harness-endpoint` kind, instance arm with driver reference, `outside-endpoint` host runtime, matrix column; nothing admits it yet, so an instance of it reports a structured block and no models                                            | Contract tests; `providerFeatureMatrix.test.ts`; replay of an existing journal; typecheck consumers           | Yes                                                                          |
 | 2   | Outside driver manifest and quarantine | Public outside entry schema; local-folder inspection accepts it and refuses capabilities, contributions, executables, install scripts, bundled-kind claims; install leaves it quarantined; remote and structured-reference lifecycle actions refused | Schema tests; inspector tests; route permission negatives                                                     | Yes                                                                          |
 | 3   | Wire protocol and host proxy           | Protocol schemas; proxy implementing `HarnessEndpointDriver` over an in-memory channel; brokered `http/request` with per-instance lease and origin check; ceiling clamp; closed reasons                                                              | `runHarnessEndpointConformance` against the proxy with a misbehaving fixture; credential and origin negatives | Yes                                                                          |
-| 4   | Confined driver process                | Supervisor launch with the driver profile and minimal environment; one process per instance; Linux reports `host-prohibited`                                                                                                                         | Escape tests on macOS: network, files outside the package, exec, environment; crash-limit test                | Code and Linux refusal yes; acceptance needs a macOS host                    |
+| 4   | Confined driver process                | Supervisor launch with the driver profile and minimal environment; one process per instance; Linux reports `host-prohibited`                                                                                                                         | Escape tests on macOS: network, files outside the package, exec, environment; crash-limit test                | Code and Linux refusal yes; acceptance runs in the `macos-15` CI job         |
 | 5   | Admission end to end                   | Trust, enable, add provider, connection check, host-run Verify tools, digest-bound records, disable and uninstall behaviour; Settings catalog group                                                                                                  | Server integration test with the fixture driver; rendered Settings QA; live loopback smoke on macOS           | Server and rendered QA yes; live smoke needs macOS with a local model server |
 | 6   | Provenance                             | Publisher signature verification, key pin at first trust, quarantined updates that clear verification, rollback                                                                                                                                      | Signature and update tests; journal replay                                                                    | Yes (decision 3)                                                             |
 | 7   | Author kit and example driver          | Out-of-process conformance kit and serve helper; the example loopback driver passes it                                                                                                                                                               | Kit tests; example driver in CI                                                                               | Yes; npm publication is a maintainer action (decision 8)                     |

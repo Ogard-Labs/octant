@@ -9,7 +9,7 @@ import {
   symlinkSync,
 } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -64,11 +64,17 @@ afterEach(async () => {
 /**
  * A home directory with a real test daemon listening on `socket` under it
  * (`.cua/cua.sock` unless given), mode 0600 as Cua's daemon sets it. It
- * speaks just enough gRPC-Web over HTTP/1.1 to answer the port.
+ * speaks just enough gRPC-Web over HTTP/1.1 to answer the port. The home is
+ * a new temporary folder unless `existingHome` is given; there only the
+ * socket's own folder is created, and removed afterwards.
  */
-async function daemonHome(answers: Readonly<Record<string, Answer>> = {}, socket = SOCKET) {
-  const home = mkdtempSync(join(tmpdir(), "octant-daemon-"));
-  homes.push(home);
+async function daemonHome(
+  answers: Readonly<Record<string, Answer>> = {},
+  socket = SOCKET,
+  existingHome?: string,
+) {
+  const home = existingHome ?? mkdtempSync(join(tmpdir(), "octant-daemon-"));
+  homes.push(existingHome === undefined ? home : join(home, dirname(socket)));
   mkdirSync(join(home, dirname(socket)), { mode: 0o700 });
   const seen: Array<Seen> = [];
   const server = createServer((request, response) => {
@@ -372,14 +378,19 @@ describe("desktop daemon port", () => {
   });
 
   it("walks from the home the user database records, whether HOME points elsewhere or is unset", async () => {
-    // A path no real home has, so the walk from the real one never reaches a daemon.
-    const socket = ".octant-daemon-port-test/daemon.sock";
-    const { home, seen } = await daemonHome({}, socket);
-    const elsewhere = await callWithHome(home, socket);
-    const unset = await callWithHome(undefined, socket);
-    expect(elsewhere).not.toMatchObject({ status: "answered" });
-    expect(elsewhere).toEqual(unset);
-    expect(seen).toEqual([]);
+    // One daemon in a decoy home that HOME names, and one at the same path
+    // under the home the user database records. Only the recorded one may
+    // answer. Asking only that the decoy stay silent passed even when the
+    // lookup refused, since both calls then refuse alike, which left macOS
+    // `id -P` unproven. Node's `userInfo()` reads the user database itself.
+    const socket = `.octant-daemon-port-test-${process.pid}-${Date.now()}/daemon.sock`;
+    const decoy = await daemonHome({}, socket);
+    const recorded = await daemonHome({}, socket, userInfo().homedir);
+    const answered = { status: "answered", grpcStatus: 0 };
+    await expect(callWithHome(decoy.home, socket)).resolves.toMatchObject(answered);
+    await expect(callWithHome(undefined, socket)).resolves.toMatchObject(answered);
+    expect(recorded.seen).toHaveLength(2);
+    expect(decoy.seen).toEqual([]);
   });
 
   it("refuses when the user database has no record of Octant's user", async () => {
