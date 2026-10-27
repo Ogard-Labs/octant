@@ -145,6 +145,21 @@ describe("Linux Full access extension denials", () => {
     );
   });
 
+  it("refuses a setuid Bubblewrap reached through a link, as an alternatives-managed bwrap is", () => {
+    const { boundRoot, bwrapPath, root } = fixture();
+    const skills = join(root, "skills");
+    mkdirSync(skills);
+    chmodSync(bwrapPath, 0o4755);
+    const linked = join(root, "bwrap-link");
+    symlinkSync(bwrapPath, linked);
+    expect(() =>
+      buildLinuxAllowDefaultDenyLaunch(
+        { executable: "/bin/true", args: ["acp"], cwd: boundRoot, denyPaths: [skills] },
+        { bwrapPath: linked },
+      ),
+    ).toThrow(`${linked} is setuid`);
+  });
+
   it("reports a Bubblewrap without the setuid bit as unprivileged and launches through it", () => {
     const { boundRoot, bwrapPath, root } = fixture();
     const skills = join(root, "skills");
