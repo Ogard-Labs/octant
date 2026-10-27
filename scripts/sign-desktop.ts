@@ -60,6 +60,17 @@ export const SIGNING_ORDER = [
  */
 export const MANAGED_TOOLS_PATH = "Contents/Resources/managed-tools";
 
+/**
+ * The bundled TypeScript language server, a Mach-O executable the host runs
+ * as a confined child for the Code editor. Notarization refuses any
+ * executable in the bundle without a Developer ID signature, the hardened
+ * runtime, and a secure timestamp, so it is signed like the vendored tools:
+ * without Octant's entitlements, because it compiles no JavaScript and
+ * records nothing, and an entitlement would only widen what it may do.
+ */
+export const BUNDLED_LANGUAGE_SERVER_SIGNING_PATH =
+  "Contents/Resources/app/apps/server/node_modules/@typescript/typescript-darwin-arm64/lib/tsc";
+
 // Thin 64-bit Mach-O and universal (fat, 32- and 64-bit offset) binaries, in
 // either byte order.
 const MACH_O_MAGIC = new Set([
@@ -281,6 +292,12 @@ export async function signAndNotarizeDesktop(input: {
   for (const target of await findMachOFiles(`${input.appPath}/${MANAGED_TOOLS_PATH}`)) {
     await input.run(createCodesignArgv({ identity: input.credentials.identity, target }));
   }
+  await input.run(
+    createCodesignArgv({
+      identity: input.credentials.identity,
+      target: `${input.appPath}/${BUNDLED_LANGUAGE_SERVER_SIGNING_PATH}`,
+    }),
+  );
   for (const relativePath of SIGNING_ORDER) {
     await input.run(
       createCodesignArgv({
