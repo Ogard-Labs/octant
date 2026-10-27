@@ -471,10 +471,7 @@ export class CodeLanguageService {
       record.connection?.notify("textDocument/didOpen", { textDocument: documentItem(document) });
     } else {
       if (document.text !== text) {
-        const editorHolds = [...document.holders].some(
-          (candidate) => !candidate.startsWith(AGENT_HOLDER_PREFIX),
-        );
-        if (editorHolds) return { status: "unsaved-edits" };
+        if (editorHolds(document)) return { status: "unsaved-edits" };
         document.text = text;
         document.version += 1;
         // What the server pushed was for the old text.
@@ -487,11 +484,18 @@ export class CodeLanguageService {
       document.holders.add(holder);
       document.lastTouched = now;
     }
-    return this.#answer(record, document, request, {
+    const version = document.version;
+    const answer = await this.#answer(record, document, request, {
       threadId: request.threadId,
       checkoutId: request.checkoutId,
       fileId: root.fileId,
     });
+    // An editor that changed the text while the server answered may have had
+    // the answer computed from its draft; that answer never reaches the agent.
+    if (document.version !== version && editorHolds(document)) {
+      return { status: "unsaved-edits" };
+    }
+    return answer;
   }
 
   /** Asks a ready server one read about a document it holds. */
@@ -946,6 +950,13 @@ export class CodeLanguageService {
   #release(record: ServerRecord, document: OpenDocument, fileKey: string, at = this.#now()): void {
     document.holders.delete(fileKey);
     this.#documents.delete(fileKey);
+    // The text an editor leaves behind may be a draft the person is
+    // discarding. Kept open for an agent's hold, the server would go on
+    // reading it for the agent's reads of other files, so the document closes
+    // and an agent's next read of it reopens the saved file.
+    if (!isAgentHolder(fileKey) && [...document.holders].every(isAgentHolder)) {
+      document.holders.clear();
+    }
     if (document.holders.size > 0) return;
     record.documents.delete(document.uri);
     record.pushed.delete(document.uri);
@@ -1000,6 +1011,14 @@ export class CodeLanguageService {
       }
     })();
   }
+}
+
+function isAgentHolder(holder: string): boolean {
+  return holder.startsWith(AGENT_HOLDER_PREFIX);
+}
+
+function editorHolds(document: OpenDocument): boolean {
+  return [...document.holders].some((holder) => !isAgentHolder(holder));
 }
 
 function isActiveThread(thread: CodeThread): boolean {

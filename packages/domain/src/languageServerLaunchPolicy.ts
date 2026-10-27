@@ -22,7 +22,10 @@ export interface LanguageServerLaunchRequest {
   /** The posture of the Code thread whose read starts the server. */
   readonly posture: ProviderExecutionPolicy;
   readonly platform: LanguageServerHostPlatform;
-  /** Who caused the start: a local window, or a paired device's read. */
+  /**
+   * Who caused the start: a local window, or anything that is not the person
+   * at the machine (a paired device's read, or an agent's tool call).
+   */
   readonly startedBy: PrincipalKind;
   /**
    * The shell-command approval for this checkout and component. Only a

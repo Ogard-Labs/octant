@@ -548,7 +548,11 @@ design left a choice open.
   than the saved file's, the read answers `unsaved-edits` and changes nothing:
   the person's draft is neither replaced on the server nor read out to a
   provider. A file only agents hold is brought up to the saved text on the
-  next read, and an agent's hold closes under the ten-minute idle rule.
+  next read, and an agent's hold closes under the ten-minute idle rule. When
+  the last editor closes a file, the agents' holds on it close too, so a
+  draft the person discards is not kept on the server for the agent's reads
+  of other files; the agent's next read reopens the saved file. An answer
+  computed while an editor changed the file's text is `unsaved-edits`.
   Residual: a diagnostic for a saved file can still name something from
   another file's unsaved draft, since one server reads the whole checkout.
 - **Checks.** Each call is decoded against its schema, wrapped as a

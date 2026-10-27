@@ -679,10 +679,31 @@ describe("Code language service reads for an agent", () => {
       { scopeId, principal: "local-window" },
       { kind: "close", threadId: test.state.thread.id, checkoutId: plainCheckout().id, fileId },
     );
+    expect((await test.agent("b.ts")).status).toBe("diagnostics");
     writeFileSync(join(paths.checkout, "b.ts"), "export const fixed = 1;\n");
     expect((await test.agent("b.ts")).status).toBe("diagnostics");
     expect(changes(log).at(-1)).toBe("export const fixed = 1;\n");
     expect(test.launches()).toBe(1);
+  });
+
+  it("closes a draft the person discards even when an agent read the file first", async () => {
+    const { test, log, paths } = fake();
+    const saved = readFileSync(join(paths.checkout, "b.ts"), "utf8");
+    expect((await test.agent("b.ts")).status).toBe("diagnostics");
+    const fileId = syncedFileId(await test.open("b.ts", { text: saved }));
+    const scope = { threadId: test.state.thread.id, checkoutId: plainCheckout().id, fileId };
+    await test.service.syncDocument(
+      { scopeId, principal: "local-window" },
+      { kind: "change", ...scope, text: `${saved}export const draftOnly = 1;\n` },
+    );
+    await test.service.syncDocument(
+      { scopeId, principal: "local-window" },
+      { kind: "close", ...scope },
+    );
+    // The server must not go on reading the discarded draft for the agent's
+    // later reads of other files.
+    await eventually(() => logged(log).some((entry) => entry.method === "textDocument/didClose"));
+    expect((await test.agent("b.ts")).status).toBe("diagnostics");
   });
 
   it("answers too-large for a file past the server's frame", async () => {
