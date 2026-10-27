@@ -236,7 +236,8 @@ under **Outside drivers**, marked as an outside driver rather than bundled.
 
 Its setup adds a provider in place: a name, the address of the service the
 driver speaks to (HTTPS, or HTTP on this computer), how the key is sent, the
-key, and the model IDs to offer. The provider is added off. Turning it on
+key, and the model IDs to offer. The key is saved in the host's credential
+store (the Keychain on a Mac). The provider is added off. Turning it on
 starts nothing; **Check connection** starts the driver in its own confined
 process, with no network and none of your files, and Octant makes every
 request for it, adding the key itself, only to the address you entered. Only
@@ -491,18 +492,21 @@ dialog walks through five steps:
 Supported profiles:
 
 - **OpenAI-compatible** HTTP (`auto`, `responses`, or `chat-completions`;
-  an API key, none on this Mac, or your organization account)
+  an API key, none on this computer, or your organization account)
 - **Anthropic-compatible** HTTP (`auto` or `messages`; an API key, none on
-  this Mac, or your organization account)
+  this computer, or your organization account)
 - **Azure AI Foundry** (OpenAI-compatible v1 profile; base URL must end with
   `/openai/v1/`; an API key or your organization account; at least one
   deployment)
 - **Ollama** local HTTP (loopback origin only)
 
-API keys are stored only by the Octant desktop app. In a browser, an endpoint
-that needs a key is added without one and reads **Needs key** until you add the
-key in the desktop app; an endpoint that needs no key, such as Ollama or a
-server on this computer, works fully. If a
+API keys are stored only by the Octant desktop app, in the host's credential
+store: Settings says **Saved in this Mac's Keychain** on a Mac and **Saved in
+this computer's credential store** on Linux, where it is Secret Service. In a
+browser, an endpoint that needs a key is added without one and reads **Needs
+key** until you add the key in the desktop app on the host's computer; an
+endpoint that needs no key, such as Ollama or a server on this computer, works
+fully. If a
 configured endpoint lists far more models than you set up, such as an Azure
 resource that lists every base model, **Settings → Octant Harness** shows the
 models you configured first and the rest under **Discovered on the endpoint**;
@@ -575,9 +579,10 @@ Image profiles.
 
 ### Credentials
 
-Credentials are write-only and stored as indirect references in the macOS
-Keychain — never returned to the interface, never journaled, never placed in
-process arguments or diagnostics. Remote endpoints require bearer or API-key
+Credentials are write-only and stored as indirect references in the host's
+credential store (the macOS Keychain, or Secret Service on Linux) — never
+returned to the interface, never journaled, never placed in process arguments
+or diagnostics. Remote endpoints require bearer or API-key
 authentication; anonymous access is accepted only for loopback. OAuth and
 subscription modes work where the official runtime supports them and are
 never silently replaced by API-key modes.

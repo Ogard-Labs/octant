@@ -4,6 +4,7 @@ import {
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { useId, useRef, useState, type FormEvent } from "react";
+import { hostCredentialStore, thisComputerName, useHostPlatform } from "../../platform";
 import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
@@ -36,6 +37,7 @@ export interface OutsideDriverAddFormProps {
  */
 export function OutsideDriverAddForm(props: OutsideDriverAddFormProps) {
   const ids = useId();
+  const hostPlatform = useHostPlatform();
   const [name, setName] = useState(props.listing.displayName);
   const [address, setAddress] = useState("");
   const [keyChoice, setKeyChoice] = useState<KeyChoice>("bearer");
@@ -153,14 +155,14 @@ export function OutsideDriverAddForm(props: OutsideDriverAddFormProps) {
             type="password"
           />
           <span className="endpoint-flow__hint" id={`${ids}-key-hint`}>
-            Saved in this Mac&apos;s Keychain. Octant adds it to each request itself; the driver
-            never sees it.
+            Saved in {hostCredentialStore(hostPlatform)}. Octant adds it to each request itself; the
+            driver never sees it.
           </span>
         </div>
       ) : (
         <p className="endpoint-flow__note">
           This browser can&apos;t store keys. Add the provider here, then add its key in the Octant
-          desktop app on this Mac.
+          desktop app on {thisComputerName(hostPlatform)}.
         </p>
       )}
       <div className="endpoint-flow__field">

@@ -1234,7 +1234,10 @@ export function startOctantServer(
                 ) {
                   headers.set("access-control-allow-origin", origin);
                 }
-                return Response.json({ hosts: listHosts(localHostDisplayName()) }, { headers });
+                return Response.json(
+                  { hosts: listHosts(localHostDisplayName(), process.platform) },
+                  { headers },
+                );
               }
               return (
                 (await privateListenerAdministrationRoutes(request)) ??

@@ -6221,8 +6221,9 @@ retry with the same name is not blocked. Refusals travel as typed results
 (HTTP 200) like every other extension command, so the dialog shows the host's
 own sentence.
 On a host without a broker the add is refused when it carries a secret, with
-the Octant app named as the way to do it. **Found on this Mac.** The same Settings section lists what Claude Code and
-Codex already know on this computer, read-only: the MCP servers in Claude
+the Octant app named as the way to do it. **Found on this computer** ("Found
+on this Mac" on a macOS host). The same Settings section lists what Claude Code and
+Codex already know on the host's computer, read-only: the MCP servers in Claude
 Code's `~/.claude.json` (the person's own and the ones kept for a Project
 folder Octant knows), a Project's `.mcp.json`, and Codex's `[mcp_servers.*]`
 in `~/.codex/config.toml`; and the plugins each has installed (Claude Code's
@@ -8342,6 +8343,16 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   an unreachable host's cached items stay listed as stale and read-only, and
   an authority-bearing mutation is allowed only on a host whose read model is
   ready.
+- **Host platform in copy.** The host's identity report (`GET /api/hosts`,
+  pre-auth like `/health`) carries the host's `platform`, set from
+  `process.platform`; it is optional in the contract because an older host
+  does not send it. Its display name already told a Mac from anything else
+  before sign-in; the platform adds only which other OS. The renderer reads it from
+  the window's own host's answer, not from federation registry entries, which
+  are the client's records and carry no platform, and copy that names the
+  host's computer or credential store follows it. Before the answer arrives,
+  or from a host that sends none, copy uses the neutral "this computer" rather
+  than the window's platform, which is wrong exactly for a remote window.
 - **Local servers and Running services.** Listener observation is ephemeral,
   scoped to listening sockets of the current user, and never journaled. One
   classifier decides what may be listed at all: a system daemon, another user's

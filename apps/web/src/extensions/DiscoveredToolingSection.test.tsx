@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { DiscoveredAgentToolingListing } from "@octant/contracts/extension-rpc";
 import { describe, expect, it, vi } from "vitest";
+import { HostPlatformContext } from "../platform";
 import { DiscoveredToolingSection } from "./DiscoveredToolingSection";
 
 const listing: DiscoveredAgentToolingListing = {
@@ -42,7 +43,7 @@ const listing: DiscoveredAgentToolingListing = {
   notes: ["legacy (Claude Code): its sse transport is not one Octant connects to."],
 };
 
-describe("Found on this Mac", () => {
+describe("Found on the host's computer", () => {
   it("lists what the other tools know and adds a server with one click", async () => {
     const user = userEvent.setup();
     const applyDiscoveredTooling = vi.fn(
@@ -58,7 +59,7 @@ describe("Found on this Mac", () => {
         revision={0}
       />,
     );
-    const servers = await screen.findByRole("list", { name: "Servers found on this Mac" });
+    const servers = await screen.findByRole("list", { name: "Servers found on this computer" });
     expect(within(servers).getByText("docs")).toBeInTheDocument();
     expect(within(servers).getByText(/Claude Code · npx -y docs-mcp/)).toBeInTheDocument();
     expect(
@@ -67,7 +68,7 @@ describe("Found on this Mac", () => {
     expect(within(servers).getByRole("note")).toHaveTextContent("Uses API_HOST");
     const buttons = within(servers).getAllByRole("button", { name: "Add to Octant" });
     expect(buttons[1]).toBeDisabled();
-    const plugins = screen.getByRole("list", { name: "Plugins found on this Mac" });
+    const plugins = screen.getByRole("list", { name: "Plugins found on this computer" });
     expect(
       within(plugins).getByText(/Codex · Codex plugin · v1.1.0 · off there/),
     ).toBeInTheDocument();
@@ -103,7 +104,7 @@ describe("Found on this Mac", () => {
         revision={0}
       />,
     );
-    const plugins = await screen.findByRole("list", { name: "Plugins found on this Mac" });
+    const plugins = await screen.findByRole("list", { name: "Plugins found on this computer" });
     await user.click(within(plugins).getByRole("button", { name: "Review and import" }));
     await waitFor(() => expect(onPluginInspected).toHaveBeenCalledWith(preview));
     await user.click(within(plugins).getByRole("button", { name: "Review and import" }));
@@ -128,5 +129,37 @@ describe("Found on this Mac", () => {
       />,
     );
     await waitFor(() => expect(container).toBeEmptyDOMElement());
+  });
+
+  it("names the computer the host reports, not the window's", async () => {
+    // The scan reads the host's files, so a Mac window driving a Linux host
+    // must not say "this Mac".
+    Object.defineProperty(window.navigator, "platform", { value: "MacIntel", configurable: true });
+    try {
+      const section = (
+        <DiscoveredToolingSection
+          client={{ listDiscoveredTooling: async () => listing, applyDiscoveredTooling: vi.fn() }}
+          disabled={false}
+          onPluginInspected={vi.fn()}
+          onServerAdded={vi.fn()}
+          revision={0}
+        />
+      );
+      const { unmount } = render(
+        <HostPlatformContext.Provider value="linux">{section}</HostPlatformContext.Provider>,
+      );
+      expect(
+        await screen.findByRole("heading", { name: "Found on this computer" }),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/other agent tools on this computer already use/)).toBeVisible();
+      unmount();
+
+      render(<HostPlatformContext.Provider value="darwin">{section}</HostPlatformContext.Provider>);
+      expect(await screen.findByRole("heading", { name: "Found on this Mac" })).toBeInTheDocument();
+      expect(screen.getByRole("list", { name: "Servers found on this Mac" })).toBeVisible();
+      expect(screen.getByRole("list", { name: "Plugins found on this Mac" })).toBeVisible();
+    } finally {
+      Reflect.deleteProperty(window.navigator, "platform");
+    }
   });
 });

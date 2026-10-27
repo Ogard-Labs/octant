@@ -20,6 +20,12 @@ import {
   useCredentialStatus,
   type CredentialStatusController,
 } from "../../providers/ProviderSettingsCredentials";
+import {
+  credentialStoreName,
+  hostCredentialStore,
+  thisComputerName,
+  useHostPlatform,
+} from "../../platform";
 import { ChatOnlyVerify } from "../../providers/ChatOnlyVerify";
 import { ModelContextWindowField } from "../../providers/ModelContextWindowField";
 import type { ProviderOAuthSignInState } from "../../providers/ProviderOAuthSignIn";
@@ -298,6 +304,9 @@ function AccessSection(
   },
 ) {
   const { instance, credential } = props;
+  // Keys and sign-ins live on the host, so the host names its computer.
+  const hostPlatform = useHostPlatform();
+  const computer = thisComputerName(hostPlatform);
   const takesKey = endpointTakesKey(instance);
   if (props.signInEndpoint) {
     return (
@@ -339,7 +348,7 @@ function AccessSection(
           )}
           {props.credentialManagementAvailable ? null : (
             <p className="endpoint-detail__note">
-              Sign-in starts from the Octant app or a browser on this Mac.
+              Sign-in starts from the Octant app or a browser on {computer}.
             </p>
           )}
         </div>
@@ -351,14 +360,14 @@ function AccessSection(
   if (!takesKey) return null;
   const status = credential.status;
   const detail = !props.credentialManagementAvailable
-    ? "Keys are added and replaced from the Octant app on this Mac."
+    ? `Keys are added and replaced from the Octant app on ${computer}.`
     : status === "stored"
-      ? "Saved in this Mac's Keychain. Octant can't show it."
+      ? `Saved in ${hostCredentialStore(hostPlatform)}. Octant can't show it.`
       : status === "missing"
         ? "No key is saved for it yet."
         : status === "checking"
-          ? "Checking the Keychain…"
-          : "Octant couldn't read the Keychain.";
+          ? `Checking the ${credentialStoreName(hostPlatform)}…`
+          : `Octant couldn't read the ${credentialStoreName(hostPlatform)}.`;
   return (
     <SettingsSection title="API key">
       <div className="setgroup">

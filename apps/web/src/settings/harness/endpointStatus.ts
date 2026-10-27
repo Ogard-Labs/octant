@@ -1,8 +1,10 @@
 import type {
   HiddenProviderModelRef,
+  HostPlatform,
   ProviderInstance,
   ProviderObservedState,
 } from "@octant/contracts";
+import { thisComputerName } from "../../platform";
 import type { ProviderProbeFailure } from "../../providers/useProviderController";
 import type { ModelEndpointDriverKind } from "../../providers/providerSettingsPresentation";
 
@@ -61,6 +63,8 @@ export interface EndpointStatusInput {
    * missing key there is added in the desktop app rather than by a fix.
    */
   readonly keysHere?: boolean;
+  /** The platform the host reports, which names the computer a key is added on. */
+  readonly hostPlatform?: HostPlatform | undefined;
   /**
    * The host's credential store has no key for it and no check has run since,
    * as after an address change deleted the key. The endpoint then reads as
@@ -243,7 +247,7 @@ function keyNeeded(input: EndpointStatusInput): EndpointStatus {
     return {
       tone: "needs-you",
       label: NEEDS_KEY_LABEL,
-      sentence: "Add its API key in the Octant desktop app on this Mac.",
+      sentence: `Add its API key in the Octant desktop app on ${thisComputerName(input.hostPlatform)}.`,
     };
   }
   return {

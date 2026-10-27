@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { HostPlatformContext } from "../platform";
 import { AddMcpServerDialog } from "./AddMcpServerDialog";
 
 describe("Add MCP server", () => {
@@ -41,25 +42,34 @@ describe("Add MCP server", () => {
     });
   });
 
-  it("names the credential store of the computer a secret is kept on", () => {
-    // Only the window on the host can keep a secret, so the platform it
-    // reports is the host's. A Linux host read "this Mac's".
+  it("names the credential store of the host's computer, not the window's", () => {
+    // A Mac window driving a Linux host: the host keeps the secret, so the
+    // host's own report names its computer.
     Object.defineProperty(window.navigator, "platform", {
-      value: "Linux x86_64",
+      value: "MacIntel",
       configurable: true,
     });
     try {
-      render(
+      const dialog = (
         <AddMcpServerDialog
           client={{ addUserMcpServer: vi.fn() as never }}
           onAdded={vi.fn()}
           onClose={vi.fn()}
           open
           secretsAvailable
-        />,
+        />
+      );
+      const { unmount } = render(
+        <HostPlatformContext.Provider value="linux">{dialog}</HostPlatformContext.Provider>,
       );
       expect(
         screen.getByText(/A secret value is kept in this computer's credential store/),
+      ).toBeInTheDocument();
+      unmount();
+
+      render(<HostPlatformContext.Provider value="darwin">{dialog}</HostPlatformContext.Provider>);
+      expect(
+        screen.getByText(/A secret value is kept in this Mac's credential store/),
       ).toBeInTheDocument();
     } finally {
       Reflect.deleteProperty(window.navigator, "platform");

@@ -9,10 +9,11 @@ import {
   type ProviderRegistrySnapshot,
 } from "@octant/contracts";
 import type { ProviderClient } from "@octant/client-runtime/provider-client";
+import type { HostPlatform } from "@octant/contracts/host";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ProviderCreateForm } from "./ProviderSettingsConfiguration";
@@ -20,15 +21,27 @@ import { ProviderSettingsList } from "./ProviderSettingsList";
 import { ProviderSettingsView, type ProviderSettingsViewProps } from "./ProviderSettingsView";
 import { ModelEndpointSettingsView } from "../settings/ModelEndpointSettingsView";
 import { useProviderController } from "./useProviderController";
+import { HostPlatformContext } from "../platform";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
 
 const id = decodeProviderInstanceId("80000000-0000-4000-8000-000000000092");
 
-const renderProviderSettings = render;
+// Settings here run against a macOS host, which keeps keys in its Keychain,
+// unless a test names another host platform.
+function renderProviderSettings(ui: ReactElement, hostPlatform: HostPlatform = "darwin") {
+  function OnHost(props: { readonly children: ReactNode }) {
+    return (
+      <HostPlatformContext.Provider value={hostPlatform}>
+        {props.children}
+      </HostPlatformContext.Provider>
+    );
+  }
+  return render(ui, { wrapper: OnHost });
+}
 
-function renderExpanded(ui: ReactElement) {
-  const result = renderProviderSettings(ui);
+function renderExpanded(ui: ReactElement, hostPlatform: HostPlatform = "darwin") {
+  const result = renderProviderSettings(ui, hostPlatform);
   // Octant Harness: a single endpoint opens on its detail page, where its
   // configuration is always shown; with none, Add endpoint opens the form.
   const endpointLinks = screen.queryAllByRole("link", { name: /Open details$/ });
@@ -2438,6 +2451,24 @@ describe("ProviderSettingsView", () => {
     expect(await within(card).findByText("No key is saved for it yet.")).toBeVisible();
   });
 
+  it("names a Linux host's credential store, not the Keychain, for a saved key", async () => {
+    const pending = deferred<ProviderCredentialStatus>();
+    const props = {
+      ...fixture({ instance: httpProvider() }),
+      onProviderCredentialStatus: vi.fn(() => pending.promise),
+    };
+    renderExpanded(<ModelEndpointSettingsView {...props} />, "linux");
+    const card = screen.getByRole("region", { name: "Private gateway" });
+    expect(within(card).getByText("Checking the credential store…")).toBeVisible();
+    await act(async () => pending.resolve("stored"));
+    expect(
+      await within(card).findByText(
+        "Saved in this computer's credential store. Octant can't show it.",
+      ),
+    ).toBeVisible();
+    expect(within(card).queryByText(/Keychain|this Mac/)).not.toBeInTheDocument();
+  });
+
   it("shows a pending credential check without claiming the key is missing", async () => {
     const pending = deferred<ProviderCredentialStatus>();
     const props = {
@@ -3493,6 +3524,17 @@ describe("ProviderSettingsView", () => {
     const control = within(card).getByRole("switch", { name: "Enable Existing CLI" });
     expect(control).toHaveAttribute("aria-disabled", "true");
     expect(control).toHaveAccessibleDescription(/has not been scanned/i);
+  });
+
+  it("names the host's computer when a Linux host has not been scanned yet", () => {
+    renderProviderSettings(
+      <ProviderSettingsView {...fixture({ instance: provider({ enabled: false }) })} />,
+      "linux",
+    );
+    const card = screen.getByRole("article", { name: "Existing CLI" });
+    expect(
+      within(card).getByRole("switch", { name: "Enable Existing CLI" }),
+    ).toHaveAccessibleDescription(/^This computer has not been scanned for it yet\./);
   });
 
   it("keeps a manual endpoint enable-able and out of any detection group", () => {

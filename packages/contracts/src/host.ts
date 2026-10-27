@@ -27,15 +27,39 @@ export const HostHealth = Schema.Literal(
 );
 export type HostHealth = typeof HostHealth.Type;
 
+// ── Host platform ───────────────────────────────────────────────────────────
+
+/** The operating system the host process runs on, as Node names it in
+ *  `process.platform`. Copy that names the host's computer ("this Mac", the
+ *  Keychain) reads this, not the window's platform: a paired phone or a browser
+ *  on another computer runs on a different platform from the host it drives. */
+export const HostPlatform = Schema.Literal(
+  "aix",
+  "android",
+  "darwin",
+  "freebsd",
+  "haiku",
+  "linux",
+  "openbsd",
+  "sunos",
+  "win32",
+  "cygwin",
+  "netbsd",
+);
+export type HostPlatform = typeof HostPlatform.Type;
+
 // ── Host identity report ────────────────────────────────────────────────────
 
 /** Server-exposed identity and capability report for one host. In v1 the
- *  server always reports exactly one healthy local entry. */
+ *  server always reports exactly one healthy local entry. `platform` is
+ *  optional because a host built before it was reported, and a federation
+ *  entry the client synthesizes for a host it has not reached, do not know it. */
 export const HostIdentity = Schema.Struct({
   hostId: HostId,
   displayName: Schema.NonEmptyTrimmedString,
   health: HostHealth,
   capabilities: Schema.Array(Schema.NonEmptyTrimmedString),
+  platform: Schema.optional(HostPlatform),
 }).annotations(strict);
 export type HostIdentity = typeof HostIdentity.Type;
 

@@ -623,6 +623,12 @@ describe("startOctantServer", () => {
           expect(hosts.status).toBe(200);
           expect(hosts.headers.get("access-control-allow-origin")).toBe(rendererOrigin);
           expect(hosts.headers.get("vary")).toBe("Origin");
+          // The renderer names the host's computer from this, not from its own
+          // window: a browser on a Mac can drive a Linux host.
+          const hostsBody = yield* Effect.promise(() => hosts.json());
+          expect(hostsBody).toMatchObject({
+            hosts: [{ hostId: "local", platform: process.platform }],
+          });
 
           for (const path of ["/api/hosts", "/api/shell/local-session"]) {
             const foreign = yield* Effect.promise(() =>

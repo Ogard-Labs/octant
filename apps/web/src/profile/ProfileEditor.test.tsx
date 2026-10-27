@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { HostPlatformContext } from "../platform";
 import { ProfileEditor } from "./ProfileEditor";
 import type { AvatarImageEnvironment } from "./avatarImage";
 
@@ -183,10 +184,31 @@ describe("ProfileEditor", () => {
     expect(screen.getByText(/sends a one-time email hash to gravatar.com/)).toBeVisible();
   });
 
+  it("says the profile is kept on the host's computer, a Mac or not", () => {
+    const { unmount } = render(
+      <HostPlatformContext.Provider value="linux">
+        <Harness />
+      </HostPlatformContext.Provider>,
+    );
+    expect(screen.getByText(/^Kept on this computer\./)).toBeVisible();
+    unmount();
+
+    render(
+      <HostPlatformContext.Provider value="darwin">
+        <Harness />
+      </HostPlatformContext.Provider>,
+    );
+    expect(screen.getByText(/^Kept on this Mac\./)).toBeVisible();
+  });
+
   it("imports a Gravatar and records where the picture came from", async () => {
     const user = userEvent.setup();
     const onCommit = vi.fn();
-    render(<Harness onCommit={onCommit} />);
+    render(
+      <HostPlatformContext.Provider value="darwin">
+        <Harness onCommit={onCommit} />
+      </HostPlatformContext.Provider>,
+    );
 
     await user.type(screen.getByLabelText("Email (optional)"), "ada@example.com");
     await user.click(screen.getByRole("button", { name: "Use Gravatar" }));
