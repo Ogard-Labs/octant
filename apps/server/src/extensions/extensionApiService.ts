@@ -28,6 +28,10 @@ import {
   LanguageServerPackageRefusedError,
   languageServerPackageRefusalMessage,
 } from "./languageServerPackage";
+import {
+  OutsideProviderDriverRefusedError,
+  outsideProviderDriverRefusalMessage,
+} from "./outsideProviderDriverPackage";
 import { StandaloneSkillService } from "./standaloneSkillService";
 
 export interface ExtensionPackageResolverPort {
@@ -206,6 +210,9 @@ export class ExtensionApiService {
       }
       if (error instanceof LanguageServerPackageRefusedError) {
         return failure("invalid", languageServerPackageRefusalMessage(error.reason));
+      }
+      if (error instanceof OutsideProviderDriverRefusedError) {
+        return failure("invalid", outsideProviderDriverRefusalMessage(error.reason));
       }
       if (
         error instanceof ExtensionInspectionError ||

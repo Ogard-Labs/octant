@@ -12,14 +12,18 @@ and credentials and confinement
 
 **Delivery state.** Accepted 2026-10-26. Slice 1 (outside family identity) is
 built: the reserved kind, the instance arm with its driver reference, the
-`outside-endpoint` host runtime, and the capability matrix column. Nothing
-admits an outside driver yet, so an outside instance reports
-`driver-not-admitted` with no models and runs no turn; slices 2 and 3 are
-next. The maintainer authorized this scope as post-preview work and accepted
-the [maintainer decisions](#maintainer-decisions) below on 2026-10-26; the
-release boundary in `AGENTS.md` and the architecture is updated separately.
-Today only bundled drivers are admitted. Slices and their evidence are tracked
-in Linear; this file states the rules they implement.
+`outside-endpoint` host runtime, and the capability matrix column. Slice 2
+(outside driver manifest and quarantine) is built: the public outside entry
+schema, inspection of a local driver folder with closed refusals, a
+quarantined install, and the local-window-only lifecycle (see
+[Manifest, inspection, and quarantine](#manifest-inspection-and-quarantine)).
+Nothing admits an outside driver yet, so an outside instance reports
+`driver-not-admitted` with no models and runs no turn; slice 3 is next. The
+maintainer authorized this scope as post-preview work and accepted the
+[maintainer decisions](#maintainer-decisions) below on 2026-10-26; the release
+boundary in `AGENTS.md` and the architecture is updated separately. Today only
+bundled drivers are admitted. Slices and their evidence are tracked in Linear;
+this file states the rules they implement.
 
 ## Outcome
 
@@ -267,6 +271,66 @@ none were given, leaving overflow to the host's existing ladder.
   repeating installed and trusted from the activation context, as bundled
   entries do. Opening it starts nothing.
 
+### Manifest, inspection, and quarantine
+
+These rules resolve what the decisions above left to implementation; each
+takes the fail-closed option.
+
+- **The entry.** `OutsideProviderDriverEntry` (`@octant/plugin-api`) is
+  `{ driverKind, protocolVersions, manifest }`: the family kind, one or more
+  `harness-endpoint/<major>` versions, and an extension package manifest held
+  to the rules under [Marketplace and catalog](#marketplace-and-catalog). Its
+  entry point is a `.mjs` or `.js` file path inside the package with no
+  scheme and no `.` or `..` segment. `readOutsideProviderDriverEntry` returns
+  a closed `OutsideProviderDriverRefusalReason` instead of throwing.
+- **A bundled-kind claim** is a `driverKind` other than the family, a slug
+  equal to any `ProviderDriverKind` value, or a `builtin:` entry point. A slug
+  is the package's name in Settings and in `@` addressing, so a bundled
+  kind's name there would read as that driver.
+- **The driver document.** A folder is a driver package when its root holds
+  `octant-provider-driver.json`; such a folder is read as a driver and as
+  nothing else, and no other layout is read as a driver. A folder whose root
+  also holds a language server's `octant-language-server.json` is refused as
+  neither, since each of those packages is read as nothing else. The
+  document is the entry without the facts only the host can state: the
+  manifest's `extensionId`, `packageId`, `source`, and `digest`, and
+  provenance `reviewed` and `reviewedAt`. A document that states one is refused rather
+  than overwritten, so the document a person reviews is the one the host
+  used. The host derives the identity from the folder and the slug, so a
+  package cannot name itself into another package's identity, and records a
+  local folder as unreviewed.
+- **Source.** Only a `local-folder` source yields a driver until publisher
+  signatures exist ([decision 4](#maintainer-decisions)); a driver document
+  in any other source is refused as `source-unsupported`.
+- **Protocol.** A package that declares no version the host speaks
+  (`harness-endpoint/1` today) is refused at inspection as
+  `protocol-incompatible`, as an incompatible app range or platform already
+  is, rather than installed only to block later.
+- **Files.** Inspection refuses a package holding any file with an execute
+  permission, native code (a `.node`, `.dylib`, `.so`, `.dll`, or `.exe`
+  name, or a Mach-O, universal, ELF, or PE header under any name, since a
+  name proves nothing), or an install script (an install lifecycle script or
+  `gypfile` in any `package.json`, or a `binding.gyp`, either name matched in
+  any letter case, as a case-insensitive macOS volume reads it). The entry module must
+  exist and must not be executable; the package inspector holds every
+  provider-driver entry to that.
+- **Refusal copy.** The extension API answers each refusal reason with fixed
+  Octant copy; nothing from the package is repeated.
+- **Quarantined install.** Bundled drivers are never stored as packages, so
+  a stored package holding a provider-driver component is an outside driver.
+  The extension projection holds it `quarantined`, untrusted, and switched off
+  whenever its selected version changes (install, update, rollback), with an
+  `outside-driver-quarantined` diagnostic. Trust, switches, and runtime
+  evidence are recorded but leave the quarantine in place: lifting it is
+  admission's step, which binds trust to the digest, and until it lands every
+  component reports `quarantined`, so no structured reference or mention can
+  select one and no process exists.
+- **Local window only.** The lifecycle route refuses every command from a
+  paired device, in addition to remote forwarding never admitting it, and a
+  paired device cannot inspect or preview a registered driver folder, since
+  an inspection is what an install consumes. Registering a folder was already
+  local-window only.
+
 ### Conformance
 
 Conformance is enforced by the host, not trusted from the author:
@@ -334,7 +398,7 @@ put a package in front of the person. Controls marked new are this design's;
 | Swaps code under a trusted name (update, mirror, typosquat)         | New: digest-bound trust, publisher key pin, quarantined updates that clear verification                                                |
 | Points the key at an internal service or attacker host              | Existing endpoint rule: HTTPS or literal-loopback HTTP, origin-checked before the key is read; no cross-origin redirect                |
 | Exhausts the host (floods, hangs, crash loops)                      | Existing supervisor bounds plus new per-message cap and host-owned deadlines                                                           |
-| An agent, mention, routine, or paired device installs or trusts one | Existing and new: lifecycle actions only from a local window; structured references stay inert                                         |
+| An agent, mention, routine, or paired device installs or trusts one | Existing and new, built: lifecycle actions only from a local window; structured references stay inert; install stays quarantined       |
 | Impersonates a bundled provider                                     | New, built: one reserved family; package-name identity with an outside label; no bundled logo, account profile, or sign-in dialect     |
 
 Residual risk: the configured endpoint receives what the person sends it, as

@@ -29,12 +29,18 @@ import {
   readLanguageServerPackage,
   type LanguageServerPackageInput,
 } from "./languageServerPackage";
+import {
+  OutsideProviderDriverRefusedError,
+  readOutsideProviderDriverPackage,
+  type OutsideProviderDriverPackageInput,
+} from "./outsideProviderDriverPackage";
 import type { CuratedBuildIosAppsCatalogSource } from "./curatedBuildIosAppsCatalog";
 
 export type PluginPackageInput =
   | CodexPluginPackageInput
   | AgentPluginPackageInput
-  | LanguageServerPackageInput;
+  | LanguageServerPackageInput
+  | OutsideProviderDriverPackageInput;
 
 /**
  * A live Agent Plugins catalog source (today npm) that the resolver can search
@@ -247,8 +253,13 @@ export class CodexPluginPackageResolver implements ExtensionPackageResolverPort 
 
 function normalizePluginPackage(input: PluginPackageInput): ResolvedExtensionPackage {
   if ("layout" in input) {
-    const reading = readLanguageServerPackage(input);
-    if (reading.status === "refused") throw new LanguageServerPackageRefusedError(reading.reason);
+    if (input.layout === "language-server-package") {
+      const reading = readLanguageServerPackage(input);
+      if (reading.status === "refused") throw new LanguageServerPackageRefusedError(reading.reason);
+      return reading.resolved;
+    }
+    const reading = readOutsideProviderDriverPackage(input);
+    if (reading.status === "refused") throw new OutsideProviderDriverRefusedError(reading.reason);
     return reading.resolved;
   }
   if (isAgentPluginPackageInput(input)) {

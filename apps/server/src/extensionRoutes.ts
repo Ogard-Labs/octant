@@ -595,6 +595,35 @@ export function createExtensionRouteHandler(options: {
         origin,
       );
     }
+    if (principalContext.principal.kind !== "local-window") {
+      // Remote forwarding never admits these, and the route refuses them too,
+      // so no path from a paired device installs, trusts, or switches on a
+      // package. Inspecting an outside provider driver is the first step of
+      // admitting one, and inspection is remembered for install, so it stays
+      // with a local window as well.
+      if (url.pathname === "/api/extensions/lifecycle") {
+        return response(
+          failure("unauthorized", "Changing a package requires the Octant window on this host."),
+          401,
+          origin,
+        );
+      }
+      if (
+        (command.kind === "inspect-package" || command.kind === "preview-package") &&
+        command.source.kind === "local-folder" &&
+        options.localPluginFolderRegistry?.get(command.source.sourceRef)?.format ===
+          "outside-provider-driver"
+      ) {
+        return response(
+          failure(
+            "unauthorized",
+            "Reviewing a provider driver requires the Octant window on this host.",
+          ),
+          401,
+          origin,
+        );
+      }
+    }
     try {
       return response(await options.service.execute(command, request.signal), 200, origin);
     } catch {
