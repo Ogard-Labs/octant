@@ -517,6 +517,58 @@ design left a choice open.
   It takes `desktop` (the packaged app for this host) or `headless` (an
   artifact tarball).
 
+### Agent read rules
+
+Slice 7 settled these details, taking the more restrictive option where the
+design left a choice open.
+
+- **Tools.** `octant_code_diagnostics` and `octant_code_definition` are the
+  closed catalog's `code-diagnostics` and `code-definition`
+  (`packages/contracts/src/toolCatalog.ts`); their argument schemas and
+  definitions are in `@octant/contracts/code-language`. Both are Code only,
+  `filesystem`, and `project-file-reads`, so Plan keeps them, no posture asks,
+  and a marked thread is not asked afresh: they read only what the thread can
+  already read, through a server that cannot write, run other programs, or
+  reach the network. Their results mark nothing, as a file read marks
+  nothing. A profile allowlist names them by these tool names.
+- **Transport.** They travel through the provider SDK's ordinary app-managed
+  tool transport (`apps/server/src/code/codeLanguageAgentTools.ts`, added to
+  every Code turn through the runtime's contributed tools), so every runtime
+  that carries Octant's tools carries them. A provider without app-managed
+  tools is never offered them and refuses a turn that carries them as
+  `unsupported`. The SDK's chat conformance now also fails a driver that asks
+  for a tool its turn did not offer, since the host answers no other name.
+- **By path, as saved.** An agent names a file by its checkout-relative path,
+  as its other file tools do; it holds no editor document, so it has no file
+  reference. The read answers for the file as saved, and lines and columns
+  are one-based, as the agent's own reads and searches number them; the host
+  converts them. Reason: an agent reads and edits the saved file, so an answer
+  for other text, or counted from zero, points at the wrong line.
+- **Never an editor's draft.** When an editor holds the file with text other
+  than the saved file's, the read answers `unsaved-edits` and changes nothing:
+  the person's draft is neither replaced on the server nor read out to a
+  provider. A file only agents hold is brought up to the saved text on the
+  next read, and an agent's hold closes under the ten-minute idle rule.
+  Residual: a diagnostic for a saved file can still name something from
+  another file's unsaved draft, since one server reads the whole checkout.
+- **Checks.** Each call is decoded against its schema, wrapped as a
+  `ToolActionRequest` under the thread's authority as it stands, and passed
+  through the tool-call choke point. The language service then runs every
+  check an editor's read passes, in the same order, on the turn's window as
+  it stands when the call runs (the standing authority other Project-scoped
+  app-managed tools use). A refused read starts nothing.
+- **Starts.** The launch decision is asked as a start the person at the
+  machine did not make, as a paired device's is, so an agent can start a
+  `static` server and never a `repo-tooling` one (`local-host-required`, in
+  every posture). Reason: running repository tooling stays the person's act
+  at the machine (D4), and an agent's call is not that act. An agent's read
+  never resets the crash budget either; reopening the file in the editor stays
+  the person's retry.
+- **Answers.** Results keep the editor's bounds, and a definition outside the
+  checkout is only its label. `starting`, `crashed`, `timed-out`, `too-large`,
+  `unsaved-edits`, and each refusal come back as a tool error with one
+  sentence saying what to do next. Slice 7 adds no journal events.
+
 ### Data lifecycle and privacy
 
 - **Drafts.** Unsaved editor text goes from the renderer to the server over the
@@ -768,6 +820,24 @@ accounts or hardware.
      the tools.
    - _Verify:_ provider-sdk conformance. A real-provider smoke needs the
      maintainer's provider sign-in.
+   - _State:_ built; the real-provider smoke is the maintainer's. The provider
+     SDK's chat conformance carries both reads to a Code session in Plan and
+     answers one, proves a provider without app-managed tools refuses them
+     before sending, and fails a driver that asks for a tool the turn did not
+     offer (`chatConformance.test.ts`); every in-tree adapter's conformance
+     passes with that check. The Code runtime offers a Plan turn both reads
+     and answers one through the language service, and offers neither to a
+     provider without app-managed tools (`codeOperationRuntime.test.ts`). On
+     Linux the bundled `tsc --lsp --stdio` under Bubblewrap answered an
+     agent's diagnostics and cross-file definition for a saved file in a Plan
+     thread, and its next read saw a saved fix
+     (`codeLanguageServiceProcess.test.ts`); the same suite covers refusals
+     before any launch, a `repo-tooling` server never started, an editor's
+     draft left in place, a file too large, and the crash budget. Still to
+     run: one Code turn in Plan on a signed-in Claude Code and a signed-in
+     Codex provider, asking the agent to read a type error and a definition
+     through the two tools. The rules are under
+     [Agent read rules](#agent-read-rules).
 8. **Debugger.** Container: design yes, implementation yes for Linux.
    - First a design addendum in this spec, approved before any code.
    - The addendum covers a `debug-adapter` component kind using the Debug

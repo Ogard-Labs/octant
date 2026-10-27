@@ -68,6 +68,25 @@ reads, never a program it starts.
 
 Files the server does not read, such as Markdown or Python, show nothing.
 
+## Agents
+
+An agent in a Code thread can ask the same server two things: the problems in
+a file (`octant_code_diagnostics`) and where a name in it is defined
+(`octant_code_definition`). It can do this in Plan mode too, since both only
+read. They are offered on providers that can carry Octant's own tools, the
+same ones listed for the other Octant tools in [Code](/guide/code), and a
+profile whose tool list leaves them out does not offer them.
+
+- The agent gets answers for the file as saved, with lines counted from 1, so
+  they match what it reads. If you have unsaved changes in that file, the
+  agent is told to wait for you to save; your text stays as you typed it and
+  is never sent to the provider.
+- A definition outside the checkout is named only as a library or "elsewhere",
+  never by its host path.
+- An agent can start the bundled server, but never one that runs the
+  repository's own tooling, and it never restarts a server that stopped:
+  **Retry** in the editor stays yours.
+
 ## Turning them off
 
 **Settings › Code › Editor › Language services** turns the bundled server off
