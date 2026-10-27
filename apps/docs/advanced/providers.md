@@ -249,7 +249,8 @@ Trust holds for the exact version you trusted. If the folder's contents change
 and you update, the provider stays blocked, with its history and key, until you
 remove it and add it again. Turning the plugin off, withdrawing trust, or
 uninstalling stops the driver and blocks the provider. Linux and Windows hosts
-cannot confine a driver, so they never run one.
+cannot confine a driver, so they never run one. To write one, see
+[Build a provider driver](/advanced/provider-drivers).
 
 An endpoint driver (OpenAI-compatible, Anthropic-compatible, Azure AI Foundry,
 Ollama) is added under **Octant Harness → Model endpoints** with **Add

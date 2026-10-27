@@ -108,6 +108,10 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "packages/client-runtime/src/remoteProductMutations.ts",
     "Remote product mutation exercisers whose only consumer is remoteExitEvidenceADriver.ts. Remove once a product caller serves that evidence or the smoke is retired.",
   ],
+  [
+    "packages/provider-sdk/src/outsideDriver.ts",
+    "The author-facing re-export of the outside driver protocol schemas, whose only in-repository consumer is outsideDriverConformance.ts; the host reads the same schemas from @octant/contracts directly. Remove once a product module imports it or the conformance kit leaves the islands.",
+  ],
   // ── Rule D: re-exported by a package barrel, used by nobody ──
   [
     "packages/provider-sdk/src/conformance.ts",
@@ -128,6 +132,10 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
   [
     "packages/provider-sdk/src/harnessEndpointConformance.ts",
     "Harness-endpoint-port conformance harness that direct-endpoint driver tests run; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the port is retired.",
+  ],
+  [
+    "packages/provider-sdk/src/outsideDriverConformance.ts",
+    "Out-of-process conformance kit that an outside driver's author runs in their own CI, and that the example loopback driver's tests run here; advisory test scaffolding by design, so reachable only from tests is its correct state. Remove once a product runner imports it or outside drivers are retired.",
   ],
   [
     "packages/provider-sdk/src/imageGenerationConformance.ts",
