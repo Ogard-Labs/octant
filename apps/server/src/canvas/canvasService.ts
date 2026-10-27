@@ -1831,12 +1831,6 @@ function sameCanvasSource(
   );
 }
 
-/**
- * The board policy shares one rejection vocabulary between comments and
- * layout; a layout revision can only raise the layout half, so a comment code
- * arriving here is a policy bug reported as a malformed request rather than a
- * code the renderer has no wording for.
- */
 /** A file's name without its folder or HTML extension, as a Canvas title. */
 function fileTitle(fileName: string | undefined): string | undefined {
   if (fileName === undefined) return undefined;
@@ -1845,6 +1839,12 @@ function fileTitle(fileName: string | undefined): string | undefined {
   return stem.length === 0 ? undefined : stem;
 }
 
+/**
+ * The board policy shares one rejection vocabulary between comments and
+ * layout; a layout revision can only raise the layout half, so a comment code
+ * arriving here is a policy bug reported as a malformed request rather than a
+ * code the renderer has no wording for.
+ */
 function isUnreadableMark(error: unknown): boolean {
   return error instanceof CanvasEventStoreError && error.category === "unreadable-mark";
 }

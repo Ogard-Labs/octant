@@ -156,7 +156,12 @@ client's `frame-src` to that path on its own origin.
   prototype is not network-contained.
 - The import's scan is not a parser. Where it reads a page differently from
   a browser, the design policy's check afterwards refuses the result
-  (`unsupported`); it is never drawn under a looser rule.
+  (`unsupported`); it is never drawn under a looser rule. That check reads
+  the text of a `textarea`, `xmp`, or CDATA section as markup, so a quote
+  that opens there no longer hides the elements after it: before, a page
+  could carry a `meta` refresh or an SVG `set` that rewrites a link into a
+  static frame that way, leaving the parent page's `frame-src` as the only
+  guard against that navigation.
 
 ## Related
 

@@ -156,6 +156,52 @@ describe("importing an HTML page into a design", () => {
     expect(canvasDesignMarkupRefusal(html)).toBeUndefined();
   });
 
+  it("never draws a page that holds script, a page setting, or a way out as a static frame", () => {
+    // Each page either runs as a running design, is refused, or is drawn
+    // static with nothing in it a browser would run, follow, or load.
+    const live =
+      /<(?:script|meta|base|link|iframe|frame|object|embed|set|animate)\b|[\s"'/]on[a-z]+\s*=|[\s"'/](?:xlink:)?href\s*=\s*"(?!#)/i;
+    for (const page of [
+      "<svg onload=alert(1)><rect/></svg>",
+      '<a href="javascript:alert(1)">x</a>',
+      '<a href="jav&#x09;ascript:alert(1)">x</a>',
+      '<iframe srcdoc="<script>alert(1)</script>"></iframe><p>x</p>',
+      '<object data="https://x.test/a.swf"></object><p>x</p>',
+      '<p style="width:expression(alert(1))">x</p>',
+      '<p style="background:url(javascript:alert(1))">x</p>',
+      '<p style="background:ur&#108;(https://x.test/a.png)">x</p>',
+      '<img src="data:image/png;base64,AA" o&#110;error="alert(1)">',
+      "<template><img src=x onerror=alert(1)></template><p>x</p>",
+      "<noscript><style></noscript><img src=x onerror=alert(1)></style></noscript>",
+      "<SCRIPT>alert(1)</SCRIPT>",
+      '<IMG SRC="data:image/png;base64,AA" ONERROR="alert(1)">',
+      '<img\nsrc="data:image/png;base64,AA"\nonerror\n=\n"alert(1)">',
+      '<img/src="data:image/png;base64,AA"/onerror=alert(1)>',
+      "<svg><script>alert(1)</script></svg>",
+      "<svg><script href=data:,alert(1) /></svg>",
+      "<svg><title><img src=x onerror=alert(1)></title></svg>",
+      "<svg><style><img src=x onerror=alert(1)></style></svg>",
+      "<svg><style><meta http-equiv=refresh content=0;url=https://x.test/></style></svg>",
+      "<math><mtext><style><img src=x onerror=alert(1)></style></mtext></math>",
+      "<?x><img src=x onerror=alert(1)>?>",
+      "<!--><img src=x onerror=alert(1)>-->",
+      '<META HTTP-EQUIV=refresh CONTENT="0;url=https://x.test/"><p>x</p>',
+      "<svg><a><SET attributeName=href to=https://x.test/ /><text>x</text></a></svg>",
+      '<svg><use href="https://x.test/s.svg#a"/><image xlink:href="https://x.test/a.png"/></svg>',
+      '<style media="screen{}</style><script>alert(1)</script>">p{}</style><p>x</p>',
+      // A browser reads a textarea, an xmp, or a CDATA section as text, so the
+      // quote inside opens nothing and what follows it is markup.
+      '<textarea><x a="</textarea><svg><style><a><set attributeName=href to=https://x.test/ /><text>Go</text></a></style></svg>',
+      '<textarea><x a="</textarea><svg><style><meta http-equiv=refresh content=0;url=https://x.test/></style></svg>',
+      '<xmp><x a="</xmp><svg><style><meta http-equiv=refresh content=0;url=https://x.test/></style></svg>',
+      '<svg><![CDATA[<x a="]]><style><a><set attributeName=href to=https://x.test/ /><text>Go</text></a></style></svg>',
+    ]) {
+      const result = importCanvasHtmlPage(page);
+      if (result.status !== "imported" || result.frame === "running") continue;
+      expect(frameHtml(result), page).not.toMatch(live);
+    }
+  });
+
   it("names the page by its title, cut to what a design title holds", () => {
     const result = imported(`<title>  ${"A".repeat(200)}  </title><p>x</p>`);
     expect(result.pageTitle?.length).toBe(120);
