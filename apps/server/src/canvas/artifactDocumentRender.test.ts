@@ -18,6 +18,7 @@ import {
   renderArtifactDocument,
   renderArtifactHtml,
   renderArtifactMarkdown,
+  renderCanvasHtmlFile,
 } from "./artifactDocumentRender";
 import {
   DEFAULT_ARTIFACT_PALETTE,
@@ -61,8 +62,12 @@ Ship the reading copy.
 Signups: 12
 `;
 
-const HTML =
-  '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Launch plan</title><style>body{font-family:system-ui,sans-serif;background:#f4f4f5;color:#3f3f46;margin:24px;line-height:1.45}h1{font-size:20px}h2,h3,h4,h5,h6{font-size:16px}table{border-collapse:collapse}td,th{border:1px solid #a1a1aa;padding:4px 8px;text-align:left}pre{white-space:pre-wrap}a{color:inherit}</style></head><body><h1>Launch plan</h1><h2>Scope</h2><p>Ship the reading copy.</p><p>Signups: 12</p></body></html>\n';
+// The document's own policy comes first in its head, so nothing it holds can
+// load from anywhere; its one stylesheet sits between the head and the body.
+const HTML_HEAD =
+  "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Launch plan</title><style>";
+const HTML_BODY =
+  '</style></head><body><main><h1>Launch plan</h1><h2>Scope</h2><p>Ship the reading copy.</p><div class="metrics"><div class="metric"><span class="muted">Signups</span><span class="value">12</span></div></div></main></body></html>\n';
 
 describe("rendering a canvas as a document", () => {
   it("snapshots the markdown and html reading of the same blocks", () => {
@@ -74,12 +79,18 @@ describe("rendering a canvas as a document", () => {
       body: MARKDOWN,
       writesDesignMarkup: false,
     });
-    expect(renderArtifactHtml(source)).toEqual({
+    const html = renderArtifactHtml(source);
+    expect(html).toMatchObject({
       kind: "rendered",
       title: "Launch plan",
-      body: HTML,
       writesDesignMarkup: false,
     });
+    if (html.kind !== "rendered") return;
+    expect(html.body.startsWith(HTML_HEAD)).toBe(true);
+    expect(html.body.endsWith(HTML_BODY)).toBe(true);
+    const style = html.body.slice(HTML_HEAD.length, html.body.length - HTML_BODY.length);
+    // One stylesheet and nothing else: no markup, and no address it could load.
+    expect(style).not.toMatch(/[<>]|url\(|@import/);
   });
 
   it("keeps a table cell that ends in a backslash from splitting the row", () => {
@@ -845,7 +856,8 @@ describe("rendering a canvas as a document", () => {
     if (html.kind !== "rendered") throw new Error("expected html");
     const htmlOrder = [
       "<h2>Service health</h2>",
-      "Requests per second:",
+      // A metric is drawn as the screen's tile: its label, then its value.
+      '<span class="muted">Requests per second</span>',
       "Slow search in eu-west",
       "<h2>Scope</h2>",
     ].map((needle) => html.body.indexOf(needle));
@@ -1057,5 +1069,232 @@ describe("exporting a styled diagram and a Gantt plan", () => {
     if (markdown.kind !== "rendered") throw new Error("expected a rendered document");
     expect(markdown.body).toContain("Build: Playable prototype (doing), 2026-06-08 → 2026-06-19");
     expect(markdown.body).toContain("Ship: Store listing (todo)\n");
+  });
+});
+
+/**
+ * The tags of a document this renderer wrote, with their attributes. The
+ * serializer always double-quotes an attribute and escapes `&`, `<`, `>`, `"`,
+ * and `'` inside it, so a tag ends at the first `>` and a value at the first
+ * `"`; a `srcdoc` page is unescaped and read the same way.
+ */
+function tagsOf(html: string): ReadonlyArray<{
+  readonly name: string;
+  readonly attributes: ReadonlyMap<string, string>;
+}> {
+  return [...html.matchAll(/<([a-zA-Z][\w-]*)((?:\s+[\w:-]+(?:="[^"]*")?)*)\s*\/?>/g)].map(
+    (match) => ({
+      name: (match[1] ?? "").toLowerCase(),
+      attributes: new Map(
+        [...(match[2] ?? "").matchAll(/([\w:-]+)(?:="([^"]*)")?/g)].map((attribute) => [
+          (attribute[1] ?? "").toLowerCase(),
+          unescapeAttribute(attribute[2] ?? ""),
+        ]),
+      ),
+    }),
+  );
+}
+
+function unescapeAttribute(value: string): string {
+  return value
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&quot;", '"')
+    .replaceAll("&apos;", "'")
+    .replaceAll("&amp;", "&");
+}
+
+/** Every address a page could load: an attribute that fetches, or a stylesheet `url()` or `@import`. */
+function loadedAddresses(html: string): ReadonlyArray<string> {
+  const fetching = new Set(["src", "srcset", "poster", "background", "data", "action"]);
+  const fromTags = tagsOf(html).flatMap((tag) => [
+    ...[...tag.attributes].filter(([name]) => fetching.has(name)).map(([, value]) => value),
+    ...(tag.name === "link" ? [tag.attributes.get("href") ?? ""] : []),
+  ]);
+  const fromStyles = [...html.matchAll(/url\(\s*["']?([^"')\s]+)|@import\s+["']?([^"';\s]+)/g)].map(
+    (match) => match[1] ?? match[2] ?? "",
+  );
+  return [...fromTags, ...fromStyles];
+}
+
+describe("a Canvas as one HTML file", () => {
+  const pixel =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  const phone = decodeCanvasBlock({
+    blockId: "onboarding",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "design",
+    title: "Onboarding",
+    size: "phone",
+    assets: [
+      {
+        assetId: "hero",
+        source: { kind: "generated-image", imageId: "44444444-4444-4444-8444-444444444444" },
+      },
+      { assetId: "shot", source: { kind: "project-file", path: "assets/shot.png" } },
+    ],
+    frames: [
+      {
+        frameId: "welcome",
+        title: "Welcome",
+        html: '<img src="octant-asset:hero" alt="Hero"><a href="#done">Next</a>',
+      },
+      { frameId: "done", title: "Done", html: '<img src="octant-asset:shot" alt="Shot">' },
+    ],
+  });
+  const prototype = decodeCanvasBlock({
+    blockId: "cart",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "design",
+    title: "Cart",
+    size: "phone",
+    runsScript: true,
+    frames: [
+      {
+        frameId: "cart",
+        title: "Cart",
+        html: '<button onclick="add()">Add</button><script>function add() {}</script>',
+      },
+    ],
+  });
+  const link = decodeCanvasBlock({
+    blockId: "docs",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "link",
+    label: "Docs",
+    href: "https://example.com/docs",
+  });
+  const hostPath = decodeCanvasBlock({
+    blockId: "file",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "file-reference",
+    sourceId: "44444444-4444-4444-8444-444444444444",
+    label: "/Users/ada/Projects/octant-secret/plan.md",
+  });
+  const chart = chartExampleBlocks[2];
+  if (chart === undefined) throw new Error("missing chart example");
+  const source = { title: "Launch review", blocks: [chart, phone, prototype, link, hostPath] };
+  const resolved = new Map([
+    [
+      "onboarding",
+      [
+        {
+          assetId: "hero" as never,
+          status: "resolved" as const,
+          mediaType: "image/png" as const,
+          data: pixel,
+        },
+        { assetId: "shot" as never, status: "unavailable" as const, reason: "missing" as const },
+      ],
+    ],
+  ]);
+
+  it("loads nothing from anywhere, draws charts inline, and writes resolved images in", () => {
+    const file = renderCanvasHtmlFile(source, { frames: "as-written", designAssets: resolved });
+    expect(file.kind).toBe("rendered");
+    if (file.kind !== "rendered") return;
+    expect(file.writesDesignMarkup).toBe(true);
+    expect(file.imagesLeftOut).toBe(0);
+
+    const top = tagsOf(file.body);
+    // The document's own policy comes first in its head and forbids every load.
+    const policyAt = top.findIndex(
+      (tag) => tag.name === "meta" && tag.attributes.has("http-equiv"),
+    );
+    expect(policyAt).toBe(3);
+    const policy = top[policyAt];
+    expect(policy?.attributes.get("content")).toContain("default-src 'none'");
+    expect(policy?.attributes.get("content")).toContain("connect-src 'none'");
+    expect(top.some((tag) => tag.name === "script" || tag.name === "link")).toBe(false);
+    // A chart is a picture in the file, not a reference to one.
+    expect(top.some((tag) => tag.name === "svg")).toBe(true);
+    // The one address outside the file is the author's own link, which loads nothing.
+    expect(top.flatMap((tag) => (tag.name === "a" ? [tag.attributes.get("href")] : []))).toEqual([
+      "https://example.com/docs",
+    ]);
+
+    // Each design frame is drawn in a sandbox that never shares an origin.
+    const frames = top.filter((tag) => tag.name === "iframe");
+    expect(frames.map((frame) => frame.attributes.get("sandbox"))).toEqual([
+      "",
+      "",
+      "allow-scripts",
+    ]);
+    const pages = frames.map((frame) => frame.attributes.get("srcdoc") ?? "");
+    for (const page of [file.body, ...pages]) {
+      for (const address of loadedAddresses(page)) {
+        expect(address).toMatch(/^data:image\/(png|svg\+xml);base64,/);
+      }
+      expect(page).not.toContain("allow-same-origin");
+    }
+    // Each page carries its frame policy ahead of everything else in it.
+    for (const page of pages) {
+      const tags = tagsOf(page);
+      // html, head, the charset, then the policy.
+      expect(tags[3]?.attributes.get("http-equiv")).toBe("Content-Security-Policy");
+      expect(tags[3]?.attributes.get("content")).toContain("default-src 'none'");
+    }
+    expect(pages[0]).toContain(`<img src="data:image/png;base64,${pixel}" alt="Hero">`);
+    // An image the host could not resolve is the labelled placeholder.
+    expect(pages[1]).toMatch(/<img src="data:image\/svg\+xml;base64,[^"]+" alt="Shot">/);
+  });
+
+  it("carries no host path, file path, or image identity", () => {
+    const file = renderCanvasHtmlFile(source, { frames: "as-written", designAssets: resolved });
+    if (file.kind !== "rendered") throw new Error("expected a file");
+    for (const leak of [
+      "/Users/ada",
+      "octant-secret",
+      "44444444-4444-4444-8444-444444444444",
+      "assets/shot.png",
+      "octant-asset:",
+    ]) {
+      expect(file.body).not.toContain(leak);
+    }
+  });
+
+  it("draws an image past the file's image budget as a placeholder and counts it", () => {
+    const large = "A".repeat(Math.ceil((3 * 1024 * 1024) / 3) * 4);
+    const file = renderCanvasHtmlFile(source, {
+      frames: "as-written",
+      designAssets: new Map([
+        [
+          "onboarding",
+          [
+            {
+              assetId: "hero" as never,
+              status: "resolved" as const,
+              mediaType: "image/png" as const,
+              data: large,
+            },
+            {
+              assetId: "shot" as never,
+              status: "resolved" as const,
+              mediaType: "image/png" as const,
+              data: large,
+            },
+          ],
+        ],
+      ]),
+    });
+    if (file.kind !== "rendered") throw new Error("expected a file");
+    expect(file.imagesLeftOut).toBe(1);
+    expect(file.body.split(large)).toHaveLength(2);
+    expect(file.body).toContain("1 image was left out of this file");
+  });
+
+  it("refuses a file past its size cap rather than writing part of one", () => {
+    // Past what a decoded Canvas can hold, which the renderer does not re-check.
+    const long = {
+      ...prototype,
+      runsScript: undefined,
+      frames: [{ frameId: "long", title: "Long", html: `<p>${"x".repeat(8 * 1024 * 1024)}</p>` }],
+    } as unknown as CanvasBlock;
+    expect(
+      renderCanvasHtmlFile(
+        { title: "Long", blocks: [long] },
+        { frames: "as-written", designAssets: new Map() },
+      ),
+    ).toEqual({ kind: "too-large" });
   });
 });

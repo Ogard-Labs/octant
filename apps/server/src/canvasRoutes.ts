@@ -43,6 +43,13 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import {
+  CANVAS_HTML_FILE_MAX_BYTES,
+  decodeCanvasHtmlFileRequest,
+  decodeCanvasHtmlFileResult,
+  type CanvasHtmlFileRequest,
+  type CanvasHtmlFileResult,
+} from "@octant/contracts/canvas-export";
+import {
   decodeCanvasExportFolderCommand,
   decodeCanvasExportFolderResult,
   decodeCanvasExportFolderView,
@@ -51,9 +58,11 @@ import {
 } from "@octant/contracts/canvas-export-folder";
 import {
   authorizeCanvasInventoryAccess,
+  canvasExportPlannedName,
   filterCanvasInventoryEntries,
   projectInventoryEntryFromProjection,
 } from "@octant/domain";
+import { renderCanvasHtmlFile } from "./canvas/artifactDocumentRender";
 import type { CanvasService } from "./canvas/canvasService";
 import type { CanvasCommentService } from "./canvas/canvasCommentService";
 import type { CanvasShareService } from "./canvas/canvasShareService";
@@ -218,6 +227,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
       route !== "export-prepare" &&
       route !== "export-decide" &&
       route !== "export-folder" &&
+      route !== "html-file" &&
       route !== "public-shares" &&
       route !== "public-share-revoke" &&
       route !== "public-link-settings" &&
@@ -1041,6 +1051,32 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         );
       }
 
+      if (route === "html-file" && request.method === "POST") {
+        const body = await readJson(request);
+        let parsed: CanvasHtmlFileRequest;
+        try {
+          if (body.kind !== "ok") throw new Error("invalid");
+          parsed = decodeCanvasHtmlFileRequest(body.value);
+        } catch {
+          return jsonResponse(
+            decodeCanvasHtmlFileResult({
+              kind: "refused",
+              code: "malformed",
+              message: "Canvas HTML file request is malformed.",
+            }),
+            200,
+            origin,
+          );
+        }
+        return jsonResponse(
+          decodeCanvasHtmlFileResult(
+            await renderCanvasHtmlFileForWindow(dependencies, authenticatedWindowId, parsed),
+          ),
+          200,
+          origin,
+        );
+      }
+
       if (route === "export-targets" && request.method === "GET") {
         const exportService = dependencies.canvasExportService;
         if (exportService === undefined) {
@@ -1741,6 +1777,65 @@ async function resolveDesignAssetsForWindow(
     versionId: read.version.versionId,
     blockId: block.blockId,
     assets,
+  };
+}
+
+/**
+ * The Canvas as one HTML file for this reader. It is a read: the same window
+ * authorization `get` runs, for the version the reader is drawing, and each
+ * design's declared images resolve under that version's own provenance, as
+ * they do when the reader draws the design. Nothing is sent anywhere and
+ * nothing is journaled; the file goes back to the window that asked.
+ */
+async function renderCanvasHtmlFileForWindow(
+  dependencies: CanvasRouteDependencies,
+  windowId: WindowId,
+  input: CanvasHtmlFileRequest,
+): Promise<CanvasHtmlFileResult> {
+  const read = await resolveCanvasGet(dependencies, windowId, input.canvasId, input.versionId);
+  if (read.kind === "unauthorized") {
+    return {
+      kind: "refused",
+      code: "unauthorized",
+      message: "This Canvas is not available to this window.",
+    };
+  }
+  if (read.kind !== "ready") {
+    return {
+      kind: "refused",
+      code: "unavailable",
+      message: "Canvas is unavailable. Reopen it from the Project.",
+    };
+  }
+  const definition = read.version.definition;
+  const designAssets = new Map<string, ReadonlyArray<CanvasDesignAssetResolution>>();
+  const resolve = dependencies.resolveDesignAssets;
+  if (resolve !== undefined) {
+    for (const block of definition.blocks) {
+      if (block.kind !== "design" || (block.assets ?? []).length === 0) continue;
+      designAssets.set(String(block.blockId), await resolve(block, definition.provenance));
+    }
+  }
+  const rendered = renderCanvasHtmlFile(definition, {
+    frames: "as-written",
+    ...(input.frameTheme === undefined ? {} : { frameTheme: input.frameTheme }),
+    designAssets,
+  });
+  if (rendered.kind === "too-large") {
+    return {
+      kind: "refused",
+      code: "too-large",
+      message: `This Canvas is too large for one HTML file (over ${String(CANVAS_HTML_FILE_MAX_BYTES / (1024 * 1024))} MB).`,
+    };
+  }
+  return {
+    kind: "ready",
+    canvasId: input.canvasId,
+    versionId: read.version.versionId,
+    fileName: canvasExportPlannedName(rendered.title, "html"),
+    html: rendered.body,
+    writesDesignMarkup: rendered.writesDesignMarkup,
+    imagesLeftOut: rendered.imagesLeftOut,
   };
 }
 

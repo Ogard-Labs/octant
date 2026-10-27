@@ -2783,6 +2783,16 @@
   flex: 1;
 }
 
+/* What Save as HTML file or Copy HTML did, on its own line under the tools. */
+.canvas-workspace-tab__notice {
+  flex-basis: 100%;
+  margin: 0;
+  padding-bottom: var(--oct-space-1);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  overflow-wrap: anywhere;
+}
+
 .canvas-workspace-tab__older,
 .canvas-workspace-tab__count {
   font-family: var(--oct-font-mono);

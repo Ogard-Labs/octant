@@ -617,6 +617,54 @@ export const CanvasExportPrepareResult = Schema.Union(
 );
 export type CanvasExportPrepareResult = typeof CanvasExportPrepareResult.Type;
 
+/**
+ * The Canvas as one self-contained HTML file a person saves or copies from
+ * their own window. It goes to no destination, so it is neither approved nor
+ * journaled: the host renders it under the same read authority as opening the
+ * Canvas and the file stays on the reader's device.
+ *
+ * The file may carry the declared images of each design that resolve for the
+ * reader, written in as `data:` images. Together they stay inside the image
+ * budget, and the whole file inside the size cap, so the answer fits what a
+ * paired device is served (8 MiB) after JSON escaping; an image past the
+ * budget is drawn as a placeholder and counted, and a file past the cap is
+ * refused as `too-large`.
+ */
+export const CANVAS_HTML_FILE_MAX_BYTES = 7 * 1024 * 1024;
+export const CANVAS_HTML_FILE_IMAGES_MAX_BYTES = 4 * 1024 * 1024;
+
+export const CanvasHtmlFileRequest = Schema.Struct({
+  schemaVersion: CanvasExportSchemaVersion,
+  kind: Schema.Literal("canvas-html-file"),
+  canvasId: CanvasId,
+  versionId: CanvasVersionId,
+  /** The theme the window draws a workspace-themed design in, as for an HTML export. */
+  frameTheme: Schema.optional(CanvasExportFrameTheme),
+}).annotations(strict);
+export type CanvasHtmlFileRequest = typeof CanvasHtmlFileRequest.Type;
+
+export const CanvasHtmlFileResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("ready"),
+    canvasId: CanvasId,
+    versionId: CanvasVersionId,
+    /** The name a saved file takes: the Canvas title made safe, with `.html`. */
+    fileName: CanvasExportFileName,
+    html: Schema.String.pipe(
+      Schema.minLength(1),
+      Schema.filter((value) => canvasExportBodyByteLength(value) <= CANVAS_HTML_FILE_MAX_BYTES, {
+        message: () => "A Canvas HTML file must fit its byte cap.",
+      }),
+    ),
+    /** The file holds design markup as written, which Octant does not check for secrets. */
+    writesDesignMarkup: Schema.Boolean,
+    /** Declared images that resolved but were drawn as placeholders to keep the file in budget. */
+    imagesLeftOut: Schema.Int.pipe(Schema.nonNegative()),
+  }).annotations(strict),
+  CanvasExportRefusal,
+);
+export type CanvasHtmlFileResult = typeof CanvasHtmlFileResult.Type;
+
 export const CanvasExportDecision = Schema.Literal("approved", "denied");
 export type CanvasExportDecision = typeof CanvasExportDecision.Type;
 
@@ -703,3 +751,5 @@ export const decodeCanvasExportDecideRequest = Schema.decodeUnknownSync(CanvasEx
 export const decodeCanvasExportDecideResult = Schema.decodeUnknownSync(CanvasExportDecideResult);
 export const decodeCanvasExportRecorded = Schema.decodeUnknownSync(CanvasExportRecorded);
 export const decodeCanvasExportPayloadDigest = Schema.decodeUnknownSync(CanvasExportPayloadDigest);
+export const decodeCanvasHtmlFileRequest = Schema.decodeUnknownSync(CanvasHtmlFileRequest);
+export const decodeCanvasHtmlFileResult = Schema.decodeUnknownSync(CanvasHtmlFileResult);

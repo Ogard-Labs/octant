@@ -682,6 +682,176 @@ describe("canvas routes", () => {
     expect(body.workspace).toEqual({ kind: "chat-virtual", projectId: null });
   });
 
+  it("hands an authorized window its Canvas as one HTML file with its images, and another Project's window nothing", async () => {
+    const projection = new CanvasProjection();
+    seedProjection(projection);
+    const current = projection.getById(canvasId)?.currentVersion;
+    if (current === undefined) throw new Error("expected a seeded Canvas");
+    const versionId = "33333333-3333-4333-8333-333333333333";
+    projection.applyVersionAppended({
+      canvasId,
+      version: {
+        ...current,
+        versionId: versionId as never,
+        sequence: 2,
+        definition: {
+          ...current.definition,
+          blocks: [
+            ...current.definition.blocks,
+            {
+              blockId: "phone" as never,
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              kind: "design",
+              title: "Onboarding",
+              size: "phone",
+              assets: [
+                {
+                  assetId: "hero" as never,
+                  source: {
+                    kind: "generated-image",
+                    imageId: "44444444-4444-4444-8444-444444444444" as never,
+                  },
+                },
+              ],
+              frames: [
+                {
+                  frameId: "home" as never,
+                  title: "Home",
+                  html: '<img src="octant-asset:hero" alt="">',
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability: windowCapability, now: 0 });
+    const canvasService = new CanvasService(
+      {
+        projection,
+        eventStore: {
+          appendVersion: () => {
+            throw new Error("not used");
+          },
+        } as never,
+        uuid: () => "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        clock: () => later as never,
+      },
+      {
+        authorize: () => true,
+        resolveWorkspace: () => ({ kind: "chat-virtual", projectId: null }),
+      },
+    );
+    const resolveDesignAssets = vi.fn(async () => [
+      {
+        assetId: "hero" as never,
+        status: "resolved" as const,
+        mediaType: "image/png" as const,
+        data: "iVBORw0KGgo=",
+      },
+    ]);
+    let active = projectId;
+    const route = createCanvasRouteHandler({
+      canvasProjection: projection,
+      canvasService,
+      windowAuthorityStore: store,
+      resolveDesignAssets,
+      projects: {
+        bootstrap: async () => ({
+          active: [
+            {
+              id: projectId,
+              name: "Chat Project",
+              type: "chat",
+              lifecycle: "active",
+              pinned: false,
+              rank: "0/1" as never,
+              version: 1 as never,
+              createdAt: now as never,
+              updatedAt: now as never,
+            },
+          ],
+          archived: [],
+          availability: [],
+          memory: [],
+        }),
+      },
+      activeContextResolver: async () => ({ mode: "chat", projectId: active }),
+      now: () => 1,
+    });
+    const ask = async (body: unknown) => {
+      const response = await route(
+        new Request("http://127.0.0.1/api/canvas/html-file", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-octant-window-capability": windowCapability,
+          },
+          body: JSON.stringify(body),
+        }),
+      );
+      return { status: response?.status, body: JSON.parse((await response?.text()) ?? "{}") };
+    };
+    const request = {
+      schemaVersion: 1,
+      kind: "canvas-html-file",
+      canvasId: String(canvasId),
+      versionId,
+    };
+
+    const ready = await ask(request);
+    expect(ready.status).toBe(200);
+    expect(ready.body).toMatchObject({
+      kind: "ready",
+      canvasId: String(canvasId),
+      versionId,
+      fileName: "Quarterly summary.html",
+      writesDesignMarkup: true,
+      imagesLeftOut: 0,
+    });
+    const html: string = ready.body.html;
+    expect(html).toContain("<h1>Quarterly summary</h1>");
+    expect(html).toContain('sandbox=""');
+    expect(html).toContain("data:image/png;base64,iVBORw0KGgo=");
+    // The file is the reader's; none of the host's identities travel in it.
+    for (const leak of [
+      String(projectId),
+      threadId,
+      String(canvasId),
+      versionId,
+      "octant-asset:",
+    ]) {
+      expect(html).not.toContain(leak);
+    }
+    expect(resolveDesignAssets).toHaveBeenCalledWith(
+      expect.objectContaining({ blockId: "phone" }),
+      expect.objectContaining({ mode: "chat", projectId, threadId }),
+    );
+
+    // A request the contract does not admit is refused as a value.
+    expect((await ask({ ...request, path: "/etc/hosts" })).body).toMatchObject({
+      kind: "refused",
+      code: "malformed",
+    });
+
+    // A window looking at another Project is told nothing and resolves nothing.
+    resolveDesignAssets.mockClear();
+    active = otherProjectId;
+    expect((await ask(request)).body).toMatchObject({ kind: "refused", code: "unauthorized" });
+    expect(resolveDesignAssets).not.toHaveBeenCalled();
+
+    // A request without the window credential is refused before anything is read.
+    const anonymous = await route(
+      new Request("http://127.0.0.1/api/canvas/html-file", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(request),
+      }),
+    );
+    expect(anonymous?.status).toBe(401);
+  });
+
   it("resolves a design's images for an authorized window from the version's own provenance, and nothing for another Project", async () => {
     const projection = new CanvasProjection();
     seedProjection(projection);
