@@ -2845,6 +2845,72 @@ describe("CodeThreadWorkspace", () => {
     );
   });
 
+  it("warns before sending that a thread switched to a model its provider cannot carry the session onto starts a new session", () => {
+    const base = controller();
+    const view = base.activeView!;
+    render(
+      <CodeThreadWorkspace
+        controller={{
+          ...base,
+          activeView: {
+            ...view,
+            thread: {
+              ...view.thread,
+              modelId: alternateModelId,
+            },
+          },
+          conversation: [
+            {
+              id: "turn:assistant-one",
+              role: "assistant",
+              text: "The first pass is complete.",
+              providerInstanceId: providerId,
+              modelId,
+              status: "completed",
+            },
+          ],
+        }}
+        providerGroups={[providerGroup(), alternateProviderGroup()]}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.getByText(/Your next message starts a new session on/)).toBeInTheDocument();
+  });
+
+  it("does not warn of a new session when the provider can carry its session on to the new model", () => {
+    const base = controller();
+    const view = base.activeView!;
+    render(
+      <CodeThreadWorkspace
+        controller={{
+          ...base,
+          activeView: {
+            ...view,
+            thread: {
+              ...view.thread,
+              modelId: alternateModelId,
+            },
+          },
+          conversation: [
+            {
+              id: "turn:assistant-one",
+              role: "assistant",
+              text: "The first pass is complete.",
+              providerInstanceId: providerId,
+              modelId,
+              status: "completed",
+            },
+          ],
+        }}
+        providerGroups={[{ ...providerGroup(), modelSwitch: "supported" }, alternateProviderGroup()]}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.queryByText(/Your next message starts a new session on/)).not.toBeInTheDocument();
+  });
+
   it("does not promise another new session after a switching turn opened one and then stopped", () => {
     const base = controller();
     const view = base.activeView!;

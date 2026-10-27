@@ -4078,7 +4078,10 @@ session without a recoverable cursor still fails closed; no transcript replay or
 replacement conversation repairs the missing identity. A follow-up on another model of
 the same provider instance resumes the same native session only when the driver
 reports the `modelSwitch` capability; the resume carries the thread's current
-model and the turn records it on the session. Claude resumes only a session
+model and the turn records it on the session. A provider that cannot carry the
+session on to another of its models starts a fresh session with the same
+disclosed provider-switch handoff instead of refusing the turn, so a model
+swap never wedges a thread on a refusal the person cannot act on. Claude resumes only a session
 whose identity (provider instance, Octant session, SDK session, Project root,
 authentication) this host recorded; the identity is journaled
 (`claude-resume-identity`), so a host restart keeps an existing thread
@@ -4125,7 +4128,8 @@ turn (`handoff`), and the transcript shows what was handed over and that hidden
 reasoning, tool activity and the previous session did not transfer. While the thread's selection names a provider other than the one its session
 is on (the provider of its last finished reply, or of a later switching turn
 whose handoff was journaled, which happens only once the new session is
-ready), the composer says the next message starts a new session with a
+ready), or names another model of the same provider whose driver cannot carry
+the session on to it, the composer says the next message starts a new session with a
 handoff.
 
 **Fork handoff (Code).** A fork's first session (no session recorded on the

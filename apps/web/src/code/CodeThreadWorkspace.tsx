@@ -800,9 +800,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       (message.status === "completed" || message.handoff !== undefined) &&
       message.providerInstanceId !== undefined,
   );
+  const sessionModelGroup = providerGroups.find(
+    (group) => String(group.instance.id) === String(sessionReply?.providerInstanceId),
+  );
   const pendingSwitchNotice =
     sessionReply !== undefined &&
-    String(sessionReply.providerInstanceId) !== String(thread.providerInstanceId)
+    (String(sessionReply.providerInstanceId) !== String(thread.providerInstanceId) ||
+      // Another model of the same provider that cannot carry the session on
+      // also starts a fresh session with a handoff on the next message.
+      (String(sessionReply.modelId) !== String(thread.modelId) &&
+        sessionModelGroup?.modelSwitch !== "supported"))
       ? pendingProviderSwitchNotice(
           providerModelLabel(providerGroups, thread),
           providerModelLabel(providerGroups, {
