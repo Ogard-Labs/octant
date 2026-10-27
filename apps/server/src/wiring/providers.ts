@@ -150,7 +150,6 @@ import type {
   ExtensionProjectPinListing,
   McpServerSignInView,
 } from "@octant/contracts/extension-rpc";
-import { validateAgentPluginsMcpDocument } from "@octant/plugin-host/agent-plugins";
 import { LocalPluginImportReceiptStore } from "../extensions/localPluginImportReceiptStore";
 import { createExtensionToolCallAuthorizer } from "../extensions/extensionToolCallAuthorizer";
 import { ExtensionToolGrantStore } from "../extensions/extensionToolGrantStore";
@@ -1050,37 +1049,19 @@ export function wireProviders(deps: ProvidersDependencies) {
         serverUrl: async (extensionId, componentId) => {
           const packageState = extensionLifecycleService
             .snapshot()
-            .packages.find((candidate) => candidate.extensionId === extensionId);
-          if (packageState === undefined || packageState.source.kind !== "user-added") {
-            return undefined;
-          }
-          const componentState = packageState.components.find(
-            (candidate) => candidate.component.id === componentId,
+            .packages.find((candidate) => String(candidate.extensionId) === extensionId);
+          if (packageState === undefined) return undefined;
+          return userAddedMcpServers.signInAddress(packageState, componentId, () =>
+            extensionPackageStore.readVerifiedConfiguration(
+              {
+                extensionId: packageState.extensionId,
+                packageId: packageState.packageId,
+                version: packageState.version,
+                digest: packageState.digest,
+              },
+              componentId,
+            ),
           );
-          if (componentState?.component.kind !== "mcp-server") return undefined;
-          let raw: unknown;
-          try {
-            raw = JSON.parse(
-              await extensionPackageStore.readVerifiedConfiguration(
-                {
-                  extensionId,
-                  packageId: packageState.packageId,
-                  version: packageState.version,
-                  digest: packageState.digest,
-                },
-                componentId,
-              ),
-            );
-          } catch {
-            return undefined;
-          }
-          const document = validateAgentPluginsMcpDocument(raw, {
-            pluginSchema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-          });
-          const server = document.servers.find(
-            (candidate) => candidate.name === componentState.component.displayName,
-          );
-          return server !== undefined && server.type !== "stdio" ? server.url : undefined;
         },
       });
     }
