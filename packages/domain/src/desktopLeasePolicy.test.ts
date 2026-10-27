@@ -31,6 +31,7 @@ describe("desktop lease policy", () => {
       decideDesktopLeaseAcquire({
         executionPolicy: "plan",
         billed: false,
+        locality: "host-local",
         initiator: "local-user",
       }),
     ).toEqual({ kind: "refused", reason: "plan-mode" });
@@ -38,6 +39,7 @@ describe("desktop lease policy", () => {
       decideDesktopLeaseAcquire({
         executionPolicy: "full-access",
         billed: true,
+        locality: "cloud",
         initiator: "agent",
       }),
     ).toEqual({ kind: "ask", asks: "billed" });
@@ -45,6 +47,7 @@ describe("desktop lease policy", () => {
       decideDesktopLeaseAcquire({
         executionPolicy: "full-access",
         billed: true,
+        locality: "cloud",
         initiator: "local-user",
       }),
     ).toEqual({ kind: "ask", asks: "billed" });
@@ -53,13 +56,19 @@ describe("desktop lease policy", () => {
   it("asks in the thread below Full access and proceeds for Full access on a host-local desktop", () => {
     for (const executionPolicy of ["approval-gated", "auto-accept-edits"] as const) {
       expect(
-        decideDesktopLeaseAcquire({ executionPolicy, billed: false, initiator: "agent" }),
+        decideDesktopLeaseAcquire({
+          executionPolicy,
+          billed: false,
+          locality: "host-local",
+          initiator: "agent",
+        }),
       ).toEqual({ kind: "ask", asks: "in-thread" });
     }
     expect(
       decideDesktopLeaseAcquire({
         executionPolicy: "full-access",
         billed: false,
+        locality: "host-local",
         initiator: "agent",
       }),
     ).toEqual({ kind: "proceed" });
@@ -67,9 +76,37 @@ describe("desktop lease policy", () => {
       decideDesktopLeaseAcquire({
         executionPolicy: "approval-gated",
         billed: false,
+        locality: "host-local",
         initiator: "remote-device",
       }),
     ).toEqual({ kind: "proceed" });
+  });
+
+  it("makes a person confirm every lease that runs off this machine, Full access and their own Start included", () => {
+    for (const initiator of ["agent", "local-user", "remote-device"] as const) {
+      for (const executionPolicy of [
+        "approval-gated",
+        "auto-accept-edits",
+        "full-access",
+      ] as const) {
+        expect(
+          decideDesktopLeaseAcquire({
+            executionPolicy,
+            billed: false,
+            locality: "cloud",
+            initiator,
+          }),
+        ).toEqual({ kind: "ask", asks: "off-machine" });
+      }
+    }
+    expect(
+      decideDesktopLeaseAcquire({
+        executionPolicy: "plan",
+        billed: false,
+        locality: "cloud",
+        initiator: "local-user",
+      }),
+    ).toEqual({ kind: "refused", reason: "plan-mode" });
   });
 
   it("caps a thread at two leases and the host at two host-local ones, counting failed releases", () => {

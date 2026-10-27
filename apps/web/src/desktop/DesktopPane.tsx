@@ -8,6 +8,7 @@ import type {
   DesktopLeaseId,
   DesktopPaneAnswer,
   DesktopPaneRequest,
+  DesktopPlacementId,
   DesktopViewId,
   LeasableDesktopProvider,
 } from "@octant/contracts";
@@ -49,6 +50,12 @@ interface OpenView {
   readonly viewId: DesktopViewId;
 }
 
+/** The provider and placement a person is asked to confirm before a desktop starts. */
+interface StartToConfirm {
+  readonly provider: LeasableDesktopProvider;
+  readonly placementId?: DesktopPlacementId;
+}
+
 /** What this tab holds of one lease's screen in this window session. */
 type Shown =
   | { readonly leaseId: DesktopLeaseId; readonly presence: "opening" | "lost" }
@@ -75,7 +82,7 @@ export function DesktopPane(props: {
   const [pending, setPending] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [confirmRelease, setConfirmRelease] = useState(false);
-  const [confirmBilled, setConfirmBilled] = useState<LeasableDesktopProvider>();
+  const [confirmStart, setConfirmStart] = useState<StartToConfirm>();
   const [shown, setShown] = useState<Shown>();
   const mounted = useRef(true);
   useEffect(() => {
@@ -194,15 +201,18 @@ export function DesktopPane(props: {
   );
 
   const start = useCallback(
-    async (billed?: LeasableDesktopProvider) => {
-      setConfirmBilled(undefined);
+    async (confirmed?: StartToConfirm) => {
+      setConfirmStart(undefined);
       setNotice(undefined);
       setAcquiring(true);
       try {
         const answer = await act("start", {
           kind: "acquire",
           threadId,
-          ...(billed === undefined ? {} : { confirmedBilledProvider: billed.providerId }),
+          ...(confirmed === undefined ? {} : { confirmedProvider: confirmed.provider.providerId }),
+          ...(confirmed?.placementId === undefined
+            ? {}
+            : { confirmedPlacement: confirmed.placementId }),
         });
         if (answer?.status === "acquired") await show(answer.lease.leaseId);
         else if (answer?.status === "not-acquired") {
@@ -284,12 +294,19 @@ export function DesktopPane(props: {
           }
           onShow={(lease) => void show(lease.leaseId)}
           onStart={() => {
-            // A billed desktop spends the person's money, so they confirm
-            // every one here, for the provider they see.
-            const offered =
-              overview?.start.status === "available" ? overview.start.provider : undefined;
-            if (offered?.billed === true) setConfirmBilled(offered);
-            else void start();
+            // A billed desktop spends the person's money, and one off this
+            // machine runs elsewhere and can outlive it, so they confirm
+            // every one here, for the provider and placement they see.
+            const offered = overview?.start.status === "available" ? overview.start : undefined;
+            if (
+              offered !== undefined &&
+              (offered.provider.billed || offered.provider.locality !== "host-local")
+            ) {
+              setConfirmStart({
+                provider: offered.provider,
+                ...(offered.placementId === undefined ? {} : { placementId: offered.placementId }),
+              });
+            } else void start();
           }}
           pending={pending}
           providers={providers}
@@ -310,18 +327,59 @@ export function DesktopPane(props: {
           so.
         </OctantConfirmDialog>
       ) : null}
-      {confirmBilled === undefined ? null : (
-        <OctantConfirmDialog
-          confirmLabel="Start desktop"
-          onCancel={() => setConfirmBilled(undefined)}
-          onConfirm={() => void start(confirmBilled)}
-          title={`Start a desktop on ${confirmBilled.displayName}?`}
-        >
-          It runs on your own {confirmBilled.displayName} account, which bills you while it runs. It
-          ends when you release it or when it expires, and Octant confirms it is gone.
-        </OctantConfirmDialog>
+      {confirmStart === undefined ? null : (
+        <StartConfirmation
+          confirm={confirmStart}
+          onCancel={() => setConfirmStart(undefined)}
+          onConfirm={() => void start(confirmStart)}
+        />
       )}
     </section>
+  );
+}
+
+/**
+ * What a person agrees to before a desktop that bills, or runs off this
+ * machine, starts: whose account bills, or where it runs and what is left
+ * running there if this machine stops.
+ */
+function StartConfirmation(props: {
+  readonly confirm: StartToConfirm;
+  readonly onCancel: () => void;
+  readonly onConfirm: () => void;
+}) {
+  const { provider, placementId } = props.confirm;
+  const placement = provider.placements?.find(
+    (entry) => String(entry.placementId) === String(placementId ?? ""),
+  );
+  const where = placement === undefined ? undefined : placement.displayName;
+  if (provider.billed) {
+    const account =
+      where === undefined ? provider.displayName : `${provider.displayName} · ${where}`;
+    return (
+      <OctantConfirmDialog
+        confirmLabel="Start desktop"
+        onCancel={props.onCancel}
+        onConfirm={props.onConfirm}
+        title={`Start a desktop on ${account}?`}
+      >
+        It runs on your own {account} account, which bills you while it runs. It ends when you
+        release it or when it expires, and Octant confirms it is gone.
+      </OctantConfirmDialog>
+    );
+  }
+  return (
+    <OctantConfirmDialog
+      confirmLabel="Start desktop"
+      onCancel={props.onCancel}
+      onConfirm={props.onConfirm}
+      title="Start a desktop off this machine?"
+    >
+      {provider.displayName} runs it off this machine
+      {where === undefined ? "" : ` (${where})`}, and it does not bill you. It ends when you release
+      it or when it expires. If this machine stops, Octant cannot end it, and it may keep running
+      there until you delete it in {provider.displayName}.
+    </OctantConfirmDialog>
   );
 }
 

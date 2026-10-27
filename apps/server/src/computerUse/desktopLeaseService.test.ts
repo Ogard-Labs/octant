@@ -303,18 +303,97 @@ describe("desktop lease service", () => {
     await expect(
       service.acquire({
         ...caller,
-        confirmedBilledProvider: decodeDesktopProviderId("other.example"),
+        confirmedProvider: decodeDesktopProviderId("other.example"),
       }),
     ).resolves.toEqual({ status: "refused", reason: "declined" });
     expect(cloud.backend.calls()).not.toContain("acquire");
 
     const started = await service.acquire({
       ...caller,
-      confirmedBilledProvider: decodeDesktopProviderId("cloud.example"),
+      confirmedProvider: decodeDesktopProviderId("cloud.example"),
     });
     expect(started).toMatchObject({ status: "acquired", lease: { billed: true } });
     // The person answered in their own tab; the host asks nobody else.
     expect(state.asked).toEqual([]);
+  });
+
+  it("starts a lease off this machine only once someone confirms where it runs, Full access and a person's own Start included", async () => {
+    const fake = createFakeDesktopProvider({ id: "spaces.example" });
+    const spaces: DesktopProvider = {
+      ...fake.provider,
+      placements: [
+        {
+          id: decodeDesktopPlacementId("here"),
+          displayName: "This machine",
+          locality: "host-local",
+          billed: false,
+        },
+        {
+          id: decodeDesktopPlacementId("other-machine"),
+          displayName: "Your other machine",
+          locality: "cloud",
+          billed: false,
+        },
+      ],
+    };
+    const { service, state } = host({ providers: [{ provider: spaces }] });
+    const inPlacement = (placementId: string) =>
+      decodeDesktopRecipe({ ...recipeFor("spaces.example", cloudCredential), placementId });
+    state.recipes.set(threadA, inPlacement("other-machine"));
+
+    // An agent asks in its thread under Full access, naming where it runs.
+    state.answer = "declined";
+    await expect(
+      service.acquire({ owner: code(threadA), actor: agentOf(threadA) }),
+    ).resolves.toEqual({ status: "refused", reason: "declined" });
+    expect(state.asked).toEqual(["off-machine"]);
+
+    // A person's tab is offered the placement to confirm with the provider,
+    // and their Start counts only with that confirmation, for that placement.
+    const caller = { owner: code(threadA), actor: person, scopeId: "window-1" };
+    await expect(service.overview(caller)).resolves.toMatchObject({
+      start: {
+        status: "available",
+        placementId: "other-machine",
+        provider: { providerId: "spaces.example", locality: "cloud", billed: false },
+      },
+    });
+    const confirmedProvider = decodeDesktopProviderId("spaces.example");
+    for (const unconfirmed of [
+      caller,
+      { ...caller, confirmedProvider },
+      { ...caller, confirmedProvider, confirmedPlacement: decodeDesktopPlacementId("here") },
+      {
+        ...caller,
+        confirmedProvider: decodeDesktopProviderId("other.example"),
+        confirmedPlacement: decodeDesktopPlacementId("other-machine"),
+      },
+    ]) {
+      await expect(service.acquire(unconfirmed)).resolves.toEqual({
+        status: "refused",
+        reason: "declined",
+      });
+    }
+    expect(fake.backend.calls()).not.toContain("acquire");
+    await expect(
+      service.acquire({
+        ...caller,
+        confirmedProvider,
+        confirmedPlacement: decodeDesktopPlacementId("other-machine"),
+      }),
+    ).resolves.toMatchObject({
+      status: "acquired",
+      lease: { placementId: "other-machine", locality: "cloud", billed: false },
+    });
+    expect(state.asked).toEqual(["off-machine"]);
+
+    // On this machine, a person's Start is their decision and asks nothing more.
+    state.recipes.set(threadB, inPlacement("here"));
+    await expect(service.acquire({ ...caller, owner: code(threadB) })).resolves.toMatchObject({
+      status: "acquired",
+      lease: { placementId: "here" },
+    });
+    expect(state.asked).toEqual(["off-machine"]);
   });
 
   it("refuses a cloud recipe that names no credential before any provider call", async () => {
@@ -330,7 +409,7 @@ describe("desktop lease service", () => {
         owner: code(threadA),
         actor: person,
         scopeId: "window-1",
-        confirmedBilledProvider: decodeDesktopProviderId("cloud.example"),
+        confirmedProvider: decodeDesktopProviderId("cloud.example"),
       }),
     ).resolves.toEqual({ status: "refused", reason: "no-provider-configured" });
     // Restart reconciliation's listing is the only call the provider saw.

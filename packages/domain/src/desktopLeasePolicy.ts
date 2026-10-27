@@ -49,22 +49,30 @@ export function desktopLeaseHoldsDesktop(state: DesktopLeaseState): boolean {
 export type DesktopLeaseAcquireGate =
   | { readonly kind: "proceed" }
   | { readonly kind: "refused"; readonly reason: "plan-mode" }
-  /** `in-thread` asks under ordinary posture rules; `billed` needs a person every time. */
-  | { readonly kind: "ask"; readonly asks: "in-thread" | "billed" };
+  /**
+   * `in-thread` asks under ordinary posture rules; `billed` and `off-machine`
+   * need a person every time.
+   */
+  | { readonly kind: "ask"; readonly asks: "in-thread" | "billed" | "off-machine" };
 
 /**
  * Plan refuses. A billed provider spends the person's money, which no posture
  * covers, so a person confirms every billed lease even under Full access. A
- * person acquiring a host-local desktop has already decided; an agent asks
- * unless the thread runs with Full access.
+ * desktop off this machine runs somewhere the person should know of before
+ * it starts, and can outlive this host, so a person confirms every one of
+ * those too, their own Start included. A person acquiring a host-local
+ * desktop has already decided; an agent asks unless the thread runs with
+ * Full access.
  */
 export function decideDesktopLeaseAcquire(input: {
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly billed: boolean;
+  readonly locality: DesktopProviderLocality;
   readonly initiator: EventActor["kind"];
 }): DesktopLeaseAcquireGate {
   if (input.executionPolicy === "plan") return { kind: "refused", reason: "plan-mode" };
   if (input.billed) return { kind: "ask", asks: "billed" };
+  if (input.locality !== "host-local") return { kind: "ask", asks: "off-machine" };
   if (input.initiator === "local-user" || input.initiator === "remote-device") {
     return { kind: "proceed" };
   }

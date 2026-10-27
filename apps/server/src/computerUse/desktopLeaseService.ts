@@ -105,8 +105,13 @@ export interface DesktopLeaseThread {
 export interface DesktopLeaseConfirmation {
   readonly owner: DesktopLeaseOwner;
   readonly provider: LeasableDesktopProvider;
-  /** `billed` asks a person in every posture; `in-thread` follows the thread's approvals. */
-  readonly asks: "in-thread" | "billed";
+  /** Where the desktop runs, for a provider with placements. */
+  readonly placementId?: DesktopPlacementId;
+  /**
+   * `billed` and `off-machine` ask a person in every posture; `in-thread`
+   * follows the thread's approvals.
+   */
+  readonly asks: "in-thread" | "billed" | "off-machine";
   readonly leaseMinutes: number;
 }
 
@@ -244,11 +249,13 @@ export interface DesktopLeaseService {
     caller: DesktopLeaseCaller & {
       readonly signal?: AbortSignal;
       /**
-       * The billed provider a person confirmed in their own tab before
-       * asking. A person's billed lease starts only with it, and only for
-       * that provider.
+       * The provider, and its placement when it has one, a person confirmed
+       * in their own tab before asking. A person's lease that bills or runs
+       * off this machine starts only with them, and only for that provider
+       * and placement.
        */
-      readonly confirmedBilledProvider?: DesktopProviderId;
+      readonly confirmedProvider?: DesktopProviderId;
+      readonly confirmedPlacement?: DesktopPlacementId;
     },
   ) => Promise<DesktopLeaseAcquireResult>;
   /** A person's or the owning agent's release of one of the thread's leases. */
@@ -1017,21 +1024,27 @@ export function createDesktopLeaseService(
     const gate = decideDesktopLeaseAcquire({
       executionPolicy: first.thread.executionPolicy,
       billed: first.terms.billed,
+      locality: first.terms.locality,
       initiator: caller.actor.kind,
     });
     if (gate.kind === "refused") return refused(gate.reason);
     if (gate.kind === "ask") {
-      // A person confirms a billed lease in their own tab before asking, for
-      // the provider they saw; nothing else stands in for that answer.
+      // A person confirms a lease that bills or runs off this machine in
+      // their own tab before asking, for the provider and placement they
+      // saw; nothing else stands in for that answer.
       const answer =
-        gate.asks === "billed" && isPerson(caller.actor)
-          ? String(caller.confirmedBilledProvider ?? "") === String(first.provider.id)
+        gate.asks !== "in-thread" && isPerson(caller.actor)
+          ? String(caller.confirmedProvider ?? "") === String(first.provider.id) &&
+            String(caller.confirmedPlacement ?? "") === String(first.terms.placementId ?? "")
             ? "approved"
             : "declined"
           : await options
               .confirm({
                 owner: first.owner,
                 provider: leasableOf(first.provider, first.terms),
+                ...(first.terms.placementId === undefined
+                  ? {}
+                  : { placementId: first.terms.placementId }),
                 asks: gate.asks,
                 leaseMinutes: first.recipe.leaseMinutes,
               })
@@ -1443,10 +1456,17 @@ export function createDesktopLeaseService(
     const gate = decideDesktopLeaseAcquire({
       executionPolicy: admitted.thread.executionPolicy,
       billed: admitted.terms.billed,
+      locality: admitted.terms.locality,
       initiator: caller.actor.kind,
     });
     if (gate.kind === "refused") return refused(gate.reason);
-    return { status: "available", provider: leasableOf(admitted.provider, admitted.terms) };
+    return {
+      status: "available",
+      provider: leasableOf(admitted.provider, admitted.terms),
+      ...(admitted.terms.placementId === undefined
+        ? {}
+        : { placementId: admitted.terms.placementId }),
+    };
   }
 
   /** A view the caller holds on this lease, with the lease still operable by them. */

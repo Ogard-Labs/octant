@@ -245,7 +245,7 @@ if (phase === "restart") {
   process.exit(left === 0 ? 0 : 1);
 }
 
-const acquired = await service.acquire({ ...caller, confirmedBilledProvider: cloud.id });
+const acquired = await service.acquire({ ...caller, confirmedProvider: cloud.id });
 step("acquire", acquired);
 if (acquired.status !== "acquired") process.exit(1);
 const leaseId = acquired.lease.leaseId;
