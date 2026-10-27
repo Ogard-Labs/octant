@@ -14,8 +14,10 @@ export type DesktopOverview = Extract<DesktopPaneAnswer, { readonly status: "ove
  * What this tab holds of the selected lease's screen. `none` is a tab that
  * has not shown it in this window session, restored tabs included: it never
  * reconnects on its own. `lost` is a view that stopped while on screen.
+ * `readable` is a view the host would not show because the connection to the
+ * desktop could be read on its way.
  */
-export type DesktopViewPresence = "none" | "opening" | "open" | "lost";
+export type DesktopViewPresence = "none" | "opening" | "open" | "lost" | "readable";
 
 /**
  * The pane's states. Each says what the host reports, never more:
@@ -30,6 +32,7 @@ export type DesktopPaneState =
   | { readonly kind: "not-shown"; readonly lease: DesktopLease }
   | { readonly kind: "live"; readonly lease: DesktopLease }
   | { readonly kind: "interrupted"; readonly lease: DesktopLease }
+  | { readonly kind: "session-readable"; readonly lease: DesktopLease }
   | { readonly kind: "releasing"; readonly lease: DesktopLease }
   | { readonly kind: "release-failed"; readonly lease: DesktopLease }
   | {
@@ -87,6 +90,7 @@ export function desktopPaneState(input: {
     case "ready":
       if (input.view === "open" || input.view === "opening") return { kind: "live", lease };
       if (input.view === "lost") return { kind: "interrupted", lease };
+      if (input.view === "readable") return { kind: "session-readable", lease };
       return { kind: "not-shown", lease };
     case "releasing":
       return { kind: "releasing", lease };
@@ -108,6 +112,23 @@ export function providerName(
     providers.find((provider) => String(provider.providerId) === providerId)?.displayName ??
     providerId
   );
+}
+
+/**
+ * Where a lease's desktop runs, for a provider with placements: the person's
+ * machine the recipe named, or the placement's own name. Undefined for a
+ * provider with no placements, whose name already says where.
+ */
+export function desktopWhere(
+  providers: ReadonlyArray<LeasableDesktopProvider>,
+  lease: DesktopLease,
+): string | undefined {
+  if (lease.machine !== undefined) return lease.machine.displayName;
+  if (lease.placementId === undefined) return undefined;
+  const placement = providers
+    .find((provider) => String(provider.providerId) === String(lease.providerId))
+    ?.placements?.find((entry) => String(entry.placementId) === String(lease.placementId));
+  return placement?.displayName ?? String(lease.placementId);
 }
 
 /** Why the thread cannot start a desktop, in one sentence a person can act on or accept. */
@@ -151,6 +172,8 @@ export function startRefusalMessage(
       return "This view of the desktop has ended.";
     case "view-limit":
       return "This desktop is already open in as many tabs as it may be.";
+    case "session-readable":
+      return "The connection to this desktop could be read on its way right now, so Octant shows nothing and sends nothing.";
   }
 }
 

@@ -56,7 +56,9 @@ file and terminal requests through the executor
 in `apps/server/src/code/codeAcpClientTools.ts`,
 [As built in 6c](#as-built-in-6c)). No shipped ACP profile can be stated
 there yet, so no provider's runtime runs on a target in the product; the
-real-provider smoke (6d) is next. Slice 7 is
+real-provider smoke (6d) is next. Since 6d's prerequisites a placed launch
+also carries fixed variables and the bound root's entries its runtime is
+denied ([Before 6d](#before-6d)). Slice 7 is
 built: a person's terminals and managed worktrees on a remote-bound Project,
 under the same admission
 ([Terminals and managed worktrees](#terminals-and-managed-worktrees)),
@@ -975,11 +977,17 @@ These rules settle what the seam needs, each in the fail-closed direction:
   is the path the person set for the provider instance on that target
   (R2); a driver launches exactly it, the host refuses a launch of any other
   path, and conformance fails a driver that names one of its own.
-- **A placed launch names a program and its arguments, nothing more.** The
-  driver gives the runtime's absolute path on the target and its arguments.
-  The working directory is the bound root and the environment is built on the
-  target, so the seam has no field through which a folder or a credential of
-  this host could cross. A placed process is its standard streams and how it
+- **A placed launch names a program and its arguments, and what its profile
+  fixes.** The driver gives the runtime's absolute path on the target, its
+  arguments, its home-relative account state, variables set to the driver's
+  own constants (a value holds no `/`, and no name the target sets itself,
+  the loader's, the proxy's, Octant's, or an account-state path's), and the
+  bound root's entries the runtime may neither read nor write. The working
+  directory is the bound root and the environment is built on the target, so
+  the seam has no field through which a folder of this host could cross, and
+  none is for a credential. A driver asks `placedLaunchExpressible`
+  (`packages/provider-sdk/src/processPlacement.ts`) whether a target accepts
+  what it would declare. A placed process is its standard streams and how it
   ended (exited, or lost with its session); it stops when the scope it was
   launched in closes.
 - **Conformance holds the claim.** A driver that declares nothing must be
@@ -1108,7 +1116,9 @@ the writing postures' otherwise), with these differences, which match what
 - **Seam.** `ProviderPlacedLaunch` gains `accountState`, at most four
   home-relative paths (no `..`, never absolute) each with its access and an
   optional variable name. A home-relative path cannot name a folder of this
-  host, so the seam keeps its rule that nothing of this host crosses.
+  host, so the seam keeps its rule that nothing of this host crosses. Since
+  6d's prerequisites it also carries `fixedVariables` and
+  `deniedRootEntries` ([Before 6d](#before-6d)).
 - **Attested.** Two canary rows join the attestation, run with the runtime
   grant shape against a scratch home and a scratch account-state folder:
   a placed runtime in Plan must fail to write the root or its account state
@@ -1491,6 +1501,41 @@ Not built in 6c, and named here so a later change owns it: the Code turn
 runtime composing a remote-bound Project's ACP thread (it waits for remote
 threads, as the native harness does), a Settings › SSH targets control for
 the runtime path, and clearing a path short of removing the target.
+
+#### Before 6d
+
+6d needs one real profile that can be placed, and every shipped profile's
+local launch fixes guard variables and denies Project entries a placed
+launch could not carry after 6c. The seam carries both first, as its own
+step, each rule in the fail-closed direction:
+
+- **Fixed variables are the driver's constants.** `ProviderPlacedLaunch`
+  gains `fixedVariables`, at most 32, and `start-process` carries them. A
+  value holds no `/` and no control character, so it names no folder of this
+  host; a name follows the account-state variable's rules (no `OCTANT_`,
+  `SSH_`, `LD_`, or `DYLD_` prefix, nothing with `PROXY`, and not `PATH`,
+  `HOME`, `TMPDIR`, `SHELL`, `USER`, or `LOGNAME`), and a name an
+  account-state path's variable already takes is refused by this host
+  before any frame and by the executor. The executor sets them first, so
+  every variable it sets itself (`LANG` included) wins over one of the same
+  name. The protocol version is unchanged: the executor's build must equal
+  this host's, and a start without the fields reads as before.
+- **Denied root entries are covered on the target.** `deniedRootEntries`,
+  at most 32, each relative to the bound root and never climbing out of it
+  (no absolute path, empty segment, `.`, or `..`). The executor covers each
+  one that exists when the runtime starts, for reading and writing, with the
+  same Linux deny cover a local launch uses (`additionalDenyReadPaths` and
+  `additionalDenyWritePaths`). A missing entry is skipped, as a local Linux
+  launch skips it, because Bubblewrap would make it as its mount point in
+  the person's root; one made mid-session is covered from the next launch.
+- **Evidence.** `executorProcesses.test.ts` (fixed variables set beside the
+  executor's own and never over them, only existing denied entries covered,
+  and a fixed variable naming an account-state variable refused),
+  `sshTargetConnectionService.test.ts` (both carried in the request, and a
+  path value, a target-set name, an account-state name, or an entry above
+  the root refused before any frame), `sshExecutorProtocol.test.ts` (the
+  wire bounds), and `processPlacementConformance.test.ts`
+  (`placedLaunchExpressible` agreeing with them).
 
 ### Credential custody
 

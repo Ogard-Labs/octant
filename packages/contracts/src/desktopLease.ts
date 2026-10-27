@@ -42,6 +42,24 @@ export const DesktopPlacementId = Schema.String.pipe(
 );
 export type DesktopPlacementId = typeof DesktopPlacementId.Type;
 
+/**
+ * One of the person's own machines a placement can run a desktop on, as the
+ * provider names it. A recipe for such a placement names the machine, so the
+ * person sees which computer a desktop uses before it starts.
+ */
+export const DesktopMachineId = Schema.String.pipe(
+  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9 ._:@-]{0,127}$/),
+  Schema.brand("DesktopMachineId"),
+);
+export type DesktopMachineId = typeof DesktopMachineId.Type;
+
+/** A machine a recipe names: the provider's id for it and the name the person chose it by. */
+export const DesktopMachine = Schema.Struct({
+  machineId: DesktopMachineId,
+  displayName: text(128),
+}).annotations(strict);
+export type DesktopMachine = typeof DesktopMachine.Type;
+
 /** Chat never leases: a Chat Project has no root to send an artifact from. */
 export const DesktopLeaseMode = Schema.Literal("work", "code");
 export type DesktopLeaseMode = typeof DesktopLeaseMode.Type;
@@ -83,6 +101,11 @@ export const DesktopRecipe = Schema.Struct({
    * takes locality and billing from it.
    */
   placementId: Schema.optional(DesktopPlacementId),
+  /**
+   * The person's machine the desktop runs on: required for a placement that
+   * chooses one, refused anywhere else.
+   */
+  machine: Schema.optional(DesktopMachine),
   network: DesktopNetworkPosture,
   leaseMinutes,
   maximumLeaseMinutes: leaseMinutes,
@@ -98,12 +121,17 @@ export const DesktopRecipe = Schema.Struct({
   );
 export type DesktopRecipe = typeof DesktopRecipe.Type;
 
-/** One placement a provider offers a recipe, with where it runs and whether it bills. */
+/**
+ * One placement a provider offers a recipe, with where it runs and whether it
+ * bills. `choosesMachine` marks a placement that runs on one of the person's
+ * own machines, which the recipe names.
+ */
 export const LeasableDesktopPlacement = Schema.Struct({
   placementId: DesktopPlacementId,
   displayName: text(128),
   locality: DesktopProviderLocality,
   billed: Schema.Boolean,
+  choosesMachine: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type LeasableDesktopPlacement = typeof LeasableDesktopPlacement.Type;
 
@@ -207,6 +235,7 @@ export const DesktopLease = Schema.Struct({
   billed: Schema.Boolean,
   credentialRef: Schema.optional(DesktopCredentialRef),
   placementId: Schema.optional(DesktopPlacementId),
+  machine: Schema.optional(DesktopMachine),
   daemon: Schema.optional(DesktopLeaseDaemon),
   state: DesktopLeaseState,
   requestedAt: UtcTimestamp,
@@ -232,8 +261,9 @@ export const DESKTOP_LEASE_EVENT_NAMES = {
  * the desktop with. It records the credential reference, never the material,
  * so teardown can still find the key after the recipe is removed. For a
  * provider that declares placements, `locality` and `billed` are the
- * placement's, and `placementId` names it. A provider run by a local daemon
- * records that daemon in `daemon`, never a token.
+ * placement's, and `placementId` names it, with the person's `machine` for a
+ * placement that chooses one. A provider run by a local daemon records that
+ * daemon in `daemon`, never a token.
  */
 export const DesktopLeaseRequested = Schema.Struct({
   leaseId: DesktopLeaseId,
@@ -244,6 +274,7 @@ export const DesktopLeaseRequested = Schema.Struct({
   hostTag: DesktopHostTag,
   credentialRef: Schema.optional(DesktopCredentialRef),
   placementId: Schema.optional(DesktopPlacementId),
+  machine: Schema.optional(DesktopMachine),
   daemon: Schema.optional(DesktopLeaseDaemon),
   network: DesktopNetworkPosture,
   expiresAt: UtcTimestamp,
@@ -409,9 +440,15 @@ export type DesktopViewId = typeof DesktopViewId.Type;
  * Why a view refuses beyond the lease's own refusals: `view-ended` names a
  * view the host does not hold for this caller (closed, lapsed, from another
  * window or device, or minted before a restart); `view-limit` is the per-lease
- * cap on open views.
+ * cap on open views; `session-readable` is a provider whose route to the
+ * desktop right now would let a third party read its screen and input, so
+ * nothing is shown or sent until the route changes.
  */
-export const DesktopViewRefusalReason = Schema.Literal("view-ended", "view-limit");
+export const DesktopViewRefusalReason = Schema.Literal(
+  "view-ended",
+  "view-limit",
+  "session-readable",
+);
 export type DesktopViewRefusalReason = typeof DesktopViewRefusalReason.Type;
 
 export const DesktopPaneRefusal = Schema.Struct({
@@ -435,12 +472,14 @@ export const DesktopPaneRequest = Schema.Union(
     kind: Schema.Literal("acquire"),
     ...paneThread,
     /**
-     * The provider, and its placement when it has one, the person confirmed
-     * in the tab before asking. A desktop that bills or runs off this machine
-     * starts only with them, and only on that provider and placement.
+     * The provider, and its placement and machine when it has them, the
+     * person confirmed in the tab before asking. A desktop that bills or runs
+     * off this computer starts only with them, and only on that provider,
+     * placement, and machine.
      */
     confirmedProvider: Schema.optional(DesktopProviderId),
     confirmedPlacement: Schema.optional(DesktopPlacementId),
+    confirmedMachine: Schema.optional(DesktopMachineId),
   }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("release"), ...paneLease }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("retry-release"), ...paneLease }).annotations(strict),
@@ -458,6 +497,15 @@ export const DesktopPaneRequest = Schema.Union(
   }).annotations(strict),
   /** The providers a Project's recipe may name on this host now, for the recipe editor. */
   Schema.Struct({ kind: Schema.Literal("recipe-providers") }).annotations(strict),
+  /**
+   * The person's machines an offered placement that chooses one can run a
+   * desktop on, for the recipe editor in a local window.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("recipe-machines"),
+    providerId: DesktopProviderId,
+    placementId: DesktopPlacementId,
+  }).annotations(strict),
 );
 export type DesktopPaneRequest = typeof DesktopPaneRequest.Type;
 
@@ -472,6 +520,8 @@ export const DesktopPaneStart = Schema.Union(
     provider: LeasableDesktopProvider,
     /** The placement the thread's recipe names, which a person confirms with the provider. */
     placementId: Schema.optional(DesktopPlacementId),
+    /** The person's machine the recipe names, for a placement that chooses one. */
+    machine: Schema.optional(DesktopMachine),
   }).annotations(strict),
   DesktopLeaseRefusal,
 );
@@ -507,6 +557,17 @@ export const DesktopPaneAnswer = Schema.Union(
     /** Providers ready for leasing on this host; a recipe naming any other is refused. */
     providers: Schema.Array(LeasableDesktopProvider),
   }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("recipe-machines"),
+    /** The machines the provider reports for the placement now, and whether each answers. */
+    machines: Schema.Array(
+      Schema.Struct({
+        machineId: DesktopMachineId,
+        displayName: text(128),
+        online: Schema.Boolean,
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(64)),
+  }).annotations(strict),
   DesktopPaneRefusal,
 );
 export type DesktopPaneAnswer = typeof DesktopPaneAnswer.Type;
@@ -516,6 +577,7 @@ export const decodeDesktopHostTag = Schema.decodeUnknownSync(DesktopHostTag);
 export const decodeDesktopProviderId = Schema.decodeUnknownSync(DesktopProviderId);
 export const decodeDesktopCredentialRef = Schema.decodeUnknownSync(DesktopCredentialRef);
 export const decodeDesktopPlacementId = Schema.decodeUnknownSync(DesktopPlacementId);
+export const decodeDesktopMachineId = Schema.decodeUnknownSync(DesktopMachineId);
 export const decodeDesktopRecipe = Schema.decodeUnknownSync(DesktopRecipe);
 export const decodeLeasableDesktopProvider = Schema.decodeUnknownSync(LeasableDesktopProvider);
 export const decodeDesktopLeaseDaemon = Schema.decodeUnknownSync(DesktopLeaseDaemon);

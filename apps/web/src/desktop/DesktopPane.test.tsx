@@ -1,6 +1,7 @@
 import type { DesktopPaneClient } from "@octant/client-runtime/desktop-pane-client";
 import {
   decodeDesktopLease,
+  decodeDesktopMachineId,
   decodeDesktopPlacementId,
   decodeDesktopProviderId,
   decodeDesktopViewId,
@@ -41,6 +42,30 @@ function lease(overrides: Partial<Record<keyof DesktopLease, unknown>> = {}): De
 }
 
 type Overview = Extract<DesktopPaneAnswer, { status: "overview" }>;
+
+const spaces = {
+  providerId: decodeDesktopProviderId("cua"),
+  displayName: "Cua Spaces",
+  locality: "cloud",
+  billed: false,
+  daemon: true,
+  placements: [
+    {
+      placementId: decodeDesktopPlacementId("this-machine"),
+      displayName: "This computer",
+      locality: "host-local",
+      billed: false,
+    },
+    {
+      placementId: decodeDesktopPlacementId("other-machine"),
+      displayName: "Your other computer",
+      locality: "cloud",
+      billed: false,
+      choosesMachine: true,
+    },
+  ],
+} as const;
+const spareMini = { machineId: decodeDesktopMachineId("m-7f3a"), displayName: "spare mini" };
 
 function overviewOf(
   leases: ReadonlyArray<DesktopLease>,
@@ -186,41 +211,23 @@ describe("Desktop pane", () => {
     );
   });
 
-  it("asks the person before starting a desktop off this machine, saying where it runs and what a stopped host leaves behind", async () => {
-    const spaces = {
-      providerId: decodeDesktopProviderId("cua"),
-      displayName: "Cua Spaces",
-      locality: "cloud",
-      billed: false,
-      daemon: true,
-      placements: [
-        {
-          placementId: decodeDesktopPlacementId("this-machine"),
-          displayName: "This machine",
-          locality: "host-local",
-          billed: false,
-        },
-        {
-          placementId: decodeDesktopPlacementId("other-machine"),
-          displayName: "Your other machine",
-          locality: "cloud",
-          billed: false,
-        },
-      ],
-    } as const;
+  it("asks the person before starting a desktop off this computer, naming the computer it runs on and what a stopped host leaves behind", async () => {
     const { client, requests } = fakeClient({
       overview: overviewOf([], {
         status: "available",
         provider: spaces,
         placementId: decodeDesktopPlacementId("other-machine"),
+        machine: spareMini,
       }),
     });
     render(<DesktopPane client={client} threadId={threadId} />);
     fireEvent.click(await screen.findByRole("button", { name: "Start desktop" }));
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText("Start a desktop off this machine?")).toBeTruthy();
-    expect(dialog.textContent).toContain("Your other machine");
-    expect(dialog.textContent).toContain("If this machine stops, Octant cannot end it");
+    expect(within(dialog).getByText("Start a desktop on spare mini?")).toBeTruthy();
+    expect(dialog.textContent).toContain(
+      "Cua Spaces runs it on spare mini (Your other computer), not on this computer",
+    );
+    expect(dialog.textContent).toContain("If this computer stops, Octant cannot end it");
     expect(kinds(requests)).toEqual([]);
     fireEvent.click(within(dialog).getByRole("button", { name: "Start desktop" }));
     await waitFor(() =>
@@ -229,8 +236,57 @@ describe("Desktop pane", () => {
         threadId,
         confirmedProvider: "cua",
         confirmedPlacement: "other-machine",
+        confirmedMachine: "m-7f3a",
       }),
     );
+  });
+
+  it("names the computer a running desktop uses", async () => {
+    const away = lease({
+      providerId: "cua",
+      locality: "cloud",
+      placementId: "other-machine",
+      machine: spareMini,
+    });
+    const here = lease({ providerId: "cua", placementId: "this-machine" });
+    for (const [running, where] of [
+      [away, "Cua Spaces · spare mini"],
+      [here, "Cua Spaces · This computer"],
+    ] as const) {
+      const { client } = fakeClient({
+        overview: { ...overviewOf([running]), providers: [spaces] },
+      });
+      render(<DesktopPane client={client} threadId={threadId} />);
+      const toolbar = await screen.findByRole("toolbar", { name: "Desktop controls" });
+      await waitFor(() => expect(toolbar.textContent).toContain(where));
+      cleanup();
+    }
+  });
+
+  it("says a view is not shown while the connection to the desktop could be read, and tries again only when asked", async () => {
+    const fake = fakeClient({ overview: overviewOf([lease()]) });
+    let readable = true;
+    const client: DesktopPaneClient = {
+      ...fake.client,
+      request: async (request) =>
+        request.kind === "open-view" && readable
+          ? (fake.requests.push(request), { status: "refused", reason: "session-readable" })
+          : fake.client.request(request),
+    };
+    render(<DesktopPane client={client} threadId={threadId} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Show desktop" }));
+    expect(await screen.findByText("Not shown: the connection could be read")).toBeTruthy();
+    expect(screen.getByText(/still running/)).toBeTruthy();
+    expect(screen.queryByRole("img", { name: "Desktop live screen" })).toBeNull();
+    expect(fake.frame).not.toHaveBeenCalled();
+
+    readable = false;
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await screen.findByRole("img", { name: "Desktop live screen" });
+
+    // A route that changes while the view is open stops it the same way.
+    fake.frame.mockResolvedValue({ status: "refused", reason: "session-readable" });
+    expect(await screen.findByText("Not shown: the connection could be read")).toBeTruthy();
   });
 
   it("sends a person's moves, scrolls, and presses in the order they made them", async () => {

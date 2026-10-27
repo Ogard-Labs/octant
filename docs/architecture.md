@@ -692,6 +692,10 @@ It also captures a leased device's screen with the selected Xcode's own
 tooling, a read like a Simulator screenshot, and the Apple workbench's
 **Physical devices** section shows the picker, setup checklist, lease
 confirmation, and that latest screenshot; a physical device has no live view.
+The agent's `octant_apple` asks for the same lease, effects, screenshots, and
+console reads through the same device policy; its lease and device-effect
+asks are answered in the thread by a person at the Mac only, never by a paired
+device.
 `/api/apple/devices` is readable by a paired device, and
 `/api/apple/device-leases`, `/api/apple/device-actions`, and
 `/api/apple/device-screenshots` (the pixels of a thread's latest device
@@ -6184,7 +6188,8 @@ same. This holds in Chat, Work, and Code.
   editor, and E2B, the first of the two named cloud providers (E2B and Cua
   Spaces), are built; Cua Spaces, reached through the person's local Cua daemon, is
   designed (accepted on 2026-10-27), and its local-daemon port and its driver
-  for a Space on this machine or on the person's other machine are built but
+  for a Space on this computer or on another of the person's computers that
+  the recipe names are built but
   offered on no host until the maintainer's live smokes pass; see
   [Disposable desktops](design/disposable-desktops.md#cua-spaces-through-the-local-daemon).
   A driver whose provider runs a daemon on this machine reaches it only
@@ -6521,7 +6526,9 @@ a capability ceiling, and a brokered request with this instance's key to its
 configured origin only), the confined process per instance that carries that
 protocol on macOS, and admission (trust at a digest, a provider added off from
 a local window, host-run Verify tools, and the process stopped whenever the
-driver stops being effective) are built. Only a macOS host admits one.
+driver stops being effective) are built, as is moving an instance to a newly
+trusted digest of its driver with its records cleared. Publisher signatures
+are not. Only a macOS host admits one.
 
 The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a

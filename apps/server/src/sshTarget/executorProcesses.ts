@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, rmSync } from "node:fs";
+import { lstatSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
   SSH_EXECUTOR_MAX_PLACED_PROCESSES,
@@ -185,6 +185,19 @@ export class ExecutorProcesses {
     if (home.status === "refused") return refusedStart(home.reason);
     const accountState = checkAccountState(environment, root, request.accountState);
     if (accountState.status === "refused") return refusedStart(accountState.reason);
+    const fixedVariables = Object.fromEntries(
+      (request.fixedVariables ?? []).map((variable) => [variable.name, variable.value]),
+    );
+    // An account-state path's variable is set here to the path it resolved
+    // to; a fixed value of the same name would point the runtime elsewhere.
+    if (
+      Object.keys(fixedVariables).some((name) =>
+        Object.hasOwn(accountState.value.environment, name),
+      )
+    ) {
+      return refusedStart("account-state-not-confinable");
+    }
+    const deniedPaths = deniedRootPaths(root, request.deniedRootEntries ?? []);
     if (this.#abandoned) return refusedStart("unavailable");
 
     const directory = join(session, "processes", String(request.stream));
@@ -217,6 +230,7 @@ export class ExecutorProcesses {
           temporaryDirectory,
           binaryFolders: binary.value.readFolders,
           accountState: accountState.value,
+          deniedPaths,
           networkEgress: { kind: "proxied", endpoint },
         }),
       });
@@ -225,7 +239,10 @@ export class ExecutorProcesses {
         // Its own process group, so a stop reaches everything it started.
         detached: true,
         stdio: ["pipe", "pipe", "pipe"],
+        // The driver's constants go first, so every variable the executor
+        // sets itself is set over a fixed one of the same name.
         env: {
+          ...fixedVariables,
           HOME: home.value,
           TMPDIR: temporaryDirectory,
           PATH: environment.path ?? DEFAULT_PATH,
@@ -314,6 +331,26 @@ export class ExecutorProcesses {
       stderr: placed.stderr.toString("base64"),
     });
   }
+}
+
+/**
+ * The denied root entries that exist as the runtime starts. Bubblewrap makes
+ * a missing path as the mount point of its cover, which would put an empty
+ * file or folder in the person's root; a missing entry holds nothing to load
+ * at start, and one made later is covered at the next launch. A local launch
+ * on Linux skips missing entries the same way (`acpProcess.ts`).
+ */
+function deniedRootPaths(root: string, entries: ReadonlyArray<string>): ReadonlyArray<string> {
+  return entries
+    .map((entry) => join(root, entry))
+    .filter((path) => {
+      try {
+        lstatSync(path);
+        return true;
+      } catch {
+        return false;
+      }
+    });
 }
 
 /** Signals the runtime's whole process group, so nothing it started outlives it. */

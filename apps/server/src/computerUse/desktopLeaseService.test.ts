@@ -7,6 +7,7 @@ import {
   DESKTOP_ARTIFACT_MAXIMUM_BYTES,
   decodeDesktopHostTag,
   decodeDesktopLeaseId,
+  decodeDesktopMachineId,
   decodeDesktopPlacementId,
   decodeDesktopProviderId,
   decodeDesktopRecipe,
@@ -18,7 +19,11 @@ import {
   type ProviderExecutionPolicy,
 } from "@octant/contracts";
 import { decodeComputerControlCommand } from "@octant/contracts/computer-use-plugin";
-import type { DesktopFrame, DesktopProvider } from "@octant/plugin-api/desktop-provider";
+import {
+  DESKTOP_SESSION_READABLE,
+  type DesktopFrame,
+  type DesktopProvider,
+} from "@octant/plugin-api/desktop-provider";
 import {
   createFakeDesktopProvider,
   FAKE_DESKTOP_FRAME,
@@ -1065,6 +1070,113 @@ describe("desktop lease service", () => {
     expect(runningDesktops(fake.backend)).toBe(0);
   });
 
+  it("refuses a recipe that allows network where its desktop cannot have it before journaling anything", async () => {
+    const fake = createFakeDesktopProvider({ id: "spaces.example" });
+    const spaces: DesktopProvider = {
+      ...fake.provider,
+      placements: [
+        {
+          id: decodeDesktopPlacementId("other-machine"),
+          displayName: "Your other computer",
+          locality: "cloud",
+          billed: false,
+        },
+      ],
+    };
+    const { service, state, connection } = host({ providers: [{ provider: spaces }] });
+    // A recipe saved before the rule existed still reaches the lease service.
+    state.recipes.set(
+      threadA,
+      decodeDesktopRecipe({
+        ...recipeFor("spaces.example", cloudCredential),
+        placementId: "other-machine",
+        network: "allow",
+      }),
+    );
+    const caller = { owner: code(threadA), actor: person, scopeId: "window-1" };
+    await expect(service.overview(caller)).resolves.toMatchObject({
+      start: { status: "refused", reason: "no-provider-configured" },
+    });
+    await expect(
+      service.acquire({
+        ...caller,
+        confirmedProvider: decodeDesktopProviderId("spaces.example"),
+        confirmedPlacement: decodeDesktopPlacementId("other-machine"),
+      }),
+    ).resolves.toEqual({ status: "refused", reason: "no-provider-configured" });
+    await expect(
+      service.acquire({ owner: code(threadA), actor: agentOf(threadA) }),
+    ).resolves.toEqual({ status: "refused", reason: "no-provider-configured" });
+    expect(state.asked).toEqual([]);
+    expect(fake.backend.calls()).not.toContain("acquire");
+    expect(
+      connection
+        .prepare("SELECT COUNT(*) AS rows FROM event_journal WHERE aggregate_type = ?")
+        .get("desktop-lease"),
+    ).toEqual({ rows: 0 });
+  });
+
+  it("runs a desktop on the machine its recipe names, and a confirmation covers only that machine", async () => {
+    const fake = createFakeDesktopProvider({ id: "spaces.example" });
+    const spaces: DesktopProvider = {
+      ...fake.provider,
+      placements: [
+        {
+          id: decodeDesktopPlacementId("other-machine"),
+          displayName: "Your other computer",
+          locality: "cloud",
+          billed: false,
+          choosesMachine: true,
+        },
+      ],
+    };
+    const { service, state } = host({ providers: [{ provider: spaces }] });
+    const studio = { machineId: decodeDesktopMachineId("host-studio"), displayName: "studio" };
+    const onMachine = (machine?: typeof studio) =>
+      decodeDesktopRecipe({
+        ...recipeFor("spaces.example", cloudCredential),
+        placementId: "other-machine",
+        ...(machine === undefined ? {} : { machine }),
+      });
+    const caller = { owner: code(threadA), actor: person, scopeId: "window-1" };
+    const confirmed = {
+      ...caller,
+      confirmedProvider: decodeDesktopProviderId("spaces.example"),
+      confirmedPlacement: decodeDesktopPlacementId("other-machine"),
+    };
+
+    // A placement that chooses a machine leases nothing until the recipe names one.
+    state.recipes.set(threadA, onMachine());
+    await expect(service.acquire(confirmed)).resolves.toEqual({
+      status: "refused",
+      reason: "no-provider-configured",
+    });
+
+    state.recipes.set(threadA, onMachine(studio));
+    await expect(service.overview(caller)).resolves.toMatchObject({
+      start: { status: "available", placementId: "other-machine", machine: studio },
+    });
+    for (const confirmedMachine of [undefined, decodeDesktopMachineId("host-attic")]) {
+      await expect(
+        service.acquire({
+          ...confirmed,
+          ...(confirmedMachine === undefined ? {} : { confirmedMachine }),
+        }),
+      ).resolves.toEqual({ status: "refused", reason: "declined" });
+    }
+    expect(fake.backend.calls()).not.toContain("acquire");
+    const started = await service.acquire({ ...confirmed, confirmedMachine: studio.machineId });
+    expect(started).toMatchObject({ status: "acquired", lease: { machine: studio } });
+
+    // Pointing the recipe at another machine ends the desktop on this one.
+    state.recipes.set(
+      threadA,
+      onMachine({ machineId: decodeDesktopMachineId("host-attic"), displayName: "attic" }),
+    );
+    await service.sweep();
+    expect(runningDesktops(fake.backend)).toBe(0);
+  });
+
   it("checks again for a commit that arrives while a sweep is already tearing down", async () => {
     const fake = createFakeDesktopProvider();
     let openGate: () => void = () => undefined;
@@ -1881,6 +1993,152 @@ describe("desktop lease service for a person's Desktop tab", () => {
       status: "refused",
       reason: "not-permitted",
     });
+  });
+
+  it("tells a person when a view is refused because the session could be read on its way, and nothing else", async () => {
+    const fake = createFakeDesktopProvider();
+    let route: "private" | "readable" | "down" = "readable";
+    const answer = (): { readonly status: "refused"; readonly reason: string } | undefined =>
+      route === "readable"
+        ? { status: "refused", reason: DESKTOP_SESSION_READABLE }
+        : route === "down"
+          ? { status: "refused", reason: "route-unverified" }
+          : undefined;
+    const relayed: DesktopProvider = {
+      ...fake.provider,
+      screen: async (handle) => {
+        const refusedNow = answer();
+        if (refusedNow !== undefined) return refusedNow;
+        const opened = await fake.provider.screen(handle);
+        if (opened.status !== "ready") return opened;
+        return {
+          status: "ready",
+          screen: {
+            ...opened.screen,
+            frame: async () => answer() ?? opened.screen.frame(),
+            input: async (event) => answer() ?? opened.screen.input(event),
+          },
+        };
+      },
+    };
+    const { service } = host({ providers: [{ provider: relayed }] });
+    const leaseId = await acquired(service, threadA);
+    await expect(service.openView({ ...at(threadA), leaseId })).resolves.toEqual({
+      status: "refused",
+      reason: "session-readable",
+    });
+    // Any other reason a driver gives stays with the host.
+    route = "down";
+    await expect(service.openView({ ...at(threadA), leaseId })).resolves.toEqual({
+      status: "refused",
+      reason: "provider-unavailable",
+    });
+
+    route = "private";
+    const viewId = await viewing(service, leaseId);
+    await expect(service.frame({ ...at(threadA), leaseId, viewId })).resolves.toMatchObject({
+      status: "frame",
+    });
+    // The route falls back to one that can read the session while the view is open.
+    route = "readable";
+    await expect(service.frame({ ...at(threadA), leaseId, viewId })).resolves.toEqual({
+      status: "refused",
+      reason: "session-readable",
+    });
+    await expect(
+      service.input({
+        ...at(threadA),
+        leaseId,
+        viewId,
+        event: { kind: "key", action: "down", key: "Enter" },
+      }),
+    ).resolves.toEqual({ status: "refused", reason: "session-readable" });
+    route = "down";
+    await expect(service.frame({ ...at(threadA), leaseId, viewId })).resolves.toEqual({
+      status: "no-frame",
+    });
+  });
+
+  it("lists the person's machines for a placement that chooses one, only to a local window", async () => {
+    const fake = createFakeDesktopProvider({ id: "spaces.example" });
+    let listed: Awaited<ReturnType<NonNullable<DesktopProvider["listMachines"]>>> = {
+      status: "listed",
+      machines: [
+        { id: "host-studio", name: "  studio  ", online: true },
+        { id: "host-attic", name: "", online: false },
+        { id: "../not an id", name: "planted", online: true },
+        { id: "host-long", name: `${"n".repeat(127)} cut here`, online: true },
+      ],
+    };
+    const asked: Array<string> = [];
+    const spaces: DesktopProvider = {
+      ...fake.provider,
+      daemon: { socketPath: ".spaces/spaces.sock", methods: [] },
+      placements: [
+        {
+          id: decodeDesktopPlacementId("here"),
+          displayName: "This computer",
+          locality: "host-local",
+          billed: false,
+        },
+        {
+          id: decodeDesktopPlacementId("other-machine"),
+          displayName: "Your other computer",
+          locality: "cloud",
+          billed: false,
+          choosesMachine: true,
+        },
+      ],
+      listMachines: async (placementId) => {
+        asked.push(String(placementId));
+        return listed;
+      },
+    };
+    const { state, restart } = host({ providers: [{ provider: spaces }] });
+    state.daemonUserId = 1_000;
+    const service = restart();
+    await service.start();
+    const ask = (actor: EventActor, placementId = "other-machine", providerId = "spaces.example") =>
+      service.recipeMachines({
+        actor,
+        providerId: decodeDesktopProviderId(providerId),
+        placementId: decodeDesktopPlacementId(placementId),
+      });
+
+    await expect(ask(person)).resolves.toEqual({
+      status: "recipe-machines",
+      machines: [
+        { machineId: "host-studio", displayName: "studio", online: true },
+        { machineId: "host-attic", displayName: "host-attic", online: false },
+        // A name cut at 128 characters never ends in the space it was cut at.
+        { machineId: "host-long", displayName: "n".repeat(127), online: true },
+      ],
+    });
+    // A paired device cannot set a recipe, so it is never shown the machines.
+    for (const refusedAsk of [ask(paired), ask(agentOf(threadA)), ask(system)]) {
+      await expect(refusedAsk).resolves.toEqual({ status: "refused", reason: "not-permitted" });
+    }
+    // Only a placement that chooses a machine, of a provider offered for leasing.
+    await expect(ask(person, "here")).resolves.toEqual({
+      status: "refused",
+      reason: "no-provider-configured",
+    });
+    await expect(ask(person, "other-machine", "fake-desktop")).resolves.toEqual({
+      status: "refused",
+      reason: "no-provider-configured",
+    });
+    state.providers = [{ provider: spaces, effective: false }];
+    await expect(ask(person)).resolves.toEqual({
+      status: "refused",
+      reason: "no-provider-configured",
+    });
+    state.providers = [{ provider: spaces, effective: true }];
+    listed = { status: "not-connected" };
+    await expect(ask(person)).resolves.toEqual({
+      status: "refused",
+      reason: "provider-unavailable",
+    });
+    expect(asked).toEqual(["other-machine", "other-machine"]);
   });
 
   it("tells a person a thread in Plan cannot start a desktop, and still refuses one it is asked for", async () => {

@@ -38,7 +38,7 @@ const SOURCE_WORDS: Readonly<Record<string, string>> = {
   octant_agent_message: "A message from another agent",
   octant_agents: "Results from helper agents",
   octant_android: "The Android emulator",
-  octant_apple: "Apple builds and the iOS Simulator",
+  octant_apple: "Apple builds, the iOS Simulator, and paired devices",
   octant_board: "The Project's work board",
   octant_browser: "Pages seen in the browser",
   octant_canvas: "A Canvas document",

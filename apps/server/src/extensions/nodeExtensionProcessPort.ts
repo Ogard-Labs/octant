@@ -8,6 +8,7 @@ import {
 import {
   access,
   chmod,
+  lstat,
   mkdir,
   readdir,
   readFile,
@@ -16,7 +17,7 @@ import {
   unlink,
   writeFile,
 } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join } from "node:path";
+import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { promisify } from "node:util";
 import {
   makeProcessConfinementLive,
@@ -378,6 +379,42 @@ function outsideDriverRuntimeReadRoots(
 }
 
 /**
+ * The temporary folder is the one place a driver may write, and the profile
+ * grants it whole, so it is checked here rather than trusted to the caller:
+ * a real folder (not a link to somewhere else), owned by this user and
+ * closed to everyone else, empty, and apart from the package it may only
+ * read and from the home folder whose private paths the profile denies. The
+ * driver process owner makes exactly such a folder for every start.
+ */
+async function assertOwnTemporaryFolder(
+  sandbox: OutsideDriverProcessSandbox,
+  homeDirectory: string | undefined,
+): Promise<void> {
+  const folder = sandbox.temporaryDirectory;
+  const overlaps = (left: string, right: string) =>
+    isInsideOrEqual(left, right) || isInsideOrEqual(right, left);
+  const status = await lstat(folder).catch(() => undefined);
+  const owner = process.getuid?.();
+  if (
+    status === undefined ||
+    !status.isDirectory() ||
+    status.isSymbolicLink() ||
+    (owner !== undefined && status.uid !== owner) ||
+    (status.mode & 0o077) !== 0 ||
+    (await readdir(folder).catch(() => undefined))?.length !== 0 ||
+    overlaps(folder, sandbox.packageRoot) ||
+    (homeDirectory !== undefined && isInsideOrEqual(homeDirectory, folder))
+  ) {
+    throw new Error("Outside driver temporary folder is not its own.");
+  }
+}
+
+function isInsideOrEqual(path: string, root: string): boolean {
+  const fromRoot = relative(root, path);
+  return fromRoot === "" || (!isAbsolute(fromRoot) && !fromRoot.split(/[\\/]/).includes(".."));
+}
+
+/**
  * An outside provider driver runs under the shared confinement builder's
  * deny-default Seatbelt profile, stricter than an MCP server's: no network, no
  * exec but the runtime itself, no fork, the package read-only, and writes only
@@ -397,6 +434,7 @@ async function prepareOutsideDriverLaunch(
   if (!isAbsolute(sandbox.packageRoot) || !isAbsolute(sandbox.temporaryDirectory)) {
     throw new Error("Extension sandbox paths must be absolute.");
   }
+  await assertOwnTemporaryFolder(sandbox, homeDirectory);
   const runtime = await realpath(input.command).catch(() => input.command);
   const readRoots = uniqueAbsolutePaths([
     sandbox.packageRoot,
