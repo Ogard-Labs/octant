@@ -8,6 +8,7 @@ import {
   type ExtensionArchiveEntry,
 } from "./packageInspector";
 import { ExtensionPackageStore, ExtensionPackageStoreError } from "./extensionPackageStore";
+import type { OutsideDriverRuntime } from "./extensionSupervisor";
 
 const directories: Array<string> = [];
 const extensionId = "42000000-0000-4000-8000-000000000001";
@@ -223,7 +224,7 @@ function driverInspection() {
   });
 }
 
-async function setup(options: { readonly outsideDriverRuntime?: string } = {}) {
+async function setup(options: { readonly outsideDriverRuntime?: OutsideDriverRuntime } = {}) {
   const dataDirectory = await mkdtemp(join(tmpdir(), "octant-extension-store-"));
   directories.push(dataDirectory);
   let next = 0;
@@ -358,58 +359,79 @@ describe("host-private immutable extension package store", () => {
     expect(inventory.filter((item) => item.kind === "quarantine")).toHaveLength(1);
   });
 
-  it("runs an outside driver's entry only on the host's runtime, in its package root, with nothing else", async () => {
-    const runtime = "/opt/octant/bin/bun";
-    const { store } = await setup({ outsideDriverRuntime: runtime });
-    const target = await store.promote(await store.stage(driverInspection()));
-    const contentRoot = store.contentRoot(target);
-    const entryPoint = join(contentRoot, "driver", "main.mjs");
-    const launch = {
-      ...target,
-      componentId: "driver",
-      entryPoint,
-      command: runtime,
-      args: [entryPoint],
-      cwd: contentRoot,
-      sandbox: {
-        kind: "outside-driver" as const,
-        instanceId: "instance-a",
-        packageRoot: contentRoot,
-        temporaryDirectory: join(tmpdir(), "octant-driver-instance-a"),
-      },
-    };
-
-    await expect(store.authorizeRuntimeLaunch(launch)).resolves.toBe(true);
-    for (const refused of [
-      { ...launch, command: entryPoint },
-      { ...launch, command: "/usr/bin/env" },
-      { ...launch, args: [entryPoint, "--inspect"] },
-      { ...launch, args: ["-e", "process.exit()"] },
-      { ...launch, cwd: join(contentRoot, "driver") },
-      { ...launch, cwd: store.pluginDataRoot() },
-      { ...launch, entryPoint: "/tmp/attacker.mjs", args: ["/tmp/attacker.mjs"] },
-      // Only the driver profile confines it, bound to this package's own root.
-      { ...launch, sandbox: undefined },
-      { ...launch, sandbox: { ...launch.sandbox, packageRoot: "/" } },
-      {
-        ...launch,
+  it.each([
+    { kind: "bun", path: "/opt/octant/bin/bun" },
+    { kind: "electron-node", path: "/Applications/Octant.app/Contents/MacOS/Octant" },
+  ] as const)(
+    "runs an outside driver's entry only on the host's $kind runtime, in its package root, with nothing else",
+    async (runtime) => {
+      const { store } = await setup({ outsideDriverRuntime: runtime });
+      const target = await store.promote(await store.stage(driverInspection()));
+      const contentRoot = store.contentRoot(target);
+      const entryPoint = join(contentRoot, "driver", "main.mjs");
+      const launch = {
+        ...target,
+        componentId: "driver",
+        entryPoint,
+        command: runtime.path,
+        args: [entryPoint],
+        cwd: contentRoot,
         sandbox: {
-          kind: "macos-seatbelt" as const,
-          scope: {
-            hostId: "local",
-            mode: "chat" as const,
-            projectId: null,
-            threadId: null,
-            providerFamily: "claude",
-          },
-          allowRead: [],
-          allowWrite: [],
-          allowNetwork: true,
+          kind: "outside-driver" as const,
+          runtime: runtime.kind,
+          instanceId: "instance-a",
+          packageRoot: contentRoot,
+          temporaryDirectory: join(tmpdir(), "octant-driver-instance-a"),
         },
-      },
-    ]) {
-      await expect(store.authorizeRuntimeLaunch(refused)).resolves.toBe(false);
-    }
+      };
+      const other =
+        runtime.kind === "bun"
+          ? ({
+              kind: "electron-node",
+              path: "/Applications/Octant.app/Contents/MacOS/Octant",
+            } as const)
+          : ({ kind: "bun", path: "/opt/octant/bin/bun" } as const);
+
+      await expect(store.authorizeRuntimeLaunch(launch)).resolves.toBe(true);
+      for (const refused of [
+        { ...launch, command: entryPoint },
+        { ...launch, command: "/usr/bin/env" },
+        { ...launch, command: other.path },
+        // The process port sets the environment by the runtime the launch
+        // names, so a launch must name the host's own.
+        { ...launch, sandbox: { ...launch.sandbox, runtime: other.kind } },
+        { ...launch, args: [entryPoint, "--inspect"] },
+        { ...launch, args: ["-e", "process.exit()"] },
+        { ...launch, cwd: join(contentRoot, "driver") },
+        { ...launch, cwd: store.pluginDataRoot() },
+        { ...launch, entryPoint: "/tmp/attacker.mjs", args: ["/tmp/attacker.mjs"] },
+        // Only the driver profile confines it, bound to this package's own root.
+        { ...launch, sandbox: undefined },
+        { ...launch, sandbox: { ...launch.sandbox, packageRoot: "/" } },
+        {
+          ...launch,
+          sandbox: {
+            kind: "macos-seatbelt" as const,
+            scope: {
+              hostId: "local",
+              mode: "chat" as const,
+              projectId: null,
+              threadId: null,
+              providerFamily: "claude",
+            },
+            allowRead: [],
+            allowWrite: [],
+            allowNetwork: true,
+          },
+        },
+      ]) {
+        await expect(store.authorizeRuntimeLaunch(refused)).resolves.toBe(false);
+      }
+    },
+  );
+
+  it("authorizes no outside driver launch on a server with no driver runtime", async () => {
+    const runtime: OutsideDriverRuntime = { kind: "bun", path: "/opt/octant/bin/bun" };
     const { store: withoutRuntime } = await setup();
     const installed = await withoutRuntime.promote(await withoutRuntime.stage(driverInspection()));
     const root = withoutRuntime.contentRoot(installed);
@@ -419,10 +441,16 @@ describe("host-private immutable extension package store", () => {
         ...installed,
         componentId: "driver",
         entryPoint: entry,
-        command: runtime,
+        command: runtime.path,
         args: [entry],
         cwd: root,
-        sandbox: { ...launch.sandbox, packageRoot: root },
+        sandbox: {
+          kind: "outside-driver",
+          runtime: runtime.kind,
+          instanceId: "instance-a",
+          packageRoot: root,
+          temporaryDirectory: join(tmpdir(), "octant-driver-instance-a"),
+        },
       }),
     ).resolves.toBe(false);
   });

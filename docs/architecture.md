@@ -5852,7 +5852,9 @@ same. This holds in Chat, Work, and Code.
   `<prefix>/etc/openssl@3`, never the rest of the prefix. It also grants
   `/` and metadata of every parent folder of those roots, because a runtime
   such as node will not start without them. Metadata names a folder; it does
-  not read its contents. An outside provider driver's process takes a stricter
+  not read its contents. An outside provider driver's process runs on the
+  server's own runtime (Bun in development, Electron's Node in the packaged
+  app, whose app bundle is then the runtime's install) and takes a stricter
   profile from the shared confinement builder (no network, no exec but its
   runtime, no fork, a read-only package, one temporary folder, and a fixed
   environment), and on any host but macOS its component is `host-prohibited`
