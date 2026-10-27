@@ -107,17 +107,20 @@ export interface CredentialCleanupBoundary {
   readonly recoveryGuidance: string | null;
 }
 
+// A signed-in paired device reads this copy and may run on another platform
+// than the host, so it names this computer's credential store rather than the
+// Mac or its Keychain, even though only a macOS host runs the purge.
 const RECOVERY_GUIDANCE: Readonly<
   Record<"locked" | "unavailable" | "failed" | "indeterminate", string>
 > = {
   locked:
-    "The macOS Keychain is locked or requires interaction. No local data was changed; unlock the Keychain (or re-authenticate) and retry.",
+    "This computer's credential store is locked or requires interaction. No local data was changed; unlock this computer's credential store (or re-authenticate) and retry.",
   unavailable:
-    "The macOS Keychain is unavailable. No local data was changed; confirm Keychain access is reachable and retry.",
+    "This computer's credential store is unavailable. No local data was changed; confirm the credential store is reachable and retry.",
   failed:
-    "The Keychain credential cleanup failed. No local data was changed; retry complete local-data removal.",
+    "The credential cleanup failed. No local data was changed; retry complete local-data removal.",
   indeterminate:
-    "The Keychain cleanup outcome could not be confirmed. Local store files remain staged; retry complete local-data removal to reconcile before using this store.",
+    "The credential cleanup outcome could not be confirmed. Local store files remain staged; retry complete local-data removal to reconcile before using this store.",
 };
 
 export function classifyCredentialCleanupOutcome(input: {
@@ -135,7 +138,7 @@ export function classifyCredentialCleanupOutcome(input: {
         matchedCount: 0,
         residualReason:
           input.platform === "darwin"
-            ? "no host credential broker was reachable in this session; the native desktop host must complete Keychain cleanup"
+            ? "no host credential broker was reachable in this session; the native desktop host must complete credential cleanup"
             : "no OS keychain integration is available on this platform",
         recoveryGuidance: null,
       };
@@ -167,7 +170,7 @@ export function classifyCredentialCleanupOutcome(input: {
         deletedCount: attempt.deletedCount,
         matchedCount: attempt.deletedCount + attempt.failedCount,
         residualReason: null,
-        recoveryGuidance: `Some Octant Keychain credentials, including the host identity when present, were already removed (${attempt.deletedCount}); ${attempt.failedCount} credential(s) could not be removed. Keychain cleanup is incomplete; unlock the Keychain and retry complete local-data removal.`,
+        recoveryGuidance: `Some Octant credentials, including the host identity when present, were already removed (${attempt.deletedCount}); ${attempt.failedCount} credential(s) could not be removed. Credential cleanup is incomplete; unlock this computer's credential store and retry complete local-data removal.`,
       };
     case "indeterminate":
     case "locked":

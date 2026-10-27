@@ -8,9 +8,11 @@ import type {
   ProviderObservedState,
   UtcTimestamp,
 } from "@octant/contracts";
-import { createCodexProvider } from "@octant/domain";
+import type { HostPlatform } from "@octant/contracts/host";
+import { createAzureFoundryProvider, createCodexProvider } from "@octant/domain";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import type { ReactElement } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HostPlatformContext } from "../../platform";
 import { ProviderCatalogView, type ProviderCatalogViewProps } from "./ProviderCatalogView";
 
@@ -105,6 +107,39 @@ function props(overrides: Partial<ProviderCatalogViewProps> = {}) {
 
 function openSetup(name: RegExp) {
   fireEvent.click(screen.getByRole("link", { name }));
+}
+
+function renderOnHost(hostPlatform: HostPlatform, ui: ReactElement) {
+  return render(
+    <HostPlatformContext.Provider value={hostPlatform}>{ui}</HostPlatformContext.Provider>,
+  );
+}
+
+// Each host is seen from a window on the other platform, so copy that read the
+// window's platform instead of the host's would name the wrong computer.
+const hostsSeenFromTheOtherPlatform = [
+  {
+    host: "linux",
+    window: "MacIntel",
+    store: "this computer's credential store",
+    elsewhere: /keychain|this Mac/i,
+  },
+  {
+    host: "darwin",
+    window: "Linux x86_64",
+    store: "this Mac's Keychain",
+    elsewhere: /credential store|this computer|system keychain/,
+  },
+] as const;
+
+function seenFromWindowOn(windowPlatform: string) {
+  beforeEach(() => {
+    Object.defineProperty(window.navigator, "platform", {
+      value: windowPlatform,
+      configurable: true,
+    });
+  });
+  afterEach(() => Reflect.deleteProperty(window.navigator, "platform"));
 }
 
 describe("ProviderCatalogView", () => {
@@ -216,7 +251,9 @@ describe("ProviderCatalogView", () => {
     expect(within(facts).getByText("Enabled").nextSibling?.textContent).toBe("On");
     expect(within(facts).getByText("Signed in").nextSibling?.textContent).toBe("Needs sign-in");
     expect(within(facts).getByText("Ready").nextSibling?.textContent).toBe("No");
-    expect(screen.getByText(/stored in the system keychain, never in the catalog/)).toBeDefined();
+    expect(
+      screen.getByText(/stored in this computer's credential store, never in the catalog/),
+    ).toBeDefined();
     expect(screen.getByText("Card for Codex CLI")).toBeDefined();
   });
 
@@ -330,6 +367,74 @@ describe("ProviderCatalogView", () => {
   });
 });
 
+describe.each(hostsSeenFromTheOtherPlatform)(
+  "where the catalog says a key is kept on a $host host",
+  (platform) => {
+    seenFromWindowOn(platform.window);
+    const foundryId = "00000000-0000-4000-8000-000000000392" as ProviderInstanceId;
+
+    it("names the host's store before an endpoint is added", () => {
+      renderOnHost(platform.host, <ProviderCatalogView {...props()} />);
+      openSetup(/^Azure AI Foundry, /);
+      const sentence = screen.getByText(/A key you enter is stored in/);
+      expect(sentence).toHaveTextContent(`A key you enter is stored in ${platform.store}.`);
+      expect(sentence.textContent).not.toMatch(platform.elsewhere);
+    });
+
+    it("names the host's store when a runtime needs a sign-in", () => {
+      renderOnHost(
+        platform.host,
+        <ProviderCatalogView
+          {...props({
+            instances: [codex(true)],
+            observedByInstance: new Map([[codexId, observed("unauthenticated")]]),
+          })}
+        />,
+      );
+      openSetup(/^Codex CLI, sign in to use/);
+      const sentence = screen.getByText(/A key you enter there is stored in/);
+      expect(sentence).toHaveTextContent(
+        `A key you enter there is stored in ${platform.store}, never in the catalog.`,
+      );
+      expect(sentence.textContent).not.toMatch(platform.elsewhere);
+    });
+
+    it("names the host's store when an endpoint needs a sign-in or a key", () => {
+      const foundry = createAzureFoundryProvider({
+        id: foundryId,
+        displayName: "Foundry relay",
+        configuration: {
+          kind: "azure-foundry-openai-http",
+          baseUrl: "https://foundry.example.openai.azure.com/openai/v1/",
+          authentication: "api-key",
+          protocol: "auto",
+          manualModelIds: ["deployment-a"],
+        },
+        existingInstances: [],
+        expectedVersion: 0 as AggregateVersion,
+        createdAt: now,
+      });
+      renderOnHost(
+        platform.host,
+        <ProviderCatalogView
+          {...props({
+            instances: [foundry],
+            observedByInstance: new Map([
+              [foundryId, { ...observed("unauthenticated"), instanceId: foundryId }],
+            ]),
+          })}
+        />,
+      );
+      openSetup(/^Azure AI Foundry, /);
+      const sentence = screen.getByText(/a key is stored in/);
+      expect(sentence).toHaveTextContent(
+        `Add it on its Model endpoints page; a key is stored in ${platform.store}, never in the catalog.`,
+      );
+      expect(sentence.textContent).not.toMatch(platform.elsewhere);
+    });
+  },
+);
+
 describe("ProviderCatalogView outside drivers", () => {
   const listing = {
     driver: {
@@ -345,7 +450,7 @@ describe("ProviderCatalogView outside drivers", () => {
     trusted: true,
   } as unknown as OutsideProviderDriverListing;
   const outsideId = "00000000-0000-4000-8000-000000000913" as ProviderInstanceId;
-  const outsideInstance = (digest: string, enabled = false): ProviderInstance =>
+  const outsideInstance = (digest: string, enabled = false, keyed = false): ProviderInstance =>
     ({
       id: outsideId,
       displayName: "Loopback chat",
@@ -355,6 +460,7 @@ describe("ProviderCatalogView outside drivers", () => {
         driver: { ...listing.driver, digest },
         baseUrl: "http://127.0.0.1:11434/",
         modelIds: ["local-model"],
+        ...(keyed ? { key: { header: "authorization", scheme: "Bearer" } } : {}),
       },
       enabled,
       environmentPolicy: "inherit-host",
@@ -507,4 +613,32 @@ describe("ProviderCatalogView outside drivers", () => {
       }),
     ).toBeDefined();
   });
+
+  describe.each(hostsSeenFromTheOtherPlatform)(
+    "where its sign-in step says the key is kept on a $host host",
+    (platform) => {
+      seenFromWindowOn(platform.window);
+
+      it("names the host's store when the service refused the driver's key", () => {
+        renderOnHost(
+          platform.host,
+          <ProviderCatalogView
+            {...props({
+              outsideDrivers: [listing],
+              instances: [outsideInstance(String(listing.driver.digest), true, true)],
+              observedByInstance: new Map([
+                [outsideId, { ...observed("unauthenticated"), instanceId: outsideId }],
+              ]),
+            })}
+          />,
+        );
+        openSetup(/^Loopback chat, /);
+        const sentence = screen.getByText(/The key is stored in/);
+        expect(sentence).toHaveTextContent(
+          `The key is stored in ${platform.store} and never reaches the driver.`,
+        );
+        expect(sentence.textContent).not.toMatch(platform.elsewhere);
+      });
+    },
+  );
 });

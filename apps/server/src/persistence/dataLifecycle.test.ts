@@ -275,6 +275,55 @@ describe("removeAllLocalData", () => {
     expect(existsSync(databasePath)).toBe(true);
   });
 
+  // A signed-in paired device reads this guidance, and it may run on another
+  // platform than the host, so the server's own copy names no platform.
+  it.each(["linux", "darwin"])(
+    "says the credential broker is unreachable without naming a Mac or Keychain on a %s host",
+    (platform) => {
+      const { directory, databasePath } = temporaryStore();
+      migratedConnection(databasePath).close();
+
+      let refusal: unknown;
+      try {
+        removeAllLocalData({
+          dataDirectory: directory,
+          databasePath,
+          platform,
+          // A dry run is no cleanup, so removal falls back to the broker guidance.
+          credentialPurgeAttempt: { kind: "dry-run", matchedCount: 1 },
+        });
+      } catch (error) {
+        refusal = error;
+      }
+
+      expect(refusal).toBeInstanceOf(CredentialCleanupBlocked);
+      const guidance = (refusal as CredentialCleanupBlocked).recoveryGuidance;
+      expect(guidance).toBe(
+        "The credential broker for this computer's credential store is unavailable. No local data was changed; retry from the native desktop host.",
+      );
+      expect(guidance).not.toMatch(/macOS|Mac\b|Keychain/);
+      expect(existsSync(databasePath)).toBe(true);
+    },
+  );
+
+  it("refuses a staged removal whose broker preflight is unreachable without naming a Mac or Keychain", async () => {
+    const { directory, databasePath } = temporaryStore();
+    migratedConnection(databasePath).close();
+
+    const refusal = await removeAllLocalDataWithCredentialPurge({
+      dataDirectory: directory,
+      databasePath,
+      platform: "darwin",
+      credentialPurge: async () => ({ kind: "not-integrated" }),
+    }).catch((error: unknown) => error);
+
+    expect(refusal).toBeInstanceOf(CredentialCleanupBlocked);
+    const guidance = (refusal as CredentialCleanupBlocked).recoveryGuidance;
+    expect(guidance).toContain("this computer's credential store is unavailable");
+    expect(guidance).not.toMatch(/macOS|Mac\b|Keychain/);
+    expect(existsSync(databasePath)).toBe(true);
+  });
+
   it("refuses to remove a store outside its data directory", () => {
     const { directory } = temporaryStore();
     expect(() =>
@@ -473,6 +522,10 @@ describe("removeAllLocalData", () => {
     }).catch((failure: unknown) => failure);
 
     expect(error).toMatchObject({ name: "CredentialCleanupBlocked", status: "indeterminate" });
+    // A paired device on another platform can read this guidance.
+    expect((error as CredentialCleanupBlocked).recoveryGuidance).toBe(
+      "The credential cleanup outcome could not be confirmed. Local store files remain staged; retry complete local-data removal to reconcile before using this store.",
+    );
     const stagingDirectory = readdirSync(directory).find((entry) =>
       entry.startsWith(".octant-remove-"),
     );
