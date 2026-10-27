@@ -1154,17 +1154,18 @@ driver needs a seam port for a provider's local daemon (reached confined, the
 way `DesktopLaunchPort` reaches a capsule), a rule for whose cloud
 credentials that daemon uses, and whether its own lifetime and `cua-expires`
 tag satisfy provider-side expiry when the daemon's host is the one that may
-die. Each of those is a maintainer decision, proposed in
-[Cua Spaces through the local daemon](#cua-spaces-through-the-local-daemon-proposed).
+die. The maintainer accepted those decisions on 2026-10-27 in
+[Cua Spaces through the local daemon](#cua-spaces-through-the-local-daemon).
 
-## Cua Spaces through the local daemon (proposed)
+## Cua Spaces through the local daemon
 
-**Status: proposed, awaiting the maintainer's approval.** Nothing here is
-built or accepted. Each open choice is marked "Proposed decision (needs
-maintainer approval)" with a recommendation and the alternatives it rejects.
-Once approved, the accepted rules move into [Rules](#rules),
-[Provider seam](#provider-seam), and [Maintainer decisions](#maintainer-decisions),
-and this section shrinks to what was delivered.
+**Status: accepted by the maintainer on 2026-10-27, every decision as
+recommended.** Cua is delivered first for this machine's placement, then the
+person's other machines; billed cloud placements wait for C5's condition. Cua
+ships on Linux hosts first; on macOS, transfer stays refused until its own
+handle-path check exists. The decisions below are rules; the sub-slices under
+[Delivery sub-slices](#delivery-sub-slices) are the delivery plan, each its own
+change with this section updated in place.
 
 ### What Cua offers now
 
@@ -1248,7 +1249,7 @@ networking can reach the host's loopback.
 
 ### The local-daemon port
 
-**Proposed decision (needs maintainer approval) C1: a generic local-daemon
+**Decision C1: a generic local-daemon
 port.** `@octant/plugin-api/desktop-provider` gains `DesktopDaemonPort`,
 "a provider's local control daemon over a Unix socket", beside
 `DesktopHttpsPort`. A driver declares in its code one socket path, relative
@@ -1296,7 +1297,7 @@ Node has no peer-credential query, so the file's owner and its directory's
 writability are what the host can check. A confined tool launch gets no home
 directory, so an agent's commands cannot reach the socket.
 
-**Proposed decision (needs maintainer approval) C2: gRPC-Web over HTTP/1.1,
+**Decision C2: gRPC-Web over HTTP/1.1,
 no new dependency.** The host frames gRPC-Web itself (a five-byte prefix per
 message and a trailer frame) over `node:http` with `socketPath`; the port's own
 tests over a real socket are what show Bun's support holds. The seam adds a small protobuf wire reader and writer (varints,
@@ -1316,7 +1317,7 @@ with `wait` off and is polled.
 
 ### Placement, account, and credentials
 
-**Proposed decision (needs maintainer approval) C3: placement is per
+**Decision C3: placement is per
 recipe.** One Cua driver serves several placements with different
 consequences: a Space on this machine leaves nothing off it, a Space on the
 person's other machine leaves it through Cua's relay, and a Space in their
@@ -1332,7 +1333,7 @@ provider id per placement (`cua-local`, `cua-cloud`), which would put one
 vendor's account and daemon behind several providers that tear down through
 the same socket.
 
-**Proposed decision (needs maintainer approval) C4: Octant stores no Cua
+**Decision C4: Octant stores no Cua
 credential.** The daemon holds the person's Cua sign-in and their cloud
 links; Octant reads none of them, never calls Cua's cloud-linking, budget,
 or sharing tools, and never declares those methods. In place of the
@@ -1366,7 +1367,7 @@ both. What ends a Space then depends on where it is:
 | Hetzner                    | Powers off at the link's time limit but is billed until a later sweep or delete.                                                               |
 | Azure                      | Runs and bills until a daemon of the person's sweeps it.                                                                                       |
 
-**Proposed decision (needs maintainer approval) C5: offer Cua's billed cloud
+**Decision C5: offer Cua's billed cloud
 placements only when Cua exposes a cloud-side deadline Octant can set and
 read.** The daemon's lifetime, and `expires_at_unix` as `ListSpaces`
 reports it, is the daemon's own record: it dies with the host and moves
@@ -1382,7 +1383,7 @@ counting the daemon's lifetime as provider-side expiry, which is exactly
 the guarantee a dead host loses; (b) offering AWS, Google Cloud, and Modal
 now with the link's time limit as an unverified backstop the person
 acknowledges, because Octant could not check the limit exists and the
-promise would rest on a setting it never sees (the maintainer may choose
+promise would rest on a setting it never sees (the maintainer may still choose
 this; then Hetzner and Azure stay refused, and the billed confirmation
 states the worst case in the table above).
 
@@ -1407,7 +1408,7 @@ What the person is told, in every case:
 
 ### Screen, input, and files
 
-**Proposed decision (needs maintainer approval) C6: everything through the
+**Decision C6: everything through the
 daemon's socket; no declared hosts.** The driver calls `ConnectSpace`, keeps
 the passthrough key in memory (never journaled), and sends `cua.env.v1`
 calls through `/v1/spaces/<key>/env/...` on the same socket: frames are
@@ -1430,7 +1431,7 @@ already fit the pane's polling).
 
 ### Isolation and network for a Space on this machine
 
-**Proposed decision (needs maintainer approval) C7: a Space on this machine
+**Decision C7: a Space on this machine
 is a QEMU VM with network `none` until a live check proves otherwise.** The
 driver asks for `kind` `vm`, `runtime` `qemu`, `network` `none`, no
 `volumes`, `env`, `services`, `egress`, `durable`, or `reuse`, and
@@ -1527,33 +1528,12 @@ where Cua documents no `network` `none`.
    and QEMU installed; each must end `PASS`, and `cua spaces list` must then
    show no Space labelled `octant-host`. The smoke also settles the
    unverified items above.
-3. **The person's other machines** (if C3 and C6 are approved). _Accepts
+3. **The person's other machines**. _Accepts
    when_ a recorded route of `relay_https` refuses the screen and an
    off-machine acquire asks. _Owed by the maintainer:_ the same smoke with a
    second machine set up with `cua host setup --provide-spaces`.
 4. **Billed cloud placements**, only after C5's condition holds or the
    maintainer chooses its alternative (b).
-
-### Questions for approval
-
-1. C1 and C2: a generic `DesktopDaemonPort` speaking gRPC-Web over a Unix
-   socket, with no new dependency and a hand-written codec, rather than
-   `@grpc/grpc-js`?
-2. C3: per-recipe placements, each with its own locality and billing,
-   rather than one provider id per placement?
-3. C4: no Cua or cloud credential in Octant, with the placement and daemon
-   recorded per lease instead of a credential reference?
-4. C5: is Cua delivered first for this machine (and then the person's other
-   machines), with billed clouds waiting for a cloud-side deadline Octant
-   can set and read? Or should AWS, Google Cloud, and Modal be offered now
-   with the cloud link's time limit as an acknowledged, unverified backstop?
-5. C6: refuse a remote Space's screen when Cua routes it through the relay's
-   readable HTTPS path?
-6. C7: a Space on this machine is a QEMU VM with no network until a live
-   check shows it cannot reach host loopback?
-7. Does a Cua Space on a Mac without a screen count toward this design now,
-   with transfer refusing on macOS until its own handle-path check, or is
-   Cua delivered on Linux hosts only first?
 
 ## Rationale
 
