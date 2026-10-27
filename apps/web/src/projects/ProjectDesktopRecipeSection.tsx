@@ -1,5 +1,6 @@
 import type { DesktopPaneClient } from "@octant/client-runtime/desktop-pane-client";
 import {
+  decodeDesktopPlacementId,
   decodeDesktopProviderId,
   type DesktopRecipe,
   type LeasableDesktopProvider,
@@ -79,6 +80,8 @@ function minuteOptions(
 
 interface RecipeDraft {
   readonly providerId: string;
+  /** The provider's placement, or empty for a provider that offers none. */
+  readonly placementId: string;
   readonly screen: string;
   readonly leaseMinutes: number;
   readonly maximumLeaseMinutes: number;
@@ -92,19 +95,31 @@ type OfferedProviders =
 
 const screenId = (screen: DesktopRecipe["screen"]) => `${screen.width}x${screen.height}`;
 
+/** The placement a provider starts from: its first, or none when it offers none. */
+function firstPlacement(
+  providerId: string,
+  providers: ReadonlyArray<LeasableDesktopProvider>,
+): string {
+  const provider = providers.find((candidate) => String(candidate.providerId) === providerId);
+  return String(provider?.placements?.[0]?.placementId ?? "");
+}
+
 function draftOf(
   saved: DesktopRecipe | undefined,
   providers: ReadonlyArray<LeasableDesktopProvider>,
 ): RecipeDraft {
   if (saved === undefined) {
+    const providerId = String(providers[0]?.providerId ?? "");
     return {
-      providerId: String(providers[0]?.providerId ?? ""),
+      providerId,
+      placementId: firstPlacement(providerId, providers),
       screen: DEFAULT_SCREEN,
       ...DEFAULT_LIMITS,
     };
   }
   return {
     providerId: String(saved.providerId),
+    placementId: String(saved.placementId ?? ""),
     screen: screenId(saved.screen),
     leaseMinutes: saved.leaseMinutes,
     maximumLeaseMinutes: saved.maximumLeaseMinutes,
@@ -115,6 +130,7 @@ function draftOf(
 function sameDraft(left: RecipeDraft, right: RecipeDraft): boolean {
   return (
     left.providerId === right.providerId &&
+    left.placementId === right.placementId &&
     left.screen === right.screen &&
     left.leaseMinutes === right.leaseMinutes &&
     left.maximumLeaseMinutes === right.maximumLeaseMinutes &&
@@ -126,20 +142,34 @@ function sameDraft(left: RecipeDraft, right: RecipeDraft): boolean {
  * The recipe a draft saves. The network is always off: a desktop on this host
  * gets network only by sharing the host's own, which the host refuses. An
  * image and a credential belong to cloud providers, which this editor does
- * not offer yet, so a saved recipe keeps whatever it already had.
+ * not offer yet, so a saved recipe keeps whatever it already had. A provider
+ * whose daemon holds the person's sign-in takes its placement in place of a
+ * credential, so none is kept for it.
  */
-function recipeOf(draft: RecipeDraft, saved: DesktopRecipe | undefined): DesktopRecipe {
+function recipeOf(
+  draft: RecipeDraft,
+  saved: DesktopRecipe | undefined,
+  providers: ReadonlyArray<LeasableDesktopProvider>,
+): DesktopRecipe {
   const [width, height] = draft.screen.split("x").map(Number);
+  const daemon = providers.some(
+    (provider) => String(provider.providerId) === draft.providerId && provider.daemon === true,
+  );
   const keep =
     saved !== undefined && String(saved.providerId) === draft.providerId
       ? {
           ...(saved.image === undefined ? {} : { image: saved.image }),
-          ...(saved.credentialRef === undefined ? {} : { credentialRef: saved.credentialRef }),
+          ...(saved.credentialRef === undefined || daemon
+            ? {}
+            : { credentialRef: saved.credentialRef }),
         }
       : {};
   return {
     providerId: decodeDesktopProviderId(draft.providerId),
     ...keep,
+    ...(draft.placementId === ""
+      ? {}
+      : { placementId: decodeDesktopPlacementId(draft.placementId) }),
     screen: { width: width ?? 1280, height: height ?? 800 },
     network: "none",
     leaseMinutes: draft.leaseMinutes,
@@ -225,15 +255,41 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
       : [{ id: screenId(saved.screen), label: `${saved.screen.width} × ${saved.screen.height}` }]),
   ];
 
-  const providerOffered = providers.some(
+  const draftProvider = providers.find(
     (provider) => String(provider.providerId) === draft.providerId,
   );
+  const providerOffered = draftProvider !== undefined;
+  const placements = draftProvider?.placements ?? [];
+  // A provider that offers placements is leased only on one of them, and one
+  // that offers none only on its own terms.
+  const placementOffered =
+    placements.length === 0
+      ? draft.placementId === ""
+      : placements.some((placement) => String(placement.placementId) === draft.placementId);
+  const placementOptions: ReadonlyArray<OctantSelectOption> = [
+    ...placements.map((placement) => ({
+      id: String(placement.placementId),
+      label: placement.displayName,
+    })),
+    // A saved placement the host no longer offers stays visible but cannot be chosen again.
+    ...(draft.placementId === "" ||
+    placements.some((placement) => String(placement.placementId) === draft.placementId)
+      ? []
+      : [
+          {
+            id: draft.placementId,
+            label: `${draft.placementId} (not available on this host)`,
+            disabled: true,
+          },
+        ]),
+  ];
   const limitsRefusal =
     draft.leaseMinutes > draft.maximumLeaseMinutes
       ? "A desktop can't start with longer than its longest run."
       : undefined;
   const unchanged = saved !== undefined && sameDraft(draft, draftOf(saved, providers));
-  const canSave = !disabled && providerOffered && limitsRefusal === undefined && !unchanged;
+  const canSave =
+    !disabled && providerOffered && placementOffered && limitsRefusal === undefined && !unchanged;
 
   async function commit(next: DesktopRecipe | null): Promise<void> {
     setPending(true);
@@ -278,11 +334,31 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
             <OctantSelectField
               aria-label="Desktop provider"
               disabled={disabled}
-              onValueChange={(providerId) => setDraft((current) => ({ ...current, providerId }))}
+              onValueChange={(providerId) =>
+                setDraft((current) => ({
+                  ...current,
+                  providerId,
+                  placementId: firstPlacement(providerId, providers),
+                }))
+              }
               options={providerOptions}
               value={draft.providerId}
             />
           </label>
+          {placementOptions.length === 0 ? null : (
+            <label className="project-provider-policy__mode">
+              <span>Runs on</span>
+              <OctantSelectField
+                aria-label="Where the desktop runs"
+                disabled={disabled}
+                onValueChange={(placementId) =>
+                  setDraft((current) => ({ ...current, placementId }))
+                }
+                options={placementOptions}
+                value={draft.placementId}
+              />
+            </label>
+          )}
           <label className="project-provider-policy__mode">
             <span>Screen</span>
             <OctantSelectField
@@ -320,7 +396,7 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
         {providers.length === 0 ? null : (
           <OctantButton
             disabled={!canSave}
-            onClick={() => void commit(recipeOf(draft, saved))}
+            onClick={() => void commit(recipeOf(draft, saved, providers))}
             size="sm"
             type="button"
           >

@@ -18,6 +18,7 @@ import {
   type DesktopHostTag,
   type DesktopInputEvent,
   type DesktopLease,
+  type DesktopLeaseDaemon,
   type DesktopLeaseEndReason,
   type DesktopLeaseId,
   type DesktopLeaseOperated,
@@ -57,6 +58,7 @@ import {
   type CacheBackoff,
 } from "@octant/domain";
 import type {
+  DesktopDaemonDeclaration,
   DesktopFrame,
   DesktopHandle,
   DesktopProvider,
@@ -148,6 +150,12 @@ export interface DesktopLeaseServiceOptions {
   readonly systemActor: EventActor;
   readonly now: () => number;
   readonly uuid: () => string;
+  /**
+   * The operating-system user whose home holds a daemon-run provider's
+   * socket, the user Octant runs as. Absent on a host with no user ids, where
+   * a provider that declares a daemon is never leased.
+   */
+  readonly daemonUserId?: number;
   /** How long one teardown call may take before it counts as failed. */
   readonly teardownTimeoutMs?: number;
   /** How long a Desktop tab's view lives with no frame read and no input. */
@@ -529,6 +537,9 @@ function recipeTerms(
   provider: DesktopProvider,
   recipe: DesktopRecipe,
 ): DesktopLeaseTerms | undefined {
+  // A daemon-run provider holds the person's own sign-in; Octant attaches no
+  // key to it, so a recipe naming one configures nothing that could run.
+  if (provider.daemon !== undefined && recipe.credentialRef !== undefined) return undefined;
   const placements = provider.placements ?? [];
   if (placements.length === 0) {
     return recipe.placementId === undefined
@@ -543,15 +554,47 @@ function recipeTerms(
     : { locality: placement.locality, billed: placement.billed, placementId: placement.id };
 }
 
+/**
+ * Whether a recipe on these terms names the account its desktop runs on: a
+ * host-local desktop needs none, and a cloud one runs on a key the host holds
+ * or on the placement a provider's daemon is signed in to.
+ */
+function recipeNamesAccount(
+  provider: DesktopProvider,
+  recipe: DesktopRecipe,
+  terms: DesktopLeaseTerms,
+): boolean {
+  if (terms.locality !== "cloud" || recipe.credentialRef !== undefined) return true;
+  return provider.daemon !== undefined && terms.placementId !== undefined;
+}
+
+/** Whether the daemon a lease recorded is the one this host's daemon port reaches now. */
+function sameDaemon(
+  recorded: DesktopLeaseDaemon | undefined,
+  declared: DesktopDaemonDeclaration | undefined,
+  userId: number | undefined,
+): boolean {
+  if (recorded === undefined) return true;
+  return declared?.socketPath === recorded.socketPath && userId === recorded.userId;
+}
+
 function leasableOf(
   provider: DesktopProvider,
   terms: Pick<DesktopLeaseTerms, "locality" | "billed"> = provider,
 ): LeasableDesktopProvider {
+  const placements = (provider.placements ?? []).slice(0, 16).map((placement) => ({
+    placementId: placement.id,
+    displayName: placement.displayName.trim().slice(0, 128) || String(placement.id),
+    locality: placement.locality,
+    billed: placement.billed,
+  }));
   return {
     providerId: provider.id,
     displayName: provider.displayName.trim().slice(0, 128) || String(provider.id),
     locality: terms.locality,
     billed: terms.billed,
+    ...(placements.length === 0 ? {} : { placements }),
+    ...(provider.daemon === undefined ? {} : { daemon: true as const }),
   };
 }
 
@@ -772,10 +815,22 @@ export function createDesktopLeaseService(
       });
     }
     const teardown = teardownFor(leaseId, String(record.lease.providerId));
+    // A listing from another daemon than the one that made the desktop says
+    // nothing about it, so it never counts as the provider confirming absence.
+    const daemonMoved = !sameDaemon(
+      record.lease.daemon,
+      registered(String(record.lease.providerId))?.provider.daemon,
+      options.daemonUserId,
+    );
     const destroyed: Destroyed =
       teardown === undefined
         ? { kind: "still-running", detail: "The provider's driver is not loaded on this host." }
-        : await destroy(teardown, leaseId, entry?.handle, record.lease.credentialRef);
+        : daemonMoved
+          ? {
+              kind: "still-running",
+              detail: "The daemon this desktop was made through is not the one this host reaches.",
+            }
+          : await destroy(teardown, leaseId, entry?.handle, record.lease.credentialRef);
     if (destroyed.kind === "gone") {
       live.delete(key);
       return { status: "released", lease: transition(leaseId, "released", options.systemActor) };
@@ -917,8 +972,14 @@ export function createDesktopLeaseService(
     const terms = recipeTerms(loaded.provider, recipe);
     if (terms === undefined) return refused("no-provider-configured");
     // A cloud desktop runs on the person's own account, so a recipe that
-    // names no credential for one configures nothing that could run.
-    if (terms.locality === "cloud" && recipe.credentialRef === undefined) {
+    // names neither a credential nor a daemon's placement for one configures
+    // nothing that could run.
+    if (!recipeNamesAccount(loaded.provider, recipe, terms)) {
+      return refused("no-provider-configured");
+    }
+    // Teardown reaches a daemon-run desktop only through the daemon this host
+    // records for it, so a host that cannot name one leases none.
+    if (loaded.provider.daemon !== undefined && options.daemonUserId === undefined) {
       return refused("no-provider-configured");
     }
     if (!loaded.effective) return refused("provider-disabled");
@@ -1005,6 +1066,11 @@ export function createDesktopLeaseService(
       hostTag,
       ...(recipe.credentialRef === undefined ? {} : { credentialRef: recipe.credentialRef }),
       ...(terms.placementId === undefined ? {} : { placementId: terms.placementId }),
+      ...(provider.daemon === undefined || options.daemonUserId === undefined
+        ? {}
+        : {
+            daemon: { socketPath: provider.daemon.socketPath, userId: options.daemonUserId },
+          }),
       network: recipe.network,
       expiresAt: iso(expiresAt),
       maximumExpiresAt: iso(now + recipe.maximumLeaseMinutes * 60_000),

@@ -97,6 +97,8 @@ interface HostState {
   providers: Array<RegisteredDesktopProvider>;
   /** Windows and devices that may not open any thread. */
   readonly deniedScopes: Set<string>;
+  /** The user Octant runs as, whose home holds a daemon-run provider's socket. */
+  daemonUserId?: number;
 }
 
 function openJournal(connection: SqliteConnection) {
@@ -146,6 +148,7 @@ function serviceOver(connection: SqliteConnection, state: HostState): DesktopLea
     systemActor: system,
     now: () => state.now,
     uuid: randomUUID,
+    ...(state.daemonUserId === undefined ? {} : { daemonUserId: state.daemonUserId }),
     teardownTimeoutMs: 1_000,
   });
 }
@@ -906,6 +909,80 @@ describe("desktop lease service", () => {
       }),
     ).resolves.toEqual({ status: "refused", reason: "no-provider-configured" });
     await service.sweep();
+    expect(runningDesktops(fake.backend)).toBe(0);
+  });
+
+  it("leases a daemon-run provider on its placement with no key, records the daemon, and tears down only through it", async () => {
+    const fake = createFakeDesktopProvider({ id: "spaces.example" });
+    const spaces: DesktopProvider = {
+      ...fake.provider,
+      daemon: { socketPath: ".spaces/spaces.sock", methods: [] },
+      placements: [
+        {
+          id: decodeDesktopPlacementId("here"),
+          displayName: "This machine",
+          locality: "host-local",
+          billed: false,
+        },
+        {
+          id: decodeDesktopPlacementId("other-machine"),
+          displayName: "Your other machine",
+          locality: "cloud",
+          billed: false,
+        },
+      ],
+    };
+    const { service, state, restart } = host({ providers: [{ provider: spaces }] });
+    const inPlacement = (placementId: string, credentialRef?: string) =>
+      decodeDesktopRecipe({ ...recipeFor("spaces.example", credentialRef), placementId });
+
+    // A host that cannot name the daemon's user leases nothing through it.
+    state.recipes.set(threadA, inPlacement("here"));
+    await expect(
+      service.acquire({ owner: code(threadA), actor: agentOf(threadA) }),
+    ).resolves.toEqual({ status: "refused", reason: "no-provider-configured" });
+
+    state.daemonUserId = 1_000;
+    const running = restart();
+    await running.start();
+    expect(running.destination()).toMatchObject({
+      leasable: [
+        {
+          providerId: "spaces.example",
+          daemon: true,
+          placements: [
+            { placementId: "here", locality: "host-local", billed: false },
+            { placementId: "other-machine", locality: "cloud", billed: false },
+          ],
+        },
+      ],
+    });
+    // The daemon holds the sign-in, so a recipe naming a key is refused, and
+    // a placement off this machine needs none.
+    state.recipes.set(threadA, inPlacement("other-machine", cloudCredential));
+    await expect(
+      running.acquire({ owner: code(threadA), actor: agentOf(threadA) }),
+    ).resolves.toEqual({ status: "refused", reason: "no-provider-configured" });
+    state.recipes.set(threadA, inPlacement("other-machine"));
+    const away = await running.acquire({ owner: code(threadA), actor: agentOf(threadA) });
+    expect(away).toMatchObject({
+      status: "acquired",
+      lease: {
+        placementId: "other-machine",
+        locality: "cloud",
+        daemon: { socketPath: ".spaces/spaces.sock", userId: 1_000 },
+      },
+    });
+    expect(away).not.toHaveProperty("lease.credentialRef");
+
+    // Octant now runs as another user, whose daemon never made this desktop:
+    // its listing is not the provider confirming absence.
+    state.daemonUserId = 1_001;
+    await expect(restart().start()).resolves.toMatchObject({ released: 0, stillRunning: 1 });
+    expect(runningDesktops(fake.backend)).toBe(1);
+
+    state.daemonUserId = 1_000;
+    await expect(restart().start()).resolves.toMatchObject({ released: 1, stillRunning: 0 });
     expect(runningDesktops(fake.backend)).toBe(0);
   });
 

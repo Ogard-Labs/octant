@@ -5,6 +5,7 @@ import {
   decodeDesktopArtifactSent,
   decodeDesktopLeaseOperated,
   decodeDesktopLeaseRequested,
+  decodeLeasableDesktopProvider,
   decodeDesktopLeaseTransitioned,
   decodeDesktopPaneAnswer,
   decodeDesktopPaneRequest,
@@ -70,6 +71,39 @@ describe("desktop lease contract", () => {
     for (const placementId of ["", "This Machine", "../cloud", "a".repeat(65)]) {
       expect(() => decodeDesktopRecipe({ ...recipe, placementId })).toThrow();
     }
+  });
+
+  it("records the daemon a lease used by its home-relative socket and user, never a path out of home", () => {
+    const daemon = { socketPath: ".cua/cua.sock", userId: 1000 };
+    expect(decodeDesktopLeaseRequested({ ...requested, daemon }).daemon).toEqual(daemon);
+    for (const socketPath of ["/home/a/.cua/cua.sock", "../x.sock", ".cua/../x", "", "a//b"]) {
+      expect(() =>
+        decodeDesktopLeaseRequested({ ...requested, daemon: { ...daemon, socketPath } }),
+      ).toThrow();
+    }
+    expect(() =>
+      decodeDesktopLeaseRequested({ ...requested, daemon: { ...daemon, token: "secret" } }),
+    ).toThrow();
+  });
+
+  it("offers a provider's placements and whether a daemon holds its sign-in", () => {
+    const offered = decodeLeasableDesktopProvider({
+      providerId: "cua",
+      displayName: "Cua Spaces",
+      locality: "host-local",
+      billed: false,
+      daemon: true,
+      placements: [
+        {
+          placementId: "this-machine",
+          displayName: "This machine",
+          locality: "host-local",
+          billed: false,
+        },
+      ],
+    });
+    expect(offered.placements?.[0]?.placementId).toBe("this-machine");
+    expect(() => decodeLeasableDesktopProvider({ ...offered, daemon: false })).toThrow();
   });
 
   it("attributes a release a person asked for while teardown records the transition", () => {
