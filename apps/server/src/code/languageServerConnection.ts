@@ -322,11 +322,13 @@ export class LanguageServerConnection {
   }
 }
 
-function frameHeader(length: number): Buffer {
+/** A `Content-Length` frame header, which LSP and DAP share. */
+export function frameHeader(length: number): Buffer {
   return Buffer.from(`Content-Length: ${length}\r\n\r\n`, "ascii");
 }
 
-function contentLength(header: string): number | undefined {
+/** The one `Content-Length` a frame header declares; undefined when it is not a frame header. */
+export function contentLength(header: string): number | undefined {
   let length: number | undefined;
   for (const line of header.split("\r\n")) {
     const separator = line.indexOf(":");

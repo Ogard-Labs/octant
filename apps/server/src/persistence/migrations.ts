@@ -2352,6 +2352,20 @@ CREATE INDEX validation_evidence_authority_idx
       ) STRICT;
     `,
   },
+  {
+    version: 88,
+    name: "create_ssh_target_runtime_binary_projection",
+    sql: `
+      CREATE TABLE ssh_target_runtime_binary_projection (
+        target_id TEXT NOT NULL CHECK(length(trim(target_id)) > 0),
+        provider_instance_id TEXT NOT NULL CHECK(length(trim(provider_instance_id)) > 0),
+        path TEXT NOT NULL CHECK(length(trim(path)) > 0),
+        aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0),
+        last_sequence INTEGER NOT NULL CHECK(last_sequence > 0),
+        PRIMARY KEY (target_id, provider_instance_id)
+      ) STRICT;
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {

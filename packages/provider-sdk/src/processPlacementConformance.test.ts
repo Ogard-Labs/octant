@@ -64,7 +64,9 @@ type Placing =
   /** Starts through the placement in a scope it never closes. */
   | "leaks-process"
   /** Starts through the placement, and its session on this host outside Plan. */
-  | "runs-locally-outside-plan";
+  | "runs-locally-outside-plan"
+  /** Starts through the placement, at a path of its own rather than the person's. */
+  | "names-its-own-runtime";
 
 /**
  * A stand-in target whose runtime answers each line it reads with `reply:`
@@ -73,6 +75,7 @@ type Placing =
 function echoTarget(): ProviderRemoteProcessPlacement {
   return {
     kind: "remote",
+    executable: "/opt/stub/bin/runtime",
     launch: () =>
       Effect.acquireRelease(
         Effect.gen(function* () {
@@ -122,7 +125,13 @@ function placedDriverFixture(options: {
   });
   const runtime = (placement: ProviderRemoteProcessPlacement | undefined) =>
     Effect.gen(function* () {
-      const launch = { executable: "/opt/stub/bin/runtime", args: ["--stdio"] } as const;
+      const launch = {
+        executable:
+          options.placing === "names-its-own-runtime"
+            ? "/usr/local/bin/another-runtime"
+            : (placement?.executable ?? "/opt/stub/bin/runtime"),
+        args: ["--stdio"],
+      };
       const local = Effect.sync((): ProviderPlacedProcess | undefined => {
         localLaunches += 1;
         return undefined;
@@ -276,6 +285,14 @@ describe("remote placement conformance", () => {
         sessionStart: { ...fixture.sessionStart, executionPolicy: "plan" },
       }),
     ).rejects.toThrow("the driver started its runtime on this host");
+  });
+
+  it("fails a driver that launches a runtime path of its own instead of the one set for the target", async () => {
+    await expect(
+      runRemotePlacementConformance(
+        placedDriverFixture({ placing: "names-its-own-runtime", remotePlacement: declared }),
+      ),
+    ).rejects.toThrow("a placed launch named another runtime than the one set for this target");
   });
 
   it("fails a declaration that names no posture", async () => {

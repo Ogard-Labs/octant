@@ -86,7 +86,7 @@ export interface ProviderRemotePlacementSupport {
  * no field here can carry a folder or a credential from this host.
  */
 export interface ProviderPlacedLaunch {
-  /** The runtime's absolute path on the target. */
+  /** The runtime's absolute path on the target: the placement's own `executable`. */
   readonly executable: string;
   readonly args: ReadonlyArray<string>;
   /**
@@ -134,6 +134,13 @@ export interface ProviderPlacedProcess {
  */
 export interface ProviderRemoteProcessPlacement {
   readonly kind: "remote";
+  /**
+   * The runtime's absolute path on the target: the path the person set for
+   * this provider instance on this target. A driver launches exactly this,
+   * never a path of its own, the model's, the root's, or the target's report,
+   * and the host refuses a launch that names another.
+   */
+  readonly executable: string;
   readonly launch: (
     launch: ProviderPlacedLaunch,
   ) => Effect.Effect<ProviderPlacedProcess, ProviderFailure, Scope.Scope>;

@@ -147,7 +147,7 @@ describe("loading a plugin folder in another tool's layout", () => {
     await expect(loadPluginDirectory(root)).rejects.toThrow(/not both/);
   });
 
-  it("reads a folder with a debug adapter's description as nothing else, and refuses it until this host can review one", async () => {
+  it("reads a folder with a debug adapter's description as a debug adapter and as nothing else", async () => {
     // Beside a plugin layout, the description still decides what the folder is,
     // so the folder's skills or servers never arrive on their own.
     const root = await folder({
@@ -156,7 +156,9 @@ describe("loading a plugin folder in another tool's layout", () => {
       ".mcp.json": JSON.stringify({ mcpServers: {} }),
       "skills/debug/SKILL.md": "---\nname: debug\ndescription: Debugs\n---\nDebug.",
     });
-    await expect(loadPluginDirectory(root)).rejects.toThrow(/debug adapter/i);
+    const loaded = await loadPluginDirectory(root);
+    expect(loaded.format).toBe("debug-adapter-package");
+    expect(loaded.notes).toEqual([]);
     for (const other of ["octant-language-server.json", "octant-provider-driver.json"]) {
       const both = await folder({ "octant-debug-adapter.json": "{}", [other]: "{}" });
       await expect(loadPluginDirectory(both)).rejects.toThrow(/one package document/);

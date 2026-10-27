@@ -14,6 +14,7 @@ import {
   ExtensionDiagnostic,
   ExtensionEffectivePackageState,
   ExtensionLanguageServerDeclaration,
+  ExtensionDebugAdapterDeclaration,
   ExtensionLicense,
   ExtensionPackageId,
   ExtensionPackageState,
@@ -458,6 +459,24 @@ export const decodeExtensionPackageReviewLanguageServer = Schema.decodeUnknownSy
   ExtensionPackageReviewLanguageServer,
 );
 
+/**
+ * What a person reviews before a debug adapter can run: the binary the host
+ * will start, that file's own digest, the runtimes it labels, the `launch`
+ * body it sends with its placeholders, and whether it takes a debug port.
+ */
+export const ExtensionPackageReviewDebugAdapter = Schema.Struct({
+  runtimes: ExtensionDebugAdapterDeclaration.from.fields.runtimes,
+  launchArguments: ExtensionDebugAdapterDeclaration.from.fields.launchArguments,
+  importTypes: ExtensionDebugAdapterDeclaration.from.fields.importTypes,
+  debugPorts: ExtensionDebugAdapterDeclaration.from.fields.debugPorts,
+  binary: PackageRelativePath,
+  binaryDigest: ExtensionContentDigest,
+}).annotations(strict);
+export type ExtensionPackageReviewDebugAdapter = typeof ExtensionPackageReviewDebugAdapter.Type;
+export const decodeExtensionPackageReviewDebugAdapter = Schema.decodeUnknownSync(
+  ExtensionPackageReviewDebugAdapter,
+);
+
 export const ExtensionPackageReviewComponent = Schema.Struct({
   id: ExtensionComponentId,
   kind: ExtensionComponentKind,
@@ -465,6 +484,7 @@ export const ExtensionPackageReviewComponent = Schema.Struct({
   declaredCapabilities: Schema.Array(ExtensionCapability).pipe(Schema.maxItems(32)),
   instructions: Schema.optional(boundedText(MAX_SKILL_PREVIEW_INSTRUCTIONS_LENGTH)),
   languageServer: Schema.optional(ExtensionPackageReviewLanguageServer),
+  debugAdapter: Schema.optional(ExtensionPackageReviewDebugAdapter),
 }).annotations(strict);
 export type ExtensionPackageReviewComponent = typeof ExtensionPackageReviewComponent.Type;
 

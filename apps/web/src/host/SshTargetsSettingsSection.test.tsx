@@ -28,6 +28,7 @@ const status = {
       decision: { status: "refused", reason: "confinement-backend-missing" },
     },
   ],
+  runtimeBinaries: [],
 };
 const project = {
   id: "66666666-6666-4666-8666-666666666666",

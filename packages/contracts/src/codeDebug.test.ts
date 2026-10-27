@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   decodeCodeDebugConfiguration,
+  decodeCodeDebugConfigurationApproved,
   decodeCodeDebugConfigurationProposal,
+  decodeCodeDebugSessionCall,
+  decodeCodeDebugSessionEnded,
+  decodeCodeDebugSessionResult,
+  MAX_CODE_DEBUG_VALUE_LENGTH,
   HOST_CREDENTIAL_ENVIRONMENT_KEYS,
   MAX_CODE_DEBUG_ARGUMENTS,
   MAX_CODE_DEBUG_ENVIRONMENT_ENTRIES,
@@ -121,5 +126,95 @@ describe("Code debug configuration contracts", () => {
     expect(() =>
       decodeCodeDebugConfigurationProposal({ status: "unmappable", reason: "looks-odd" }),
     ).toThrow();
+  });
+});
+
+describe("Code debug session contracts", () => {
+  const scope = {
+    threadId: "20000000-0000-4000-8000-000000000001",
+    checkoutId: "30000000-0000-4000-8000-000000000001",
+    sessionId: "40000000-0000-4000-8000-000000000001",
+  };
+
+  it("decodes only the requests on Octant's closed list", () => {
+    for (const request of [
+      { kind: "state", afterOutput: 3 },
+      { kind: "stack-trace", programThreadId: 1 },
+      { kind: "variables", variablesReference: 1000 },
+      { kind: "next", programThreadId: 1 },
+      { kind: "evaluate", expression: "count", context: "repl" },
+      { kind: "stop" },
+    ]) {
+      expect(decodeCodeDebugSessionCall({ ...scope, request }).request).toEqual(request);
+    }
+    for (const request of [
+      { kind: "attach", processId: 4 },
+      { kind: "restart" },
+      { kind: "set-variable", variablesReference: 1, name: "x", value: "1" },
+      { kind: "read-memory", memoryReference: "0x0" },
+      // `evaluate` carries only what the person typed, in a context the panel has.
+      { kind: "evaluate", expression: "count", context: "clipboard" },
+      { kind: "evaluate", expression: "", context: "repl" },
+      { kind: "source", path: "/etc/passwd" },
+    ]) {
+      expect(() => decodeCodeDebugSessionCall({ ...scope, request })).toThrow();
+    }
+  });
+
+  it("bounds what a session answers and keeps host paths out of locations", () => {
+    expect(() =>
+      decodeCodeDebugSessionResult({
+        status: "variables",
+        variables: [
+          {
+            name: "big",
+            value: "x".repeat(MAX_CODE_DEBUG_VALUE_LENGTH + 1),
+            truncated: false,
+            variablesReference: 0,
+          },
+        ],
+        truncated: false,
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCodeDebugSessionResult({
+        status: "stack",
+        frames: [
+          {
+            id: 1,
+            name: "main",
+            location: { kind: "checkout", path: "/home/me/main.py", line: 1, column: 1 },
+          },
+        ],
+        truncated: false,
+      }),
+    ).toThrow();
+  });
+
+  it("journals a confirmation with its configuration and a session with its end reason, and nothing it showed", () => {
+    const approved = {
+      approvalId: "50000000-0000-4000-8000-000000000001",
+      projectId: "60000000-0000-4000-8000-000000000001",
+      approvalClass: "shell-commands",
+      configurationDigest: `sha256:${"a".repeat(64)}`,
+      configuration: configuration(),
+      adapter: {
+        extensionId: "10000000-0000-4000-8000-000000000001",
+        componentId: "adapter",
+        packageDigest: `sha256:${"b".repeat(64)}`,
+        lifecycleVersion: 2,
+      },
+      scope: { kind: "checkout", checkoutId: scope.checkoutId },
+    };
+    expect(decodeCodeDebugConfigurationApproved(approved)).toEqual(approved);
+    const ended = {
+      sessionId: scope.sessionId,
+      projectId: approved.projectId,
+      threadId: scope.threadId,
+      configurationDigest: approved.configurationDigest,
+      endReason: "program-exited",
+    };
+    expect(decodeCodeDebugSessionEnded(ended)).toEqual(ended);
+    expect(() => decodeCodeDebugSessionEnded({ ...ended, output: "secret" })).toThrow();
   });
 });

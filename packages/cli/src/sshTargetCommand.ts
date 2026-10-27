@@ -20,9 +20,9 @@ import { failureMessage, type OpenedLocalControlSession } from "./localControl";
 
 /**
  * `octant ssh-target`: register, re-pin, connect, list, and remove SSH targets
- * from this machine, bind a Code Project to a folder on one, and read that
- * folder's files, Git status, and diff. Canonical:
- * docs/design/remote-ssh-environments.md.
+ * from this machine, set where a provider's runtime is on one, bind a Code
+ * Project to a folder on one, and read that folder's files, Git status, and
+ * diff. Canonical: docs/design/remote-ssh-environments.md.
  *
  * A host key is pinned only after the person confirms the fingerprint the
  * destination presented: typed at the prompt, or given beforehand with
@@ -40,6 +40,12 @@ export type SshTargetCliCommand =
   | { readonly action: "repin"; readonly targetId: string; readonly fingerprint?: string }
   | { readonly action: "connect"; readonly targetId: string }
   | { readonly action: "remove"; readonly targetId: string }
+  | {
+      readonly action: "runtime";
+      readonly targetId: string;
+      readonly providerInstanceId: string;
+      readonly path: string;
+    }
   | {
       readonly action: "bind";
       readonly targetId: string;
@@ -98,6 +104,20 @@ export function resolveSshTargetCliCommand(
   }
   if (action === "files" || action === "read" || action === "status" || action === "diff") {
     return resolveReadCommand(action, rest, flagNames);
+  }
+  if (action === "runtime") {
+    const [targetId, providerInstanceId, path, ...extra] = rest;
+    if (
+      targetId === undefined ||
+      providerInstanceId === undefined ||
+      path === undefined ||
+      extra.length > 0 ||
+      flagNames.length > 0
+    ) {
+      return undefined;
+    }
+    // The host checks each against its schemas before anything is recorded.
+    return { action: "runtime", targetId, providerInstanceId, path };
   }
   if (action === "bind") {
     const [targetId, remoteRoot] = rest;
@@ -218,6 +238,24 @@ export async function runSshTargetCliCommand(input: RunSshTargetCliCommandInput)
     }
     if (decoded.targets.length === 0) input.stdout.write("No SSH targets.\n");
     for (const status of decoded.targets) writeStatus(input.stdout, status);
+    return 0;
+  }
+  if (command.action === "runtime") {
+    const sent = await session.send({
+      path: "/api/desktop/ssh-targets/runtime-binary",
+      method: "POST",
+      body: {
+        targetId: command.targetId,
+        providerInstanceId: command.providerInstanceId,
+        path: command.path,
+      },
+    });
+    const status = sent.status === 200 ? answer(SshTargetStatus, sent.body) : undefined;
+    if (status === undefined) {
+      input.stderr.write(`${failureMessage(sent, "Octant refused to set that runtime path.")}\n`);
+      return 1;
+    }
+    writeStatus(input.stdout, status);
     return 0;
   }
   if (command.action === "connect" || command.action === "remove") {
@@ -546,6 +584,9 @@ function writeStatus(
   );
   stdout.write(`  host key ${status.fingerprint}\n`);
   stdout.write(`  executor ${status.target.executorPath}\n`);
+  for (const binary of status.runtimeBinaries) {
+    stdout.write(`  runtime of ${String(binary.providerInstanceId)} at ${binary.path}\n`);
+  }
   for (const { posture, decision } of status.admission) {
     if (decision.status === "admitted") {
       stdout.write(`  ${posture}: admitted\n`);

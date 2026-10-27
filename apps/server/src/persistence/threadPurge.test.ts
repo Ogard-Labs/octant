@@ -41,6 +41,17 @@ import { ExternalContentIngestionStore } from "../context/externalContentIngesti
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { CodeAttachmentStore } from "../code/codeAttachmentStore";
 import { LanguageServerApprovalStore } from "../code/languageServerApprovals";
+import { DebugConfigurationApprovalStore } from "../code/debugConfigurationApprovals";
+import { DebugSessionRecords } from "../code/debugSessionRecords";
+import {
+  CODE_DEBUG_CONFIGURATION_AGGREGATE,
+  CODE_DEBUG_EGRESS_AGGREGATE,
+  CODE_DEBUG_EVENT_NAMES,
+  CODE_DEBUG_SESSION_AGGREGATE,
+  decodeCodeDebugConfiguration,
+  decodeCodeDebugConfigurationDigest,
+  decodeCodeDebugSessionId,
+} from "@octant/contracts/code-debug";
 import { GeneratedImageStore } from "../image/generatedImageStore";
 import { WorkAttachmentStore } from "../work/workAttachmentStore";
 import { writeChatContent } from "./chatProjection";
@@ -54,7 +65,7 @@ import { queryUsageRecords, readAllUsageRecords } from "./usageProjection";
 import { openSqlite, type SqliteConnection } from "./sqlitePort";
 import { purgeThreadArtifacts } from "./threadArtifactPurge";
 import { THREAD_AGGREGATE_TYPE_BY_MODE } from "./threadIdentity";
-import { erasePurgedProjectData } from "./threadPurge";
+import { erasePurgedProjectData, erasePurgedThread } from "./threadPurge";
 import { managedWorktreeRoot } from "../code/managedWorktreeService";
 import { ThreadCheckpointProjection } from "./threadCheckpointProjection";
 import { ThreadRetentionService } from "../threadRetentionService";
@@ -632,6 +643,141 @@ describe("thread purge sweep", () => {
     approvals.forgetProject(erased.projectId);
     expect(approvals.holds(erased)).toBe(false);
     expect(approvals.record({ ...erased, scope: "checkout" })).toBe("recorded");
+  });
+
+  it("erases a debug session's records with its thread, and a Project's confirmations, sessions, and egress records with the Project, and only that Project's", () => {
+    const harness = openHarness();
+    const otherProjectId = "c3630000-0000-4000-8000-000000000021";
+    const actor = decodeEventActor({
+      kind: "local-user",
+      actorId: "c3630000-0000-4000-8000-000000000022",
+    });
+    const approvals = new DebugConfigurationApprovalStore({
+      journal: harness.journal,
+      personActor: actor,
+      uuid: randomUUID,
+      clock: () => now,
+    });
+    const records = new DebugSessionRecords({
+      journal: harness.journal,
+      personActor: actor,
+      hostActor: actor,
+      uuid: randomUUID,
+      clock: () => now,
+    });
+    const configurationDigest = decodeCodeDebugConfigurationDigest(`sha256:${"d".repeat(64)}`);
+    const sessions = new Map<string, string>();
+    for (const project of [projectId, otherProjectId]) {
+      expect(
+        approvals.record({
+          projectId: decodeProjectId(project),
+          checkoutId: decodeCodeCheckoutId("c3630000-0000-4000-8000-000000000023"),
+          configuration: decodeCodeDebugConfiguration({
+            name: "Run",
+            adapter: "c3630000-0000-4000-8000-000000000024/adapter",
+            program: "src/main.py",
+            args: ["--secret-argument"],
+            env: [],
+            stopOnEntry: false,
+          }),
+          configurationDigest,
+          adapter: {
+            extensionId: "c3630000-0000-4000-8000-000000000024" as never,
+            componentId: "adapter" as never,
+            packageDigest: `sha256:${"e".repeat(64)}` as never,
+            lifecycleVersion: 3,
+          },
+          scope: "project",
+        }),
+      ).toBe("recorded");
+      const sessionId = randomUUID();
+      sessions.set(project, sessionId);
+      const threadId =
+        project === projectId ? threads.code.id : "c3630000-0000-4000-8000-000000000025";
+      expect(
+        records.started({
+          sessionId: decodeCodeDebugSessionId(sessionId),
+          projectId: decodeProjectId(project),
+          threadId: threadId as never,
+          checkoutId: decodeCodeCheckoutId("c3630000-0000-4000-8000-000000000023"),
+          configurationDigest,
+          network: "proxied",
+        }),
+      ).toBe("recorded");
+      harness.journal.append({
+        aggregate: { aggregateType: CODE_DEBUG_EGRESS_AGGREGATE, aggregateId: sessionId },
+        expectedVersion: 0,
+        events: [
+          {
+            eventId: randomUUID(),
+            eventName: CODE_DEBUG_EVENT_NAMES.egressLaunchStarted,
+            eventVersion: 1,
+            correlationId: randomUUID(),
+            actor: { kind: "system", actorId: "c3630000-0000-4000-8000-000000000026" },
+            occurredAt: now,
+            payload: {
+              launch: { launchId: sessionId, threadId, projectId: project },
+              startedAt: now,
+              threadTainted: false,
+            },
+          },
+        ],
+      } as never);
+    }
+    // A session on another thread of the Project outlives the thread purge
+    // and goes with the Project.
+    const kept = randomUUID();
+    expect(
+      records.started({
+        sessionId: decodeCodeDebugSessionId(kept),
+        projectId: decodeProjectId(projectId),
+        threadId: "c3630000-0000-4000-8000-000000000027" as never,
+        checkoutId: decodeCodeCheckoutId("c3630000-0000-4000-8000-000000000023"),
+        configurationDigest,
+        network: "allow",
+      }),
+    ).toBe("recorded");
+    const remaining = () =>
+      harness.connection
+        .prepare(
+          `SELECT aggregate_type, aggregate_id FROM event_journal
+           WHERE aggregate_type IN (?, ?, ?) ORDER BY aggregate_type, aggregate_id`,
+        )
+        .all(
+          CODE_DEBUG_CONFIGURATION_AGGREGATE,
+          CODE_DEBUG_EGRESS_AGGREGATE,
+          CODE_DEBUG_SESSION_AGGREGATE,
+        );
+    const other = [
+      { aggregate_type: CODE_DEBUG_CONFIGURATION_AGGREGATE, aggregate_id: otherProjectId },
+      { aggregate_type: CODE_DEBUG_EGRESS_AGGREGATE, aggregate_id: sessions.get(otherProjectId) },
+      { aggregate_type: CODE_DEBUG_SESSION_AGGREGATE, aggregate_id: sessions.get(otherProjectId) },
+    ];
+
+    // A thread purge takes the session records that name the thread and
+    // leaves the Project's confirmation and egress records.
+    erasePurgedThread({
+      connection: harness.connection,
+      mode: "code",
+      threadId: threads.code.id as never,
+    });
+    expect(remaining()).toEqual(
+      [
+        { aggregate_type: CODE_DEBUG_CONFIGURATION_AGGREGATE, aggregate_id: projectId },
+        { aggregate_type: CODE_DEBUG_EGRESS_AGGREGATE, aggregate_id: sessions.get(projectId) },
+        { aggregate_type: CODE_DEBUG_SESSION_AGGREGATE, aggregate_id: kept },
+        ...other,
+      ].sort((left, right) =>
+        `${left.aggregate_type}\0${String(left.aggregate_id)}`.localeCompare(
+          `${right.aggregate_type}\0${String(right.aggregate_id)}`,
+        ),
+      ),
+    );
+
+    erasePurgedProjectData({ connection: harness.connection, projectId, canvasIds: [] });
+    expect(remaining()).toEqual(other);
+    approvals.forgetProject(decodeProjectId(projectId));
+    expect(approvals.approvals(decodeProjectId(projectId))).toEqual([]);
   });
 
   it("leaves a managed worktree in place whose receipt names a path outside the managed worktree directory", async () => {

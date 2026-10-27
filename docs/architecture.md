@@ -215,13 +215,21 @@ turn (Plan included) whose provider carries Octant's tools; they read the saved
 file, never an editor's draft, and never start or read through a server that
 runs repository tooling, approved or not
 ([agent read rules](design/language-services.md#agent-read-rules)).
-Of the debugger, only the seam is built: the `debug-adapter` component kind
-(Code only, quarantined like any executable component), the
-`octant-debug-adapter.json` package document, which the host refuses to
-install until it can review one, the pure start policy, the configuration
-schema, and the mapping from a repository launch file to proposals. Nothing
-starts a debug session yet
-([Debugger seam rules](design/language-services.md#debugger-seam-rules)).
+The debugger's seam and session host are built: the `debug-adapter`
+component kind (Code only, quarantined like any executable component), the
+`octant-debug-adapter.json` package document, which installs from a local
+folder untrusted and disabled with a review of its binary, digest, runtimes,
+and `launch` body, the pure start policy, the configuration schema, and the
+mapping from a repository launch file to proposals. A person at a local
+window confirms a configuration (a journaled `shell-commands` approval for one
+configuration digest and adapter package state) and starts it; the adapter and
+the program run in one capsule confined as a terminal, on the session's own
+`proxied` egress under the thread's rules below Full access, and the session
+ends at once when the thread, its posture, its checkout, the confirmation, or
+the Project goes. The routes under `/api/code/debug/` are local-window only
+with no remote action, no agent tool reaches a session, and nothing a session
+shows is journaled. The Run and debug panel that calls them is not built yet
+([Debugger session rules](design/language-services.md#debugger-session-rules)).
 
 **Host resources.** `GET /api/host/resources` is a read-only snapshot of this
 host's load: CPU use averaged over a short sample of the process's CPU times,
@@ -838,8 +846,11 @@ Project are built, from a local window (Settings › SSH targets) or the local
 CLI, under the same admission; the composer's Project picker lists such a
 Project without offering it for a thread. The provider-sdk seam for placing a
 runtime on a target, its conformance, and the executor's confined runtime
-launches with their own proxy on this host are built; no driver declares
-placement yet, so no provider's runtime runs there. SSH targets, their
+launches with their own proxy on this host are built, and the ACP driver
+declares placement for a profile whose whole launch can be stated on a
+target, at the runtime path the person set for it there; no shipped profile
+can be stated there yet, so no provider's runtime runs on a target. SSH
+targets, their runtime paths, their
 attestation digests, remote bindings, managed worktrees, remote terminals'
 starts and ends, and a placed runtime's egress are journaled. Its
 admission, confinement attestation,
@@ -2509,8 +2520,9 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   the shared conformance harness (chat, child-agent, and context-facts
   suites) before it is selectable. An acquisition may carry a host-supplied
   remote placement, which reaches only a driver that declares
-  `remotePlacement` and only through `acquireProviderConnection`; every other
-  driver reports it unsupported and launches nothing
+  `remotePlacement` and only through `acquireProviderConnection`, and names
+  the runtime path the person set on the target, the only one the driver may
+  launch; every other driver reports it unsupported and launches nothing
   ([Provider runtimes on a target](design/remote-ssh-environments.md#provider-runtimes-on-a-target)).
 - **Probe scheduling.** Operations on one provider instance run one at a time.
   A probe asked for while another probe of that instance is running joins it
@@ -7252,7 +7264,8 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   usage) is the degraded form: the capability exists but is not promised before
   it is seen. Placement on an SSH target is not a capability and has no row:
   it is the driver's own `ProviderDriver.remotePlacement` declaration, never a
-  probe, and no driver declares it yet.
+  probe. The ACP driver makes it only for a profile whose whole launch can be
+  stated on a target, which no shipped profile is yet.
 
   | Capability               | Claude Code                                                  | Codex                                                     | OpenCode                                                          | Pi                                                                                      | ACP agents                                                                    | Ollama                                                           | Harness endpoints                                                                 | Outside harness endpoints                                        | Oh My Pi                              |
   | ------------------------ | ------------------------------------------------------------ | --------------------------------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------- |

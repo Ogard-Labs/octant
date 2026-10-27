@@ -1,5 +1,6 @@
 import type { CodeCheckoutId } from "@octant/contracts/code";
 import type {
+  CodeDebugConfiguration,
   CodeDebugConfigurationDigest,
   CodeDebugStartRefusalReason,
 } from "@octant/contracts/code-debug";
@@ -67,6 +68,8 @@ export interface DebugSessionStartRequest {
   readonly configurationPaths: "resolve" | "unresolved";
   /** The adapter's declared `debugPorts`. */
   readonly debugPorts: 0 | 1;
+  /** The adapter's declared `runtimes`; `native` marks one that debugs native code. */
+  readonly adapterRuntimes: ReadonlyArray<string>;
 }
 
 export interface DebugSessionLaunchShape {
@@ -108,6 +111,13 @@ export function decideDebugSessionStart(
   request: DebugSessionStartRequest,
 ): DebugSessionStartDecision {
   if (request.platform !== "macos" && request.platform !== "linux") {
+    return { status: "refused", reason: "unsupported-platform" };
+  }
+  // Debugging native code on macOS needs the program's task port, which no
+  // Seatbelt profile Octant writes grants; it stays refused until a Mac
+  // measurement names the rights and the maintainer approves them. An adapter
+  // that needs them without saying so is refused by Seatbelt itself.
+  if (request.platform === "macos" && request.adapterRuntimes.includes("native")) {
     return { status: "refused", reason: "unsupported-platform" };
   }
   // The component kind is Code only, and Chat and Work have no checkout a
@@ -164,4 +174,27 @@ function approvalCovers(
     (approval.scope.kind === "project" ||
       String(approval.scope.checkoutId) === String(request.checkoutId))
   );
+}
+
+/**
+ * The text a configuration's digest is taken over: what the session runs, in
+ * a fixed order, with the environment sorted by name because its order
+ * changes nothing that runs. Every other change, the name included, is a new
+ * configuration the person confirms again. An absent folder is the
+ * checkout's root.
+ */
+export function canonicalDebugConfigurationText(configuration: CodeDebugConfiguration): string {
+  const env = [...configuration.env]
+    .map((entry) => [String(entry.key), entry.value] as const)
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+  return JSON.stringify([
+    "octant.code-debug-configuration@1",
+    configuration.name,
+    String(configuration.adapter),
+    String(configuration.program),
+    configuration.args,
+    configuration.cwd === undefined ? null : String(configuration.cwd),
+    env,
+    configuration.stopOnEntry,
+  ]);
 }

@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import {
   chmodSync,
   chownSync,
@@ -9,8 +10,9 @@ import {
 } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DesktopDaemonRequest } from "@octant/plugin-api/desktop-provider";
 import { createDesktopDaemonPort, type DesktopDaemonPortOptions } from "./desktopDaemonPort";
 
@@ -60,14 +62,14 @@ afterEach(async () => {
 });
 
 /**
- * A home directory with a real test daemon listening on `.cua/cua.sock`,
- * mode 0600 as Cua's daemon sets it. It speaks just enough gRPC-Web over
- * HTTP/1.1 to answer the port.
+ * A home directory with a real test daemon listening on `socket` under it
+ * (`.cua/cua.sock` unless given), mode 0600 as Cua's daemon sets it. It
+ * speaks just enough gRPC-Web over HTTP/1.1 to answer the port.
  */
-async function daemonHome(answers: Readonly<Record<string, Answer>> = {}) {
+async function daemonHome(answers: Readonly<Record<string, Answer>> = {}, socket = SOCKET) {
   const home = mkdtempSync(join(tmpdir(), "octant-daemon-"));
   homes.push(home);
-  mkdirSync(join(home, ".cua"), { mode: 0o700 });
+  mkdirSync(join(home, dirname(socket)), { mode: 0o700 });
   const seen: Array<Seen> = [];
   const server = createServer((request, response) => {
     const chunks: Array<Buffer> = [];
@@ -88,12 +90,12 @@ async function daemonHome(answers: Readonly<Record<string, Answer>> = {}) {
     });
   });
   servers.push(server);
-  const socketPath = join(home, SOCKET);
+  const socketPath = join(home, socket);
   await new Promise<void>((resolve) => server.listen(socketPath, () => resolve()));
   chmodSync(socketPath, 0o600);
   const port = (overrides: Partial<DesktopDaemonPortOptions> = {}) =>
     createDesktopDaemonPort({
-      daemon: () => ({ socketPath: SOCKET, methods: METHODS }),
+      daemon: () => ({ socketPath: socket, methods: METHODS }),
       homeDirectory: home,
       userId,
       ...overrides,
@@ -109,6 +111,53 @@ const call = (method: string, extra: Partial<DesktopDaemonRequest> = {}): Deskto
   ...extra,
 });
 const CREATE = "/test.daemon.v1.SpaceService/CreateSpace";
+
+/**
+ * One call through a port that finds the home itself, made while `HOME` is
+ * `home` or unset. Bun reads `HOME` once, from the environment it was
+ * launched with (observed on Bun 1.4.4), so under Bun the call is made by a
+ * Bun launched with it; Node reads it live, so under Node it is set here.
+ */
+async function callWithHome(home: string | undefined, socketPath: string): Promise<unknown> {
+  const declaration = { socketPath, methods: [CREATE] };
+  const request = { method: CREATE, message: [], maxResponseBytes: 1_024 };
+  if (process.versions.bun === undefined) {
+    vi.stubEnv("HOME", home);
+    try {
+      const port = createDesktopDaemonPort({ daemon: () => declaration });
+      return await port.call({ ...request, message: new Uint8Array(request.message) });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  }
+  // The child's script is a constant; the module path and the call's inputs
+  // travel in its environment, so no value is spliced into code.
+  const environment: NodeJS.ProcessEnv = {
+    ...process.env,
+    OCTANT_TEST_DAEMON_PORT_MODULE: fileURLToPath(
+      new URL("./desktopDaemonPort.ts", import.meta.url),
+    ),
+    OCTANT_TEST_DAEMON_DECLARATION: JSON.stringify(declaration),
+    OCTANT_TEST_DAEMON_REQUEST: JSON.stringify(request),
+  };
+  delete environment.HOME;
+  if (home !== undefined) environment.HOME = home;
+  const script = [
+    "const { createDesktopDaemonPort } = await import(process.env.OCTANT_TEST_DAEMON_PORT_MODULE);",
+    "const declaration = JSON.parse(process.env.OCTANT_TEST_DAEMON_DECLARATION);",
+    "const request = JSON.parse(process.env.OCTANT_TEST_DAEMON_REQUEST);",
+    "const port = createDesktopDaemonPort({ daemon: () => declaration });",
+    "const result = await port.call({ ...request, message: new Uint8Array(request.message) });",
+    "process.stdout.write(JSON.stringify(result));",
+  ].join("\n");
+  const output = await new Promise<string>((settle, reject) =>
+    execFile(process.execPath, ["-e", script], { env: environment }, (error, stdout) =>
+      error === null ? settle(stdout) : reject(error),
+    ),
+  );
+  const result: unknown = JSON.parse(output);
+  return result;
+}
 
 describe("desktop daemon port", () => {
   it("answers a declared call over gRPC-Web on the daemon's Unix socket, writing every header itself", async () => {
@@ -319,6 +368,28 @@ describe("desktop daemon port", () => {
     await expect(port().call(call(CREATE))).resolves.toEqual({
       status: "failed",
       reason: "daemon-unreachable",
+    });
+  });
+
+  it("walks from the home the user database records, whether HOME points elsewhere or is unset", async () => {
+    // A path no real home has, so the walk from the real one never reaches a daemon.
+    const socket = ".octant-daemon-port-test/daemon.sock";
+    const { home, seen } = await daemonHome({}, socket);
+    const elsewhere = await callWithHome(home, socket);
+    const unset = await callWithHome(undefined, socket);
+    expect(elsewhere).not.toMatchObject({ status: "answered" });
+    expect(elsewhere).toEqual(unset);
+    expect(seen).toEqual([]);
+  });
+
+  it("refuses when the user database has no record of Octant's user", async () => {
+    const unrecorded = createDesktopDaemonPort({
+      daemon: () => ({ socketPath: SOCKET, methods: METHODS }),
+      userId: 2_000_000_001,
+    });
+    await expect(unrecorded.call(call(CREATE))).resolves.toEqual({
+      status: "refused",
+      reason: "socket-unsafe",
     });
   });
 

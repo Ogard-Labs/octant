@@ -57,8 +57,10 @@ import {
   startToolEgressProxy,
   type ToolEgressProxy,
   type ToolEgressProxyClose,
+  type ToolEgressProposableRefusal,
   type ToolEgressProxyOptions,
   type ToolEgressRecordAppend,
+  type ToolEgressRecords,
 } from "./nativeHarnessEgressProxy";
 
 /**
@@ -440,16 +442,7 @@ export class ToolEgressRules {
         decisionsRecorded: async (payload) => this.#record(launch, "decisionsRecorded", payload),
         launchSummarized: async (payload) => this.#record(launch, "launchSummarized", payload),
       },
-      onProposable: (refusal) => {
-        const key = `${refusal.host} ${String(refusal.port)}`;
-        const known = proposals.get(key);
-        if (known !== undefined) {
-          known.attempts += 1;
-          return;
-        }
-        if (proposals.size >= MAX_TOOL_EGRESS_PROPOSALS_PER_LAUNCH) return;
-        proposals.set(key, { ...refusal, attempts: 1 });
-      },
+      onProposable: (refusal) => collectProposal(proposals, refusal),
     });
     if (started.status === "refused") return started;
     const state: LiveLaunchState = { proxy: started.proxy, launch, proposals };
@@ -482,6 +475,56 @@ export class ToolEgressRules {
     return {
       status: "listening",
       launch: { proxy: started.proxy, finish: () => this.#finish(state) },
+    };
+  }
+
+  /**
+   * Starts the proxy for a program a person runs for a thread outside any
+   * turn: a debug session's capsule. It decides on the thread's and its
+   * Project's rules, with the thread's taint suspending standing rules, as
+   * the thread's commands are decided, and what it is refused for becomes a
+   * proposal on the thread. Its records go where the caller says, never to
+   * the thread's aggregate, and nothing it receives reaches a model, so it
+   * marks no thread. A launch whose listener or start record fails gets no
+   * proxy and must not run.
+   */
+  async startProgramLaunch(
+    input: Pick<
+      ToolEgressProxyOptions,
+      "launch" | "endpoint" | "resolveAll" | "connect" | "limits"
+    > & { readonly records: ToolEgressRecords },
+  ): Promise<ToolEgressLaunchStart> {
+    const launch = input.launch;
+    const proposals: LiveLaunchState["proposals"] = new Map();
+    const started = await startToolEgressProxy({
+      ...input,
+      taint: () => ({
+        threadTainted: this.#tainted(String(launch.threadId)),
+        parentTainted: false,
+      }),
+      rules: () => this.#rulesFor(launch),
+      clock: this.#options.clock,
+      onProposable: (refusal) => collectProposal(proposals, refusal),
+    });
+    if (started.status === "refused") return started;
+    const state: LiveLaunchState = { proxy: started.proxy, launch, proposals };
+    this.#live.set(String(launch.launchId), state);
+    return {
+      status: "listening",
+      launch: {
+        proxy: started.proxy,
+        finish: async () => {
+          let closed: ToolEgressProxyClose;
+          try {
+            closed = await state.proxy.close();
+          } catch {
+            closed = { status: "unavailable" };
+          }
+          this.#live.delete(String(launch.launchId));
+          this.#raiseProposals(state);
+          return closed;
+        },
+      },
     };
   }
 
@@ -1525,4 +1568,19 @@ function entryKey(entry: ToolEgressDecisionEntry): string {
 
 function sum(values: ReadonlyArray<number>): number {
   return values.reduce((total, value) => total + value, 0);
+}
+
+/** Counts a refusal toward the launch's proposals, at most one per host and port. */
+function collectProposal(
+  proposals: LiveLaunchState["proposals"],
+  refusal: ToolEgressProposableRefusal,
+): void {
+  const key = `${refusal.host} ${String(refusal.port)}`;
+  const known = proposals.get(key);
+  if (known !== undefined) {
+    known.attempts += 1;
+    return;
+  }
+  if (proposals.size >= MAX_TOOL_EGRESS_PROPOSALS_PER_LAUNCH) return;
+  proposals.set(key, { ...refusal, attempts: 1 });
 }
