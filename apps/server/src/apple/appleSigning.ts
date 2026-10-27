@@ -60,11 +60,23 @@ export function parsePropertyList(xml: string): PropertyListValue | undefined {
   }
 }
 
+// One pass can leave a marker that overlapping ones form (`<!-<!-- -->-`), so
+// declarations and comments are removed until nothing changes.
+function withoutDeclarationsOrComments(xml: string): string {
+  let previous: string;
+  let current = xml;
+  do {
+    previous = current;
+    current = previous
+      .replace(/<\?[\s\S]*?\?>/g, "")
+      .replace(/<!--[\s\S]*?-->/g, "")
+      .replace(/<!DOCTYPE[^>]*>/g, "");
+  } while (current !== previous);
+  return current;
+}
+
 function tokenize(xml: string): ReadonlyArray<Token> | undefined {
-  const body = xml
-    .replace(/<\?[\s\S]*?\?>/g, "")
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/<!DOCTYPE[^>]*>/g, "");
+  const body = withoutDeclarationsOrComments(xml);
   const tokens: Token[] = [];
   const pattern = /<(\/?)([A-Za-z]+)(?:\s[^<>]*?)?\s*(\/?)>|([^<]+)|(<)/g;
   for (const match of body.matchAll(pattern)) {
