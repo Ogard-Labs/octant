@@ -1640,6 +1640,9 @@ describe("provider registry contracts", () => {
           version: "1.2.0",
           digest: `sha256:${"a".repeat(64)}`,
         },
+        baseUrl: "http://127.0.0.1:8080/",
+        key: { header: "authorization", scheme: "Bearer" },
+        modelIds: ["local-model"],
       },
       enabled: false,
       environmentPolicy: "inherit-host",
@@ -1683,17 +1686,52 @@ describe("provider registry contracts", () => {
         configuration: { kind: "ollama-native-http", baseUrl: "http://127.0.0.1:11434" },
       }),
     ).toThrow();
-    // Nothing admits an outside driver yet: no command creates or reconfigures one.
-    expect(() =>
-      decodeProviderRegistryCommand({
-        kind: "create-outside-harness-endpoint-provider",
-        instanceId: ids.instance,
-        expectedVersion: 0,
-        displayName: outside.displayName,
-        configuration: outside.configuration,
-      }),
-    ).toThrow();
+    // No command reconfigures one: its package, address, and models are fixed when it is added.
     expect(() => decodeProviderInstanceConfigurationChanged({ instance: outside })).toThrow();
+  });
+
+  it("adds an outside driver provider off, with only the models listed and a key header the person chose", () => {
+    const configuration = {
+      kind: "outside-harness-endpoint",
+      driver: {
+        extensionId: "00000000-0000-4000-8000-000000000911",
+        packageId: "00000000-0000-4000-8000-000000000912",
+        componentId: "driver",
+        version: "0.1.0",
+        digest: `sha256:${"b".repeat(64)}`,
+      },
+      baseUrl: "https://models.example.test/v1/",
+      key: { header: "x-api-key" },
+      modelIds: ["model-a", "model-b"],
+    } as const;
+    const command = {
+      kind: "create-outside-harness-endpoint-provider",
+      instanceId: ids.instance,
+      expectedVersion: 0,
+      displayName: "Team models",
+      configuration,
+    } as const;
+    expect(decodeProviderRegistryCommand(command)).toEqual(command);
+    const { key: _key, ...withoutKey } = configuration;
+    expect(decodeProviderRegistryCommand({ ...command, configuration: withoutKey })).toEqual({
+      ...command,
+      configuration: withoutKey,
+    });
+    // Created off: the command has no switch to start it on.
+    expect(() => decodeProviderRegistryCommand({ ...command, enabled: true })).toThrow();
+    for (const invalid of [
+      { ...configuration, modelIds: [] },
+      { ...configuration, modelIds: ["model-a", "model-a"] },
+      { ...configuration, key: { header: "proxy-authorization" } },
+      { ...configuration, key: { header: "cookie" } },
+      { ...configuration, key: { header: "Host" } },
+      { ...configuration, key: { header: "X-Api-Key" } },
+      { ...configuration, key: { header: "x-api-key", scheme: "Basic" } },
+      { ...configuration, key: { header: "x-api-key", value: "secret" } },
+      { ...configuration, apiKey: "secret" },
+    ]) {
+      expect(() => decodeProviderRegistryCommand({ ...command, configuration: invalid })).toThrow();
+    }
   });
 
   it("reports a driver the activation ladder does not admit as a closed refusal with no models", () => {
