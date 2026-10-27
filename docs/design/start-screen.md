@@ -153,7 +153,11 @@ subagent needs your approval" or "Review subagent asked a question" (the
 child's role), under the parent thread's title, with the child's task and the
 request text. It has one action, **Review request**, which opens the parent
 thread on its Agents tab with that child selected; it offers no Approve, Deny,
-or choices, so the answer is given in the child's own detail view. If the window's thread list does not hold the parent yet, it reads the list once more and, when the parent is still missing, says it could not open the thread rather than doing nothing. This pending-request projection lists Work and Code children only; Chat's
+or choices, so the answer is given in the child's own detail view. The agent's
+own harness approval ("needs your approval") and a Work agent's own question
+("is waiting for your answer") are rows the same way, with the request text and
+one action, **Review request**, which opens the thread, whose approval or
+question card above the composer answers it. If the window's thread list does not hold the parent yet, it reads the list once more and, when the parent is still missing, says it could not open the thread rather than doing nothing. This pending-request projection lists Work and Code children only; Chat's
 [Agents dock](workspace.md#subagents) does not extend that scope. At most five rows show, then **+N more**, which
 opens the Inbox. The card is hidden while nothing waits, and unavailable where
 this window has no reader (a remote window).
@@ -378,8 +382,8 @@ that list. It has one row per waiting thread, titled with the thread and
 detailed with its mode, what it waits on, and how long, and Enter opens the
 thread (when every request on a thread is a subagent's, Enter opens that
 child's Agents tab). A waiting subagent gets one **Review request** command and
-no Approve or Deny; an agent's own approval is only its thread's row, which
-opens the thread. Each approval also gets **Approve** and **Deny** commands, so typing
+no Approve or Deny; an agent's own approval, or a Work agent's own question,
+is only its thread's row, which opens the thread. Each approval also gets **Approve** and **Deny** commands, so typing
 "approve" finds them; they answer through the mode's own approval command
 without opening the thread,
 and a refusal shows as a notice. A question's choices are not listed, so its row

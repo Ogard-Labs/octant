@@ -402,6 +402,31 @@ describe("pending request contract", () => {
     ).toMatchObject({ kind: "lead-approval" });
   });
 
+  it("lists a Work lead's own question with no handle to answer it, in Work only", () => {
+    const leadQuestion = {
+      mode: "work",
+      kind: "lead-question",
+      projectId: ids.project,
+      threadId: ids.workThread,
+      threadTitle: "Quarterly report",
+      text: "Which quarter should the summary cover?",
+      requestedAt,
+    } as const;
+    expect(decodePendingRequest(leadQuestion)).toEqual(leadQuestion);
+    expect(() => decodePendingRequest({ ...leadQuestion, answer: workApproval.answer })).toThrow();
+    expect(() => decodePendingRequest({ ...leadQuestion, options: [{ label: "Q3" }] })).toThrow();
+    expect(() => decodePendingRequest({ ...leadQuestion, lostInRestart: true })).toThrow();
+    // A Code lead's question is a Code question and a Chat lead's is a Chat
+    // question, each with its own answer handle; neither is listed this way.
+    expect(() => decodePendingRequest({ ...leadQuestion, mode: "code" })).toThrow();
+    expect(() => decodePendingRequest({ ...leadQuestion, mode: "chat" })).toThrow();
+    const { projectId: _projectId, ...unfiled } = leadQuestion;
+    expect(() => decodePendingRequest(unfiled)).toThrow();
+    expect(() =>
+      decodePendingRequest({ ...leadQuestion, text: "Update /Users/me/report.md?" }),
+    ).toThrow();
+  });
+
   it("bounds the list and requires the truncation flag", () => {
     expect(() => decodePendingRequestList({ requests: [workApproval] })).toThrow();
     expect(() =>

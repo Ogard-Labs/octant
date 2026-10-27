@@ -42,7 +42,10 @@ import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { listWorkTurnDecisions, workTurnDecision } from "../turnDecisions/workTurnDecisions";
 import { defaultShellSettings, workProjectKeepsStatusFile } from "@octant/domain";
 import { resolveAgentRunParentThreadTitle, resolveHarnessThreadFacts } from "./agentRuns";
-import { listLeadApprovalRequests } from "../harness/leadApprovalAttention";
+import {
+  listLeadApprovalRequests,
+  listLeadQuestionRequests,
+} from "../harness/leadApprovalAttention";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { WorkRequestStateWiring } from "./workRequestState";
 import type { AuthorityWiring } from "./authority";
@@ -232,6 +235,19 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
           mode === "chat"
             ? chatService.listsActiveThread(threadId)
             : windowMayOpenWorkOrCodeThread({ threadId, windowId: asking }),
+      },
+      String(windowId),
+    )),
+    ...(await listLeadQuestionRequests(
+      {
+        questions: nativeHarnessQuestions,
+        sessions: nativeHarnessSessions,
+        threadFacts: ({ threadId, mode }) =>
+          resolveHarnessThreadFacts({ persistence, workThreadProjection, threadId, mode }),
+        // Only a Work lead's question is listed, so the reach is a Work
+        // parent's: the window's binding to the thread's project.
+        authorizeThread: ({ threadId, windowId: asking }) =>
+          windowMayOpenWorkOrCodeThread({ threadId, windowId: asking }),
       },
       String(windowId),
     )),

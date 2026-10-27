@@ -9,10 +9,12 @@ import { PendingRequestRow } from "../pendingRequests/PendingRequestRow";
 import {
   isFindOnlyPendingRequest,
   isLeadApprovalPendingRequest,
+  isLeadQuestionPendingRequest,
   pendingRequestKey,
 } from "../pendingRequests/pendingRequests";
 import {
   usePendingRequestRows,
+  type PendingRequestRowEntry,
   type PendingRequestRowsSource,
 } from "../pendingRequests/usePendingRequestRows";
 import { Surface, SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
@@ -158,20 +160,20 @@ export function InboxView(props: InboxViewProps) {
   const decisions = props.decisions;
   const { rows: requestRows, answer } = usePendingRequestRows(decisions);
   // Decisions finished turns asked, subagents waiting on the person, and the
-  // agent's own approvals are the requests the Inbox lists from this read; its
-  // other approvals and questions come from thread attention signals.
+  // agent's own approvals and Work questions are the requests the Inbox lists
+  // from this read; its other approvals and questions come from thread
+  // attention signals.
   const decisionRows = (requestRows ?? []).filter(
     (entry) => entry.request.kind === "decision" || isFindOnlyPendingRequest(entry.request),
   );
-  // A thread whose agent waits on its own approval is listed once, as that
-  // approval, rather than again as the thread's attention signal for it.
-  const approving = new Set(
-    decisionRows
-      .filter((entry) => isLeadApprovalPendingRequest(entry.request))
-      .map((entry) => String(entry.request.threadId)),
-  );
+  // A thread whose agent waits on its own approval or question is listed once,
+  // as that request, rather than again as the thread's attention signal for it.
+  const approving = threadsWith(decisionRows, isLeadApprovalPendingRequest);
+  const asking = threadsWith(decisionRows, isLeadQuestionPendingRequest);
   const attentionItems = props.attentionItems.filter(
-    (item) => !(item.signal.reason === "approval-required" && approving.has(item.signal.threadId)),
+    (item) =>
+      !(item.signal.reason === "approval-required" && approving.has(item.signal.threadId)) &&
+      !(item.signal.reason === "question-asked" && asking.has(item.signal.threadId)),
   );
 
   return (
@@ -383,5 +385,15 @@ export function InboxView(props: InboxViewProps) {
         </SurfaceSection>
       )}
     </Surface>
+  );
+}
+
+/** The threads whose listed request is of one find-only kind. */
+function threadsWith(
+  rows: ReadonlyArray<PendingRequestRowEntry>,
+  matches: (request: PendingRequest) => boolean,
+): ReadonlySet<string> {
+  return new Set(
+    rows.filter((entry) => matches(entry.request)).map((entry) => String(entry.request.threadId)),
   );
 }

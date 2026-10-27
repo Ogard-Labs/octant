@@ -1652,6 +1652,117 @@ describe("WorkspaceView agent approval card", () => {
   });
 });
 
+describe("WorkspaceView agent question card", () => {
+  const question = {
+    id: "00000000-0000-4000-8000-000000000071",
+    prompt: "Which quarter should the summary cover?",
+    options: ["Q3", "Q4"],
+    status: "pending",
+    askedAt: "2026-10-16T12:06:00.000Z",
+  };
+  function harnessClient(mode: "work" | "code", threadId: string) {
+    return {
+      session: vi.fn(async () => ({
+        session: {
+          id: "00000000-0000-4000-8000-000000000010",
+          threadId,
+          mode,
+          leadSlotId: "default",
+          lead: {
+            hostId: "00000000-0000-4000-8000-0000000000aa",
+            providerInstanceId: "00000000-0000-4000-8000-000000000001",
+            modelId: "frontier-large",
+          },
+          status: "running",
+          turnsRun: 1,
+          cutovers: 0,
+          startedAt: "2026-10-16T12:00:00.000Z",
+          updatedAt: "2026-10-16T12:05:00.000Z",
+          version: 4,
+        },
+        routes: [],
+        turns: [],
+        reductions: [],
+        interventions: [],
+        activatedFollowUpIds: [],
+        questions: [question],
+        approvals: [],
+      })),
+      command: vi.fn(),
+      decideApproval: vi.fn(),
+      answerQuestion: vi.fn(async () => ({
+        kind: "question-answered",
+        question: {
+          ...question,
+          status: "answered",
+          answer: "Q4",
+          settledAt: "2026-10-16T12:06:05.000Z",
+        },
+      })),
+    };
+  }
+
+  it("shows a Work thread's own pending question in its composer and answers it there", async () => {
+    const client = harnessClient("work", ids.thread);
+    const tab = {
+      id: ids.tab,
+      kind: "work-thread",
+      mode: "work",
+      threadId: ids.thread,
+      title: "Draft brief",
+    } as WorkspaceTab;
+    render(
+      <WorkspaceView
+        {...propsFor(tab)}
+        nativeHarnessClient={client as never}
+        workThreads={[
+          {
+            id: ids.thread,
+            projectId: ids.project,
+            title: "Draft brief",
+            lifecycle: "active",
+            providerInstanceId: "00000000-0000-4000-8000-000000000901",
+            modelId: "gpt-4",
+            version: 1,
+            createdAt: "2026-07-26T20:00:00.000Z",
+            updatedAt: "2026-07-26T20:00:00.000Z",
+          } as never,
+        ]}
+        workThreadClient={
+          { bootstrap: vi.fn(async () => ({ threads: [] })), execute: vi.fn() } as never
+        }
+        mode="work"
+      />,
+    );
+    const card = await screen.findByRole(
+      "region",
+      { name: "Provider question" },
+      { timeout: 5_000 },
+    );
+    expect(card.closest(".composer")).not.toBeNull();
+    await userEvent.click(within(card).getByRole("radio", { name: "Q4" }));
+    await userEvent.click(within(card).getByRole("button", { name: "Submit" }));
+    await waitFor(() =>
+      expect(client.answerQuestion).toHaveBeenCalledWith(ids.thread, {
+        questionId: question.id,
+        answer: "Q4",
+      }),
+    );
+  });
+
+  it("leaves a Code thread's question to Code's own inline question", async () => {
+    const client = harnessClient("code", codeIds.thread);
+    render(
+      <WorkspaceView
+        {...propsFor(codeTab("code-overview", "Overview"))}
+        nativeHarnessClient={client as never}
+      />,
+    );
+    await waitFor(() => expect(client.session).toHaveBeenCalled(), { timeout: 5_000 });
+    expect(screen.queryByRole("region", { name: "Provider question" })).not.toBeInTheDocument();
+  });
+});
+
 describe("WorkspaceView cross-context banner", () => {
   it("renders the cross-context notice inside an existing thread composer with a dismiss control", async () => {
     const base = propsFor(codeTab("code-overview", "Overview"));
