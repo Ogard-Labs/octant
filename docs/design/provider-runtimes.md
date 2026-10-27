@@ -84,6 +84,20 @@ option is absent) out of the session. The decoder tolerates the narrower list
 (the runtime may drop a requested tool, never add one), so a launch that lacks
 a requested tool still runs.
 
+Every Claude launch names Octant as its client: both launch shapes set
+`CLAUDE_CODE_ENTRYPOINT=octant`, and a label inherited from the host
+environment never crosses (the passthrough list drops it with the rest of the
+host's `CLAUDE_*` variables). The runtime sends the label with every request,
+and the plan meters read it: the 5-hour window drains roughly twice as fast
+per token under the Agent SDK's default `sdk-*` labels as under any named
+client, measured by several parties across accounts and plans
+(2026-09-25 through 2026-10-27; Anthropic has not said whether the weighting
+is intended, and the Agent SDK writes its own `sdk-ts` only when the variable
+is unset). Naming is also the attribution the runtime's own hosts use: the
+desktop app and the IDE extension set their own labels on the same SDK
+transport. If Anthropic documents the `sdk-*` rate as intended policy, this
+rule is revisited rather than kept against a stated boundary.
+
 ## OpenCode
 
 The installed OpenCode binary's
