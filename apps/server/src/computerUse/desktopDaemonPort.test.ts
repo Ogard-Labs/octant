@@ -130,13 +130,21 @@ async function callWithHome(home: string | undefined, socketPath: string): Promi
       vi.unstubAllEnvs();
     }
   }
-  const environment = { ...process.env };
+  // The child's script is a constant; the module path and the call's inputs
+  // travel in its environment, so no value is spliced into code.
+  const environment = {
+    ...process.env,
+    OCTANT_TEST_DAEMON_PORT_MODULE: fileURLToPath(new URL("./desktopDaemonPort.ts", import.meta.url)),
+    OCTANT_TEST_DAEMON_DECLARATION: JSON.stringify(declaration),
+    OCTANT_TEST_DAEMON_REQUEST: JSON.stringify(request),
+  };
   delete environment.HOME;
   if (home !== undefined) environment.HOME = home;
   const script = [
-    `const { createDesktopDaemonPort } = await import(${JSON.stringify(fileURLToPath(new URL("./desktopDaemonPort.ts", import.meta.url)))});`,
-    `const port = createDesktopDaemonPort({ daemon: () => (${JSON.stringify(declaration)}) });`,
-    `const request = ${JSON.stringify(request)};`,
+    "const { createDesktopDaemonPort } = await import(process.env.OCTANT_TEST_DAEMON_PORT_MODULE);",
+    "const declaration = JSON.parse(process.env.OCTANT_TEST_DAEMON_DECLARATION);",
+    "const request = JSON.parse(process.env.OCTANT_TEST_DAEMON_REQUEST);",
+    "const port = createDesktopDaemonPort({ daemon: () => declaration });",
     "const result = await port.call({ ...request, message: new Uint8Array(request.message) });",
     "process.stdout.write(JSON.stringify(result));",
   ].join("\n");
