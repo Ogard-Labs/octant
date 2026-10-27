@@ -87,6 +87,11 @@ export function createExpoSecureStringStorage(
 
   // Native Expo / React Native (no document, no Node).
   const SecureStore = require("expo-secure-store") as typeof import("expo-secure-store");
+  const { Platform } = require("react-native") as typeof import("react-native");
+  if (Platform.OS === "ios") {
+    iosKeychain ??= createThisDeviceKeychainStorage(SecureStore);
+    return iosKeychain;
+  }
   return {
     async getItem(key) {
       return SecureStore.getItemAsync(key);
@@ -97,6 +102,68 @@ export function createExpoSecureStringStorage(
     async deleteItem(key) {
       await SecureStore.deleteItemAsync(key);
     },
+  };
+}
+
+/** The expo-secure-store calls the iOS Keychain storage makes. */
+export type KeychainCalls = Pick<
+  typeof import("expo-secure-store"),
+  "getItemAsync" | "setItemAsync" | "deleteItemAsync" | "WHEN_UNLOCKED_THIS_DEVICE_ONLY"
+>;
+
+/**
+ * expo-secure-store's own default service. Items an earlier build wrote there
+ * carry its default accessibility, `WHEN_UNLOCKED`, which an encrypted or
+ * iCloud backup restores onto another device.
+ */
+const EARLIER_KEYCHAIN_OPTIONS = {} as const;
+const THIS_DEVICE_KEYCHAIN_SERVICE = "octant.this-device";
+
+/** One for the app, so every caller shares its one queue. */
+let iosKeychain: ExpoSecureStringStorage | undefined;
+
+/**
+ * Octant's iOS secure storage: Keychain items readable only while the phone
+ * is unlocked and never restored onto another device, so a device signing key
+ * stays on the phone that paired, as Android's disabled backup keeps it there.
+ * The Keychain keeps an item's accessibility when it is written again, so an
+ * item an earlier build wrote is moved to a separate service on its first read
+ * (written there, then removed from the old one) rather than rewritten in
+ * place. Every call runs after the one before it: a write landing while a read
+ * moves an item would otherwise be overwritten by the older value.
+ */
+export function createThisDeviceKeychainStorage(store: KeychainCalls): ExpoSecureStringStorage {
+  const thisDevice = {
+    keychainService: THIS_DEVICE_KEYCHAIN_SERVICE,
+    keychainAccessible: store.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+  };
+  let tail: Promise<unknown> = Promise.resolve();
+  const inTurn = <T>(run: () => Promise<T>): Promise<T> => {
+    const next = tail.then(run, run);
+    tail = next.catch(() => undefined);
+    return next;
+  };
+  return {
+    getItem: (key) =>
+      inTurn(async () => {
+        const current = await store.getItemAsync(key, thisDevice);
+        if (current !== null) return current;
+        const earlier = await store.getItemAsync(key, EARLIER_KEYCHAIN_OPTIONS);
+        if (earlier === null) return null;
+        await store.setItemAsync(key, earlier, thisDevice);
+        await store.deleteItemAsync(key, EARLIER_KEYCHAIN_OPTIONS);
+        return earlier;
+      }),
+    setItem: (key, value) =>
+      inTurn(async () => {
+        await store.setItemAsync(key, value, thisDevice);
+        await store.deleteItemAsync(key, EARLIER_KEYCHAIN_OPTIONS);
+      }),
+    deleteItem: (key) =>
+      inTurn(async () => {
+        await store.deleteItemAsync(key, thisDevice);
+        await store.deleteItemAsync(key, EARLIER_KEYCHAIN_OPTIONS);
+      }),
   };
 }
 
