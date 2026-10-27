@@ -2142,7 +2142,15 @@ flowchart LR
   navigation and Project/extension projections instead of independent polling
   timers. An image job queued or finished journals on its own `image-jobs`
   topic, so a thread's generated-image list re-reads when the agent's image
-  tool completes a job rather than on its idle cadence. A running turn's start time and latest step (a tool name and one
+  tool completes a job rather than on its idle cadence. Captures, tool
+  approvals, follow-up offers and message queues use their own metadata-only
+  Machine change topics. A renderer re-reads the authoritative scoped API
+  after a notice, on reconnect or becoming visible, and every thirty seconds
+  as recovery. Hidden windows stop recovery timers. In-memory approval
+  services publish both creation and settlement, including expiry and
+  cancellation; the notice carries no approval body or authority. A notice
+  arriving during a read earns one trailing read. Consumers without the
+  Machine feed retain their bounded polling fallback. A running turn's start time and latest step (a tool name and one
   redacted, truncated argument, or a wait on approval or an answer) ride on the
   same Chat, Work, and Code navigation rows as `executing`, optional and absent
   together outside a live turn. They are held in memory by one process-local

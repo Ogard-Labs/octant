@@ -103,7 +103,12 @@ import { PathMentionTypeahead } from "../code/CodePathMentionPicker";
 import { selectedModelReadsImages, useWorkComposerImages } from "./composer/useWorkComposerImages";
 import { WorkImageAttachmentChips } from "./composer/WorkImageAttachmentChips";
 import { useWorkFileMentions } from "./useWorkFileMentions";
+import {
+  THREAD_ACTIVITY_RECOVERY_MS,
+  useThreadActivityRevision,
+} from "../polling/ThreadActivityRevisions";
 import { samePollingData } from "../polling/samePollingData";
+import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { ChildResultCards } from "../agents/ChildResultCards";
@@ -1156,39 +1161,40 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     };
   }, [projectId, props.changeRevision, props.requestClient, props.threadId]);
 
+  const browserApprovalRevision = useThreadActivityRevision("toolApprovals");
+  // A different thread or client starts clean; a notice never clears the list.
   useEffect(() => {
-    const client = props.browserAutomationClient;
-    const listApprovals = client?.listApprovals;
-    if (listApprovals === undefined) {
-      setBrowserApprovals([]);
-      return;
-    }
-    const controller = new AbortController();
-    let inFlight = false;
-    const refresh = async () => {
-      if (!documentIsVisible() || inFlight) return;
-      inFlight = true;
+    setBrowserApprovals([]);
+  }, [props.browserAutomationClient, props.threadId]);
+  const refreshBrowserApprovals = useCallback(
+    async (signal: AbortSignal) => {
+      const client = props.browserAutomationClient;
+      const listApprovals = client?.listApprovals;
+      if (listApprovals === undefined) return;
       try {
-        const approvals = await listApprovals(controller.signal);
-        if (!controller.signal.aborted) {
-          setBrowserApprovals(
-            approvals.filter((approval) => String(approval.threadId) === String(props.threadId)),
+        const approvals = await listApprovals.call(client, signal);
+        if (signal.aborted) return;
+        setBrowserApprovals((current) => {
+          const next = approvals.filter(
+            (approval) => String(approval.threadId) === String(props.threadId),
           );
-        }
+          return samePollingData(current, next) ? current : next;
+        });
       } catch {
-        if (!controller.signal.aborted) setBrowserApprovals([]);
-      } finally {
-        inFlight = false;
+        if (!signal.aborted) setBrowserApprovals([]);
       }
-    };
-    const stop = scheduleVisibleInterval(() => void refresh(), turnRunning ? 500 : 5_000, {
-      runImmediately: true,
-    });
-    return () => {
-      controller.abort();
-      stop();
-    };
-  }, [props.browserAutomationClient, props.threadId, turnRunning]);
+    },
+    [props.browserAutomationClient, props.threadId],
+  );
+  useVisibleRefresh(
+    refreshBrowserApprovals,
+    browserApprovalRevision,
+    browserApprovalRevision === undefined
+      ? turnRunning
+        ? 500
+        : 5_000
+      : THREAD_ACTIVITY_RECOVERY_MS,
+  );
 
   const pendingBrowserApproval = browserApprovals[0];
   const decideBrowserApproval = async (decision: "approved" | "denied", remember?: boolean) => {

@@ -6,7 +6,12 @@ import {
   type SideTaskClient,
 } from "@octant/client-runtime/side-task-client";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
-import { scheduleVisibleInterval } from "../polling/documentVisibility";
+import {
+  THREAD_ACTIVITY_RECOVERY_MS,
+  useThreadActivityRevision,
+} from "../polling/ThreadActivityRevisions";
+import { samePollingData } from "../polling/samePollingData";
+import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 import "./follow-up-suggestions.css";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
@@ -41,34 +46,35 @@ export function SideTaskCards(props: SideTaskCardsProps) {
   const currentThread = useRef(threadId);
   currentThread.current = threadId;
 
-  const load = useCallback(async () => {
-    const generation = ++requestGeneration.current;
-    try {
-      const next = await client.sideTasks(threadId);
-      if (requestGeneration.current === generation) setTasks(next.tasks);
-    } catch {
-      // An offer is not state the person is waiting on; the next tick retries.
-    }
-  }, [client, threadId]);
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      const generation = ++requestGeneration.current;
+      try {
+        const next = await client.sideTasks(threadId);
+        if (signal?.aborted !== true && requestGeneration.current === generation) {
+          setTasks((current) => (samePollingData(current, next.tasks) ? current : next.tasks));
+        }
+      } catch {
+        // An offer is not state the person is waiting on; the next read retries.
+      }
+    },
+    [client, threadId],
+  );
 
+  const revision = useThreadActivityRevision("threadFollowUps");
+  // A different thread or client starts clean; a notice never clears the list.
   useEffect(() => {
+    requestGeneration.current += 1;
     setTasks([]);
     setError(undefined);
-    let inFlight = false;
-    const tick = () => {
-      if (inFlight) return;
-      inFlight = true;
-      void load().finally(() => {
-        inFlight = false;
-      });
-    };
-    tick();
-    const stop = scheduleVisibleInterval(tick, props.refreshIntervalMs ?? 4_000);
-    return () => {
-      requestGeneration.current += 1;
-      stop();
-    };
-  }, [load, props.refreshIntervalMs]);
+  }, [client, threadId]);
+
+  const refresh = useCallback(async (signal: AbortSignal) => load(signal), [load]);
+  useVisibleRefresh(
+    refresh,
+    revision,
+    revision === undefined ? (props.refreshIntervalMs ?? 4_000) : THREAD_ACTIVITY_RECOVERY_MS,
+  );
 
   const offered = tasks.filter((task) => task.status === "offered").reverse();
   if (offered.length === 0 && error === undefined) return null;
