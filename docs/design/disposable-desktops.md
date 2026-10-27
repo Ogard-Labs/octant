@@ -1321,8 +1321,11 @@ driver would need them in its imports); `node:http2` h2c over the socket
 (no dependency, but Bun's HTTP/2 client is the less-proven path; kept as the
 fallback if the live smoke shows the passthrough does not answer gRPC-Web);
 and Cua's own SDK (`@trycua/cua`, a native module that embeds Cua's whole
-runtime in Octant's process). Server streaming is not needed: a create runs
-with `wait` off and is polled.
+runtime in Octant's process). A create runs with `wait` off and is polled.
+The one server stream a driver needs is `ProcessService.StartProcess`, the
+only way Cua starts a program in a Space; the port reads such a stream whole
+to its status, inside the same bounds, so only a stream the daemon ends on
+its own is answered ([Built in Cua sub-slice 1](#built-in-cua-sub-slice-1)).
 
 ### Placement, account, and credentials
 
@@ -1564,13 +1567,23 @@ where Cua documents no `network` `none`.
 
 Rules this sub-slice resolved:
 
-- **A daemon call carries four fields and nothing else.** The request is
-  the method, one unframed message, the response bound, and a signal. A
+- **A daemon call carries these fields and nothing else.** The request is
+  the method, one unframed message, the response bound, whether the method
+  streams its answer, and a signal. A
   request with any other field, `headers` among them, refuses
   `request-invalid`, because a driver that is not type-checked can send any
   shape. The host sends `content-type: application/grpc-web+proto`,
   `content-length`, and `grpc-timeout` set to the port's own bound; the HTTP
   client adds only `Host` and `Connection`.
+- **A streamed answer is read whole.** `ProcessService.StartProcess` is the
+  only way Cua starts a program in a Space, and it streams. A call that says
+  its method streams (`stream`) is answered with every message in order
+  (`messages`) and the status, read inside the same 45-second and byte
+  bounds, the byte bound counting all messages together. A unary call still
+  fails `response-invalid` on a second message, and a stream the daemon never
+  ends times out, so only a stream the daemon ends on its own is answered.
+  This extended the published seam after the port was first built, as its
+  own change.
 - **A malformed answer fails as `response-invalid`.** C1 listed three
   failures; a fourth is needed for a daemon that answers something other than
   one gRPC-Web answer: an HTTP status other than 200, another content type
@@ -1651,7 +1664,9 @@ Removing each check in turn fails at least one of these tests. The same file
 passes under Bun 1.4.4, which runs the development and headless servers
 (`bun --bun x vitest run --project unit src/computerUse/desktopDaemonPort.test.ts`
 in `apps/server`), as well as under Node, which runs the packaged desktop's
-server, through `bun run test`.
+server, through `bun run test`. It also covers a whole stream, its shared
+bound, a unary call refusing two messages, a `stream` that is not a boolean,
+and a stream that never ends.
 `protobufWire.test.ts` covers protobuf's documented encodings, a negative
 `int64`, round trips of every wire type, and malformed input answered as a
 value. `desktopLeaseService.test.ts` covers a placement the provider does not

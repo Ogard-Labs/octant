@@ -56,7 +56,7 @@ const DEFAULT_MAX_RESPONSE_BYTES = maxDesktopFrameBytes({ width: 7_680, height: 
 const FRAMING_ALLOWANCE_BYTES = 16_384;
 /** The longest status message passed on to the driver. */
 const MAX_GRPC_MESSAGE_LENGTH = 1_024;
-const REQUEST_FIELDS = new Set(["method", "message", "maxResponseBytes", "signal"]);
+const REQUEST_FIELDS = new Set(["method", "message", "maxResponseBytes", "stream", "signal"]);
 const SOCKET_PATH_SEGMENT = /^[A-Za-z0-9._-]{1,255}$/;
 const GRPC_WEB_CONTENT_TYPES = new Set(["application/grpc-web", "application/grpc-web+proto"]);
 const DATA_FRAME = 0x00;
@@ -97,6 +97,7 @@ export function createDesktopDaemonPort(options: DesktopDaemonPortOptions): Desk
         message: request.message,
         timeoutMs,
         limit,
+        stream: request.stream === true,
         ...(request.signal === undefined ? {} : { signal: request.signal }),
       });
     },
@@ -118,6 +119,7 @@ function requestWellFormed(request: DesktopDaemonRequest): boolean {
     typeof request.method === "string" &&
     request.message instanceof Uint8Array &&
     Number.isSafeInteger(request.maxResponseBytes) &&
+    (request.stream === undefined || typeof request.stream === "boolean") &&
     (request.signal === undefined || request.signal instanceof AbortSignal)
   );
 }
@@ -190,13 +192,14 @@ function frameMessage(message: Uint8Array): Uint8Array {
   return framed;
 }
 
-/** One unary gRPC-Web call over HTTP/1.1 on the socket, bounded in time and bytes. */
+/** One gRPC-Web call over HTTP/1.1 on the socket, bounded in time and bytes. */
 function exchange(call: {
   readonly socketPath: string;
   readonly method: string;
   readonly message: Uint8Array;
   readonly timeoutMs: number;
   readonly limit: number;
+  readonly stream: boolean;
   readonly signal?: AbortSignal;
 }): Promise<DesktopDaemonResult> {
   const body = frameMessage(call.message);
@@ -252,7 +255,7 @@ function exchange(call: {
         chunks.push(chunk);
       });
       response.on("end", () =>
-        settle(readGrpcWebAnswer(Buffer.concat(chunks), response.headers, call.limit)),
+        settle(readGrpcWebAnswer(Buffer.concat(chunks), response.headers, call.limit, call.stream)),
       );
     });
     if (!settled) outgoing.end(body);
@@ -260,17 +263,21 @@ function exchange(call: {
 }
 
 /**
- * One unary answer: at most one uncompressed message, then a trailer frame
- * with the status, and nothing after it. A daemon that fails before any
- * message may instead send the status in the response headers with no body.
+ * One whole answer: uncompressed messages (at most one for a unary call),
+ * then a trailer frame with the status, and nothing after it. A daemon that
+ * fails before any message may instead send the status in the response
+ * headers with no body. `limit` bounds the one message of a unary call and
+ * every message of a stream together.
  */
 function readGrpcWebAnswer(
   body: Buffer,
   headers: IncomingHttpHeaders,
   limit: number,
+  stream: boolean,
 ): DesktopDaemonResult {
   let offset = 0;
-  let message: Uint8Array | undefined;
+  const messages: Array<Uint8Array> = [];
+  let received = 0;
   let trailers: ReadonlyMap<string, string> | undefined;
   while (offset < body.byteLength) {
     if (trailers !== undefined || offset + 5 > body.byteLength) return failed("response-invalid");
@@ -279,9 +286,10 @@ function readGrpcWebAnswer(
     if (end > body.byteLength) return failed("response-invalid");
     const payload = body.subarray(offset + 5, end);
     if (flag === DATA_FRAME) {
-      if (message !== undefined) return failed("response-invalid");
-      if (payload.byteLength > limit) return failed("response-too-large");
-      message = new Uint8Array(payload);
+      if (!stream && messages.length > 0) return failed("response-invalid");
+      received += payload.byteLength;
+      if (received > limit) return failed("response-too-large");
+      messages.push(new Uint8Array(payload));
     } else if (flag === TRAILER_FRAME) {
       trailers = readTrailers(payload);
       if (trailers === undefined) return failed("response-invalid");
@@ -299,7 +307,8 @@ function readGrpcWebAnswer(
     status: "answered",
     grpcStatus: Number(code),
     grpcMessage: percentDecoded(status.get("grpc-message") ?? "").slice(0, MAX_GRPC_MESSAGE_LENGTH),
-    message: message ?? new Uint8Array(0),
+    message: messages[0] ?? new Uint8Array(0),
+    messages,
   };
 }
 
