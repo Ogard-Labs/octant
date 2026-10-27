@@ -1904,10 +1904,11 @@ flowchart LR
   A single narrow SQLite port has two adapters — `bun:sqlite` in production
   and `better-sqlite3` for the Node portability smoke — that pass the same
   conformance suite. Journal, migration, and projection code depend only on
-  the port. Both adapters run the store in WAL mode with `synchronous = NORMAL`:
-  streamed replies commit one transaction per token and FULL would fsync each
-  commit, while NORMAL under WAL keeps the database consistent after a crash
-  and risks only the last transactions on power loss.
+  the port. Both adapters run the store in WAL mode with `synchronous = FULL`:
+  a Chat reply's streamed deltas batch into one journal commit per short burst,
+  so the authoritative journal fsyncs a bounded number of times per second
+  instead of once per token, and a power loss loses at most the burst that was
+  still open — never a committed one.
   Settings → Data & storage exposes a read-only, server-authoritative data
   map of those locations (and per-Project facts) so a person can see what
   this host stores without opening a document. Categories the host cannot
@@ -3668,7 +3669,10 @@ frame of its own. On that same stream, an attempt's first streamed delta
 journals `chat.attempt-updated@1` (outcome `streaming`, the first response
 reference) and every later delta journals `chat.attempt-response-appended@1`
 carrying only the reference it appended and the attempt's `updatedAt`, so
-journal bytes per reply are linear in its length. The appended frame goes only
+journal bytes per reply are linear in its length. Deltas inside a short burst
+share one journal commit, folded ahead of any full attempt update in the same
+transaction, so the store fsyncs per burst rather than per token and stays on
+`synchronous = FULL`. The appended frame goes only
 to a subscriber that asks with `appended=1`; every other subscriber still
 receives each delta as a full `attempt-updated` frame read back from the
 projection, which already holds the attempt's current state. The receipt is
