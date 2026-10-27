@@ -126,8 +126,7 @@ import { providerFamilyForThread } from "../providers/providerFamily";
 import { useExtensionDraftSelections } from "../chat/useExtensionDraftSelections";
 import {
   REMOTE_CODE_THREAD_CONNECTORS_UNAVAILABLE,
-  REMOTE_CODE_THREAD_FULL_ACCESS_UNAVAILABLE,
-  REMOTE_CODE_THREAD_POSTURES,
+  remoteCodeThreadPostureRefusal,
   remoteCodeTurnReadiness,
 } from "@octant/domain/ssh-target-recovery";
 import { remoteCodeProjectFor, useRemoteCodeProjects } from "../projects/sshRemoteProjectEntries";
@@ -2131,14 +2130,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 onLowerThread={(next) => void changeAccess(next)}
                 onRaiseThread={(next) => void changeAccess(next)}
                 onSelect={setTurnAccessOverride}
-                {...(remoteCheckout
-                  ? {
-                      raiseLimit: {
-                        postures: REMOTE_CODE_THREAD_POSTURES,
-                        reason: REMOTE_CODE_THREAD_FULL_ACCESS_UNAVAILABLE,
-                      },
-                    }
-                  : {})}
+                {...(remoteCheckout ? { raiseRefusal: remoteCodeThreadPostureRefusal } : {})}
                 value={nextTurnAccess}
               />
             </>

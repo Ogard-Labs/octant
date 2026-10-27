@@ -130,6 +130,30 @@ export const REMOTE_CODE_THREAD_FULL_ACCESS_UNAVAILABLE =
  */
 export const REMOTE_CODE_THREAD_POSTURES = ["plan", "approval-gated"] as const;
 
+/** Why a thread on an SSH target is not created holding, or raised to, Auto-accept edits. */
+export const REMOTE_CODE_THREAD_AUTO_ACCEPT_UNAVAILABLE =
+  "Auto-accept edits is not available for a thread on an SSH target: a turn there takes no checkpoint, so each edit is approved. Choose Ask for approvals or Plan.";
+
+/**
+ * Why the host refuses a thread on an SSH target holding `posture`, or
+ * undefined for a posture in `REMOTE_CODE_THREAD_POSTURES`. The host applies
+ * this when a thread is created and when its access changes; a window only
+ * mirrors it.
+ */
+export function remoteCodeThreadPostureRefusal(
+  posture: ProviderExecutionPolicy,
+): string | undefined {
+  switch (posture) {
+    case "plan":
+    case "approval-gated":
+      return undefined;
+    case "auto-accept-edits":
+      return REMOTE_CODE_THREAD_AUTO_ACCEPT_UNAVAILABLE;
+    case "full-access":
+      return REMOTE_CODE_THREAD_FULL_ACCESS_UNAVAILABLE;
+  }
+}
+
 /** Whether a native-harness turn could start on a target now, or why not. */
 export type RemoteCodeTurnReadiness =
   | { readonly status: "ready" }

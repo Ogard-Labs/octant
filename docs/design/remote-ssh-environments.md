@@ -795,7 +795,12 @@ each in the fail-closed direction:
 admit Auto-accept edits on a target that attests it, but a remote turn takes
 no checkpoint, so an edit accepted without review has no way back on the
 target. The window offers Plan and Ask for approvals, and each write there is
-approved; the host still refuses Full access at creation.
+approved. The host enforces the same rule: `create-code-thread` on a
+`remote-root` checkout refuses Auto-accept edits and Full access, and
+`change-code-thread-access` on such a thread refuses raising it to either,
+before any approval is consulted (`remoteCodeThreadPostureRefusal` in
+`packages/domain/src/sshTargetRecovery.ts`, applied in
+`apps/server/src/code/codeService.ts`).
 
 ### Terminals and managed worktrees
 
