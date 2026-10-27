@@ -1059,6 +1059,7 @@ function remoteCodeProduct(input: {
       const all = await frames();
       const end = settled(all)?.event;
       return {
+        operationId,
         started,
         state: end?.kind === "operation-state" ? end.state : undefined,
         failure: end?.kind === "operation-state" ? end.failure?.message : undefined,
@@ -1075,6 +1076,9 @@ function remoteCodeProduct(input: {
         gitOperationId: randomUUID(),
         maxDiffBytes: 4_096,
       }),
+    /** Where a fork of the thread through one of its turns would start. */
+    forkPoint: (scope: WindowId, thread: CodeThread, throughOperationId: string) =>
+      runtime.forkPoint(scope, thread, throughOperationId),
     egressEvents: (threadId: string) =>
       events
         .replayAggregateType({ aggregateType: "thread-egress", afterSequence: 0, limit: 1_000 })
@@ -2567,6 +2571,13 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
           category: "unavailable",
           message: expect.stringContaining("on an SSH target"),
         },
+      });
+      expect(product.localGit).toEqual([]);
+      // Forking captures the checkout as it stands with this host's Git, so a
+      // remote thread is not forked: nothing here checkpoints the path.
+      expect(await product.forkPoint(productWindow, thread, turn.operationId)).toEqual({
+        status: "refused",
+        reason: "unavailable",
       });
       expect(product.localGit).toEqual([]);
 

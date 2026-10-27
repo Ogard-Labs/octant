@@ -698,7 +698,9 @@ These rules settle what the step needs, each in the fail-closed direction:
   service, language tools, delegation, and extensions' tools each read or act
   on this host, so none joins a remote turn. A send that selects Browser or
   Computer is refused, and a remote thread cannot start from a fork, whose
-  session seeding acts here.
+  session seeding acts here. Nor is a remote thread forked: a fork starts
+  from files this host's Git captures, so its fork point is refused
+  `unavailable` before any capture.
 - **Only the native harness runs, checked before anything launches.** A turn
   whose provider is not the native harness is refused before its runtime is
   acquired: one whose driver declares no placement in the turn's posture with
@@ -1628,7 +1630,7 @@ agent can implement and verify it in a Linux container with OpenSSH installed an
    through the Code turn runtime over a model stub: a read, an edit, a test,
    and a fetch on the loopback target with approvals, egress decided and
    journaled here, no Git of this host called, Full access refused at
-   creation, another Code operation refused, and a turn narrowed to Plan
+   creation, another Code operation and a fork refused, and a turn narrowed to Plan
    offered no write or command; a runtime without placement and one with it
    refused before either is acquired; a paired device creating no Full
    access thread and writing nothing in Plan, and a window bound elsewhere

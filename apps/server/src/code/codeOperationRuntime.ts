@@ -1656,6 +1656,12 @@ export function createCodeOperationRuntime(
       if (!(await options.windowAccess.canAccessProject(windowId, source.projectId))) {
         return { status: "refused", reason: "unavailable" };
       }
+      // A fork starts from files this host's Git captured. A remote root's
+      // path names a folder on the target, and on this host either nothing or
+      // an unrelated folder of the same name, so no capture runs there.
+      if (options.persistence.readCodeCheckout(source.checkoutId)?.kind === "remote-root") {
+        return { status: "refused", reason: "unavailable" };
+      }
       const turns = codeThreadTurns((page) => events.conversation(page), source.id);
       if (turns === undefined) return { status: "refused", reason: "not-found" };
       const choice = chooseCodeForkPoint(turns, throughOperationId);
