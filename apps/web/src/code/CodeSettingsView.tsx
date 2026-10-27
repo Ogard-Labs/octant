@@ -1,6 +1,6 @@
 import type { CodeDiffLayout, CodeSettings } from "@octant/contracts/code";
 import type { SettingsSettingId } from "@octant/contracts";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { SettingRow, SettingsSection } from "../settings/primitives";
 import { OctantFieldError } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -101,6 +101,38 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     );
   }
   const [message, setMessage] = useState<string>();
+  // A save can resolve after later renders: when the host refuses a change as
+  // stale, its reloaded settings arrive first, so a refused pick returns to
+  // what the host holds now, not what it held when the pick was made.
+  const hostSettings = useRef(props.settings);
+  hostSettings.current = props.settings;
+
+  /**
+   * A switch or pick that was not saved goes back to what the host kept: left
+   * as chosen, the Language services switch read off while the host still ran
+   * the server, and no later change carried it. Typed text stays so the person
+   * can correct it.
+   */
+  function restoreUnsavedPicks(
+    change: Partial<CodeSettingsDraft> & { readonly bundledLanguageServer?: boolean },
+  ) {
+    const host = hostSettings.current;
+    if (change.executionPolicy !== undefined) {
+      setExecutionPolicy(host.defaultExecutionPolicy);
+    }
+    if (change.permissionPersistence !== undefined) {
+      setPermissionPersistence(host.defaultPermissionPersistence);
+    }
+    if (change.requireGitRepository !== undefined) {
+      setRequireGitRepository(host.requireGitRepository);
+    }
+    if (change.defaultDiffLayout !== undefined) {
+      setDefaultDiffLayout(host.defaultDiffLayout ?? "unified");
+    }
+    if (change.bundledLanguageServer !== undefined) {
+      setBundledLanguageServer(host.bundledLanguageServer !== false);
+    }
+  }
 
   /**
    * Every page in Settings keeps what you change; a Save button here meant a
@@ -126,10 +158,12 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
       .filter((argument) => argument.length > 0);
     const trimmedExecutable = draft.executable.trim();
     if (trimmedExecutable !== "" && !trimmedExecutable.startsWith("/")) {
+      restoreUnsavedPicks(change);
       setMessage("External editor executable must be an absolute path.");
       return;
     }
     if (arguments_.length > 32) {
+      restoreUnsavedPicks(change);
       setMessage("External editor arguments are limited to 32 entries.");
       return;
     }
@@ -157,27 +191,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     } catch {
       updated = false;
     }
-    if (!updated) {
-      // A refused switch or pick goes back to what the host kept: left as
-      // chosen, the Language services switch read off while the host still
-      // ran the server, and no later change carried it. Typed text stays so
-      // the person can correct it.
-      if (change.executionPolicy !== undefined) {
-        setExecutionPolicy(props.settings.defaultExecutionPolicy);
-      }
-      if (change.permissionPersistence !== undefined) {
-        setPermissionPersistence(props.settings.defaultPermissionPersistence);
-      }
-      if (change.requireGitRepository !== undefined) {
-        setRequireGitRepository(props.settings.requireGitRepository);
-      }
-      if (change.defaultDiffLayout !== undefined) {
-        setDefaultDiffLayout(props.settings.defaultDiffLayout ?? "unified");
-      }
-      if (change.bundledLanguageServer !== undefined) {
-        setBundledLanguageServer(props.settings.bundledLanguageServer !== false);
-      }
-    }
+    if (!updated) restoreUnsavedPicks(change);
     setMessage(updated ? undefined : "Code defaults could not be saved.");
   }
 

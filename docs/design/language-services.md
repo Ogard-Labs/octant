@@ -1591,8 +1591,10 @@ accounts or hardware.
      390 px, light and dark through the app's theme provider) showed it on,
      off, and refused with no horizontal overflow or console errors. It found
      that a refused change left the switch showing the refused position while
-     the host kept the old one, and no later change sent it. A refused switch
-     or pick now returns to the host's value and typed text stays
+     the host kept the old one, and no later change sent it. A switch or pick
+     that is not saved, whether the host refuses it, refuses it as stale after
+     another change, or the window holds it back for an unfinished editor
+     path, now returns to what the host holds, and typed text stays
      (`CodeSettingsView.test.tsx`). The rules are under
      [Editor rules](#editor-rules).
 4. **Ship the binary.** Container: partly.
@@ -1647,7 +1649,10 @@ accounts or hardware.
      digest drawn over its label, the component's kind over its name, and the
      grant sentence cut off inside a scroll box above Confirm install. Now the
      label keeps its column, the kind line goes under the name on a phone,
-     and only a package's own text is bounded. The rules are under
+     and only a package's own text is bounded. A debug adapter review and a
+     plugin's bundled skill instructions, rendered the same way, keep their
+     labels clear and their grant sentence and heading in view, with only
+     the launch request or instructions scrolling. The rules are under
      [User-added servers](#user-added-servers).
 6. **`repo-tooling` servers.** Container: yes.
    - Use the shell-command approval per checkout and component, rememberable
@@ -1680,7 +1685,7 @@ accounts or hardware.
      light and dark) showed the approval line with Allow in this checkout and
      Allow in this Project, an approval that opened the file with one marker,
      a host refusal naming the local window, and an approval not recorded,
-     with no horizontal overflow or console errors; a Project erase removes the
+     with no horizontal overflow or console errors. A Project erase removes the
      approvals, from the running host too, and the egress records
      (`threadPurge.test.ts`). A revoked Project rule, or a thread taking in
      outside content, closes a server's idle tunnel at once,
