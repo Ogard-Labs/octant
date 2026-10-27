@@ -1,6 +1,6 @@
 import { DEFAULT_THEME_SETTINGS, decodeThemeSemanticOverrideEntry } from "@octant/contracts/theme";
 import { describe, expect, it } from "vitest";
-import { INCREASED_CONTRAST_EDITOR_TEXT, resolveEditorColorProjection } from "./editorColors";
+import { INCREASED_CONTRAST_TEXT, resolveEditorColorProjection } from "./editorColors";
 import { resolveEffectiveTokens } from "./fallback";
 
 describe("editor color projection", () => {
@@ -58,7 +58,7 @@ describe("editor color projection", () => {
     expect(resolveEditorColorProjection(resolved).foreground).toBe("#dddddd");
     expect(resolveEditorColorProjection(resolved, { increasedContrast: true })).toMatchObject({
       background: "#1a1a1a",
-      ...INCREASED_CONTRAST_EDITOR_TEXT.dark,
+      ...INCREASED_CONTRAST_TEXT.dark,
     });
   });
 

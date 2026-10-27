@@ -1,6 +1,6 @@
 import { DEFAULT_THEME_SETTINGS, decodeThemeSemanticOverrideEntry } from "@octant/contracts/theme";
 import { describe, expect, it } from "vitest";
-import { INCREASED_CONTRAST_EDITOR_TEXT } from "./editorColors";
+import { INCREASED_CONTRAST_TEXT } from "./editorColors";
 import { resolveEffectiveTokens } from "./fallback";
 import { resolveTerminalColorProjection } from "./terminalColors";
 
@@ -68,7 +68,7 @@ describe("terminal color projection", () => {
   it("draws the window's increased-contrast ink and raises the floor under increased contrast", () => {
     for (const mode of ["light", "dark"] as const) {
       const resolved = resolveEffectiveTokens({ ...DEFAULT_THEME_SETTINGS, mode }, false);
-      const ink = INCREASED_CONTRAST_EDITOR_TEXT[mode];
+      const ink = INCREASED_CONTRAST_TEXT[mode];
       const projection = resolveTerminalColorProjection(resolved, { increasedContrast: true });
 
       expect(projection.palette).toMatchObject({

@@ -1,5 +1,5 @@
 import { MINIMUM_CONTRAST } from "./contrast";
-import { INCREASED_CONTRAST_EDITOR_TEXT } from "./editorColors";
+import { INCREASED_CONTRAST_TEXT } from "./editorColors";
 import type { ResolvedTheme } from "./fallback";
 import { DEFAULT_DARK_TOKENS, getDefaultToken } from "./tokens";
 
@@ -57,11 +57,9 @@ export function resolveTerminalColorProjection(
   const role = (id: string): string => resolved.tokens[id] ?? getDefaultToken(id, resolved.mode);
   const increased = options.increasedContrast === true;
   // The same ink the stylesheet swaps in for the rest of the window.
-  const ink = increased
-    ? INCREASED_CONTRAST_EDITOR_TEXT[resolved.mode].foreground
-    : role("text-primary");
+  const ink = increased ? INCREASED_CONTRAST_TEXT[resolved.mode].foreground : role("text-primary");
   const muted = increased
-    ? INCREASED_CONTRAST_EDITOR_TEXT[resolved.mode].mutedForeground
+    ? INCREASED_CONTRAST_TEXT[resolved.mode].mutedForeground
     : role("text-muted");
   const ground = role("workspace");
   // Resolved roles flip with the mode, but ANSI black must stay dark and
