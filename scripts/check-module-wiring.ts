@@ -675,18 +675,6 @@ export function findUnregisteredRouteModules(
  */
 export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
   [
-    "/api/apple/devices",
-    "2026-10-26: physical Apple device discovery and status are served ahead of their caller, the device pane of docs/design/apple-devices.md (delivery slice 4). Remove when the workbench's device picker calls it.",
-  ],
-  [
-    "/api/apple/device-leases",
-    "2026-10-26: starting and releasing a physical device's lease is served ahead of its caller, the device pane's lease confirmation of docs/design/apple-devices.md (delivery slice 4). Remove when the pane calls it.",
-  ],
-  [
-    "/api/apple/device-actions",
-    "2026-10-26: building, installing, launching, stopping, and reading the console of a thread's own app on a leased physical device is served ahead of its caller, the device pane of docs/design/apple-devices.md (delivery slice 4). Remove when the pane calls it.",
-  ],
-  [
     "/api/code/language/documents",
     "Language services' document sync, served by the host since 2026-10-26 ahead of the editor that calls it (docs/design/language-services.md, delivery plan slice 3). Remove once the Code editor syncs its open documents.",
   ],

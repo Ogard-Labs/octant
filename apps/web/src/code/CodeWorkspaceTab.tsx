@@ -14,6 +14,7 @@ import type { CodeOverviewSurfaceKind } from "./CodeOverview";
 import { nativeCodeWorkspaceApprovals } from "./codeWorkspaceApprovals";
 import { noticeTouches, useCodeFileChangeWatch } from "./useCodeFileChangeWatch";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
+import type { AppleDeviceClient } from "@octant/client-runtime/apple-device-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
@@ -28,6 +29,7 @@ export default function CodeWorkspaceTab(props: {
   readonly controller: CodeController;
   readonly holdAccessNotice?: CodeThreadControllers["holdAccessNotice"];
   readonly appleToolchainClient?: AppleToolchainClient;
+  readonly appleDeviceClient?: AppleDeviceClient;
   readonly extensionClient?: ExtensionClient;
   readonly browserAvailable?: boolean;
   readonly projectRemembersFullAccess?: boolean;
@@ -141,6 +143,9 @@ export default function CodeWorkspaceTab(props: {
         {...(props.appleToolchainClient === undefined
           ? {}
           : { appleToolchainClient: props.appleToolchainClient })}
+        {...(props.appleDeviceClient === undefined
+          ? {}
+          : { appleDeviceClient: props.appleDeviceClient })}
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
         {...(props.browserAvailable === undefined
           ? {}

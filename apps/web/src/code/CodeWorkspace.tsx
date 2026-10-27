@@ -43,11 +43,13 @@ import type { CodeThreadControllers } from "./codeThreadControllers";
 import type { CodeController } from "./useCodeController";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
+import type { AppleDeviceClient } from "@octant/client-runtime/apple-device-client";
 import type { AndroidEmulatorRequest } from "@octant/contracts/android-toolchain";
 import type {
   AppleActionProgress,
   AppleActionRequest,
   AppleBuildEvidence,
+  AppleDeviceRequest,
   ApplePlatform,
   AppleSimulatorId,
 } from "@octant/contracts/apple-toolchain";
@@ -65,6 +67,8 @@ import { AppleWorkbenchPane, type AppleWorkbenchIntent } from "../apple/AppleWor
 import { useAppleSimulatorScreen } from "../apple/useAppleSimulatorScreen";
 import { useAppleSimulatorLiveScreen } from "../apple/useAppleSimulatorLiveScreen";
 import { useAppleWorkbench } from "../apple/useAppleWorkbench";
+import { ApplePhysicalDevices } from "../apple/ApplePhysicalDevices";
+import { useAppleDevices } from "../apple/useAppleDevices";
 
 const MonacoEditorPane = lazy(() =>
   import("./MonacoEditorPane").then((module) => ({ default: module.MonacoEditorPane })),
@@ -103,6 +107,12 @@ export interface CodeWorkspaceApprovals {
    */
   readonly apple?: (request: AppleActionRequest) => Promise<string | undefined>;
   /**
+   * The desktop app's confirmation that lets this thread use one paired
+   * iPhone or iPad. Returns the approval the host minted, or undefined when
+   * the person declined.
+   */
+  readonly appleDeviceLease?: (request: AppleDeviceRequest) => Promise<string | undefined>;
+  /**
    * Native confirmation for one Android emulator action. Clicks never use this;
    * Allow input does.
    */
@@ -119,6 +129,7 @@ export interface CodeWorkspaceApprovals {
 
 export interface CodeWorkspaceProps {
   readonly appleToolchainClient?: AppleToolchainClient;
+  readonly appleDeviceClient?: AppleDeviceClient;
   readonly approvals?: CodeWorkspaceApprovals;
   readonly client: CodeClient;
   readonly controller: CodeController;
@@ -402,7 +413,13 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
           {...(props.approvals?.apple === undefined
             ? {}
             : { requestApproval: props.approvals.apple })}
+          {...(props.approvals?.appleDeviceLease === undefined
+            ? {}
+            : { requestDeviceLease: props.approvals.appleDeviceLease })}
           client={props.appleToolchainClient}
+          {...(props.appleDeviceClient === undefined
+            ? {}
+            : { deviceClient: props.appleDeviceClient })}
           createUuid={nextUuid}
           {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
           tab={props.tab}
@@ -415,9 +432,11 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
 
 function AppleWorkbenchSurface(props: {
   readonly client: AppleToolchainClient;
+  readonly deviceClient?: AppleDeviceClient;
   readonly createUuid: () => string;
   readonly hostBridge?: OctantHostBridge;
   readonly requestApproval?: (request: AppleActionRequest) => Promise<string | undefined>;
+  readonly requestDeviceLease?: (request: AppleDeviceRequest) => Promise<string | undefined>;
   readonly tab: Extract<CodeTab, { readonly kind: "apple-workbench" }>;
   readonly thread: NonNullable<CodeController["activeView"]>["thread"];
   readonly checkoutId: NonNullable<CodeController["activeView"]>["checkout"]["id"];
@@ -811,6 +830,50 @@ function AppleWorkbenchSurface(props: {
       }}
       onSelectSimulator={setChosenSimulatorId}
       awaitingChoice={awaitingChoice}
+      {...(props.deviceClient === undefined || props.tab.pane === "device"
+        ? {}
+        : {
+            physicalDevices: (
+              <ApplePhysicalDevicesSurface
+                client={props.deviceClient}
+                createUuid={createUuid}
+                {...(props.requestDeviceLease === undefined
+                  ? {}
+                  : { requestLease: props.requestDeviceLease })}
+                scope={{ authority, threadId: props.thread.id, checkoutId: props.checkoutId }}
+                teamKey={`octant.apple-device-team.${String(props.thread.projectId)}`}
+              />
+            ),
+          })}
+    />
+  );
+}
+
+/**
+ * The workbench's paired iPhones and iPads. The dock's Simulator pane does
+ * not show them: a physical device has no live view to stream.
+ */
+function ApplePhysicalDevicesSurface(props: Parameters<typeof useAppleDevices>[0]) {
+  const devices = useAppleDevices(props);
+  return (
+    <ApplePhysicalDevices
+      busy={devices.busy}
+      canConfirmLease={devices.canConfirmLease}
+      {...(devices.discovery === undefined ? {} : { discovery: devices.discovery })}
+      {...(devices.failure === undefined ? {} : { failure: devices.failure })}
+      onCapture={(deviceId) => void devices.capture(deviceId)}
+      onCheckAgain={devices.checkAgain}
+      onRelease={(deviceId) => void devices.release(deviceId)}
+      onSelect={devices.select}
+      onTeamChange={devices.setTeam}
+      onUseDevice={(deviceId) => void devices.leaseDevice(deviceId)}
+      {...(devices.problem === undefined ? {} : { problem: devices.problem })}
+      {...(devices.screenshotUrl === undefined ? {} : { screenshotUrl: devices.screenshotUrl })}
+      {...(devices.selectedDeviceId === undefined
+        ? {}
+        : { selectedDeviceId: devices.selectedDeviceId })}
+      status={devices.status}
+      team={devices.team}
     />
   );
 }

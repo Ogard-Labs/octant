@@ -22,6 +22,10 @@ import {
   type AppleToolchainClient,
 } from "@octant/client-runtime/apple-toolchain-client";
 import {
+  createAppleDeviceClient,
+  type AppleDeviceClient,
+} from "@octant/client-runtime/apple-device-client";
+import {
   createAndroidToolchainClient,
   type AndroidToolchainClient,
 } from "@octant/client-runtime/android-toolchain-client";
@@ -135,6 +139,7 @@ export interface LaunchedShellClients {
   readonly agentMessageClient: AgentMessageClient;
   readonly nativeHarnessClient: NativeHarnessClient;
   readonly appleToolchainClient: AppleToolchainClient;
+  readonly appleDeviceClient: AppleDeviceClient;
   readonly androidToolchainClient: AndroidToolchainClient;
   readonly automationClient: AutomationClient;
   readonly automationNotificationClient: ReturnType<typeof createAutomationNotificationClient>;
@@ -257,6 +262,7 @@ export function createLaunchedShellClients(
     agentRunSettingsClient: options.agentRunSettingsClient ?? createAgentRunSettingsClient(port),
     agentMessageClient: createAgentMessageClient(port),
     appleToolchainClient: options.appleToolchainClient ?? createAppleToolchainClient(port),
+    appleDeviceClient: createAppleDeviceClient(port),
     androidToolchainClient: options.androidToolchainClient ?? createAndroidToolchainClient(port),
     automationClient: options.automationClient ?? createAutomationClient(port),
     automationNotificationClient: createAutomationNotificationClient(port),
