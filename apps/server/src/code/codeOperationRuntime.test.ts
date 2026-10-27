@@ -1857,6 +1857,145 @@ describe("CodeOperationRuntime", () => {
   );
 
   it.each([
+    ["a Full-access turn", "full-access", undefined],
+    ["a Plan turn", "approval-gated", "plan"],
+  ] as const)(
+    "lets the agent use a paired device in %s only once a person at the Mac answers",
+    async (_name, threadPolicy, turnPolicy) => {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const provider = providerConnection(queue);
+      const deviceId = "90000000-0000-4000-8000-000000000021";
+      const authority = decodeToolActionAuthority({
+        hostId: "90000000-0000-4000-8000-000000000001",
+        mode: "code",
+        projectId: thread().projectId,
+        providerInstanceId: thread().providerInstanceId,
+        extension: { kind: "core" },
+      });
+      const received: unknown[] = [];
+      const request = vi.fn(async (_windowId: WindowId, sent: unknown) => {
+        received.push(sent);
+        return undefined;
+      });
+      const fixture = runtimeFixture({
+        provider: providerDriver(provider),
+        approvalValidator: false,
+        supportsAppManagedTools: true,
+        describeAppleDevice: (id) =>
+          String(id) === deviceId
+            ? {
+                name: "Henrik's iPhone",
+                model: "iPhone 16 Pro",
+                osVersion: "26.1",
+                connection: "wired",
+              }
+            : undefined,
+        appleToolchain: {
+          resolveAuthority: () => authority,
+          discover: vi.fn(),
+          execute: vi.fn(),
+          snapshot: vi.fn(),
+          requestPaneOpen: vi.fn(async () => undefined),
+          readScreenshot: vi.fn(),
+          inputGrantIsOpen: () => false,
+          devices: {
+            request,
+            check: vi.fn(async () => ({
+              kind: "refused" as const,
+              reason: "confirmation-required" as const,
+            })),
+            readScreenshot: vi.fn(),
+            readConsole: vi.fn(),
+          },
+        } as never,
+      });
+      fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: threadPolicy }));
+      try {
+        const operation = operationId(92);
+        await fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operation,
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+          ...(turnPolicy === undefined ? {} : { executionPolicy: turnPolicy }),
+        });
+        await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+        await Effect.runPromise(
+          Queue.offer(
+            queue,
+            providerEvent({
+              kind: "tool-request",
+              requestId: "apple-use-device",
+              toolName: "octant_apple",
+              inputJson: JSON.stringify({ operation: "use-device", deviceId }),
+            }),
+          ),
+        );
+        let approval: Extract<OperationFrame["event"], { kind: "approval-requested" }> | undefined;
+        await vi.waitFor(async () => {
+          const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 30);
+          approval = frames
+            .map((frame) => frame.event)
+            .find((event) => event.kind === "approval-requested");
+          expect(approval).toBeDefined();
+        });
+        if (approval === undefined) throw new Error("Expected a device lease confirmation");
+        // The card names the device and the thread, as the desktop's lease
+        // confirmation does.
+        expect(approval.summary).toContain("Let this thread use Henrik's iPhone?");
+        expect(approval.summary).toContain("iPhone 16 Pro");
+
+        // A paired device's answer, or one no window vouched for, settles nothing.
+        const remote = await fixture.runtime.execute(windowId, {
+          kind: "answer-provider-approval",
+          operationId: operationId(93),
+          threadId,
+          checkoutId,
+          approvalId: approval.approvalId,
+          decision: "approved",
+        });
+        expect(JSON.stringify(remote)).toContain("Only a person at the Mac");
+        expect(request).not.toHaveBeenCalled();
+
+        await fixture.runtime.execute(
+          windowId,
+          {
+            kind: "answer-provider-approval",
+            operationId: operationId(94),
+            threadId,
+            checkoutId,
+            approvalId: approval.approvalId,
+            decision: "approved",
+          },
+          { initiator: "user" },
+        );
+        await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
+        const sent = received[0] as Parameters<
+          NonNullable<typeof fixture.runtime.validateAppleDeviceLease>
+        >[1];
+        expect(sent).toMatchObject({
+          kind: "use-device",
+          deviceId,
+          requestedBy: { kind: "agent" },
+          approval: { kind: "approved" },
+        });
+        // The receipt the person's answer minted is one-use and bound to this request.
+        await expect(fixture.runtime.validateAppleDeviceLease?.(windowId, sent)).resolves.toBe(
+          true,
+        );
+        await expect(fixture.runtime.validateAppleDeviceLease?.(windowId, sent)).resolves.toBe(
+          false,
+        );
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    },
+  );
+
+  it.each([
     ["full-access", "plan"],
     ["auto-accept-edits", "plan"],
     ["full-access", "approval-gated"],
