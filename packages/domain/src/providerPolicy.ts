@@ -81,6 +81,7 @@ import type {
   OpenCodeProviderInstance,
   OutsideHarnessEndpointProviderConfiguration,
   OutsideHarnessEndpointProviderInstance,
+  OutsideProviderDriverReference,
 } from "@octant/contracts/providers";
 
 export type ProviderPolicyRejectionCode =
@@ -1134,6 +1135,35 @@ export function createOutsideHarnessEndpointProvider(
     version: nextVersion(input.expectedVersion),
     createdAt: input.createdAt,
     updatedAt: input.createdAt,
+  };
+}
+
+/**
+ * Moves a provider to the digest its person trusted for the same driver. It is
+ * the one change an outside provider takes after it is added, and the host
+ * makes it only once the person has trusted the new selection; the address,
+ * key placement, listed models, and switch stay as the person set them. A
+ * reference to another package or component is refused: that is a different
+ * driver, which takes a new provider.
+ */
+export function rebindOutsideHarnessEndpointDriver(
+  provider: OutsideHarnessEndpointProviderInstance,
+  driver: OutsideProviderDriverReference,
+  updatedAt: UtcTimestamp,
+): OutsideHarnessEndpointProviderInstance {
+  const bound = provider.configuration.driver;
+  if (
+    String(bound.extensionId) !== String(driver.extensionId) ||
+    String(bound.packageId) !== String(driver.packageId) ||
+    String(bound.componentId) !== String(driver.componentId)
+  ) {
+    reject("invalid-configuration", "A provider moves only to another version of its own driver.");
+  }
+  return {
+    ...provider,
+    configuration: { ...provider.configuration, driver },
+    version: nextVersion(provider.version),
+    updatedAt,
   };
 }
 

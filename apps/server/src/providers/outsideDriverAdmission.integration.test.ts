@@ -20,6 +20,7 @@ import {
 import { ExtensionPackageStore } from "../extensions/extensionPackageStore";
 import { LocalPluginFolderRegistry } from "../extensions/localPluginFolderRegistry";
 import { Persistence, makePersistenceLive } from "../persistence/persistenceService";
+import { rebuildAll } from "../persistence/recovery";
 import { makeConfiguredProviderDriver } from "../wiring/providers";
 import { OutsideDriverAdmission } from "./outsideDriverAdmission";
 import {
@@ -206,6 +207,7 @@ async function host(
     persistence,
     runtimeRegistry: registry,
     isOutsideDriverAdmitted: (instance) => admission.isAdmitted(instance),
+    outsideDriverRebindTarget: (instance) => admission.rebindTarget(instance),
     outsideDriverListings: () => admission.listings(),
     driver: (instance) =>
       makeConfiguredProviderDriver(instance, {
@@ -218,7 +220,10 @@ async function host(
     uuid: randomUUID,
     clock: () => now,
   });
+  // As the server wires it: a newly trusted digest moves its instances
+  // first, then processes that no longer match stop.
   reconcile = async () => {
+    await providers.rebindOutsideDrivers();
     await admission.reconcile(persistence.readProviderInstances());
     providers.reconcileConfiguredProviders();
   };
@@ -446,7 +451,7 @@ describe("outside driver admission end to end", () => {
     expect((await context.observed())?.verifiedToolModelIds ?? []).toEqual([]);
   });
 
-  it("blocks the instance at another digest, keeps it and its records, and stops its process", async () => {
+  it("holds an update until the person trusts it, then moves the provider to the new digest and clears its records", async () => {
     const context = await host({
       handlers: { "session/send": () => ({ text: "", toolCalls: [echoToolCall] }) },
     });
@@ -457,9 +462,9 @@ describe("outside driver admission end to end", () => {
     await context.providers.probe(windowId, instanceId);
     await context.providers.verifyModelTools(windowId, instanceId, localModel);
 
-    // An update selects another digest: the package is held again, and even
-    // once the person trusts and switches on the new version, the instance
-    // bound to the old digest stays blocked.
+    // An update selects another digest: the package is held again and the
+    // instance, still bound to the old digest, is blocked and its process
+    // stopped. Nothing moves it until the person trusts the new version.
     await writeDriverFolder(context.driverRoot, "0.2.0");
     const updated = await context.inspect();
     expect(updated.digest).not.toBe(entry.digest);
@@ -472,7 +477,6 @@ describe("outside driver admission end to end", () => {
     });
     expect(context.stops).toEqual([String(instanceId)]);
     expect(context.drivers[0]?.end.stopped()).toBe(true);
-    await context.admit(entry.extensionId);
     expect(context.admission.activation(outside(context.instance()))).toEqual({
       kind: "blocked",
       reason: "superseded",
@@ -487,14 +491,102 @@ describe("outside driver admission end to end", () => {
       context.providers.verifyModelTools(windowId, instanceId, localModel),
     ).rejects.toThrow(/not available/);
     expect(context.starts).toHaveLength(1);
-    // The instance, its binding, and its catalogue stay until the person removes them.
-    expect(context.instance()).toMatchObject({
+    // Held, the instance keeps its binding and its records.
+    const held = context.instance();
+    expect(held).toMatchObject({
       enabled: true,
       configuration: { driver: { digest: entry.digest } },
     });
     expect(context.persistence.readProviderCatalog?.(instanceId)?.verifiedToolModelIds).toEqual([
       localModel,
     ]);
+
+    // Trusting the new version moves the instance to it, as a journaled
+    // change, and clears what was learned at the old digest.
+    await context.mutate(entry.extensionId, { kind: "set-source-trust", trusted: true });
+    expect(context.instance()).toMatchObject({
+      enabled: true,
+      version: held.version + 1,
+      configuration: {
+        driver: { version: updated.version, digest: updated.digest },
+        baseUrl: "http://127.0.0.1:11434/",
+        modelIds: ["local-model", "unreported-model"],
+      },
+    });
+    expect(context.persistence.readProviderCatalog?.(instanceId)).toMatchObject({
+      invalidated: true,
+    });
+    expect(
+      context.persistence.readProviderCatalog?.(instanceId)?.verifiedToolModelIds,
+    ).toBeUndefined();
+    // The switches decide whether the new digest runs; until they are on, it does not.
+    expect(await context.observed()).toMatchObject({ reason: "driver-not-admitted", models: [] });
+    expect(context.starts).toHaveLength(1);
+
+    await context.mutate(entry.extensionId, { kind: "set-plugin-desired", desired: true });
+    const checked = await context.providers.probe(windowId, instanceId);
+    expect(checked).toMatchObject({ readiness: "ready" });
+    expect(checked.verifiedToolModelIds ?? []).toEqual([]);
+    expect(context.starts).toHaveLength(2);
+    expect(context.starts[1]).toMatchObject({
+      instanceId,
+      driver: { version: updated.version, digest: updated.digest },
+    });
+
+    // The journal holds the move: a rebuild reads the same binding back.
+    rebuildAll({
+      connection: context.persistence.connection,
+      journal: context.persistence.journal,
+      projections: context.persistence.projections,
+      clock: () => now,
+    });
+    expect(context.instance()).toMatchObject({
+      configuration: { driver: { digest: updated.digest } },
+    });
+    expect(context.admission.activation(outside(context.instance()))).toEqual({
+      kind: "effective",
+    });
+  });
+
+  it("moves the provider back on a trusted rollback, and never on withdrawn trust", async () => {
+    const context = await host();
+    const entry = await context.install();
+    await context.admit(entry.extensionId);
+    await context.addProvider(entry);
+    await writeDriverFolder(context.driverRoot, "0.2.0");
+    const updated = await context.inspect();
+    await context.extension({
+      kind: "update-package",
+      extensionId: entry.extensionId,
+      packageId: updated.packageId,
+      version: updated.version,
+      digest: updated.digest,
+    });
+    await context.mutate(entry.extensionId, { kind: "set-source-trust", trusted: true });
+    expect(context.instance()).toMatchObject({
+      configuration: { driver: { digest: updated.digest } },
+    });
+
+    await context.extension({
+      kind: "rollback-package",
+      extensionId: entry.extensionId,
+      packageId: entry.packageId,
+      version: entry.version,
+      digest: entry.digest,
+    });
+    // A rollback is held like an update: the instance stays where it is.
+    expect(context.instance()).toMatchObject({
+      configuration: { driver: { digest: updated.digest } },
+    });
+    await context.mutate(entry.extensionId, { kind: "set-source-trust", trusted: true });
+    expect(context.instance()).toMatchObject({
+      configuration: { driver: { digest: entry.digest } },
+    });
+    const version = context.instance().version;
+    await context.mutate(entry.extensionId, { kind: "set-source-trust", trusted: false });
+    await context.mutate(entry.extensionId, { kind: "set-source-trust", trusted: true });
+    // Trusting the digest it already binds changes nothing.
+    expect(context.instance().version).toBe(version);
   });
 
   it("stops the process when the plugin or the provider is turned off, and on uninstall, keeping the provider", async () => {

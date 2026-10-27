@@ -13,6 +13,7 @@ import {
   decodeProviderRegistrySnapshot,
   type OutsideHarnessEndpointProviderInstance,
   type OutsideProviderDriverListing,
+  type OutsideProviderDriverReference,
   type ProviderDriverKind,
   type ProviderFailure,
   type ProviderInstance,
@@ -69,6 +70,7 @@ import {
   createCodexProvider,
   createOllamaProvider,
   createOutsideHarnessEndpointProvider,
+  rebindOutsideHarnessEndpointDriver,
   createPiProvider,
   createOhMyPiProvider,
   changeOhMyPiConfiguration,
@@ -202,6 +204,13 @@ export interface ProviderServiceOptions {
    * instance is blocked.
    */
   readonly isOutsideDriverAdmitted?: (instance: OutsideHarnessEndpointProviderInstance) => boolean;
+  /**
+   * The digest an outside instance moves to because its person trusted it, or
+   * nothing. Absent on a host that admits no outside driver.
+   */
+  readonly outsideDriverRebindTarget?: (
+    instance: OutsideHarnessEndpointProviderInstance,
+  ) => OutsideProviderDriverReference | undefined;
   /** The outside drivers the provider catalog lists. Reading them starts nothing. */
   readonly outsideDriverListings?: () => ReadonlyArray<OutsideProviderDriverListing>;
   readonly clearResumeIdentities?: (instanceId: ProviderInstanceId) => Promise<void>;
@@ -250,6 +259,9 @@ export class ProviderService implements ProviderServiceApi {
   readonly #driverProvider: ProviderServiceOptions["driver"];
   readonly #isDriverPluginEffective: (driverKind: ProviderDriverKind) => boolean;
   readonly #isOutsideDriverAdmitted: (instance: OutsideHarnessEndpointProviderInstance) => boolean;
+  readonly #outsideDriverRebindTarget: NonNullable<
+    ProviderServiceOptions["outsideDriverRebindTarget"]
+  >;
   readonly #outsideDriverListings: () => ReadonlyArray<OutsideProviderDriverListing>;
   readonly #clearResumeIdentities: ProviderServiceOptions["clearResumeIdentities"];
   readonly #clearRuntimeUsageLimits: ProviderServiceOptions["clearRuntimeUsageLimits"];
@@ -288,6 +300,7 @@ export class ProviderService implements ProviderServiceApi {
       options.isDriverPluginEffective ??
       ((driverKind) => admittedBundledProviderDriverKinds().has(driverKind));
     this.#isOutsideDriverAdmitted = options.isOutsideDriverAdmitted ?? (() => false);
+    this.#outsideDriverRebindTarget = options.outsideDriverRebindTarget ?? (() => undefined);
     this.#outsideDriverListings = options.outsideDriverListings ?? (() => []);
     this.#clearResumeIdentities = options.clearResumeIdentities;
     this.#clearRuntimeUsageLimits = options.clearRuntimeUsageLimits;
@@ -375,6 +388,54 @@ export class ProviderService implements ProviderServiceApi {
     } catch (error) {
       throw this.#mapFailure(error);
     }
+  }
+
+  /**
+   * Moves every outside instance whose person has trusted another digest of
+   * its driver to that digest, as a journaled configuration change. Trust is
+   * the only way there: an update or rollback clears it and holds the
+   * package, so neither moves an instance by itself. What was learned at the
+   * old digest goes with the move: the Verify tools record and model evidence
+   * in the catalogue, the observation, and the runtime, so the next use
+   * starts the new digest's process unverified, under its own crash limit.
+   * Idempotent, so a host that stopped between the trust and the move makes
+   * it on its next pass.
+   */
+  async rebindOutsideDrivers(): Promise<ReadonlyArray<ProviderInstanceId>> {
+    const moved: Array<ProviderInstanceId> = [];
+    for (const candidate of this.#persistence.readProviderInstances()) {
+      if (candidate.driverKind !== "outside-harness-endpoint") continue;
+      if (this.#outsideDriverRebindTarget(candidate) === undefined) continue;
+      const rebound = await this.#withInstanceOperation(candidate.id, async () => {
+        this.#assertReady();
+        // Read again inside the instance's queue: a change that landed while
+        // this waited is the one to move.
+        const current = this.#persistence.readProviderInstance(candidate.id);
+        if (current?.driverKind !== "outside-harness-endpoint") return false;
+        const driver = this.#outsideDriverRebindTarget(current);
+        if (driver === undefined) return false;
+        const updatedAt = decodeTimestamp(this.#clock());
+        const instance = rebindOutsideHarnessEndpointDriver(current, driver, updatedAt);
+        // A turn still holding the old digest's runtime keeps it until it
+        // ends; that process is already stopped, so the turn fails at once.
+        await this.#runtime.invalidateRuntime(current.id).catch((error: unknown) => {
+          if (!(error instanceof ProviderRuntimeInvalidationRejected)) throw error;
+        });
+        this.#appendInstance(current.version, "provider.instance-driver-rebound@1", instance);
+        this.#authoritativeInstance(instance);
+        this.#invalidateCatalog(
+          instance.id,
+          { kind: "driver" },
+          "provider driver moved to a newly trusted version",
+          updatedAt,
+        );
+        this.#runtime.clearObservedState(instance.id);
+        this.#clearRuntimeUsageLimits?.(instance.id);
+        return true;
+      });
+      if (rebound) moved.push(candidate.id);
+    }
+    return moved;
   }
 
   pendingInstanceOperationCount(): number {

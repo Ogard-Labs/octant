@@ -72,7 +72,7 @@ describe("provider Settings presentation", () => {
     expect(providerRefusalGuidance(instance, blocked)).toEqual({
       reason: "This provider's driver package is not admitted, so it offers no models.",
       nextStep:
-        "Octant runs this provider only once its driver package is installed, trusted, and enabled.",
+        "Octant runs this provider only once its driver package is installed, trusted, and enabled. After an update, trusting the new version moves this provider to it.",
     });
     expect(
       providerRefusalGuidance(instance, {
@@ -84,6 +84,17 @@ describe("provider Settings presentation", () => {
       reason: "This provider's driver package does not speak a protocol Octant can use.",
       nextStep:
         "Octant stopped the driver. Install a version of the package built for this Octant, then check the connection again.",
+    });
+    // A driver has no binary path a person could fix; Octant starts it itself.
+    expect(
+      providerRefusalGuidance(instance, {
+        ...blocked,
+        reason: "runtime-unavailable",
+      }),
+    ).toEqual({
+      reason: "Octant could not start this provider's driver, or the driver stopped.",
+      nextStep:
+        "Check the connection again. If the driver keeps stopping, Octant holds this version until Octant restarts or you trust another version.",
     });
   });
 
