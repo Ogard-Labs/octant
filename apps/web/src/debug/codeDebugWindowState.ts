@@ -30,7 +30,8 @@ export function codeDebugThreadKey(threadId: string, checkoutId: string): string
   return JSON.stringify([threadId, checkoutId]);
 }
 
-export type BreakpointToggle = "added" | "removed" | "full";
+/** A toggle past a bound takes nothing and names the bound: the file's, or the files'. */
+export type BreakpointToggle = "added" | "removed" | "file-full" | "files-full";
 
 export class CodeDebugWindowState {
   readonly #threads = new Map<string, CodeDebugThreadState>();
@@ -61,11 +62,10 @@ export class CodeDebugWindowState {
       if (remaining.length === 0) breakpoints.delete(path);
       else breakpoints.set(path, remaining);
       outcome = "removed";
-    } else if (
-      lines.length >= MAX_CODE_DEBUG_BREAKPOINTS_PER_FILE ||
-      (lines.length === 0 && breakpoints.size >= MAX_CODE_DEBUG_BREAKPOINT_FILES)
-    ) {
-      return "full";
+    } else if (lines.length >= MAX_CODE_DEBUG_BREAKPOINTS_PER_FILE) {
+      return "file-full";
+    } else if (lines.length === 0 && breakpoints.size >= MAX_CODE_DEBUG_BREAKPOINT_FILES) {
+      return "files-full";
     } else {
       breakpoints.set(
         path,

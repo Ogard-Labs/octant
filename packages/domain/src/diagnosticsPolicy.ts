@@ -1,6 +1,7 @@
 import type {
   DiagnosticComponentVersion,
   DiagnosticCorrelation,
+  DiagnosticDebugSessions,
   DiagnosticEvidencePacket,
   DiagnosticFailureDomain,
   DiagnosticRecoveryFact,
@@ -14,6 +15,7 @@ import {
   MAX_DIAGNOSTIC_VERSIONS,
   type DiagnosticHostHealth,
   DIAGNOSTICS_PACKET_VERSION,
+  DIAGNOSTICS_PACKET_VERSION_WITH_DEBUG_SESSIONS,
   DIAGNOSTICS_PACKET_VERSION_WITH_JOURNAL_GROWTH,
   decodeDiagnosticEvidencePacket,
   decodeDiagnosticSafeText,
@@ -168,6 +170,7 @@ export function serializeDiagnosticsEvidencePacket(packet: DiagnosticEvidencePac
     ...(packet.hostHealth === undefined ? {} : { hostHealth: packet.hostHealth }),
     generatedAt: packet.generatedAt,
     ...(packet.journalGrowth === undefined ? {} : { journalGrowth: packet.journalGrowth }),
+    ...(packet.debugSessions === undefined ? {} : { debugSessions: packet.debugSessions }),
   });
 }
 
@@ -223,6 +226,8 @@ export interface RawDiagnosticInput {
   readonly hostHealth?: DiagnosticHostHealth;
   /** Kinds and counts only; the contract schema admits nothing else. */
   readonly journalGrowth?: JournalGrowth;
+  /** Counts by closed end reason only; the contract schema admits nothing else. */
+  readonly debugSessions?: DiagnosticDebugSessions;
   /** When the underlying operation actually succeeded, no failure packet exists. */
   readonly succeeded?: boolean;
 }
@@ -366,9 +371,11 @@ export function buildDiagnosticsPacket(input: RawDiagnosticInput): DiagnosticsPa
 
   const candidate = {
     packetVersion:
-      input.journalGrowth === undefined && input.hostHealth === undefined
-        ? DIAGNOSTICS_PACKET_VERSION
-        : DIAGNOSTICS_PACKET_VERSION_WITH_JOURNAL_GROWTH,
+      input.debugSessions !== undefined
+        ? DIAGNOSTICS_PACKET_VERSION_WITH_DEBUG_SESSIONS
+        : input.journalGrowth === undefined && input.hostHealth === undefined
+          ? DIAGNOSTICS_PACKET_VERSION
+          : DIAGNOSTICS_PACKET_VERSION_WITH_JOURNAL_GROWTH,
     packetId: input.packetId,
     domain: input.domain,
     failureCode: input.failureCode,
@@ -386,6 +393,7 @@ export function buildDiagnosticsPacket(input: RawDiagnosticInput): DiagnosticsPa
     ...(input.hostHealth === undefined ? {} : { hostHealth: input.hostHealth }),
     generatedAt: input.generatedAt,
     ...(input.journalGrowth === undefined ? {} : { journalGrowth: input.journalGrowth }),
+    ...(input.debugSessions === undefined ? {} : { debugSessions: input.debugSessions }),
   };
 
   try {

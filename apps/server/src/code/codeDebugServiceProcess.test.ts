@@ -640,6 +640,10 @@ describe("starting a debug session", () => {
     );
     const listed = await test.configurations();
     if (listed.status !== "listed") throw new Error(`not listed: ${JSON.stringify(listed)}`);
+    // The panel names the package and version, as Settings does, beside the adapter.
+    expect(listed.adapters).toMatchObject([
+      { displayName: "Fixture adapter", packageName: "Fixture adapter", packageVersion: "1.0.0" },
+    ]);
     expect(listed.launchFile).toMatchObject({
       status: "read",
       proposals: [

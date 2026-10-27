@@ -122,13 +122,47 @@ export function unmappableText(reason: CodeDebugImportUnmappableReason): string 
   }
 }
 
+/**
+ * An adapter's name where configurations are listed. Two installed adapters
+ * may share a name, so a shared one also names its package and version, and
+ * its id when even those match.
+ */
 export function adapterName(
   adapters: ReadonlyArray<CodeDebugAdapterSummary>,
   adapter: string,
 ): string {
-  return (
-    adapters.find((candidate) => String(candidate.adapter) === adapter)?.displayName ?? adapter
-  );
+  const summary = adapters.find((candidate) => String(candidate.adapter) === adapter);
+  if (summary === undefined) return adapter;
+  const sharing = adapters.filter((candidate) => candidate.displayName === summary.displayName);
+  return sharing.length === 1
+    ? summary.displayName
+    : `${summary.displayName} (${distinctPackageText(sharing, summary)})`;
+}
+
+/**
+ * Which adapter the confirmation card allows: its name and the package it
+ * came from, since the confirmation covers that package as it stands.
+ */
+export function adapterIdentity(
+  adapters: ReadonlyArray<CodeDebugAdapterSummary>,
+  adapter: string,
+): string {
+  const summary = adapters.find((candidate) => String(candidate.adapter) === adapter);
+  if (summary === undefined) return adapter;
+  const sharing = adapters.filter((candidate) => candidate.displayName === summary.displayName);
+  return `${summary.displayName}, from ${distinctPackageText(sharing, summary)}`;
+}
+
+function distinctPackageText(
+  sharing: ReadonlyArray<CodeDebugAdapterSummary>,
+  summary: CodeDebugAdapterSummary,
+): string {
+  const text = (candidate: CodeDebugAdapterSummary) =>
+    `${candidate.packageName} ${candidate.packageVersion}`;
+  const own = text(summary);
+  return sharing.filter((candidate) => text(candidate) === own).length === 1
+    ? own
+    : `${own}, ${String(summary.adapter)}`;
 }
 
 /** The configuration a person writes in the panel, as typed. */

@@ -2131,9 +2131,14 @@ flowchart LR
   kind per day for the last 14 days, the journal head sequence, and the database
   size, as kind names and counts only: no payload, identifier, or thread or
   Project name. A packet carrying this section or the `hostHealth` counters
-  (see the development loop) is version 2; a version 1 packet carries neither. One grouped query over the `event_journal_occurred_at` index
+  (see the development loop) is version 2, or version 3 when it also counts
+  debug sessions (below); a version 1 packet carries neither. One grouped query over the `event_journal_occurred_at` index
   reads it when diagnostics are exported or Settings opens, never on a timer,
-  and Settings shows the same table.
+  and Settings shows the same table. An export also counts Code debug
+  sessions started, and ended per end reason, over the same window
+  (`debugSessions`, a version 3 packet, absent when there were none), with
+  no session, thread, or Project named; the rule is in
+  [Debugger session rules](design/language-services.md#debugger-session-rules).
 - **Recovery.** Sequence-based reconnect replay for local and remote clients —
   a dropped stream catches up from the authoritative snapshot before it reopens,
   keeps retrying while the host is unreachable, and a remote session whose window
@@ -8909,7 +8914,7 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   its SQL shape and duration, never bound values, and an event-loop lag over
   `OCTANT_EVENT_LOOP_LAG_MS` (default 100) logs the lag. Both log lines are off
   under tests unless the variable is set. The diagnostics export carries
-  `hostHealth` counters (a version 2 packet) since process start: slow statement count and worst
+  `hostHealth` counters (a version 2 or 3 packet) since process start: slow statement count and worst
   duration, lag event count and worst lag, in milliseconds, with no SQL text or
   route names.
 - `bun run dev` starts Vite for `apps/web` and launches Electron against it.

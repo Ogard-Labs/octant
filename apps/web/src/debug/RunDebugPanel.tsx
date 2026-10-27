@@ -27,6 +27,7 @@ import {
 } from "./codeDebugWindowState";
 import { DebugSessionView } from "./DebugSessionView";
 import {
+  adapterIdentity,
   adapterName,
   emptyDraft,
   LOCAL_ONLY_TEXT,
@@ -545,7 +546,7 @@ function ConfigurationForm(props: {
           onValueChange={(adapter) => change({ adapter })}
           options={props.adapters.map((adapter) => ({
             id: String(adapter.adapter),
-            label: adapter.displayName,
+            label: adapterName(props.adapters, String(adapter.adapter)),
           }))}
           value={draft.adapter}
         />
@@ -642,7 +643,7 @@ function ConfirmationCard(props: {
       </p>
       <dl className="run-debug__facts">
         <dt>Adapter</dt>
-        <dd>{adapterName(props.adapters, String(configuration.adapter))}</dd>
+        <dd>{adapterIdentity(props.adapters, String(configuration.adapter))}</dd>
         <dt>Program</dt>
         <dd>
           <code>{configuration.program}</code>

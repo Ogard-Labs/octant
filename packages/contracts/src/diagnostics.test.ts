@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   DIAGNOSTICS_PACKET_VERSION,
+  DIAGNOSTICS_PACKET_VERSION_WITH_DEBUG_SESSIONS,
+  DIAGNOSTICS_PACKET_VERSION_WITH_JOURNAL_GROWTH,
   decodeDiagnosticEvidencePacket,
   decodeDiagnosticFailureCode,
   decodeDiagnosticFailureDomain,
@@ -182,6 +184,59 @@ describe("DiagnosticEvidencePacket", () => {
     expect(() =>
       decodeDiagnosticEvidencePacket({ ...validPacket, rawStore: { rows: [] } }),
     ).toThrow();
+  });
+
+  it("carries debug session counts and end reasons only in a version 3 packet", () => {
+    const debugSessions = {
+      since: "2026-07-21",
+      started: 3,
+      ended: [
+        { endReason: "stopped", count: 2 },
+        { endReason: "host-restarted", count: 1 },
+      ],
+    };
+    const packet = decodeDiagnosticEvidencePacket({
+      ...validPacket,
+      packetVersion: DIAGNOSTICS_PACKET_VERSION_WITH_DEBUG_SESSIONS,
+      debugSessions,
+    });
+    expect(packet.debugSessions).toEqual(debugSessions);
+    // A version 2 reader refuses the field, so a packet with it says so.
+    for (const packetVersion of [
+      DIAGNOSTICS_PACKET_VERSION,
+      DIAGNOSTICS_PACKET_VERSION_WITH_JOURNAL_GROWTH,
+    ]) {
+      expect(() =>
+        decodeDiagnosticEvidencePacket({ ...validPacket, packetVersion, debugSessions }),
+      ).toThrow();
+    }
+    expect(() =>
+      decodeDiagnosticEvidencePacket({
+        ...validPacket,
+        packetVersion: DIAGNOSTICS_PACKET_VERSION_WITH_DEBUG_SESSIONS,
+      }),
+    ).toThrow();
+    // Counts by closed reason only: no session, thread, or Project can ride along.
+    for (const changed of [
+      { ...debugSessions, ended: [{ endReason: "stopped", count: 1, threadId: "t" }] },
+      { ...debugSessions, ended: [{ endReason: "the adapter said hello", count: 1 }] },
+      {
+        ...debugSessions,
+        ended: [
+          { endReason: "stopped", count: 1 },
+          { endReason: "stopped", count: 1 },
+        ],
+      },
+      { ...debugSessions, sessions: [] },
+    ]) {
+      expect(() =>
+        decodeDiagnosticEvidencePacket({
+          ...validPacket,
+          packetVersion: DIAGNOSTICS_PACKET_VERSION_WITH_DEBUG_SESSIONS,
+          debugSessions: changed,
+        }),
+      ).toThrow();
+    }
   });
 
   it("rejects a packet with empty required evidence arrays", () => {

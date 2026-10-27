@@ -1,4 +1,8 @@
 import type { CodeClient } from "@octant/client-runtime/code-client";
+import {
+  MAX_CODE_DEBUG_BREAKPOINT_FILES,
+  MAX_CODE_DEBUG_BREAKPOINTS_PER_FILE,
+} from "@octant/contracts/code-debug";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -39,6 +43,57 @@ describe("MonacoEditorPane", () => {
     await waitFor(() =>
       expect(fixture.setDebugDecorations).toHaveBeenLastCalledWith({ breakpoints: [] }),
     );
+  });
+
+  it("says why a gutter breakpoint was not set once the file, or the thread's files, hold as many as a session takes", async () => {
+    const fixture = runtime();
+    render(
+      <MonacoEditorPane client={client()} file={textFile()} loadRuntime={fixture.loadRuntime} />,
+    );
+    await waitFor(() => expect(fixture.options?.onToggleBreakpoint).toBeDefined());
+    const key = codeDebugThreadKey(ids.thread, ids.checkout);
+    const path = "src/index.ts" as never;
+    const others = Array.from({ length: MAX_CODE_DEBUG_BREAKPOINT_FILES }, (_, index) => {
+      return `src/other-${index}.ts` as never;
+    });
+    try {
+      act(() => {
+        for (let line = 1; line <= MAX_CODE_DEBUG_BREAKPOINTS_PER_FILE; line += 1) {
+          codeDebugWindowState.toggleBreakpoint(key, path, line);
+        }
+      });
+      act(() => fixture.options?.onToggleBreakpoint?.(MAX_CODE_DEBUG_BREAKPOINTS_PER_FILE + 1));
+      expect(
+        await screen.findByText(
+          "This file already has 256 breakpoints, the most a debug session takes. Remove one to add another.",
+        ),
+      ).toBeVisible();
+      expect(codeDebugWindowState.read(key).breakpoints.get(path)).toHaveLength(256);
+      // A toggle that is taken clears the notice.
+      act(() => fixture.options?.onToggleBreakpoint?.(1));
+      expect(screen.queryByText(/the most a debug session takes/)).not.toBeInTheDocument();
+
+      act(() => {
+        for (let line = 2; line <= MAX_CODE_DEBUG_BREAKPOINTS_PER_FILE; line += 1) {
+          codeDebugWindowState.toggleBreakpoint(key, path, line);
+        }
+        for (const other of others) codeDebugWindowState.toggleBreakpoint(key, other, 1);
+      });
+      act(() => fixture.options?.onToggleBreakpoint?.(4));
+      expect(
+        await screen.findByText(
+          "Breakpoints are already set in 64 files, the most a debug session takes. Clear another file's breakpoints to set one here.",
+        ),
+      ).toBeVisible();
+      expect(codeDebugWindowState.read(key).breakpoints.has(path)).toBe(false);
+    } finally {
+      act(() => {
+        for (const other of others) codeDebugWindowState.toggleBreakpoint(key, other, 1);
+        for (const line of codeDebugWindowState.read(key).breakpoints.get(path) ?? []) {
+          codeDebugWindowState.toggleBreakpoint(key, path, line);
+        }
+      });
+    }
   });
 
   it("offers an explicit external-editor handoff when the desktop host provides it", async () => {
