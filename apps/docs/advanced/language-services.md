@@ -37,6 +37,11 @@ definitions.
 
 ## What the server can do
 
+The server is part of Octant: the desktop app and the headless host install
+each carry the one built for their Mac or Linux machine, with its license and
+notices, and nothing is downloaded when it starts. On macOS it is signed with
+the app. It changes version only when Octant updates.
+
 The bundled server is confined when the host starts it:
 
 - It reads the checkout and its own install, and nothing else of yours.

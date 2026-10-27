@@ -5,6 +5,7 @@ export * from "./replicaStore";
 export * from "./desktopProvider";
 export * from "./providerDriverCatalog";
 export * from "./languageServerPackage";
+export * from "./outsideProviderDriver";
 
 export * from "./computerUse";
 export * from "./canvasExport";

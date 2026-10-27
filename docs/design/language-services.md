@@ -18,9 +18,10 @@ accepted this design and its [decisions](#maintainer-decisions) on 2026-10-26.
 **Slices 1 (seam and policy), 2 (companion and the bundled TypeScript
 server), and 3 (editor wiring) are built: the Code editor shows the host's
 diagnostics and jumps to definitions, locally and from a paired device.**
-Slice 5 (user-added `static` servers) is also built. Slice 4 is next. Monaco
-editing and the explicit external-editor handoff stay the primary Code editing
-paths and are unchanged by every slice.
+Slice 4 (ship the binary) is built: packages carry the server, and a signed
+Apple Silicon package awaits the maintainer. Slice 5 (user-added `static`
+servers) is also built. Monaco editing and the explicit external-editor
+handoff stay the primary Code editing paths and are unchanged by every slice.
 
 ## Outcome
 
@@ -94,6 +95,11 @@ behind its own approval and confinement rules.
   `none`, `provider-endpoints-only`, and `unrestricted`. The
   [harness tool egress rules](../architecture.md#harness-tool-egress-rules)
   materialize `proxied` for commands.
+- **Packaging (slice 4).** `scripts/package-desktop.ts` stages the target's
+  native package beside the server's runtime packages, `sign-desktop.ts`
+  signs its binary, `package-headless.ts` vendors it into the headless
+  artifact, and `scripts/smoke-packaged-language-services.ts` serves the
+  editor's scenario from a package outside any checkout.
 - **A server already present.** The repository's pinned `typescript` 7.0.2
   dependency ships a native binary per platform
   (`@typescript/typescript-<platform>-<arch>`, about 24 MB) that speaks the
@@ -383,7 +389,8 @@ design left a choice open.
   identity from the folder and the slug, so a folder can never take the
   bundled server's identity or another package's, and records it unreviewed.
   A folder with the document is read as a language server and as nothing
-  else. Other sources are refused until a marketplace package can carry a
+  else; one that also holds an outside provider driver's
+  `octant-provider-driver.json` is refused as neither. Other sources are refused until a marketplace package can carry a
   publisher signature.
 - **What a package may hold.** Exactly one `language-server` component, Code
   only, for no provider family, with no contributions, whose entry point is a
@@ -542,6 +549,49 @@ classes.
 - **Platforms.** macOS and Linux. Any other platform refuses with
   `unsupported-platform`. A missing Seatbelt or Bubblewrap backend fails closed
   and names the recovery, as confinement already does.
+
+### Packaging rules
+
+Slice 4 settled these details, taking the more restrictive option where the
+design left a choice open.
+
+- **What ships.** Each package carries the native package for its own target,
+  `@typescript/typescript-<platform>-<arch>`, resolved through the pinned
+  `typescript` package so its version is the lockfile's. It ships whole and
+  unchanged, neither stripped nor rebuilt: the binary (`lib/tsc`), the
+  standard library declarations it reads from its own folder (`lib/*.d.ts`),
+  and the package's `LICENSE` and `NOTICE.txt`, which are its license notice.
+  The desktop app holds it under the server's runtime packages
+  (`Resources/app/apps/server/node_modules`) and the headless artifact under
+  its top-level `node_modules`, where the server's existing resolution finds
+  it. A package build refuses to finish when the binary, the standard
+  library, the license, or the notices are missing, or when the copy it
+  resolved is not the version `typescript` pins (resolution walks up past the
+  repository, so a nested checkout could reach an outer install's). Reason: the server finds
+  the binary by walking up from its bundle, so a package without its own copy
+  would serve whichever copy sat above wherever the app was put, a checkout's
+  or a stranger's.
+- **Headless artifact.** The artifact's general rule drops type declarations
+  from vendored packages; the language server's are kept, since without them
+  every file reports missing global types. The binary is recorded as a
+  `native-module` component, the role that installs executable, so it is
+  verified by digest at install and at every start like the others.
+- **macOS signing.** A release build signs the binary with the Developer ID,
+  the hardened runtime, and a secure timestamp, before it seals the app, and
+  with none of Octant's entitlements. Reason: notarization refuses an
+  unsigned executable in the bundle, and the entitlements (JIT, unsigned
+  executable memory, audio input) exist for Electron and dictation; a server
+  that compiles nothing and records nothing gains only reach from them.
+- **Linux.** The binary ships unsigned, as the image does. Packaging checks
+  that it is an executable 64-bit ELF file.
+- **Evidence.** `scripts/smoke-packaged-language-services.ts` starts a
+  package's own server from a copy outside the repository, with no
+  `node_modules` above it, and serves slice 3's scenario for a Plan thread: the
+  cross-file type error, the definition in the other file, and a standard
+  library name read as `bundled-library`. It also checks that the process
+  that answered runs the package's binary and that stopping the host stops it.
+  It takes `desktop` (the packaged app for this host) or `headless` (an
+  artifact tarball).
 
 ### Data lifecycle and privacy
 
@@ -742,6 +792,20 @@ accounts or hardware.
    - _Verify:_ unsigned Linux packaging in the container. A signed and
      notarized Apple Silicon package needs the maintainer's signing credentials
      and a Mac.
+   - _State:_ built; the signed Apple Silicon run is the maintainer's. The
+     Linux x64 headless artifact, extracted outside the repository with no
+     `node_modules` above it, served the scenario through its own server and
+     its own binary under Bubblewrap, and stopping the host stopped the
+     binary; an artifact built without this slice refused the same open as
+     `no-language-server`. Packaging tests cover the staged package, the
+     refusals, the headless roles, and the signing order and arguments. The
+     Linux AppImage was not built in the container: its native rebuild
+     fetches Electron's headers from `electronjs.org`, which the container's
+     network refused. Still to run: `bun run package:desktop` with signing
+     credentials on an Apple Silicon Mac, then
+     `bun scripts/smoke-packaged-language-services.ts desktop`; the same smoke
+     covers the Linux AppImage's portable folder where its packaging can
+     reach that host. The rules are under [Packaging rules](#packaging-rules).
 5. **User-added `static` servers.** Container: yes.
    - Install through the existing package store, untrusted and switched off.
      The review card names the binary, digest, languages, class, and "cannot

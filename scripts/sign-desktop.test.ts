@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  BUNDLED_LANGUAGE_SERVER_SIGNING_PATH,
   createArchiveArgv,
   createCodesignArgv,
   createNotarizationLogArgv,
@@ -18,7 +19,7 @@ import {
   signAndNotarizeDesktop,
   SIGNING_ORDER,
 } from "./sign-desktop";
-import { signPackagedDesktop } from "./package-desktop";
+import { PACKAGED_EXECUTABLE_FILES, signPackagedDesktop } from "./package-desktop";
 
 const credentials = {
   OCTANT_SIGNING_IDENTITY: "Developer ID Application: Example (TEAMID1234)",
@@ -176,6 +177,29 @@ describe("signAndNotarizeDesktop", () => {
     ]) {
       expect(signed).toContain(`/repo/out/Octant.app/${payload}`);
     }
+  });
+
+  it("signs the bundled language server with the hardened runtime and no entitlements before sealing the app", async () => {
+    // Notarization refuses an executable in the bundle that lacks a Developer
+    // ID signature, the hardened runtime, or a timestamp.
+    const argv = await record();
+    const signed = argv.filter(
+      (command) => command[0] === "/usr/bin/codesign" && command.includes("--sign"),
+    );
+    const targets = signed.map((command) => command[command.length - 1]);
+    const languageServer = `/repo/out/Octant.app/${BUNDLED_LANGUAGE_SERVER_SIGNING_PATH}`;
+    const index = targets.indexOf(languageServer);
+
+    expect(index).toBeGreaterThanOrEqual(0);
+    expect(index).toBeLessThan(targets.indexOf("/repo/out/Octant.app"));
+    expect(signed[index]).toEqual(
+      expect.arrayContaining(["--sign", "Developer ID", "--options", "runtime", "--timestamp"]),
+    );
+    expect(signed[index]).not.toContain("--entitlements");
+    // The path signed is the one packaging ships and checks as executable.
+    expect(PACKAGED_EXECUTABLE_FILES.map((path) => `Contents/Resources/${path}`)).toContain(
+      BUNDLED_LANGUAGE_SERVER_SIGNING_PATH,
+    );
   });
 
   it("signs the crash reporter before sealing its framework", async () => {

@@ -13,7 +13,11 @@ import {
 } from "@octant/host-runtime";
 import { MIGRATIONS, type Migration } from "../apps/server/src/persistence/migrations";
 import {
+  BUNDLED_LANGUAGE_SERVER_BINARY,
+  bundledLanguageServerPackage,
+  bundledLanguageServerPaths,
   EXTERNAL_RUNTIME_PACKAGES,
+  stageBundledLanguageServer,
   stageRuntimePackages,
   validatePackagedRuntimeImports,
 } from "./package-desktop";
@@ -300,11 +304,14 @@ const NATIVE_RUNTIME_FILE = /(?:\.node|\.so|\.dylib)$|(?:^|\/)spawn-helper$/;
  * package's own module resolution is not second-guessed.
  */
 export function isHeadlessRuntimeFile(path: string, target: HeadlessArtifactTarget): boolean {
-  if (/\.d\.[cm]?ts$/.test(path)) return false;
   // Package-manager and CI dotfiles; the manifest refuses hidden segments.
   if (path.split("/").some((segment) => segment.startsWith("."))) return false;
   const [scopeOrName, maybeName] = path.split("/");
   const packageName = scopeOrName?.startsWith("@") ? `${scopeOrName}/${maybeName}` : scopeOrName;
+  // The language server reads its standard library declarations at run time;
+  // without them every file reports missing global types.
+  if (packageName === bundledLanguageServerPackage(target)) return true;
+  if (/\.d\.[cm]?ts$/.test(path)) return false;
   const inner = path.slice((packageName ?? "").length + 1);
   if (packageName === "effect") return !inner.startsWith("src/");
   if (packageName === "better-sqlite3") {
@@ -324,10 +331,17 @@ export function isHeadlessRuntimeFile(path: string, target: HeadlessArtifactTarg
   return true;
 }
 
-export function headlessRuntimeFileRole(path: string): HeadlessArtifactComponentRole {
+export function headlessRuntimeFileRole(
+  path: string,
+  target: HeadlessArtifactTarget,
+): HeadlessArtifactComponentRole {
   // The manifest has no dedicated dependency role, and an installed CLI
   // refuses a manifest with a role it does not know, so vendored JavaScript is
-  // recorded as part of the server it runs with.
+  // recorded as part of the server it runs with. The language server's binary
+  // is a native executable, so it takes the role that installs executable.
+  if (path === `${bundledLanguageServerPackage(target)}/${BUNDLED_LANGUAGE_SERVER_BINARY}`) {
+    return "native-module";
+  }
   return NATIVE_RUNTIME_FILE.test(path) ? "native-module" : "server";
 }
 
@@ -387,9 +401,24 @@ async function assembleRepositoryArtifact(
     packageNames: HEADLESS_CLI_RUNTIME_PACKAGES,
     stagedVersions,
   });
+  await stageBundledLanguageServer({
+    repositoryRoot,
+    destinationNodeModules: runtimeNodeModules,
+    target,
+    stagedVersions,
+  });
   for (const file of await collectFiles(runtimeNodeModules)) {
     if (!isHeadlessRuntimeFile(file, target)) continue;
-    push(headlessRuntimeFileRole(file), `node_modules/${file}`, join(runtimeNodeModules, file));
+    push(
+      headlessRuntimeFileRole(file, target),
+      `node_modules/${file}`,
+      join(runtimeNodeModules, file),
+    );
+  }
+  for (const required of bundledLanguageServerPaths(target, "node_modules")) {
+    if (!components.some((component) => component.path === required)) {
+      throw new Error(`Headless artifact is missing the bundled language server's ${required}.`);
+    }
   }
 
   const migrationsPath = join(scratch, "migrations.json");

@@ -752,7 +752,11 @@ Rules this slice resolved:
   turn sent at approval-gated on a Full access thread asks. Once the thread
   has read outside content, an agent's transfer asks under Full access too:
   `send-file` is a Computer use action, and taint stops standing approvals,
-  which Full access is.
+  which Full access is. An app grant is for the file a name held when the
+  person allowed it: a `send-file` of that name ends every grant for the
+  name on that lease when it starts and again when it settles, whatever its
+  outcome, so the next launch asks. Rejected: keeping the grant when the
+  hash matches, since a send cut off midway may still have replaced the file.
 - **Agent input is journaled.** `desktop.operated@1` is written before the
   driver gets the input, with the agent as actor. Reading the screen (apps,
   windows, observe) is not journaled, and typed text and keys never are.
@@ -772,7 +776,8 @@ conformance suite still passes over the real launch port, refusing an
 element-addressed click as `unsupported`. `computerUseToolService.test.ts`
 covers binding, the approval asked in the thread, the first of the thread's
 and the local card's answers withdrawing the other, the one-action rule under
-taint, Plan refusal, `needs-image-model`, the transfer question, and this Mac
+taint, Plan refusal, `needs-image-model`, the transfer question, a resent
+file's name ending its app grant, and this Mac
 refusing keyboard-focus input; `desktopLeaseService.test.ts` covers the
 journaled input, the caller's own confirmation, and a transfer asked at the
 turn's lower posture or under taint; `codeOperationRuntime.test.ts`

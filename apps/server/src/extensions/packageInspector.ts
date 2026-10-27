@@ -211,7 +211,10 @@ export function inspectExtensionPackage(
       }
       const entryPoint = normalizeArchivePath(rawEntryPoint, limits.maximumPathBytes);
       const entry = filesByPath.get(entryPoint);
-      if (entry === undefined || entry.executable !== true) {
+      // A provider driver's entry is a module the host loads on its own
+      // runtime, never a program of the package's own, so it must not be one.
+      const runsAsModule = component.kind === "provider-driver";
+      if (entry === undefined || (entry.executable === true) === runsAsModule) {
         fail("entry-point-missing", "Declared package entry point is unavailable.");
       }
       declaredEntryPoints.add(entryPoint);

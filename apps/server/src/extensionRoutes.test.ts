@@ -455,6 +455,90 @@ describe("bounded authenticated extension routes", () => {
     expect(register).toHaveBeenCalledTimes(1);
   });
 
+  it("refuses every package lifecycle command from a paired device before it reaches the service", async () => {
+    const execute = vi.fn(
+      async (): Promise<ExtensionCommandResult> => ({
+        kind: "extension-state-updated",
+        snapshot: setupSnapshot(),
+      }),
+    );
+    const handler = setup({ snapshot: setupSnapshot, execute });
+    const target = { extensionId, packageId, version: "1.0.0", digest };
+    const mutation = { commandVersion: 1, extensionId, expectedStateVersion: 1 };
+    for (const command of [
+      { kind: "install-package", ...target },
+      { kind: "update-package", ...target },
+      { kind: "rollback-package", ...target },
+      { kind: "uninstall-package", extensionId, packageId },
+      { kind: "set-source-trust", ...mutation, trusted: true },
+      { kind: "set-plugin-desired", ...mutation, desired: true },
+      { kind: "set-component-desired", ...mutation, componentId: "driver", desired: true },
+    ]) {
+      const denied = await handler(pairedDeviceRequest("/api/extensions/lifecycle", command));
+      expect(denied?.status).toBe(401);
+    }
+    expect(execute).not.toHaveBeenCalled();
+    const accepted = await handler(
+      request("/api/extensions/lifecycle", { kind: "install-package", ...target }),
+    );
+    expect(accepted?.status).toBe(200);
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a paired device the inspection of an outside provider driver folder", async () => {
+    const execute = vi.fn(
+      async (): Promise<ExtensionCommandResult> => ({
+        kind: "extension-command-failed",
+        failure: { category: "unavailable", message: "Extension source is unavailable." },
+      }),
+    );
+    const windowAuthorityStore = new WindowAuthorityStore();
+    windowAuthorityStore.register({ windowId: windowId as never, capability, now });
+    const formats: Readonly<Record<string, string>> = {
+      "local-driver": "outside-provider-driver",
+      "local-plugin": "agent-plugins",
+    };
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute },
+      windowAuthorityStore,
+      localPluginFolderRegistry: {
+        get: (sourceRef: string) =>
+          formats[sourceRef] === undefined ? undefined : { format: formats[sourceRef] },
+      } as never,
+      now: () => now,
+    });
+    const driver = { kind: "local-folder", sourceRef: "local-driver" };
+    for (const [path, kind] of [
+      ["/api/extensions/inspect", "inspect-package"],
+      ["/api/extensions/preview", "preview-package"],
+    ] as const) {
+      const denied = await handler(pairedDeviceRequest(path, { kind, source: driver }));
+      expect(denied?.status).toBe(401);
+    }
+    expect(execute).not.toHaveBeenCalled();
+    // A paired device may still read a plugin folder's review, and a local
+    // window may still inspect the driver.
+    const plugin = { kind: "local-folder", sourceRef: "local-plugin" };
+    expect(
+      (
+        await handler(
+          pairedDeviceRequest("/api/extensions/inspect", {
+            kind: "inspect-package",
+            source: plugin,
+          }),
+        )
+      )?.status,
+    ).toBe(200);
+    expect(
+      (
+        await handler(
+          request("/api/extensions/inspect", { kind: "inspect-package", source: driver }),
+        )
+      )?.status,
+    ).toBe(200);
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+
   it("rejects local-folder import from a remote device before reading the host path", async () => {
     const register = vi.fn();
     const handler = createExtensionRouteHandler({

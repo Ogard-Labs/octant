@@ -202,45 +202,50 @@ function applyLifecycle(
         payload.kind === "update-committed" &&
         next.current !== undefined &&
         hasCapabilityExpansion(next.current, payload.manifest);
+      const outsideDriver = holdsProviderDriver(payload.manifest);
+      const held = expanded || outsideDriver;
       const versions = selectVersion(next.versions, payload.manifest);
       const componentDesired =
         payload.kind === "update-committed" && next.current !== undefined
           ? preserveUnchangedComponentDesired(next.current, payload.manifest, next.componentDesired)
           : {};
+      const diagnostics = expanded
+        ? appendDiagnostic(next.diagnostics, {
+            code: "capability-review-required",
+            message: "Updated package capabilities require review.",
+          })
+        : next.diagnostics;
       return {
         ...withoutPending(next),
-        lifecycleState: expanded ? "quarantined" : "installed",
+        lifecycleState: held ? "quarantined" : "installed",
         current: payload.manifest,
         versions,
-        trusted: expanded ? false : next.trusted,
-        pluginDesired: expanded ? false : next.pluginDesired,
+        trusted: held ? false : next.trusted,
+        pluginDesired: held ? false : next.pluginDesired,
         componentDesired,
-        quarantined: expanded,
+        quarantined: held,
         draining: false,
         broken: false,
         unavailable: false,
         interrupted: false,
         waiting: false,
         tombstoned: false,
-        diagnostics: expanded
-          ? appendDiagnostic(next.diagnostics, {
-              code: "capability-review-required",
-              message: "Updated package capabilities require review.",
-            })
-          : next.diagnostics,
+        diagnostics: outsideDriver
+          ? appendDiagnostic(diagnostics, OUTSIDE_DRIVER_QUARANTINE)
+          : diagnostics,
       };
     }
     case "rollback-selected":
       return {
         ...withoutPending(next),
         grantsEnded: { sequence: lastSequence, reason: "rolled-back" },
-        lifecycleState: "installed",
+        lifecycleState: holdsProviderDriver(payload.manifest) ? "quarantined" : "installed",
         current: payload.manifest,
         versions: selectVersion(next.versions, payload.manifest),
         trusted: false,
         pluginDesired: false,
         componentDesired: {},
-        quarantined: false,
+        quarantined: holdsProviderDriver(payload.manifest),
         draining: false,
         broken: false,
         unavailable: false,
@@ -505,6 +510,22 @@ function selectVersion(
     ),
   );
 }
+
+/**
+ * Bundled provider drivers are never stored as packages, so a stored package
+ * that holds one is an outside driver. It is held quarantined whenever its
+ * selected version changes (install, update, rollback), and nothing here
+ * lifts that: trust, switches, and runtime evidence leave it in place until
+ * the driver's admission, which binds trust to the digest, exists.
+ */
+function holdsProviderDriver(manifest: ExtensionPackageManifest): boolean {
+  return manifest.components.some((component) => component.kind === "provider-driver");
+}
+
+const OUTSIDE_DRIVER_QUARANTINE: ExtensionDiagnostic = {
+  code: "outside-driver-quarantined",
+  message: "An outside provider driver stays quarantined until Octant admits it.",
+};
 
 function hasCapabilityExpansion(
   previous: ExtensionPackageManifest,

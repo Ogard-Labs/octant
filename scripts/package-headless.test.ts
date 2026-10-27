@@ -281,12 +281,38 @@ describe("vendored runtime dependencies", () => {
   });
 
   it("records native binaries as native modules and everything else with the server", () => {
-    expect(headlessRuntimeFileRole("node-pty/build/Release/pty.node")).toBe("native-module");
-    expect(headlessRuntimeFileRole("node-pty/prebuilds/darwin-arm64/spawn-helper")).toBe(
+    expect(headlessRuntimeFileRole("node-pty/build/Release/pty.node", linux)).toBe("native-module");
+    expect(headlessRuntimeFileRole("node-pty/prebuilds/darwin-arm64/spawn-helper", linux)).toBe(
       "native-module",
     );
-    expect(headlessRuntimeFileRole("@opentui/core-linux-x64/libopentui.so")).toBe("native-module");
-    expect(headlessRuntimeFileRole("effect/dist/esm/index.js")).toBe("server");
+    expect(headlessRuntimeFileRole("@opentui/core-linux-x64/libopentui.so", linux)).toBe(
+      "native-module",
+    );
+    expect(headlessRuntimeFileRole("effect/dist/esm/index.js", linux)).toBe("server");
+  });
+
+  it("ships the target's language server whole: its executable, its standard library, and its notices", () => {
+    // The server reads lib.*.d.ts beside its binary; dropping them as
+    // declarations would turn every file's diagnostics into missing globals.
+    for (const path of [
+      "@typescript/typescript-linux-x64/lib/tsc",
+      "@typescript/typescript-linux-x64/lib/lib.d.ts",
+      "@typescript/typescript-linux-x64/lib/lib.es5.d.ts",
+      "@typescript/typescript-linux-x64/LICENSE",
+      "@typescript/typescript-linux-x64/NOTICE.txt",
+    ]) {
+      expect(isHeadlessRuntimeFile(path, linux), path).toBe(true);
+    }
+    expect(headlessRuntimeFileRole("@typescript/typescript-linux-x64/lib/tsc", linux)).toBe(
+      "native-module",
+    );
+    expect(headlessRuntimeFileRole("@typescript/typescript-linux-x64/lib/lib.d.ts", linux)).toBe(
+      "server",
+    );
+    // Another target's declarations are still declarations.
+    expect(isHeadlessRuntimeFile("@typescript/typescript-darwin-arm64/lib/lib.d.ts", linux)).toBe(
+      false,
+    );
   });
 });
 
