@@ -602,16 +602,6 @@ export function wireProviders(deps: ProvidersDependencies) {
     // further down once the broker is known; the holder lets the session
     // manager and the routes reach it from here.
     const mcpServerSignInHolder: { current: McpServerSignIn | undefined } = { current: undefined };
-    const signInOrUnavailable = async (
-      run: (signIn: McpServerSignIn) => Promise<McpServerSignInView>,
-    ): Promise<McpServerSignInView> =>
-      mcpServerSignInHolder.current === undefined
-        ? {
-            kind: "refused",
-            reason: "unavailable",
-            message: "Signing in needs the credential broker.",
-          }
-        : run(mcpServerSignInHolder.current);
     const userAddedMcpServers = new UserAddedMcpServerStore({
       directory: join(providerDataDirectory, "extensions", "user-added"),
       registry: userAddedPluginRegistry,
@@ -624,6 +614,47 @@ export function wireProviders(deps: ProvidersDependencies) {
             }),
           }),
     });
+    // The address a user-added server's package names, read from the
+    // installed package itself so a sign-in can only ever target the server
+    // the person added.
+    const mcpServerSignInAddress = async (
+      extensionId: string,
+      componentId: string,
+    ): Promise<string | undefined> => {
+      const packageState = extensionLifecycleService
+        .snapshot()
+        .packages.find((candidate) => String(candidate.extensionId) === extensionId);
+      if (packageState === undefined) return undefined;
+      return userAddedMcpServers.signInAddress(packageState, componentId, () =>
+        extensionPackageStore.readVerifiedConfiguration(
+          {
+            extensionId: packageState.extensionId,
+            packageId: packageState.packageId,
+            version: packageState.version,
+            digest: packageState.digest,
+          },
+          componentId,
+        ),
+      );
+    };
+    // Settings asks about every MCP server component, so a host without the
+    // broker names the missing broker only for a server that could sign in;
+    // every other component, a third-party plugin's included, has nothing to
+    // show rather than a refusal and a Sign in button that cannot work.
+    const signInOrUnavailable = async (
+      extensionId: string,
+      componentId: string,
+      run: (signIn: McpServerSignIn) => Promise<McpServerSignInView>,
+    ): Promise<McpServerSignInView> => {
+      if (mcpServerSignInHolder.current !== undefined) return run(mcpServerSignInHolder.current);
+      return (await mcpServerSignInAddress(extensionId, componentId)) === undefined
+        ? { kind: "not-applicable" }
+        : {
+            kind: "refused",
+            reason: "unavailable",
+            message: "Signing in needs the credential broker.",
+          };
+    };
     // What Claude Code and Codex keep on this computer, read for a local
     // window to pick from; Octant never writes to their files.
     const agentToolingDiscovery = new AgentToolingDiscovery({
@@ -823,15 +854,21 @@ export function wireProviders(deps: ProvidersDependencies) {
       },
       mcpServerSignIn: {
         status: (extensionId, componentId, principalKind) =>
-          signInOrUnavailable((signIn) => signIn.status(extensionId, componentId, principalKind)),
+          signInOrUnavailable(extensionId, componentId, (signIn) =>
+            signIn.status(extensionId, componentId, principalKind),
+          ),
         begin: (extensionId, componentId, principalKind) =>
-          signInOrUnavailable((signIn) => signIn.begin(extensionId, componentId, principalKind)),
+          signInOrUnavailable(extensionId, componentId, (signIn) =>
+            signIn.begin(extensionId, componentId, principalKind),
+          ),
         poll: (extensionId, componentId, attemptId, principalKind) =>
-          signInOrUnavailable((signIn) =>
+          signInOrUnavailable(extensionId, componentId, (signIn) =>
             signIn.poll(extensionId, componentId, attemptId, principalKind),
           ),
         signOut: (extensionId, componentId, principalKind) =>
-          signInOrUnavailable((signIn) => signIn.signOut(extensionId, componentId, principalKind)),
+          signInOrUnavailable(extensionId, componentId, (signIn) =>
+            signIn.signOut(extensionId, componentId, principalKind),
+          ),
       },
       toolApprovals: extensionToolApprovalService,
       toolGrants: extensionToolGrantStore,
@@ -1043,26 +1080,7 @@ export function wireProviders(deps: ProvidersDependencies) {
         oauth: hostOAuth,
         access: (credentialRef) => oauthBroker.access(credentialRef),
         actorId: OCTANT_LOCAL_ACTOR_ID,
-        // The address a user-added server's package names, read from the
-        // installed package itself so a sign-in can only ever target the
-        // server the person added.
-        serverUrl: async (extensionId, componentId) => {
-          const packageState = extensionLifecycleService
-            .snapshot()
-            .packages.find((candidate) => String(candidate.extensionId) === extensionId);
-          if (packageState === undefined) return undefined;
-          return userAddedMcpServers.signInAddress(packageState, componentId, () =>
-            extensionPackageStore.readVerifiedConfiguration(
-              {
-                extensionId: packageState.extensionId,
-                packageId: packageState.packageId,
-                version: packageState.version,
-                digest: packageState.digest,
-              },
-              componentId,
-            ),
-          );
-        },
+        serverUrl: mcpServerSignInAddress,
       });
     }
     const subscriptionOAuth =

@@ -6174,7 +6174,9 @@ components those are: the installed package's source reads `plugin-package`
 like any other, so the host recognizes its own package by the source
 reference its store of generated folders holds, and Settings asks the host's
 sign-in status for each MCP server component (`not-applicable` shows
-nothing) rather than reading a source kind. The host runs the MCP
+nothing) rather than reading a source kind. A host without the credential
+broker still answers `not-applicable` for every other component and names
+the missing broker only for a server that could sign in. The host runs the MCP
 authorization flow as the protocol lays it out: a bare request to the server
 answers 401 and names its protected resource metadata (RFC 9728, or the
 well-known path when the header names none), whose `resource` must be the
