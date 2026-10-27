@@ -28,6 +28,7 @@ import { WindowId } from "@octant/contracts/shell";
 import { SshRemoteProjectService } from "./sshRemoteProjectService";
 import { SshRemoteTerminalService } from "./sshRemoteTerminalService";
 import type { ProviderRuntimeEgress } from "./providerRuntimeEgress";
+import { placeableRuntimesOn, type RemoteRuntimeSource } from "./sshRemoteCodeThreads";
 import {
   SshTargetConnectionService,
   type SshTargetPlacementInput,
@@ -206,10 +207,19 @@ function service(
     readonly identity?: object;
     readonly facts?: object;
     readonly runtimeEgress?: ProviderRuntimeEgress;
+    /** The provider instances a status reports placeable agents from, as the server wires them. */
+    readonly runtimes?: () => ReadonlyArray<RemoteRuntimeSource>;
   } = {},
 ) {
-  return new SshTargetConnectionService({
+  const { runtimes } = overrides;
+  const connections: SshTargetConnectionService = new SshTargetConnectionService({
     ...(overrides.runtimeEgress === undefined ? {} : { runtimeEgress: overrides.runtimeEgress }),
+    ...(runtimes === undefined
+      ? {}
+      : {
+          placeableRuntimes: (targetId: SshTargetId) =>
+            placeableRuntimesOn({ connections, store: registry, runtimes }, targetId),
+        }),
     store: registry,
     buildVersion: BUILD,
     sshExecutable: join(directory, "ssh"),
@@ -224,6 +234,7 @@ function service(
       OCTANT_DESKTOP_BRIDGE_SECRET: "never-forwarded",
     },
   });
+  return connections;
 }
 
 async function registered(connections: SshTargetConnectionService) {
@@ -1083,6 +1094,108 @@ describe("SSH target connection service", () => {
       });
     }
     expect(requests()).toEqual(["attest"]);
+    connections.close();
+  });
+
+  it("reports an ACP agent a turn would place, with its runtime's admission and whether its path is set, and no other provider", async () => {
+    const instance = (suffix: string) =>
+      decodeProviderInstanceId(`81000000-0000-4000-8000-0000000000${suffix}`);
+    const declared = {
+      postures: ["plan", "approval-gated", "auto-accept-edits"],
+      appToolTransport: "stdio",
+    } as const;
+    const runtimes = (): ReadonlyArray<RemoteRuntimeSource> => [
+      {
+        providerInstanceId: instance("01"),
+        driver: { kind: "copilot", remotePlacement: declared },
+      },
+      {
+        providerInstanceId: instance("02"),
+        driver: { kind: "copilot", remotePlacement: declared },
+      },
+      // Neither is placed by a turn: Codex declares no placement, and Pi is
+      // not an ACP agent though it declares one.
+      { providerInstanceId: instance("03"), driver: { kind: "codex" } },
+      { providerInstanceId: instance("04"), driver: { kind: "pi", remotePlacement: declared } },
+    ];
+    const connections = service({ runtimes });
+    const status = await registered(connections);
+    expect(
+      connections.setRuntimeBinary({
+        targetId: status.target.id,
+        providerInstanceId: instance("01"),
+        path: remotePath(AGENT),
+      }),
+    ).toMatchObject({ status: "ok" });
+    const everyPosture = (decision: object) =>
+      (["plan", "approval-gated", "auto-accept-edits"] as const).map((posture) => ({
+        posture,
+        decision,
+      }));
+    expect(connections.list()[0]?.placeableRuntimes).toEqual([
+      {
+        providerInstanceId: instance("01"),
+        runtimePath: "set",
+        admission: everyPosture({ status: "admitted" }),
+      },
+      {
+        providerInstanceId: instance("02"),
+        runtimePath: "missing",
+        admission: everyPosture({ status: "admitted" }),
+      },
+    ]);
+    // The turn's placement refuses the agent without a path with the
+    // sentence a window shows on it.
+    const session = connections.session(status.target.id);
+    if (session === undefined) throw new Error("no session");
+    expect(
+      connections.placement({
+        ...placementOn(session, "plan"),
+        providerInstanceId: instance("02"),
+      }),
+    ).toMatchObject({
+      status: "refused",
+      failure: {
+        message: `Set where this provider's runtime is on the SSH target before it runs there: octant ssh-target runtime ${String(status.target.id)} ${String(instance("02"))} <path>.`,
+      },
+    });
+
+    connections.close();
+    expect(connections.list()[0]?.placeableRuntimes[0]?.admission[0]).toEqual({
+      posture: "plan",
+      decision: { status: "refused", reason: "target-unreachable" },
+    });
+  });
+
+  it("reports an agent a macOS target cannot place refused in every posture, as its turn would be", async () => {
+    const facts = passingFacts();
+    const connections = service({
+      facts: {
+        ...facts,
+        platform: { operatingSystem: "darwin", architecture: "arm64", uid: 501 },
+        backend: { kind: "seatbelt", sandboxExecExecutable: true },
+      },
+      runtimes: () => [
+        {
+          providerInstanceId: decodeProviderInstanceId("81000000-0000-4000-8000-000000000001"),
+          driver: {
+            kind: "copilot",
+            remotePlacement: { postures: ["plan", "approval-gated"], appToolTransport: "stdio" },
+          },
+        },
+      ],
+    });
+    const status = await registered(connections);
+    expect(status.admission.find((entry) => entry.posture === "plan")?.decision).toEqual({
+      status: "admitted",
+    });
+    expect(
+      connections.list()[0]?.placeableRuntimes[0]?.admission.map((entry) => entry.decision),
+    ).toEqual([
+      { status: "refused", reason: "runtime-not-attestable" },
+      { status: "refused", reason: "runtime-not-attestable" },
+      { status: "refused", reason: "runtime-not-attestable" },
+    ]);
     connections.close();
   });
 });

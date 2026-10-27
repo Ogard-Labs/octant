@@ -7632,6 +7632,12 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   font-size: inherit;
 }
 
+/* The note can carry a command with two ids in it, which must wrap and copy. */
+.composer-model-picker__unavailable-note {
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
 .activity-nav__row {
   display: flex;
   align-items: center;

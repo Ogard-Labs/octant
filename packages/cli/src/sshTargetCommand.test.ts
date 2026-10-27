@@ -33,6 +33,7 @@ const status = {
   runtimeBinaries: [
     { providerInstanceId: "77777777-7777-4777-8777-777777777777", path: "/opt/agent/bin/agent" },
   ],
+  placeableRuntimes: [],
 };
 
 function harness(ask?: (question: string) => Promise<string | undefined>) {

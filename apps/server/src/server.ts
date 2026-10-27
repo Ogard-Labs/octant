@@ -444,6 +444,7 @@ export function startOctantServer(
       workThreadProjection,
     });
     const { sshTargetConnections, sshTargetStore } = wireSshTargets({
+      configuredDriverOptions,
       persistence,
       providerDataDirectory,
       version,

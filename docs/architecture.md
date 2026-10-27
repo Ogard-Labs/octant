@@ -870,7 +870,8 @@ launches with their own proxy on this host are built, and the ACP driver
 declares placement for a profile whose whole launch can be stated on a
 target (its fixed variables and the Project entries it denies included), at
 the runtime path the person set for it there; GitHub Copilot's profile is the
-first that can, and the composer does not offer it for a remote Project yet. SSH
+first that can, and a local window's composer offers it for a remote Project
+where the target's status lists it placeable and its path is set there. SSH
 targets, their runtime paths, their
 attestation digests, remote bindings, managed worktrees, remote terminals'
 starts and ends, and a placed runtime's egress are journaled. Its
