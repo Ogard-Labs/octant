@@ -96,6 +96,15 @@ export interface AcpProcessProfile {
   /** Project-root entries the agent may neither read nor write. */
   readonly forbiddenRootEntries?: ReadonlyArray<string>;
   readonly confinement: AcpConfinementStrategy;
+  /**
+   * How the agent runs on a remote target the host reaches, such as an SSH
+   * target. A placed launch carries only a program, its arguments, and its
+   * account state, so a profile states this only when that is its whole
+   * launch; `acpRemotePlacement` refuses one that would leave a guard, a
+   * variable, a managed file, or a denied path of its local launch behind.
+   * Absent: the agent is never placed.
+   */
+  readonly remote?: { readonly args: ReadonlyArray<string> };
 }
 
 /**

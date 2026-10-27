@@ -175,6 +175,57 @@ describe("SSH target administration routes", () => {
     expect(existsSync(join(directory, "ssh-ran"))).toBe(false);
   });
 
+  it("records where a provider's runtime is on a target for a local window only", async () => {
+    const { handle, connections } = setup();
+    const probed = await handle(post(SSH_TARGET_ROUTES.hostKey, { destination: "devbox" }));
+    const probe = (await probed?.json()) as { probeId: string; fingerprint: string };
+    const registered = await handle(
+      post(SSH_TARGET_ROUTES.register, {
+        probeId: probe.probeId,
+        fingerprint: probe.fingerprint,
+        executorPath: "/opt/octant/bin/octant",
+      }),
+    );
+    if (registered === undefined) throw new Error("the route did not answer");
+    const { target } = (await registered.json()) as { target: { id: string } };
+    const setting = {
+      targetId: target.id,
+      providerInstanceId: "66666666-6666-4666-8666-666666666666",
+      path: "/opt/agent/bin/agent",
+    };
+    // A paired device holds no bridge secret, so it cannot choose what runs there.
+    expect(
+      (
+        await handle(
+          post(SSH_TARGET_ROUTES.runtimeBinary, setting, { "x-octant-desktop-secret": "" }),
+        )
+      )?.status,
+    ).toBe(401);
+    expect(
+      (await handle(post(SSH_TARGET_ROUTES.runtimeBinary, { ...setting, path: "bin/agent" })))
+        ?.status,
+    ).toBe(400);
+    expect(
+      (
+        await handle(
+          post(SSH_TARGET_ROUTES.runtimeBinary, {
+            ...setting,
+            targetId: "77777777-7777-4777-8777-777777777777",
+          }),
+        )
+      )?.status,
+    ).toBe(404);
+    expect(connections.list()[0]?.runtimeBinaries).toEqual([]);
+    const set = await handle(post(SSH_TARGET_ROUTES.runtimeBinary, setting));
+    expect(set?.status).toBe(200);
+    expect(await set?.json()).toMatchObject({
+      runtimeBinaries: [
+        { providerInstanceId: setting.providerInstanceId, path: "/opt/agent/bin/agent" },
+      ],
+    });
+    connections.close();
+  });
+
   it("refuses to bind a remote root on a target with no attested connection, and binds nothing", async () => {
     const { handle } = setup();
     const probed = await handle(post(SSH_TARGET_ROUTES.hostKey, { destination: "devbox" }));

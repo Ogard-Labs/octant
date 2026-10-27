@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { decodeProviderInstanceId } from "@octant/contracts";
 import { decodeUtcTimestamp } from "@octant/contracts/events";
 import { decodeCodeTerminalId } from "@octant/contracts/code";
 import { decodeProjectId } from "@octant/contracts/projects";
@@ -35,6 +36,9 @@ const target = (id: string, destination: string): SshTarget => ({
 });
 
 const devbox = target("11111111-1111-4111-8111-111111111111", "build@devbox.internal");
+const agentPath = Schema.decodeUnknownSync(SshRemotePath);
+const firstInstance = decodeProviderInstanceId("99999999-9999-4999-8999-999999999991");
+const secondInstance = decodeProviderInstanceId("99999999-9999-4999-8999-999999999992");
 const spare = target("22222222-2222-4222-8222-222222222222", "spare.internal");
 
 const attestation: SshAttestation = {
@@ -69,7 +73,7 @@ afterEach(() => {
 });
 
 describe("SSH target journal", () => {
-  it("replays registration, re-pin, attestation, binding, and removal to the same targets and Projects", () => {
+  it("replays registration, re-pin, attestation, runtime paths, binding, and removal to the same targets and Projects", () => {
     const { store, connection, journal } = opened;
     expect(store.register(devbox)).toBe("recorded");
     expect(store.register(spare)).toBe("recorded");
@@ -84,6 +88,20 @@ describe("SSH target journal", () => {
     expect(store.bindProject(project)).toBe("recorded");
     // A binding never changes: a second one under the same id is refused.
     expect(store.bindProject({ ...project, targetId: spare.id })).toBe("refused");
+    // One path per provider instance, the latest replacing the earlier; a
+    // removed target's paths go with it.
+    expect(
+      store.setRuntimeBinary(devbox.id, firstInstance, agentPath("/opt/agent/bin/agent")),
+    ).toBe("recorded");
+    expect(
+      store.setRuntimeBinary(devbox.id, secondInstance, agentPath("/opt/other/bin/agent")),
+    ).toBe("recorded");
+    expect(
+      store.setRuntimeBinary(devbox.id, firstInstance, agentPath("/opt/agent-2/bin/agent")),
+    ).toBe("recorded");
+    expect(store.setRuntimeBinary(spare.id, firstInstance, agentPath("/opt/agent/bin/agent"))).toBe(
+      "recorded",
+    );
     expect(store.remove(spare.id)).toBe("recorded");
 
     const expectState = () => {
@@ -103,6 +121,11 @@ describe("SSH target journal", () => {
         ],
       });
       expect(readSshRemoteProjects(connection)).toEqual([project]);
+      expect(store.runtimeBinaries(devbox.id)).toEqual([
+        { providerInstanceId: secondInstance, path: "/opt/other/bin/agent" },
+        { providerInstanceId: firstInstance, path: "/opt/agent-2/bin/agent" },
+      ]);
+      expect(store.runtimeBinaries(spare.id)).toEqual([]);
     };
     expectState();
 
@@ -182,9 +205,10 @@ describe("SSH target journal", () => {
     expect(() => statSync(pin)).toThrow();
   });
 
-  it("exports targets without their destination, host key, executor path, or remote roots", () => {
+  it("exports targets without their destination, host key, executor path, runtime paths, or remote roots", () => {
     const { store } = opened;
     store.register(devbox);
+    store.setRuntimeBinary(devbox.id, firstInstance, agentPath("/opt/agent-private/bin/agent"));
     store.recordAttestation(devbox.id, attestation, [
       { posture: "plan", decision: { status: "admitted" } },
     ]);
@@ -209,6 +233,7 @@ describe("SSH target journal", () => {
       FIRST_KEY,
       "SHA256:",
       "/opt/octant-private",
+      "/opt/agent-private",
       "/home/build/private-app",
     ]) {
       expect(serialized).not.toContain(secret);

@@ -469,6 +469,73 @@ describe("Code routes", () => {
     expect(approve).toHaveBeenCalledOnce();
   });
 
+  it("serves debugging to a local window only, and refuses a paired device before reading its request", async () => {
+    const session = vi.fn(async () => ({ status: "refused", reason: "no-session" }));
+    const debug = {
+      configurations: vi.fn(),
+      approve: vi.fn(),
+      start: vi.fn(),
+      session,
+    };
+    const route = routeFixture({}, undefined, undefined, [], undefined, debug);
+    const post = (path: string, body: unknown) =>
+      request(path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const call = {
+      threadId,
+      checkoutId,
+      sessionId: "00000000-0000-4000-8000-000000000951",
+      request: { kind: "state" },
+    };
+    const answered = await route(post("/api/code/debug/session", call));
+    expect(answered?.status).toBe(200);
+    await expect(answered?.json()).resolves.toEqual({ status: "refused", reason: "no-session" });
+    expect(session).toHaveBeenCalledWith({ scopeId: windowId, principal: "local-window" }, call);
+
+    // No request outside the closed list decodes: `attach`, a memory read, or
+    // a window named by the caller.
+    for (const body of [
+      { ...call, request: { kind: "attach", processId: 1 } },
+      { ...call, request: { kind: "read-memory", memoryReference: "0x0" } },
+      { ...call, windowId },
+    ]) {
+      expect((await route(post("/api/code/debug/session", body)))?.status).toBe(400);
+    }
+    expect(session).toHaveBeenCalledOnce();
+
+    for (const path of [
+      "/api/code/debug/configurations",
+      "/api/code/debug/approvals",
+      "/api/code/debug/start",
+      "/api/code/debug/session",
+    ]) {
+      const remoteDeviceId = "00000000-0000-4000-8000-000000000952";
+      const remoteRequest = post(path, call);
+      bindPrincipalRouteContext(remoteRequest, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "00000000-0000-4000-8000-000000000953" as never,
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      expect((await route(remoteRequest))?.status).toBe(403);
+    }
+    expect(debug.configurations).not.toHaveBeenCalled();
+    expect(debug.approve).not.toHaveBeenCalled();
+    expect(debug.start).not.toHaveBeenCalled();
+    expect(session).toHaveBeenCalledOnce();
+
+    expect((await routeFixture()(post("/api/code/debug/session", call)))?.status).toBe(503);
+  });
+
   it("reports language services unavailable on a host without them", async () => {
     const response = await routeFixture()(
       request("/api/code/language/read", {
@@ -1978,6 +2045,7 @@ function routeFixture(
     readonly read: (...args: never[]) => unknown;
     readonly approve?: (...args: never[]) => unknown;
   },
+  debug?: Readonly<Record<"configurations" | "approve" | "start" | "session", unknown>>,
 ) {
   const store = new WindowAuthorityStore();
   store.register({ windowId, capability, now: 0 });
@@ -2005,5 +2073,6 @@ function routeFixture(
     ...(maxJsonBodySize === undefined ? {} : { maxJsonBodySize }),
     ...(projectTerminals === undefined ? {} : { projectTerminals: projectTerminals as never }),
     ...(language === undefined ? {} : { language: language as never }),
+    ...(debug === undefined ? {} : { debug: debug as never }),
   });
 }

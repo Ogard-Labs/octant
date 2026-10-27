@@ -25,6 +25,11 @@ import {
 } from "./pinnedUpstreamPackageFetcher";
 import { createMarketplaceFetch } from "./marketplaceHttps";
 import {
+  DebugAdapterPackageRefusedError,
+  readDebugAdapterPackage,
+  type DebugAdapterPackageInput,
+} from "./debugAdapterPackage";
+import {
   LanguageServerPackageRefusedError,
   readLanguageServerPackage,
   type LanguageServerPackageInput,
@@ -40,7 +45,8 @@ export type PluginPackageInput =
   | CodexPluginPackageInput
   | AgentPluginPackageInput
   | LanguageServerPackageInput
-  | OutsideProviderDriverPackageInput;
+  | OutsideProviderDriverPackageInput
+  | DebugAdapterPackageInput;
 
 /**
  * A live Agent Plugins catalog source (today npm) that the resolver can search
@@ -253,6 +259,11 @@ export class CodexPluginPackageResolver implements ExtensionPackageResolverPort 
 
 function normalizePluginPackage(input: PluginPackageInput): ResolvedExtensionPackage {
   if ("layout" in input) {
+    if (input.layout === "debug-adapter-package") {
+      const reading = readDebugAdapterPackage(input);
+      if (reading.status === "refused") throw new DebugAdapterPackageRefusedError(reading.reason);
+      return reading.resolved;
+    }
     if (input.layout === "language-server-package") {
       const reading = readLanguageServerPackage(input);
       if (reading.status === "refused") throw new LanguageServerPackageRefusedError(reading.reason);

@@ -45,23 +45,19 @@ export function readLanguageServerPackage(
   // A folder the person picked is the only source until a marketplace
   // package can carry a publisher signature.
   if (input.source.kind !== "local-folder") return refused("source-unsupported");
-  const document = parseJsonFile(input.entries, LANGUAGE_SERVER_PACKAGE_DOCUMENT_PATH);
+  const document = parsePackageDocumentFile(input.entries, LANGUAGE_SERVER_PACKAGE_DOCUMENT_PATH);
   if (!isRecord(document) || !isRecord(document.manifest)) return refused("document-invalid");
   const reading = readLanguageServerPackageDocument(document);
   if (reading.status === "refused") return reading;
   // The digest covers the document as the author wrote it, so the host adds
   // its facts to the raw manifest rather than to the decoded one.
-  const authored = document.manifest;
-  const slug = reading.document.manifest.slug;
-  const manifest = {
-    ...authored,
-    extensionId: stableUuid(`extension:${input.source.sourceRef}:${slug}`),
-    packageId: stableUuid(`package:${input.source.sourceRef}:${slug}`),
-    digest: `sha256:${"0".repeat(64)}`,
-    source: input.source,
-    provenance: { ...(isRecord(authored.provenance) ? authored.provenance : {}), reviewed: false },
-  };
-  const filesRefusal = packageFilesRefusal(
+  const manifest = hostStatedManifest(
+    "octant.language-server-package",
+    input.source,
+    document.manifest,
+    reading.document.manifest.slug,
+  );
+  const filesRefusal = binaryOnlyFilesRefusal(
     input.entries,
     reading.document.manifest.components[0]?.entryPoint,
   );
@@ -127,10 +123,14 @@ export function languageServerPackageRefusalMessage(
   }
 }
 
-function packageFilesRefusal(
+/**
+ * A package whose binary is its only executable file: the entry point must be
+ * an executable file in the package, and no other file may be executable.
+ */
+export function binaryOnlyFilesRefusal(
   entries: ReadonlyArray<ExtensionArchiveEntry>,
   entryPoint: string | undefined,
-): LanguageServerPackageRefusalReason | undefined {
+): "entry-point-missing" | "ships-other-program" | undefined {
   const files = entries.filter((entry) => entry.kind === "file");
   const binary = files.find((entry) => entry.path === entryPoint);
   if (entryPoint === undefined || binary?.executable !== true) return "entry-point-missing";
@@ -140,7 +140,11 @@ function packageFilesRefusal(
   return undefined;
 }
 
-function parseJsonFile(entries: ReadonlyArray<ExtensionArchiveEntry>, path: string): unknown {
+/** A package document read as strict UTF-8 JSON; anything else reads as undefined. */
+export function parsePackageDocumentFile(
+  entries: ReadonlyArray<ExtensionArchiveEntry>,
+  path: string,
+): unknown {
   const entry = entries.find((candidate) => candidate.path === path && candidate.kind === "file");
   if (entry?.content === undefined) return undefined;
   try {
@@ -150,7 +154,7 @@ function parseJsonFile(entries: ReadonlyArray<ExtensionArchiveEntry>, path: stri
   }
 }
 
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+export function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -159,16 +163,32 @@ function refused(reason: LanguageServerPackageRefusalReason): LanguageServerPack
 }
 
 /**
- * The stored identity of a folder's server, derived from the folder and the
- * slug so a new version from the same folder updates the same package, and a
- * package can never name itself into another one's identity, the bundled
- * server's included.
+ * The manifest as the host stores it: the author's own, with the facts only
+ * the host states added. The identity is derived from the folder and the
+ * slug, under a namespace per package kind, so a new version from the same
+ * folder updates the same package, and a package can never name itself into
+ * another one's identity, a bundled component's included. The digest covers
+ * the document as the author wrote it, so the facts are added to the raw
+ * manifest rather than to the decoded one.
  */
-function stableUuid(seed: string): string {
-  const bytes = createHash("sha256")
-    .update(`octant.language-server-package\0${seed}`)
-    .digest()
-    .subarray(0, 16);
+export function hostStatedManifest(
+  namespace: string,
+  source: Extract<ExtensionSource, { readonly kind: "local-folder" }>,
+  authored: Readonly<Record<string, unknown>>,
+  slug: string,
+): Readonly<Record<string, unknown>> {
+  return {
+    ...authored,
+    extensionId: stableUuid(namespace, `extension:${source.sourceRef}:${slug}`),
+    packageId: stableUuid(namespace, `package:${source.sourceRef}:${slug}`),
+    digest: `sha256:${"0".repeat(64)}`,
+    source,
+    provenance: { ...(isRecord(authored.provenance) ? authored.provenance : {}), reviewed: false },
+  };
+}
+
+function stableUuid(namespace: string, seed: string): string {
+  const bytes = createHash("sha256").update(`${namespace}\0${seed}`).digest().subarray(0, 16);
   bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x50;
   bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
   const hex = bytes.toString("hex");

@@ -30,6 +30,9 @@ const status = {
       decision: { status: "refused", reason: "confinement-backend-missing" },
     },
   ],
+  runtimeBinaries: [
+    { providerInstanceId: "77777777-7777-4777-8777-777777777777", path: "/opt/agent/bin/agent" },
+  ],
 };
 
 function harness(ask?: (question: string) => Promise<string | undefined>) {
@@ -112,6 +115,36 @@ describe("octant ssh-target", () => {
       );
     }
     expect(right.sent.at(-1)?.path).toBe("/api/desktop/ssh-targets/register");
+  });
+
+  it("sets where a provider's runtime is on a target through the local route, and lists it", async () => {
+    const run = harness();
+    expect(
+      await run.run([
+        "runtime",
+        status.target.id,
+        "77777777-7777-4777-8777-777777777777",
+        "/opt/agent/bin/agent",
+      ]),
+    ).toBe(0);
+    expect(run.sent).toEqual([
+      {
+        path: "/api/desktop/ssh-targets/runtime-binary",
+        method: "POST",
+        body: {
+          targetId: status.target.id,
+          providerInstanceId: "77777777-7777-4777-8777-777777777777",
+          path: "/opt/agent/bin/agent",
+        },
+      },
+    ]);
+    expect(run.out.join("")).toContain(
+      "runtime of 77777777-7777-4777-8777-777777777777 at /opt/agent/bin/agent",
+    );
+    expect(resolveSshTargetCliCommand(["runtime", "id", "instance"], {})).toBeUndefined();
+    expect(
+      resolveSshTargetCliCommand(["runtime", "id", "instance", "/a", "/b"], {}),
+    ).toBeUndefined();
   });
 
   it("re-pins against the target's own destination", async () => {

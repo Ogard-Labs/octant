@@ -972,14 +972,23 @@ describe("RepositoryTestProcessPort", () => {
   it("reports uncertain cleanup and fails closed on unsupported process-group platforms", async () => {
     const child = fakeChild(4321);
     const receiptDirectory = temporaryDirectory();
+    // The receipt write is held until well after cleanup has given up on the
+    // group, so an uncertain result reported without waiting for the receipt
+    // reaches the assertion with nothing on disk for a restart to reap.
+    let releaseIdentity = () => {};
+    const identity = new Promise<string>((resolveIdentity) => {
+      releaseIdentity = () => resolveIdentity(`sha256:${"a".repeat(64)}`);
+    });
     const uncertain = new RepositoryTestProcessPort(
       confinedOptions({
         spawn: () => child,
-        killProcessGroup: vi.fn(),
+        killProcessGroup: (_pid, signal) => {
+          if (signal === "SIGKILL") setTimeout(releaseIdentity, 50);
+        },
         processGroupExists: () => true,
         gracefulTimeoutMs: 1,
         receiptDirectory,
-        processIdentity: async () => `sha256:${"a".repeat(64)}`,
+        processIdentity: () => identity,
       }),
     );
     await expect(

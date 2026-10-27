@@ -6,7 +6,14 @@ import { describe, expect, it } from "vitest";
 import type { CodeThread, WindowId } from "@octant/contracts";
 import { makeProcessConfinementLive } from "../process/seatbeltProfile";
 import { liveCodeTestSourcePort, type CodeTestSourcePort } from "./codeDirectoryPort";
-import { createCodeAcpClientTools, type CodeAcpTerminalConfinement } from "./codeAcpClientTools";
+import { ACP_CLIENT_TOOL_NAMES } from "@octant/provider-sdk";
+import type { NativeHarnessShellRun } from "../harness/nativeHarnessTools";
+import {
+  createCodeAcpClientTools,
+  createRemoteCodeAcpClientTools,
+  type CodeAcpTerminalConfinement,
+  type RemoteCodeAcpClientToolsOptions,
+} from "./codeAcpClientTools";
 
 const windowId = "10000000-0000-4000-8000-000000000001" as WindowId;
 
@@ -399,4 +406,202 @@ describe("ACP Code client tools", () => {
       }
     },
   );
+});
+
+describe("ACP Code client tools on an SSH target", () => {
+  const remoteRoot = "/home/build/app";
+
+  /** The target's file tool and shell as a turn's remote harness binds them, recording each call. */
+  function remote(
+    executionPolicy: CodeThread["executionPolicy"],
+    files: Record<string, string> = {},
+  ) {
+    const calls: string[] = [];
+    const commands: Array<{ readonly command: string; readonly signal?: AbortSignal }> = [];
+    let finishCommand: (run: NativeHarnessShellRun) => void = () => undefined;
+    const filesystem: RemoteCodeAcpClientToolsOptions["filesystem"] = {
+      read: async ({ path, offset, limit }) => {
+        calls.push(`read ${path}@${String(offset ?? 0)}`);
+        const content = files[path];
+        if (content === undefined) return { kind: "refused", reason: "path-not-found" };
+        const all = content.split("\n");
+        const start = offset ?? 0;
+        // Two lines a run, so a whole file takes several.
+        const lines = all.slice(start, start + Math.min(limit ?? 2, 2));
+        const next = start + lines.length;
+        return {
+          kind: "file",
+          path,
+          startLine: start,
+          lines,
+          totalLines: all.length,
+          ...(next < all.length ? { nextLine: next } : {}),
+          bounds: { truncated: next < all.length, returnedBytes: 0 },
+        };
+      },
+      write: async ({ path, content }) => {
+        calls.push(`write ${path}`);
+        files[path] = content;
+        return { kind: "written", path, bytes: content.length, created: true };
+      },
+    };
+    const tools = createRemoteCodeAcpClientTools({
+      root: remoteRoot,
+      thread: thread(executionPolicy),
+      readExecutionPolicy: () => executionPolicy,
+      filesystem,
+      shell: {
+        run: (input) => {
+          calls.push("command");
+          commands.push({
+            command: input.command,
+            ...(input.signal === undefined ? {} : { signal: input.signal }),
+          });
+          return new Promise((resolve) => {
+            finishCommand = resolve;
+            input.signal?.addEventListener("abort", () =>
+              resolve({ status: "cancelled", output: "stopped", truncated: false }),
+            );
+          });
+        },
+      },
+      uuid: () => "terminal-1",
+    });
+    const call = async (name: string, input: unknown, signal?: AbortSignal) =>
+      tools.execute({
+        name,
+        inputJson: JSON.stringify(input),
+        ...(signal === undefined ? {} : { signal }),
+      });
+    return {
+      tools,
+      calls,
+      commands,
+      call,
+      finish: (run: NativeHarnessShellRun) => finishCommand(run),
+    };
+  }
+
+  it("refuses a client file write or a terminal in Plan before anything is asked of the target", async () => {
+    const target = remote("plan");
+    expect(target.tools.definitions.map((definition) => definition.name)).toEqual([
+      ACP_CLIENT_TOOL_NAMES.readTextFile,
+    ]);
+    expect(
+      await target.call(ACP_CLIENT_TOOL_NAMES.writeTextFile, {
+        path: `${remoteRoot}/notes.md`,
+        content: "planned",
+      }),
+    ).toEqual({ result: { error: "read-only-posture" }, isError: true });
+    expect(
+      await target.call(ACP_CLIENT_TOOL_NAMES.terminalCreate, { command: "touch planned" }),
+    ).toEqual({ result: { error: "read-only-posture" }, isError: true });
+    expect(target.calls).toEqual([]);
+  });
+
+  it("reads a whole file run after run through the target's file tool, and a span of it once", async () => {
+    const target = remote("approval-gated", {
+      [`${remoteRoot}/README.md`]: "one\ntwo\nthree\nfour\nfive",
+    });
+    expect(
+      await target.call(ACP_CLIENT_TOOL_NAMES.readTextFile, { path: `${remoteRoot}/README.md` }),
+    ).toEqual({ result: { content: "one\ntwo\nthree\nfour\nfive" } });
+    expect(
+      await target.call(ACP_CLIENT_TOOL_NAMES.readTextFile, {
+        path: `${remoteRoot}/README.md`,
+        line: 2,
+        limit: 2,
+      }),
+    ).toEqual({ result: { content: "two\nthree" } });
+    expect(await target.call(ACP_CLIENT_TOOL_NAMES.readTextFile, { path: "README.md" })).toEqual({
+      result: { error: "path-outside-checkout" },
+      isError: true,
+    });
+    expect(target.calls).toEqual([
+      `read ${remoteRoot}/README.md@0`,
+      `read ${remoteRoot}/README.md@2`,
+      `read ${remoteRoot}/README.md@4`,
+      `read ${remoteRoot}/README.md@1`,
+    ]);
+  });
+
+  it("writes a file on the target in a writing posture", async () => {
+    const files: Record<string, string> = {};
+    const target = remote("auto-accept-edits", files);
+    expect(
+      await target.call(ACP_CLIENT_TOOL_NAMES.writeTextFile, {
+        path: `${remoteRoot}/notes.md`,
+        content: "written on the target",
+      }),
+    ).toEqual({ result: {} });
+    expect(files[`${remoteRoot}/notes.md`]).toBe("written on the target");
+  });
+
+  it("runs a terminal as one command on the target, with its output and exit once it ended", async () => {
+    const target = remote("approval-gated");
+    expect(
+      await target.call(ACP_CLIENT_TOOL_NAMES.terminalCreate, {
+        command: "printf",
+        args: ["%s\\n", "it's here"],
+        env: [{ name: "GREETING", value: "a'b" }],
+        cwd: `${remoteRoot}/src`,
+        outputByteLimit: 4,
+      }),
+    ).toEqual({ result: { terminalId: "terminal-1" } });
+    // Every word reaches the target's shell exactly as the agent gave it.
+    expect(target.commands[0]?.command).toBe(
+      [
+        `cd -- '${remoteRoot}/src' || exit 126`,
+        "export GREETING='a'\\''b'",
+        "exec 'printf' '%s\\n' 'it'\\''s here'",
+      ].join("\n"),
+    );
+    // The executor answers once the command ended; until then there is nothing to read.
+    expect(
+      await target.call(ACP_CLIENT_TOOL_NAMES.terminalOutput, { terminalId: "terminal-1" }),
+    ).toEqual({ result: { output: "", truncated: false } });
+    target.finish({ status: "ran", exitCode: 0, output: "it's here\n", truncated: false });
+    expect(
+      await target.call(ACP_CLIENT_TOOL_NAMES.terminalWaitForExit, { terminalId: "terminal-1" }),
+    ).toEqual({ result: { exitCode: 0 } });
+    expect(
+      await target.call(ACP_CLIENT_TOOL_NAMES.terminalOutput, { terminalId: "terminal-1" }),
+    ).toEqual({ result: { output: "ere\n", truncated: true, exitStatus: { exitCode: 0 } } });
+    expect(
+      await target.call(ACP_CLIENT_TOOL_NAMES.terminalRelease, { terminalId: "terminal-1" }),
+    ).toEqual({ result: {} });
+    expect(
+      await target.call(ACP_CLIENT_TOOL_NAMES.terminalOutput, { terminalId: "terminal-1" }),
+    ).toEqual({ result: { error: "terminal-unknown" }, isError: true });
+  });
+
+  it("stops a terminal's command on the target when it is killed", async () => {
+    const target = remote("approval-gated");
+    await target.call(ACP_CLIENT_TOOL_NAMES.terminalCreate, { command: "sleep 600" });
+    expect(
+      await target.call(ACP_CLIENT_TOOL_NAMES.terminalKill, { terminalId: "terminal-1" }),
+    ).toEqual({ result: {} });
+    expect(target.commands[0]?.signal?.aborted).toBe(true);
+    expect(
+      await target.call(ACP_CLIENT_TOOL_NAMES.terminalWaitForExit, { terminalId: "terminal-1" }),
+    ).toEqual({ result: { signal: "SIGTERM" } });
+  });
+
+  it("refuses a working folder outside the bound root, and a variable that would redirect the command's proxy", async () => {
+    const target = remote("approval-gated");
+    for (const cwd of ["/home/build", `${remoteRoot}/../other`, "/etc"]) {
+      expect(
+        await target.call(ACP_CLIENT_TOOL_NAMES.terminalCreate, { command: "ls", cwd }),
+      ).toEqual({ result: { error: "cwd-outside-checkout" }, isError: true });
+    }
+    for (const name of ["HTTPS_PROXY", "no_proxy", "PATH", "HOME"]) {
+      expect(
+        await target.call(ACP_CLIENT_TOOL_NAMES.terminalCreate, {
+          command: "ls",
+          env: [{ name, value: "http://elsewhere.example" }],
+        }),
+      ).toEqual({ result: { error: "invalid-environment" }, isError: true });
+    }
+    expect(target.calls).toEqual([]);
+  });
 });

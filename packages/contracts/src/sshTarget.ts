@@ -10,7 +10,7 @@
  */
 
 import { Schema } from "effect";
-import { ProviderExecutionPolicy } from "./providers";
+import { ProviderExecutionPolicy, ProviderInstanceId } from "./providers";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -337,6 +337,29 @@ export const SshTargetRequest = Schema.Struct({ targetId: SshTargetId }).annotat
 export type SshTargetRequest = typeof SshTargetRequest.Type;
 
 /**
+ * Where one provider instance's runtime is on a target, as the person set it
+ * from this machine. A runtime placed on the target launches this path and
+ * no other: never one from the model, the remote root, or the target's own
+ * report. The executor still checks the file before every launch.
+ */
+export const SshRuntimeBinary = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  path: SshRemotePath,
+}).annotations(strict);
+export type SshRuntimeBinary = typeof SshRuntimeBinary.Type;
+
+/** The most runtime paths one target holds, one per provider instance. */
+export const SSH_TARGET_MAX_RUNTIME_BINARIES = 64;
+
+/** Sets, or replaces, the runtime path of one provider instance on a target. */
+export const SshRuntimeBinarySetRequest = Schema.Struct({
+  targetId: SshTargetId,
+  providerInstanceId: ProviderInstanceId,
+  path: SshRemotePath,
+}).annotations(strict);
+export type SshRuntimeBinarySetRequest = typeof SshRuntimeBinarySetRequest.Type;
+
+/**
  * The connection as this host sees it now. It lives in memory only and is
  * never journaled: a restart begins every target at `not-connected`.
  */
@@ -368,6 +391,9 @@ export const SshTargetStatus = Schema.Struct({
   remoteUser: Schema.optional(SshRemoteUser),
   platform: Schema.optional(SshTargetPlatform),
   admission: Schema.Array(SshTargetPostureAdmission).pipe(Schema.maxItems(8)),
+  runtimeBinaries: Schema.Array(SshRuntimeBinary).pipe(
+    Schema.maxItems(SSH_TARGET_MAX_RUNTIME_BINARIES),
+  ),
 }).annotations(strict);
 export type SshTargetStatus = typeof SshTargetStatus.Type;
 
@@ -387,6 +413,8 @@ export const SshTargetAdministrationRefusalReason = Schema.Literal(
   "unknown-target",
   /** A re-pin probe was made for another destination than the target's. */
   "destination-mismatch",
+  /** The target already holds the most runtime paths it may. */
+  "too-many-runtime-binaries",
 );
 export type SshTargetAdministrationRefusalReason = typeof SshTargetAdministrationRefusalReason.Type;
 

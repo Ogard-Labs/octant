@@ -19,6 +19,7 @@ import type {
 } from "@octant/contracts/extensions";
 import type {
   ExtensionPackagePreview,
+  ExtensionPackageReviewDebugAdapter,
   ExtensionPackageReviewLanguageServer,
   ExtensionProjectPinListing,
 } from "@octant/contracts/extension-rpc";
@@ -212,6 +213,45 @@ function LanguageServerReview(props: { readonly review: ExtensionPackageReviewLa
           Project&apos;s network rules allow. It never runs in Plan or for a paired device.
         </p>
       )}
+    </div>
+  );
+}
+
+/**
+ * What a person reviews before a debug adapter can run: the binary that would
+ * start, its own digest, the runtimes it labels, the `launch` body it sends
+ * with its placeholders, and whether it takes a debug port, with what trusting
+ * it grants in words.
+ */
+function DebugAdapterReview(props: { readonly review: ExtensionPackageReviewDebugAdapter }) {
+  const { review } = props;
+  return (
+    <div className="extensions-settings__instruction-review">
+      <dl className="extensions-settings__compatibility" aria-label="Debug adapter review">
+        <div>
+          <dt>Binary</dt>
+          <dd>{review.binary}</dd>
+        </div>
+        <div>
+          <dt>Binary digest</dt>
+          <dd>{review.binaryDigest}</dd>
+        </div>
+        <div>
+          <dt>Runtimes</dt>
+          <dd>{review.runtimes.join(", ")}</dd>
+        </div>
+        <div>
+          <dt>Debug port</dt>
+          <dd>{review.debugPorts === 1 ? "One, chosen by Octant" : "None"}</dd>
+        </div>
+      </dl>
+      <p className="extensions-settings__preview-heading">Launch request</p>
+      <pre>{JSON.stringify(review.launchArguments, null, 2)}</pre>
+      <p className="extensions-settings__effective">
+        It runs programs from the checkout and can write the checkout. It reaches only the hosts the
+        thread&apos;s network rules allow, and runs only a configuration you confirm and start
+        yourself. It never runs in Plan, for a paired device, or for an agent.
+      </p>
     </div>
   );
 }
@@ -1307,6 +1347,9 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                                   {component.languageServer === undefined ? null : (
                                     <LanguageServerReview review={component.languageServer} />
                                   )}
+                                  {component.debugAdapter === undefined ? null : (
+                                    <DebugAdapterReview review={component.debugAdapter} />
+                                  )}
                                 </li>
                               ))}
                             </ul>
@@ -1399,6 +1442,9 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                           )}
                           {component.languageServer === undefined ? null : (
                             <LanguageServerReview review={component.languageServer} />
+                          )}
+                          {component.debugAdapter === undefined ? null : (
+                            <DebugAdapterReview review={component.debugAdapter} />
                           )}
                         </li>
                       ))}

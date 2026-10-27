@@ -184,6 +184,12 @@ import {
   CODE_LANGUAGE_SERVER_EVENT_NAMES,
   CodeLanguageServerApprovalGranted,
 } from "@octant/contracts/code-language";
+import {
+  CODE_DEBUG_EVENT_NAMES,
+  CodeDebugConfigurationApproved,
+  CodeDebugSessionEnded,
+  CodeDebugSessionStarted,
+} from "@octant/contracts/code-debug";
 import { HostOAuthJournalRecord } from "@octant/contracts/host-oauth";
 import { ProviderKeyJournalRecord } from "@octant/contracts/provider-key-journal";
 import {
@@ -241,6 +247,7 @@ import {
   SshTargetRegistered,
   SshTargetRemoved,
   SshTargetRepinned,
+  SshTargetRuntimeBinarySet,
 } from "@octant/contracts/ssh-target-events";
 import { RemoteAccessProjection } from "./remoteAccessProjection";
 import {
@@ -450,6 +457,18 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       1,
       ThreadEgressLaunchSummarizedPayload,
     )
+    .register(CODE_DEBUG_EVENT_NAMES.configurationApproved, 1, CodeDebugConfigurationApproved)
+    .register(CODE_DEBUG_EVENT_NAMES.sessionStarted, 1, CodeDebugSessionStarted)
+    .register(CODE_DEBUG_EVENT_NAMES.sessionEnded, 1, CodeDebugSessionEnded)
+    // A debug session's egress is audited with the payloads a harness
+    // command's `proxied` launch uses, under names of its own.
+    .register(CODE_DEBUG_EVENT_NAMES.egressLaunchStarted, 1, ThreadEgressLaunchStartedPayload)
+    .register(
+      CODE_DEBUG_EVENT_NAMES.egressDecisionsRecorded,
+      1,
+      ThreadEgressDecisionsRecordedPayload,
+    )
+    .register(CODE_DEBUG_EVENT_NAMES.egressLaunchSummarized, 1, ThreadEgressLaunchSummarizedPayload)
     .register(AGENT_RUN_REQUESTED, 1, AgentRunRequested)
     .register(AGENT_RUN_STATUS_CHANGED, 1, AgentRunStatusChanged)
     .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged)
@@ -501,6 +520,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(SSH_TARGET_EVENT_NAMES.repinned, 1, SshTargetRepinned)
     .register(SSH_TARGET_EVENT_NAMES.attested, 1, SshTargetAttested)
     .register(SSH_TARGET_EVENT_NAMES.removed, 1, SshTargetRemoved)
+    .register(SSH_TARGET_EVENT_NAMES.runtimeBinarySet, 1, SshTargetRuntimeBinarySet)
     .register(SSH_REMOTE_PROJECT_EVENT_NAMES.bound, 1, SshRemoteProjectBound)
     .register(SSH_REMOTE_WORKTREE_EVENT_NAMES.created, 1, SshRemoteWorktreeCreated)
     .register(SSH_REMOTE_WORKTREE_EVENT_NAMES.removed, 1, SshRemoteWorktreeRemoved)

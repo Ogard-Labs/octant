@@ -3,8 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Exit, Fiber, Schema, Scope, Stream } from "effect";
 import { decodeProviderInstanceId, type ProviderFailure } from "@octant/contracts";
+import type { ProviderRemoteProcessPlacement } from "@octant/provider-sdk/driver";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { SshDestination, SshExecutorPath, SshRemotePath } from "@octant/contracts/ssh-target";
+import {
+  SshDestination,
+  SshExecutorPath,
+  SshRemotePath,
+  SshTargetId,
+} from "@octant/contracts/ssh-target";
 import {
   SSH_EXECUTOR_PREAMBLE,
   SSH_EXECUTOR_PROTOCOL_VERSION,
@@ -39,6 +45,8 @@ const BUILD = "0.9.0+test";
 const destination = Schema.decodeUnknownSync(SshDestination)("build@devbox.example");
 const decodeWindowId = Schema.decodeUnknownSync(WindowId);
 const executorPath = Schema.decodeUnknownSync(SshExecutorPath)("/opt/octant/bin/octant");
+const remotePath = Schema.decodeUnknownSync(SshRemotePath);
+const decodeTargetId = Schema.decodeUnknownSync(SshTargetId);
 
 const FAKE_SSH = String.raw`
 const fs = require("node:fs");
@@ -873,7 +881,7 @@ describe("SSH target connection service", () => {
     const session = connections.session(status.target.id);
     if (session === undefined) throw new Error("no session");
 
-    const refused = await launchExit(connections.placement(placementOn(session, "approval-gated")));
+    const refused = await launchExit(placeOn(connections, placementOn(session, "approval-gated")));
     expect(refused).toMatchObject({ category: "unavailable" });
     expect(proxies).toBe(0);
     expect(requests()).toEqual(["attest"]);
@@ -890,7 +898,7 @@ describe("SSH target connection service", () => {
     const scope = Effect.runSync(Scope.make());
     const placed = await Effect.runPromise(
       Scope.extend(
-        connections.placement(placementOn(session, "plan")).launch({
+        placeOn(connections, placementOn(session, "plan")).launch({
           executable: "/opt/agent/bin/agent",
           args: ["--acp"],
         }),
@@ -924,7 +932,7 @@ describe("SSH target connection service", () => {
     const status = await registered(connections);
     const session = connections.session(status.target.id);
     if (session === undefined) throw new Error("no session");
-    const placement = connections.placement(placementOn(session, "plan"));
+    const placement = placeOn(connections, placementOn(session, "plan"));
     const scope = Effect.runSync(Scope.make());
     const placed = await Effect.runPromise(
       Scope.extend(placement.launch({ executable: "/opt/agent/bin/agent", args: [] }), scope),
@@ -948,7 +956,7 @@ describe("SSH target connection service", () => {
     const failure = async (input: SshTargetPlacementInput, args: ReadonlyArray<string>) => {
       const exit = await Effect.runPromiseExit(
         Effect.scoped(
-          connections.placement(input).launch({ executable: "/opt/agent/bin/agent", args }),
+          placeOn(connections, input).launch({ executable: "/opt/agent/bin/agent", args }),
         ),
       );
       return Exit.isFailure(exit) && exit.cause._tag === "Fail" ? exit.cause.error : undefined;
@@ -963,7 +971,7 @@ describe("SSH target connection service", () => {
     ).toMatchObject({ category: "invalid-configuration" });
     const fiveStates = await Effect.runPromiseExit(
       Effect.scoped(
-        connections.placement(placementOn(session, "plan")).launch({
+        placeOn(connections, placementOn(session, "plan")).launch({
           executable: "/opt/agent/bin/agent",
           args: [],
           accountState: Array.from({ length: 5 }, (_, index) => ({
@@ -984,6 +992,48 @@ describe("SSH target connection service", () => {
     connections.close();
   });
 
+  it("places a runtime only at the path the person set for its provider on the target, refusing any other before any frame", async () => {
+    const requests = () =>
+      readFileSync(join(directory, "request.json.log"), "utf8").trim().split("\n");
+    const connections = service({ runtimeEgress: listeningEgress() });
+    const status = await registered(connections);
+    const session = connections.session(status.target.id);
+    if (session === undefined) throw new Error("no session");
+    const input = placementOn(session, "plan");
+    // Nothing set for this provider on this target: there is no placement.
+    expect(connections.placement(input)).toMatchObject({
+      status: "refused",
+      failure: { category: "invalid-configuration" },
+    });
+    const placement = placeOn(connections, input);
+    expect(placement.executable).toBe(AGENT);
+    expect(connections.list()[0]?.runtimeBinaries).toEqual([
+      { providerInstanceId: input.providerInstanceId, path: AGENT },
+    ]);
+    // A path of the driver's own, or the model's, never reaches the executor.
+    expect(await launchExit(placement, "/srv/app/tools/agent")).toMatchObject({
+      category: "invalid-configuration",
+    });
+    // Once the person points the provider elsewhere, the old placement starts nothing.
+    expect(
+      connections.setRuntimeBinary({
+        targetId: status.target.id,
+        providerInstanceId: input.providerInstanceId,
+        path: remotePath("/opt/agent-2/bin/agent"),
+      }),
+    ).toMatchObject({ status: "ok" });
+    expect(await launchExit(placement)).toMatchObject({ category: "interrupted" });
+    expect(requests()).toEqual(["attest"]);
+    expect(
+      connections.setRuntimeBinary({
+        targetId: decodeTargetId("99999999-9999-4999-8999-999999999999"),
+        providerInstanceId: input.providerInstanceId,
+        path: remotePath(AGENT),
+      }),
+    ).toMatchObject({ status: "refused", reason: "unknown-target" });
+    connections.close();
+  });
+
   it("places no runtime, in any posture, on a host without a runtime proxy", async () => {
     const requests = () =>
       readFileSync(join(directory, "request.json.log"), "utf8").trim().split("\n");
@@ -992,7 +1042,7 @@ describe("SSH target connection service", () => {
     const session = connections.session(status.target.id);
     if (session === undefined) throw new Error("no session");
     for (const posture of ["plan", "approval-gated"] as const) {
-      expect(await launchExit(connections.placement(placementOn(session, posture)))).toMatchObject({
+      expect(await launchExit(placeOn(connections, placementOn(session, posture)))).toMatchObject({
         category: "unavailable",
       });
     }
@@ -1011,6 +1061,25 @@ function listeningEgress(): ProviderRuntimeEgress {
       close: async () => undefined,
     }),
   };
+}
+
+/** The agent's path on the stand-in target, as the person set it there. */
+const AGENT = "/opt/agent/bin/agent";
+
+/** The placement for `input`, with the agent's path set on its target first. */
+function placeOn(
+  connections: SshTargetConnectionService,
+  input: SshTargetPlacementInput,
+): ProviderRemoteProcessPlacement {
+  const set = connections.setRuntimeBinary({
+    targetId: input.session.targetId,
+    providerInstanceId: input.providerInstanceId,
+    path: remotePath(AGENT),
+  });
+  if (set.status !== "ok") throw new Error(set.message);
+  const placement = connections.placement(input);
+  if (placement.status !== "placed") throw new Error(placement.failure.message);
+  return placement.placement;
 }
 
 const placementDriver = {
@@ -1036,10 +1105,11 @@ function placementOn(
 
 /** The failure a launch through the placement ends with, or undefined when it started. */
 async function launchExit(
-  placement: ReturnType<SshTargetConnectionService["placement"]>,
+  placement: ProviderRemoteProcessPlacement,
+  executable = AGENT,
 ): Promise<ProviderFailure | undefined> {
   const exit = await Effect.runPromiseExit(
-    Effect.scoped(placement.launch({ executable: "/opt/agent/bin/agent", args: [] })),
+    Effect.scoped(placement.launch({ executable, args: [] })),
   );
   if (Exit.isSuccess(exit)) return undefined;
   const failure = exit.cause._tag === "Fail" ? exit.cause.error : undefined;
