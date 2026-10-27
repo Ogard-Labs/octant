@@ -494,6 +494,20 @@
   color: var(--oct-meta);
 }
 
+/* A Project on an SSH target: whether its target is connected, as a dot the
+   row's label also states for assistive technology. */
+.remote-project-section__connection {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-inline: var(--oct-space-1);
+  border-radius: 50%;
+  background: var(--oct-meta);
+}
+.remote-project-section__connection[data-connected="true"] {
+  background: var(--oct-success-fg);
+}
+
 .project-row__action {
   min-height: var(--oct-nav-row-h);
   padding: 0 var(--oct-space-2);

@@ -78,6 +78,15 @@ export interface CodeAccessPickerProps {
   readonly onRaiseThread: (executionPolicy: ProviderExecutionPolicy) => void;
   /** Lower the durable thread grant back to approval-gated. Narrowing needs no confirmation. */
   readonly onLowerThread: (executionPolicy: ProviderExecutionPolicy) => void;
+  /**
+   * The postures the thread may be raised to, when fewer than all, and why
+   * the others are not offered. A thread on an SSH target is raised no
+   * further than Ask for approvals.
+   */
+  readonly raiseLimit?: {
+    readonly postures: ReadonlyArray<ProviderExecutionPolicy>;
+    readonly reason: string;
+  };
 }
 
 /**
@@ -108,14 +117,20 @@ export function CodeAccessPicker(props: CodeAccessPickerProps) {
     ...raises.map((id) => ({
       id,
       label: `Raise thread · ${CODE_ACCESS_POSTURE_LABEL[id]}`,
-      ...(id === "full-access" && !props.nativeConfirmationAvailable
+      ...(props.raiseLimit !== undefined && !props.raiseLimit.postures.includes(id)
         ? {
             disabled: true,
-            disabledNote: "Confirm in the desktop app",
-            disabledReason:
-              "Full access requires native confirmation, which only the desktop app can give. Remembered Project Full access is granted when a thread is created.",
+            disabledNote: "Not on an SSH target",
+            disabledReason: props.raiseLimit.reason,
           }
-        : {}),
+        : id === "full-access" && !props.nativeConfirmationAvailable
+          ? {
+              disabled: true,
+              disabledNote: "Confirm in the desktop app",
+              disabledReason:
+                "Full access requires native confirmation, which only the desktop app can give. Remembered Project Full access is granted when a thread is created.",
+            }
+          : {}),
     })),
   ];
   const harnessAsks = props.harnessAsksUnderFullAccess === true && props.value === "full-access";

@@ -116,7 +116,7 @@ export const REMOTE_CODE_THREAD_CONNECTORS_UNAVAILABLE =
  * for one it could place but does not start yet.
  */
 export const REMOTE_CODE_THREAD_PROVIDER_UNAVAILABLE =
-  "Threads on an SSH target run on Octant's own harness for now. Choose a model it runs.";
+  "This model is not available on an SSH target: threads there run on Octant's own harness for now.";
 
 /** Why a thread on an SSH target is not created holding Full access. */
 export const REMOTE_CODE_THREAD_FULL_ACCESS_UNAVAILABLE =

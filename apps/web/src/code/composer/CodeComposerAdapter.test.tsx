@@ -1090,4 +1090,166 @@ describe("CodeComposerAdapter interactions", () => {
 
     expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent("Plan");
   });
+
+  describe("for a Project on an SSH target", () => {
+    const pickerGroup = (
+      id: string,
+      displayName: string,
+      runtime: PickerGroup["runtime"],
+      modelName: string,
+    ): PickerGroup => ({
+      instance: decodeProviderInstance({
+        id,
+        displayName,
+        driverKind: "codex",
+        configuration: { kind: "codex-cli", binaryPath: "/opt/homebrew/bin/codex" },
+        enabled: true,
+        environmentPolicy: "inherit-host",
+        version: 1,
+        createdAt: "2026-09-15T10:00:00.000Z",
+        updatedAt: "2026-09-15T10:00:00.000Z",
+      }),
+      runtime,
+      readiness: "ready",
+      driverLabel: displayName,
+      endpointHost: undefined,
+      executionHost: "Local host",
+      sections: [
+        {
+          id: "all-models",
+          label: "Models",
+          models: [
+            {
+              model: {
+                id: decodeProviderModelId(modelName),
+                displayName: modelName,
+                reasoning: "unsupported",
+                inputModalities: ["text"],
+                source: "discovered",
+                verification: "verified",
+                options: [],
+              },
+              badges: [],
+              toolCapable: true,
+            },
+          ],
+        },
+      ],
+    });
+    const harness = pickerGroup(
+      "80000000-0000-4000-8000-0000000000b1",
+      "Octant",
+      "octant-harness",
+      "harness-model",
+    );
+    const cli = pickerGroup(
+      "80000000-0000-4000-8000-0000000000b2",
+      "Local Codex",
+      "provider",
+      "cli-model",
+    );
+    const connected = {
+      target: {
+        id: "55555555-5555-4555-8555-555555555555",
+        destination: "build@devbox",
+        hostKey: { algorithm: "ssh-ed25519", publicKey: "AAAA" },
+        executorPath: "/home/build/.local/octant/bin/octant",
+      },
+      fingerprint: "SHA256:nThbg6kXUpJWGl7E1IGOCspRomTxdCARLviKw6E5SY8",
+      connection: "connected",
+      admission: [
+        { posture: "plan", decision: { status: "admitted" } },
+        { posture: "approval-gated", decision: { status: "admitted" } },
+        { posture: "auto-accept-edits", decision: { status: "admitted" } },
+      ],
+      runtimeBinaries: [],
+    } as never;
+    const remoteProps = {
+      ...defaultProps,
+      projectName: "Service",
+      providerGroups: [harness, cli],
+      selectedProviderInstanceId: harness.instance.id,
+      selectedModelId: decodeProviderModelId("harness-model"),
+      remote: { location: "build@devbox:/home/build/service", target: connected },
+    };
+
+    it("offers only Plan and Ask for approvals, the bound folder, and no branch or worktree", async () => {
+      const user = userEvent.setup();
+      const onCreateThread = vi.fn();
+      render(
+        <CodeComposerAdapter
+          {...remoteProps}
+          defaultExecutionPolicy="full-access"
+          onCreateThread={onCreateThread}
+        />,
+      );
+
+      expect(screen.getByText("build@devbox:/home/build/service")).toBeVisible();
+      expect(screen.queryByRole("button", { name: "Workspace" })).toBeNull();
+      expect(screen.queryByRole("button", { name: /branch/i })).toBeNull();
+      expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent(
+        "Ask for approvals",
+      );
+      await user.click(screen.getByRole("button", { name: "Access policy" }));
+      expect((await screen.findAllByRole("menuitemradio")).map((item) => item.textContent)).toEqual(
+        ["Plan · read-only", "Ask for approvals"],
+      );
+      expect(
+        screen.queryByRole("menuitemcheckbox", { name: "Remember for this Project" }),
+      ).toBeNull();
+      await user.keyboard("{Escape}");
+
+      await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the build");
+      await user.click(screen.getByRole("button", { name: "Create thread" }));
+      await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(1));
+      expect(onCreateThread.mock.calls[0]?.[0]).toMatchObject({
+        executionPolicy: "approval-gated",
+        permissionPersistence: "current-session",
+        workspace: "current-checkout",
+      });
+      expect(onCreateThread.mock.calls[0]?.[0]).not.toHaveProperty("computerUseSelection");
+    });
+
+    it("lists other providers unavailable with the reason, and starts nothing on one", async () => {
+      const user = userEvent.setup();
+      const onCreateThread = vi.fn();
+      render(
+        <CodeComposerAdapter
+          {...remoteProps}
+          selectedProviderInstanceId={cli.instance.id}
+          selectedModelId={decodeProviderModelId("cli-model")}
+          onCreateThread={onCreateThread}
+        />,
+      );
+
+      await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the build");
+      expect(screen.getByRole("button", { name: "Create thread" })).toBeDisabled();
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "This model is not available on an SSH target: threads there run on Octant's own harness",
+      );
+      await user.click(screen.getByRole("button", { name: "Provider and model" }));
+      await user.click(screen.getByRole("option", { name: "Local Codex" }));
+      expect(screen.getByRole("option", { name: "cli-model" })).toBeDisabled();
+      expect(onCreateThread).not.toHaveBeenCalled();
+    });
+
+    it("says the target is not connected and offers no Start until it is", async () => {
+      const user = userEvent.setup();
+      const disconnected = { ...(connected as object), connection: "not-connected" } as never;
+      const { rerender } = render(
+        <CodeComposerAdapter
+          {...remoteProps}
+          remote={{ location: remoteProps.remote.location, target: disconnected }}
+        />,
+      );
+      await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the build");
+      expect(screen.getByRole("button", { name: "Create thread" })).toBeDisabled();
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "The SSH target is not connected. Connect it again when it is reachable.",
+      );
+
+      rerender(<CodeComposerAdapter {...remoteProps} />);
+      expect(screen.getByRole("button", { name: "Create thread" })).toBeEnabled();
+    });
+  });
 });
