@@ -1,5 +1,5 @@
 import { realpathSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { spawn as nodeSpawn } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -83,7 +83,9 @@ describe("node extension process port", () => {
     const home = join(root, "home");
     const packageRoot = join(root, "package");
     const temporaryDirectory = join(root, "driver-tmp");
-    await Promise.all([home, packageRoot, temporaryDirectory].map((path) => mkdir(path)));
+    await Promise.all([home, packageRoot].map((path) => mkdir(path)));
+    // As the driver process owner makes it: fresh, empty, and private.
+    await mkdir(temporaryDirectory, { mode: 0o700 });
     let observed:
       | { command: string; args: ReadonlyArray<string>; env: NodeJS.ProcessEnv | undefined }
       | undefined;
@@ -157,7 +159,9 @@ describe("node extension process port", () => {
     const home = join(root, "home");
     const packageRoot = join(root, "package");
     const temporaryDirectory = join(root, "driver-tmp");
-    await Promise.all([home, packageRoot, temporaryDirectory].map((path) => mkdir(path)));
+    await Promise.all([home, packageRoot].map((path) => mkdir(path)));
+    // As the driver process owner makes it: fresh, empty, and private.
+    await mkdir(temporaryDirectory, { mode: 0o700 });
     const electron = "/Applications/Octant.app/Contents/MacOS/Octant";
     let observed: { args: ReadonlyArray<string>; env: NodeJS.ProcessEnv | undefined } | undefined;
     const spawn = ((...input: Parameters<typeof nodeSpawn>) => {
@@ -240,6 +244,66 @@ describe("node extension process port", () => {
         },
       }),
     ).rejects.toThrow("could not be started");
+    expect(spawned).toBe(false);
+  });
+
+  it("refuses an outside driver whose temporary folder is not a fresh, private, empty folder of its own", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-driver-temporary-"));
+    receiptDirectories.push(root);
+    const home = join(root, "home");
+    const packageRoot = join(root, "package");
+    await Promise.all([home, packageRoot].map((path) => mkdir(path)));
+    const shared = join(root, "shared");
+    await mkdir(shared, { mode: 0o755 });
+    const holding = join(root, "holding");
+    await mkdir(holding, { mode: 0o700 });
+    await writeFile(join(holding, "left-behind"), "");
+    const target = join(root, "target");
+    await mkdir(target, { mode: 0o700 });
+    const linked = join(root, "linked");
+    await symlink(target, linked);
+    const insidePackage = join(packageRoot, "tmp");
+    await mkdir(insidePackage, { mode: 0o700 });
+    let spawned = false;
+    const spawn = ((...input: Parameters<typeof nodeSpawn>) => {
+      spawned = true;
+      return nodeSpawn(...input);
+    }) as typeof nodeSpawn;
+    const port = createNodeExtensionProcessPort({
+      spawn,
+      shutdownTimeoutMs: 100,
+      platform: "darwin",
+      sandboxPath: process.execPath,
+      homeDirectory: home,
+    });
+    // Each would widen the one folder the driver may write: one others can
+    // read, one holding someone's files, one that leads elsewhere, the
+    // package it may only read, a missing one, and one holding the home folder.
+    for (const temporaryDirectory of [
+      shared,
+      holding,
+      linked,
+      insidePackage,
+      join(root, "missing"),
+      root,
+    ]) {
+      await expect(
+        port.start({
+          ...startInput,
+          command: process.execPath,
+          args: [join(packageRoot, "main.mjs")],
+          cwd: packageRoot,
+          readiness: "spawn",
+          sandbox: {
+            kind: "outside-driver",
+            runtime: "bun",
+            instanceId: "instance-a",
+            packageRoot,
+            temporaryDirectory,
+          },
+        }),
+      ).rejects.toThrow("could not be started");
+    }
     expect(spawned).toBe(false);
   });
 

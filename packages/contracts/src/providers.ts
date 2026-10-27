@@ -1095,6 +1095,16 @@ export const ProviderInstanceConfigurationChanged = Schema.Struct({
   ),
 }).annotations(strict);
 export type ProviderInstanceConfigurationChanged = typeof ProviderInstanceConfigurationChanged.Type;
+/**
+ * An outside instance moved to another digest of its own driver. Only the host
+ * writes it, once the person has trusted that digest; no command reconfigures
+ * an outside instance, so `provider.instance-configuration-changed@1` never
+ * carries one.
+ */
+export const ProviderInstanceDriverRebound = Schema.Struct({
+  instance: OutsideHarnessEndpointProviderInstance,
+}).annotations(strict);
+export type ProviderInstanceDriverRebound = typeof ProviderInstanceDriverRebound.Type;
 export const ProviderInstanceDataTagsChanged = Schema.Struct({
   instance: ProviderInstance,
 }).annotations(strict);
@@ -1118,6 +1128,7 @@ export const PROVIDER_EVENT_NAMES = [
   "provider.instance-renamed@1",
   "provider.instance-binary-changed@1",
   "provider.instance-configuration-changed@1",
+  "provider.instance-driver-rebound@1",
   "provider.instance-data-tags-changed@1",
   "provider.instance-enabled-changed@1",
   "provider.instance-removed@1",
@@ -2673,6 +2684,9 @@ export const decodeProviderInstanceBinaryChanged = Schema.decodeUnknownSync(
 );
 export const decodeProviderInstanceConfigurationChanged = Schema.decodeUnknownSync(
   ProviderInstanceConfigurationChanged,
+);
+export const decodeProviderInstanceDriverRebound = Schema.decodeUnknownSync(
+  ProviderInstanceDriverRebound,
 );
 export const decodeProviderInstanceEnabledChanged = Schema.decodeUnknownSync(
   ProviderInstanceEnabledChanged,

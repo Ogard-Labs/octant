@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ThemeProvider } from "../../design-system/theme";
 import { PrivacySecurityPanel } from "./PrivacySecurityPanel";
 import { createUnavailableDeviceIntegrityPort } from "./deviceIntegrityPort";
+import { createSecureWindowScreenshotPrivacyPort } from "./deviceProtectionModule";
 import { createUnavailableKeyStorageProtectionPort } from "./keyStorageProtectionPort";
 import { createUnavailableScreenshotPrivacyPort } from "./screenshotPrivacyPort";
 
@@ -33,5 +34,27 @@ describe("mobile privacy settings", () => {
     expect(markup).not.toContain("Hide in recents");
     expect(markup).not.toContain("Use standard capture");
     expect(markup).not.toContain("Push and recents stay redacted");
+  });
+
+  it("on iOS names what the protection covers and that a screenshot is not blocked", () => {
+    const markup = renderToStaticMarkup(
+      createElement(ThemeProvider, {
+        preference: "light",
+        children: createElement(PrivacySecurityPanel, {
+          hostHealth: "ready",
+          integrity: createUnavailableDeviceIntegrityPort(),
+          keyStorage: createUnavailableKeyStorageProtectionPort(),
+          screenshotPrivacy: createSecureWindowScreenshotPrivacyPort(
+            { setSecureWindow: async () => "applied", keyStorageProtection: async () => "unknown" },
+            "app-switcher-and-recording",
+          ),
+        }),
+      }),
+    );
+
+    expect(markup).toContain("The app switcher and a recorded or mirrored screen show no Octant");
+    expect(markup).toContain("iOS cannot block a screenshot");
+    expect(markup).not.toContain("Screenshots, screen recordings");
+    expect(markup).toContain("Use standard capture");
   });
 });
