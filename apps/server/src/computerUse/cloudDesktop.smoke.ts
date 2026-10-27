@@ -159,9 +159,27 @@ const service = createDesktopLeaseService({
 const owner = { mode: "code" as const, threadId };
 const caller = { owner, actor: person, scopeId: "smoke-window" };
 
-function step(name: string, outcome: unknown): void {
-  console.log(`${name}: ${JSON.stringify(outcome)}`);
+/**
+ * Steps that did not answer as a working desktop would. The run still
+ * releases and checks the provider after one, so a failure never leaves a
+ * billed desktop behind, but it cannot end `PASS`: the live run is the only
+ * evidence for the parts a recording cannot prove.
+ */
+const failedSteps: Array<string> = [];
+
+function step(name: string, outcome: unknown, ok = true): void {
+  console.log(`${ok ? "" : "FAILED "}${name}: ${JSON.stringify(outcome)}`);
+  if (!ok) failedSteps.push(name);
 }
+
+/** Whether an `octant_computer` answer is the desktop doing what was asked. */
+const controlAnswered = (outcome: { readonly status: string; readonly result?: unknown }) =>
+  outcome.status === "answered" &&
+  typeof outcome.result === "object" &&
+  outcome.result !== null &&
+  "kind" in outcome.result &&
+  outcome.result.kind !== "refused" &&
+  outcome.result.kind !== "failed";
 
 /** Asks the provider itself whether any desktop of this host remains. */
 async function remaining(): Promise<number> {
@@ -194,37 +212,35 @@ if (phase === "kill") {
 }
 
 const view = await service.openView({ ...caller, leaseId });
-step("open view", view);
-if (view.status !== "viewing") process.exit(1);
-const frame = await service.frame({ ...caller, leaseId, viewId: view.viewId });
-step(
-  "person's frame",
-  frame.status === "frame" ? { ...frame.frame, bytes: frame.frame.bytes.length } : frame,
-);
-for (const event of [
-  { kind: "pointer", action: "down", button: "left", x: 100, y: 100 },
-  { kind: "pointer", action: "up", button: "left", x: 100, y: 100 },
-  { kind: "text", text: "hello from Octant" },
-] as const) {
+step("open view", view, view.status === "viewing");
+if (view.status === "viewing") {
+  const frame = await service.frame({ ...caller, leaseId, viewId: view.viewId });
   step(
-    `person's ${event.kind}`,
-    await service.input({ ...caller, leaseId, viewId: view.viewId, event }),
+    "person's frame",
+    frame.status === "frame" ? { ...frame.frame, bytes: frame.frame.bytes.length } : frame,
+    frame.status === "frame",
   );
+  for (const event of [
+    { kind: "pointer", action: "down", button: "left", x: 100, y: 100 },
+    { kind: "pointer", action: "up", button: "left", x: 100, y: 100 },
+    { kind: "text", text: "hello from Octant" },
+  ] as const) {
+    const delivered = await service.input({ ...caller, leaseId, viewId: view.viewId, event });
+    step(`person's ${event.kind}`, delivered, delivered.status === "delivered");
+  }
 }
 
 const agentCaller = { owner, actor: agent, leaseId };
-step(
-  "agent's send-file",
-  await service.transfer({
-    ...agentCaller,
-    path: "octant-smoke-app",
-    confirm: async () => "approved",
-  }),
-);
+const sent = await service.transfer({
+  ...agentCaller,
+  path: "octant-smoke-app",
+  confirm: async () => "approved",
+});
+step("agent's send-file", sent, sent.status === "delivered");
 const control = async (command: unknown) =>
   service.control({ ...agentCaller, command: decodeComputerControlCommand(command) });
 const launched = await control({ operation: "launch", appId: "octant-smoke-app" });
-step("agent's launch", launched);
+step("agent's launch", launched, controlAnswered(launched));
 const observed = await control({ operation: "observe", appId: "octant-smoke-app", windowId: 1 });
 const observation =
   observed.status === "answered" && observed.result.kind === "observation"
@@ -233,20 +249,36 @@ const observation =
 step(
   "agent's observe",
   observation === undefined ? observed : { image: observation.image?.data.length },
+  observation?.image !== undefined,
 );
 if (observation !== undefined) {
-  step(
-    "agent's click",
-    await control({ operation: "click", observationId: observation.observationId, x: 50, y: 50 }),
-  );
-  step(
-    "agent's type",
-    await control({ operation: "type", observationId: observation.observationId, text: "typed" }),
-  );
+  const clicked = await control({
+    operation: "click",
+    observationId: observation.observationId,
+    x: 50,
+    y: 50,
+  });
+  step("agent's click", clicked, controlAnswered(clicked));
+  const typed = await control({
+    operation: "type",
+    observationId: observation.observationId,
+    text: "typed",
+  });
+  step("agent's type", typed, controlAnswered(typed));
 }
 
-step("person's extension", await service.extend({ ...caller, leaseId, byMinutes: 10 }));
-step("release", await service.release({ ...caller, leaseId }));
+const extended = await service.extend({ ...caller, leaseId, byMinutes: 10 });
+step("person's extension", extended, extended.status === "extended");
+const released = await service.release({ ...caller, leaseId });
+step("release", released, released.status === "released");
 const left = await remaining();
-console.log(left === 0 ? "PASS: nothing of this host remains." : "FAIL: desktops remain.");
-process.exit(left === 0 ? 0 : 1);
+if (left === 0 && failedSteps.length === 0) {
+  console.log("PASS: every step answered, and nothing of this host remains.");
+  process.exit(0);
+}
+console.log(
+  left === 0
+    ? `FAIL: nothing of this host remains, but these steps failed: ${failedSteps.join(", ")}.`
+    : "FAIL: desktops remain.",
+);
+process.exit(1);

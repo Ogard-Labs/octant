@@ -324,8 +324,8 @@ export interface DesktopHttpsPort {
 
 /**
  * Whether a call may go to `url`: HTTPS, on the default port, with no
- * credentials in the URL, to one of `hosts`. `*.example.com` also matches
- * every subdomain of `example.com`.
+ * credentials in the URL, to one of `hosts`. `*.example.com` matches every
+ * subdomain of `example.com`, never `example.com` itself.
  */
 export function desktopProviderHostDeclared(url: string, hosts: ReadonlyArray<string>): boolean {
   let target: URL;
