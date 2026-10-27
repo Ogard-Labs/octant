@@ -1,10 +1,12 @@
 import {
   decodeProviderProbeResult,
+  type OutsideDriverKeyPlacement,
   type ProviderFailure,
   type ProviderFailureCategory,
   type ProviderInstanceId,
   type ProviderModel,
   type ProviderModelId,
+  type ProviderTurnInput,
   type UtcTimestamp,
 } from "@octant/contracts";
 import {
@@ -101,6 +103,11 @@ export interface OutsideHarnessEndpointProxyOptions {
   readonly channel: OutsideDriverChannel;
   /** The address the person configured; a brokered request reaches only its origin. */
   readonly baseUrl: string;
+  /**
+   * How the person said the key is sent; undefined when the provider takes
+   * no key. A brokered request carries the key only in exactly this place.
+   */
+  readonly key: OutsideDriverKeyPlacement | undefined;
   /** The models the person listed; the instance offers no other. */
   readonly modelIds: ReadonlyArray<ProviderModelId>;
   readonly runtimeRegistry: ProviderDriverRuntimeRegistry;
@@ -501,6 +508,7 @@ function relayedHeaders(
 function makeBroker(input: {
   readonly instanceId: ProviderInstanceId;
   readonly origin: string | undefined;
+  readonly key: OutsideDriverKeyPlacement | undefined;
   readonly credentialResolver: ProviderCredentialResolver | undefined;
   readonly fetch: OutsideDriverFetch;
   readonly limits: OutsideDriverLimits;
@@ -526,6 +534,20 @@ function makeBroker(input: {
       REFUSED_REQUEST_HEADERS.has(keyHeader)
     ) {
       throw failure("unauthorized", "The provider driver may not set that header.");
+    }
+    // The person chose where the key goes when they added the provider; a
+    // driver that asks for it anywhere else, or for a provider that takes no
+    // key, is refused before the key is read.
+    if (
+      params.auth !== undefined &&
+      (input.key === undefined ||
+        keyHeader !== input.key.header ||
+        params.auth.scheme !== input.key.scheme)
+    ) {
+      throw failure(
+        "unauthorized",
+        "The provider driver asked to send the key where this provider does not send it.",
+      );
     }
     const headers = new Headers();
     for (const [name, value] of params.headers ?? []) {
@@ -645,6 +667,7 @@ export function makeOutsideHarnessEndpointProxy(
     broker: makeBroker({
       instanceId,
       origin: configuredOrigin(options.baseUrl),
+      key: options.key,
       credentialResolver: options.credentialResolver,
       fetch: options.fetch ?? ((input, init) => fetch(input, init)),
       limits,
@@ -875,29 +898,39 @@ export function makeOutsideHarnessEndpointProxy(
         }
       },
       // Decided on the host from its own records, never asked of the driver.
-      admitTurn: (turn, modelId) => {
-        if (link.stopped !== undefined) return link.stopped;
-        const observed = registry.observedState(instanceId);
-        const model = observed?.models.find(
-          (candidate) => String(candidate.id) === String(modelId),
-        );
-        const verified =
-          observed?.verifiedToolModelIds?.some((id) => String(id) === String(modelId)) ?? false;
-        return validateChatTurnInput(
-          turn,
-          {
-            nativeAttachments: observed?.capabilities.nativeAttachments ?? "unsupported",
-            appManagedTools: verified ? "supported" : "unsupported",
-          },
-          model,
-        );
-      },
+      admitTurn: (turn, modelId) =>
+        link.stopped ?? admitOutsideDriverTurn(registry, instanceId, turn, modelId),
     },
     probe: (input) =>
       String(input.instanceId) !== String(instanceId)
         ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
         : Effect.tryPromise({ try: probe, catch: closed }),
   };
+}
+
+/**
+ * Whether an outside driver instance takes this turn for one of its models,
+ * decided from the host's own records alone: the last observation for image
+ * input, and the host's Verify tools record for Octant's tools.
+ */
+export function admitOutsideDriverTurn(
+  registry: Pick<ProviderDriverRuntimeRegistry, "observedState">,
+  instanceId: ProviderInstanceId,
+  turn: ProviderTurnInput,
+  modelId: ProviderModelId,
+): ProviderFailure | undefined {
+  const observed = registry.observedState(instanceId);
+  const model = observed?.models.find((candidate) => String(candidate.id) === String(modelId));
+  const verified =
+    observed?.verifiedToolModelIds?.some((id) => String(id) === String(modelId)) ?? false;
+  return validateChatTurnInput(
+    turn,
+    {
+      nativeAttachments: observed?.capabilities.nativeAttachments ?? "unsupported",
+      appManagedTools: verified ? "supported" : "unsupported",
+    },
+    model,
+  );
 }
 
 /**

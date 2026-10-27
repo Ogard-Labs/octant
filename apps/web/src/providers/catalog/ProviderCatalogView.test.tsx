@@ -2,6 +2,7 @@ import type {
   AggregateVersion,
   DiscoveryCandidate,
   DiscoverySnapshot,
+  OutsideProviderDriverListing,
   ProviderInstance,
   ProviderInstanceId,
   ProviderObservedState,
@@ -310,11 +311,150 @@ describe("ProviderCatalogView", () => {
     render(<ProviderCatalogView {...props()} />);
     openSetup(/^Codex CLI, /);
     fireEvent.click(screen.getByRole("button", { name: "Back to Provider catalog" }));
-    expect(document.activeElement?.getAttribute("data-catalog-kind")).toBe("codex");
+    expect(document.activeElement?.getAttribute("data-catalog-key")).toBe("codex");
     openSetup(/^Claude Code, /);
     fireEvent.keyDown(screen.getByRole("heading", { level: 1, name: "Claude Code" }), {
       key: "Escape",
     });
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+  });
+});
+
+describe("ProviderCatalogView outside drivers", () => {
+  const listing = {
+    driver: {
+      extensionId: "00000000-0000-4000-8000-000000000911",
+      packageId: "00000000-0000-4000-8000-000000000912",
+      componentId: "driver",
+      version: "0.1.0",
+      digest: `sha256:${"b".repeat(64)}`,
+    },
+    displayName: "Loopback chat",
+    source: "local-folder",
+    installed: true,
+    trusted: true,
+  } as unknown as OutsideProviderDriverListing;
+  const outsideId = "00000000-0000-4000-8000-000000000913" as ProviderInstanceId;
+  const outsideInstance = (digest: string, enabled = false): ProviderInstance =>
+    ({
+      id: outsideId,
+      displayName: "Loopback chat",
+      driverKind: "outside-harness-endpoint",
+      configuration: {
+        kind: "outside-harness-endpoint",
+        driver: { ...listing.driver, digest },
+        baseUrl: "http://127.0.0.1:11434/",
+        modelIds: ["local-model"],
+      },
+      enabled,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    }) as unknown as ProviderInstance;
+
+  it("lists an admitted outside driver in its own group with an outside label, never as bundled", () => {
+    render(<ProviderCatalogView {...props({ outsideDrivers: [listing] })} />);
+    const outside = screen.getByRole("list", { name: "Outside drivers" });
+    const row = within(outside).getByRole("link", {
+      name: "Loopback chat, not added. Open setup",
+    });
+    expect(row.textContent).toContain("Model endpoint · Outside driver");
+    expect(row.textContent).not.toContain("Bundled");
+    expect(screen.getByRole("status", { name: "Provider catalog summary" }).textContent).toBe(
+      "22 drivers · 0 ready · 0 need you",
+    );
+    expect(screen.getByText(/Outside drivers are listed once you have trusted/)).toBeDefined();
+  });
+
+  it("shows no outside group when the host admits none", () => {
+    render(<ProviderCatalogView {...props()} />);
+    expect(screen.queryByRole("list", { name: "Outside drivers" })).toBeNull();
+  });
+
+  it("adds a provider from the driver with the address, key placement, key, and models given", async () => {
+    const onAddOutsideProvider = vi.fn(async () => true);
+    const view = props({
+      outsideDrivers: [listing],
+      onAddOutsideProvider,
+      credentialManagementAvailable: true,
+    });
+    render(<ProviderCatalogView {...view} />);
+    openSetup(/^Loopback chat, /);
+    expect(screen.getByRole("heading", { level: 1, name: "Loopback chat" })).toBeDefined();
+    const form = screen.getByRole("form", { name: "Add a provider from Loopback chat" });
+    fireEvent.change(within(form).getByLabelText("Address"), {
+      target: { value: "https://models.example.test/v1" },
+    });
+    fireEvent.change(within(form).getByLabelText("API key"), { target: { value: "KEY-1" } });
+    fireEvent.change(within(form).getByLabelText("Model IDs"), {
+      target: { value: "model-a, model-b model-a" },
+    });
+    fireEvent.click(within(form).getByRole("button", { name: "Add provider" }));
+    await waitFor(() => expect(onAddOutsideProvider).toHaveBeenCalledTimes(1));
+    const [displayName, configuration, credential] = onAddOutsideProvider.mock
+      .calls[0] as unknown as [string, unknown, { readonly value: string }];
+    expect(displayName).toBe("Loopback chat");
+    expect(configuration).toEqual({
+      kind: "outside-harness-endpoint",
+      driver: listing.driver,
+      baseUrl: "https://models.example.test/v1",
+      key: { header: "authorization", scheme: "Bearer" },
+      modelIds: ["model-a", "model-b"],
+    });
+    expect(credential.value).toBe("KEY-1");
+    // Opening and adding never start anything on their own.
+    expect(view.onProbe).not.toHaveBeenCalled();
+    expect(view.onSetEnabled).not.toHaveBeenCalled();
+  });
+
+  it("refuses a form with no models before it asks the host", () => {
+    const onAddOutsideProvider = vi.fn(async () => true);
+    render(<ProviderCatalogView {...props({ outsideDrivers: [listing], onAddOutsideProvider })} />);
+    openSetup(/^Loopback chat, /);
+    fireEvent.change(screen.getByLabelText("Address"), {
+      target: { value: "http://127.0.0.1:11434" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add provider" }));
+    expect(screen.getByText(/at least one model ID/)).toBeDefined();
+    expect(onAddOutsideProvider).not.toHaveBeenCalled();
+  });
+
+  it("continues the provider bound to this digest, and says the package is unsigned developer input", () => {
+    render(
+      <ProviderCatalogView
+        {...props({
+          outsideDrivers: [listing],
+          instances: [outsideInstance(listing.driver.digest)],
+          renderRuntimeCard: (instance) => <p>Card for {instance.displayName}</p>,
+        })}
+      />,
+    );
+    openSetup(/^Loopback chat, off/);
+    expect(screen.getByRole("button", { name: "Turn on" })).toBeDefined();
+    expect(screen.getByText("Card for Loopback chat")).toBeDefined();
+    const pkg = screen.getByRole("heading", { name: "Package" }).closest("section")!;
+    expect(within(pkg).getByText("Source").nextSibling?.textContent).toBe("Local folder, unsigned");
+    expect(within(pkg).getByText("Trusted").nextSibling?.textContent).toBe(
+      "Yes, by you, at this digest",
+    );
+    expect(within(pkg).getByText("Digest").nextSibling?.textContent).toBe(listing.driver.digest);
+    expect(screen.queryByRole("button", { name: "Open Model endpoints" })).toBeNull();
+  });
+
+  it("does not count a provider bound to another digest of the same driver", () => {
+    render(
+      <ProviderCatalogView
+        {...props({
+          outsideDrivers: [listing],
+          instances: [outsideInstance(`sha256:${"c".repeat(64)}`, true)],
+        })}
+      />,
+    );
+    expect(
+      within(screen.getByRole("list", { name: "Outside drivers" })).getByRole("link", {
+        name: "Loopback chat, not added. Open setup",
+      }),
+    ).toBeDefined();
   });
 });

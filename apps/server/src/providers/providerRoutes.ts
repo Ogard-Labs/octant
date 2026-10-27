@@ -10,6 +10,7 @@ import {
   type ProviderFailure,
   type ProviderModelId,
 } from "@octant/contracts";
+import { readPrincipalRouteContext } from "../principalRouteContext";
 import { authenticateProjectRequest } from "../projectBindingRoutes";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
@@ -140,6 +141,26 @@ export function createProviderRouteHandler(dependencies: ProviderRouteDependenci
           return response(
             { category: "invalid-configuration", message: "Provider command is invalid." },
             400,
+            origin,
+          );
+        }
+        // Adding a provider from an outside driver and Verify tools are steps
+        // of admitting one, which only a person at a local window takes.
+        // Remote forwarding never admits provider commands; the route refuses
+        // these too.
+        const principal = readPrincipalRouteContext(request)?.principal;
+        if (
+          (command.kind === "create-outside-harness-endpoint-provider" ||
+            command.kind === "verify-model-tools") &&
+          principal !== undefined &&
+          principal.kind !== "local-window"
+        ) {
+          return response(
+            {
+              category: "unauthorized",
+              message: "This step requires the Octant window on this host.",
+            },
+            401,
             origin,
           );
         }

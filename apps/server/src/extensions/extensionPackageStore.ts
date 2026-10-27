@@ -267,6 +267,40 @@ export class ExtensionPackageStore {
     }
   }
 
+  /**
+   * An outside provider driver's package root and its one entry module, only
+   * after the whole stored version is verified against its digest. Undefined
+   * unless the component is a provider driver whose entry exists and is not
+   * executable, which is the only launch `authorizeRuntimeLaunch` admits.
+   */
+  async verifiedDriverEntry(
+    target: ExtensionVersionReference,
+    componentId: string,
+  ): Promise<{ readonly packageRoot: string; readonly entryPoint: string } | undefined> {
+    try {
+      validateTarget(target);
+      if (!(await this.verifyVersion(target))) return undefined;
+      const directory = this.#versionPath(target);
+      const receipt = await readReceipt(directory);
+      const component = receipt.manifest.components.find(
+        (candidate) => candidate.id === componentId,
+      );
+      const relativeEntryPoint = receipt.entryPoints[componentId];
+      const entry = receipt.files.find((file) => file.path === relativeEntryPoint);
+      if (
+        component?.kind !== "provider-driver" ||
+        relativeEntryPoint === undefined ||
+        entry?.executable !== false
+      ) {
+        return undefined;
+      }
+      const packageRoot = join(directory, "content");
+      return { packageRoot, entryPoint: safeContentPath(packageRoot, relativeEntryPoint) };
+    } catch {
+      return undefined;
+    }
+  }
+
   contentRoot(target: ExtensionVersionReference): string {
     validateTarget(target);
     return join(this.#versionPath(target), "content");

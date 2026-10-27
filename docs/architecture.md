@@ -2628,9 +2628,10 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   other than `builtin:provider-driver/<kind>`, and any source other than
   `bundled`. That schema stays closed: an outside driver has its own public
   `OutsideProviderDriverEntry` schema in `@octant/plugin-api`, read from a
-  local folder and installed quarantined, with nothing yet admitting it;
-  third-party provider-driver plugins are an authorized post-preview track
-  under [Outside provider drivers](design/outside-provider-drivers.md). The catalog repeats installed and trusted from the activation context
+  local folder, installed held, and admitted at its digest when its source is
+  trusted; the catalog lists effective outside drivers in their own group from
+  the registry snapshot. Third-party provider-driver plugins are an authorized
+  post-preview track under [Outside provider drivers](design/outside-provider-drivers.md). The catalog repeats installed and trusted from the activation context
   that admits the driver; it never sets them. `resolveProviderCatalogState` in
   `@octant/domain` derives available, enabled, signed in, and ready separately.
   It reads the registry, the last observations, and the last scan, with each
@@ -6325,8 +6326,10 @@ that harness-endpoint shape is a design accepted on 2026-10-26, in
 their inspection and quarantined install from a local folder, and the host
 proxy that runs one over the harness endpoint wire protocol (closed failures,
 a capability ceiling, and a brokered request with this instance's key to its
-configured origin only), and the confined process per instance that carries
-that protocol on macOS are built; nothing admits one yet.
+configured origin only), the confined process per instance that carries that
+protocol on macOS, and admission (trust at a digest, a provider added off from
+a local window, host-run Verify tools, and the process stopped whenever the
+driver stops being effective) are built. Only a macOS host admits one.
 
 The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a
@@ -7194,9 +7197,10 @@ mechanisms are:
     Each cell is a ceiling: the bundled Harness endpoints' declaration, held
     by the host's clamp on every probe claim (`outsideDriverCeiling.ts`), which
     an outside driver's own claims can lower but never exceed, and Octant's
-    tools reach only models the host itself verified. No outside driver package is
-    admitted yet, so an instance reports `driver-not-admitted` with no models
-    and runs no turn.
+    tools reach only models the host itself verified, through a Verify tools
+    request the host makes itself. An instance whose driver is not effective at
+    the digest it binds (on every host but macOS, always) reports
+    `driver-not-admitted` with no models and runs no turn.
   - **Oh My Pi** lists models and starts no session; its driver refuses
     `acquire`, so it never reaches a picker.
 
