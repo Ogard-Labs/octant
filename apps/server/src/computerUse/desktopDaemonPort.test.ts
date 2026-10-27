@@ -335,6 +335,11 @@ describe("desktop daemon port", () => {
       status: "refused",
       reason: "request-invalid",
     });
+    const nothing: DesktopDaemonRequest = JSON.parse("null");
+    await expect(port().call(nothing)).resolves.toEqual({
+      status: "refused",
+      reason: "request-invalid",
+    });
     expect(seen).toEqual([]);
   });
 

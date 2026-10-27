@@ -31,9 +31,12 @@ export interface DesktopDaemonPortOptions {
   /** The daemon the driver declares in its code. */
   readonly daemon: () => DesktopDaemonDeclaration;
   /**
-   * The home directory of the user Octant runs as. Defaults to the one the
-   * operating system records for that user, never `$HOME`, so an
-   * environment override cannot move the socket.
+   * The home directory of the user Octant runs as. Defaults to the one
+   * `os.userInfo()` reports: under Node, the packaged desktop's runtime, the
+   * one the operating system records, whatever `$HOME` says. Bun, which runs
+   * the development and headless servers, reports `$HOME` there when it is
+   * set (observed on Bun 1.4.4), so an override can move where the walk
+   * starts; the owner and mode checks still hold from that directory down.
    */
   readonly homeDirectory?: string;
   /** The user Octant runs as. Defaults to the process's own. */
@@ -43,7 +46,7 @@ export interface DesktopDaemonPortOptions {
   readonly maxResponseBytes?: number;
 }
 
-/** One call, from the socket checks to the last byte, as for the HTTPS port. */
+/** One exchange, from the connect to the last byte, as for the HTTPS port; the socket checks before it are local reads. */
 const DEFAULT_TIMEOUT_MS = 45_000;
 /** A daemon's requests are small control messages; the Cua upload sends files in chunks. */
 const DEFAULT_MAX_REQUEST_BYTES = 4 * 1_048_576;
@@ -73,11 +76,11 @@ export function createDesktopDaemonPort(options: DesktopDaemonPortOptions): Desk
 
   return {
     call: async (request) => {
-      if (request.signal?.aborted === true) return { status: "cancelled" };
       // The request type has no headers, but a driver that is not
       // type-checked can send any shape; anything beyond these fields could
       // only be an attempt to set what the host owns.
       if (!requestWellFormed(request)) return refused("request-invalid");
+      if (request.signal?.aborted === true) return { status: "cancelled" };
       const declaration = options.daemon();
       if (!desktopDaemonMethodDeclared(request.method, declaration.methods)) {
         return refused("method-not-declared");
