@@ -7347,7 +7347,11 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   chosen folder is stored by its real path (a folder named through a link, or
   one not created yet, by where it resolves), and a materialization whose root
   no longer resolves to exactly that path is refused as an unavailable
-  destination before anything is written or removed. Resolving the root afresh
+  destination before anything is written or removed. A folder stored earlier
+  by a path that is not its real path, and the host default
+  `<default folder>/Artifacts` when the default folder is named through a
+  link, refuse the same way until a mirror folder is chosen again; the
+  refusal is recorded only in the mirror receipt. Resolving the root afresh
   for each use let a folder inside a checkout, swapped itself for a link to a
   host folder, receive every write the confinement above then held inside the
   link's target. A missing root is created on demand only beneath a folder
