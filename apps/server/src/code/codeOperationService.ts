@@ -81,6 +81,14 @@ import { ReviewFindingServiceError } from "./reviewFindingService";
 
 type Awaitable<T> = T | Promise<T>;
 
+/** The operations a thread whose checkout is a remote root may run: its turns. */
+const REMOTE_THREAD_OPERATIONS: ReadonlySet<CodeOperationCommand["kind"]> = new Set([
+  "start-provider-turn",
+  "answer-provider-input",
+  "answer-provider-approval",
+  "cancel-provider-turn",
+]);
+
 export interface CodeOperationAuthorityPort {
   readonly readThread: (threadId: CodeOperationCommand["threadId"]) => CodeThread | undefined;
   readonly effectiveThread?: (windowId: WindowId, thread: CodeThread) => CodeThread;
@@ -1058,6 +1066,17 @@ export class CodeOperationService {
     }
     const scope = await this.#scope(windowId, command);
     if ("failure" in scope) return this.#failed(command.operationId, scope.failure, scope.message);
+    // A remote-bound thread's checkout lives on its SSH target. Its turns
+    // reach it through the executor; every other operation here (terminals,
+    // tests, Git, files, pull requests) would act on a folder of this host,
+    // so each is refused before any root is resolved.
+    if (scope.checkout.kind === "remote-root" && !REMOTE_THREAD_OPERATIONS.has(command.kind)) {
+      return this.#failed(
+        command.operationId,
+        "unavailable",
+        "This thread's checkout is on an SSH target, where this operation is not available.",
+      );
+    }
     if (command.kind === "start-provider-turn" && command.delivery !== undefined) {
       const delivery = this.#agentResultDelivery(command);
       if (delivery !== undefined) return delivery;
@@ -1298,11 +1317,12 @@ export class CodeOperationService {
                 recordedStart === undefined &&
                 turnRefusal === undefined
               ) {
-                const checkpoint = await this.#checkpoint(
-                  turnThread,
-                  scope.checkout.id,
-                  root.checkoutRoot,
-                );
+                // A remote root is no folder of this host: Git here never
+                // captures a path that only names it on the target.
+                const checkpoint =
+                  scope.checkout.kind === "remote-root"
+                    ? undefined
+                    : await this.#checkpoint(turnThread, scope.checkout.id, root.checkoutRoot);
                 // Check again after the asynchronous checkpoint so a changed generation or
                 // an intervening parent admission cannot acquire a stale delivery mark.
                 const afterCheckpoint = this.#agentResultDelivery(command);

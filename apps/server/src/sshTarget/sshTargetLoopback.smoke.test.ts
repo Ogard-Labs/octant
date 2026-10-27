@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync,
   chownSync,
@@ -33,7 +33,17 @@ import {
   type ProviderRuntimeEvent,
   type ToolActionAuthority,
 } from "@octant/contracts";
-import { decodeCodeRelativePath, decodeCodeTerminalId } from "@octant/contracts/code";
+import {
+  decodeCodeRelativePath,
+  decodeCodeTerminalId,
+  decodeCodeThread,
+  type CodeCheckoutIdentity,
+} from "@octant/contracts/code";
+import {
+  decodeCodeEvidenceReference,
+  type CodeEvidenceReference,
+  type CodeOperationEventFrame,
+} from "@octant/contracts/code-operations";
 import { WindowId } from "@octant/contracts/shell";
 import { decodeUtcTimestamp } from "@octant/contracts/events";
 import { decodeProjectId } from "@octant/contracts/projects";
@@ -45,6 +55,35 @@ import {
   type SshTargetStatus,
 } from "@octant/contracts/ssh-target";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
+import { CodeContentStore } from "../code/codeContentStore";
+import { CodeOperationEventStore } from "../code/codeOperationEventStore";
+import { createCodeOperationRuntime } from "../code/codeOperationRuntime";
+import { CodeService, type CodePersistencePort } from "../code/codeService";
+import { CodeSessionAuthorityStore } from "../code/codeSessionAuthorityStore";
+import { codeTurnExecutionPolicyReader } from "../code/codeTurnExecutionPolicy";
+import { CodeProjectAccess } from "../codeProjectAccess";
+import { createNativeHarnessAuthority } from "../harness/nativeHarnessAuthority";
+import {
+  readCodeCheckout,
+  readCodeCheckoutAggregateVersion,
+  readCodeCheckouts,
+  readCodeFileReference,
+  readCodeFileReferences,
+  readCodeRuntimeWorkAggregateVersion,
+  readCodeRuntimeWorks,
+  readCodeThread,
+  readCodeThreadActivity,
+  readCodeThreads,
+  readCodeThreadView,
+} from "../persistence/codeProjection";
+import { readThreadIdModes } from "../persistence/threadIdentity";
+import type { PrincipalRouteContext } from "../principalRouteContext";
+import {
+  bindRemoteCodeTurn,
+  remoteCodeCheckoutRoot,
+  remoteCodeProjectOf,
+  withRemoteCodeCheckouts,
+} from "./sshRemoteCodeThreads";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
 import type { NativeHarnessApprovalStore } from "../harness/nativeHarnessApprovals";
 import { createNativeHarnessComposition } from "../harness/nativeHarnessComposition";
@@ -586,6 +625,457 @@ function remoteHarnessHost(input: {
     rules,
     composition,
     egressEvents: () =>
+      events
+        .replayAggregateType({ aggregateType: "thread-egress", afterSequence: 0, limit: 1_000 })
+        .filter((event) => String(event.aggregateId) === threadId),
+  };
+}
+
+const productWindow = Schema.decodeUnknownSync(WindowId)(randomUUID());
+const pairedDevice = Schema.decodeUnknownSync(WindowId)(randomUUID());
+const pairedDeviceRequest: PrincipalRouteContext = {
+  principal: {
+    kind: "remote-device",
+    hostId: "local",
+    deviceId: String(pairedDevice),
+    credentialGeneration: 1,
+    origin: "https://device.example",
+    protocolVersion: 1,
+    capabilityDigest: "a".repeat(64),
+    sessionId: randomUUID(),
+  } as never,
+  scopeId: pairedDevice,
+};
+
+/** Which provider a remote-bound thread's turn resolves. */
+type ProductProvider = "harness" | "undeclared-runtime" | "declared-runtime";
+
+/**
+ * This host's product path for a remote-bound Project's threads, wired as
+ * the host wires it: the Code service that prepares the Project's checkout
+ * and creates threads, and the Code turn runtime that runs their turns,
+ * with the remote checkout, the harness's authority over the binding, the
+ * remote tool set bound to the target's session, the turn's posture reader,
+ * and Project access for a local window bound to the Project or a paired
+ * device. Inference is a local model stub answering from `script`; this
+ * host's Git ports record every call, so a test can show none was made.
+ */
+function remoteCodeProduct(input: {
+  readonly connections: SshTargetConnectionService;
+  readonly project: SshRemoteProject;
+  readonly approve: Pick<NativeHarnessApprovalStore, "ask">["ask"];
+  readonly provider?: ProductProvider;
+  readonly fixturePort?: number;
+}) {
+  if (journal === undefined) throw new Error("the journal opens before the tests");
+  const { journal: events, connection } = journal;
+  const store = openedStore();
+  const clock = () => new Date().toISOString();
+  const tainted = (id: string) =>
+    readThreadExternalContentTaint(connection, id).externalContentIngested;
+  const ingestion = new ExternalContentIngestionStore({
+    journal: events,
+    connection,
+    uuid: randomUUID,
+    clock,
+    actor: systemActor,
+  });
+  const persistence: CodePersistencePort = {
+    journal: events,
+    readCodeSettings: () => undefined,
+    readCodeThread: (id) => readCodeThread(connection, id),
+    readThreadIdModes: (id) => readThreadIdModes(connection, id),
+    readCodeThreads: () => readCodeThreads(connection),
+    readCodeThreadActivity: () => readCodeThreadActivity(connection),
+    readCodeRuntimeWorks: (id) => readCodeRuntimeWorks(connection, id),
+    readCodeCheckout: (id) => readCodeCheckout(connection, id),
+    readCodeCheckoutAggregateVersion: (id) => readCodeCheckoutAggregateVersion(connection, id),
+    readCodeCheckouts: () => readCodeCheckouts(connection),
+    readCodeFileReference: (id) => readCodeFileReference(connection, id),
+    readCodeFileReferences: (id) => readCodeFileReferences(connection, id),
+    readCodeThreadView: (id) => readCodeThreadView(connection, id),
+  };
+  // A local window reaches the Project its workspace names; a paired device
+  // reaches any Project this host holds, as for a local Project.
+  const access = new CodeProjectAccess({
+    readWorkspace: (scope) =>
+      String(scope) === String(productWindow)
+        ? ({ contextByMode: { code: { projectId: input.project.id } } } as never)
+        : undefined,
+    hasActiveCodeProject: (id) => store.getProject(String(id)) !== undefined,
+    isWindowLive: (scope) => String(scope) === String(productWindow),
+  });
+  const codeService = new CodeService({
+    persistence,
+    access: {
+      canBrowseProject: (id) => store.getProject(String(id)) !== undefined,
+      canAccessProject: (scope, id) => access.canAccessProject(scope, id),
+    },
+    checkouts: withRemoteCodeCheckouts(store, {
+      observe: async () => {
+        throw new Error("No local Project is bound in this test.");
+      },
+    }),
+    roots: { resolve: async () => undefined },
+    files: {
+      open: async () => ({
+        status: "failed" as const,
+        failure: { category: "unavailable" as const, code: "helper-unavailable" },
+      }),
+      save: async () => ({
+        status: "failed" as const,
+        failure: { category: "unavailable" as const, code: "helper-unavailable" },
+      }),
+    },
+    content: new CodeContentStore(),
+    uuid: randomUUID,
+    clock,
+    workingDirectories: { resolve: async () => undefined },
+    onWorkingDirectoryChanged: async () => undefined,
+    // Every native confirmation is given, so a refusal is the Project's own.
+    approvals: { validate: async () => true },
+  });
+  const rules = new ToolEgressRules({
+    journal: events,
+    readCodeThread: (id) => {
+      const thread = readCodeThread(connection, id as never);
+      return thread === undefined
+        ? undefined
+        : { projectId: String(thread.projectId), commandsProxied: true };
+    },
+    readThreadTaint: tainted,
+    recordLaunchTaint: ({ threadId: marked, launchId }) => {
+      const recorded = ingestion.record({
+        threadId: marked,
+        provenance: { origin: "external-content", sourceLabel: "tool-egress" },
+        contentReference: toolEgressLaunchTaintReference(launchId),
+        correlationId: launchId,
+        authorized: true,
+      });
+      return recorded.kind === "recorded" || recorded.kind === "already-recorded"
+        ? "recorded"
+        : "unavailable";
+    },
+    hostActor: systemActor,
+    personActor,
+    uuid: randomUUID,
+    clock,
+  });
+  const { connections } = input;
+  // As in the harness host above: the fixture's public name resolves to a
+  // public address, which the target dials as the fixture.
+  const throughFixture: SshRemoteHarnessOptions["connections"] = {
+    admit: (targetId, request) => connections.admit(targetId, request),
+    session: (targetId) => connections.session(targetId),
+    harnessFile: (session, admission, request) =>
+      connections.harnessFile(session, admission, request),
+    runCommand: (session, admission, request, options) =>
+      connections.runCommand(session, admission, request, options),
+    resolveOnTarget: async (session, host) =>
+      host === "allowed.example.com"
+        ? [FIXTURE_ADDRESS]
+        : connections.resolveOnTarget(session, host),
+    dialFromTarget: (session, destination) =>
+      connections.dialFromTarget(
+        session,
+        destination.address === FIXTURE_ADDRESS && input.fixturePort !== undefined
+          ? { address: "127.0.0.1", port: input.fixturePort }
+          : destination,
+      ),
+  };
+  const egressDirectory = join(root, "host-egress");
+  mkdirSync(egressDirectory, { recursive: true, mode: 0o700 });
+  const sessionAuthority = new CodeSessionAuthorityStore();
+  const runtimeHolder: { current?: ReturnType<typeof createCodeOperationRuntime> } = {};
+  const hostId = "00000000-0000-4000-8000-0000000000ab" as never;
+  const composition = createNativeHarnessComposition({
+    authority: createNativeHarnessAuthority({
+      hostId,
+      persistence: {
+        readProject: () => undefined,
+        readCodeThread: (id) => readCodeThread(connection, id),
+        readProviderInstance: () => ({ enabled: true }) as never,
+        readChatThread: () => undefined,
+      },
+      workThreads: { read: () => undefined },
+      readThreadTaint: (id) => readThreadExternalContentTaint(connection, id),
+      holdsRemoteCodeBinding: (thread) => remoteCodeProjectOf(store, thread) !== undefined,
+    }),
+    isHarnessProvider: () => true,
+    approvals: { ask: input.approve },
+    readCodeExecutionPolicy: codeTurnExecutionPolicyReader({
+      readCodeThread: (id) => readCodeThread(connection, id),
+      codeSessionAuthority: sessionAuthority,
+      codeOperationRuntime: {
+        threadWithActiveTurnPosture: (thread) =>
+          runtimeHolder.current?.threadWithActiveTurnPosture?.(thread) ?? thread,
+      },
+    }),
+    remoteHarness: (bind) =>
+      bindSshRemoteHarness(
+        {
+          connections: throughFixture,
+          egress: {
+            startLaunch: (launch) => rules.startLaunch(launch),
+            endpoint: { kind: "unix-socket", parentDirectory: egressDirectory },
+            launchId: () => Schema.decodeUnknownSync(ToolEgressLaunchId)(randomUUID()),
+          },
+          uuid: randomUUID,
+        },
+        bind,
+      ),
+    hostId,
+    readThreadTaint: tainted,
+    isChildAuthorityCurrent: () => false,
+    recordExternalContentIngestion: (record) => ingestion.record(record),
+    uuid: randomUUID,
+    clock,
+  });
+  // The model stub answers each request with the next scripted reply and
+  // keeps what it was sent; a provider that is not the harness records
+  // whether anything ever acquired it.
+  const script: NativeHarnessResponse[] = [];
+  const requests: NativeHarnessRequest[] = [];
+  const acquired: string[] = [];
+  const transport: NativeHarnessTransport = {
+    open: async () => ({
+      fits: () => true,
+      send: async (request) => {
+        requests.push(request);
+        const next = script.shift();
+        if (next === undefined) throw new Error("The model stub ran out of replies.");
+        return next;
+      },
+      release: () => undefined,
+    }),
+  };
+  const provider = input.provider ?? "harness";
+  // One store across turns, as the host's journal is, so a later turn takes
+  // up the session an earlier one opened.
+  const transcripts = new MemoryNativeHarnessTranscriptStore();
+  const driver: ProviderDriver = {
+    kind:
+      provider === "harness"
+        ? "openai-compatible"
+        : provider === "undeclared-runtime"
+          ? "codex"
+          : "opencode",
+    ...(provider === "declared-runtime"
+      ? {
+          remotePlacement: {
+            postures: ["plan", "approval-gated", "auto-accept-edits"],
+            appToolTransport: "stdio",
+          },
+        }
+      : {}),
+    probe: () => Effect.die(new Error("The test provider is not probed.")),
+    acquire: (acquireInput) => {
+      acquired.push(acquireInput.projectRoot);
+      return provider === "harness"
+        ? createNativeHarnessConnection({
+            instanceId: harnessInstance,
+            driverKind: "openai-compatible",
+            projectRoot: acquireInput.projectRoot,
+            mode: "code",
+            transport,
+            transcripts,
+            admitTurn: () => undefined,
+            clock,
+            correlationId: () => randomUUID(),
+          })
+        : Effect.die(new Error("A runtime that cannot run on the target was launched."));
+    },
+  };
+  const evidence = new Map<string, string>();
+  const put = (content: string): CodeEvidenceReference => {
+    const reference = decodeCodeEvidenceReference({
+      contentId: randomUUID(),
+      digest: createHash("sha256").update(content).digest("hex"),
+      byteLength: Buffer.byteLength(content),
+    });
+    evidence.set(String(reference.contentId), content);
+    return reference;
+  };
+  const localGit: string[] = [];
+  const noted =
+    <T>(name: string, answer: T) =>
+    async () => {
+      localGit.push(name);
+      return answer;
+    };
+  const failed = { status: "failed" as const };
+  const runtime = createCodeOperationRuntime({
+    persistence: {
+      journal: events,
+      readCodeRuntimeWorkAggregateVersion: (id) =>
+        readCodeRuntimeWorkAggregateVersion(connection, id),
+      readCodeThread: (id) => readCodeThread(connection, id),
+      readCodeCheckout: (id) => readCodeCheckout(connection, id),
+      readReviewFinding: () => undefined,
+      readReviewFindings: () => [],
+    },
+    windowAccess: {
+      canAccessProject: (scope, id) => access.canAccessProject(scope, id),
+      standingAuthority: (run) => access.standingAuthority(run),
+    },
+    resolveCheckoutRoot: async (_scope, thread, checkout: CodeCheckoutIdentity) =>
+      checkout.kind === "remote-root" ? remoteCodeCheckoutRoot(store, thread) : undefined,
+    resolveProviderDriver: () => driver,
+    remoteCodeTurn: (turn) =>
+      bindRemoteCodeTurn({ store, connections: input.connections, composition }, turn),
+    supportsAppManagedTools: () => true,
+    sessionAuthority,
+    credentialResolver: { resolve: async () => undefined },
+    resolvePullRequestTarget: async () => undefined,
+    reviewFiles: { resolve: () => undefined },
+    evidence: {
+      put,
+      read: async (reference) => evidence.get(String(reference.contentId)),
+    },
+    gitObservationPort: {
+      observe: noted("observe", { status: "unavailable" as const }),
+      observeRemotes: noted("remotes", []),
+    },
+    gitMutationPort: {
+      stage: noted("stage", failed),
+      unstage: noted("unstage", failed),
+      commit: noted("commit", failed),
+      push: noted("push", failed),
+      discard: noted("discard", failed),
+      revertCommit: noted("revert", failed),
+      snapshotWorkingTree: noted("checkpoint", failed),
+      restoreWorkingTree: noted("restore", failed),
+      releaseCheckpoint: async () => {
+        localGit.push("release");
+      },
+    },
+    actor: personActor,
+    clock,
+    uuid: randomUUID,
+  });
+  runtimeHolder.current = runtime;
+  const operations = new CodeOperationEventStore({
+    journal: events,
+    uuid: randomUUID,
+    clock,
+    actor: personActor,
+  });
+  const asScope = <T>(scope: WindowId, run: () => Promise<T>): Promise<T> =>
+    String(scope) === String(pairedDevice) ? access.run(pairedDeviceRequest, run) : run();
+  return {
+    rules,
+    script,
+    requests,
+    acquired,
+    localGit,
+    /** Prepares the Project's checkout and creates a thread on it, as the composer does. */
+    createThread: async (
+      scope: WindowId,
+      executionPolicy: ProviderExecutionPolicy,
+    ): Promise<CodeThread> => {
+      const prepared = await asScope(scope, () =>
+        codeService.execute(scope, {
+          kind: "prepare-code-project-checkout",
+          projectId: input.project.id,
+        }),
+      );
+      if (prepared.kind !== "checkout-prepared") throw new Error("checkout not prepared");
+      expect(prepared.checkout.kind).toBe("remote-root");
+      const now = clock();
+      const created = await asScope(scope, () =>
+        codeService.execute(scope, {
+          kind: "create-code-thread",
+          thread: decodeCodeThread({
+            id: randomUUID(),
+            projectId: input.project.id,
+            bindingRevisionId: prepared.bindingRevisionId,
+            repositoryId: prepared.checkout.repositoryId,
+            checkoutId: prepared.checkout.id,
+            title: "On the target",
+            lifecycle: "active",
+            providerInstanceId: harnessInstance,
+            modelId: harnessModel,
+            executionPolicy,
+            permissionPersistence: "current-session",
+            deliveryTarget: {
+              branchIntent: "main",
+              remoteName: "origin",
+              proposedBaseRepository: "octant/remote-app",
+              proposedBaseBranch: "main",
+              outcomeKind: "local-implementation",
+              confirmedAt: now,
+            },
+            version: 1,
+            createdAt: now,
+            updatedAt: now,
+          }),
+        }),
+      );
+      if (created.kind !== "thread-created") throw new Error("thread not created");
+      return created.thread;
+    },
+    /** Sends one turn through the Code turn runtime and waits for it to settle. */
+    runTurn: async (
+      scope: WindowId,
+      thread: CodeThread,
+      prompt: string,
+      executionPolicy?: ProviderExecutionPolicy,
+    ) => {
+      const operationId = randomUUID();
+      const started = await asScope(scope, () =>
+        runtime.execute(scope, {
+          kind: "start-provider-turn",
+          operationId,
+          threadId: thread.id,
+          checkoutId: thread.checkoutId,
+          sessionId: randomUUID(),
+          prompt: put(prompt),
+          ...(executionPolicy === undefined ? {} : { executionPolicy }),
+        }),
+      );
+      const frames = async (): Promise<ReadonlyArray<CodeOperationEventFrame>> => {
+        const replay = operations.replay({
+          threadId: thread.id,
+          operationId: operationId as never,
+          afterCursor: 0,
+          limit: 256,
+        });
+        return replay.status === "ok" ? replay.frames : [];
+      };
+      const settled = (all: ReadonlyArray<CodeOperationEventFrame>) =>
+        all.findLast(
+          (frame) =>
+            frame.event.kind === "operation-state" &&
+            (frame.event.state === "completed" ||
+              frame.event.state === "interrupted" ||
+              frame.event.state === "failed"),
+        );
+      if (!("state" in started) || started.state === "running") {
+        for (let attempt = 0; attempt < 1_200 && settled(await frames()) === undefined;) {
+          attempt += 1;
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      }
+      const all = await frames();
+      const end = settled(all)?.event;
+      return {
+        started,
+        state: end?.kind === "operation-state" ? end.state : undefined,
+        failure: end?.kind === "operation-state" ? end.failure?.message : undefined,
+        frames: all,
+      };
+    },
+    /** Any other Code operation on the thread, which acts on a folder of this host. */
+    observeGit: (scope: WindowId, thread: CodeThread) =>
+      runtime.execute(scope, {
+        kind: "observe-git",
+        operationId: randomUUID(),
+        threadId: thread.id,
+        checkoutId: thread.checkoutId,
+        gitOperationId: randomUUID(),
+        maxDiffBytes: 4_096,
+      }),
+    egressEvents: (threadId: string) =>
       events
         .replayAggregateType({ aggregateType: "thread-egress", afterSequence: 0, limit: 1_000 })
         .filter((event) => String(event.aggregateId) === threadId),
@@ -1941,6 +2431,322 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
       connections.remove(status.target.id);
     }
   }, 240_000);
+
+  it("creates a Code thread in a remote-bound Project and runs its harness turn through the Code turn runtime, reading, editing, testing, and fetching on the target with approvals", async () => {
+    const checkout = harnessCheckout("product-app");
+    const fixture = createHttpServer((_request, response) => {
+      response.end("hello from the fixture\n");
+    });
+    await new Promise<void>((resolve) => fixture.listen(0, "127.0.0.1", resolve));
+    const fixtureAddress = fixture.address();
+    const fixturePort =
+      typeof fixtureAddress === "object" && fixtureAddress !== null ? fixtureAddress.port : 0;
+    const connections = service();
+    const status = await register(connections, target("product", asNobody()));
+    expect(reasons(status)).toEqual(["admitted", "admitted", "admitted"]);
+    try {
+      const bound = await projectsOn(connections).bind({
+        targetId: status.target.id,
+        remoteRoot: remotePath(checkout),
+        name: "Product app",
+      });
+      if (bound.status !== "ok") throw new Error(`bind refused: ${bound.reason}`);
+      const approvals: string[] = [];
+      const product = remoteCodeProduct({
+        connections,
+        project: bound.value,
+        approve: async (ask) => {
+          approvals.push(ask.toolName);
+          return "approved";
+        },
+        fixturePort,
+      });
+
+      // Full access needs remembering for the Project, which a remote-bound
+      // Project cannot do yet, so no thread is created holding it.
+      await expect(product.createThread(productWindow, "full-access")).rejects.toMatchObject({
+        failure: { category: "unauthorized" },
+      });
+      const thread = await product.createThread(productWindow, "approval-gated");
+      expect(
+        product.rules.answer({
+          threadId: String(thread.id),
+          principal: { kind: "local-window" },
+          grants: [
+            {
+              host: "allowed.example.com",
+              port: fixturePort,
+              scope: { kind: "thread", lifetime: "1h" },
+            },
+          ],
+        }),
+      ).toMatchObject({ kind: "answered" });
+      const call = (toolCallId: string, toolName: string, args: object) => ({
+        toolCallId,
+        toolName,
+        argumentsJson: JSON.stringify(args),
+      });
+      product.script.push(
+        { text: "Reading.", toolCalls: [call("read-1", "read", { path: "math.js" })] },
+        {
+          text: "Fixing.",
+          toolCalls: [
+            call("edit-1", "edit", { path: "math.js", oldText: "a - b", newText: "a + b" }),
+          ],
+        },
+        {
+          text: "Testing.",
+          toolCalls: [
+            call("test-1", "bash", {
+              command: 'sh check.sh; ls "$HOME/.ssh" >/dev/null 2>&1 || echo SSH-HIDDEN',
+            }),
+          ],
+        },
+        {
+          text: "Fetching.",
+          toolCalls: [
+            call("net-1", "bash", {
+              command: [
+                `curl -sS --max-time 20 http://allowed.example.com:${String(fixturePort)}/`,
+                `curl -sS -o /dev/null -w 'blocked:%{http_code}\\n' --max-time 20 http://blocked.example.com:${String(fixturePort)}/`,
+              ].join("; "),
+            }),
+          ],
+        },
+        { text: "Fixed, tested, and fetched.", toolCalls: [] },
+      );
+      const turn = await product.runTurn(productWindow, thread, "Fix add() and run the check.");
+      expect(turn.state).toBe("completed");
+      expect(toolResult(product.requests, "read-1")).toMatchObject({
+        kind: "file",
+        path: "math.js",
+        lines: ["export const add = (a, b) => a - b;", ""],
+      });
+      expect(toolResult(product.requests, "edit-1")).toMatchObject({
+        kind: "edited",
+        path: "math.js",
+        replacements: 1,
+      });
+      // The edit landed in the target's folder, as the target's user.
+      expect(readFileSync(join(checkout, "math.js"), "utf8")).toBe(
+        "export const add = (a, b) => a + b;\n",
+      );
+      expect(statSync(join(checkout, "math.js")).uid).toBe(NOBODY);
+      const tested = JSON.stringify(toolResult(product.requests, "test-1"));
+      expect(tested).toContain("PASS");
+      expect(tested).toContain("SSH-HIDDEN");
+      const fetched = JSON.stringify(toolResult(product.requests, "net-1"));
+      expect(fetched).toContain("hello from the fixture");
+      expect(fetched).toContain("blocked:403");
+      // Each write and command asked first; reading did not.
+      expect(approvals).toEqual(["edit", "bash", "bash"]);
+      const summary = product
+        .egressEvents(String(thread.id))
+        .find(
+          (event) =>
+            event.eventName === "thread.egress-launch-summarized@1" &&
+            summarizesHost(event.payload, "allowed.example.com"),
+        );
+      expect(summary?.payload).toMatchObject({
+        entries: expect.arrayContaining([
+          expect.objectContaining({ host: "allowed.example.com", decision: "allowed" }),
+          expect.objectContaining({ host: "blocked.example.com", decision: "refused" }),
+        ]),
+      });
+      // Inference ran here against the path as the target names it, and no
+      // Git of this host checkpointed or observed that path, though on this
+      // loopback target it is also a folder here.
+      expect(product.acquired).toEqual([String(bound.value.remoteRoot)]);
+      expect(product.localGit).toEqual([]);
+      const started = turn.frames.find((frame) => frame.event.kind === "conversation-turn-started");
+      expect(started?.event).not.toHaveProperty("checkpoint");
+      // Every other Code operation would act on a folder of this host.
+      expect(await product.observeGit(productWindow, thread)).toMatchObject({
+        kind: "operation-failed",
+        failure: {
+          category: "unavailable",
+          message: expect.stringContaining("on an SSH target"),
+        },
+      });
+      expect(product.localGit).toEqual([]);
+
+      // A turn narrowed to Plan is offered no write or command, and what the
+      // model asks for anyway changes nothing on the target.
+      const asked = product.requests.length;
+      product.script.push(
+        {
+          text: "Changing.",
+          toolCalls: [
+            call("plan-write", "write", { path: "planned.txt", content: "no" }),
+            call("plan-bash", "bash", { command: "touch planned-command" }),
+          ],
+        },
+        { text: "Planned.", toolCalls: [] },
+        { text: "Planned.", toolCalls: [] },
+      );
+      const planned = await product.runTurn(productWindow, thread, "Plan only.", "plan");
+      expect(planned.state).toBe("completed");
+      const offered = (product.requests[asked]?.tools ?? []).map((tool) => tool.name);
+      expect(offered).toContain("read");
+      expect(offered).not.toContain("bash");
+      expect(offered).not.toContain("edit");
+      expect(offered).not.toContain("write");
+      expect(existsSync(join(checkout, "planned.txt"))).toBe(false);
+      expect(existsSync(join(checkout, "planned-command"))).toBe(false);
+      expect(approvals).toEqual(["edit", "bash", "bash"]);
+    } finally {
+      fixture.close();
+      connections.close();
+      connections.remove(status.target.id);
+    }
+  }, 240_000);
+
+  it("refuses a runtime that cannot run on the target before anything launches, and gives a paired device no more than the Project's authority", async () => {
+    const checkout = harnessCheckout("refusal-app");
+    const connections = service();
+    const status = await register(connections, target("refusal", asNobody()));
+    expect(reasons(status)).toEqual(["admitted", "admitted", "admitted"]);
+    try {
+      const bound = await projectsOn(connections).bind({
+        targetId: status.target.id,
+        remoteRoot: remotePath(checkout),
+        name: "Refusal app",
+      });
+      if (bound.status !== "ok") throw new Error(`bind refused: ${bound.reason}`);
+
+      // A driver that declares no placement is refused with admission's own
+      // reason; one that declares it, because the turn runtime places no
+      // runtime yet. Neither is acquired, here or on the target.
+      for (const [provider, message] of [
+        ["undeclared-runtime", "Octant cannot confine this runtime on an SSH target"],
+        ["declared-runtime", "Code threads do not start a placed runtime yet"],
+      ] as const) {
+        const product = remoteCodeProduct({
+          connections,
+          project: bound.value,
+          approve: async () => "approved",
+          provider,
+        });
+        const thread = await product.createThread(productWindow, "approval-gated");
+        const turn = await product.runTurn(productWindow, thread, "Run on the target.");
+        expect(turn.started).toMatchObject({ kind: "provider-turn-state", state: "failed" });
+        expect(JSON.stringify(turn.started)).toContain(message);
+        expect(product.acquired).toEqual([]);
+        expect(product.localGit).toEqual([]);
+      }
+
+      // A paired device reaches the Project's threads, never more: no Full
+      // access, and a Plan turn it sends writes and runs nothing.
+      const asked: string[] = [];
+      const product = remoteCodeProduct({
+        connections,
+        project: bound.value,
+        approve: async (ask) => {
+          asked.push(ask.toolName);
+          return "approved";
+        },
+      });
+      await expect(product.createThread(pairedDevice, "full-access")).rejects.toMatchObject({
+        failure: { category: "unauthorized" },
+      });
+      const thread = await product.createThread(pairedDevice, "approval-gated");
+      product.script.push(
+        {
+          text: "Changing.",
+          toolCalls: [
+            {
+              toolCallId: "device-write",
+              toolName: "write",
+              argumentsJson: JSON.stringify({ path: "device.txt", content: "no" }),
+            },
+            {
+              toolCallId: "device-bash",
+              toolName: "bash",
+              argumentsJson: JSON.stringify({ command: "touch device-command" }),
+            },
+          ],
+        },
+        { text: "Done.", toolCalls: [] },
+        { text: "Done.", toolCalls: [] },
+      );
+      const planned = await product.runTurn(pairedDevice, thread, "Change it.", "plan");
+      expect(planned.state).toBe("completed");
+      const offered = (product.requests[0]?.tools ?? []).map((tool) => tool.name);
+      expect(offered).toContain("read");
+      expect(offered).not.toContain("bash");
+      expect(offered).not.toContain("write");
+      expect(existsSync(join(checkout, "device.txt"))).toBe(false);
+      expect(existsSync(join(checkout, "device-command"))).toBe(false);
+      expect(asked).toEqual([]);
+      // A window whose workspace names another Project reaches nothing here.
+      const stranger = Schema.decodeUnknownSync(WindowId)(randomUUID());
+      await expect(product.createThread(stranger, "approval-gated")).rejects.toMatchObject({
+        failure: { category: "unauthorized" },
+      });
+    } finally {
+      connections.close();
+      connections.remove(status.target.id);
+    }
+  }, 240_000);
+
+  it("stops a remote-bound thread's turn as target-disconnected when the session ends, and queues nothing", async () => {
+    const checkout = harnessCheckout("product-disconnect-app");
+    const connections = service();
+    const status = await register(connections, target("product-disconnect", asNobody()));
+    try {
+      const bound = await projectsOn(connections).bind({
+        targetId: status.target.id,
+        remoteRoot: remotePath(checkout),
+        name: "Product disconnect app",
+      });
+      if (bound.status !== "ok") throw new Error(`bind refused: ${bound.reason}`);
+      const product = remoteCodeProduct({
+        connections,
+        project: bound.value,
+        approve: async () => "approved",
+      });
+      const thread = await product.createThread(productWindow, "approval-gated");
+      product.script.push(
+        {
+          text: "Running.",
+          toolCalls: [
+            {
+              toolCallId: "slow-1",
+              toolName: "bash",
+              argumentsJson: JSON.stringify({ command: "sleep 41; touch ran-after-disconnect" }),
+            },
+          ],
+        },
+        { text: "unused", toolCalls: [] },
+      );
+      const turn = product.runTurn(productWindow, thread, "Run the slow job.");
+      for (let attempt = 0; attempt < 100 && !processRunning("sleep 41"); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect(processRunning("sleep 41")).toBe(true);
+      process.kill(executorProcess(), "SIGKILL");
+      const stopped = await turn;
+      expect(stopped.state).toBe("interrupted");
+      expect(stopped.failure).toContain("target-disconnected");
+      for (let attempt = 0; attempt < 50 && processRunning("sleep 41"); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect(processRunning("sleep 41")).toBe(false);
+
+      // While the target is away, a new turn is refused before it launches.
+      const refused = await product.runTurn(productWindow, thread, "Again.");
+      expect(JSON.stringify(refused.started)).toContain("not connected");
+
+      // A new session attests afresh, and nothing of the stopped turn arrives.
+      expect((await connections.connect(status.target.id)).status).toBe("ok");
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      expect(existsSync(join(checkout, "ran-after-disconnect"))).toBe(false);
+    } finally {
+      connections.close();
+      connections.remove(status.target.id);
+    }
+  }, 240_000);
+
   it("places a runtime in Plan and approval-gated that echoes beside reads and a command, kept to its root and home, reaching public names only through a journaled proxy here", async () => {
     const checkout = harnessCheckout("runtime-app");
     const binary = runtimeBinary(join(root, "runtime-bin"));

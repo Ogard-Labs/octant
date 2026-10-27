@@ -150,6 +150,20 @@ export const CodeCheckoutIdentity = Schema.Union(
     ownershipReceiptId: WorktreeReceiptId,
     observedAt: UtcTimestamp,
   }).annotations(strict),
+  /**
+   * A remote-bound Project's root on an SSH target. It is never a folder of
+   * this host: its identity digests the binding the target's executor
+   * resolved, it carries no head because this host reads no Git of it, and
+   * only a native-harness turn reaches it, through the target's executor.
+   */
+  Schema.Struct({
+    id: CodeCheckoutId,
+    repositoryId: CodeRepositoryId,
+    kind: Schema.Literal("remote-root"),
+    availability: Schema.Literal("available", "unavailable", "waiting"),
+    head: Schema.Struct({ kind: Schema.Literal("none") }).annotations(strict),
+    observedAt: UtcTimestamp,
+  }).annotations(strict),
 );
 export type CodeCheckoutIdentity = typeof CodeCheckoutIdentity.Type;
 

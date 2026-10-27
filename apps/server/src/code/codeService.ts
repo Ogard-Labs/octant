@@ -322,7 +322,13 @@ function repeatsJournaledCheckout(
 export function codeNavigationCheckoutChip(
   checkout: CodeCheckoutIdentity | undefined,
 ): CodeNavigationRuntime["checkoutChip"] {
-  if (checkout === undefined || checkout.kind === "plain-folder") return undefined;
+  if (
+    checkout === undefined ||
+    checkout.kind === "plain-folder" ||
+    checkout.kind === "remote-root"
+  ) {
+    return undefined;
+  }
   const label = checkout.head.kind === "branch" ? checkout.head.name : "Detached HEAD";
   return { checkoutKind: checkout.kind, label };
 }
@@ -1689,6 +1695,15 @@ export class CodeService {
           requestedPermissionPersistence: command.thread.permissionPersistence,
         });
         const thread = this.#threadWithProfiledAuthority(command.thread, profiled);
+        // Full access on a target needs it remembered for the Project, and a
+        // remote-bound Project has nowhere to remember it yet, so no thread
+        // there is created holding it, even for this session.
+        if (checkout.kind === "remote-root" && thread.executionPolicy === "full-access") {
+          throw this.#failure(
+            "unauthorized",
+            "Full access is not available for a Project on an SSH target. Choose a narrower posture.",
+          );
+        }
         const project = this.#persistence.readProject?.(thread.projectId);
         if (
           this.#isProviderModelAllowed?.({
