@@ -108,6 +108,7 @@ describe("node extension process port", () => {
       readiness: "spawn",
       sandbox: {
         kind: "outside-driver",
+        runtime: "bun",
         instanceId: "instance-a",
         packageRoot,
         temporaryDirectory,
@@ -150,6 +151,98 @@ describe("node extension process port", () => {
     });
   });
 
+  it("runs an outside driver on Electron's Node with only that runtime's switch added, reading the app bundle that holds it", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-driver-electron-"));
+    receiptDirectories.push(root);
+    const home = join(root, "home");
+    const packageRoot = join(root, "package");
+    const temporaryDirectory = join(root, "driver-tmp");
+    await Promise.all([home, packageRoot, temporaryDirectory].map((path) => mkdir(path)));
+    const electron = "/Applications/Octant.app/Contents/MacOS/Octant";
+    let observed: { args: ReadonlyArray<string>; env: NodeJS.ProcessEnv | undefined } | undefined;
+    const spawn = ((...input: Parameters<typeof nodeSpawn>) => {
+      const [, args, options] = input;
+      observed = { args, env: options.env };
+      return nodeSpawn(process.execPath, ["-e", ""], options);
+    }) as typeof nodeSpawn;
+    const port = createNodeExtensionProcessPort({
+      spawn,
+      shutdownTimeoutMs: 100,
+      platform: "darwin",
+      sandboxPath: process.execPath,
+      homeDirectory: home,
+    });
+    const child = await port.start({
+      ...startInput,
+      command: electron,
+      args: [join(packageRoot, "main.mjs")],
+      cwd: packageRoot,
+      env: { NODE_OPTIONS: "--inspect=0.0.0.0:9229", ELECTRON_RUN_AS_NODE: "0" },
+      readiness: "spawn",
+      sandbox: {
+        kind: "outside-driver",
+        runtime: "electron-node",
+        instanceId: "instance-a",
+        packageRoot,
+        temporaryDirectory,
+      },
+    });
+    await child.stop().catch(() => undefined);
+
+    const profile = observed?.args[1] ?? "";
+    // No flag reaches the runtime: the entry is its one argument.
+    expect(observed?.args.slice(2)).toEqual(["--", electron, join(packageRoot, "main.mjs")]);
+    // The bundle holds the executable, Electron's Frameworks, and its Resources.
+    expect(profile).toContain('(allow file-read* (subpath "/Applications/Octant.app"))');
+    expect(profile).not.toContain('(allow file-read* (subpath "/Applications"))');
+    expect(profile).not.toContain("(allow network");
+    expect(profile).not.toContain("(allow process-fork)");
+    expect(profile.split("\n").filter((rule) => rule.startsWith("(allow process-exec"))).toEqual([
+      `(allow process-exec (literal "${electron}"))`,
+    ]);
+    expect(
+      profile.split("\n").filter((rule) => rule.startsWith("(allow file-write* (subpath")),
+    ).toEqual([`(allow file-write* (subpath "${temporaryDirectory}"))`]);
+    expect(observed?.env).toEqual({
+      PATH: "/usr/bin:/bin",
+      LANG: "en_US.UTF-8",
+      HOME: temporaryDirectory,
+      TMPDIR: temporaryDirectory,
+      ELECTRON_RUN_AS_NODE: "1",
+    });
+  });
+
+  it("refuses an Electron runtime that is not inside an app bundle, since only the bundle was measured", async () => {
+    let spawned = false;
+    const spawn = ((...input: Parameters<typeof nodeSpawn>) => {
+      spawned = true;
+      return nodeSpawn(...input);
+    }) as typeof nodeSpawn;
+    const port = createNodeExtensionProcessPort({
+      spawn,
+      shutdownTimeoutMs: 100,
+      platform: "darwin",
+      sandboxPath: process.execPath,
+    });
+    await expect(
+      port.start({
+        ...startInput,
+        command: "/opt/electron/electron",
+        args: [join(tmpdir(), "main.mjs")],
+        cwd: tmpdir(),
+        readiness: "spawn",
+        sandbox: {
+          kind: "outside-driver",
+          runtime: "electron-node",
+          instanceId: "instance-a",
+          packageRoot: tmpdir(),
+          temporaryDirectory: tmpdir(),
+        },
+      }),
+    ).rejects.toThrow("could not be started");
+    expect(spawned).toBe(false);
+  });
+
   it("never starts an outside driver on Linux, where extension processes have no confinement", async () => {
     let spawned = false;
     const spawn = ((...input: Parameters<typeof nodeSpawn>) => {
@@ -167,6 +260,7 @@ describe("node extension process port", () => {
         readiness: "spawn",
         sandbox: {
           kind: "outside-driver",
+          runtime: "bun",
           instanceId: "instance-a",
           packageRoot: process.cwd(),
           temporaryDirectory: tmpdir(),

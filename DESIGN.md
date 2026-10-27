@@ -938,7 +938,10 @@ terminal engine enforces per cell against the background it is drawn on:
 4.5:1 normally and 7:1 under increased contrast, half that for dim text.
 Increased contrast also swaps in the same high-contrast ink as the rest of the
 window. A theme, mode, contrast, or system appearance change repaints an open
-terminal in place, keeping its scrollback.
+terminal in place, keeping its scrollback, and so does a change in the sidebar
+material (opaque or Glass, including Glass the host resolves after the terminal
+opened) or in reduced transparency, which moves the cells onto or off the Glass
+plate.
 
 Status roles are paired to the surface where they render. Use the text role
 for labels and the surface role for a background; never rely on hue alone:

@@ -7,6 +7,7 @@ import type {
   ExtensionProcessHandle,
   ExtensionRuntimeStartInput,
   ExtensionSupervisor,
+  OutsideDriverRuntime,
 } from "../extensions/extensionSupervisor";
 import type { OutsideDriverChannel } from "./outsideHarnessEndpointProxy";
 
@@ -30,7 +31,7 @@ import type { OutsideDriverChannel } from "./outsideHarnessEndpointProxy";
 export type OutsideDriverProcessRefusal =
   /** This platform has no confinement for a driver process (Linux, Windows). */
   | "host-prohibited"
-  /** The server does not run on Bun, the only runtime a driver runs on. */
+  /** The server runs on neither Bun nor Electron's Node, the runtimes a driver runs on. */
   | "runtime-unavailable"
   /** This instance's driver already has its process. */
   | "already-running"
@@ -54,6 +55,32 @@ export interface OutsideDriverProcessStartInput {
   readonly signal?: AbortSignal;
 }
 
+/** What the server knows of the runtime it runs on. */
+export interface OutsideDriverRuntimeHost {
+  readonly versions: Readonly<Record<string, string | undefined>>;
+  readonly execPath: string;
+  /** Electron's process type; absent when Electron runs as Node. */
+  readonly type?: string | undefined;
+}
+
+/**
+ * A driver runs on the runtime that runs this server and on nothing else, so
+ * the host ships no second runtime: the server's own Bun in development, and
+ * in the packaged app the Electron executable the server already runs on as
+ * Node. Electron's own main process, plain Node, or anything unrecognised
+ * gives no runtime, and every driver start is refused as `runtime-unavailable`.
+ */
+export function resolveOutsideDriverRuntime(
+  host: OutsideDriverRuntimeHost,
+): OutsideDriverRuntime | undefined {
+  if (!isAbsolute(host.execPath)) return undefined;
+  if (host.versions.bun !== undefined) return { kind: "bun", path: host.execPath };
+  if (host.versions.electron !== undefined && host.type === undefined) {
+    return { kind: "electron-node", path: host.execPath };
+  }
+  return undefined;
+}
+
 export interface OutsideDriverProcessLimits {
   /** The largest line the host reads before handing it to the proxy to refuse. */
   readonly messageBytes: number;
@@ -70,8 +97,8 @@ const DEFAULT_LIMITS: OutsideDriverProcessLimits = {
 export interface OutsideDriverProcessesOptions {
   readonly supervisor: Pick<ExtensionSupervisor, "startInteractive" | "stopInteractive">;
   readonly platform: NodeJS.Platform;
-  /** The Bun that runs this server, or nothing when the server runs on another runtime. */
-  readonly runtime: string | undefined;
+  /** The runtime that runs this server, or nothing when no driver may run on it. */
+  readonly runtime: OutsideDriverRuntime | undefined;
   /** Where each process's private temporary folder is made and removed. */
   readonly temporaryRoot: string;
   readonly now?: () => number;
@@ -87,7 +114,7 @@ interface RunningDriver {
 export class OutsideDriverProcesses {
   readonly #supervisor: OutsideDriverProcessesOptions["supervisor"];
   readonly #platform: NodeJS.Platform;
-  readonly #runtime: string | undefined;
+  readonly #runtime: OutsideDriverRuntime | undefined;
   readonly #temporaryRoot: string;
   readonly #now: () => number;
   readonly #limits: OutsideDriverProcessLimits;
@@ -110,7 +137,7 @@ export class OutsideDriverProcesses {
     // never starts a driver, rather than starting it unconfined.
     if (!isOutsideDriverHostConfined(this.#platform)) return refused("host-prohibited");
     const runtime = this.#runtime;
-    if (runtime === undefined || !isAbsolute(runtime)) return refused("runtime-unavailable");
+    if (runtime === undefined || !isAbsolute(runtime.path)) return refused("runtime-unavailable");
     const instanceKey = String(input.instanceId);
     // A process on its way out is waited for, so its successor never overlaps it.
     const previous = this.#running.get(instanceKey);
@@ -166,7 +193,7 @@ export class OutsideDriverProcesses {
         version: input.driver.version,
         digest: input.driver.digest,
         entryPoint: input.entryPoint,
-        command: runtime,
+        command: runtime.path,
         args: [input.entryPoint],
         cwd: input.packageRoot,
         // The process port replaces this with the driver's fixed environment.
@@ -179,6 +206,7 @@ export class OutsideDriverProcesses {
         authority: { kind: "trusted-extension", extensionId: input.driver.extensionId },
         sandbox: {
           kind: "outside-driver",
+          runtime: runtime.kind,
           instanceId: instanceKey,
           packageRoot: input.packageRoot,
           temporaryDirectory,

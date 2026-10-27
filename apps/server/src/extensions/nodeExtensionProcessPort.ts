@@ -16,7 +16,7 @@ import {
   unlink,
   writeFile,
 } from "node:fs/promises";
-import { dirname, isAbsolute, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import {
   makeProcessConfinementLive,
@@ -330,7 +330,10 @@ const OUTSIDE_DRIVER_DEVICE_READS = ["/dev/null", "/dev/zero", "/dev/random", "/
  * `TMPDIR` and `HOME`, so a runtime that keeps a cache under its home writes
  * only into the folder removed at stop and learns no path of the person's.
  * Nothing is inherited: no provider or cloud key, no broker coordinates, no
- * Project or checkout path.
+ * Project or checkout path. Electron's executable runs as Node only with
+ * `ELECTRON_RUN_AS_NODE=1`, so that runtime gets that one switch and nothing
+ * else: no `NODE_OPTIONS`, which would reach its Node through the default
+ * fuses, and no flag, since the entry is the command line's one argument.
  */
 function outsideDriverEnvironment(
   sandbox: OutsideDriverProcessSandbox,
@@ -340,7 +343,38 @@ function outsideDriverEnvironment(
     LANG: "en_US.UTF-8",
     HOME: sandbox.temporaryDirectory,
     TMPDIR: sandbox.temporaryDirectory,
+    ...(sandbox.runtime === "electron-node" ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
   };
+}
+
+/**
+ * What a driver's runtime reads to start. Bun reads its own folder and its
+ * parent, plus the Homebrew prefix's shared libraries for a Homebrew Bun.
+ * Electron's Node loads Electron's framework, ICU data, and V8 snapshot from
+ * the app bundle that holds its executable (`<name>.app/Contents/MacOS/<name>`),
+ * so that bundle is the read root, taken from the runtime's own path. An
+ * Electron outside an app bundle is not a layout this profile was measured
+ * for, so it is refused rather than guessed at.
+ */
+function outsideDriverRuntimeReadRoots(
+  runtime: string,
+  kind: OutsideDriverProcessSandbox["runtime"],
+): ReadonlyArray<string> {
+  if (kind === "bun") {
+    const runtimeFolder = dirname(runtime);
+    return [runtimeFolder, dirname(runtimeFolder), ...homebrewRuntimeRoots(runtime)];
+  }
+  const executableFolder = dirname(runtime);
+  const contents = dirname(executableFolder);
+  const bundle = dirname(contents);
+  if (
+    basename(executableFolder) !== "MacOS" ||
+    basename(contents) !== "Contents" ||
+    !bundle.endsWith(".app")
+  ) {
+    throw new Error("Extension process sandbox is unavailable on this host.");
+  }
+  return [bundle];
 }
 
 /**
@@ -364,12 +398,9 @@ async function prepareOutsideDriverLaunch(
     throw new Error("Extension sandbox paths must be absolute.");
   }
   const runtime = await realpath(input.command).catch(() => input.command);
-  const runtimeFolder = dirname(runtime);
   const readRoots = uniqueAbsolutePaths([
     sandbox.packageRoot,
-    runtimeFolder,
-    dirname(runtimeFolder),
-    ...homebrewRuntimeRoots(runtime),
+    ...outsideDriverRuntimeReadRoots(runtime, sandbox.runtime),
     ...OUTSIDE_DRIVER_SYSTEM_READ_ROOTS,
   ]);
   // As for the extension profile: the runtime reads "/" and stats every parent

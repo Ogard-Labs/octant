@@ -1,19 +1,22 @@
 import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { createServer, type Server } from "node:net";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { decodeProviderInstanceId, type OutsideProviderDriverReference } from "@octant/contracts";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { ExtensionSupervisor } from "../extensions/extensionSupervisor";
+import { ExtensionSupervisor, type OutsideDriverRuntime } from "../extensions/extensionSupervisor";
 import { createNodeExtensionProcessPort } from "../extensions/nodeExtensionProcessPort";
 import { OutsideDriverProcesses } from "./outsideDriverProcess";
 
 /**
  * Escape tests for the outside driver profile, against a real Seatbelt
- * process. They need macOS and a Bun on the PATH, and skip everywhere else:
- * a Linux host never starts a driver (see `outsideDriverProcess.test.ts`), so
- * there is nothing to escape from there.
+ * process, on each runtime a driver runs on: Bun, and Electron's Node when
+ * its binary is present. They need macOS and a Bun on the PATH, and skip
+ * everywhere else: a Linux host never starts a driver (see
+ * `outsideDriverProcess.test.ts`), so there is nothing to escape from there.
  */
 const onMacos = process.platform === "darwin" ? describe : describe.skip;
 
@@ -100,6 +103,25 @@ function resolveBun(): string {
   });
 }
 
+/**
+ * The Electron the desktop app ships, which the packaged app's server and its
+ * drivers run on as Node. Its binary arrives only when `electron/install.js`
+ * runs (the `macos-15` CI job runs it before these tests), so without it the
+ * Electron case skips rather than downloading here.
+ */
+function resolveElectron(): string | undefined {
+  try {
+    const packageRoot = dirname(createRequire(import.meta.url).resolve("electron/package.json"));
+    const relativeBinary = readFileSync(join(packageRoot, "path.txt"), "utf8").trim();
+    const binary = join(packageRoot, "dist", relativeBinary);
+    return existsSync(binary) ? binary : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const electron = process.platform === "darwin" ? resolveElectron() : undefined;
+
 onMacos("an outside driver's confined process", () => {
   let root = "";
   let server: Server | undefined;
@@ -119,15 +141,18 @@ onMacos("an outside driver's confined process", () => {
     await rm(root, { recursive: true, force: true });
   });
 
-  it("reaches no network, no file outside its package and folder, not the home folder or its keychains, no program, and no host variable", async () => {
+  async function expectConfined(runtime: OutsideDriverRuntime): Promise<void> {
     const address = server?.address();
     if (address === null || address === undefined || typeof address === "string") {
       throw new Error("expected a listening loopback server");
     }
-    const packageRoot = join(root, "package");
-    const outside = join(root, "outside");
-    const temporaryRoot = join(root, "temporary");
-    await Promise.all([packageRoot, outside, temporaryRoot].map((path) => mkdir(path)));
+    const runtimeRoot = join(root, runtime.kind);
+    const packageRoot = join(runtimeRoot, "package");
+    const outside = join(runtimeRoot, "outside");
+    const temporaryRoot = join(runtimeRoot, "temporary");
+    await Promise.all(
+      [packageRoot, outside, temporaryRoot].map((path) => mkdir(path, { recursive: true })),
+    );
     const secret = join(outside, "secret.txt");
     await writeFile(secret, "host secret");
     await writeFile(join(packageRoot, "own.txt"), "package file");
@@ -136,6 +161,7 @@ onMacos("an outside driver's confined process", () => {
       entryPoint,
       escapeProbe({ packageRoot, secret, outside, home: homedir(), port: address.port }),
     );
+    const connectionsBefore = connections;
     // A variable the server holds must not reach the driver.
     process.env.OCTANT_ESCAPE_CANARY = "sk-host-canary";
     const supervisor = new ExtensionSupervisor({
@@ -146,7 +172,7 @@ onMacos("an outside driver's confined process", () => {
     const owner = new OutsideDriverProcesses({
       supervisor,
       platform: process.platform,
-      runtime: resolveBun(),
+      runtime,
       temporaryRoot,
     });
     const start = await owner.start({ instanceId, driver, packageRoot, entryPoint });
@@ -174,13 +200,26 @@ onMacos("an outside driver's confined process", () => {
           LANG: "en_US.UTF-8",
           HOME: ownFolder,
           TMPDIR: ownFolder,
+          ...(runtime.kind === "electron-node" ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
         },
       });
-      expect(connections).toBe(0);
+      expect(connections).toBe(connectionsBefore);
     } finally {
       delete process.env.OCTANT_ESCAPE_CANARY;
       await owner.stop(instanceId);
     }
     expect(await readdir(temporaryRoot)).toEqual([]);
+  }
+
+  it("reaches no network, no file outside its package and folder, not the home folder or its keychains, no program, and no host variable", async () => {
+    await expectConfined({ kind: "bun", path: resolveBun() });
   });
+
+  it.skipIf(electron === undefined)(
+    "reaches none of them on Electron's Node either, the runtime the packaged app runs drivers on",
+    async () => {
+      if (electron === undefined) throw new Error("expected the Electron binary");
+      await expectConfined({ kind: "electron-node", path: electron });
+    },
+  );
 });
