@@ -373,12 +373,14 @@ function writePinRecords(path: string, records: ReadonlyArray<PinRecord>): void 
   renameSync(staging, path);
 }
 
+import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
+
 export const PAIRED_COMPUTER_CHANNELS = {
-  pair: "octant:paired-computers:pair",
-  list: "octant:paired-computers:list",
-  forget: "octant:paired-computers:forget",
-  settle: "octant:paired-computers:settle",
-  request: "octant:paired-computers:request",
+  pair: DESKTOP_IPC_CHANNELS.pairedComputerPair,
+  list: DESKTOP_IPC_CHANNELS.pairedComputerList,
+  forget: DESKTOP_IPC_CHANNELS.pairedComputerForget,
+  settle: DESKTOP_IPC_CHANNELS.pairedComputerSettle,
+  request: DESKTOP_IPC_CHANNELS.pairedComputerRequest,
 } as const;
 
 /**
