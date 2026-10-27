@@ -166,6 +166,25 @@ describe("serializeDiagnosticsEvidencePacket", () => {
       digest(serializeDiagnosticsEvidencePacket(build({ hostHealth: health }))),
     );
   });
+  it("is version 3 with debug session counts, covered by the digest", () => {
+    const debugSessions = {
+      since: "2026-10-03",
+      started: 2,
+      ended: [{ endReason: "program-exited" as const, count: 2 }],
+    };
+    const packet = build({ journalGrowth: growth, debugSessions });
+    expect(packet.packetVersion).toBe(3);
+    const text = serializeDiagnosticsEvidencePacket(packet);
+    expect(JSON.parse(text).debugSessions).toEqual(debugSessions);
+    expect(digest(text)).not.toBe(
+      digest(
+        serializeDiagnosticsEvidencePacket(
+          build({ journalGrowth: growth, debugSessions: { ...debugSessions, started: 3 } }),
+        ),
+      ),
+    );
+    expect(build({ journalGrowth: growth }).packetVersion).toBe(2);
+  });
 });
 
 describe("buildDiagnosticsPacket", () => {

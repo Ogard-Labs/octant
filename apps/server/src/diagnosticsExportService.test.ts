@@ -4,12 +4,18 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import { decodeDiagnosticsExportRequest } from "@octant/contracts";
+import {
+  decodeCodeDebugSessionEnded,
+  decodeCodeDebugSessionStarted,
+} from "@octant/contracts/code-debug";
 import { serializeDiagnosticsEvidencePacket } from "@octant/domain";
 import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
 import { openSqlite, type SqliteConnection } from "./persistence/sqlitePort";
 import { readDiagnosticsExportReceipt } from "./persistence/diagnosticsExportProjection";
 import { Journal } from "./persistence/journal";
 import { createPhase1RuntimeRegistries } from "./persistence/runtimeRegistry";
+import { DebugSessionRecords } from "./code/debugSessionRecords";
+import { OCTANT_LOCAL_ACTOR_ID } from "./shellService";
 import {
   exportDiagnosticsEvidence,
   recordDiagnosticsFailureIncident,
@@ -175,6 +181,76 @@ describe("exportDiagnosticsEvidence", () => {
       expect(outcome.packet.hostHealth).toEqual(health);
       expect(outcome.packet.journalGrowth).toBeDefined();
       const serialized = serializeDiagnosticsEvidencePacket(outcome.packet);
+      expect(outcome.receipt.contentDigest).toBe(
+        createHash("sha256").update(serialized).digest("hex"),
+      );
+    } finally {
+      store.connection.close();
+    }
+  });
+
+  it("counts debug sessions by end reason in a version 3 packet, naming no session", () => {
+    const store = setup();
+    try {
+      recordFailure(store, "00000000-0000-4000-8000-000000000001", "provider");
+      let ids = 0;
+      const actor = { kind: "local-user" as const, actorId: OCTANT_LOCAL_ACTOR_ID };
+      const records = (occurredAt: string) =>
+        new DebugSessionRecords({
+          journal: store.journal,
+          personActor: actor,
+          hostActor: actor,
+          uuid: () => `00000000-0000-4000-8000-${String((ids += 1)).padStart(12, "0")}`,
+          clock: () => occurredAt,
+        });
+      const session = (index: number, endReason?: "stopped" | "program-exited") => {
+        const named = {
+          sessionId: `00000000-0000-4000-9000-${String(index).padStart(12, "0")}`,
+          projectId: "00000000-0000-4000-8000-0000000000b1",
+          threadId: "00000000-0000-4000-8000-0000000000c1",
+          configurationDigest: `sha256:${"a".repeat(64)}`,
+        };
+        // One session started before the window: only its end is counted.
+        const startedAt = index === 0 ? "2026-07-01T00:00:00.000Z" : "2026-08-09T10:00:00.000Z";
+        records(startedAt).started(
+          decodeCodeDebugSessionStarted({
+            ...named,
+            checkoutId: "00000000-0000-4000-8000-0000000000d1",
+            network: "proxied",
+          }),
+        );
+        if (endReason !== undefined) {
+          records("2026-08-09T10:05:00.000Z").ended(
+            decodeCodeDebugSessionEnded({ ...named, endReason }),
+          );
+        }
+      };
+      session(0, "stopped");
+      session(1, "stopped");
+      session(2, "program-exited");
+      session(3);
+
+      const outcome = exportDiagnosticsEvidence(
+        request({
+          correlationId: "00000000-0000-4000-8000-000000000001",
+          domain: "provider",
+          summary: "Provider stopped responding after retrying twice.",
+        }),
+        deps(store),
+      );
+      if (outcome.kind !== "exported") throw new Error("expected exported outcome");
+      expect(outcome.packet.packetVersion).toBe(3);
+      expect(outcome.packet.debugSessions).toEqual({
+        since: "2026-07-28",
+        started: 3,
+        ended: [
+          { endReason: "stopped", count: 2 },
+          { endReason: "program-exited", count: 1 },
+        ],
+      });
+      const serialized = serializeDiagnosticsEvidencePacket(outcome.packet);
+      expect(serialized).not.toContain("00000000-0000-4000-9000-");
+      expect(serialized).not.toContain("0000000000c1");
       expect(outcome.receipt.contentDigest).toBe(
         createHash("sha256").update(serialized).digest("hex"),
       );

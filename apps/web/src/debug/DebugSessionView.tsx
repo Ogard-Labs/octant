@@ -77,6 +77,9 @@ export function DebugSessionView(props: DebugSessionViewProps) {
     ...(props.pollMs === undefined ? {} : { pollMs: props.pollMs }),
   });
   useBreakpointSync(store, key, controls);
+  // With the tool closed nothing follows the program, so a line the editor
+  // marked could outlive the stop. Reopening reads the stop and marks it again.
+  useEffect(() => () => store.setStopped(key, undefined), [key, store]);
   const stopped = view.state?.status === "stopped";
   const running = view.state?.status === "running";
   const busy = view.pending !== undefined;

@@ -1660,7 +1660,7 @@ describe("WorkspaceView agent question card", () => {
     status: "pending",
     askedAt: "2026-10-16T12:06:00.000Z",
   };
-  function harnessClient(mode: "work" | "code", threadId: string) {
+  function harnessClient(mode: "work" | "code", threadId: string, asking = true) {
     return {
       session: vi.fn(async () => ({
         session: {
@@ -1673,7 +1673,7 @@ describe("WorkspaceView agent question card", () => {
             providerInstanceId: "00000000-0000-4000-8000-000000000001",
             modelId: "frontier-large",
           },
-          status: "running",
+          status: asking ? "running" : "idle",
           turnsRun: 1,
           cutovers: 0,
           startedAt: "2026-10-16T12:00:00.000Z",
@@ -1685,7 +1685,7 @@ describe("WorkspaceView agent question card", () => {
         reductions: [],
         interventions: [],
         activatedFollowUpIds: [],
-        questions: [question],
+        questions: asking ? [question] : [],
         approvals: [],
       })),
       command: vi.fn(),
@@ -1702,8 +1702,7 @@ describe("WorkspaceView agent question card", () => {
     };
   }
 
-  it("shows a Work thread's own pending question in its composer and answers it there", async () => {
-    const client = harnessClient("work", ids.thread);
+  function renderWorkThread(client: ReturnType<typeof harnessClient>) {
     const tab = {
       id: ids.tab,
       kind: "work-thread",
@@ -1711,7 +1710,7 @@ describe("WorkspaceView agent question card", () => {
       threadId: ids.thread,
       title: "Draft brief",
     } as WorkspaceTab;
-    render(
+    return render(
       <WorkspaceView
         {...propsFor(tab)}
         nativeHarnessClient={client as never}
@@ -1734,6 +1733,23 @@ describe("WorkspaceView agent question card", () => {
         mode="work"
       />,
     );
+  }
+
+  it("reads an opened Work thread's harness session once for every card beside its composer", async () => {
+    const client = harnessClient("work", ids.thread, false);
+    renderWorkThread(client);
+    await waitFor(() => expect(document.querySelector(".composer")).not.toBeNull(), {
+      timeout: 5_000,
+    });
+    await waitFor(() => expect(client.session).toHaveBeenCalled());
+    // Give any second reader the same chance to ask before counting.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(client.session).toHaveBeenCalledExactlyOnceWith(ids.thread);
+  });
+
+  it("shows a Work thread's own pending question in its composer and answers it there", async () => {
+    const client = harnessClient("work", ids.thread);
+    renderWorkThread(client);
     const card = await screen.findByRole(
       "region",
       { name: "Provider question" },

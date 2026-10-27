@@ -4,6 +4,7 @@ import {
   type ExtensionCompatibility,
   type ExtensionComponentQualifiedId,
   type ExtensionDebugAdapterDeclaration,
+  type ExtensionPackageVersion,
 } from "@octant/contracts/extensions";
 import type { DebugAdapterPackageState } from "@octant/domain";
 import {
@@ -29,6 +30,9 @@ export interface CodeDebugAdapterComponent {
   /** What a configuration names: the extension and component ids. */
   readonly adapter: ExtensionComponentQualifiedId;
   readonly displayName: string;
+  /** The package's name as Settings shows it, and its version. */
+  readonly packageName: string;
+  readonly packageVersion: ExtensionPackageVersion;
   readonly declaration: ExtensionDebugAdapterDeclaration;
   /**
    * The reviewed package state a confirmation covers. Its lifecycle version
@@ -96,6 +100,8 @@ export function installedDebugAdapterComponents(
           order: `${packageState.slug ?? ""}\0${target.extensionId}\0${componentId}`,
           adapter,
           displayName: component.displayName,
+          packageName: packageState.displayName ?? packageState.slug ?? component.displayName,
+          packageVersion: packageState.version,
           declaration,
           packageState: {
             extensionId: packageState.extensionId,
