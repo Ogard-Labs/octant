@@ -104,6 +104,7 @@ import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { createRemoteCodeAcpClientTools } from "../code/codeAcpClientTools";
 import { makeAcpDriver } from "../providers/acpDriver";
 import { placeableAcpProfile } from "../providers/acpPlacement.test-support";
+import type { AcpProviderProfile } from "../providers/acpProfiles";
 import { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
 import { acquireProviderConnection } from "@octant/provider-sdk/process-placement";
 import { runRemotePlacementConformance } from "@octant/provider-sdk/process-placement-conformance";
@@ -648,7 +649,7 @@ const pairedDeviceRequest: PrincipalRouteContext = {
 };
 
 /** Which provider a remote-bound thread's turn resolves. */
-type ProductProvider = "harness" | "undeclared-runtime" | "declared-runtime";
+type ProductProvider = "harness" | "undeclared-runtime" | "declared-runtime" | "placed-acp";
 
 /**
  * This host's product path for a remote-bound Project's threads, wired as
@@ -853,13 +854,24 @@ function remoteCodeProduct(input: {
   // One store across turns, as the host's journal is, so a later turn takes
   // up the session an earlier one opened.
   const transcripts = new MemoryNativeHarnessTranscriptStore();
-  const driver: ProviderDriver = {
+  // The ACP driver for a profile that carries a guard and denies a Project
+  // entry, as a shipped placeable profile does, counting starts on this host.
+  const placedAcp = placedAcpDriver({
+    ...placeableAcpProfile,
+    process: {
+      ...placeableAcpProfile.process,
+      guards: { NO_COLOR: "1" },
+      forbiddenRootEntries: [".mcp.json"],
+    },
+  });
+  const harnessDriver: ProviderDriver = {
     kind:
       provider === "harness"
         ? "openai-compatible"
         : provider === "undeclared-runtime"
           ? "codex"
-          : "opencode",
+          : // An ACP agent's kind, so the turn reaches the runtime path's check.
+            "copilot",
     ...(provider === "declared-runtime"
       ? {
           remotePlacement: {
@@ -886,6 +898,22 @@ function remoteCodeProduct(input: {
         : Effect.die(new Error("A runtime that cannot run on the target was launched."));
     },
   };
+  const driver: ProviderDriver =
+    provider === "placed-acp"
+      ? {
+          ...placedAcp.driver,
+          acquire: (acquireInput) => {
+            acquired.push(
+              `${acquireInput.projectRoot}${acquireInput.placement === undefined ? "" : " placed"}`,
+            );
+            return placedAcp.driver.acquire(acquireInput);
+          },
+        }
+      : harnessDriver;
+  const threadProvider =
+    provider === "placed-acp"
+      ? { providerInstanceId: acpInstance, modelId: acpModel }
+      : { providerInstanceId: harnessInstance, modelId: harnessModel };
   const evidence = new Map<string, string>();
   const put = (content: string): CodeEvidenceReference => {
     const reference = decodeCodeEvidenceReference({
@@ -922,7 +950,10 @@ function remoteCodeProduct(input: {
       checkout.kind === "remote-root" ? remoteCodeCheckoutRoot(store, thread) : undefined,
     resolveProviderDriver: () => driver,
     remoteCodeTurn: (turn) =>
-      bindRemoteCodeTurn({ store, connections: input.connections, composition }, turn),
+      bindRemoteCodeTurn(
+        { store, connections: input.connections, composition, uuid: randomUUID },
+        turn,
+      ),
     supportsAppManagedTools: () => true,
     sessionAuthority,
     credentialResolver: { resolve: async () => undefined },
@@ -968,6 +999,17 @@ function remoteCodeProduct(input: {
     requests,
     acquired,
     localGit,
+    /** Every start of the placed ACP agent on this host, which must stay none. */
+    localAcpStarts: placedAcp.localStarts,
+    /** What the provider said in a turn's frames, read back from the evidence store. */
+    said: (frames: ReadonlyArray<CodeOperationEventFrame>) =>
+      frames
+        .map((frame) =>
+          frame.event.kind === "provider-content" && frame.event.channel === "message"
+            ? (evidence.get(String(frame.event.content.contentId)) ?? "")
+            : "",
+        )
+        .join(""),
     /** Prepares the Project's checkout and creates a thread on it, as the composer does. */
     createThread: async (
       scope: WindowId,
@@ -993,8 +1035,7 @@ function remoteCodeProduct(input: {
             checkoutId: prepared.checkout.id,
             title: "On the target",
             lifecycle: "active",
-            providerInstanceId: harnessInstance,
-            modelId: harnessModel,
+            ...threadProvider,
             executionPolicy,
             permissionPersistence: "current-session",
             deliveryTarget: {
@@ -1055,6 +1096,12 @@ function remoteCodeProduct(input: {
           attempt += 1;
           await new Promise((resolve) => setTimeout(resolve, 100));
         }
+      }
+      // The turn is settled once its runtime let it go, as a window sees it:
+      // a placed runtime stops on the target first.
+      for (let attempt = 0; attempt < 300 && runtime.turnInProgress?.(String(thread.id));) {
+        attempt += 1;
+        await new Promise((resolve) => setTimeout(resolve, 50));
       }
       const all = await frames();
       const end = settled(all)?.event;
@@ -1332,10 +1379,13 @@ function reasons(status: SshTargetStatus): ReadonlyArray<string> {
  * prompt names. `hello` answers with its working folder and the account
  * state its variable points at; `write <path>`, `read <path>`, and `run
  * <command line>` ask the client for that file or terminal, whatever the
- * client said it offers, and report the answer.
+ * client said it offers, and report the answer; `env <name>` reports a
+ * variable it was started with, and `peek <path>` reads a file itself, as an
+ * agent loading its Project's configuration would.
  */
 const FIXTURE_ACP_AGENT = String.raw`#!${process.execPath}
 "use strict";
+const fs = require("node:fs");
 const readline = require("node:readline");
 const send = (message) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", ...message }) + "\n");
 let nextId = 0;
@@ -1380,6 +1430,16 @@ async function prompt(id, params) {
       await ask("terminal/release", { sessionId, terminalId });
       say(sessionId, "run: exit " + String(exit.result.exitCode) + " " + output.result.output);
     }
+  } else if (verb === "env") {
+    say(sessionId, "env: " + String(process.env[argument]));
+  } else if (verb === "peek") {
+    let seen;
+    try {
+      seen = fs.readFileSync(argument, "utf8");
+    } catch (error) {
+      seen = "unreadable " + error.code;
+    }
+    say(sessionId, "peek: " + (seen === "" ? "empty" : seen));
   } else {
     say(sessionId, "hello from " + sessionFolders.get(sessionId) + " signed in with " + process.env.FIXTURE_AGENT_HOME);
   }
@@ -1404,6 +1464,10 @@ lines.on("line", (line) => {
     sessionFolders.set(sessionId, params.cwd);
     return send({ id, result: { sessionId, configOptions: configOptions() } });
   }
+  if (method === "session/load") {
+    sessionFolders.set(params.sessionId, params.cwd);
+    return send({ id, result: { configOptions: configOptions() } });
+  }
   if (method === "session/set_config_option") {
     options[params.configId] = params.value;
     return send({ id, result: { configOptions: configOptions() } });
@@ -1427,12 +1491,12 @@ function acpAgentBinary(folder: string): string {
   return path;
 }
 
-/** The ACP driver for the placeable fixture profile, counting every start on this host. */
-function placedAcpDriver() {
+/** The ACP driver for a placeable fixture profile, counting every start on this host. */
+function placedAcpDriver(profile: AcpProviderProfile = placeableAcpProfile) {
   let localStarts = 0;
   const registry = new ProviderRuntimeRegistry();
   const driver = makeAcpDriver({
-    profile: placeableAcpProfile,
+    profile,
     instanceId: acpInstance,
     binaryPath: "/nonexistent/local/fixture-agent",
     managedHome: join(root, "acp-local-home"),
@@ -2626,11 +2690,11 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
       if (bound.status !== "ok") throw new Error(`bind refused: ${bound.reason}`);
 
       // A driver that declares no placement is refused with admission's own
-      // reason; one that declares it, because the turn runtime places no
-      // runtime yet. Neither is acquired, here or on the target.
+      // reason; one that declares it, while the person has set no path for
+      // its runtime on this target. Neither is acquired, here or on the target.
       for (const [provider, message] of [
         ["undeclared-runtime", "Octant cannot confine this runtime on an SSH target"],
-        ["declared-runtime", "Code threads do not start a placed runtime yet"],
+        ["declared-runtime", "Set where this provider's runtime is on the SSH target"],
       ] as const) {
         const product = remoteCodeProduct({
           connections,
@@ -2694,6 +2758,95 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
       await expect(product.createThread(stranger, "approval-gated")).rejects.toMatchObject({
         failure: { category: "unauthorized" },
       });
+    } finally {
+      connections.close();
+      connections.remove(status.target.id);
+    }
+  }, 240_000);
+
+  it("runs a placed ACP agent's Code turns through the Code turn runtime, started only through the placement with its guard, its Project's denied entry covered, and its client files on the target", async () => {
+    const checkout = harnessCheckout("placed-acp-app");
+    writeFileSync(join(checkout, ".mcp.json"), '{"servers":"started without approval"}\n');
+    run("chown", [`${String(NOBODY)}:${String(NOBODY)}`, join(checkout, ".mcp.json")]);
+    const agent = acpAgentBinary(join(root, "acp-bin"));
+    const accountFolder = join(root, "nobody-home", ".fixture-agent");
+    mkdirSync(accountFolder, { recursive: true, mode: 0o700 });
+    chownSync(accountFolder, NOBODY, NOBODY);
+    const connections = service(developmentBuild, journaledRuntimeEgress("placed-acp-egress"));
+    const status = await register(connections, target("placed-acp", asNobody()));
+    try {
+      const bound = await projectsOn(connections).bind({
+        targetId: status.target.id,
+        remoteRoot: remotePath(checkout),
+        name: "Placed ACP app",
+      });
+      if (bound.status !== "ok") throw new Error(`bind refused: ${bound.reason}`);
+      const remoteRoot = String(bound.value.remoteRoot);
+      const set = connections.setRuntimeBinary({
+        targetId: status.target.id,
+        providerInstanceId: acpInstance,
+        path: remotePath(agent),
+      });
+      if (set.status !== "ok") throw new Error(set.message);
+      const product = remoteCodeProduct({
+        connections,
+        project: bound.value,
+        approve: async () => "approved",
+        provider: "placed-acp",
+      });
+      // The remote refusals hold for a placed agent as for the harness: no
+      // thread is created holding Full access or Auto-accept edits.
+      for (const posture of ["full-access", "auto-accept-edits"] as const) {
+        await expect(product.createThread(productWindow, posture)).rejects.toMatchObject({
+          failure: { category: "unauthorized" },
+        });
+      }
+      const thread = await product.createThread(productWindow, "approval-gated");
+      const said = async (prompt: string, executionPolicy?: ProviderExecutionPolicy) => {
+        const turn = await product.runTurn(productWindow, thread, prompt, executionPolicy);
+        expect({ state: turn.state, failure: turn.failure, started: turn.started }).toMatchObject({
+          state: "completed",
+          failure: undefined,
+        });
+        return product.said(turn.frames);
+      };
+
+      // The agent runs in the bound root on the target (which a transcript
+      // names as the checkout), signed in with the target's own account
+      // state, with its guard set there.
+      expect(await said("hello")).toBe(`hello from [CHECKOUT] signed in with ${accountFolder}`);
+      expect(await said("env NO_COLOR")).toContain("env: 1");
+      // The Project entry its local launch denies is covered on the target
+      // too, while the rest of the root stays readable to it.
+      expect(await said(`peek ${join(remoteRoot, ".mcp.json")}`)).toMatch(
+        /^peek: (?:empty|unreadable )/u,
+      );
+      expect(await said(`peek ${join(remoteRoot, "math.js")}`)).toContain("peek: export const add");
+      // Its client requests are the remote harness's calls on the target.
+      expect(await said(`read ${join(remoteRoot, "math.js")}`)).toContain(
+        "read: export const add = (a, b) => a - b;",
+      );
+      expect(await said(`write ${join(remoteRoot, "agent-wrote")}`)).toContain("write: ok");
+      expect(readFileSync(join(checkout, "agent-wrote"), "utf8")).toBe("written by the agent");
+      expect(statSync(join(checkout, "agent-wrote")).uid).toBe(NOBODY);
+      // A turn narrowed to Plan is offered no write, and one asked for anyway
+      // changes nothing on the target.
+      expect(await said(`write ${join(remoteRoot, "plan-wrote")}`, "plan")).toContain(
+        "write: refused",
+      );
+      expect(existsSync(join(checkout, "plan-wrote"))).toBe(false);
+
+      // Every turn acquired the agent through the placement, against the
+      // path as the target names it; nothing started here, and no Git of
+      // this host observed the path.
+      expect(product.acquired.length).toBe(7);
+      expect(new Set(product.acquired)).toEqual(new Set([`${remoteRoot} placed`]));
+      expect(product.localAcpStarts()).toBe(0);
+      expect(product.localGit).toEqual([]);
+      for (let attempt = 0; attempt < 100 && processRunning(agent); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(processRunning(agent)).toBe(false);
     } finally {
       connections.close();
       connections.remove(status.target.id);

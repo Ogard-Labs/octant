@@ -640,6 +640,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               store: sshTargetStore,
               connections: sshTargetConnections,
               composition: nativeHarnessComposition,
+              uuid: randomUUID,
             },
             input,
           ),

@@ -326,6 +326,98 @@ describe("reconcileCodeRestart", () => {
     },
   );
 
+  it.each([
+    ["running", "running"],
+    ["waiting", "waiting"],
+    ["completed", "completed"],
+  ] as const)(
+    "interrupts a remote-bound thread's %s turn as target-disconnected, since the restart ended its target's session",
+    (operationState, workState) => {
+      const { connection, journal } = openStore();
+      try {
+        appendFixture(journal, { remote: true });
+        if (workState !== "running") {
+          journal.append({
+            aggregate: { aggregateType: "code-runtime", aggregateId: ids.runtime },
+            expectedVersion: 1,
+            events: [
+              {
+                eventId: "8100000d-0000-4000-8000-000000000001",
+                eventName: "code.runtime-work-updated@1",
+                eventVersion: 1,
+                correlationId: ids.correlation,
+                actor: { kind: "system", actorId: ids.actor },
+                occurredAt: now,
+                payload: {
+                  kind: "runtime-work-updated",
+                  work: {
+                    id: ids.runtime,
+                    threadId: ids.thread,
+                    kind: "provider-turn",
+                    state: workState,
+                    updatedAt: now,
+                  },
+                },
+              },
+            ],
+          });
+        }
+        const aggregate = { aggregateType: "code-operation", aggregateId: ids.runtime };
+        journal.append({
+          aggregate,
+          expectedVersion: 0,
+          events: [
+            {
+              eventId: "8100000d-0000-4000-8000-000000000002",
+              eventName: "code.operation-event-recorded@1",
+              eventVersion: 1,
+              correlationId: ids.correlation,
+              actor: { kind: "system", actorId: ids.actor },
+              occurredAt: now,
+              payload: {
+                threadId: ids.thread,
+                operationId: ids.runtime,
+                cursor: 1,
+                occurredAt: now,
+                event: { kind: "operation-state", state: operationState },
+              },
+            },
+          ],
+        });
+        const replay = () => journal.replayAggregate({ ...aggregate, afterVersion: 0, limit: 100 });
+        const recovery = { connection, journal, reconciledAt: "2026-07-21T08:00:00.000Z" };
+        reconcileCodeRestart(recovery);
+        const events = replay().map((entry) => decodeCodeOperationEventFrame(entry.payload).event);
+        const work = readCodeRuntimeWork(connection, decodeCodeRuntimeWorkId(ids.runtime));
+        if (operationState === "completed") {
+          // A settled turn has nothing left to end.
+          expect(events).toEqual([{ kind: "operation-state", state: "completed" }]);
+          expect(work?.state).toBe("completed");
+        } else {
+          // Nothing waits for a session that is gone: the turn reads as
+          // stopped, not waiting for a resume that cannot reach the target.
+          expect(events).toEqual([
+            { kind: "operation-state", state: operationState },
+            {
+              kind: "operation-state",
+              state: "interrupted",
+              failure: {
+                category: "failed",
+                message: expect.stringContaining("target-disconnected"),
+              },
+            },
+          ]);
+          expect(work?.state).toBe("interrupted");
+        }
+        const settled = replay();
+        reconcileCodeRestart(recovery);
+        expect(replay()).toEqual(settled);
+      } finally {
+        connection.close();
+      }
+    },
+  );
+
   it("keeps turn order and leaves an unresolved outcome unresolved", () => {
     const { connection, journal } = openStore();
     try {
@@ -425,7 +517,7 @@ function openStore() {
   };
 }
 
-function appendFixture(journal: Journal): void {
+function appendFixture(journal: Journal, options: { readonly remote?: boolean } = {}): void {
   const common = {
     correlationId: ids.correlation,
     actor: { kind: "system", actorId: ids.actor },
@@ -455,15 +547,25 @@ function appendFixture(journal: Journal): void {
     createdAt: now,
     updatedAt: now,
   } as const;
-  const checkout = {
-    id: ids.checkout,
-    repositoryId,
-    kind: "managed-worktree",
-    availability: "available",
-    head: { kind: "branch", name: "feature/phase-7", oid: "b".repeat(40) },
-    ownershipReceiptId: ids.receipt,
-    observedAt: now,
-  } as const;
+  const checkout =
+    options.remote === true
+      ? ({
+          id: ids.checkout,
+          repositoryId,
+          kind: "remote-root",
+          availability: "available",
+          head: { kind: "none" },
+          observedAt: now,
+        } as const)
+      : ({
+          id: ids.checkout,
+          repositoryId,
+          kind: "managed-worktree",
+          availability: "available",
+          head: { kind: "branch", name: "feature/phase-7", oid: "b".repeat(40) },
+          ownershipReceiptId: ids.receipt,
+          observedAt: now,
+        } as const);
 
   for (const input of [
     {

@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import { makeAcpDriver, type AcpClientPort } from "./acpDriver";
 import type { AcpConnection, AcpProcessPort } from "./acpProcess";
 import { acpProviderProfiles, type AcpProviderProfile } from "./acpProfiles";
+import { acpRemotePlacement } from "./acpPlacement";
 import { acpStandInTarget, placeableAcpProfile } from "./acpPlacement.test-support";
 import type { ProviderPlacedLaunch } from "@octant/provider-sdk/driver";
 import {
@@ -93,23 +94,26 @@ describe.each(Object.values(acpProviderProfiles))(
       });
     });
 
-    it("reports placement on a remote target unsupported, and launches nothing when handed one", async () => {
-      const fixture = createFixture(profile);
-      const evidence = await runRemotePlacementConformance({
-        driver: fixture.driver,
-        acquireInput: { instanceId, projectRoot, mode: "code" },
-        sessionStart: { sessionId, modelId, executionPolicy: "approval-gated" },
-        turn: { sessionId, prompt: "hello", attachments: [], tools: [] },
-        target: {
-          kind: "remote",
-          executable: "/opt/agent/bin/agent",
-          launch: () => Effect.fail({ category: "unavailable", message: "No target." }),
-        },
-        localLaunches: () => fixture.active() + fixture.released(),
-        isReleased: () => fixture.active() === 0,
-      });
-      expect(evidence).toMatchObject({ claim: "unsupported", refusedBeforeAnyLaunch: true });
-    });
+    it.skipIf(acpRemotePlacement(profile, undefined) !== undefined)(
+      "reports placement on a remote target unsupported, and launches nothing when handed one",
+      async () => {
+        const fixture = createFixture(profile);
+        const evidence = await runRemotePlacementConformance({
+          driver: fixture.driver,
+          acquireInput: { instanceId, projectRoot, mode: "code" },
+          sessionStart: { sessionId, modelId, executionPolicy: "approval-gated" },
+          turn: { sessionId, prompt: "hello", attachments: [], tools: [] },
+          target: {
+            kind: "remote",
+            executable: "/opt/agent/bin/agent",
+            launch: () => Effect.fail({ category: "unavailable", message: "No target." }),
+          },
+          localLaunches: () => fixture.active() + fixture.released(),
+          isReleased: () => fixture.active() === 0,
+        });
+        expect(evidence).toMatchObject({ claim: "unsupported", refusedBeforeAnyLaunch: true });
+      },
+    );
 
     it("passes chat conformance with explicit unsupported native attachments", async () => {
       const fixture = createFixture(profile);
@@ -173,6 +177,37 @@ describe("ACP placement on a remote target", () => {
         accountState: [
           { path: ".fixture-agent", access: "read-write", variable: "FIXTURE_AGENT_HOME" },
         ],
+      });
+    }
+  });
+
+  it("places GitHub Copilot through its declaration, passing placement conformance with its guard, denied Project entries, and sign-in folder", async () => {
+    const profile = acpProviderProfiles.copilot;
+    const fixture = createFixture(profile, new AnsweringClient(profile));
+    const launches: ProviderPlacedLaunch[] = [];
+    const evidence = await runRemotePlacementConformance({
+      driver: fixture.driver,
+      acquireInput: { instanceId, projectRoot: "/home/build/app", mode: "code" },
+      sessionStart: { sessionId, modelId, executionPolicy: "approval-gated" },
+      turn: { sessionId, prompt: "hello", attachments: [], tools: [] },
+      target: acpStandInTarget({
+        launches,
+        executable: "/home/build/.local/bin/copilot",
+        agentName: profile.process.agentName,
+        version: profile.process.minimumVersion.join("."),
+      }),
+      localLaunches: () => fixture.active() + fixture.released(),
+      isReleased: () => fixture.active() === 0,
+    });
+    expect(evidence).toMatchObject({ claim: "supported", ranOnTarget: true });
+    expect(launches.length).toBeGreaterThan(0);
+    for (const launch of launches) {
+      expect(launch).toEqual({
+        executable: "/home/build/.local/bin/copilot",
+        args: ["--acp"],
+        accountState: [{ path: ".copilot", access: "read-write", variable: "COPILOT_HOME" }],
+        fixedVariables: { NO_COLOR: "1" },
+        deniedRootEntries: profile.process.forbiddenRootEntries,
       });
     }
   });
