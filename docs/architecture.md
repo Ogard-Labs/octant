@@ -5975,9 +5975,15 @@ same. This holds in Chat, Work, and Code.
   the `desktop-provider` seam with its conformance suite, the host lease
   service, the host-local provider (a virtual X display in a dedicated
   Bubblewrap launch, Linux only), artifact transfer, a Code send's binding
-  of `octant_computer` to one of its thread's leases, and the Code dock's
-  Desktop tool are built; no recipe storage is, so every lease command
-  refuses as a value and no lease exists to bind.
+  of `octant_computer` to one of its thread's leases, the Code dock's
+  Desktop tool, and the first of the two cloud providers, E2B and Cua Spaces,
+  are built. A cloud driver reaches its provider only through the host's
+  HTTPS port, which sends nothing outside the hosts the driver declares and
+  attaches the person's key from the credential broker's
+  `/v1/desktop-provider-credentials/*` namespace itself; a person confirms
+  every billed desktop. No recipe storage is built, so every lease command
+  refuses as a value, no lease exists to bind, and no host offers a cloud
+  provider yet.
 
 **Canvas export.** A destination plugin contributes an export target through
 `@octant/plugin-api`. The contribution names the formats it accepts. The host

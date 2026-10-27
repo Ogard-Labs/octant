@@ -1,0 +1,252 @@
+/**
+ * The maintainer's live smoke for a bundled cloud desktop provider.
+ *
+ * It runs the real lease service, the real host HTTPS port, and the bundled
+ * driver against the provider's real API, on the maintainer's own account. It
+ * is never run by tests or CI: it spends money. The API key is read from
+ * standard input, never from an argument or the environment, and is held only
+ * in this process's memory, where the credential broker would otherwise
+ * answer for it. A Project recipe is supplied here because no recipe storage
+ * exists yet.
+ *
+ *   read -rs KEY; printf %s "$KEY" | bun run desktop:cloud:smoke e2b run
+ *   read -rs KEY; printf %s "$KEY" | bun run desktop:cloud:smoke e2b kill
+ *   read -rs KEY; printf %s "$KEY" | bun run desktop:cloud:smoke e2b restart
+ *
+ * `run` acquires a billed desktop as a person who confirmed it, reads a frame,
+ * sends a person's click and text, sends a small app as the agent, launches,
+ * observes, clicks, and types into it as the agent, extends the lease, then
+ * releases it and asks the provider whether anything of this host remains.
+ * `kill` acquires a desktop and kills this process with SIGKILL while it
+ * runs. `restart` is the next host start: it reconciles from the journal and
+ * the provider's tagged listing, then asks the provider again. The journal
+ * and host tag live in a state directory that `kill` and `restart` share.
+ */
+import { mkdirSync, readFileSync, writeFileSync, existsSync, chmodSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import {
+  decodeDesktopCredentialRef,
+  decodeDesktopHostTag,
+  decodeDesktopRecipe,
+  decodeEventActor,
+  type DesktopProviderId,
+} from "@octant/contracts";
+import { decodeComputerControlCommand } from "@octant/contracts/computer-use-plugin";
+import type { DesktopHttpsPort, DesktopProvider } from "@octant/plugin-api/desktop-provider";
+import { createDesktopHttpsPort } from "./desktopHttpsPort";
+import { createDesktopLeaseService } from "./desktopLeaseService";
+import { Journal } from "../persistence/journal";
+import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
+import { catchUpProjection } from "../persistence/projection";
+import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
+import { openSqlite } from "../persistence/sqlitePort";
+import {
+  createE2bDesktopProvider,
+  E2B_DESKTOP_HOSTS,
+  E2B_DESKTOP_PROVIDER_ID,
+} from "../plugins/e2bDesktop/e2bDesktopProvider";
+
+interface CloudDriver {
+  readonly id: DesktopProviderId;
+  readonly hosts: ReadonlyArray<string>;
+  readonly create: (https: DesktopHttpsPort) => DesktopProvider;
+}
+
+const DRIVERS: Readonly<Record<string, CloudDriver>> = {
+  e2b: {
+    id: E2B_DESKTOP_PROVIDER_ID,
+    hosts: E2B_DESKTOP_HOSTS,
+    create: (https) => createE2bDesktopProvider(https),
+  },
+};
+
+const [providerName = "", phase = ""] = process.argv.slice(2);
+const driverEntry = DRIVERS[providerName];
+if (driverEntry === undefined || !["run", "kill", "restart"].includes(phase)) {
+  console.error(
+    `usage: desktop:cloud:smoke <${Object.keys(DRIVERS).join("|")}> <run|kill|restart>`,
+  );
+  process.exit(2);
+}
+const cloud: CloudDriver = driverEntry;
+
+const key = (await Bun.stdin.text()).trim();
+if (key.length === 0) {
+  console.error("Pipe the provider's API key on standard input.");
+  process.exit(2);
+}
+
+const state = join(tmpdir(), `octant-cloud-desktop-smoke-${providerName}`);
+mkdirSync(state, { recursive: true, mode: 0o700 });
+const remembered = (name: string): string => {
+  const path = join(state, name);
+  if (!existsSync(path)) writeFileSync(path, randomUUID(), { mode: 0o600 });
+  return readFileSync(path, "utf8").trim();
+};
+const hostTag = decodeDesktopHostTag(remembered("host-tag"));
+const credentialRef = decodeDesktopCredentialRef(remembered("credential-ref"));
+const threadId = remembered("thread-id");
+const checkout = join(state, "checkout");
+mkdirSync(checkout, { recursive: true });
+// The app the agent sends: a shell script that keeps running so it can be observed.
+writeFileSync(join(checkout, "octant-smoke-app"), "#!/bin/sh\nexec sleep 600\n");
+chmodSync(join(checkout, "octant-smoke-app"), 0o755);
+
+const connection = openSqlite(join(state, "journal.sqlite3"));
+applyMigrations(connection, MIGRATIONS, () => new Date().toISOString());
+const runtime = createPhase1RuntimeRegistries();
+const journal = new Journal({
+  connection,
+  registry: runtime.events,
+  projections: runtime.projections,
+  clock: () => new Date().toISOString(),
+});
+for (const projection of runtime.projections.all()) {
+  catchUpProjection({ connection, journal, projection, clock: () => new Date().toISOString() });
+}
+const projection = runtime.desktopLeaseProjection;
+
+const driver = cloud.create(
+  createDesktopHttpsPort({
+    hosts: () => cloud.hosts,
+    credentialPermitted: (ref) =>
+      projection
+        .list()
+        .some(
+          (record) =>
+            String(record.lease.providerId) === String(cloud.id) &&
+            String(record.lease.credentialRef ?? "") === String(ref),
+        ),
+    credential: async (ref) => (String(ref) === String(credentialRef) ? key : undefined),
+  }),
+);
+const recipe = decodeDesktopRecipe({
+  providerId: String(cloud.id),
+  credentialRef: String(credentialRef),
+  screen: { width: 1024, height: 768 },
+  network: "none",
+  leaseMinutes: 10,
+  maximumLeaseMinutes: 40,
+  idleMinutes: 15,
+});
+const person = decodeEventActor({ kind: "local-user", actorId: randomUUID() });
+const agent = decodeEventActor({
+  kind: "agent",
+  actorId: randomUUID(),
+  providerInstanceId: randomUUID(),
+  threadId,
+});
+const service = createDesktopLeaseService({
+  journal,
+  projection,
+  hostTag,
+  platform: process.platform,
+  hasScreen: false,
+  providers: () => [{ provider: driver, effective: true }],
+  recipe: () => recipe,
+  thread: () => ({ active: true, executionPolicy: "approval-gated" }),
+  callerMayOpen: () => true,
+  computerUseEnabled: () => true,
+  confirm: async () => "declined",
+  threadRoot: async () => checkout,
+  confirmTransfer: async () => "approved",
+  systemActor: decodeEventActor({ kind: "system", actorId: randomUUID() }),
+  now: () => Date.now(),
+  uuid: randomUUID,
+});
+const owner = { mode: "code" as const, threadId };
+const caller = { owner, actor: person, scopeId: "smoke-window" };
+
+function step(name: string, outcome: unknown): void {
+  console.log(`${name}: ${JSON.stringify(outcome)}`);
+}
+
+/** Asks the provider itself whether any desktop of this host remains. */
+async function remaining(): Promise<number> {
+  const listed = await driver.listOwned(hostTag, credentialRef);
+  step("provider listing for this host", listed);
+  if (listed.status !== "listed")
+    throw new Error("The provider could not list this host's desktops.");
+  return listed.resources.length;
+}
+
+const reconciled = await service.start();
+step("restart reconciliation", reconciled);
+
+if (phase === "restart") {
+  const left = await remaining();
+  console.log(left === 0 ? "PASS: nothing of this host remains." : "FAIL: desktops remain.");
+  process.exit(left === 0 ? 0 : 1);
+}
+
+const acquired = await service.acquire({ ...caller, confirmedBilledProvider: cloud.id });
+step("acquire", acquired);
+if (acquired.status !== "acquired") process.exit(1);
+const leaseId = acquired.lease.leaseId;
+
+if (phase === "kill") {
+  console.log(
+    `Killing this host with lease ${String(leaseId)} running. Run the restart phase next.`,
+  );
+  process.kill(process.pid, "SIGKILL");
+}
+
+const view = await service.openView({ ...caller, leaseId });
+step("open view", view);
+if (view.status !== "viewing") process.exit(1);
+const frame = await service.frame({ ...caller, leaseId, viewId: view.viewId });
+step(
+  "person's frame",
+  frame.status === "frame" ? { ...frame.frame, bytes: frame.frame.bytes.length } : frame,
+);
+for (const event of [
+  { kind: "pointer", action: "down", button: "left", x: 100, y: 100 },
+  { kind: "pointer", action: "up", button: "left", x: 100, y: 100 },
+  { kind: "text", text: "hello from Octant" },
+] as const) {
+  step(
+    `person's ${event.kind}`,
+    await service.input({ ...caller, leaseId, viewId: view.viewId, event }),
+  );
+}
+
+const agentCaller = { owner, actor: agent, leaseId };
+step(
+  "agent's send-file",
+  await service.transfer({
+    ...agentCaller,
+    path: "octant-smoke-app",
+    confirm: async () => "approved",
+  }),
+);
+const control = async (command: unknown) =>
+  service.control({ ...agentCaller, command: decodeComputerControlCommand(command) });
+const launched = await control({ operation: "launch", appId: "octant-smoke-app" });
+step("agent's launch", launched);
+const observed = await control({ operation: "observe", appId: "octant-smoke-app", windowId: 1 });
+const observation =
+  observed.status === "answered" && observed.result.kind === "observation"
+    ? observed.result
+    : undefined;
+step(
+  "agent's observe",
+  observation === undefined ? observed : { image: observation.image?.data.length },
+);
+if (observation !== undefined) {
+  step(
+    "agent's click",
+    await control({ operation: "click", observationId: observation.observationId, x: 50, y: 50 }),
+  );
+  step(
+    "agent's type",
+    await control({ operation: "type", observationId: observation.observationId, text: "typed" }),
+  );
+}
+
+step("person's extension", await service.extend({ ...caller, leaseId, byMinutes: 10 }));
+step("release", await service.release({ ...caller, leaseId }));
+const left = await remaining();
+console.log(left === 0 ? "PASS: nothing of this host remains." : "FAIL: desktops remain.");
+process.exit(left === 0 ? 0 : 1);

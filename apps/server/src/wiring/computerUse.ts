@@ -29,17 +29,28 @@ import {
 } from "../context/externalContentTaintProjection";
 import { readFile as readFileFromDisk, stat as statFromDisk } from "node:fs/promises";
 import { linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { decodeDesktopHostTag, type DesktopHostTag } from "@octant/contracts";
+import {
+  decodeDesktopHostTag,
+  type DesktopHostTag,
+  type DesktopProviderId,
+} from "@octant/contracts";
 import { defaultShellSettings } from "@octant/domain";
 import {
   createDesktopLeaseService,
   createLeasedComputerUsePort,
 } from "../computerUse/desktopLeaseService";
 import { createHostLocalDesktopLaunch } from "../computerUse/hostLocalDesktopLaunch";
+import { createDesktopHttpsPort } from "../computerUse/desktopHttpsPort";
 import {
   createHostLocalDesktopProvider,
   HOST_LOCAL_DESKTOP_PROGRAMS,
 } from "../plugins/hostLocalDesktop/hostLocalDesktopProvider";
+import {
+  createE2bDesktopProvider,
+  E2B_DESKTOP_HOSTS,
+  E2B_DESKTOP_PROVIDER_ID,
+} from "../plugins/e2bDesktop/e2bDesktopProvider";
+import { makeDesktopProviderCredentialBrokerClient } from "../providers/credentialBrokerClient";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { withToolFamilyHelp } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
@@ -122,8 +133,8 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
   // thread's leases operates it as that thread's agent and asks in its thread
   // through the Computer tool. A person reaches a Code thread's leases from
   // its Desktop tab, as the window or paired device that may open the thread.
-  // A person acquiring a host-local desktop has already decided; a billed
-  // lease still declines until a person's billed confirmation exists.
+  // A person acquiring a host-local desktop has already decided; a person's
+  // billed lease starts only with the confirmation their own tab sends.
   //
   // On Linux the bundled host-local driver is always loaded, so teardown and
   // restart reconciliation can reap its desktops even after the programs it
@@ -151,13 +162,50 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
               hostLocalDesktopLaunch.readiness(HOST_LOCAL_DESKTOP_PROGRAMS).status === "ready",
           },
         ];
+  // A cloud driver reaches its provider only through this port: its own
+  // declared hosts, and the person's key from the desktop-provider namespace
+  // of the credential broker, attached only for a credential reference one of
+  // that provider's leases recorded. A host with no broker attaches no key.
+  const desktopProviderCredentials =
+    options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+      ? undefined
+      : makeDesktopProviderCredentialBrokerClient({
+          url: options.credentialBrokerUrl,
+          token: options.credentialBrokerToken,
+        });
+  const cloudDesktopPort = (providerId: DesktopProviderId, hosts: ReadonlyArray<string>) =>
+    createDesktopHttpsPort({
+      hosts: () => hosts,
+      credentialPermitted: (ref) =>
+        persistence.desktopLeaseProjection
+          .list()
+          .some(
+            (record) =>
+              String(record.lease.providerId) === String(providerId) &&
+              String(record.lease.credentialRef ?? "") === String(ref),
+          ),
+      credential: async (ref) => desktopProviderCredentials?.resolve(String(ref)),
+    });
+  // The bundled E2B driver is loaded on every host, so teardown and restart
+  // reconciliation reach any E2B lease a host ever journaled. No host offers
+  // it for leasing yet: a billed provider waits for the person's own opt-in,
+  // which arrives with recipe storage and its key entry.
+  const cloudDesktops = [
+    {
+      provider: createE2bDesktopProvider(
+        cloudDesktopPort(E2B_DESKTOP_PROVIDER_ID, E2B_DESKTOP_HOSTS),
+      ),
+      effective: false,
+    },
+  ];
+  const desktopProviders = [...hostLocalDesktops, ...cloudDesktops];
   const desktopLeases = createDesktopLeaseService({
     journal: persistence.journal,
     projection: persistence.desktopLeaseProjection,
     hostTag: desktopHostTag,
     platform: process.platform,
     hasScreen: computerUseDesktop !== undefined || options.computerUseAdapter !== undefined,
-    providers: () => hostLocalDesktops,
+    providers: () => desktopProviders,
     recipe: () => undefined,
     thread: (owner) => {
       const current =
