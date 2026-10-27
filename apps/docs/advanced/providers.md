@@ -220,8 +220,8 @@ Below that is one guided setup with a single next step:
   second one. The host refuses to duplicate one too.
 - **Turn on** switches the provider on.
 - **Sign in** uses the runtime's own Providers & Models card, shown on the
-  setup page. A key you enter there is stored in the system keychain, never
-  in the catalog.
+  setup page. A key you enter there is stored in the host's credential store
+  (the Keychain on a Mac, Secret Service on Linux), never in the catalog.
 - **Check connection** starts the runtime once to read its models and sign-in.
   If the runtime cannot start at its configured path, the card's **Locate
   binary…** fixes it.
