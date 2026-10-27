@@ -1261,6 +1261,9 @@ export class ChatService {
   navigation(): ChatNavigation {
     this.#assertReady();
     const hidden = this.#hiddenThreadIds();
+    // Read only when a row could be parked: a streaming turn is executing, and
+    // navigation is read on every streaming delta.
+    let questioning: ReadonlySet<string> | undefined;
     return {
       threads: this.#persistence
         .readChatNavigation()
@@ -1271,7 +1274,26 @@ export class ChatService {
           // not executing, the same as the boards read it. The thread keeps
           // saying so after a restart took the turn, until it is resumed.
           if (this.#awaitsHarnessApproval?.(String(thread.id)) === true) {
-            return { ...thread, executing: false, awaitingInput: true as const };
+            return {
+              ...thread,
+              executing: false,
+              awaitingInput: true as const,
+              awaitingKind: "approval" as const,
+            };
+          }
+          // A turn parked on a question is owed by the person in the same
+          // way, whether a provider asked it or the harness lead's own
+          // `ask-user` call did: both park the attempt on it.
+          if (!thread.executing && this.#activeThreadExecutions.has(String(thread.id))) {
+            questioning ??= this.#threadsParkedOnQuestion();
+          }
+          if (questioning?.has(String(thread.id)) === true) {
+            return {
+              ...thread,
+              executing: false,
+              awaitingInput: true as const,
+              awaitingKind: "user-input" as const,
+            };
           }
           // Only a row projected as executing speaks for a live turn; a stale
           // registry entry can never make an idle row look busy.
@@ -1378,6 +1400,23 @@ export class ChatService {
     })();
     if (thread === undefined || thread.lifecycle !== "active") return false;
     return thread.projectId === undefined || this.#isActiveChatProject(thread.projectId);
+  }
+
+  /**
+   * The threads whose running attempt is parked on a question this process can
+   * still deliver an answer to, the same attempts {@link listPendingQuestions}
+   * lists. A waiting attempt left by a restart cannot take an answer, so it is
+   * not counted.
+   */
+  #threadsParkedOnQuestion(): ReadonlySet<string> {
+    const threads = new Set<string>();
+    for (const attemptId of this.#activeAttempts.keys()) {
+      const attempt = this.#persistence.readChatAttempt(attemptId);
+      if (attempt !== undefined && openQuestion(attempt) !== undefined) {
+        threads.add(String(attempt.threadId));
+      }
+    }
+    return threads;
   }
 
   /**

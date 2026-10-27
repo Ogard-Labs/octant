@@ -495,6 +495,52 @@ describe("boardRuntimeActivityFromTurnsAndSignals", () => {
     }
   });
 
+  it("parks a thread on the agent's own harness question exactly as on a pending Work question", () => {
+    const question = boardRuntimeActivityFromTurnsAndSignals({
+      turns: [turn("running")],
+      pendingRequest: true,
+      pendingRequestKind: "user-input",
+      childActive: 0,
+      childWaiting: 0,
+    });
+    const leadQuestion = boardRuntimeActivityFromTurnsAndSignals({
+      turns: [turn("running")],
+      pendingRequest: false,
+      leadQuestionWaiting: true,
+      childActive: 0,
+      childWaiting: 0,
+    });
+    // The same wait with the same words: the sidebar and the Inbox say the
+    // thread is waiting for an answer, and the board files it under Waiting.
+    expect(leadQuestion).toEqual(question);
+    expect(leadQuestion).toMatchObject({
+      executing: false,
+      awaitingInput: true,
+      awaitingKind: "user-input",
+    });
+    // Answered or cancelled, the turn runs on and the thread is executing again.
+    expect(
+      boardRuntimeActivityFromTurnsAndSignals({
+        turns: [turn("running")],
+        pendingRequest: false,
+        leadQuestionWaiting: false,
+        childActive: 0,
+        childWaiting: 0,
+      }),
+    ).toMatchObject({ executing: true, awaitingInput: false });
+    // A pending Work request, then the lead's approval, still names the wait.
+    expect(
+      boardRuntimeActivityFromTurnsAndSignals({
+        turns: [turn("running")],
+        pendingRequest: false,
+        leadApprovalWaiting: true,
+        leadQuestionWaiting: true,
+        childActive: 0,
+        childWaiting: 0,
+      }),
+    ).toMatchObject({ awaitingKind: "approval" });
+  });
+
   it("files a running turn parked on a request as waiting, and executing again once answered", () => {
     const parked = boardRuntimeActivityFromTurnsAndSignals({
       turns: [turn("running")],

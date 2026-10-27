@@ -8,6 +8,7 @@ import {
 } from "@octant/contracts";
 import { modeText } from "../agentRun/childPendingRequests";
 import type { NativeHarnessApprovalStore } from "./nativeHarnessApprovals";
+import type { NativeHarnessQuestionStore } from "./nativeHarnessQuestions";
 import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
 
 export interface LeadApprovalSources {
@@ -67,6 +68,25 @@ export function leadApprovalFor(
 /** Whether the thread's lead is waiting on a person for an approval. */
 export function awaitsLeadApproval(sources: LeadApprovalSources, threadId: string): boolean {
   return leadApprovalFor(sources, threadId) !== undefined;
+}
+
+export interface LeadQuestionSources {
+  readonly questions: Pick<NativeHarnessQuestionStore, "waiting">;
+  readonly sessions: Pick<NativeHarnessSessionStore, "pendingLeadQuestionIds">;
+}
+
+/**
+ * Whether the thread's lead is blocked on its own `ask-user` question right
+ * now. A subagent's question is not the lead's and is read elsewhere. Unlike
+ * an approval, a question a restart left pending does not count: nothing
+ * receives an answer to it, the session already asks to be resumed, and the
+ * turn it cut off says so on its own.
+ */
+export function awaitsLeadQuestion(sources: LeadQuestionSources, threadId: string): boolean {
+  const waiting = sources.questions.waiting().filter((entry) => entry.threadId === threadId);
+  if (waiting.length === 0) return false;
+  const asked = new Set(sources.sessions.pendingLeadQuestionIds(threadId));
+  return waiting.some((entry) => asked.has(entry.questionId));
 }
 
 /** Every thread whose lead is waiting on a person for an approval. */
