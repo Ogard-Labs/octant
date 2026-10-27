@@ -121,6 +121,15 @@
   gap: var(--oct-space-2);
 }
 
+/* Adding a provider from an outside driver: the fields stack, one column. */
+.provider-catalog__form {
+  display: grid;
+  flex: 1 1 100%;
+  gap: var(--oct-space-3);
+  max-width: 32rem;
+  min-width: 0;
+}
+
 .provider-catalog__result:empty {
   display: none;
 }

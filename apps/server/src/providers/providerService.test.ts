@@ -886,13 +886,14 @@ describe("ProviderService", () => {
       instanceId,
       channel: channel.host,
       baseUrl: "https://models.example.test/v1/",
+      key: { header: "authorization", scheme: "Bearer" },
       modelIds: [decodeProviderModelId("local-model")],
       runtimeRegistry: runtime,
       clock: () => now,
     });
     const fixture = serviceFixture({
       instances: [outsideProvider()],
-      isDriverPluginEffective: () => true,
+      isOutsideDriverAdmitted: () => true,
       // The service's own driver probe: the typed failure, unwrapped.
       probe: async () => {
         const exit = await Effect.runPromiseExit(Effect.scoped(proxy.probe({ instanceId })));
@@ -5066,6 +5067,7 @@ function serviceFixture(
     readonly withCatalogPersistence?: boolean;
     readonly initialCatalog?: ProviderCatalogSnapshot;
     readonly isDriverPluginEffective?: (driverKind: ProviderInstance["driverKind"]) => boolean;
+    readonly isOutsideDriverAdmitted?: (instance: ProviderInstance) => boolean;
     readonly isProviderExecutableAvailable?: (instance: ProviderInstance) => boolean;
     readonly runCliUpdate?: ProviderServiceOptions["runCliUpdate"];
   } = {},
@@ -5154,6 +5156,9 @@ function serviceFixture(
       ...(options.isDriverPluginEffective === undefined
         ? {}
         : { isDriverPluginEffective: options.isDriverPluginEffective }),
+      ...(options.isOutsideDriverAdmitted === undefined
+        ? {}
+        : { isOutsideDriverAdmitted: options.isOutsideDriverAdmitted }),
       ...(options.isProviderExecutableAvailable === undefined
         ? {}
         : { isProviderExecutableAvailable: options.isProviderExecutableAvailable }),
@@ -5193,6 +5198,8 @@ function outsideProvider(overrides: Record<string, unknown> = {}) {
         version: "1.2.0",
         digest: `sha256:${"a".repeat(64)}`,
       },
+      baseUrl: "http://127.0.0.1:8080/",
+      modelIds: ["local-model"],
     },
     enabled: true,
     environmentPolicy: "inherit-host",

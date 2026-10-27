@@ -59,6 +59,14 @@ export interface ProjectedExtensionRecord {
   readonly pluginDesired: boolean;
   readonly componentDesired: Readonly<Record<string, boolean>>;
   readonly quarantined: boolean;
+  /**
+   * An outside provider driver held until its source is trusted at the
+   * selected digest. It is apart from `quarantined`, which a failed integrity
+   * check or the supervisor sets and which trust never lifts. Absent in a
+   * record written before admission existed, which reads as not held: such a
+   * record's `quarantined` is already set.
+   */
+  readonly awaitingAdmission?: boolean;
   readonly draining: boolean;
   readonly broken: boolean;
   readonly unavailable: boolean;
@@ -204,6 +212,9 @@ function applyLifecycle(
         hasCapabilityExpansion(next.current, payload.manifest);
       const outsideDriver = holdsProviderDriver(payload.manifest);
       const held = expanded || outsideDriver;
+      // An outside driver's review is trusting it, so a widened component is
+      // held for that admission rather than for a review nothing else lifts.
+      const reviewHeld = expanded && !outsideDriver;
       const versions = selectVersion(next.versions, payload.manifest);
       const componentDesired =
         payload.kind === "update-committed" && next.current !== undefined
@@ -223,7 +234,8 @@ function applyLifecycle(
         trusted: held ? false : next.trusted,
         pluginDesired: held ? false : next.pluginDesired,
         componentDesired,
-        quarantined: held,
+        quarantined: reviewHeld,
+        awaitingAdmission: outsideDriver,
         draining: false,
         broken: false,
         unavailable: false,
@@ -245,7 +257,8 @@ function applyLifecycle(
         trusted: false,
         pluginDesired: false,
         componentDesired: {},
-        quarantined: holdsProviderDriver(payload.manifest),
+        quarantined: false,
+        awaitingAdmission: holdsProviderDriver(payload.manifest),
         draining: false,
         broken: false,
         unavailable: false,
@@ -261,14 +274,18 @@ function applyLifecycle(
         interrupted: next.current === undefined || next.interrupted,
         diagnostics: appendDiagnostic(next.diagnostics, payload.reason),
       };
-    case "source-trust-changed":
-      return {
+    case "source-trust-changed": {
+      const trusted = {
         ...next,
         trusted: payload.trusted,
         ...(payload.trusted
           ? {}
           : { grantsEnded: { sequence: lastSequence, reason: "trust-revoked" as const } }),
       };
+      return next.current !== undefined && !next.tombstoned && holdsProviderDriver(next.current)
+        ? admitOutsideDriver(trusted, payload.trusted)
+        : trusted;
+    }
     case "plugin-desired-state-changed":
       return { ...next, pluginDesired: payload.desired };
     case "component-desired-state-changed":
@@ -334,6 +351,15 @@ function applyLifecycle(
       };
     }
     case "runtime-state-observed":
+      // One package serves every instance added from it, each with its own
+      // process and crash limit (`outsideDriverProcess.ts`). A crash of one
+      // is that instance's to count, so it does not break the package for
+      // the others; the evidence is still kept.
+      if (payload.state === "crashed" && isProviderDriverComponent(next, payload.componentId)) {
+        return payload.reason === undefined
+          ? next
+          : { ...next, diagnostics: appendDiagnostic(next.diagnostics, payload.reason) };
+      }
       return applyRuntimeState(next, payload.state, payload.reason);
     case "package-inspected":
     case "install-requested":
@@ -422,7 +448,7 @@ function activation(
     componentDesired: installed && componentDesired,
     compatible: true,
     policyAllowed: true,
-    quarantined: record.quarantined,
+    quarantined: isQuarantined(record),
     draining: record.draining,
     broken: record.broken,
     unavailable: record.unavailable,
@@ -473,7 +499,7 @@ function upsertRecord(connection: SqliteConnection, record: ProjectedExtensionRe
       record.tombstoned ? 0 : record.current === undefined ? 0 : 1,
       record.trusted ? 1 : 0,
       record.pluginDesired ? 1 : 0,
-      record.quarantined ? 1 : 0,
+      isQuarantined(record) ? 1 : 0,
       record.broken ? 1 : 0,
       record.waiting ? 1 : 0,
       JSON.stringify(record),
@@ -513,18 +539,63 @@ function selectVersion(
 
 /**
  * Bundled provider drivers are never stored as packages, so a stored package
- * that holds one is an outside driver. It is held quarantined whenever its
- * selected version changes (install, update, rollback), and nothing here
- * lifts that: trust, switches, and runtime evidence leave it in place until
- * the driver's admission, which binds trust to the digest, exists.
+ * that holds one is an outside driver. It is held for admission whenever its
+ * selected version changes (install, update, rollback), and switches and
+ * runtime evidence leave that hold in place.
  */
 function holdsProviderDriver(manifest: ExtensionPackageManifest): boolean {
   return manifest.components.some((component) => component.kind === "provider-driver");
 }
 
+function isProviderDriverComponent(record: ProjectedExtensionRecord, componentId: string): boolean {
+  return (
+    record.current?.components.some(
+      (component) => component.id === componentId && component.kind === "provider-driver",
+    ) === true
+  );
+}
+
+function isQuarantined(record: ProjectedExtensionRecord): boolean {
+  return record.quarantined || record.awaitingAdmission === true;
+}
+
+/**
+ * Trusting an outside driver's source is its admission: it lifts the hold for
+ * the version and digest selected now. Any later change of selection holds it
+ * again and clears trust, so trust never outlives the digest it was given
+ * for. Withdrawing trust holds it again, so trusting stays the review step. A
+ * quarantine from a failed integrity check or the supervisor is not this hold
+ * and stays.
+ */
+function admitOutsideDriver(
+  record: ProjectedExtensionRecord,
+  trusted: boolean,
+): ProjectedExtensionRecord {
+  if (!trusted) {
+    return {
+      ...record,
+      awaitingAdmission: true,
+      lifecycleState: "quarantined",
+      diagnostics: appendDiagnostic(record.diagnostics, OUTSIDE_DRIVER_QUARANTINE),
+    };
+  }
+  if (record.awaitingAdmission !== true) return record;
+  return {
+    ...record,
+    awaitingAdmission: false,
+    lifecycleState:
+      record.lifecycleState === "quarantined" && !record.quarantined
+        ? "installed"
+        : record.lifecycleState,
+    diagnostics: record.diagnostics.filter(
+      (diagnostic) => diagnostic.code !== OUTSIDE_DRIVER_QUARANTINE.code,
+    ),
+  };
+}
+
 const OUTSIDE_DRIVER_QUARANTINE: ExtensionDiagnostic = {
   code: "outside-driver-quarantined",
-  message: "An outside provider driver stays quarantined until Octant admits it.",
+  message: "An outside provider driver stays quarantined until you trust its source.",
 };
 
 function hasCapabilityExpansion(

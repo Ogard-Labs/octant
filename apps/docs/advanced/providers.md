@@ -105,9 +105,9 @@ the page never infers them from what a picker can mention.
   thread, **By the runtime** when **Compact session** asks the runtime to
   summarize the session it keeps, **Needs a newer version** when this install
   is too old for the request, **Not available** when the runtime keeps its own
-  history and Octant has no compaction request for it (the ACP agents), so
-  Octant can neither see what it keeps nor compact it, or **Not confirmed**
-  while the runtime is not ready to say.
+  history and Octant has no compaction request for it (OpenCode, Pi and the
+  ACP agents), so Octant cannot compact it, or **Not confirmed** while the
+  runtime is not ready to say.
 
 | Runtime                                               | Transport for Octant tools                                     |
 | ----------------------------------------------------- | -------------------------------------------------------------- |
@@ -169,8 +169,9 @@ it instead of imitating it.
 - **Most** for ACP agents: they reopen a session only when the agent offers to,
   and they ask questions on every agent except Mistral Vibe and fx.
 - **Token usage** is not measured for ACP agents. A spend ceiling leaves their
-  turns out and says so, and a Code thread's context meter says the runtime
-  reports no usage rather than waiting for a figure that will not come.
+  turns out and says so, and a thread's context meter, in Code, Work, or
+  Chat, says the runtime reports no usage rather than waiting for a figure
+  that will not come.
 - **Ollama** runs Octant Harness against the Ollama service on this computer:
   Octant tools reach only models you verified, and it reports no file changes
   or approvals of its own. Octant asks Ollama for each model's window
@@ -224,6 +225,30 @@ Below that is one guided setup with a single next step:
 - **Check connection** starts the runtime once to read its models and sign-in.
   If the runtime cannot start at its configured path, the card's **Locate
   binary…** fixes it.
+
+#### Outside drivers
+
+On a Mac, a provider driver that does not ship with Octant can be added from a
+folder on this computer. Under **Plugins**, review the driver folder, install
+it, trust its source, and switch it on; each is a separate step, and none
+happens on its own. Once it is trusted and switched on, the catalog lists it
+under **Outside drivers**, marked as an outside driver rather than bundled.
+
+Its setup adds a provider in place: a name, the address of the service the
+driver speaks to (HTTPS, or HTTP on this computer), how the key is sent, the
+key, and the model IDs to offer. The provider is added off. Turning it on
+starts nothing; **Check connection** starts the driver in its own confined
+process, with no network and none of your files, and Octant makes every
+request for it, adding the key itself, only to the address you entered. Only
+the model IDs you listed that the driver also reports are offered. To let a
+model use Octant's tools, use **Verify tools** on the provider's card: Octant
+sends one request and checks the answer itself.
+
+Trust holds for the exact version you trusted. If the folder's contents change
+and you update, the provider stays blocked, with its history and key, until you
+remove it and add it again. Turning the plugin off, withdrawing trust, or
+uninstalling stops the driver and blocks the provider. Linux and Windows hosts
+cannot confine a driver, so they never run one.
 
 An endpoint driver (OpenAI-compatible, Anthropic-compatible, Azure AI Foundry,
 Ollama) is added under **Octant Harness → Model endpoints** with **Add

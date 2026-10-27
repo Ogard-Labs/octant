@@ -3,7 +3,7 @@ import { createLocalUsageHistoryLastReadStore } from "../persistence/localUsageH
 import { createSelectedExtensionResolver } from "../extensions/selectedExtensions";
 import { randomUUID } from "node:crypto";
 import { lstatSync, realpathSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   decodeCodeCheckoutId,
@@ -48,6 +48,8 @@ import { makeOpenAiCompatibleDriver } from "../providers/openAiCompatibleDriver"
 import { makeAnthropicCompatibleDriver } from "../providers/anthropicCompatibleDriver";
 import { makeAzureFoundryDriver } from "../providers/azureFoundryDriver";
 import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
+import { OutsideDriverAdmission } from "../providers/outsideDriverAdmission";
+import { OutsideDriverProcesses } from "../providers/outsideDriverProcess";
 import {
   makeCredentialBrokerClient,
   makeMcpServerCredentialBrokerClient,
@@ -159,7 +161,6 @@ import type {
   ExtensionProjectPinListing,
   McpServerSignInView,
 } from "@octant/contracts/extension-rpc";
-import { validateAgentPluginsMcpDocument } from "@octant/plugin-host/agent-plugins";
 import { LocalPluginImportReceiptStore } from "../extensions/localPluginImportReceiptStore";
 import { createExtensionToolCallAuthorizer } from "../extensions/extensionToolCallAuthorizer";
 import { ExtensionToolGrantStore } from "../extensions/extensionToolGrantStore";
@@ -217,6 +218,8 @@ export interface ConfiguredProviderDriverOptions {
   readonly nativeHarness?: NativeHarnessEndpointHooks;
   readonly onRuntimeEvent?: (event: ProviderRuntimeEvent) => void;
   readonly admittedDriverKinds?: ReadonlySet<ProviderDriverKind>;
+  /** Admits outside drivers per instance and digest; absent, every outside instance is blocked. */
+  readonly outsideDrivers?: Pick<OutsideDriverAdmission, "isAdmitted" | "endpoint">;
   readonly localUsageHistorySourceForInstance?: (
     instance: ProviderInstance,
   ) => ProviderLocalUsageHistorySource | undefined;
@@ -233,11 +236,26 @@ export function makeConfiguredProviderDriver(
     throw new ProviderDriverConfigurationError();
   }
   const admitted = options.admittedDriverKinds ?? admittedBundledProviderDriverKinds();
-  if (!admitted.has(instance.driverKind)) {
+  // One family kind covers every outside driver, so an outside instance is
+  // admitted at the package and digest it binds, never by its kind.
+  if (
+    instance.driverKind === "outside-harness-endpoint"
+      ? options.outsideDrivers?.isAdmitted(instance) !== true
+      : !admitted.has(instance.driverKind)
+  ) {
     throw new Error("Provider driver plugin is not effective.");
   }
   let driver: ProviderDriver;
-  if (instance.driverKind === "openai-compatible") {
+  if (instance.driverKind === "outside-harness-endpoint") {
+    if (options.outsideDrivers === undefined) {
+      throw new Error("Provider driver plugin is not effective.");
+    }
+    driver = runDirectEndpointOnNativeHarness(
+      options.outsideDrivers.endpoint(instance),
+      instance,
+      options,
+    );
+  } else if (instance.driverKind === "openai-compatible") {
     driver = runDirectEndpointOnNativeHarness(
       makeOpenAiCompatibleDriver({
         instanceId: instance.id,
@@ -520,11 +538,27 @@ export function wireProviders(deps: ProvidersDependencies) {
         authorizeLaunch: (input) => extensionPackageStore.authorizeRuntimeLaunch(input),
         evidence: (event) => recordExtensionRuntimeEvidence?.(event),
       });
+    // Set once the provider service exists. An uninstall stops the package's
+    // outside driver processes before the supervisor drains it, so their exits
+    // are stops the host asked for and never count toward a crash limit.
+    let stopOutsideDriversOf: ((extensionId: string) => Promise<void>) | undefined;
+    let reconcileOutsideDrivers: (() => Promise<void>) | undefined;
     const extensionLifecycleService = new ExtensionLifecycleService({
       connection: persistence.connection,
       journal: persistence.journal,
       store: extensionPackageStore,
-      supervisor: extensionSupervisor,
+      supervisor: {
+        blockNewActivation: async (extensionId) => {
+          await stopOutsideDriversOf?.(extensionId);
+          await extensionSupervisor.blockNewActivation(extensionId);
+        },
+        drain: (extensionId) => extensionSupervisor.drain(extensionId),
+        unregister: (extensionId) => extensionSupervisor.unregister(extensionId),
+        receipts: () => extensionSupervisor.receipts(),
+        ...(extensionSupervisor.reconcile === undefined
+          ? {}
+          : { reconcile: async () => await extensionSupervisor.reconcile?.() }),
+      },
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       isCompatible: (manifest) => isExtensionPackageCompatible(manifest, version, process.platform),
@@ -629,16 +663,6 @@ export function wireProviders(deps: ProvidersDependencies) {
     // further down once the broker is known; the holder lets the session
     // manager and the routes reach it from here.
     const mcpServerSignInHolder: { current: McpServerSignIn | undefined } = { current: undefined };
-    const signInOrUnavailable = async (
-      run: (signIn: McpServerSignIn) => Promise<McpServerSignInView>,
-    ): Promise<McpServerSignInView> =>
-      mcpServerSignInHolder.current === undefined
-        ? {
-            kind: "refused",
-            reason: "unavailable",
-            message: "Signing in needs the credential broker.",
-          }
-        : run(mcpServerSignInHolder.current);
     const userAddedMcpServers = new UserAddedMcpServerStore({
       directory: join(providerDataDirectory, "extensions", "user-added"),
       registry: userAddedPluginRegistry,
@@ -651,6 +675,47 @@ export function wireProviders(deps: ProvidersDependencies) {
             }),
           }),
     });
+    // The address a user-added server's package names, read from the
+    // installed package itself so a sign-in can only ever target the server
+    // the person added.
+    const mcpServerSignInAddress = async (
+      extensionId: string,
+      componentId: string,
+    ): Promise<string | undefined> => {
+      const packageState = extensionLifecycleService
+        .snapshot()
+        .packages.find((candidate) => String(candidate.extensionId) === extensionId);
+      if (packageState === undefined) return undefined;
+      return userAddedMcpServers.signInAddress(packageState, componentId, () =>
+        extensionPackageStore.readVerifiedConfiguration(
+          {
+            extensionId: packageState.extensionId,
+            packageId: packageState.packageId,
+            version: packageState.version,
+            digest: packageState.digest,
+          },
+          componentId,
+        ),
+      );
+    };
+    // Settings asks about every MCP server component, so a host without the
+    // broker names the missing broker only for a server that could sign in;
+    // every other component, a third-party plugin's included, has nothing to
+    // show rather than a refusal and a Sign in button that cannot work.
+    const signInOrUnavailable = async (
+      extensionId: string,
+      componentId: string,
+      run: (signIn: McpServerSignIn) => Promise<McpServerSignInView>,
+    ): Promise<McpServerSignInView> => {
+      if (mcpServerSignInHolder.current !== undefined) return run(mcpServerSignInHolder.current);
+      return (await mcpServerSignInAddress(extensionId, componentId)) === undefined
+        ? { kind: "not-applicable" }
+        : {
+            kind: "refused",
+            reason: "unavailable",
+            message: "Signing in needs the credential broker.",
+          };
+    };
     // What Claude Code and Codex keep on this computer, read for a local
     // window to pick from; Octant never writes to their files.
     const agentToolingDiscovery = new AgentToolingDiscovery({
@@ -771,6 +836,10 @@ export function wireProviders(deps: ProvidersDependencies) {
         // Settings has no thread authority. Drain only package/components whose
         // lifecycle state changed; unrelated in-flight MCP calls remain intact.
         await agentPluginMcpSessionManager.reconcileLifecycleSnapshot(snapshot);
+        // A driver that stopped being effective (uninstall, rollback, withdrawn
+        // trust, a switch turned off) stops its processes, and its instances
+        // report the block.
+        await reconcileOutsideDrivers?.();
       },
       userAddedMcpServers: {
         owns: (sourceRef) => userAddedMcpServers.owns(sourceRef),
@@ -850,15 +919,21 @@ export function wireProviders(deps: ProvidersDependencies) {
       },
       mcpServerSignIn: {
         status: (extensionId, componentId, principalKind) =>
-          signInOrUnavailable((signIn) => signIn.status(extensionId, componentId, principalKind)),
+          signInOrUnavailable(extensionId, componentId, (signIn) =>
+            signIn.status(extensionId, componentId, principalKind),
+          ),
         begin: (extensionId, componentId, principalKind) =>
-          signInOrUnavailable((signIn) => signIn.begin(extensionId, componentId, principalKind)),
+          signInOrUnavailable(extensionId, componentId, (signIn) =>
+            signIn.begin(extensionId, componentId, principalKind),
+          ),
         poll: (extensionId, componentId, attemptId, principalKind) =>
-          signInOrUnavailable((signIn) =>
+          signInOrUnavailable(extensionId, componentId, (signIn) =>
             signIn.poll(extensionId, componentId, attemptId, principalKind),
           ),
         signOut: (extensionId, componentId, principalKind) =>
-          signInOrUnavailable((signIn) => signIn.signOut(extensionId, componentId, principalKind)),
+          signInOrUnavailable(extensionId, componentId, (signIn) =>
+            signIn.signOut(extensionId, componentId, principalKind),
+          ),
       },
       toolApprovals: extensionToolApprovalService,
       toolGrants: extensionToolGrantStore,
@@ -1025,6 +1100,40 @@ export function wireProviders(deps: ProvidersDependencies) {
           });
     const credentialResolver =
       credentialBroker === undefined ? undefined : makeProviderApiKeyPool(credentialBroker);
+    // An outside driver runs only under the supervisor this host owns, which
+    // builds the driver profile; an injected supervisor starts none.
+    const outsideDriverProcesses =
+      extensionSupervisor instanceof ExtensionSupervisor
+        ? new OutsideDriverProcesses({
+            supervisor: extensionSupervisor,
+            platform: process.platform,
+            runtime: process.versions.bun === undefined ? undefined : process.execPath,
+            temporaryRoot: tmpdir(),
+          })
+        : {
+            start: async () => ({ status: "refused" as const, reason: "start-failed" as const }),
+            stop: async () => undefined,
+          };
+    const outsideDriverAdmission = new OutsideDriverAdmission({
+      platform: process.platform,
+      packages: () => extensionLifecycleService.snapshot().packages,
+      isCompatible: (packageState) =>
+        isExtensionCompatibilityCompatible(packageState.compatibility, version, process.platform),
+      entry: (driver) =>
+        extensionPackageStore.verifiedDriverEntry(
+          {
+            extensionId: String(driver.extensionId),
+            packageId: String(driver.packageId),
+            version: String(driver.version),
+            digest: String(driver.digest),
+          },
+          String(driver.componentId),
+        ),
+      processes: outsideDriverProcesses,
+      runtimeRegistry: providerRuntimeRegistry,
+      ...(credentialResolver === undefined ? {} : { credentialResolver }),
+    });
+    stopOutsideDriversOf = (extensionId) => outsideDriverAdmission.stopPackage(extensionId);
     // The retirement reads the stored value as it is, so it asks the broker
     // and not the key pool, which answers with one key of a pool.
     void retireClaudeHelperTokens({
@@ -1070,44 +1179,7 @@ export function wireProviders(deps: ProvidersDependencies) {
         oauth: hostOAuth,
         access: (credentialRef) => oauthBroker.access(credentialRef),
         actorId: OCTANT_LOCAL_ACTOR_ID,
-        // The address a user-added server's package names, read from the
-        // installed package itself so a sign-in can only ever target the
-        // server the person added.
-        serverUrl: async (extensionId, componentId) => {
-          const packageState = extensionLifecycleService
-            .snapshot()
-            .packages.find((candidate) => candidate.extensionId === extensionId);
-          if (packageState === undefined || packageState.source.kind !== "user-added") {
-            return undefined;
-          }
-          const componentState = packageState.components.find(
-            (candidate) => candidate.component.id === componentId,
-          );
-          if (componentState?.component.kind !== "mcp-server") return undefined;
-          let raw: unknown;
-          try {
-            raw = JSON.parse(
-              await extensionPackageStore.readVerifiedConfiguration(
-                {
-                  extensionId,
-                  packageId: packageState.packageId,
-                  version: packageState.version,
-                  digest: packageState.digest,
-                },
-                componentId,
-              ),
-            );
-          } catch {
-            return undefined;
-          }
-          const document = validateAgentPluginsMcpDocument(raw, {
-            pluginSchema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-          });
-          const server = document.servers.find(
-            (candidate) => candidate.name === componentState.component.displayName,
-          );
-          return server !== undefined && server.type !== "stdio" ? server.url : undefined;
-        },
+        serverUrl: mcpServerSignInAddress,
       });
     }
     const subscriptionOAuth =
@@ -1153,6 +1225,8 @@ export function wireProviders(deps: ProvidersDependencies) {
       persistence,
       runtimeRegistry: providerRuntimeRegistry,
       isProviderExecutableAvailable,
+      isOutsideDriverAdmitted: (instance) => outsideDriverAdmission.isAdmitted(instance),
+      outsideDriverListings: () => outsideDriverAdmission.listings(),
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       clearResumeIdentities: async (instanceId) => {
@@ -1193,6 +1267,7 @@ export function wireProviders(deps: ProvidersDependencies) {
             runtimeRegistry: providerRuntimeRegistry,
             permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
             onRuntimeEvent: recordProviderRuntimeUsage,
+            outsideDrivers: outsideDriverAdmission,
             ...(credentialResolver === undefined ? {} : { credentialResolver }),
             ...(subscriptionOAuth === undefined ? {} : { subscriptionOAuth }),
             ...(directoryOAuth === undefined ? {} : { directoryOAuth }),
@@ -1201,6 +1276,12 @@ export function wireProviders(deps: ProvidersDependencies) {
           () => workRequestRuntime,
         ),
     });
+    // Processes first: a stopped driver leaves its own closed observation,
+    // which the provider service then replaces with the block it reports.
+    reconcileOutsideDrivers = async () => {
+      await outsideDriverAdmission.reconcile(persistence.readProviderInstances());
+      providerService.reconcileConfiguredProviders();
+    };
     const probeProviderForThreads: (
       providerInstanceId: ProviderInstance["id"],
     ) => Promise<ProviderProbeResult> = (providerInstanceId) =>
@@ -1345,6 +1426,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       runtimeRegistry: providerRuntimeRegistry,
       permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
       onRuntimeEvent: recordProviderRuntimeUsage,
+      outsideDrivers: outsideDriverAdmission,
       ...(credentialResolver === undefined ? {} : { credentialResolver }),
       ...(subscriptionOAuth === undefined ? {} : { subscriptionOAuth }),
       ...(directoryOAuth === undefined ? {} : { directoryOAuth }),

@@ -1,0 +1,71 @@
+name: Mobile (Android internal)
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: mobile-android-internal
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate the mobile release source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - run: bun run --cwd apps/mobile typecheck
+      - run: bun run --cwd apps/mobile test
+      - name: Resolve the Android internal Expo configuration
+        working-directory: apps/mobile
+        env:
+          EAS_BUILD_PROFILE: android-internal
+        run: bunx expo config --type public --json >/dev/null
+
+  build:
+    name: Build the signed internal Android APK
+    needs: validate
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    environment: mobile-android-internal
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - name: Set up Expo and EAS
+        uses: expo/expo-github-action@v9
+        with:
+          eas-version: 24.7.0
+          packager: bun
+          token: ${{ secrets.EXPO_TOKEN }}
+      # Anyone holding an internal build's page or APK link can install it,
+      # and this repository's workflow logs are public. EAS's own output stays
+      # on the runner; the log shows it only with every link and build id
+      # withheld (an id names the build's page), and the
+      # maintainer shares the install link from EAS with the chosen testers.
+      # `--freeze-credentials` refuses to make a keystore here: the one
+      # signing key is set up once, interactively, in EAS.
+      - name: Build the internal APK in EAS
+        working-directory: apps/mobile
+        run: |
+          set -uo pipefail
+          eas build --platform android --profile android-internal --non-interactive --wait --freeze-credentials --json >"$RUNNER_TEMP/eas-build.json" 2>"$RUNNER_TEMP/eas-build.log"
+          status=$?
+          sed -E -e 's#https?://[^[:space:]]+#<link withheld>#g' \
+            -e 's#[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}#<id withheld>#g' \
+            "$RUNNER_TEMP/eas-build.log"
+          if [ "$status" -ne 0 ]; then
+            echo "::error::EAS did not finish the Android build; its full log is in the EAS dashboard."
+            exit "$status"
+          fi
+          echo "EAS finished the signed internal Android build; share its install link from the EAS dashboard."

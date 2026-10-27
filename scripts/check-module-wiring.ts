@@ -95,19 +95,7 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "apps/server/src/persistence/sqlitePort.conformance.ts",
     "Conformance kit that sqlitePort.test.ts and sqlitePort.smoke.ts run against the SQLite port; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the port's last conformance test is retired.",
   ],
-  [
-    "apps/server/src/providers/outsideHarnessEndpointProxy.ts",
-    "Host proxy for outside provider drivers, run today over an in-memory channel by its tests and the provider service test. Nothing admits an outside driver yet: the confined driver process and the admission wiring that build it are later delivery slices of docs/design/outside-provider-drivers.md. Remove once the provider driver factory builds it for an admitted instance.",
-  ],
-  [
-    "apps/server/src/providers/outsideDriverProcess.ts",
-    "The confined process behind each outside provider driver instance (one supervised Seatbelt process per instance, its stdio as the proxy's channel, and the crash limit), run today by its own tests and the macOS escape tests. Nothing admits an outside driver yet: the admission wiring that starts one for an effective instance is a later delivery slice of docs/design/outside-provider-drivers.md. Remove once the provider driver factory starts it.",
-  ],
   // ── Reached only through another island, so an island with it ──
-  [
-    "apps/server/src/providers/outsideDriverCeiling.ts",
-    "The outside driver capability ceiling, whose only consumer is outsideHarnessEndpointProxy.ts; providerFeatureMatrix.test.ts reads its block as the matrix column. Remove once the proxy is wired.",
-  ],
   [
     "packages/contracts/src/auditEvents.ts",
     "Audit event schemas whose only consumer is evaluateEscapeSuite.ts. Remove once a product runner reaches the escape suite or the suite is retired.",

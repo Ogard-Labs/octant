@@ -109,6 +109,15 @@ describe("providerBootstrapPolicy", () => {
     expect(selected).toEqual([codexId]);
   });
 
+  it("never checks an outside driver's provider in the background, so its process starts only on a person's check or a turn", () => {
+    const outsideId = decodeProviderInstanceId("00000000-0000-4000-8000-000000000903");
+    const selected = listAutoProbeInstanceIds(
+      [instance(outsideId, "outside-harness-endpoint", true), instance(codexId, "codex", true)],
+      new Set(),
+    );
+    expect(selected).toEqual([codexId]);
+  });
+
   it("detects selectable provider models from picker groups", () => {
     const empty: ReadonlyArray<PickerGroup> = [];
     const withModels = [

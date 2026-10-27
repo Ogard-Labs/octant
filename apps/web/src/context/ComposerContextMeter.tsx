@@ -5,6 +5,7 @@ import {
   providerLimitWindowName,
 } from "../providers/providerLimitWindow";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
+import type { ProviderUsageReporting } from "@octant/contracts";
 import { matchKeybinding } from "@octant/domain";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
@@ -47,6 +48,13 @@ const RING_SIZE = 16;
 const RING_RADIUS = 7;
 /** The share at which the ring and a limit's bar take the warning ink. */
 const NEAR_LIMIT_PERCENT = 80;
+/**
+ * An ACP agent's turns carry no usage, so no figure is late: there will never
+ * be one. Said wherever the meter would otherwise wait for a window, whether
+ * the thread is provider-run (Code) or planned by Octant (Work, Chat).
+ */
+const NO_USAGE_REPORTED =
+  "This runtime reports no usage, so this thread has no context window to show.";
 
 export function ComposerContextMeterShortcut() {
   const { requestOpen } = useComposerContextMeterScope();
@@ -185,6 +193,9 @@ export function ComposerContextMeter() {
             <ContextUsageFallback
               compactControls={compactControls}
               fallback={fallback}
+              {...(scope.usageReporting === undefined
+                ? {}
+                : { usageReporting: scope.usageReporting })}
               {...(openUsage === undefined
                 ? {}
                 : {
@@ -203,6 +214,9 @@ export function ComposerContextMeter() {
               setInspecting(true);
             }}
             snapshot={snapshot}
+            {...(scope.usageReporting === undefined
+              ? {}
+              : { usageReporting: scope.usageReporting })}
             windowModel={windowModel}
           />
         )}
@@ -469,6 +483,7 @@ function ContextUsageFallback(props: {
   readonly compactControls: ReactNode;
   readonly fallback: ComposerContextUsageFallback;
   readonly onOpenUsage?: () => void;
+  readonly usageReporting?: ProviderUsageReporting;
 }) {
   const { fallback } = props;
   const reported = reportedWindow(fallback);
@@ -491,8 +506,8 @@ function ContextUsageFallback(props: {
           />
           <p className="context-window-popover__source">
             {fallback.inputTokens === undefined || fallback.outputTokens === undefined
-              ? fallback.usageReporting === "not-reported"
-                ? "This runtime reports no usage, so this thread has no context window to show."
+              ? props.usageReporting === "not-reported"
+                ? NO_USAGE_REPORTED
                 : "No usage has been reported for this thread."
               : "This provider reports what a turn spent, but not a context-window maximum, so there is no share of a window to show."}
           </p>
@@ -684,6 +699,7 @@ function ContextUsagePopover(props: {
   readonly compactControls: ReactNode;
   readonly onInspect: () => void;
   readonly snapshot: ContextInspectorSnapshot;
+  readonly usageReporting?: ProviderUsageReporting;
   readonly windowModel: ReturnType<typeof contextWindowModel>;
 }) {
   const { windowModel, snapshot } = props;
@@ -713,8 +729,9 @@ function ContextUsagePopover(props: {
       />
       {totalTokens === undefined || percent === undefined ? (
         <p className="context-window-popover__source">
-          No model has reported a context-window maximum for this thread, so there is no share of a
-          window to show.
+          {props.usageReporting === "not-reported"
+            ? NO_USAGE_REPORTED
+            : "No model has reported a context-window maximum for this thread, so there is no share of a window to show."}
         </p>
       ) : (
         <SegmentBar

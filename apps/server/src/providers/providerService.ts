@@ -11,6 +11,8 @@ import {
   decodeProviderRegistryCommand,
   decodeProviderRegistryCommandResult,
   decodeProviderRegistrySnapshot,
+  type OutsideHarnessEndpointProviderInstance,
+  type OutsideProviderDriverListing,
   type ProviderDriverKind,
   type ProviderFailure,
   type ProviderInstance,
@@ -66,6 +68,7 @@ import {
   createOpenAiImageProvider,
   createCodexProvider,
   createOllamaProvider,
+  createOutsideHarnessEndpointProvider,
   createPiProvider,
   createOhMyPiProvider,
   changeOhMyPiConfiguration,
@@ -193,6 +196,14 @@ export interface ProviderServiceOptions {
   readonly probe?: (instance: ProviderInstance) => Promise<unknown>;
   readonly driver?: (instance: ProviderInstance) => ProviderDriver;
   readonly isDriverPluginEffective?: (driverKind: ProviderDriverKind) => boolean;
+  /**
+   * Whether an outside instance's driver is effective at the digest it binds.
+   * Absent on a host that admits no outside driver, where every outside
+   * instance is blocked.
+   */
+  readonly isOutsideDriverAdmitted?: (instance: OutsideHarnessEndpointProviderInstance) => boolean;
+  /** The outside drivers the provider catalog lists. Reading them starts nothing. */
+  readonly outsideDriverListings?: () => ReadonlyArray<OutsideProviderDriverListing>;
   readonly clearResumeIdentities?: (instanceId: ProviderInstanceId) => Promise<void>;
   /**
    * Deletes the API key stored for a provider instance. Called before an
@@ -238,6 +249,8 @@ export class ProviderService implements ProviderServiceApi {
   readonly #clock: () => string;
   readonly #driverProvider: ProviderServiceOptions["driver"];
   readonly #isDriverPluginEffective: (driverKind: ProviderDriverKind) => boolean;
+  readonly #isOutsideDriverAdmitted: (instance: OutsideHarnessEndpointProviderInstance) => boolean;
+  readonly #outsideDriverListings: () => ReadonlyArray<OutsideProviderDriverListing>;
   readonly #clearResumeIdentities: ProviderServiceOptions["clearResumeIdentities"];
   readonly #clearRuntimeUsageLimits: ProviderServiceOptions["clearRuntimeUsageLimits"];
   readonly #ensureAccountDirectory: (directory: string) => Promise<void>;
@@ -274,6 +287,8 @@ export class ProviderService implements ProviderServiceApi {
     this.#isDriverPluginEffective =
       options.isDriverPluginEffective ??
       ((driverKind) => admittedBundledProviderDriverKinds().has(driverKind));
+    this.#isOutsideDriverAdmitted = options.isOutsideDriverAdmitted ?? (() => false);
+    this.#outsideDriverListings = options.outsideDriverListings ?? (() => []);
     this.#clearResumeIdentities = options.clearResumeIdentities;
     this.#clearRuntimeUsageLimits = options.clearRuntimeUsageLimits;
     this.#ensureAccountDirectory =
@@ -302,7 +317,7 @@ export class ProviderService implements ProviderServiceApi {
         .filter(({ instanceId }) => configuredIds.has(instanceId))
         .flatMap((catalog) => {
           const instance = instanceById.get(String(catalog.instanceId));
-          if (instance === undefined || !this.#isDriverKindAvailable(instance.driverKind)) {
+          if (instance === undefined || !this.#isInstanceDriverAvailable(instance)) {
             return [];
           }
           return [
@@ -328,7 +343,7 @@ export class ProviderService implements ProviderServiceApi {
         .filter(({ instanceId }) => configuredIds.has(instanceId))
         .map((state) => {
           const instance = instanceById.get(String(state.instanceId));
-          if (instance === undefined || !this.#isDriverKindAvailable(instance.driverKind)) {
+          if (instance === undefined || !this.#isInstanceDriverAvailable(instance)) {
             const unavailable = driverNotAdmittedObservation(state.instanceId, state.observedAt);
             return instance === undefined
               ? unavailable
@@ -347,6 +362,7 @@ export class ProviderService implements ProviderServiceApi {
             (providerIndex.get(String(left.instanceId)) ?? Number.MAX_SAFE_INTEGER) -
             (providerIndex.get(String(right.instanceId)) ?? Number.MAX_SAFE_INTEGER),
         );
+      const outsideDrivers = this.#outsideDriverListings();
       return decodeProviderRegistrySnapshot({
         instances: orderedInstances,
         defaults,
@@ -354,6 +370,7 @@ export class ProviderService implements ProviderServiceApi {
         ...(persistedCatalogs === undefined || persistedCatalogs.length === 0
           ? {}
           : { catalogs: persistedCatalogs }),
+        ...(outsideDrivers.length === 0 ? {} : { outsideDrivers }),
       });
     } catch (error) {
       throw this.#mapFailure(error);
@@ -405,6 +422,9 @@ export class ProviderService implements ProviderServiceApi {
       // Nothing to warm: an image profile is a generation endpoint, not a
       // runtime the probe path can start.
       if (isImageProfileDriverKind(instance.driverKind)) continue;
+      // An outside driver's process starts on a person's check or a turn,
+      // never because the host started.
+      if (instance.driverKind === "outside-harness-endpoint") continue;
       if (this.#unusableConfigurationObservation(instance) !== undefined) continue;
       try {
         await this.#probeConfiguredInstance(instance.id);
@@ -661,7 +681,8 @@ export class ProviderService implements ProviderServiceApi {
             command.kind === "create-openai-image-provider" ||
             command.kind === "create-gemini-native-image-provider" ||
             command.kind === "create-bfl-image-provider" ||
-            command.kind === "create-ideogram-image-provider"
+            command.kind === "create-ideogram-image-provider" ||
+            command.kind === "create-outside-harness-endpoint-provider"
           ) {
             if (current !== undefined || command.expectedVersion !== 0) {
               throw this.#invalid("Provider configuration changed; reload and retry.");
@@ -798,6 +819,17 @@ export class ProviderService implements ProviderServiceApi {
               case "create-ideogram-image-provider":
                 instance = createIdeogramImageProvider({
                   ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-outside-harness-endpoint-provider":
+                // Always created off; the command carries no switch.
+                instance = createOutsideHarnessEndpointProvider({
+                  id: common.id,
+                  displayName: common.displayName,
+                  existingInstances: common.existingInstances,
+                  expectedVersion: common.expectedVersion,
+                  createdAt: common.createdAt,
                   configuration: command.configuration,
                 });
                 break;
@@ -1268,7 +1300,7 @@ export class ProviderService implements ProviderServiceApi {
           this.#clearRuntimeUsageLimits?.(instanceId);
           throw this.#invalid("Enable this provider before probing it.");
         }
-        if (!this.#isDriverKindAvailable(instance.driverKind)) {
+        if (!this.#isInstanceDriverAvailable(instance)) {
           // Keep the block visible rather than leaving the instance unobserved.
           this.#runtime.setObservedState(
             driverNotAdmittedObservation(instanceId, decodeTimestamp(this.#clock())),
@@ -1408,10 +1440,18 @@ export class ProviderService implements ProviderServiceApi {
         instance.configuration.kind === "amazon-bedrock-converse-http"
           ? instance.configuration.manualModelIds.map((id) => String(id))
           : [];
+      // An outside instance offers only the models the person listed that its
+      // last check also reported, which is what its observation holds.
       const knownIds =
         instance.driverKind === "azure-foundry" || instance.driverKind === "amazon-bedrock"
           ? configuredIds
-          : [...configuredIds, ...observed.models.map((model) => String(model.id))];
+          : instance.driverKind === "outside-harness-endpoint"
+            ? observed.models
+                .map((model) => String(model.id))
+                .filter((id) =>
+                  instance.configuration.modelIds.some((listed) => String(listed) === id),
+                )
+            : [...configuredIds, ...observed.models.map((model) => String(model.id))];
       if (!knownIds.includes(String(modelId))) {
         throw this.#invalid(
           instance.driverKind === "azure-foundry"
@@ -1479,7 +1519,7 @@ export class ProviderService implements ProviderServiceApi {
     // Decided before the factory runs: a driver the activation ladder does not
     // admit (every outside driver, until its package is admitted) is never
     // built, so no driver code runs to describe its own block.
-    if (!this.#isDriverKindAvailable(instance.driverKind)) {
+    if (!this.#isInstanceDriverAvailable(instance)) {
       return driverNotAdmittedObservation(instance.id, decodeTimestamp(this.#clock()));
     }
     if (this.#claudeAccountNeedsOwnConfigDirectory(instance)) {
@@ -2065,13 +2105,24 @@ export class ProviderService implements ProviderServiceApi {
   }
 
   #assertDriverPluginEffective(instance: ProviderInstance): void {
-    if (!this.#isDriverKindAvailable(instance.driverKind)) {
+    if (!this.#isInstanceDriverAvailable(instance)) {
       throw this.#unsupported("This provider driver is not available.");
     }
   }
 
-  #isDriverKindAvailable(driverKind: ProviderDriverKind): boolean {
-    return isImageProfileDriverKind(driverKind) || this.#isDriverPluginEffective(driverKind);
+  /**
+   * A bundled driver is admitted by kind. An outside driver is admitted per
+   * instance, at the package and digest that instance binds: one family kind
+   * covers every outside driver, so the kind alone admits none of them.
+   */
+  #isInstanceDriverAvailable(instance: ProviderInstance): boolean {
+    if (instance.driverKind === "outside-harness-endpoint") {
+      return this.#isOutsideDriverAdmitted(instance);
+    }
+    return (
+      isImageProfileDriverKind(instance.driverKind) ||
+      this.#isDriverPluginEffective(instance.driverKind)
+    );
   }
 
   #assertReady(): void {

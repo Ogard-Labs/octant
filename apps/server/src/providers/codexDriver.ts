@@ -35,6 +35,7 @@ import {
 } from "@octant/provider-sdk/chat-conformance";
 import { Cause, Effect, Exit, Option, Queue, Scope, Stream } from "effect";
 import {
+  codexAccountWindowStatus,
   mapCodexMessage,
   type CodexEventContext,
   type CodexPendingApproval,
@@ -691,14 +692,7 @@ function normalizeCodexServiceLimits(
       const resetsAt = codexResetTimestamp(window.resetsAt);
       windows.push({
         window: rateLimitWindowId(scope, slot, window.windowDurationMins),
-        status:
-          snapshot.rateLimitReachedType !== undefined && snapshot.rateLimitReachedType !== null
-            ? "exhausted"
-            : utilization >= 1
-              ? "exhausted"
-              : utilization >= 0.8
-                ? "warning"
-                : "allowed",
+        status: codexAccountWindowStatus(snapshot, utilization),
         utilization,
         ...(resetsAt === undefined ? {} : { resetsAt }),
         observedAt: updatedAt,

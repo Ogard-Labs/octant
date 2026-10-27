@@ -102,6 +102,8 @@ EAS profiles live in `eas.json`:
 - `development` — dev client, internal distribution
 - `preview` — direct internal-distribution artifacts
 - `production` — App Store-signed iOS artifact for internal TestFlight
+- `android-internal` — signed Android APK for maintainer-chosen testers,
+  keystore held in EAS
 
 The app is linked to the maintainer-owned `@henrikogard/octant-mobile` EAS
 project and App Store Connect record. A local production build can be queued
@@ -120,6 +122,11 @@ upload does not submit an App Store version for review.
 
 See [`docs/mobile-testflight.md`](../../docs/mobile-testflight.md) for the
 credential boundary, setup checklist, and device acceptance pass.
+
+The manually dispatched `Mobile (Android internal)` workflow builds the
+`android-internal` profile from `main` in its own protected
+`mobile-android-internal` environment and prints no install link to the public
+log. See [`docs/mobile-android-internal.md`](../../docs/mobile-android-internal.md).
 
 ## Design
 

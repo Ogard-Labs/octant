@@ -306,6 +306,12 @@ export interface DesktopLeaseService {
 /** What the host holds in memory for a lease that may still have a desktop. */
 interface LiveLease {
   handle?: DesktopHandle;
+  /**
+   * The screen this desktop was acquired with. A person may edit the recipe
+   * while it runs; the edit applies to the next desktop, so this one's frames
+   * stay bounded by its own screen, not the recipe's new one.
+   */
+  screen?: DesktopRecipe["screen"];
   teardown?: DesktopTeardownPort;
   acquiring?: AbortController;
   pendingEnd?: { readonly reason: DesktopLeaseEndReason; readonly requestedBy?: EventActor };
@@ -916,6 +922,7 @@ export function createDesktopLeaseService(
     const entry: LiveLease = {
       teardown: teardownPortOf(provider),
       acquiring: controller,
+      screen: recipe.screen,
       lastActivityAt: now,
       openTabs: 0,
     };
@@ -983,7 +990,6 @@ export function createDesktopLeaseService(
     readonly handle: DesktopHandle;
     readonly provider: DesktopProvider;
     readonly thread: DesktopLeaseThread;
-    readonly recipe: DesktopRecipe;
   };
 
   /** Every operating command: the lease is the caller's thread's, ready, and still authorized. */
@@ -1009,7 +1015,7 @@ export function createDesktopLeaseService(
     const loaded = registered(String(record.lease.providerId));
     if (loaded === undefined || !loaded.effective) return refused("provider-disabled");
     if (!options.computerUseEnabled()) return refused("computer-use-off");
-    return { status: "operating", record, handle, provider: loaded.provider, thread, recipe };
+    return { status: "operating", record, handle, provider: loaded.provider, thread };
   }
 
   /**
@@ -1357,9 +1363,11 @@ export function createDesktopLeaseService(
       status: "failed" as const,
       reason: "timed-out",
     });
+    const started = live.get(String(caller.leaseId))?.screen;
     if (
       answered.status !== "frame" ||
-      !desktopFrameFits(answered.frame, admitted.operating.recipe.screen)
+      started === undefined ||
+      !desktopFrameFits(answered.frame, started)
     ) {
       return { status: "no-frame" };
     }

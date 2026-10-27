@@ -16,6 +16,7 @@ import {
   type ActiveMemoryEntry,
   type BoundProject,
   type ConnectedGitHubRepository,
+  type LeasableDesktopProvider,
   type MemoryCommandResult,
   type MemoryEntry,
   type Project,
@@ -33,6 +34,7 @@ import {
   MemoryPolicyRejected,
   changeProjectLifecycle,
   changeCodeProjectAccess,
+  changeCodeProjectDesktopRecipe,
   changeCodeProjectNewThreadWorkspace,
   changeCodeProjectPullRequestBackgroundRefresh,
   changeProjectColor,
@@ -122,6 +124,12 @@ export interface ProjectServiceOptions {
     projectName: string,
     today: WorkStatusDate,
   ) => Promise<void>;
+  /**
+   * The desktop providers this host offers for leasing now. A recipe may name
+   * only one of them; absent means none, so every recipe but a removal is
+   * refused.
+   */
+  readonly offeredDesktopProviders?: () => ReadonlyArray<LeasableDesktopProvider>;
 }
 
 /** What the host names the Project it provisions under the default folder. */
@@ -159,6 +167,7 @@ export class ProjectService implements ProjectServiceApi {
   readonly #defaultFolder: () => string;
   readonly #ensureDirectory: (path: string) => Promise<void>;
   readonly #seedWorkProjectStatusFile: ProjectServiceOptions["seedWorkProjectStatusFile"];
+  readonly #offeredDesktopProviders: () => ReadonlyArray<LeasableDesktopProvider>;
   readonly #archiveListeners = new Set<
     (project: Extract<Project, { readonly type: "work" }>) => void
   >();
@@ -187,6 +196,7 @@ export class ProjectService implements ProjectServiceApi {
         await mkdir(path, { recursive: true });
       });
     this.#seedWorkProjectStatusFile = options.seedWorkProjectStatusFile;
+    this.#offeredDesktopProviders = options.offeredDesktopProviders ?? (() => []);
   }
 
   hasActiveProject(projectId: ProjectId, requiredType: ProjectType): boolean {
@@ -704,6 +714,15 @@ export class ProjectService implements ProjectServiceApi {
           project = changeProjectBrandKit(current, command.brandKit, timestamp);
           kind = "project-brand-kit-changed";
           eventName = "project.brand-kit-changed@1";
+        } else if (command.kind === "change-code-project-desktop-recipe") {
+          project = changeCodeProjectDesktopRecipe(
+            current,
+            command.recipe,
+            this.#offeredDesktopProviders(),
+            timestamp,
+          );
+          kind = "code-project-desktop-recipe-changed";
+          eventName = "project.code-desktop-recipe-changed@1";
         } else {
           if (current.type === "chat")
             throw new ProjectServiceError({

@@ -116,7 +116,7 @@ export function startRefusalMessage(
 ): string {
   switch (reason) {
     case "no-provider-configured":
-      return "This Project has no desktop recipe yet, and this version of Octant has no place to set one.";
+      return "This Project has no desktop recipe yet, or its provider isn't on this host. Set one under Disposable desktop in the Project's settings.";
     case "provider-disabled":
       return "The desktop provider for this Project is turned off.";
     case "provider-unavailable":

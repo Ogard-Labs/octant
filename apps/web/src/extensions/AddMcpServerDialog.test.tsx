@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -78,5 +80,21 @@ describe("Add MCP server", () => {
         headers: [{ name: "X-Team", value: "docs", secret: false }],
       },
     });
+  });
+
+  it("keeps a variable's name and value side by side on a phone instead of overlapping", () => {
+    // Observed at 390px: the value sat in an auto-sized column that began
+    // inside the name field, so the two inputs overlapped by 46px.
+    const styles = readFileSync(
+      resolve(process.cwd(), "src/styles/extensions-settings.css"),
+      "utf8",
+    ).replace(/\s+/g, " ");
+    const narrow = /@media \(max-width: 640px\) \{(.*?)\} \}/.exec(
+      styles.slice(styles.indexOf(".mcp-server-values__row")),
+    )?.[1];
+    expect(narrow).toMatch(
+      /\.mcp-server-values__row \{ grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\); \}/,
+    );
+    expect(narrow).toMatch(/\.mcp-server-values__row > input \{ min-width: 0; \}/);
   });
 });

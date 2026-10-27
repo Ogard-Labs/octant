@@ -612,9 +612,46 @@ export const OutsideProviderDriverReference = Schema.Struct({
   digest: ExtensionContentDigest,
 }).annotations(strict);
 export type OutsideProviderDriverReference = typeof OutsideProviderDriverReference.Type;
+/**
+ * Headers the key may never travel in, whatever the person chooses:
+ * `proxy-authorization` is read by a proxy rather than the endpoint, and
+ * `cookie`, `set-cookie`, and `host` put it where intermediaries route and log.
+ */
+const OUTSIDE_DRIVER_REFUSED_KEY_HEADERS: ReadonlySet<string> = new Set([
+  "proxy-authorization",
+  "cookie",
+  "set-cookie",
+  "host",
+]);
+/**
+ * How the person said the key is sent: the one header, in lowercase, and
+ * whether it goes as `Bearer <key>`. A brokered request carries the key only
+ * when the driver asks for exactly this placement.
+ */
+export const OutsideDriverKeyPlacement = Schema.Struct({
+  header: Schema.String.pipe(
+    Schema.pattern(/^[a-z0-9!#$%&'*+.^_`|~-]{1,64}$/),
+    Schema.filter((header) => !OUTSIDE_DRIVER_REFUSED_KEY_HEADERS.has(header)),
+  ),
+  scheme: Schema.optional(Schema.Literal("Bearer")),
+}).annotations(strict);
+export type OutsideDriverKeyPlacement = typeof OutsideDriverKeyPlacement.Type;
+/**
+ * An outside harness endpoint as the person added it: the exact driver
+ * package, the address its brokered requests may reach, how the key is sent
+ * (absent: no key), and the models the person listed, which are the only
+ * models it offers.
+ */
 export const OutsideHarnessEndpointProviderConfiguration = Schema.Struct({
   kind: Schema.Literal("outside-harness-endpoint"),
   driver: OutsideProviderDriverReference,
+  baseUrl: Schema.NonEmptyTrimmedString,
+  key: Schema.optional(OutsideDriverKeyPlacement),
+  modelIds: Schema.Array(ProviderModelId).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(64),
+    Schema.filter((modelIds) => new Set(modelIds).size === modelIds.length),
+  ),
 }).annotations(strict);
 export type OutsideHarnessEndpointProviderConfiguration =
   typeof OutsideHarnessEndpointProviderConfiguration.Type;
@@ -1662,11 +1699,31 @@ export const ProviderObservedState = Schema.Struct({
 }).annotations(strict);
 export type ProviderObservedState = typeof ProviderObservedState.Type;
 
+/**
+ * One outside driver the activation ladder admits on this host, as the
+ * provider catalog lists it: the exact package a provider would bind, the
+ * package's own name, and the package facts the catalog repeats. Only a
+ * local folder yields a driver today, so every listing is unsigned developer
+ * input.
+ */
+export const OutsideProviderDriverListing = Schema.Struct({
+  driver: OutsideProviderDriverReference,
+  displayName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  source: Schema.Literal("local-folder"),
+  installed: Schema.Boolean,
+  trusted: Schema.Boolean,
+}).annotations(strict);
+export type OutsideProviderDriverListing = typeof OutsideProviderDriverListing.Type;
+
 export const ProviderRegistrySnapshot = Schema.Struct({
   instances: Schema.Array(ProviderInstance),
   defaults: ProviderDefaults,
   observedStates: Schema.Array(ProviderObservedState),
   catalogs: Schema.optional(Schema.Array(ProviderCatalogSnapshot)),
+  /** Absent from a host that admits no outside driver. */
+  outsideDrivers: Schema.optional(
+    Schema.Array(OutsideProviderDriverListing).pipe(Schema.maxItems(256)),
+  ),
 }).annotations(strict);
 export type ProviderRegistrySnapshot = typeof ProviderRegistrySnapshot.Type;
 
@@ -1829,6 +1886,17 @@ export const ProviderRegistryCommand = Schema.Union(
     ...CreateProviderCommandFields,
     displayName: Schema.NonEmptyTrimmedString,
     configuration: OllamaProviderConfiguration,
+  }).annotations(strict),
+  /**
+   * Adds a provider from an admitted outside driver. It takes no `enabled`:
+   * the instance is created off, and nothing starts the driver until the
+   * person turns it on and checks the connection.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("create-outside-harness-endpoint-provider"),
+    ...ProviderInstanceCommandFields,
+    displayName: Schema.NonEmptyTrimmedString,
+    configuration: OutsideHarnessEndpointProviderConfiguration,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("rename-provider"),

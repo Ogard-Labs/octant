@@ -1,11 +1,13 @@
+import { createDesktopPaneClient } from "@octant/client-runtime/desktop-pane-client";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { ProjectAvailability, ProjectId, ProjectSummary } from "@octant/contracts/projects";
 import type { CanvasDesignBrand } from "@octant/contracts/canvas";
+import type { DesktopRecipe } from "@octant/contracts/desktop-lease";
 import type { ProjectColor, ProjectProviderPolicy } from "@octant/contracts/projects";
 import type { ProviderInstance } from "@octant/contracts/providers";
 import { ChevronDown, SquarePen } from "lucide-react";
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -15,6 +17,7 @@ import { FolderPicker } from "./FolderPicker";
 import { ProjectMemorySection } from "./ProjectMemorySection";
 import { ProjectThreadsSection } from "./ProjectThreadsSection";
 import { ProjectBrandKitSection } from "./ProjectBrandKitSection";
+import { ProjectDesktopRecipeSection } from "./ProjectDesktopRecipeSection";
 import { ProjectProviderPolicySection } from "./ProjectProviderPolicySection";
 import {
   PROJECT_COLOR_MENU_ITEMS,
@@ -54,6 +57,14 @@ export interface ProjectOverviewProps {
     projectId: ProjectId,
     brandKit: CanvasDesignBrand,
   ) => Promise<boolean>;
+  /** Absent when the host cannot accept the change; a Code Project's recipe is then not shown. */
+  readonly onDesktopRecipeChange?: (
+    projectId: ProjectId,
+    recipe: DesktopRecipe | null,
+  ) => Promise<boolean>;
+  /** The host this window reaches, so the recipe editor can ask which desktop providers it offers. */
+  readonly serverUrl?: string;
+  readonly windowCapability?: string;
   /** Absent when the host cannot accept the change; the setting is then not shown. */
   readonly onWorkStatusFileChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
   readonly providerInstances?: ReadonlyArray<ProviderInstance>;
@@ -74,6 +85,21 @@ export function ProjectOverview(props: ProjectOverviewProps) {
   const allowRootRelink = props.allowRootRelink !== false;
   const unavailable = props.project.type !== "chat" && props.availability?.status === "unavailable";
   const boundMode = props.project.type === "code" ? "code" : "work";
+  // A base URL the client refuses (a remote host over plain HTTP) leaves the
+  // recipe editor unable to ask, which it says, rather than broken.
+  const { serverUrl, windowCapability } = props;
+  const desktopPaneClient = useMemo(() => {
+    if (serverUrl === undefined || windowCapability === undefined) return undefined;
+    try {
+      return createDesktopPaneClient({
+        baseUrl: serverUrl,
+        fetch: globalThis.fetch,
+        windowCapability,
+      });
+    } catch {
+      return undefined;
+    }
+  }, [serverUrl, windowCapability]);
 
   useEffect(() => {
     alive.current = true;
@@ -363,6 +389,22 @@ export function ProjectOverview(props: ProjectOverviewProps) {
               />
             </ProjectOverviewInspector>
           )}
+          {props.project.type === "code" && props.onDesktopRecipeChange !== undefined ? (
+            <ProjectOverviewInspector
+              key={`${String(props.project.id)}-desktop-recipe`}
+              label="Disposable desktop"
+              summary="The Linux desktop this Project's threads can start"
+            >
+              <ProjectDesktopRecipeSection
+                {...(desktopPaneClient === undefined ? {} : { client: desktopPaneClient })}
+                disabled={archived || connectionStale}
+                onChange={async (recipe) =>
+                  (await props.onDesktopRecipeChange?.(props.project.id, recipe)) ?? false
+                }
+                project={props.project}
+              />
+            </ProjectOverviewInspector>
+          ) : null}
           {props.project.type === "work" &&
           props.project.origin !== "default-folder" &&
           props.onWorkStatusFileChange !== undefined ? (

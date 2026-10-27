@@ -457,6 +457,44 @@ describe("boardRuntimeActivityFromTurnsAndSignals", () => {
     });
   });
 
+  it("parks a thread on the agent's own harness approval exactly as on a pending question", async () => {
+    // Live, and after a restart took the turn but the journal still holds the approval.
+    const cutOff = turn("failed", {
+      category: "interrupted",
+      message: "Octant restarted while this turn was running, so it did not finish.",
+    });
+    for (const turns of [[turn("running")], [cutOff]]) {
+      const question = boardRuntimeActivityFromTurnsAndSignals({
+        turns,
+        pendingRequest: true,
+        pendingRequestKind: "user-input",
+        childActive: 0,
+        childWaiting: 0,
+      });
+      const approval = boardRuntimeActivityFromTurnsAndSignals({
+        turns,
+        pendingRequest: false,
+        leadApprovalWaiting: true,
+        childActive: 0,
+        childWaiting: 0,
+      });
+      expect(approval).toMatchObject({ executing: false, awaitingInput: true });
+      // The same wait, named for what the person is asked: the sidebar marks
+      // it and the board files it alike, and only the words differ.
+      expect(approval).toEqual({ ...question, awaitingKind: "approval" });
+
+      const board = await service({
+        threads: [
+          boardThread({ thread: thread({ id: ids.waiting, title: "Asked a question" }) }),
+          boardThread({ thread: thread({ id: ids.executing, title: "Asked to write" }) }),
+        ],
+        runtime: (threadId) => (threadId === ids.waiting ? question : approval),
+      }).query(decodeWorkBoardQuery({ version: 1 }));
+      expect(cardFor(board.cards, ids.waiting).status).toBe("waiting");
+      expect(cardFor(board.cards, ids.executing).status).toBe("waiting");
+    }
+  });
+
   it("files a running turn parked on a request as waiting, and executing again once answered", () => {
     const parked = boardRuntimeActivityFromTurnsAndSignals({
       turns: [turn("running")],

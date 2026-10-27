@@ -521,6 +521,7 @@ describe("Project and memory event payload contracts", () => {
       "project.provider-policy-changed@1",
       "project.work-status-file-changed@1",
       "project.brand-kit-changed@1",
+      "project.code-desktop-recipe-changed@1",
       "memory.entry-created@1",
       "memory.entry-superseded@1",
       "memory.entry-retracted@1",

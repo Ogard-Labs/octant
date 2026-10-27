@@ -892,6 +892,8 @@ function rateLimitWindowEvents(
     const utilization = window.usedPercent / 100;
     if (window.usedPercent < 0 || window.usedPercent > 100) continue;
     const resetsAt = resetTimestamp(window.resetsAt ?? undefined);
+    // The reached flag does not say which window ran out, so only a window
+    // that is itself full supplies the reset a usage-limit stop reports.
     if (utilization >= 1 && resetsAt !== undefined) {
       context.exhaustedWindowReset = resetsAt;
     }
@@ -903,13 +905,29 @@ function rateLimitWindowEvents(
           slot,
           window.windowDurationMins ?? undefined,
         ),
-        status: utilization >= 1 ? "exhausted" : utilization >= 0.8 ? "warning" : "allowed",
+        status: codexAccountWindowStatus(snapshot, utilization),
         ...(utilization < 0 || utilization > 1 ? {} : { utilization }),
         ...(resetsAt === undefined ? {} : { resetsAt }),
       }),
     );
   }
   return results.length === 0 ? [{ kind: "ignored" }] : results;
+}
+
+/**
+ * One status rule for a Codex account window, whether it arrives in a mid-turn
+ * `account/rateLimits/updated` or from `account/rateLimits/read`. Codex can
+ * name the account limit reached (`rateLimitReachedType`) while a window still
+ * reads below 100%; the flag outranks the percentage so both paths agree.
+ */
+export function codexAccountWindowStatus(
+  snapshot: RateLimitSnapshot,
+  utilization: number,
+): "exhausted" | "warning" | "allowed" {
+  if (snapshot.rateLimitReachedType !== undefined && snapshot.rateLimitReachedType !== null) {
+    return "exhausted";
+  }
+  return utilization >= 1 ? "exhausted" : utilization >= 0.8 ? "warning" : "allowed";
 }
 
 /** Codex reports a reset instant in Unix seconds; milliseconds are accepted too. */
