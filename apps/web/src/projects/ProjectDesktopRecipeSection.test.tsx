@@ -39,7 +39,30 @@ const hostLocal = {
   billed: false,
 } as const;
 
-function client(providers: ReadonlyArray<typeof hostLocal>) {
+/** A provider run by a local daemon that holds the person's sign-in, with its placements. */
+const spaces = {
+  providerId: "spaces.example",
+  displayName: "Spaces",
+  locality: "host-local",
+  billed: false,
+  daemon: true,
+  placements: [
+    {
+      placementId: "this-machine",
+      displayName: "This machine",
+      locality: "host-local",
+      billed: false,
+    },
+    {
+      placementId: "other-machine",
+      displayName: "Your other machine",
+      locality: "cloud",
+      billed: false,
+    },
+  ],
+} as const;
+
+function client(providers: ReadonlyArray<object>) {
   const request = vi.fn<DesktopPaneClient["request"]>(async () =>
     decodeDesktopPaneAnswer({ status: "recipe-providers", providers }),
   );
@@ -107,6 +130,69 @@ describe("ProjectDesktopRecipeSection", () => {
     // The confirmation's own button; the dialog hides the section behind it.
     await user.click(await screen.findByRole("button", { name: "Remove recipe" }));
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(null));
+  });
+
+  it("offers a provider's placements and saves the one chosen, with no key, starting from its first", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn(async () => true);
+    render(
+      <ProjectDesktopRecipeSection
+        client={client([hostLocal, spaces])}
+        onChange={onChange}
+        project={project()}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Desktop provider" })).toHaveTextContent(
+        "This host",
+      ),
+    );
+    // A provider that offers no placements asks for none.
+    expect(screen.queryByRole("combobox", { name: "Where the desktop runs" })).toBeNull();
+    await user.click(screen.getByRole("combobox", { name: "Desktop provider" }));
+    await user.click(await screen.findByRole("option", { name: "Spaces" }));
+    expect(screen.getByRole("combobox", { name: "Where the desktop runs" })).toHaveTextContent(
+      "This machine",
+    );
+    await user.click(screen.getByRole("combobox", { name: "Where the desktop runs" }));
+    await user.click(await screen.findByRole("option", { name: "Your other machine" }));
+    await user.click(screen.getByRole("button", { name: "Set recipe" }));
+
+    expect(onChange).toHaveBeenCalledWith({
+      providerId: "spaces.example",
+      placementId: "other-machine",
+      screen: { width: 1280, height: 800 },
+      network: "none",
+      leaseMinutes: 30,
+      maximumLeaseMinutes: 240,
+      idleMinutes: 15,
+    });
+  });
+
+  it("keeps a saved placement the host no longer offers from being saved again", async () => {
+    const user = userEvent.setup();
+    render(
+      <ProjectDesktopRecipeSection
+        client={client([spaces])}
+        onChange={vi.fn(async () => true)}
+        project={project(
+          decodeDesktopRecipe({
+            ...savedRecipe,
+            providerId: "spaces.example",
+            placementId: "own-cloud",
+            screen: { width: 1024, height: 768 },
+          }),
+        )}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Where the desktop runs" })).toHaveTextContent(
+        "own-cloud (not available on this host)",
+      ),
+    );
+    await user.click(screen.getByRole("combobox", { name: "Desktop screen size" }));
+    await user.click(await screen.findByRole("option", { name: "1920 × 1080" }));
+    expect(screen.getByRole("button", { name: "Save recipe" })).toBeDisabled();
   });
 
   it("offers nothing to set when the host offers no provider", async () => {
