@@ -105,9 +105,9 @@ the page never infers them from what a picker can mention.
   thread, **By the runtime** when **Compact session** asks the runtime to
   summarize the session it keeps, **Needs a newer version** when this install
   is too old for the request, **Not available** when the runtime keeps its own
-  history and Octant has no compaction request for it (the ACP agents), so
-  Octant can neither see what it keeps nor compact it, or **Not confirmed**
-  while the runtime is not ready to say.
+  history and Octant has no compaction request for it (OpenCode, Pi and the
+  ACP agents), so Octant cannot compact it, or **Not confirmed** while the
+  runtime is not ready to say.
 
 | Runtime                                               | Transport for Octant tools                                     |
 | ----------------------------------------------------- | -------------------------------------------------------------- |
