@@ -622,6 +622,16 @@ describe("thread purge sweep", () => {
         aggregate_id: launches.get(otherProjectId),
       },
     ]);
+    const erased = {
+      projectId: decodeProjectId(projectId),
+      checkoutId: decodeCodeCheckoutId("c3630000-0000-4000-8000-000000000013"),
+      component: "extension:language-server:sha256:abc@1",
+    };
+    // The host forgets them as it erases them, so they stop being in force
+    // at once and the Project's next approval is recorded afresh.
+    approvals.forgetProject(erased.projectId);
+    expect(approvals.holds(erased)).toBe(false);
+    expect(approvals.record({ ...erased, scope: "checkout" })).toBe("recorded");
   });
 
   it("leaves a managed worktree in place whose receipt names a path outside the managed worktree directory", async () => {

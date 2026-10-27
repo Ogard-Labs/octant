@@ -51,7 +51,7 @@ import { CodeLanguageService } from "./codeLanguageService";
 import { installedLanguageServerComponents } from "./installedLanguageServers";
 import { LanguageServerApprovalStore } from "./languageServerApprovals";
 import { createLanguageServerEgress } from "./languageServerEgress";
-import { LanguageServerProcessPort } from "./languageServerProcess";
+import { LanguageServerProcessPort, type LanguageServerProcess } from "./languageServerProcess";
 
 const now = "2026-10-26T12:00:00.000Z";
 const scopeId = "10000000-0000-4000-8000-000000000001" as WindowId;
@@ -341,6 +341,7 @@ async function host(
       isExtensionCompatibilityCompatible(compatibility, "1.0.0", process.platform),
   });
   let launches = 0;
+  let running: LanguageServerProcess | undefined;
   const approvals = () =>
     new LanguageServerApprovalStore({
       journal,
@@ -392,9 +393,11 @@ async function host(
     },
     components,
     processes: {
-      launch: (launch) => {
+      launch: async (launch) => {
         launches += 1;
-        return processes.launch(launch);
+        const outcome = await processes.launch(launch);
+        if (outcome.status === "launched") running = outcome.process;
+        return outcome;
       },
     },
     platform: process.platform === "darwin" ? "macos" : "linux",
@@ -433,6 +436,10 @@ async function host(
     reloadedApprovals: approvals,
     components,
     launches: () => launches,
+    /** Ends the server the host last started, as a crash would. */
+    crash: async () => {
+      await running?.kill();
+    },
     inspect: async (folder: string): Promise<ExtensionCommandResult> => {
       const registered = await folders.register(folder);
       return extensions.execute({ kind: "inspect-package", source: registered.source });
@@ -799,6 +806,31 @@ describe("a language server that runs the repository's tooling", () => {
     await test.enableComponent(true);
     expect(await test.open()).toEqual({ status: "refused", reason: "approval-required" });
     expect(test.launches()).toBe(1);
+  });
+
+  it("does not restart a crashed server whose package changed since its approval", async () => {
+    const test = await host(passthrough, { executionPolicy: "approval-gated" });
+    await test.install(toolingFolder(test.root, benign));
+    await test.trust(true);
+    await test.enablePlugin(true);
+    await test.enableComponent(true);
+    expect(await test.approve("checkout")).toMatchObject({ status: "approved" });
+    const opened = await test.open();
+    if (opened.status !== "synced") throw new Error(`not synced: ${JSON.stringify(opened)}`);
+    expect(test.launches()).toBe(1);
+
+    // The package changes and the server ends before any sweep has run: the
+    // approval no longer covers what would start, so nothing starts.
+    await test.enableComponent(false);
+    await test.enableComponent(true);
+    await test.crash();
+    // A restart within the crash budget would have launched by now.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(test.launches()).toBe(1);
+    expect(await test.diagnostics(opened.fileId)).toEqual({
+      status: "refused",
+      reason: "approval-required",
+    });
   });
 });
 

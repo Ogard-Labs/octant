@@ -773,6 +773,21 @@ export class CodeLanguageService {
     }
   }
 
+  /**
+   * Whether this server may start now: a `repo-tooling` one only while an
+   * approval covers its package state as it is now, not as it was when the
+   * record was made.
+   */
+  #startCovered(record: ServerRecord): boolean {
+    if (record.component.launchClass === "static") return true;
+    const current = this.#components().find(
+      (component) => component.componentKey === record.component.componentKey,
+    );
+    return (
+      current !== undefined && this.#approvalHolds(record.projectId, record.checkoutId, current)
+    );
+  }
+
   /** Whether any active thread on the checkout has taken in outside content. */
   #checkoutTainted(checkoutId: CodeCheckoutId): boolean {
     return this.#authority
@@ -806,6 +821,13 @@ export class CodeLanguageService {
   async #start(record: ServerRecord): Promise<StartOutcome> {
     const generation = ++record.generation;
     record.state = "starting";
+    // A crash restart has no caller whose request was decided, and the
+    // package may have changed since: without this, a server that ended
+    // between such a change and the sweep came back with no approval.
+    if (!this.#startCovered(record)) {
+      record.state = "stopped";
+      return "crashed";
+    }
     const executable = await record.component.executable().catch(() => undefined);
     if (record.generation !== generation) return "crashed";
     if (executable === undefined) return this.#crash(record, generation);

@@ -20,7 +20,9 @@ server), and 3 (editor wiring) are built: the Code editor shows the host's
 diagnostics and jumps to definitions, locally and from a paired device.**
 Slice 4 (ship the binary) is built: packages carry the server, and a signed
 Apple Silicon package awaits the maintainer. Slice 5 (user-added `static`
-servers) is also built. Monaco editing and the explicit external-editor
+servers) and slice 6 (repository-tooling servers, started only after a local
+window's approval and networked under the Project's egress rules) are also
+built. Monaco editing and the explicit external-editor
 handoff stay the primary Code editing paths and are unchanged by every slice.
 
 ## Outcome
@@ -91,6 +93,12 @@ behind its own approval and confinement rules.
   reads a local folder that holds one into the package store, and
   `apps/server/src/code/installedLanguageServers.ts` offers the installed
   servers the activation ladder makes effective in Code to the companion.
+- **Repository tooling (slice 6).** `apps/server/src/code/languageServerApprovals.ts`
+  journals a local window's approval of a `repo-tooling` server for a
+  checkout or Project, `POST /api/code/language/approvals` records it,
+  `languageServerEgress.ts` gives each start its own `proxied` egress proxy
+  under the Project's rules, and the editor offers **Allow in this checkout**
+  and **Allow in this Project** when the host answers `approval-required`.
 - **Network levels.** `apps/server/src/process/threadEgressPolicy.ts` resolves
   `none`, `provider-endpoints-only`, and `unrestricted`. The
   [harness tool egress rules](../architecture.md#harness-tool-egress-rules)
@@ -468,7 +476,9 @@ classes.
   `shell-commands` approval class, scoped to one checkout or to the Project.
   One that cannot be appended answers `not-recorded` and is not in force. A
   restarted host rebuilds the approvals from the journal. The record names no
-  thread, so a thread purge leaves it, and a Project erase removes it.
+  thread, so a thread purge leaves it, and a Project erase removes it and
+  ends it in the running host at once, since the Project lives on after an
+  erase.
 - **What an approval covers.** One server in one package state: its
   extension, component, package digest, and the package's lifecycle version.
   Any later change to the package (an update, a switch, trust given or
@@ -481,7 +491,8 @@ classes.
   a `repo-tooling` server even while it runs for another thread, because the
   document a caller opens is what the server then runs the repository's
   tooling on. A running server stops when no approval covers its current
-  package state.
+  package state, and a restart after a crash, which no request decided, starts
+  it only while one does.
 - **Launch.** As a terminal is confined: the checkout writable, programs and
   child processes allowed, the server's install readable, and its private
   cache as for `static`. The environment holds only `HOME` and `TMPDIR` (the
@@ -845,7 +856,7 @@ accounts or hardware.
      until the person at a local window approves it. Once approved it starts,
      still refuses a paired device and a Plan thread while it runs, survives a
      restart through the journal, and stops and asks again after its package
-     changes (`installedLanguageServersProcess.test.ts`,
+     changes, a crash restart included (`installedLanguageServersProcess.test.ts`,
      `languageServerApprovals.test.ts`). On Linux, approved and started by the
      real companion under Bubblewrap, a fixture server ran another program and
      wrote the checkout, reached neither this host nor the internet directly,
@@ -856,7 +867,8 @@ accounts or hardware.
      (`codeRoutes.test.ts`); the editor's approval and the review copy are
      covered in `MonacoEditorPane.test.tsx` and
      `ExtensionsSettingsView.test.tsx`; a Project erase removes the
-     approvals and egress records (`threadPurge.test.ts`). The `macos-15` CI
+     approvals, from the running host too, and the egress records
+     (`threadPurge.test.ts`). The `macos-15` CI
      job runs the same process test for Seatbelt evidence; it has not yet run
      on a Mac. The rules are under [Repository tooling](#repository-tooling).
 7. **Agent read tools** (D5; after the editor slices ship). Container: yes.

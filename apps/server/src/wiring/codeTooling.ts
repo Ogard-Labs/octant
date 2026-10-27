@@ -413,6 +413,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       codeExternalEditorRoutes,
       codeOperationApprovalRoutes,
       codeRoutes,
+      languageServerApprovals,
       localServerRoutes,
       projectTerminals,
       remoteServerGrantLocalRoutes,

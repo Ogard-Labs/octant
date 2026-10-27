@@ -136,6 +136,15 @@ export class LanguageServerApprovalStore {
   }
 
   /**
+   * A Project erase removed this Project's approvals from the journal while
+   * the Project lives on; they stop being in force now, not at restart, and
+   * its next approval is appended to the emptied aggregate.
+   */
+  forgetProject(projectId: ProjectId): void {
+    this.#projects.delete(String(projectId));
+  }
+
+  /**
    * Rebuilds every Project's approvals. A record that no longer decodes
    * approves nothing, and still counts toward its aggregate's version so the
    * next append lands after it.
