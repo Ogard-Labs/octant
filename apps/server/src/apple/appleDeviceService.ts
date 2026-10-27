@@ -47,6 +47,7 @@ import {
 import {
   confinedProjectPath,
   projectSelector,
+  readCapture,
   type AppleProcessResult,
 } from "./appleToolchainService";
 import {
@@ -79,6 +80,8 @@ const LAUNCH_SETTLE_MS = 10_000;
 const MAX_CONSOLE_BYTES = 1024 * 1024;
 /** The most signed products the host holds, oldest forgotten first. */
 const MAX_HELD_PRODUCTS = 64;
+/** The most latest-screenshot pointers the host holds, one per thread, checkout, and device. */
+const MAX_HELD_SCREENSHOTS = 64;
 const MAX_DIAGNOSTICS = 64;
 const MAX_DIAGNOSTIC_LENGTH = 2_048;
 /**
@@ -121,6 +124,12 @@ export interface AppleDeviceServiceOptions {
    * removed once it has been read.
    */
   readonly outputDirectory: string;
+  /**
+   * A host-private directory a device screenshot lands in before it becomes
+   * evidence. Only the capture launch may write it; every other launch is
+   * denied it, as the Simulator's capture directory is.
+   */
+  readonly captureDirectory: string;
   /** Where each device build gets a private derived-data directory of its own. */
   readonly artifactRoot: string;
   /**
@@ -141,6 +150,7 @@ export interface AppleDeviceServiceOptions {
   readonly leases: AppleDeviceLeases;
   readonly realpath: (path: string) => Promise<string>;
   readonly writeArtifact?: (reference: string, bytes: Uint8Array) => Promise<void>;
+  readonly readArtifact?: (reference: string) => Promise<Uint8Array | undefined>;
   /** Journals what a device operation did, as the Simulator's evidence is. */
   readonly recordEvidence?: (evidence: AppleDeviceEvidence, startedAt: string) => void;
   readonly now: () => string;
@@ -178,6 +188,21 @@ interface HeldProduct {
   readonly bundleIdentifier: AppleBundleIdentifier;
   readonly signing: AppleDeviceSigning;
 }
+
+/** The latest screen a thread captured of one device, readable only by that thread. */
+interface HeldScreenshot {
+  readonly threadId: string;
+  readonly checkoutId: string;
+  readonly deviceId: AppleDeviceId;
+  readonly reference: AppleEvidenceReference;
+  readonly capturedAt: string;
+}
+
+/** What reading a held screenshot found. Another thread's, or one replaced since, is not found. */
+export type AppleDeviceScreenshotRead =
+  | { readonly kind: "found"; readonly bytes: Uint8Array }
+  | { readonly kind: "not-found" }
+  | { readonly kind: "unavailable" };
 
 interface ThreadBundle {
   readonly threadId: string;
@@ -236,7 +261,8 @@ const SIGNING_GAP_NOTES: Readonly<Record<AppleDevelopmentSigningGap, string>> = 
  * discovery through the selected Xcode's `devicectl`, host-minted ids,
  * person-confirmed leases, and, inside a lease, the thread's own app built,
  * signed for development with the person's existing keychain identity,
- * installed, launched under a console session, read, and stopped. Every
+ * installed, launched under a console session, read, and stopped, and the
+ * device's screen captured with the selected Xcode's own tooling. Every
  * request is decided by the pure device policy against what the host just
  * found and what this thread already holds; this service only gathers that
  * state and carries out what the policy allowed.
@@ -261,6 +287,9 @@ export class AppleDeviceService {
    */
   readonly #products: HeldProduct[] = [];
   readonly #installed: ThreadBundle[] = [];
+  readonly #screenshots: HeldScreenshot[] = [];
+  /** Capture files a screenshot launch is writing right now; a sweep leaves them alone. */
+  readonly #capturesInProgress = new Set<string>();
   /** The latest console session per device and bundle, running or ended. */
   readonly #sessions = new Map<string, ConsoleSession>();
   readonly #stopListening: () => void;
@@ -334,6 +363,26 @@ export class AppleDeviceService {
     return await this.#carryOut(request, context, host, signal);
   }
 
+  /**
+   * The pixels of a screenshot this thread, on this checkout, took last of a
+   * device. Anything else, another thread's included, is not found, so a
+   * reference alone never reads a screen.
+   */
+  async readScreenshot(
+    reference: string,
+    scope: Pick<AppleDeviceExecutionScope, "threadId" | "checkoutId">,
+  ): Promise<AppleDeviceScreenshotRead> {
+    const held = this.#screenshots.some(
+      (shot) =>
+        String(shot.reference) === reference &&
+        shot.threadId === String(scope.threadId) &&
+        shot.checkoutId === String(scope.checkoutId),
+    );
+    if (!held) return { kind: "not-found" };
+    const bytes = await this.#options.readArtifact?.(reference);
+    return bytes === undefined ? { kind: "unavailable" } : { kind: "found", bytes };
+  }
+
   /** Ends every console session this host started; the apps end with them. */
   async close(): Promise<void> {
     this.#stopListening();
@@ -360,6 +409,12 @@ export class AppleDeviceService {
               const holder = this.#options.leases.holder(String(device.deviceId), threadId);
               return holder === undefined ? [] : [{ deviceId: device.deviceId, holder }];
             }),
+            screenshots: this.#screenshots
+              .filter(
+                (shot) =>
+                  shot.threadId === threadId && shot.checkoutId === String(request.checkoutId),
+              )
+              .map(({ deviceId, reference, capturedAt }) => ({ deviceId, reference, capturedAt })),
             discoveredAt: this.#options.now(),
           },
         });
@@ -424,6 +479,7 @@ export class AppleDeviceService {
       case "launch":
       case "terminate":
       case "logs":
+      case "screenshot":
         if (this.#actionIds.has(String(request.actionId))) {
           return decodeAppleDeviceResponse({
             kind: "apple-device-failure",
@@ -444,8 +500,8 @@ export class AppleDeviceService {
           artifacts: [],
         });
       default:
-        // Screenshots and uninstall arrive in later slices; until then the
-        // host does not offer what the policy would allow.
+        // Uninstall arrives in a later slice; until then the host does not
+        // offer what the policy would allow.
         return refused("operation-unavailable");
     }
   }
@@ -472,6 +528,9 @@ export class AppleDeviceService {
           break;
         case "terminate":
           step = await this.#terminate(work);
+          break;
+        case "screenshot":
+          step = await this.#screenshot(work);
           break;
         default:
           step = await this.#logs(work);
@@ -900,6 +959,101 @@ export class AppleDeviceService {
     return done;
   }
 
+  /**
+   * Captures the device's screen with the selected Xcode's own tooling
+   * (decision 5) into the host-private capture directory, then keeps it as
+   * evidence by reference. Only the image's reference enters the evidence:
+   * a phone's screen shows the person's own data.
+   */
+  async #screenshot(work: Work): Promise<Step> {
+    const { request } = work;
+    const deviceId = request.deviceId;
+    const device = await this.#coreDeviceIdentifier(deviceId);
+    if (deviceId === undefined) return stopped("failed", "A screenshot names its device.");
+    if (device === undefined) return stopped("unavailable", "The device is not listed any more.");
+    if (this.#options.writeArtifact === undefined) {
+      return stopped("unavailable", "This host keeps no screenshot evidence.");
+    }
+    const directory = this.#options.captureDirectory;
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    await this.#sweepCaptures();
+    // A capture reads the screen of a device the thread may no longer hold.
+    if (!this.#holdsLease(request)) return stopped("failed", LEASE_ENDED_NOTE);
+    // One file per attempt, named by the host alone, so nothing else can
+    // predict where a capture lands.
+    const capturePath = join(directory, `${randomUUID()}.png`);
+    this.#capturesInProgress.add(capturePath);
+    try {
+      const result = await this.#run(
+        [
+          "xcrun",
+          "devicectl",
+          "device",
+          "screenshot",
+          "--device",
+          device,
+          "--destination",
+          capturePath,
+        ],
+        work.signal,
+        [directory],
+        request.timeoutMs,
+      );
+      // devicectl's own words can name the device, so only the outcome is kept.
+      if (!succeeded(result)) {
+        return stopped(outcomeFor(result), "devicectl could not capture the device's screen.");
+      }
+      const bytes = await readCapture(capturePath, "png");
+      if (bytes === undefined) {
+        return stopped("failed", "devicectl reported a capture but wrote no PNG.");
+      }
+      const reference = `apple-device-screenshot-${request.actionId}`;
+      await this.#options.writeArtifact(reference, bytes);
+      work.artifacts.push({ kind: "screenshot", reference });
+      this.#holdScreenshot({
+        threadId: String(request.threadId),
+        checkoutId: String(request.checkoutId),
+        deviceId,
+        reference,
+        capturedAt: this.#options.now(),
+      });
+      work.notes.push("Captured the device's screen; the image is kept as evidence by reference.");
+      return done;
+    } finally {
+      this.#capturesInProgress.delete(capturePath);
+      await rm(capturePath, { force: true }).catch(() => undefined);
+    }
+  }
+
+  /** Keeps a thread's latest screenshot of a device in place of its earlier one. */
+  #holdScreenshot(screenshot: HeldScreenshot): void {
+    const earlier = this.#screenshots.findIndex(
+      (shot) =>
+        shot.threadId === screenshot.threadId &&
+        shot.checkoutId === screenshot.checkoutId &&
+        String(shot.deviceId) === String(screenshot.deviceId),
+    );
+    if (earlier >= 0) this.#screenshots.splice(earlier, 1);
+    this.#screenshots.push(screenshot);
+    if (this.#screenshots.length > MAX_HELD_SCREENSHOTS) this.#screenshots.shift();
+  }
+
+  /**
+   * Removes captures a launch left behind: one that outlived its timeout can
+   * write its file after its own attempt removed the path. The directory
+   * holds only this host's device captures.
+   */
+  async #sweepCaptures(): Promise<void> {
+    const directory = this.#options.captureDirectory;
+    const names = await readdir(directory).catch(() => []);
+    await Promise.all(
+      names
+        .map((name) => join(directory, name))
+        .filter((path) => !this.#capturesInProgress.has(path))
+        .map((path) => rm(path, { force: true }).catch(() => undefined)),
+    );
+  }
+
   async #record(work: Work, outcome: AppleBuildOutcome): Promise<AppleDeviceResponse> {
     const { request } = work;
     const completedAt = this.#options.now();
@@ -1253,7 +1407,11 @@ export class AppleDeviceService {
         timeoutMs,
         additionalReadRoots: [directory],
         ...(writeRoots.length === 0 ? {} : { additionalWriteRoots: writeRoots }),
-        isolatedRoots: [this.#options.outputDirectory, ...(this.#options.isolatedRoots ?? [])],
+        isolatedRoots: [
+          this.#options.outputDirectory,
+          this.#options.captureDirectory,
+          ...(this.#options.isolatedRoots ?? []),
+        ],
       },
       signal,
     );
@@ -1262,6 +1420,7 @@ export class AppleDeviceService {
   #isolatedRoots(): ReadonlyArray<string> {
     return [
       this.#options.outputDirectory,
+      this.#options.captureDirectory,
       this.#options.signingDirectory,
       ...(this.#options.isolatedRoots ?? []),
     ];

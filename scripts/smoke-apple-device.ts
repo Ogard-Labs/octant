@@ -1,8 +1,10 @@
 // Native smoke for a physical iPhone or iPad (docs/design/apple-devices.md,
-// delivery slice 3). It drives the host's device service through the same
-// confined launches the product uses: discovery, a person-confirmed lease, a
-// development-signed build of the Simulator fixture run on the device, its
-// console read, its stop, and the refusals of a foreign product and bundle.
+// delivery slices 3 and 4). It drives the host's device service through the
+// same confined launches the product uses: discovery, a person-confirmed
+// lease, a development-signed build of the Simulator fixture run on the
+// device, its console read, a screenshot of the running app (or the selected
+// Xcode reporting it has no device screenshot), its stop, and the refusals of
+// a foreign product and bundle.
 //
 // Run on a Mac with Xcode selected, a paired and unlocked device with
 // Developer Mode on, and a development provisioning profile for
@@ -14,7 +16,7 @@
 // who answers the lease confirmation and each effect's approval, as the
 // desktop dialog's receipt would; it prints every evidence record it got.
 import { randomUUID } from "node:crypto";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -59,6 +61,7 @@ const service = new AppleDeviceService({
   execute: (input, signal) => appleProcess.execute(input, signal),
   executeSigning: (input, signal) => signingProcess.execute(input, signal),
   outputDirectory: join(stateRoot, "devicectl"),
+  captureDirectory: join(stateRoot, "device-captures"),
   artifactRoot: store.artifactRoot,
   signingDirectory: join(stateRoot, "signing"),
   provisioningProfileDirectories: [
@@ -70,6 +73,7 @@ const service = new AppleDeviceService({
   leases: new AppleDeviceLeases(),
   realpath,
   writeArtifact: (reference, bytes) => store.writeArtifact(reference, bytes),
+  readArtifact: (reference) => store.readArtifact(reference),
   recordEvidence: (evidence) => journal.push(evidence),
   now: () => new Date().toISOString(),
   newId: randomUUID,
@@ -171,6 +175,29 @@ try {
   console.info(
     `APPLE_DEVICE_SMOKE_CONSOLE=${JSON.stringify(new TextDecoder().decode(printed ?? new Uint8Array()))}`,
   );
+  // Decision 5: the selected Xcode's own tooling captures the screen, or the
+  // host reports that it offers none and nothing stands in.
+  if (discovery.discovery.tooling.includes("screenshot")) {
+    const shot = requireEvidence(
+      "screenshot",
+      await ask("screenshot", { kind: "screenshot", deviceId }),
+    );
+    const read = await service.readScreenshot(shot.artifacts[0]?.reference ?? "", scope);
+    if (read.kind !== "found")
+      throw new Error(`The screenshot could not be read back: ${read.kind}.`);
+    const saved = join(tmpdir(), "octant-apple-device-smoke-screenshot.png");
+    await writeFile(saved, read.bytes);
+    console.info(
+      `APPLE_DEVICE_SMOKE_SCREENSHOT=${JSON.stringify({ bytes: read.bytes.byteLength, saved })}`,
+    );
+  } else {
+    requireRefusal(
+      "screenshot this Xcode does not offer",
+      await ask("screenshot", { kind: "screenshot", deviceId }),
+      "operation-unavailable",
+    );
+    console.info("APPLE_DEVICE_SMOKE_SCREENSHOT=unavailable");
+  }
   requireEvidence(
     "terminate",
     await ask("terminate", { kind: "terminate", deviceId, bundleIdentifier }),

@@ -1139,10 +1139,21 @@ describe("startOctantServer", () => {
           );
           expect(registered?.status).toBe(204);
 
-          for (const [path, kind] of [
-            ["/api/apple/devices", "discover"],
-            ["/api/apple/device-leases", "use-device"],
-            ["/api/apple/device-actions", "build"],
+          const { authority, threadId, checkoutId } = deviceRequest("discover");
+          for (const [path, payload] of [
+            ["/api/apple/devices", deviceRequest("discover")],
+            ["/api/apple/device-leases", deviceRequest("use-device")],
+            ["/api/apple/device-actions", deviceRequest("build")],
+            [
+              "/api/apple/device-screenshots",
+              {
+                kind: "apple-artifact-request",
+                authority,
+                threadId,
+                checkoutId,
+                reference: "apple-device-screenshot-1",
+              },
+            ],
           ] as const) {
             const response = yield* Effect.promise(() =>
               Promise.resolve(
@@ -1153,7 +1164,7 @@ describe("startOctantServer", () => {
                       "content-type": "application/json",
                       "x-octant-window-capability": capability,
                     },
-                    body: JSON.stringify(deviceRequest(kind)),
+                    body: JSON.stringify(payload),
                   }),
                 ),
               ),

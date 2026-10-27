@@ -131,7 +131,10 @@ export function parseDevicectlLockState(document: unknown): DevicectlLockState {
 export interface DevicectlProbe {
   readonly operation: AppleDeviceToolingOperation | "lock-state";
   readonly subcommand: ReadonlyArray<string>;
-  /** Text the help must also contain, for an operation that is a flag of another. */
+  /**
+   * Text the help must also contain: the flag an operation is, or the option
+   * the host passes it.
+   */
   readonly requires?: string;
 }
 
@@ -141,7 +144,9 @@ export const DEVICECTL_PROBES: ReadonlyArray<DevicectlProbe> = [
   { operation: "launch-app", subcommand: ["device", "process", "launch"] },
   { operation: "terminate-process", subcommand: ["device", "process", "terminate"] },
   { operation: "uninstall-app", subcommand: ["device", "uninstall", "app"] },
-  { operation: "screenshot", subcommand: ["device", "screenshot"] },
+  // A capture is written where the host says, so a help that does not take
+  // that option cannot be driven the way the host drives it.
+  { operation: "screenshot", subcommand: ["device", "screenshot"], requires: "--destination" },
   {
     operation: "console-logs",
     subcommand: ["device", "process", "launch"],

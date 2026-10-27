@@ -518,7 +518,11 @@ describe("authenticated product route dispatch", () => {
     expect((await product(handoff("/api/apple/devices", "POST")))?.status).toBe(200);
     expect(dispatch).toHaveBeenCalledTimes(1);
 
-    for (const path of ["/api/apple/device-leases", "/api/apple/device-actions"]) {
+    for (const path of [
+      "/api/apple/device-leases",
+      "/api/apple/device-actions",
+      "/api/apple/device-screenshots",
+    ]) {
       expect(
         classifyProductAction(new Request(`https://octant.example${path}`, { method: "POST" })),
       ).toBeUndefined();

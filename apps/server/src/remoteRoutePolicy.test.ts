@@ -666,7 +666,11 @@ describe("remote route policy", () => {
       kind: "allow",
       surface: "authenticated-product",
     });
-    for (const path of ["/api/apple/device-leases", "/api/apple/device-actions"]) {
+    for (const path of [
+      "/api/apple/device-leases",
+      "/api/apple/device-actions",
+      "/api/apple/device-screenshots",
+    ]) {
       const local = inspect(path);
       expect(local).toMatchObject({ kind: "reject", facts: { surface: "local-only" } });
       if (local.kind === "reject") expect(local.response.status).toBe(404);

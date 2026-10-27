@@ -911,8 +911,63 @@ describe("Apple physical device contracts", () => {
   });
 
   it("has no evidence for an operation this host does not carry out on a device", () => {
-    for (const kind of ["use-device", "uninstall", "provisioning-update", "upload", "screenshot"]) {
+    for (const kind of ["use-device", "uninstall", "provisioning-update", "upload"]) {
       expect(() => AppleContracts.decodeAppleDeviceEvidence({ ...signedBuild, kind })).toThrow();
     }
+  });
+
+  it("keeps a device screenshot as evidence by reference, never a signed product", () => {
+    const { product: _product, signing: _signing, ...plain } = signedBuild;
+    const screenshot = {
+      ...plain,
+      kind: "screenshot",
+      bundleIdentifier: undefined,
+      artifacts: [{ kind: "screenshot", reference: "apple-device-screenshot-1" }],
+    };
+    const { bundleIdentifier: _bundle, ...withoutBundle } = screenshot;
+    expect(AppleContracts.decodeAppleDeviceEvidence(withoutBundle).artifacts[0]?.kind).toBe(
+      "screenshot",
+    );
+    expect(() =>
+      AppleContracts.decodeAppleDeviceEvidence({ ...signedBuild, kind: "screenshot" }),
+    ).toThrow();
+  });
+
+  it("lets a discovery point at the thread's latest screenshot of each device, and nothing more", () => {
+    const discovery = {
+      devices: [device],
+      tooling: ["list-devices", "screenshot"],
+      leases: [{ deviceId: device.deviceId, holder: "this-thread" }],
+      screenshots: [
+        {
+          deviceId: device.deviceId,
+          reference: "apple-device-screenshot-1",
+          capturedAt: "2026-10-26T12:00:00.000Z",
+        },
+      ],
+      discoveredAt: "2026-10-26T12:00:00.000Z",
+    };
+    const answer = AppleContracts.decodeAppleDeviceResponse({
+      kind: "apple-device-discovery",
+      discovery,
+    });
+    expect(answer.kind === "apple-device-discovery" && answer.discovery.screenshots).toHaveLength(
+      1,
+    );
+    // A host that predates screenshots answers without the field.
+    const { screenshots: _screenshots, ...older } = discovery;
+    expect(
+      AppleContracts.decodeAppleDeviceResponse({ kind: "apple-device-discovery", discovery: older })
+        .kind,
+    ).toBe("apple-device-discovery");
+    expect(() =>
+      AppleContracts.decodeAppleDeviceResponse({
+        kind: "apple-device-discovery",
+        discovery: {
+          ...discovery,
+          screenshots: [{ ...discovery.screenshots[0], path: "/Users/me/capture.png" }],
+        },
+      }),
+    ).toThrow();
   });
 });
