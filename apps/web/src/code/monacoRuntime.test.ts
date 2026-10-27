@@ -41,6 +41,15 @@ const mocks = vi.hoisted(() => ({
   editor: undefined as unknown,
   modeConfigurations: [] as Array<readonly [string, unknown]>,
   workerDefinitions: [] as ReadonlyArray<unknown>,
+  decorationsSet: vi.fn(),
+  mouseDownListeners: [] as Array<
+    (event: { target: { type: number; position?: { lineNumber: number } } }) => void
+  >,
+  actions: [] as Array<{
+    id: string;
+    keybindings?: ReadonlyArray<number>;
+    run: (editor: { getPosition: () => { lineNumber: number } | null }) => void;
+  }>,
 }));
 
 const modelUri = { scheme: "octant-code", toString: () => "octant-code://checkout/file" };
@@ -74,12 +83,24 @@ vi.mock("monaco-editor", () => ({
     ) {}
   },
   MarkerSeverity: { Hint: 1, Info: 2, Warning: 4, Error: 8 },
+  KeyCode: { F9: 67 },
   editor: {
+    MouseTargetType: { GUTTER_GLYPH_MARGIN: 2, CONTENT_TEXT: 6 },
+    TrackedRangeStickiness: { NeverGrowsWhenTypingAtEdges: 1 },
     create: mocks.editorCreate.mockImplementation(() => {
       mocks.editor = {
         dispose: mocks.editorDispose,
         focus: mocks.editorFocus,
         updateOptions: mocks.editorUpdateOptions,
+        createDecorationsCollection: () => ({ set: mocks.decorationsSet, clear: vi.fn() }),
+        onMouseDown: (listener: (typeof mocks.mouseDownListeners)[number]) => {
+          mocks.mouseDownListeners.push(listener);
+          return { dispose: vi.fn() };
+        },
+        addAction: (action: (typeof mocks.actions)[number]) => {
+          mocks.actions.push(action);
+          return { dispose: vi.fn() };
+        },
       };
       return mocks.editor;
     }),
@@ -138,6 +159,8 @@ describe("Monaco runtime", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.changeListeners.length = 0;
+    mocks.mouseDownListeners.length = 0;
+    mocks.actions.length = 0;
     mocks.value = "stale";
     mocks.modelGetValue.mockImplementation(() => mocks.value);
     mocks.modelSetValue.mockImplementation((value: string) => {
@@ -160,6 +183,47 @@ describe("Monaco runtime", () => {
     expect(mocks.modelSetValue).toHaveBeenCalledWith("latest");
     session.dispose();
     expect(mocks.modelDispose).not.toHaveBeenCalled();
+  });
+
+  it("toggles a breakpoint from the glyph gutter or F9 only when the pane takes breakpoints, and draws them with the stopped line", () => {
+    const plain = mount(document.createElement("div"), options());
+    expect(mocks.editorCreate).toHaveBeenLastCalledWith(
+      expect.any(HTMLElement),
+      expect.objectContaining({ glyphMargin: false }),
+    );
+    expect(mocks.mouseDownListeners).toHaveLength(0);
+    plain.dispose();
+
+    const onToggleBreakpoint = vi.fn();
+    const session = mount(document.createElement("div"), options({ onToggleBreakpoint }));
+    expect(mocks.editorCreate).toHaveBeenLastCalledWith(
+      expect.any(HTMLElement),
+      expect.objectContaining({ glyphMargin: true }),
+    );
+    for (const listener of mocks.mouseDownListeners) {
+      listener({ target: { type: 6, position: { lineNumber: 4 } } });
+      listener({ target: { type: 2, position: { lineNumber: 3 } } });
+    }
+    expect(onToggleBreakpoint).toHaveBeenCalledExactlyOnceWith(3);
+    const f9 = mocks.actions.find((action) => action.keybindings?.includes(67));
+    f9?.run({ getPosition: () => ({ lineNumber: 7 }) });
+    expect(onToggleBreakpoint).toHaveBeenLastCalledWith(7);
+
+    session.setDebugDecorations?.({ breakpoints: [3], stoppedLine: 5 });
+    expect(mocks.decorationsSet).toHaveBeenLastCalledWith([
+      expect.objectContaining({
+        range: expect.objectContaining({ startLineNumber: 3 }),
+        options: expect.objectContaining({ glyphMarginClassName: "code-debug-breakpoint" }),
+      }),
+      expect.objectContaining({
+        range: expect.objectContaining({ startLineNumber: 5 }),
+        options: expect.objectContaining({
+          isWholeLine: true,
+          className: "code-debug-stopped-line",
+        }),
+      }),
+    ]);
+    session.dispose();
   });
 
   it("mounts the editor with the Octant dark presentation", () => {
