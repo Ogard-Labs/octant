@@ -42,6 +42,11 @@ newly trusted digest of its driver, and only then, with its records cleared
 because the rules listed under
 [Signature rules not yet settled](#signature-rules-not-yet-settled) are open,
 and until they are no source but an unsigned local folder yields a driver.
+Slice 7 (author kit and example driver) is built: the author-facing protocol
+re-export, the serve helper, the out-of-process conformance kit, and an
+example loopback driver package that passes the kit and the host proxy's
+conformance in CI (see [Author kit rules](#author-kit-rules)); nothing is
+published to a registry ([decision 8](#maintainer-decisions)).
 The maintainer authorized this scope as
 post-preview work and accepted the [maintainer decisions](#maintainer-decisions)
 below on 2026-10-26; the release boundary in `AGENTS.md` and the architecture
@@ -419,9 +424,9 @@ takes the fail-closed option.
   of response.
 - **The channel.** The proxy reads and writes lines through a channel
   interface; slice 3 runs it in memory, and slice 4 attaches the confined
-  process's stdin and stdout. The author-facing re-export from
-  `@octant/provider-sdk` lands with the author kit in slice 7, by
-  [decision 8](#maintainer-decisions).
+  process's stdin and stdout. The author-facing re-export is
+  `@octant/provider-sdk/outside-driver`, part of the author kit (see
+  [Author kit rules](#author-kit-rules)).
 
 ### Admission rules
 
@@ -701,6 +706,67 @@ Conformance is enforced by the host, not trusted from the author:
 - **For authors.** An out-of-process kit runs the same properties against a
   driver binary in the author's CI. Its evidence is advisory and never enables
   anything.
+
+### Author kit rules
+
+These rules resolve what slice 7 left to implementation.
+
+- **What the kit is.** Three provider SDK entry points:
+  `@octant/provider-sdk/outside-driver` re-exports the protocol schemas a
+  driver reads and writes from `@octant/contracts`;
+  `@octant/provider-sdk/outside-driver-serve` is the serve helper; and
+  `@octant/provider-sdk/outside-driver-conformance` is the out-of-process
+  conformance kit (`runOutsideDriverConformance`). The user guide's
+  [Build a provider driver](../../apps/docs/advanced/provider-drivers.md) page
+  is the author's how-to.
+- **The serve helper is plain JavaScript a package carries.** A driver can
+  read nothing outside its package root, so it cannot import the helper from
+  anywhere else. `outsideDriverServe.mjs` is one `.mjs` module that imports
+  only `node:readline` (present on Bun and on Electron's Node), with its types
+  in a declaration file beside it; a driver package keeps a copy, and a test
+  holds the example's copy byte-identical to the SDK's.
+- **What the helper does for a driver.** It answers `initialize` on
+  `harness-endpoint/1` alone and refuses any other offer as `incompatible`;
+  numbers brokered requests and hands back their head, then their body as the
+  host streams it; aborts a send's signal on `session/cancel` and stops
+  streaming its events; and writes every failure as the structure the host
+  reads (a category, `retryAfterMs`, `contextOverflow`), dropping a value the
+  host's schema would refuse and turning any other thrown value into
+  `provider-failed`, so a driver's own text never needs to cross. On stdio it
+  sends `console` output to stderr, since the host stops a driver at the first
+  stdout line that is not a protocol message, and exits when the host closes
+  stdin.
+- **What the conformance kit checks.** It plays the host against a channel:
+  a driver's process stdio in the author's CI, or an in-memory channel in a
+  test. Every line is held to the 4 MiB cap and to the strict schemas the host
+  decodes; an answer or event for a call never made fails. A brokered request
+  must keep to the configured origin, set none of the headers only the host
+  sets, and ask for the key only where the fixture says the provider sends it;
+  the kit sends a placeholder credential, never a real one, and relays the
+  body in pieces a few characters long, because the host relays it wherever
+  its reads end. The run passes when the handshake agrees on a version the
+  host speaks, the probe reports a listed model, a send settles with text or
+  tool calls, the driver still answers after a cancel and after a release,
+  and every failure carries a category the host reads.
+- **The key placement is the person's.** `initialize` carries no key facts,
+  so a driver asks for the key in the header its service reads, and the
+  person chooses that placement when they add the provider; the driver's own
+  documentation says which. A driver for a service that takes no key asks for
+  none, and the host accepts such a provider only on loopback.
+- **The example driver.** `packages/provider-sdk/examples/loopback-chat-driver`
+  translates to the OpenAI-compatible chat completions protocol of a local
+  model server (llama.cpp's server, LM Studio, vLLM, or Ollama's `/v1`):
+  `GET models` for the probe, reporting only listed models, and a streamed
+  `POST chat/completions` per send, with tool calls assembled from their
+  streamed pieces. It asks for no key. CI runs it through the kit in process
+  and as its own process on the test runtime, reads its folder through the
+  host's inspection, and runs it through the host proxy and
+  `runHarnessEndpointConformance` against a loopback model server; a Linux host
+  starts no driver process, so the proxy run is in process. The maintainer's
+  live smoke on macOS uses this package.
+- **Publication.** Nothing is published to npm or any registry; that needs an
+  npm organization and account and stays a maintainer action
+  ([decision 8](#maintainer-decisions)).
 
 ### Capability honesty and fail-closed behaviour
 

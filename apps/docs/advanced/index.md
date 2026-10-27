@@ -38,6 +38,7 @@ without over-trusting a surface that has not shipped.
 - [Android emulator](/advanced/android-emulator) — in-app AVD pane, `adb` input, and `octant_android`.
 - [Code on an SSH target](/advanced/ssh-targets) — keep a Code Project's folder on a machine you reach with ssh, with terminals and managed worktrees there.
 - [Plugins and skills](/advanced/plugins-and-skills) — install, trust, enable, and use extension packages and standalone skills.
+- [Build a provider driver](/advanced/provider-drivers) — write, test, package, and add a provider driver that does not ship with Octant.
 
 ## Appearance and workflows
 

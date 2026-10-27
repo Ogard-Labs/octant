@@ -252,7 +252,8 @@ its next check starts the new version, and its models need **Verify tools**
 again, since what Octant learned about the old version does not carry over. A
 rollback works the same way. Turning the plugin off, withdrawing trust, or
 uninstalling stops the driver and blocks the provider. Linux and Windows hosts
-cannot confine a driver, so they never run one.
+cannot confine a driver, so they never run one. To write one, see
+[Build a provider driver](/advanced/provider-drivers).
 
 An endpoint driver (OpenAI-compatible, Anthropic-compatible, Azure AI Foundry,
 Ollama) is added under **Octant Harness → Model endpoints** with **Add

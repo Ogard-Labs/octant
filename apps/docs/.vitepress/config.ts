@@ -92,6 +92,7 @@ export default defineConfig({
             { text: "Subagents", link: "/advanced/subagents" },
             { text: "Native Harness", link: "/advanced/native-harness" },
             { text: "Plugins and Skills", link: "/advanced/plugins-and-skills" },
+            { text: "Build a Provider Driver", link: "/advanced/provider-drivers" },
           ],
         },
         {
