@@ -59,6 +59,8 @@ export type FakeRefreshAnswer =
   | "server-error"
   | "unreachable";
 
+export type FakeDevicePollFailure = "server-error" | "throttled" | "unreachable";
+
 export type FakeMintAnswer = "credentials" | "forbidden" | "unauthorized" | "server-error";
 
 interface MintedRole {
@@ -91,6 +93,7 @@ export class FakeCloud {
   #grantsRefreshToken = true;
   #reachable = true;
   #deviceAnswer: "issued" | "refused" | "unavailable" = "issued";
+  #devicePollFailures: FakeDevicePollFailure[] = [];
 
   constructor(now: () => number = Date.now) {
     this.#now = now;
@@ -178,6 +181,11 @@ export class FakeCloud {
 
   setDeviceAnswer(value: "issued" | "refused" | "unavailable"): void {
     this.#deviceAnswer = value;
+  }
+
+  /** The next device-code polls fail, in order, before the portal answers them again. */
+  failDevicePolls(...failures: FakeDevicePollFailure[]): void {
+    this.#devicePollFailures = failures;
   }
 
   /** Every session and refresh token stops working, as an administrator's revocation does. */
@@ -310,6 +318,10 @@ export class FakeCloud {
     }
     if (path === "/token") {
       if (fields.grantType === "urn:ietf:params:oauth:grant-type:device_code") {
+        const failure = this.#devicePollFailures.shift();
+        if (failure === "unreachable") throw new TypeError("fetch failed");
+        if (failure === "throttled") return new Response("", { status: 429 });
+        if (failure === "server-error") return new Response("", { status: 503 });
         const entry = [...this.#devices].find(([key]) =>
           key.startsWith(`${String(fields.deviceCode)}|`),
         );

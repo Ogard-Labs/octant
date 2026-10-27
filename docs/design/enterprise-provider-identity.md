@@ -146,6 +146,13 @@ reasons add `interaction-required`, and `access` adds `binding-mismatch`. A
 grant the broker no longer holds reads `sign-in-again` (`expired`), as a
 subscription grant does.
 
+A settled sign-in attempt, of either route family, stays readable through
+`status` for five minutes past its deadline (longer than the server follows
+one) and is then forgotten when the next attempt begins, so abandoned
+attempts do not accumulate in a long-running broker; a forgotten attempt
+reads `unknown`. An attempt still waiting on the issuer is kept, since its
+answer may yet store a grant that only that attempt names.
+
 ## Tenant, audience, and endpoint binding
 
 A `directory-oauth` instance records three facts in its configuration, none
@@ -424,9 +431,14 @@ Rules slice 2 resolved, each the most conservative reading of decision 2:
   5xx, or no answer is `unavailable`.
 - **Polling.** `authorization_pending` and `slow_down` wait;
   `authorization_declined` or `access_denied` is `denied`; `expired_token` is
-  `timeout`; any other refusal is `exchange-refused`; a network failure or a
-  5xx ends the attempt `unavailable`, as the standard device flow already
-  does. A finished sign-in passes the loopback flow's scope and identity-token
+  `timeout`; any other refusal is `exchange-refused`. No answer, a 429, or a
+  5xx is transient: the broker polls again after a wait that doubles with
+  each such answer in a row (up to a minute) and returns to the directory's
+  interval after the next real answer, until the code expires. A code that
+  runs out while the directory is still failing ends the attempt
+  `unavailable` rather than `timeout`, since the person may never have been
+  able to enter it. Rejected: ending the attempt at the first 5xx, which
+  turned a brief outage into a failed sign-in and a new code. A finished sign-in passes the loopback flow's scope and identity-token
   checks without a nonce: none can be sent, and the token is the tenant
   token endpoint's answer to the attempt's own device code.
 - **Consent.** The command prints the same consent line Settings shows (terms
@@ -454,7 +466,10 @@ conservative reading of decision 4 and the broker operations above:
   anything, so a person the portal does not give the account and role holds
   no grant (`not-authorized`). Every address is built from the portal's
   region (`oidc.<region>.amazonaws.com`, `portal.sso.<region>.amazonaws.com`);
-  nothing in a descriptor or an answer names a host.
+  nothing in a descriptor or an answer names a host. Polling the device code
+  follows slice 2's rule: a poll the portal does not answer, or answers with
+  a 429 or a 5xx, is retried with a doubling wait until the code expires, and
+  a code that runs out during the outage reads `unavailable`.
 - **One partition.** Regions are the commercial partition's (`us-east-1`
   form); the government, isolated, sovereign, and China partitions sign under
   other hosts and keys and wait for an organization that needs one. The

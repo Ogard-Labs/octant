@@ -79,6 +79,8 @@ interface Scene {
   readonly clock: { now: number };
   /** Every broker answer body, for the secret-absence check. */
   readonly answers: string[];
+  /** Every wait the broker asked for between device-code polls, in order. */
+  readonly waits: number[];
   readonly call: (path: string, body: unknown) => Promise<{ status: number; body: unknown }>;
 }
 
@@ -86,10 +88,14 @@ async function scene(): Promise<Scene> {
   const clock = { now: Date.parse("2026-10-27T09:00:00.000Z") };
   const cloud = new FakeCloud(() => clock.now);
   const store = memoryStore();
+  const waits: number[] = [];
   const broker = await startCredentialBroker(store, undefined, {
     fetch: cloud.fetch as typeof fetch,
     now: () => clock.now,
-    sleep: () => new Promise((resolve) => setTimeout(resolve, 1)),
+    sleep: (ms) => {
+      waits.push(ms);
+      return new Promise((resolve) => setTimeout(resolve, 1));
+    },
   });
   open.push(broker);
   const answers: string[] = [];
@@ -108,7 +114,7 @@ async function scene(): Promise<Scene> {
     answers.push(text);
     return { status: response.status, body: JSON.parse(text) as unknown };
   };
-  return { broker, cloud, store, clock, answers, call };
+  return { broker, cloud, store, clock, answers, waits, call };
 }
 
 async function begin(
@@ -231,6 +237,65 @@ describe("cloud single sign-on", () => {
       });
       expect(current.store.values.size).toBe(0);
     }
+  });
+
+  it("keeps polling through a portal outage with a growing wait and signs in once the code is entered", async () => {
+    const current = await scene();
+    current.cloud.failDevicePolls("server-error", "throttled", "unreachable");
+    const started = await begin(current);
+    current.cloud.approve();
+
+    const state = await settled(current, (started.body as { attemptId: string }).attemptId);
+
+    expect(state).toMatchObject({ kind: "signed-in" });
+    expect(current.cloud.count(OIDC_HOST, "/token")).toBeGreaterThanOrEqual(4);
+    // The portal asks for a poll every second; each failure in a row doubles
+    // the wait, and the first answer after the outage resets it.
+    expect(current.waits.slice(0, 4)).toEqual([1_000, 2_000, 4_000, 8_000]);
+    expect(current.waits.slice(4).every((wait) => wait === 1_000)).toBe(true);
+    expect(current.store.values.size).toBe(1);
+  });
+
+  it("ends an attempt whose code ran out while the portal was failing as unavailable, storing nothing", async () => {
+    const current = await scene();
+    current.cloud.failDevicePolls(...Array.from({ length: 1_000 }, () => "server-error" as const));
+    const started = await begin(current);
+    const deadline = Date.now() + 2_000;
+    while (current.cloud.count(OIDC_HOST, "/token") < 2 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+    expect(current.cloud.count(OIDC_HOST, "/token")).toBeGreaterThanOrEqual(2);
+
+    current.clock.now += 11 * 60_000;
+
+    expect(await settled(current, (started.body as { attemptId: string }).attemptId)).toMatchObject(
+      { kind: "refused", reason: "unavailable" },
+    );
+    expect(current.store.values.size).toBe(0);
+    // The wait never grows past a minute however long the outage lasts.
+    expect(Math.max(...current.waits)).toBeLessThanOrEqual(60_000);
+  });
+
+  it("forgets a settled attempt a while after its code ran out", async () => {
+    const current = await scene();
+    const first = await begin(current);
+    const attemptId = (first.body as { attemptId: string }).attemptId;
+    current.cloud.decline();
+    expect(await settled(current, attemptId)).toMatchObject({ kind: "refused", reason: "denied" });
+
+    // Still readable just past expiry, for a command that polls late.
+    current.clock.now += 11 * 60_000;
+    await begin(current);
+    expect((await current.call("/v1/cloud-iam/status", { attemptId })).body).toMatchObject({
+      kind: "refused",
+      reason: "denied",
+    });
+
+    current.clock.now += 5 * 60_000;
+    await begin(current);
+    expect((await current.call("/v1/cloud-iam/status", { attemptId })).body).toEqual({
+      kind: "unknown",
+    });
   });
 
   it("refuses a page off the portal's own hosts before any code is shown", async () => {
