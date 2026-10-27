@@ -6026,8 +6026,15 @@ same. This holds in Chat, Work, and Code.
   service, the host-local provider (a virtual X display in a dedicated
   Bubblewrap launch, Linux only), artifact transfer, a Code send's binding
   of `octant_computer` to one of its thread's leases, the Code dock's
-  Desktop tool, and a Code Project's stored desktop recipe with its settings
-  editor are built; only the cloud provider driver is not.
+  Desktop tool, a Code Project's stored desktop recipe with its settings
+  editor, and E2B, the first of the two named cloud providers (E2B and Cua
+  Spaces), are built; Cua Spaces waits on a design for reaching its local
+  daemon. A cloud driver reaches its provider only through the host's
+  HTTPS port, which sends nothing outside the hosts the driver declares and
+  attaches the person's key from the credential broker's
+  `/v1/desktop-provider-credentials/*` namespace itself; a person confirms
+  every billed desktop. No host offers a cloud provider yet, so a recipe can
+  name only the host-local provider.
 
 **Canvas export.** A destination plugin contributes an export target through
 `@octant/plugin-api`. The contribution names the formats it accepts. The host

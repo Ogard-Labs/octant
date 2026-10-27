@@ -101,6 +101,7 @@ describe("composeHostDataMap", () => {
         { service: "app.octant.replica-device-keys.v1" },
         { service: "app.octant.replica-store-credentials.v1" },
         { service: "app.octant.mcp-server-credentials.v1" },
+        { service: "app.octant.desktop-provider-credentials.v1" },
       ],
     });
     expect(decoded.host.outbound.map((entry) => entry.category)).toEqual([

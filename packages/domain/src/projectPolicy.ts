@@ -365,6 +365,11 @@ export function changeCodeProjectDesktopRecipe(
     if (provider.locality === "host-local" && recipe.network === "allow") {
       reject("invalid-desktop-recipe", "A desktop on this host cannot have network access yet");
     }
+    // A cloud desktop runs on the person's own account; without a credential
+    // the lease service refuses every acquire, so the recipe is refused here.
+    if (provider.locality === "cloud" && recipe.credentialRef === undefined) {
+      reject("invalid-desktop-recipe", "A cloud desktop needs a saved key for its account");
+    }
   }
   if (sameDesktopRecipe(project.desktopRecipe, recipe ?? undefined)) {
     reject("invalid-lifecycle", "Project desktop recipe is already selected");

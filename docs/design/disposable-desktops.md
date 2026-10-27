@@ -9,21 +9,26 @@ launches go through the shared confinement port, and authority is checked on the
 server ([Architecture: security and authority](../architecture.md#security-and-authority)).
 
 **Delivery state.** Accepted 2026-10-26; slices 1–5 and recipe storage are
-built and slice 6 is not. The maintainer authorized this scope as
-post-preview work and accepted the [maintainer decisions](#maintainer-decisions)
-below on 2026-10-26; it is not part of the first release, and the
+built, and slice 6 is built for E2B; its Cua Spaces driver is blocked on a
+design decision (see [Built in slice 6](#built-in-slice-6)). The maintainer
+authorized this scope as post-preview work and accepted the
+[maintainer decisions](#maintainer-decisions) below on 2026-10-26, naming the
+two cloud providers on 2026-10-27; it is not part of the first release, and the
 [Current Release Boundary](../../AGENTS.md#current-release-boundary) is
 unchanged by this document. The lease contract, the `desktop-provider` seam
 and its conformance suite, the host lease service, the host-local provider,
 artifact transfer, the agent's binding of `octant_computer` to a lease, the
-Desktop pane, and a Code Project's stored recipe with its settings editor
-exist (see [Built in slice 1](#built-in-slice-1),
+Desktop pane, a Code Project's stored recipe with its settings editor, the
+cloud HTTPS port, and the E2B driver exist; no host offers E2B for leasing yet,
+so a recipe can name only the host-local provider (see
+[Built in slice 1](#built-in-slice-1),
 [Built in slice 2](#built-in-slice-2),
 [Built in slice 3](#built-in-slice-3),
 [Built in slice 4](#built-in-slice-4),
-[Built in slice 5](#built-in-slice-5), and
-[Built: recipe storage](#built-recipe-storage)). Slice 4's real-provider
-smoke is still owed by the maintainer.
+[Built in slice 5](#built-in-slice-5),
+[Built in slice 6](#built-in-slice-6), and
+[Built: recipe storage](#built-recipe-storage)). Slice 4's real-provider smoke
+and slice 6's E2B live smoke are still owed by the maintainer.
 
 **Name.** The product calls it a _disposable desktop_. "Computer" already names
 the Mac computer-use destination and the paired-host Computers card, and a
@@ -347,7 +352,13 @@ translation to its provider.
 The host gives the driver capability-scoped ports, never raw handles: a confined
 launch port for a host-local provider, and an authenticated HTTPS call port for a
 cloud provider. Each port is added to the seam with the slice whose driver
-needs it (2 and 6). The confined launch port, `DesktopLaunchPort`, launches one
+needs it (2 and 6). The HTTPS port, `DesktopHttpsPort`, reaches only the hosts
+a driver declares in its code (`hosts`), attaches the person's key itself, and
+answers every call as a value ([Built in slice 6](#built-in-slice-6)). A cloud
+desktop's handle names the credential reference of the account it lives in,
+and `listOwned(hostTag, credentialRef)` lists one account; a provider that
+needs a credential answers `failed` without one, because `listed` is the
+provider confirming every other desktop is absent. The confined launch port, `DesktopLaunchPort`, launches one
 named program only for a lease the host is provisioning and only once per
 lease, always as the host's dedicated desktop launch; the driver chooses the
 program and its arguments and nothing about the capsule. A driver the host keeps only for
@@ -357,8 +368,10 @@ teardown is held as `DesktopTeardownPort` (`id`, `release`, `verifyGone`,
 `packages/provider-sdk/src/imageGenerationConformance.ts`, proves that a driver
 stops when cancelled, tags what it creates, sets provider-side expiry when it
 bills, reports an extension only when the provider confirms the new expiry,
-reports absence only when absent, and refuses rather than degrades an
-unsupported command. Its fixture maps two scenarios onto whatever backs the
+reports absence only when absent, refuses rather than degrades an
+unsupported command, and, given a second driver over the same provider, lets
+a restarted host find by its tag and destroy what a killed one left; a billed
+driver must prove the last. Its fixture maps two scenarios onto whatever backs the
 driver, a provider that declines an extension and a desktop that outlives its
 destroy, so a recorded transport can drive the same checks. The in-memory
 driver tests use (`packages/plugin-api/src/fakeDesktopProvider.ts`) is test
@@ -391,16 +404,22 @@ alternatives considered and the reason for the choice follow it.
 
 1. **First provider.** The first provider is a host-local virtual display in a
    Bubblewrap launch: no new runtime, no account, no cost, Linux hosts only,
-   contents are the host's installed apps, kernel-shared isolation. The second
-   is a cloud provider on the person's account (the original plan named E2B):
-   VM isolation and image templates, but an account, a key, billing, and data
-   leaving the machine. The host-local provider exercises the whole seam,
-   teardown, transfer, and pane in a Linux container with no account, so the
-   risky host-owned parts are proven before money is involved. Not planned: a
-   host-local OCI container provider (rootless Podman), which offers real
-   per-Project images but needs a container runtime the person installs and a
-   second confinement mechanism Octant must verify; it is reconsidered only if
-   per-Project images prove necessary locally.
+   contents are the host's installed apps, kernel-shared isolation. The cloud
+   providers, on the person's own account, are **E2B** and **Cua Spaces**
+   (named 2026-10-27): VM isolation and image templates, but an account,
+   billing, and data leaving the machine. Each is its own bundled driver
+   through the same `desktop-provider` seam, so neither gets a shortcut the
+   other, or a third-party plugin, could not take. E2B is delivered first. The host-local
+   provider exercises the whole seam, teardown, transfer, and pane in a Linux
+   container with no account, so the risky host-owned parts are proven before
+   money is involved. Not planned: a host-local OCI container provider
+   (rootless Podman), which offers real per-Project images but needs a
+   container runtime the person installs and a second confinement mechanism
+   Octant must verify; it is reconsidered only if per-Project images prove
+   necessary locally. _Why two cloud providers:_ offering two keeps the seam
+   honest about what is provider-specific, and a person can use the account
+   they already have. Rejected: one cloud provider only, which would let the
+   seam quietly take one vendor's shape.
 2. **Who may acquire a billed lease.** A person confirms every billed lease in
    every posture. Rejected: ordinary posture rules, as for any effect. Spending
    the person's money is not a code effect Full access covers.
@@ -466,11 +485,12 @@ container with no account or hardware.
    [Workspace](workspace.md) and the user guide. _Accepts when_ person input is
    journaled as `local-user`/`remote-device` with no approval, and a restored
    tab never reconnects. _Verify:_ component tests and rendered QA at each state.
-6. **Cloud provider driver** (per decisions 1 and 2; needs a maintainer-owned
-   account, an API key, and billing authority). Bundled driver through the seam,
-   declared hosts, provider-side expiry and its extension, tag reconciliation.
-   _Accepts when_ the conformance suite passes against a recorded transport, and
-   a maintainer-run smoke acquires, drives, releases, and confirms at the
+6. **Cloud provider drivers** (per decisions 1 and 2: E2B, then Cua Spaces;
+   needs a maintainer-owned account, an API key, and billing authority for
+   each). Bundled drivers through the seam, declared hosts, provider-side
+   expiry and its extension, tag reconciliation. _Accepts when_ the
+   conformance suite passes against a recorded transport, and a
+   maintainer-run smoke acquires, drives, releases, and confirms at the
    provider that nothing remains, including after a forced host kill.
 
 Later, each with its own design note here: a forwarded Local server port,
@@ -860,8 +880,9 @@ Rules this slice resolved:
   active Code Project, as for other Code reads ([decision 3](#maintainer-decisions)).
   Only Code threads have a Desktop tab.
 - **A person's acquire.** A person starting a host-local desktop is not asked
-  again (Plan still refuses). A billed lease still declines: the person's
-  billed confirmation arrives with the cloud provider (slice 6).
+  again (Plan still refuses). A billed lease declined here until the person's
+  billed confirmation arrived with the cloud providers
+  ([slice 6](#built-in-slice-6)).
 - **The pane offers Start only when acquire would not refuse at once.** The
   overview's `start` carries every refusal acquire meets before it asks the
   provider, Plan's `plan-mode` included, so a thread in Plan shows why it
@@ -936,8 +957,10 @@ Rules this delivery resolved:
   and a lease cannot start longer than its maximum. The recipe must name a
   provider the host offers for leasing now (the same list destination
   reporting gives); a host-local recipe cannot allow network
-  ([slice 2](#built-in-slice-2)). A save that changes nothing, and any change
-  to an archived Project, is refused. Removing is always allowed.
+  ([slice 2](#built-in-slice-2)), while a cloud recipe may, and must name a
+  credential reference ([slice 6](#built-in-slice-6)). A save that changes
+  nothing, and any change to an archived Project, is refused. Removing is
+  always allowed.
 - **Read afresh on every lease command.** The lease service asks for the
   recipe on each acquire, operating command, and sweep, from the thread's
   Project as stored now. A new screen size or limit applies to the next
@@ -955,8 +978,9 @@ Rules this delivery resolved:
   the editor never changes a recipe by itself. A new recipe starts from
   decision 4's limits: a 30-minute lease, four hours at most, idle after
   15 minutes. Network is always none. Image and credential reference are for
-  a cloud provider and are not editable until one exists (slice 6); a save
-  keeps the ones already stored for the same provider. Remove asks first,
+  a cloud provider and are not editable until a host offers one (slice 6
+  builds E2B but offers it nowhere yet); a save keeps the ones already stored
+  for the same provider. Remove asks first,
   because it destroys running desktops.
 
 Evidence: `projectDesktopRecipe.test.ts` saves a recipe through
@@ -970,7 +994,8 @@ refuses recipes the schema refuses and journals nothing while the host
 offers the provider; `desktopLeaseService.test.ts` keeps a running desktop's
 frames bounded by its own screen after the recipe's screen changes;
 `projectPolicy.test.ts` covers set, replace, remove, the provider and network
-refusals, Work and Chat Projects, and no-ops; `projectRoutes.test.ts` refuses
+refusals, a cloud recipe kept only with a credential, Work and Chat Projects,
+and no-ops; `projectRoutes.test.ts` refuses
 a paired device's change and keeps a local window's; `desktopPaneRoutes.test.ts`
 lists the offered providers; `ProjectDesktopRecipeSection.test.tsx` sets a
 recipe on an offered provider, keeps an unavailable saved provider from being
@@ -980,6 +1005,156 @@ browser, light and dark, at 1280 and 390 pixels wide, for a new recipe set on
 the host's provider, a saved recipe, a saved provider the host no longer
 offers, and a host that offers none, with no console error and no horizontal
 overflow.
+
+### Built in slice 6
+
+Slice 6 lands the shared cloud pieces with the E2B driver. The Cua Spaces
+driver is not built; why is recorded at the end of this section.
+
+- **Seam.** `DesktopHttpsPort` and `desktopProviderHostDeclared` in
+  `packages/plugin-api/src/desktopProvider.ts`; `DesktopProvider.hosts`;
+  `DesktopHandle.credentialRef`; `listOwned(hostTag, credentialRef)`. The
+  conformance suite's fixture may name `restarted`, a second driver over the
+  same provider, and a billed driver must. The screenshot-only control the
+  host-local driver had (`ScreenshotDesktopControl`), with `x11Keysym`,
+  `pngDimensions`, and `maxDesktopFrameBytes`, moved into the seam
+  (`desktopScreenshotControl.ts`) so every screen-only driver translates
+  `octant_computer` the same way.
+- **Host.** `apps/server/src/computerUse/desktopHttpsPort.ts` is the port.
+  The lease service lists each account a provider's leases recorded, refuses
+  a cloud recipe that names no credential, and takes a person's billed
+  confirmation from their request. The broker gains the
+  `/v1/desktop-provider-credentials/*` namespace (Keychain service and Secret
+  Service attribute `desktop-provider-credentials.v1`), and the wiring reads
+  keys from it.
+- **Contract.** The pane's `acquire` carries `confirmedBilledProvider`.
+- **Driver.** `apps/server/src/plugins/e2bDesktop/`: the `e2b` provider and
+  its in-sandbox process and file calls. It imports only `@octant/contracts`
+  and the seam, and has no network of its own; a test enforces both.
+- **Pane.** Start on a billed provider asks the person first, naming the
+  provider, and sends that provider with the acquire.
+- **Smoke.** `apps/server/src/computerUse/cloudDesktop.smoke.ts`
+  (`bun run desktop:cloud:smoke`), the maintainer's live run.
+
+Rules this slice resolved:
+
+- **The HTTPS port decides where anything goes.** A call reaches only HTTPS,
+  on the default port, with no credentials in the URL, to a host the driver
+  declares (`*.example.com` matches subdomains only). It never follows a
+  redirect, refuses headers the transport or another identity owns (`Host`,
+  `Content-Length`, `Cookie`, and the like), and is bounded at 45 seconds,
+  129 MiB out (a transfer's largest file), and the response size the driver
+  names, capped at one uncompressed frame of the largest screen. The host
+  checks the URL before it reads any key.
+- **A key goes only where one of the provider's leases recorded it.** The
+  driver names a credential reference and the header its provider reads; the
+  host attaches the key only when a journaled lease of that provider recorded
+  that reference. Journal-before-create records it before the first call, so
+  teardown after revocation still reaches the account, and a driver can never
+  name another provider's key. The key never reaches the driver.
+- **Desktop keys have their own broker namespace.** A recipe's credential
+  reference names a key in `/v1/desktop-provider-credentials/*`, apart from
+  model providers' keys, so neither can stand in for the other. A host with
+  no broker attaches no key. No editor enters a key yet; that arrives with
+  the person's opt-in to a billed provider.
+- **A cloud recipe must name a credential.** A recipe for a cloud provider
+  with no credential reference configures nothing that could run: the lease
+  service refuses it `no-provider-configured` before any provider call, and
+  the recipe store refuses to save it
+  ([recipe storage](#built-recipe-storage)).
+- **Restart lists account by account.** Reconciliation lists each provider
+  once with no credential and once per credential reference any of its leases
+  recorded, and destroys tagged desktops that have no live lease. A listing
+  that fails for one account skips only that account's orphans; each
+  unreleased lease is still destroyed through its own account's listing.
+- **A person's billed confirmation is theirs.** A person confirms a billed
+  desktop in their own tab, which names the provider they saw
+  (`confirmedBilledProvider`); the host starts a person's billed lease only
+  with it and only for that provider, re-checking authority, provider, and
+  posture before the call. No other answer stands in for it. An agent still
+  acquires nothing.
+- **Loaded for teardown, offered after the person opts in.** The E2B driver
+  is loaded on every host, so teardown and restart reconciliation reach any
+  E2B lease a host ever journaled. It is not effective: no host offers it for
+  leasing, reports it as a destination, or lets a recipe name it until the
+  person can choose it and enter its key. A billed provider is never on by
+  default.
+- **E2B.** The control plane is `api.e2b.app` with the key in `X-API-Key`.
+  A desktop is a sandbox created from the recipe's template (E2B's public
+  `desktop` template when it names none) through `POST /v2/sandboxes` with the
+  lease id as its `Idempotency-Key`, `octantLease` and `octantHost` metadata,
+  E2B's timeout set to the lease expiry plus two minutes, `autoPause` off,
+  internet only when the recipe allows it, and no public traffic to its
+  ports. E2B's own `endAt` is the provider-side expiry; an extension sets the
+  timeout again and counts only when the `endAt` E2B then reports reaches
+  the new expiry, since a plan may hold a sandbox below what was asked.
+  Release is `DELETE` (204, or 404 for one already gone); only a `GET` that
+  answers 404 is gone, and a paused sandbox is present. A listing filters by
+  `octantHost` over running and paused sandboxes, reads at most 20 pages, and
+  past that answers `failed`. The screen, input, and files go through the
+  sandbox's own daemon at `sandbox.e2b.app` with the sandbox's own token,
+  which stays in the driver's memory and is never journaled; the person's key
+  never goes there. A sandbox E2B reports on another domain is destroyed and
+  the acquire fails. Inside, the driver starts `Xvfb` at the recipe's size, as
+  E2B's desktop SDK does, takes frames with `scrot`, sends input as `xdotool`
+  argument lists with no shell, lands a sent file read-only in
+  `/home/user/inbox` through a staging file, and launches a copy as host-local
+  does.
+- **A cloud recipe may allow the network.** A cloud desktop is a VM with its
+  own network and never shares the host's, so decision 5's per-recipe
+  `allow` applies to it as written; `none` turns the sandbox's internet off.
+
+Evidence: `e2bDesktopProvider.test.ts` runs the conformance suite, restart
+included, against a recorded E2B (`e2bRecordedApi.test-support.ts`, built
+from E2B's published OpenAPI documents and its SDK's envd transport) through
+the host's real HTTPS port, and covers the tagged create with E2B's timeout
+past the lease expiry, the key reaching only `api.e2b.app`, frames and a
+person's input as argument lists, a sent file landing in the inbox and
+launching, an extension E2B holds short refused, a sandbox on another domain
+destroyed, paged listing by host, a rejected key, and the import boundary. Through
+the lease service over a journal on disk, a host killed with a lease
+`ready`, and one killed while E2B was still creating it, each find the
+sandbox by its tag on the next start and destroy it. `desktopHttpsPort.test.ts`
+covers undeclared hosts, plain HTTP, ports and URL credentials refused before
+any key is read, a credential no lease recorded, host-owned headers,
+redirects, response bounds, time-outs, and cancellation.
+`desktopLeaseService.test.ts` covers a person's billed confirmation for the
+right provider only, a cloud recipe with no credential, and a killed host's
+cloud desktops found through each lease's account. The conformance tests cover
+the restart check and its refusals, `DesktopPane.test.tsx` the billed
+confirmation, and `credentialBroker.test.ts` the new namespace's isolation.
+The real-`bwrap` host-local suite passes over the moved screenshot control.
+
+Owed by the maintainer, for E2B: an E2B account with billing, an API key, and
+`bun run desktop:cloud:smoke e2b run`, then `… e2b kill` followed by
+`… e2b restart`, from `apps/server`, each with the key piped on standard input
+(`read -rs KEY; printf %s "$KEY" | bun run desktop:cloud:smoke e2b run`). Each
+run must end `PASS`, and the E2B dashboard must then list no sandbox with
+`octantHost` metadata. The live run is also what confirms what a recording
+cannot: that envd answers the process service in Connect's JSON codec, that
+`Xvfb` and a launched app outlive the command that started them, that the
+`desktop` template carries `Xvfb`, `xdpyinfo`, `scrot`, `xdotool`, and
+`setsid`, that a killed sandbox answers 404 at once, and how the account's
+plan caps an extension.
+
+**Cua Spaces is blocked on a design decision.** Cua's own documentation
+(read 2026-10-27 from its public repository) gives no endpoint a host can call
+over HTTPS with a stored key. Cua's hosted cloud, the only such API, ended on
+18 October 2026. A Space is now created, listed, given a lifetime
+(`set_lifetime`), and deleted through the local `cua daemon` on the person's
+own machine, over gRPC on a Unix socket (`cua.daemon.v1.SpaceService`). That
+daemon runs Spaces on the machine itself, on the person's other machines, or
+in their own AWS, Google Cloud, or Azure account (linked by OIDC, with no
+stored key) or Hetzner or Modal account (a token Cua seals to their devices).
+The screen, input, and files go through `cua-spacesd` (gRPC or gRPC-Web on
+port 3211, with a per-Space bearer token) and Cua's relay. So the shared
+pieces above do not fit it: there are no declared hosts or API-key header for
+`DesktopHttpsPort`, and no key for the desktop-provider namespace. A Cua
+driver needs a seam port for a provider's local daemon (reached confined, the
+way `DesktopLaunchPort` reaches a capsule), a rule for whose cloud
+credentials that daemon uses, and whether its own lifetime and `cua-expires`
+tag satisfy provider-side expiry when the daemon's host is the one that may
+die. Each of those is a maintainer decision.
 
 ## Rationale
 
@@ -1002,9 +1177,13 @@ Source entry points: `apps/server/src/computerUse/desktopLeaseService.ts` and
 (the seam), `apps/server/src/computerUse/hostLocalDesktopLaunch.ts` (the
 host-local launch through `apps/server/src/process/linuxConfinement.ts`),
 `apps/server/src/computerUse/desktopArtifactRead.ts` (the transfer's read),
-`apps/server/src/plugins/hostLocalDesktop/` (the host-local driver and its
-agent control), `apps/server/src/computerUse/computerUseToolService.ts` (a
-send's binding to a lease), `apps/server/src/desktopPaneRoutes.ts`, and the
-web Desktop pane (`apps/web/src/desktop/`). Each slice above lists its
+`apps/server/src/plugins/hostLocalDesktop/` (the host-local driver),
+`packages/plugin-api/src/desktopScreenshotControl.ts` (agent control of a
+screen-only desktop), `apps/server/src/computerUse/desktopHttpsPort.ts` and
+`apps/server/src/plugins/e2bDesktop/` (the cloud port and the E2B driver),
+`apps/server/src/computerUse/computerUseToolService.ts` (a send's binding to
+a lease), `apps/server/src/desktopPaneRoutes.ts`, and the web Desktop pane
+(`apps/web/src/desktop/`). Each slice above lists its
 evidence. Lease negatives, restart reconciliation, and real-`bwrap` permission
-negatives are the load-bearing checks; a cloud smoke is maintainer-run.
+negatives are the load-bearing checks; a cloud smoke is maintainer-run
+(`cloudDesktop.smoke.ts`).

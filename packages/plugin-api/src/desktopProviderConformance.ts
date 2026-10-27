@@ -5,9 +5,12 @@
  * stops when cancelled, tags what it creates, sets a provider-side expiry when
  * it bills, reports an extension only when the provider confirms the new
  * expiry, reports absence only when the desktop is absent, and refuses rather
- * than degrades a command it does not support. The fixture maps each scenario
- * onto whatever backs the driver: an in-memory provider or a recorded
- * transport.
+ * than degrades a command it does not support. When the fixture can build a
+ * second driver over the same provider, it also proves that a host killed
+ * while a desktop ran finds that desktop by its tag after it starts again and
+ * can destroy it; a billed driver must prove it. The fixture maps each
+ * scenario onto whatever backs the driver: an in-memory provider or a
+ * recorded transport.
  */
 import type { ComputerControlCommand } from "@octant/contracts/computer-use-plugin";
 import type { DesktopHostTag, DesktopRecipe, UtcTimestamp } from "@octant/contracts";
@@ -27,6 +30,12 @@ export interface DesktopProviderConformanceFixture {
   readonly recipe: DesktopRecipe;
   /** A command this driver does not support, or none when it supports every one. */
   readonly unsupportedCommand?: ComputerControlCommand;
+  /**
+   * A new driver over the provider `previous` reached, as a host that was
+   * killed and started again builds it: nothing `previous` kept in memory
+   * carries over. Required for a billed driver.
+   */
+  readonly restarted?: (previous: DesktopProvider) => DesktopProvider;
 }
 
 export interface DesktopProviderConformanceEvidence {
@@ -36,6 +45,8 @@ export interface DesktopProviderConformanceEvidence {
   readonly extendedOnlyWhenConfirmed: true;
   readonly reportedAbsenceOnlyWhenAbsent: true;
   readonly refusedUnsupportedCommand: true;
+  /** Absent when the fixture cannot restart the driver and the driver does not bill. */
+  readonly foundAfterRestart?: true;
 }
 
 const ORDINARY: DesktopProviderConformanceScenario = {
@@ -59,17 +70,29 @@ const freshHostTag = (): DesktopHostTag => decodeDesktopHostTag(globalThis.crypt
 const minutesFromNow = (minutes: number): UtcTimestamp =>
   decodeUtcTimestamp(new Date(Date.now() + minutes * 60_000).toISOString());
 
+/** The handles `provider` lists under `hostTag`, in the recipe's account. */
+async function listed(
+  provider: DesktopProvider,
+  hostTag: DesktopHostTag,
+  recipe: DesktopRecipe,
+): Promise<ReadonlyArray<DesktopHandle>> {
+  const result = await answered("listOwned", () =>
+    provider.listOwned(hostTag, recipe.credentialRef),
+  );
+  assertConformance(result.status === "listed", "listOwned did not list a reachable provider");
+  return result.resources
+    .filter((resource) => String(resource.hostTag) === String(hostTag))
+    .map((resource) => resource.handle);
+}
+
 async function listsLease(
   provider: DesktopProvider,
   hostTag: DesktopHostTag,
+  recipe: DesktopRecipe,
   handle: DesktopHandle,
 ): Promise<boolean> {
-  const listed = await answered("listOwned", () => provider.listOwned(hostTag));
-  assertConformance(listed.status === "listed", "listOwned did not list a reachable provider");
-  return listed.resources.some(
-    (resource) =>
-      String(resource.handle.leaseId) === String(handle.leaseId) &&
-      String(resource.hostTag) === String(hostTag),
+  return (await listed(provider, hostTag, recipe)).some(
+    (each) => String(each.leaseId) === String(handle.leaseId),
   );
 }
 
@@ -114,7 +137,9 @@ export async function runDesktopProviderConformance(
     }),
   );
   assertConformance(cancelled.status === "cancelled", "a cancelled acquire did not stop");
-  const afterCancel = await answered("listOwned", () => provider.listOwned(hostTag));
+  const afterCancel = await answered("listOwned", () =>
+    provider.listOwned(hostTag, fixture.recipe.credentialRef),
+  );
   assertConformance(
     afterCancel.status === "listed" &&
       afterCancel.resources.every(
@@ -126,11 +151,11 @@ export async function runDesktopProviderConformance(
   const { result: acquired, expiresAt } = await acquire(provider, fixture.recipe, hostTag);
   const handle = acquired.handle;
   assertConformance(
-    await listsLease(provider, hostTag, handle),
+    await listsLease(provider, hostTag, fixture.recipe, handle),
     "the desktop is not listed under its lease id and host tag",
   );
   assertConformance(
-    !(await listsLease(provider, freshHostTag(), handle)),
+    !(await listsLease(provider, freshHostTag(), fixture.recipe, handle)),
     "the desktop is listed under another host's tag",
   );
 
@@ -163,8 +188,35 @@ export async function runDesktopProviderConformance(
   const gone = await answered("verifyGone", () => provider.verifyGone(handle));
   assertConformance(gone.status === "gone", "a destroyed desktop was not reported gone");
   assertConformance(
-    !(await listsLease(provider, hostTag, handle)),
+    !(await listsLease(provider, hostTag, fixture.recipe, handle)),
     "a destroyed desktop is still listed",
+  );
+
+  let foundAfterRestart = false;
+  if (fixture.restarted !== undefined) {
+    const killed = fixture.create(ORDINARY);
+    const before = await acquire(killed, fixture.recipe, hostTag);
+    const restarted = fixture.restarted(killed);
+    const found = (await listed(restarted, hostTag, fixture.recipe)).filter(
+      (each) => String(each.leaseId) === String(before.result.handle.leaseId),
+    );
+    assertConformance(
+      found.length === 1,
+      "a restarted host did not find the desktop a killed host left by its tag",
+    );
+    for (const each of found) {
+      await answered("release", () => restarted.release(each));
+      const gone = await answered("verifyGone", () => restarted.verifyGone(each));
+      assertConformance(
+        gone.status === "gone",
+        "a restarted host could not destroy the desktop a killed host left",
+      );
+    }
+    foundAfterRestart = true;
+  }
+  assertConformance(
+    foundAfterRestart || !provider.billed,
+    "a billed driver must show a restarted host finds what a killed host left",
   );
 
   const declining = fixture.create({ ...ORDINARY, providerDeclinesExtension: true });
@@ -196,5 +248,6 @@ export async function runDesktopProviderConformance(
     extendedOnlyWhenConfirmed: true,
     reportedAbsenceOnlyWhenAbsent: true,
     refusedUnsupportedCommand: true,
+    ...(foundAfterRestart ? { foundAfterRestart: true as const } : {}),
   };
 }

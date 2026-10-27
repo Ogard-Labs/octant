@@ -84,6 +84,18 @@ export function makeMcpServerCredentialBrokerClient(
   return makeBrokerCredentialClient(options, "/v1/mcp-server-credentials/", "secretId");
 }
 
+/**
+ * Cloud desktop providers' API keys, through the broker's own routes for
+ * them, keyed by the desktop recipe's credential reference. Those routes reach
+ * a separate credential namespace, so a desktop driver's key and a model
+ * provider's key can never stand in for each other.
+ */
+export function makeDesktopProviderCredentialBrokerClient(
+  options: CredentialBrokerClientOptions,
+): ProviderCredentialStore {
+  return makeBrokerCredentialClient(options, "/v1/desktop-provider-credentials/", "credentialRef");
+}
+
 function makeBrokerCredentialClient(
   options: CredentialBrokerClientOptions,
   routePrefix:
@@ -91,7 +103,8 @@ function makeBrokerCredentialClient(
     | "/v1/replica-device-keys/"
     | "/v1/replica-store-credentials/"
     | "/v1/canvas-public-share-secrets/"
-    | "/v1/mcp-server-credentials/",
+    | "/v1/mcp-server-credentials/"
+    | "/v1/desktop-provider-credentials/",
   field: "providerInstanceId" | "instanceId" | "credentialRef" | "secretId",
 ): ProviderCredentialStore {
   const fetch = options.fetch ?? globalThis.fetch;

@@ -1,14 +1,15 @@
 /**
- * Agent control of a host-local desktop: the `octant_computer` commands
- * translated onto the desktop's screen and its line protocol.
+ * Agent control of a desktop that is only a screen: the `octant_computer`
+ * commands translated onto its frames, its input, and a way to start a sent
+ * file. Any driver whose desktop has no accessibility tree may use it; the
+ * host-local and cloud drivers do.
  *
- * The desktop has no accessibility tree. An app is a file the host sent into
- * the desktop's inbox; it has one "window", the whole screen, and an
- * observation is a screenshot of that screen with no elements. So clicks are
- * points on the screenshot, typed text and keys go to whatever the last click
- * focused, and a command addressed to an element refuses `unsupported`.
- * Approvals, the session cap, and journaling stay with the host; this only
- * translates.
+ * An app is a file the host sent into the desktop's inbox; it has one
+ * "window", the whole screen, and an observation is a screenshot of that
+ * screen with no elements. So clicks are points on the screenshot, typed
+ * text and keys go to whatever the last click focused, and a command
+ * addressed to an element refuses `unsupported`. Approvals, the session cap,
+ * and journaling stay with the host; this only translates.
  */
 import {
   decodeComputerControlResult,
@@ -16,20 +17,27 @@ import {
   type ComputerControlResult,
 } from "@octant/contracts/computer-use-plugin";
 import type { DesktopInputEvent, DesktopRecipe } from "@octant/contracts";
-import type { DesktopFrameResult, DesktopInputResult } from "@octant/plugin-api/desktop-provider";
-import type { DesktopReply } from "./hostLocalDesktopChannel";
+import type { DesktopFrameResult, DesktopInputResult } from "./desktopProvider";
+
+/** How a desktop started a sent file, or why it could not. */
+export type ScreenshotDesktopLaunch =
+  | { readonly status: "launched"; readonly pid: number }
+  | { readonly status: "failed" }
+  | { readonly status: "unreachable" };
 
 /** What control needs of one running desktop. */
-export interface HostLocalDesktopSurface {
+export interface ScreenshotDesktopSurface {
   readonly screen: DesktopRecipe["screen"];
-  /** Writes one protocol line and waits for its reply. */
-  readonly request: (line: string) => Promise<DesktopReply>;
+  /** Starts the sent file `appId` from the inbox, detached, and names its process. */
+  readonly launch: (appId: string) => Promise<ScreenshotDesktopLaunch>;
+  /** Whether the process a launch named still runs. */
+  readonly alive: (pid: number) => Promise<"running" | "gone" | "unreachable">;
   readonly frame: () => Promise<DesktopFrameResult>;
   readonly input: (event: DesktopInputEvent) => Promise<DesktopInputResult>;
 }
 
 /** An app id is a sent file's name; only names the command set can carry are offered. */
-const APP_ID = /^[A-Za-z0-9][A-Za-z0-9.-]{0,254}$/;
+export const SCREENSHOT_DESKTOP_APP_ID = /^[A-Za-z0-9][A-Za-z0-9.-]{0,254}$/;
 /** The one window an app has: the desktop's whole screen. */
 const SCREEN_WINDOW_ID = 1;
 /** Observations a desktop remembers; an older one answers `stale-observation`. */
@@ -68,16 +76,16 @@ function base64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-export class HostLocalDesktopControl {
-  readonly #surface: HostLocalDesktopSurface;
+export class ScreenshotDesktopControl {
+  readonly #surface: ScreenshotDesktopSurface;
   /** Files the host sent into the inbox; only these may launch. */
   readonly #sent = new Set<string>();
-  /** Each launched app's process in the desktop's own PID namespace. */
+  /** Each launched app's process on the desktop. */
   readonly #launched = new Map<string, number>();
   /** Which app each recent observation showed. */
   readonly #observations = new Map<string, string>();
 
-  constructor(surface: HostLocalDesktopSurface) {
+  constructor(surface: ScreenshotDesktopSurface) {
     this.#surface = surface;
   }
 
@@ -92,7 +100,7 @@ export class HostLocalDesktopControl {
         return decodeComputerControlResult({
           kind: "apps",
           apps: [...this.#sent]
-            .filter((name) => APP_ID.test(name))
+            .filter((name) => SCREENSHOT_DESKTOP_APP_ID.test(name))
             .slice(0, 256)
             .map((name) => ({ appId: name, name })),
         });
@@ -122,25 +130,27 @@ export class HostLocalDesktopControl {
   }
 
   async #launch(appId: string): Promise<ComputerControlResult> {
-    if (!this.#sent.has(appId) || !APP_ID.test(appId))
+    if (!this.#sent.has(appId) || !SCREENSHOT_DESKTOP_APP_ID.test(appId))
       return refused("not-sent", "Send the app with send-file before launching it.");
-    const reply = await this.#surface.request(`launch ${appId}`);
-    if (reply.kind === "broken") return DESKTOP_UNREACHABLE;
-    const pid = reply.kind === "line" && reply.words[0] === "launched" ? reply.words[1] : undefined;
-    if (pid === undefined || !/^[1-9][0-9]{0,8}$/.test(pid))
+    const launched = await this.#surface.launch(appId);
+    if (launched.status === "unreachable") return DESKTOP_UNREACHABLE;
+    if (
+      launched.status !== "launched" ||
+      !Number.isSafeInteger(launched.pid) ||
+      launched.pid < 1 ||
+      launched.pid > 999_999_999
+    )
       return failed("launch-failed", "The desktop could not start the app.");
-    this.#launched.set(appId, Number(pid));
+    this.#launched.set(appId, launched.pid);
     return this.#windows(appId, true);
   }
 
   async #alive(appId: string): Promise<"running" | "gone" | "unreachable"> {
     const pid = this.#launched.get(appId);
     if (pid === undefined) return "gone";
-    const reply = await this.#surface.request(`alive ${pid}`);
-    if (reply.kind === "broken") return "unreachable";
-    if (reply.kind === "line" && reply.words[0] === "ok") return "running";
-    this.#launched.delete(appId);
-    return "gone";
+    const alive = await this.#surface.alive(pid);
+    if (alive === "gone") this.#launched.delete(appId);
+    return alive;
   }
 
   #windows(appId: string, running: boolean): ComputerControlResult {
@@ -258,4 +268,77 @@ export class HostLocalDesktopControl {
       }
     }
   }
+}
+
+/** DOM key names a Desktop tab sends, as the X keysyms `xdotool` takes. */
+const NAMED_KEYS: Readonly<Record<string, string>> = {
+  Enter: "Return",
+  Backspace: "BackSpace",
+  Tab: "Tab",
+  Escape: "Escape",
+  " ": "space",
+  ArrowUp: "Up",
+  ArrowDown: "Down",
+  ArrowLeft: "Left",
+  ArrowRight: "Right",
+  Delete: "Delete",
+  Insert: "Insert",
+  Home: "Home",
+  End: "End",
+  PageUp: "Prior",
+  PageDown: "Next",
+  Shift: "Shift_L",
+  Control: "Control_L",
+  Alt: "Alt_L",
+  Meta: "Super_L",
+  CapsLock: "Caps_Lock",
+  "-": "minus",
+  "=": "equal",
+  "[": "bracketleft",
+  "]": "bracketright",
+  ";": "semicolon",
+  "'": "apostrophe",
+  ",": "comma",
+  ".": "period",
+  "/": "slash",
+  "\\": "backslash",
+  "`": "grave",
+};
+
+/**
+ * The X keysym for a key name a Desktop tab sends, or undefined for one no X
+ * desktop maps. The set is closed, so only known keysyms reach a desktop.
+ */
+export function x11Keysym(key: string): string | undefined {
+  // An own property only: `constructor` or `toString` would otherwise name
+  // an inherited function, whose source text would reach the desktop.
+  if (Object.hasOwn(NAMED_KEYS, key)) return NAMED_KEYS[key];
+  if (/^[A-Za-z0-9]$/.test(key)) return key;
+  if (/^F([1-9]|1[0-2])$/.test(key)) return key;
+  return undefined;
+}
+
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] as const;
+
+/**
+ * Reads a PNG's dimensions from its header without decoding it, so a frame
+ * larger than the screen is refused before anything parses its pixels.
+ */
+export function pngDimensions(
+  bytes: Uint8Array,
+): { readonly width: number; readonly height: number } | undefined {
+  if (bytes.length < 24) return undefined;
+  if (!PNG_SIGNATURE.every((byte, index) => bytes[index] === byte)) return undefined;
+  if (String.fromCharCode(...bytes.subarray(12, 16)) !== "IHDR") return undefined;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return { width: view.getUint32(16), height: view.getUint32(20) };
+}
+
+/**
+ * The most bytes one frame of `screen` may carry: an uncompressed 32-bit
+ * image of the whole screen with its row filter bytes, plus room for PNG's
+ * own framing.
+ */
+export function maxDesktopFrameBytes(screen: DesktopRecipe["screen"]): number {
+  return screen.width * screen.height * 4 + screen.height + 1_048_576;
 }

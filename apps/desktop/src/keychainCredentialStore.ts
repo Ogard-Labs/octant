@@ -57,7 +57,8 @@ export type KeychainCredentialNamespace =
   | "replica-device-key"
   | "replica-store-credential"
   | "canvas-public-share-secret"
-  | "mcp-server-credential";
+  | "mcp-server-credential"
+  | "desktop-provider-credential";
 
 /** The request field that names an item in a namespace of its own. */
 const NAMESPACE_ID_FIELD = {
@@ -65,6 +66,7 @@ const NAMESPACE_ID_FIELD = {
   "replica-store-credential": "credentialRef",
   "canvas-public-share-secret": "credentialRef",
   "mcp-server-credential": "secretId",
+  "desktop-provider-credential": "credentialRef",
 } as const;
 
 export function keychainHelperSpec(
