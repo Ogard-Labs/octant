@@ -191,6 +191,14 @@ describe("mirroring artifacts to files", () => {
     expect(h.write).not.toHaveBeenCalled();
   });
 
+  it("does not report a Plan-mode refusal as the Project's folder not being mirrored", async () => {
+    const h = await withGlobalFolder(harness({ planMode: true }));
+
+    await h.service.materialize(version());
+
+    expect(h.service.view().projects).toEqual([]);
+  });
+
   it("reports a write it could not do instead of unwinding the version", async () => {
     const h = await withGlobalFolder(harness());
     h.write.mockRejectedValueOnce(new Error("read-only filesystem"));
