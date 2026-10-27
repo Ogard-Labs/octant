@@ -2115,6 +2115,7 @@ describe("compacting an Octant Harness session", () => {
       readonly thirdTurn?: ReadonlyArray<NativeHarnessResponse>;
       readonly offered?: ReadonlyArray<ProviderToolDefinition>;
       readonly mode?: "chat" | "work" | "code";
+      readonly firstPrompt?: string;
     }) => {
       const transcripts = new MemoryNativeHarnessTranscriptStore();
       const requests: NativeHarnessRequest[] = [];
@@ -2161,7 +2162,7 @@ describe("compacting an Octant Harness session", () => {
             yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
             const seen: ProviderRuntimeEvent[] = [];
             const answered = new Set<string>();
-            for (const prompt of ["first", "second", "third"]) {
+            for (const prompt of [input.firstPrompt ?? "first", "second", "third"]) {
               seen.length = 0;
               const turn = yield* Effect.fork(
                 Stream.runForEach(
@@ -2268,6 +2269,33 @@ describe("compacting an Octant Harness session", () => {
       expect(summary[0]?.system).toContain("coding session");
       expect(summary[0]?.system).toContain("files and identifiers");
     });
+
+    it.each(["chat", "work"] as const)(
+      "keeps the request at the end of a long first %s message in the summary request",
+      async (mode) => {
+        // A fresh session's first message carries the host's planned history
+        // with the person's request at its end.
+        const request = "Now rename the parser module to tokenizer.";
+        const firstPrompt = `Earlier conversation:\n${"planned history ".repeat(400)}\n\n${request}`;
+        const run = await runLongSession({
+          mode,
+          firstPrompt,
+          refuses: (sent) => {
+            const texts = sent.history.map((message) => message.text);
+            return texts.includes(firstPrompt) && texts.includes("third");
+          },
+        });
+
+        expect(run.events.at(-1)?.kind).toBe("completed");
+        const summary = run.requests.filter((sent) => sent.tools.length === 0);
+        expect(summary).toHaveLength(1);
+        const material = summary[0]?.history[0]?.text ?? "";
+        expect(material).toContain("User: Earlier conversation:");
+        expect(material).toContain(request);
+        expect(material).toMatch(/\[… \d+ characters omitted …\]/);
+        expect(material).not.toContain(firstPrompt);
+      },
+    );
 
     it.each(["chat", "work"] as const)(
       "resumes a %s session from the summary its overflowing turn wrote",
