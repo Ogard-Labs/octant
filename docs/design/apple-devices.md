@@ -10,10 +10,10 @@ extends ([Architecture: device transport and evidence](../architecture.md#device
 [Device workbench](device-workbench.md) owns the Simulator and emulator panes.
 
 **Status: accepted 2026-10-26; slices 1 (contracts and policy) and 2
-(discovery, identity, and lease on the host) are built, slice 3
-(development-signed build, install, launch, terminate, and console logs) is
-built and waits on its native smoke on a Mac with a paired device, and slice 4
-is next.** The maintainer
+(discovery, identity, and lease on the host) are built, slices 3
+(development-signed build, install, launch, terminate, and console logs) and
+4 (device pane and screenshots) are built and wait on their native smoke on a
+Mac with a paired device, and slice 5 is next.** The maintainer
 authorized this scope as post-preview work and accepted the decisions below on
 2026-10-26. That authorizes this design and its slices; it does not by itself
 authorize spending, creating developer accounts,
@@ -60,8 +60,13 @@ TestFlight track for its mobile client is a separate operator runbook
   request is decided by `evaluateAppleDeviceRequest`. A device build signs
   with the person's own keychain identity in a host-owned step
   ([`appleSigning.ts`](../../apps/server/src/apple/appleSigning.ts) and the
-  pure `chooseAppleDevelopmentSigning`). Nothing captures a device's screen
-  yet, no pane calls the routes, and `octant_apple` has no device operation.
+  pure `chooseAppleDevelopmentSigning`). The action route also captures a
+  leased device's screen, and the local-only
+  `POST /api/apple/device-screenshots` hands a local window the pixels of its
+  thread's latest screenshot. The Apple workbench's **Physical devices**
+  section ([`ApplePhysicalDevices.tsx`](../../apps/web/src/apple/ApplePhysicalDevices.tsx))
+  is the device picker, setup checklist, lease confirmation, and latest
+  screenshot; `octant_apple` has no device operation yet.
 - Every build passes `CODE_SIGNING_ALLOWED=NO`, Simulator and device alike
   ([`appleToolchainService.ts`](../../apps/server/src/apple/appleToolchainService.ts),
   `xcodebuildArguments`), so no build launch touches a signing identity, and
@@ -290,6 +295,45 @@ access covers neither the device lease nor any distribution step.
 - A physical device has no input channel and no live view: Octant has no
   supported way to inject touches into real hardware. **Allow input** does not
   apply, and the pane shows the latest screenshot evidence.
+- `screenshot` runs `devicectl device screenshot` with `--device` and
+  `--destination`, and the probe counts it only when that help also names
+  `--destination`. The file lands in a `0700` directory in the host's data
+  directory (`apple-runtime/device-captures`) that every other launch is
+  denied and only the capture launch may write; it is read back without
+  following a link, as one file with one name, under the artifact size bound,
+  and only a PNG is kept. The capture's own file is removed whatever happened,
+  and each capture first clears any file an earlier one left. _Reason:_ the
+  same custody as a Simulator capture, and a tool whose output option the
+  host cannot name cannot be driven the way the host drives it, so it is
+  reported unavailable rather than guessed at.
+- The host keeps, in memory, each thread's latest screenshot of each device on
+  its checkout; a newer capture replaces the older one, and a restart forgets
+  them. `discover` lists the asking thread's (`screenshots`), and only that
+  thread's local window, on that checkout, can read the pixels, on the
+  local-only `/api/apple/device-screenshots`. A reference the thread does not
+  hold, an earlier one included, reads as not found. The image stays in the
+  artifact store under existing retention.
+- The workbench's **Physical devices** section looks once when it opens and
+  again when the person checks again or acts; it never polls, since each look
+  runs the selected Xcode's device tooling on the Mac.
+- Its setup checklist has four rows in the order the host decides a device's
+  state: **Reachable from this Mac** (`unavailable`), **Paired and trusted**
+  (`untrusted`), **Developer Mode on** (`developer-mode-off`), and
+  **Development team**. A row after the one that failed reads as not checked,
+  never as passed. A locked phone passes every row and says to unlock it in
+  its state line. _Reason:_ CoreDevice reports pairing and trust as one fact,
+  and reachability is decided before it.
+- The **Development team** row is the Team ID the person types, checked
+  against the ten-character team shape and remembered per viewer in that
+  window's storage. It selects no identity by itself: the host chooses the
+  signature for the team a build names (see signing custody below).
+- The pane offers a lease start (**Let this thread use** and the device's
+  name, the desktop app's `apple-device-lease` confirmation), **Stop using**, and
+  **Capture screen** (only inside this thread's lease, and only while the
+  device is `connected`). It never offers a move: it is never told which
+  thread holds another lease, so it says only that another thread is using
+  the device. A window that cannot raise the desktop confirmation (a browser
+  on the Mac, a paired device) offers no lease at all.
 
 ### Signing and provisioning custody
 
@@ -393,7 +437,11 @@ find-identity -v -p codesigning` lists and the profiles Xcode installed in
 - A paired device may read device status and evidence of a thread it can open.
   It may start `discover` and `status` only: a new screenshot or console read
   is refused (`local-person-required`), since a remote client observes
-  evidence the host already produced.
+  evidence the host already produced. It sees that a screenshot exists (the
+  discovery's reference and time), but never its pixels:
+  `/api/apple/device-screenshots` is local-only. _Reason:_ a phone's screen
+  shows the person's own data, and the Simulator's screenshot pixels do not
+  reach a paired device either.
 - Device install, launch, terminate, and uninstall from a `remote-device`
   person are refused: remote clients observe only (decision 4). So is every
   other device or distribution request from one, `release-device` included.
@@ -401,8 +449,9 @@ find-identity -v -p codesigning` lists and the profiles Xcode installed in
   Connect key, upload, submission, and release are local-only, never
   remote-approvable.
 - The private listener forwards `POST /api/apple/devices` (admitted as a
-  Project read) and never `/api/apple/device-leases` or
-  `/api/apple/device-actions`, which are local-only. Each
+  Project read) and never `/api/apple/device-leases`,
+  `/api/apple/device-actions`, or `/api/apple/device-screenshots`, which are
+  local-only. Each
   route takes only its own kinds, and refuses a request whose `requestedBy` is
   not the person behind the asking window: `local-user` for a local window, the
   paired device's own `remote-device` for a paired device.
@@ -556,6 +605,28 @@ accounts or hardware; its real-hardware acceptance is separate where noted.
    capture per decision 5. _Accept:_ honest states for every device state and
    an unavailable screenshot capability. _Verify:_ component tests and rendered
    QA against a fixture host; capture smoke on hardware.
+   _State:_ built from fixtures: the device `screenshot` evidence and the
+   discovery's `screenshots` in contracts; on the host the capture into
+   `device-captures`, the held latest screenshot, the action route's
+   `screenshot`, and the local-only `/api/apple/device-screenshots`; the
+   `@octant/client-runtime/apple-device-client`; and the workbench's
+   **Physical devices** section with its picker, checklist, lease
+   confirmation, capture, and latest screenshot. Its evidence is the
+   `screenshots of a leased device` suite of `AppleDeviceService`, the route,
+   remote, product-dispatch, and booted-server negatives, the
+   `appleDeviceClient` tests, and the `ApplePhysicalDevices` and
+   `useAppleDevices` component tests, which cover every device state and a
+   Mac whose Xcode offers no device screenshot. Still open, on the same Mac
+   and device as slice 3: `bun run smoke:apple-device` now also captures the
+   running fixture app's screen, or confirms the selected Xcode reports no
+   device screenshot (`APPLE_DEVICE_SMOKE_SCREENSHOT=unavailable`); the
+   capture confirms `devicectl device screenshot`'s help names
+   `--destination` and that it writes a PNG there, and any CoreDevice grant
+   the capture launch needs is measured then and listed beside the Apple
+   `test` rule. Rendered QA of the pane is open too: the Linux container that
+   built this slice had no browser, so the maintainer opens the workbench on
+   that Mac and checks the section against the paired device in each state
+   it can show.
 5. **Agent operations** (container). `octant_apple` device operations,
    `use-device`, help text, harness and provider conformance. _Accept:_ the
    agent cannot start a lease without the person's answer, and Plan refuses

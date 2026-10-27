@@ -672,8 +672,14 @@ signs it for development in a host-owned step with the person's own keychain
 identity for the team (never `-allowProvisioningUpdates`), installs only that
 product, launches it under a console session it holds, and stops only that
 session; each effect follows the thread's posture like a Simulator effect.
+It also captures a leased device's screen with the selected Xcode's own
+tooling, a read like a Simulator screenshot, and the Apple workbench's
+**Physical devices** section shows the picker, setup checklist, lease
+confirmation, and that latest screenshot; a physical device has no live view.
 `/api/apple/devices` is readable by a paired device, and
-`/api/apple/device-leases` and `/api/apple/device-actions` are local-only.
+`/api/apple/device-leases`, `/api/apple/device-actions`, and
+`/api/apple/device-screenshots` (the pixels of a thread's latest device
+screenshot) are local-only.
 
 On an approval-gated thread, **Allow input** is the confirmation that opens
 that destination; clicks, typing, Home, and Lock never raise it
@@ -7182,7 +7188,10 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   may write only the one app bundle it signs and read only the private
   directory holding that signature's entitlements, which every other Apple
   launch is denied, as `devicectl`'s answer directory is. A device install
-  reads its product without write access. None of these launches carries a
+  reads its product without write access. A device screenshot lands in its
+  own private `device-captures` directory, which every other Apple launch is
+  denied and only the capture launch may write, like a Simulator capture.
+  None of these launches carries a
   keychain or CoreDevice grant yet: each one the maintainer's device smoke
   shows a launch needs is measured then and added to this list, never to the
   shared profile.
