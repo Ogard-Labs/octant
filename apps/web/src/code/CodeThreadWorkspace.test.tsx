@@ -2903,7 +2903,10 @@ describe("CodeThreadWorkspace", () => {
             },
           ],
         }}
-        providerGroups={[{ ...providerGroup(), modelSwitch: "supported" }, alternateProviderGroup()]}
+        providerGroups={[
+          { ...providerGroup(), modelSwitch: "supported" },
+          alternateProviderGroup(),
+        ]}
         threadId={threadId}
       />,
     );
