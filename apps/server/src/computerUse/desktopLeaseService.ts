@@ -1552,7 +1552,9 @@ export function createDesktopLeaseService(
     controller.abort();
     if (listed.status !== "listed") return refused("provider-unavailable");
     // A driver is untrusted: an id that is not one is left out, and a name is
-    // bounded, falling back to the id.
+    // bounded, falling back to the id. A name is trimmed again after the cut,
+    // because the answer's names are trimmed text and one that is not fails
+    // the whole listing.
     const machines: Array<{
       readonly machineId: DesktopMachineId;
       readonly displayName: string;
@@ -1566,7 +1568,7 @@ export function createDesktopLeaseService(
       } catch {
         continue;
       }
-      const name = typeof machine.name === "string" ? machine.name.trim().slice(0, 128) : "";
+      const name = typeof machine.name === "string" ? machine.name.trim().slice(0, 128).trim() : "";
       machines.push({
         machineId,
         displayName: name === "" ? String(machineId) : name,

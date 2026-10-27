@@ -2067,6 +2067,7 @@ describe("desktop lease service for a person's Desktop tab", () => {
         { id: "host-studio", name: "  studio  ", online: true },
         { id: "host-attic", name: "", online: false },
         { id: "../not an id", name: "planted", online: true },
+        { id: "host-long", name: `${"n".repeat(127)} cut here`, online: true },
       ],
     };
     const asked: Array<string> = [];
@@ -2109,6 +2110,8 @@ describe("desktop lease service for a person's Desktop tab", () => {
       machines: [
         { machineId: "host-studio", displayName: "studio", online: true },
         { machineId: "host-attic", displayName: "host-attic", online: false },
+        // A name cut at 128 characters never ends in the space it was cut at.
+        { machineId: "host-long", displayName: "n".repeat(127), online: true },
       ],
     });
     // A paired device cannot set a recipe, so it is never shown the machines.

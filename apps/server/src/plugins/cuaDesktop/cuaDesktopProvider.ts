@@ -643,8 +643,6 @@ export function createCuaDesktopProvider(
     billed: false,
     placements: CUA_DESKTOP_PLACEMENTS,
     daemon: CUA_DESKTOP_DAEMON,
-    // The daemon is the person's to install, start, and sign in; Octant only
-    // checks that it answers and is a release this driver was written for.
     // Lists the machines a person may name for a Space on another of their
     // machines. It creates nothing.
     listMachines: async (placementId, signal): Promise<DesktopListMachinesResult> => {
@@ -663,6 +661,8 @@ export function createCuaDesktopProvider(
         })),
       };
     },
+    // The daemon is the person's to install, start, and sign in; Octant only
+    // checks that it answers and is a release this driver was written for.
     status: async () => {
       const info = await call("/cua.daemon.v1.DaemonService/GetInfo", cuaGetInfoRequest());
       if (info.kind === "unreachable") return { status: "not-connected" };
