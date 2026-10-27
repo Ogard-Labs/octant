@@ -488,7 +488,9 @@ design left a choice open.
   (`Resources/app/apps/server/node_modules`) and the headless artifact under
   its top-level `node_modules`, where the server's existing resolution finds
   it. A package build refuses to finish when the binary, the standard
-  library, the license, or the notices are missing. Reason: the server finds
+  library, the license, or the notices are missing, or when the copy it
+  resolved is not the version `typescript` pins (resolution walks up past the
+  repository, so a nested checkout could reach an outer install's). Reason: the server finds
   the binary by walking up from its bundle, so a package without its own copy
   would serve whichever copy sat above wherever the app was put, a checkout's
   or a stranger's.

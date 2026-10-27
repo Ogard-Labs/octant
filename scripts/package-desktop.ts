@@ -256,7 +256,9 @@ export function bundledLanguageServerPaths(
 /**
  * Copy the language server's native package for `target` into
  * `destinationNodeModules`, resolved the way the pinned `typescript` package
- * resolves its own optional dependency, so its version is the lockfile's.
+ * resolves its own optional dependency. Its version must be the one
+ * `typescript` pins: resolution walks up past the repository, so a checkout
+ * nested in another install (a worktree) could otherwise ship a stale copy.
  */
 export async function stageBundledLanguageServer(input: {
   readonly repositoryRoot: string;
@@ -267,10 +269,27 @@ export async function stageBundledLanguageServer(input: {
   const typescriptManifest = createRequire(
     resolve(input.repositoryRoot, "apps/server/package.json"),
   ).resolve("typescript/package.json");
+  const packageName = bundledLanguageServerPackage(input.target);
+  const typescript = JSON.parse(await readFile(typescriptManifest, "utf8")) as {
+    readonly version?: string;
+    readonly optionalDependencies?: Readonly<Record<string, string>>;
+  };
+  const pinned = typescript.optionalDependencies?.[packageName];
+  const native = JSON.parse(
+    await readFile(
+      createRequire(typescriptManifest).resolve(`${packageName}/package.json`),
+      "utf8",
+    ),
+  ) as { readonly version?: string };
+  if (pinned === undefined || native.version !== pinned) {
+    throw new Error(
+      `The bundled language server ${packageName} is ${native.version ?? "unversioned"}, but typescript ${typescript.version ?? "(unversioned)"} pins ${pinned ?? "no such package"}.`,
+    );
+  }
   await stageRuntimePackages({
     requesterManifest: typescriptManifest,
     destinationNodeModules: input.destinationNodeModules,
-    packageNames: [bundledLanguageServerPackage(input.target)],
+    packageNames: [packageName],
     ...(input.stagedVersions === undefined ? {} : { stagedVersions: input.stagedVersions }),
   });
 }

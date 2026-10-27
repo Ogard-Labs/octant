@@ -402,6 +402,47 @@ describe("desktop packaging boundary", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it("refuses to stage a language server whose version is not the one typescript pins", async () => {
+    // Node resolution walks up past the repository, so a checkout nested in
+    // another (a worktree) can resolve a stale copy from the outer install.
+    const root = await mkdtemp(resolve(tmpdir(), "octant-package-language-server-"));
+    try {
+      const native = resolve(root, "node_modules/@typescript/typescript-linux-x64");
+      await mkdir(resolve(root, "apps/server"), { recursive: true });
+      await mkdir(resolve(root, "node_modules/typescript"), { recursive: true });
+      await mkdir(resolve(native, "lib"), { recursive: true });
+      await writeFile(resolve(root, "apps/server/package.json"), "{}");
+      await writeFile(
+        resolve(root, "node_modules/typescript/package.json"),
+        JSON.stringify({
+          name: "typescript",
+          version: "7.0.2",
+          optionalDependencies: { "@typescript/typescript-linux-x64": "7.0.2" },
+        }),
+      );
+      await writeFile(
+        resolve(native, "package.json"),
+        JSON.stringify({ name: "@typescript/typescript-linux-x64", version: "7.0.1" }),
+      );
+      await writeFile(resolve(native, "lib/tsc"), "binary", { mode: 0o755 });
+
+      await expect(
+        stageBundledLanguageServer({
+          repositoryRoot: root,
+          destinationNodeModules: resolve(root, "stage/apps/server/node_modules"),
+          target: DESKTOP_PACKAGE_TARGETS["linux-x64"],
+        }),
+      ).rejects.toThrow(
+        "The bundled language server @typescript/typescript-linux-x64 is 7.0.1, but typescript 7.0.2 pins 7.0.2.",
+      );
+      await expect(
+        access(resolve(root, "stage/apps/server/node_modules/@typescript")),
+      ).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   it("preserves Chromium sandboxing even when an unrelated user namespace probe would fail", async () => {
     const root = await mkdtemp(resolve(tmpdir(), "octant-linux-launch-"));
     try {
