@@ -77,7 +77,9 @@ Treat the states independently:
 - **Pinned TLS.** The in-tree exchange (`modules/octant-pinned-tls/android`)
   dials the judged address and passes the TLS 1.3 handshake only for the
   pinned key. The server smoke test runs this Kotlin source on a JVM against a
-  real host listener wherever `kotlinc` is installed.
+  real host listener wherever `kotlinc` is installed. CI's server job requires
+  it (`OCTANT_REQUIRE_KOTLINC=1`), so a runner without `kotlinc` and `java`
+  fails rather than skipping the test.
 - **Nothing backed up, no location.** Android backup is off, and the overlay
   and location permissions, the media-location one included, are removed from
   the manifest.

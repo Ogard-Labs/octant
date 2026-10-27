@@ -562,6 +562,13 @@ function hasKotlinc(): boolean {
 
 const swiftcFound = hasSwiftc();
 const kotlincFound = hasKotlinc();
+/**
+ * Set where the Android exchange must run, as the CI server job sets it. The
+ * Ubuntu runner image ships `kotlinc` and `java`, but nothing else would
+ * notice an image without them: the Android exchange would skip and the run
+ * would still pass, leaving the phone's Kotlin source untested.
+ */
+const kotlincRequired = process.env.OCTANT_REQUIRE_KOTLINC === "1";
 let swiftBinary: string | undefined;
 let kotlinJar: string | undefined;
 const nativeBuild = mkdtempSync(join(tmpdir(), "octant-pinned-tls-"));
@@ -621,10 +628,15 @@ const phoneExchanges: ReadonlyArray<{
   {
     name: "the phone's Android exchange",
     exchange: (listenerPort) => {
+      if (!kotlincFound) {
+        throw new Error(
+          "OCTANT_REQUIRE_KOTLINC is set, but kotlinc or java did not answer, so the Android exchange cannot run.",
+        );
+      }
       if (kotlinJar === undefined) throw new Error("The Android exchange was not built.");
       return kotlinExchange(kotlinJar, listenerPort);
     },
-    runs: () => kotlincFound,
+    runs: () => kotlincFound || kotlincRequired,
   },
 ];
 

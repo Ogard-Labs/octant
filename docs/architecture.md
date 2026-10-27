@@ -689,6 +689,10 @@ It also captures a leased device's screen with the selected Xcode's own
 tooling, a read like a Simulator screenshot, and the Apple workbench's
 **Physical devices** section shows the picker, setup checklist, lease
 confirmation, and that latest screenshot; a physical device has no live view.
+The agent's `octant_apple` asks for the same lease, effects, screenshots, and
+console reads through the same device policy; its lease and device-effect
+asks are answered in the thread by a person at the Mac only, never by a paired
+device.
 `/api/apple/devices` is readable by a paired device, and
 `/api/apple/device-leases`, `/api/apple/device-actions`, and
 `/api/apple/device-screenshots` (the pixels of a thread's latest device

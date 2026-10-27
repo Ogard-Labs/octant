@@ -278,6 +278,23 @@ phone says when it can dictate again. Reading replies aloud stays on the
 computer. Without a transcription endpoint, or while the computer is
 unreachable, the phone shows no microphone.
 
+## Screen privacy and keys on the phone
+
+**Computers › Privacy & security** in the phone app says what this phone
+protects:
+
+- On Android, screenshots, screen recordings, and the recents preview show no
+  Octant content.
+- On iPhone, the app switcher shows a blank preview, and Octant hides itself
+  while the screen is recorded or mirrored, saying why. iOS cannot block a
+  screenshot, so avoid taking one of a thread you would not share.
+- Choose **Use standard capture** to turn this protection off until you next
+  open the app; every launch starts protected again.
+- The phone's keys for each paired computer stay on that phone: a backup or
+  phone transfer never gives another phone a usable copy, so a new phone pairs
+  again. On iPhone
+  they are kept in the Keychain, readable only while the phone is unlocked.
+
 ## Device management
 
 The host can rename or revoke devices, revoke all devices, and rotate host
