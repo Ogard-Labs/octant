@@ -363,17 +363,30 @@ export function changeCodeProjectDesktopRecipe(
       reject("invalid-desktop-recipe", "That desktop provider isn't available on this host");
     }
     // A placement decides locality and billing, and so the network and key
-    // rules below. The offered providers carry no placements yet, so a
-    // placement is refused rather than judged by its provider's own terms.
-    if (recipe.placementId !== undefined) {
+    // rules below. A provider that offers placements is leased only on one of
+    // them; one that offers none is leased on its own terms.
+    const placements = provider.placements ?? [];
+    const placement = placements.find(
+      (candidate) => String(candidate.placementId) === String(recipe.placementId ?? ""),
+    );
+    if (placements.length === 0 ? recipe.placementId !== undefined : placement === undefined) {
       reject("invalid-desktop-recipe", "That desktop placement isn't available on this host");
     }
-    if (provider.locality === "host-local" && recipe.network === "allow") {
+    const locality = placement?.locality ?? provider.locality;
+    if (locality === "host-local" && recipe.network === "allow") {
       reject("invalid-desktop-recipe", "A desktop on this host cannot have network access yet");
     }
-    // A cloud desktop runs on the person's own account; without a credential
-    // the lease service refuses every acquire, so the recipe is refused here.
-    if (provider.locality === "cloud" && recipe.credentialRef === undefined) {
+    // A daemon-run provider holds the person's own sign-in. Octant stores no
+    // key for it, so a recipe that names one is refused rather than kept.
+    if (provider.daemon === true && recipe.credentialRef !== undefined) {
+      reject("invalid-desktop-recipe", "This desktop provider signs in through its own app");
+    }
+    // A cloud desktop runs on the person's own account: through a key Octant
+    // holds, or through the placement a provider's daemon is signed in to.
+    // With neither the lease service refuses every acquire, so the recipe is
+    // refused here.
+    const daemonPlacement = provider.daemon === true && placement !== undefined;
+    if (locality === "cloud" && recipe.credentialRef === undefined && !daemonPlacement) {
       reject("invalid-desktop-recipe", "A cloud desktop needs a saved key for its account");
     }
   }

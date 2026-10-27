@@ -675,8 +675,19 @@ slice by slice, in
 [Apple physical devices and distribution](design/apple-devices.md). The host
 already discovers paired iPhones and iPads through `devicectl`, keeps the
 UDID, serial number, and ECID to itself, and holds a lease only after a person
-at the Mac confirms it; `/api/apple/devices` is readable by a paired device and
-`/api/apple/device-leases` is local-only.
+at the Mac confirms it. Inside a lease it builds the thread's app unsigned,
+signs it for development in a host-owned step with the person's own keychain
+identity for the team (never `-allowProvisioningUpdates`), installs only that
+product, launches it under a console session it holds, and stops only that
+session; each effect follows the thread's posture like a Simulator effect.
+It also captures a leased device's screen with the selected Xcode's own
+tooling, a read like a Simulator screenshot, and the Apple workbench's
+**Physical devices** section shows the picker, setup checklist, lease
+confirmation, and that latest screenshot; a physical device has no live view.
+`/api/apple/devices` is readable by a paired device, and
+`/api/apple/device-leases`, `/api/apple/device-actions`, and
+`/api/apple/device-screenshots` (the pixels of a thread's latest device
+screenshot) are local-only.
 
 On an approval-gated thread, **Allow input** is the confirmation that opens
 that destination; clicks, typing, Home, and Lock never raise it
@@ -2313,7 +2324,10 @@ flowchart LR
   rewrites that artifact's mirrored files in place (removing old names on
   rename) and journals every outcome as a receipt, including skipped and
   refused; a write failure never unwinds the version. Plan, an unbound or
-  unavailable destination, and an unauthorized one are refused. A repository
+  unavailable destination (including a folder that no longer resolves to the
+  real path it was stored by; see
+  [host reads of a bound root](#security-and-authority)), and an unauthorized
+  one are refused. A repository
   destination writes the working tree only; optional auto-commit (off by
   default, refused without a repository destination) commits only the files
   it just wrote, refuses when other work is staged, and never pushes.
@@ -6079,14 +6093,18 @@ same. This holds in Chat, Work, and Code.
   Desktop tool, a Code Project's stored desktop recipe with its settings
   editor, and E2B, the first of the two named cloud providers (E2B and Cua
   Spaces), are built; Cua Spaces, reached through the person's local Cua daemon, is
-  designed (accepted on 2026-10-27), and its local-daemon port is built but
-  its driver is not yet; see
+  designed (accepted on 2026-10-27), and its local-daemon port and its driver
+  for a Space on this machine are built but offered on no host until the
+  maintainer's live smoke passes; see
   [Disposable desktops](design/disposable-desktops.md#cua-spaces-through-the-local-daemon).
   A driver whose provider runs a daemon on this machine reaches it only
   through the host's daemon port: one Unix socket under the home of Octant's
   user that the host checks for symlinks and other owners before connecting,
   only the methods the driver declares, and no header the driver supplies.
-  A cloud driver reaches its provider only through the host's
+  Octant stores no credential for such a provider: its daemon holds the
+  person's sign-in, a recipe names one of the driver's placements instead,
+  and a lease records the daemon it used so teardown goes through that same
+  daemon. A cloud driver reaches its provider only through the host's
   HTTPS port, which sends nothing outside the hosts the driver declares and
   attaches the person's key from the credential broker's
   `/v1/desktop-provider-credentials/*` namespace itself; a person confirms
@@ -6759,8 +6777,26 @@ mechanisms are:
   capabilities at all, and dropping `CAP_SYS_ADMIN` stopped only `umount`.
   A setuid-root Bubblewrap makes no user namespace for an ordinary user
   either; measured on bwrap 0.9.0 installed setuid, the runtime read the
-  denied file through both processes, and Octant does not refuse such an
-  install. Hiding host processes would take away what Full access grants.
+  denied file through both processes. Octant therefore refuses a setuid
+  Bubblewrap for this bind: before the launch the server reads the setuid
+  bit and owner from the `bwrap` file the kernel would run
+  (`bubblewrapPrivilege`), and a setuid one, whatever its owner, refuses
+  Full access as `incompatible` with a sentence telling the person to enable
+  unprivileged user namespaces and install a Bubblewrap that is not setuid,
+  or to choose a narrower permission. A Full-access launch that is not
+  wrapped is unaffected, since it has no denials to keep. Hiding host
+  processes would take away what Full access grants. The restricted capsule
+  does not depend on the user namespace for this and is not refused for a
+  setuid Bubblewrap: `--unshare-all` gives it a PID namespace and its own
+  `/proc`, so the only `/proc/<pid>/root` it can open is one of its own
+  processes, under the same covers. Measured on bwrap 0.9.0 installed setuid
+  with no user namespace, a covered file read empty through every visible
+  `/proc/<pid>/root` and a same-user host process was not visible. The Plan
+  forwarder's nested capsule starts its own Bubblewrap unprivileged
+  (Bubblewrap sets `no_new_privs` and mounts the bound program `nosuid`) with
+  `--unshare-user`, so it gets a user namespace or fails closed; host-local
+  desktops and SSH executor launches use the restricted capsule, and SSH
+  admission already requires working unprivileged user namespaces.
   The capsule binds `/etc` and `/sys` read-only because
   workloads read them: resolver and `nsswitch` files, TLS roots, `passwd`,
   the dynamic linker cache, `alternatives` links, and login shell startup
@@ -6833,7 +6869,8 @@ mechanisms are:
   extension or host-auth paths to deny (Kimi, for example) launches Full access
   under an allow-default `sandbox-exec` profile or a Bubblewrap host-root bind
   that denies only those paths (`makeAcpConfinementLive`). That wrapper
-  confines nothing else. On Linux a deny path that does not exist is skipped,
+  confines nothing else. On Linux it is refused when `bwrap` is setuid, as
+  above. On Linux a deny path that does not exist is skipped,
   because Bubblewrap would create it in the person's own Project (see
   [Extensions and skills](#extensions-and-skills)). A linked deny path is
   covered at its target, as in the restricted capsule above: measured on
@@ -7179,6 +7216,19 @@ mechanisms are:
   reads its product from the same directory without write access; XCTest
   results also land inside it. Simulator captures remain isolated in their own
   private directory and are writable only by the capture launch.
+  A physical device build follows the same rule with signing off. Its
+  signing step is a separate pair of host-owned launches, `security
+find-identity` and `codesign`, through a port with no network; `codesign`
+  may write only the one app bundle it signs and read only the private
+  directory holding that signature's entitlements, which every other Apple
+  launch is denied, as `devicectl`'s answer directory is. A device install
+  reads its product without write access. A device screenshot lands in its
+  own private `device-captures` directory, which every other Apple launch is
+  denied and only the capture launch may write, like a Simulator capture.
+  None of these launches carries a
+  keychain or CoreDevice grant yet: each one the maintainer's device smoke
+  shows a launch needs is measured then and added to this list, never to the
+  shared profile.
 
 - **Provider capability matrix ("degraded on").** Claude Code and Codex are the
   first-class providers: the two subscription coding runtimes the product is
@@ -7318,7 +7368,47 @@ mechanisms are:
   a link anywhere in that path refuses it too. Artifact mirror re-import reads
   its bundle the same way: the bundle must resolve inside the destination root
   it was written under, and the open must land on that path, because a plain
-  read followed a mirrored folder swapped for a link to a host folder. A
+  read followed a mirrored folder swapped for a link to a host folder. Mirror
+  writes and removals, including a thread or Project purge's removal of each
+  Canvas's mirrored files, are held inside the destination root the same way.
+  Creating the folders by path and then checking where they resolved compared
+  a folder with itself, so a mirrored folder swapped for such a link received
+  the bundle and its sidecars, and removing a renamed artifact's stale file or
+  purging a thread's mirrored files deleted the host files of those names. A
+  purge removes each path a mirror receipt names from under that receipt's
+  destination root (the folder destination's stored root, used only while it
+  still resolves to exactly that path, since such a folder can sit inside a
+  checkout where the root itself can be swapped for a link; or the Project's
+  checkout for a repository destination, whose receipt paths already begin
+  with the destination folder); a re-import's recorded bundle path is removed
+  only from under one of those roots. A refused or
+  failed removal leaves that file and the purge goes on, so a planted link
+  cannot make a thread impossible to purge. A mirror write takes Work's
+  confined write: a file being replaced is opened where the open must land on
+  its canonical path, and a new file and any missing folders are created
+  relative to folders held open from the root down, one no-follow name at a
+  time. A removal unlinks the name relative to a folder proved to sit at its
+  canonical path: on Linux under `/proc/self/fd/N` of a proved open; on macOS,
+  which offers Node no descriptor-relative unlink, from a child process whose
+  working directory `/bin/pwd -P` reports at that path. On macOS a folder
+  create that loses a race against such a swap can leave one empty folder in
+  the host folder; no file is written or removed there. A global-folder
+  destination's root is held to its stored path as the export folder's is. The
+  chosen folder is stored by its real path (a folder named through a link, or
+  one not created yet, by where it resolves), and a materialization whose root
+  no longer resolves to exactly that path is refused as an unavailable
+  destination before anything is written or removed. A folder stored earlier
+  by a path that is not its real path, and the host default
+  `<default folder>/Artifacts` when the default folder is named through a
+  link, refuse the same way until a mirror folder is chosen again; the
+  refusal is recorded only in the mirror receipt. Resolving the root afresh
+  for each use let a folder inside a checkout, swapped itself for a link to a
+  host folder, receive every write the confinement above then held inside the
+  link's target. A missing root is created on demand only beneath a folder
+  still at its own real path; a swap between that check and the create can
+  leave one empty folder in the host folder, never a file. Removals and
+  re-import stay anchored on the stored path through the confined operations
+  above. A
   checkout's `.git` marker is read through the same open; see the confined Git
   rule for the linked-worktree pointers it leads to. The managed-worktree
   identity check, the folder browser's repository test, and managed-clone

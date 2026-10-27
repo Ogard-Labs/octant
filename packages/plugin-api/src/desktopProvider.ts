@@ -387,27 +387,38 @@ export interface DesktopDaemonDeclaration {
 }
 
 /**
- * One unary gRPC-Web call. The host frames `message`, writes every header
- * itself, and takes none from the driver, so a driver cannot send a
- * credential or a header the daemon trusts as a caller's identity.
+ * One gRPC-Web call with one request message. The host frames `message`,
+ * writes every header itself, and takes none from the driver, so a driver
+ * cannot send a credential or a header the daemon trusts as a caller's
+ * identity.
  */
 export interface DesktopDaemonRequest {
   readonly method: string;
   /** One serialized protobuf message, unframed. */
   readonly message: Uint8Array;
-  /** The largest response message this call needs. The host's own bound still applies. */
+  /**
+   * The largest response this call needs: the one message of a unary call,
+   * or every message of a stream together. The host's own bound still applies.
+   */
   readonly maxResponseBytes: number;
+  /**
+   * The method streams its answer (a server-streaming RPC). The host reads
+   * the whole stream to its status, inside the same time and byte bounds, so
+   * only a stream the daemon ends on its own is answered.
+   */
+  readonly stream?: boolean;
   readonly signal?: AbortSignal;
 }
 
 /**
  * `answered` is any gRPC status, errors included, with the response message
- * (empty when the daemon sent none) and the status message as the daemon
- * wrote it. `refused` is the host declining before anything was sent: a
- * method the driver did not declare, a socket that fails the host's checks,
- * a message over the bound, or a request carrying anything but the fields
- * above. `failed` is the daemon not answering, too slowly, too much, or with
- * something that is not one gRPC-Web answer.
+ * (empty when the daemon sent none), every message in order (at most one for
+ * a unary call), and the status message as the daemon wrote it. `refused` is
+ * the host declining before anything was sent: a method the driver did not
+ * declare, a socket that fails the host's checks, a message over the bound,
+ * or a request carrying anything but the fields above. `failed` is the
+ * daemon not answering, too slowly, too much, or with something that is not
+ * one gRPC-Web answer.
  */
 export type DesktopDaemonResult =
   | {
@@ -415,6 +426,7 @@ export type DesktopDaemonResult =
       readonly grpcStatus: number;
       readonly grpcMessage: string;
       readonly message: Uint8Array;
+      readonly messages: ReadonlyArray<Uint8Array>;
     }
   | {
       readonly status: "refused";

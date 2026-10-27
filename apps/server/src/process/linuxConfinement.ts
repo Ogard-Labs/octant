@@ -61,6 +61,16 @@ export function buildLinuxAllowDefaultDenyLaunch(
 ): ConfinedProcessLaunch {
   const bwrapPath = options.bwrapPath ?? DEFAULT_BWRAP_PATH;
   requireLinuxConfinement(bwrapPath);
+  // This bind shares the host's process namespace, so its denials hold only
+  // while the runtime sits in a user namespace of its own (see
+  // `bubblewrapPrivilege`). A setuid Bubblewrap does not give it one.
+  const privilege = bubblewrapPrivilege(bwrapPath);
+  if (privilege.status !== "unprivileged") {
+    throw new ProcessConfinementError(
+      "incompatible",
+      fullAccessBubblewrapRefusal(bwrapPath, privilege),
+    );
+  }
   if (!isAbsolute(input.executable)) {
     throw new ProcessConfinementError(
       "invalid-configuration",
@@ -162,6 +172,60 @@ export function requireLinuxConfinement(bwrapPath: string): void {
       absent ? "linux-bubblewrap-missing" : undefined,
     );
   }
+}
+
+/** The mode bit that runs a program with its owner's user id. */
+const SETUID_BIT = 0o4000;
+
+/**
+ * How the Bubblewrap at `bwrapPath` runs for this host's user, read from the
+ * program's own mode and owner rather than guessed from the distribution.
+ *
+ * Bubblewrap run by an ordinary user can mount only inside a user namespace
+ * of its own, so it always makes one. A setuid one mounts with its owner's
+ * privileges instead and makes none unless asked for one, which setuid
+ * installs exist to avoid on kernels without unprivileged user namespaces.
+ * Measured on bwrap 0.9.0 installed setuid root and run by an ordinary
+ * user, a host-root bind's runtime stayed in the host's user namespace and
+ * read a denied file through the `/proc/<pid>/root` of its Bubblewrap parent
+ * and of another of that user's processes; the same launch from an
+ * unprivileged bwrap was refused both. The status follows the link a
+ * `/usr/bin/bwrap` alternative may be, because the kernel honours the bit on
+ * the file it runs. A capsule with a PID namespace of its own does not depend
+ * on this: it sees no process outside itself.
+ */
+export type BubblewrapPrivilege =
+  | { readonly status: "unprivileged" }
+  | { readonly status: "setuid"; readonly ownerUid: number }
+  | { readonly status: "unreadable" };
+
+export function bubblewrapPrivilege(bwrapPath: string): BubblewrapPrivilege {
+  let stats;
+  try {
+    stats = statSync(bwrapPath);
+  } catch {
+    return { status: "unreadable" };
+  }
+  return (stats.mode & SETUID_BIT) !== 0
+    ? { status: "setuid", ownerUid: stats.uid }
+    : { status: "unprivileged" };
+}
+
+function fullAccessBubblewrapRefusal(
+  bwrapPath: string,
+  privilege: Exclude<BubblewrapPrivilege, { readonly status: "unprivileged" }>,
+): string {
+  if (privilege.status === "unreadable") {
+    return `Full access did not start: Octant could not check how the Bubblewrap at ${bwrapPath} runs.`;
+  }
+  const owner = privilege.ownerUid === 0 ? "root" : `user id ${String(privilege.ownerUid)}`;
+  return (
+    `Full access did not start: the Bubblewrap at ${bwrapPath} is setuid ${owner}, which gives ` +
+    "the runtime no user namespace of its own, so the extension and sign-in files Full access " +
+    "hides from it would stay readable through other processes. Enable unprivileged user " +
+    "namespaces and install a Bubblewrap that is not setuid, or choose a narrower permission " +
+    "than Full access."
+  );
 }
 
 export function buildBubblewrapLaunch(

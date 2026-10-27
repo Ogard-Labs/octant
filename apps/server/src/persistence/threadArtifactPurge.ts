@@ -1,6 +1,7 @@
 import { readdir, readFile, rm } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import type { OctantMode } from "@octant/contracts";
+import { createArtifactMirrorFilePort } from "../canvas/artifactMirrorFilePort";
 import type { SqliteConnection } from "./sqlitePort";
 import { listThreadFileAnchors } from "./threadPurge";
 
@@ -51,11 +52,27 @@ export async function purgeThreadArtifacts(input: ThreadArtifactPurgeInput): Pro
   await removeOwnedWorktrees(input);
 }
 
-/** Deletes the files each Canvas mirrored, as its journaled receipts name them. */
+/**
+ * Deletes the files each Canvas mirrored, as its journaled receipts name them.
+ *
+ * A destination root is a Code checkout, Work folder, or folder the person
+ * picked, and an agent can rename folders inside it. A path removal followed a
+ * mirrored folder swapped for a link to a host folder and deleted the host
+ * files with the mirrored names, so every removal goes through the mirror's
+ * own port: the name is unlinked from its folder only once that folder is
+ * proved to sit inside the root.
+ *
+ * Removal is best-effort, as the mirror's stale-file removal is. A refused or
+ * failed removal leaves that one file and the purge goes on; otherwise an
+ * agent that planted a link could make its thread impossible to purge.
+ */
 export async function removeMirrorFiles(
   connection: SqliteConnection,
   canvasIds: ReadonlyArray<string>,
 ): Promise<void> {
+  const files = createArtifactMirrorFilePort();
+  const remove = (root: string, path: string) =>
+    files.remove(`${root}/${path}`, root).catch(() => undefined);
   for (const canvasId of canvasIds) {
     const rows = connection
       .prepare(
@@ -66,36 +83,51 @@ export async function removeMirrorFiles(
              OR json_extract(payload_json, '$.receipt.canvasId') = ?)`,
       )
       .all(canvasId, canvasId, canvasId) as ReadonlyArray<{ readonly payload_json: string }>;
+    const roots: string[] = [];
+    const reimported: string[] = [];
     for (const row of rows) {
       const payload = parseRecord(row.payload_json);
       if (payload === undefined) continue;
-      if (typeof payload.path === "string") await removeFile(payload.path);
+      if (typeof payload.path === "string") reimported.push(payload.path);
       const receipt = isRecord(payload.receipt) ? payload.receipt : payload;
-      await removeReceiptFiles(connection, receipt);
+      const root = await receiptRoot(connection, receipt, files.resolveRoot);
+      if (root === undefined) continue;
+      roots.push(root);
+      for (const path of stringList(receipt.paths)) await remove(root, path);
+    }
+    // A re-import records the bundle's absolute path and not its root, so it
+    // is removed only from under a root this Canvas's receipts name.
+    for (const path of reimported) {
+      const root = roots.find((candidate) => path.startsWith(`${candidate}/`));
+      if (root !== undefined) await remove(root, path.slice(root.length + 1));
     }
   }
 }
 
-async function removeReceiptFiles(
+/**
+ * The canonical root a receipt's paths are relative to. A repository
+ * receipt's paths already begin with its destination folder, so its root is
+ * the Project's checkout itself.
+ *
+ * A folder destination can sit inside a checkout, where an agent can swap the
+ * root itself for a link to a host folder; resolving it afresh followed that
+ * link and deleted the host files with the mirrored names. Its root is used
+ * only while it still resolves to exactly the path the receipt stored.
+ */
+async function receiptRoot(
   connection: SqliteConnection,
   receipt: Record<string, unknown>,
-): Promise<void> {
-  const paths = stringList(receipt.paths);
+  resolveRoot: (absolutePath: string) => Promise<string | undefined>,
+): Promise<string | undefined> {
   const destination = isRecord(receipt.destination) ? receipt.destination : undefined;
-  if (destination === undefined) return;
+  if (destination === undefined) return undefined;
   if (destination.kind === "global-folder" && typeof destination.canonicalRoot === "string") {
-    for (const path of paths) await removeContained(destination.canonicalRoot, path);
+    const stored = destination.canonicalRoot;
+    return (await resolveRoot(stored)) === stored ? stored : undefined;
   }
-  if (
-    destination.kind === "project-repository" &&
-    typeof destination.relativeDirectory === "string"
-  ) {
-    const root = projectCheckoutRoot(connection, receipt.projectId);
-    if (root === undefined) return;
-    for (const path of paths) {
-      await removeContained(join(root, destination.relativeDirectory), path);
-    }
-  }
+  if (destination.kind !== "project-repository") return undefined;
+  const root = projectCheckoutRoot(connection, receipt.projectId);
+  return root === undefined ? undefined : await resolveRoot(root);
 }
 
 function projectCheckoutRoot(connection: SqliteConnection, projectId: unknown): string | undefined {
@@ -209,19 +241,6 @@ async function removeMatchingReceipts(
     const parsed = parseRecord(await readFile(file, "utf8").catch(() => ""));
     if (parsed !== undefined && matches(parsed)) await rm(file, { force: true });
   }
-}
-
-async function removeContained(root: string, relativePath: string): Promise<void> {
-  if (!isAbsolute(root) || relativePath.includes("\0")) return;
-  const target = resolve(root, relativePath);
-  const relation = relative(resolve(root), target);
-  if (relation.startsWith("..") || isAbsolute(relation)) return;
-  await rm(target, { force: true });
-}
-
-async function removeFile(path: string): Promise<void> {
-  if (!isAbsolute(path)) return;
-  await rm(path, { force: true });
 }
 
 async function removeDirectory(path: string, dataDirectory: string): Promise<void> {

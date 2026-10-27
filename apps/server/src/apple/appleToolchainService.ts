@@ -1726,7 +1726,7 @@ function isBuildRequest(request: AppleActionRequest): request is AppleBuildReque
   );
 }
 
-async function confinedProjectPath(
+export async function confinedProjectPath(
   checkoutRoot: string,
   projectPath: string,
   realpath: (path: string) => Promise<string>,
@@ -1741,7 +1741,7 @@ async function confinedProjectPath(
   return candidate;
 }
 
-function projectSelector(path: string): "-project" | "-workspace" | "-packagePath" {
+export function projectSelector(path: string): "-project" | "-workspace" | "-packagePath" {
   if (path.endsWith(".xcworkspace")) return "-workspace";
   if (path.endsWith("Package.swift")) return "-packagePath";
   return "-project";
@@ -2289,7 +2289,7 @@ const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] as const;
  * descriptor; and only a PNG is kept. A link to a host file, a second name for
  * someone else's file, or any other content reads as no capture at all.
  */
-async function readCapture(
+export async function readCapture(
   path: string,
   content: "png" | "recording",
 ): Promise<Uint8Array | undefined> {

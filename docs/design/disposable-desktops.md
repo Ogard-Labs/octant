@@ -11,8 +11,10 @@ server ([Architecture: security and authority](../architecture.md#security-and-a
 **Delivery state.** Accepted 2026-10-26; slices 1–5 and recipe storage are
 built, and slice 6 is built for E2B. Cua Spaces follows the
 [local-daemon design](#cua-spaces-through-the-local-daemon) accepted on
-2026-10-27: its daemon port is built and its driver is not yet (see
-[Built in Cua sub-slice 1](#built-in-cua-sub-slice-1)). The maintainer
+2026-10-27: its daemon port and its driver for a Space on this machine are
+built, and no host offers it yet (see
+[Built in Cua sub-slice 1](#built-in-cua-sub-slice-1) and
+[Built in Cua sub-slice 2](#built-in-cua-sub-slice-2)). The maintainer
 authorized this scope as post-preview work and accepted the
 [maintainer decisions](#maintainer-decisions) below on 2026-10-26, naming the
 two cloud providers on 2026-10-27; it is not part of the first release, and the
@@ -21,17 +23,19 @@ unchanged by this document. The lease contract, the `desktop-provider` seam
 and its conformance suite, the host lease service, the host-local provider,
 artifact transfer, the agent's binding of `octant_computer` to a lease, the
 Desktop pane, a Code Project's stored recipe with its settings editor, the
-cloud HTTPS port, the E2B driver, the local-daemon port, and recipe
-placements exist; no host offers E2B for leasing yet,
-so a recipe can name only the host-local provider (see
+cloud HTTPS port, the E2B driver, the local-daemon port, recipe
+placements, and the Cua driver for this machine exist; no host offers E2B
+or Cua for leasing yet, so a recipe can name only the host-local provider
+(see
 [Built in slice 1](#built-in-slice-1),
 [Built in slice 2](#built-in-slice-2),
 [Built in slice 3](#built-in-slice-3),
 [Built in slice 4](#built-in-slice-4),
 [Built in slice 5](#built-in-slice-5),
 [Built in slice 6](#built-in-slice-6), and
-[Built: recipe storage](#built-recipe-storage)). Slice 4's real-provider smoke
-and slice 6's E2B live smoke are still owed by the maintainer.
+[Built: recipe storage](#built-recipe-storage)). Slice 4's real-provider smoke,
+slice 6's E2B live smoke, and Cua sub-slice 2's live smoke are still owed by
+the maintainer.
 
 **Name.** The product calls it a _disposable desktop_. "Computer" already names
 the Mac computer-use destination and the paired-host Computers card, and a
@@ -1068,7 +1072,9 @@ Rules this slice resolved:
   with no credential reference configures nothing that could run: the lease
   service refuses it `no-provider-configured` before any provider call, and
   the recipe store refuses to save it
-  ([recipe storage](#built-recipe-storage)).
+  ([recipe storage](#built-recipe-storage)). Since
+  [Cua sub-slice 2](#built-in-cua-sub-slice-2) a placement of a provider
+  whose daemon holds the person's sign-in stands in for the credential (C4).
 - **Restart lists account by account.** Reconciliation lists each provider
   once with no credential and once per credential reference any of its leases
   recorded, and destroys tagged desktops that have no live lease. A listing
@@ -1173,8 +1179,10 @@ ships on Linux hosts first; on macOS, transfer stays refused until its own
 handle-path check exists. The decisions below are rules; the sub-slices under
 [Delivery sub-slices](#delivery-sub-slices) are the delivery plan, each its own
 change with this section updated in place. Sub-slice 1, the daemon port, is
-built ([Built in Cua sub-slice 1](#built-in-cua-sub-slice-1)); no Cua driver
-exists yet.
+built ([Built in Cua sub-slice 1](#built-in-cua-sub-slice-1)), and so is
+sub-slice 2, the driver for a Space on this machine
+([Built in Cua sub-slice 2](#built-in-cua-sub-slice-2)); no host offers it
+until the maintainer's live smoke passes.
 
 ### What Cua offers now
 
@@ -1321,8 +1329,11 @@ driver would need them in its imports); `node:http2` h2c over the socket
 (no dependency, but Bun's HTTP/2 client is the less-proven path; kept as the
 fallback if the live smoke shows the passthrough does not answer gRPC-Web);
 and Cua's own SDK (`@trycua/cua`, a native module that embeds Cua's whole
-runtime in Octant's process). Server streaming is not needed: a create runs
-with `wait` off and is polled.
+runtime in Octant's process). A create runs with `wait` off and is polled.
+The one server stream a driver needs is `ProcessService.StartProcess`, the
+only way Cua starts a program in a Space; the port reads such a stream whole
+to its status, inside the same bounds, so only a stream the daemon ends on
+its own is answered ([Built in Cua sub-slice 1](#built-in-cua-sub-slice-1)).
 
 ### Placement, account, and credentials
 
@@ -1479,8 +1490,10 @@ where Cua documents no `network` `none`.
   feature, or the Space's `SystemService.GetCapabilities` reports another
   `cua.env.v1` protocol version. Windows has no Unix socket path here and
   offers no Cua provider.
-- The driver is loaded on every Linux and macOS host for teardown, and is
-  effective only after the person chooses it in a recipe, as E2B is.
+- The driver is loaded for teardown, and is effective only after the person
+  chooses it in a recipe, as E2B is. It is loaded on Linux hosts now and on
+  macOS once Cua is offered there, and only once the host has journaled a
+  Cua lease ([Built in Cua sub-slice 2](#built-in-cua-sub-slice-2)).
 - On macOS a Space gives a Mac without a screen its first desktop
   provider, but [artifact transfer](#built-in-slice-3) still refuses
   `path-unverifiable` there until a handle-path check exists for macOS. That
@@ -1523,7 +1536,8 @@ where Cua documents no `network` `none`.
    host-owned headers, oversized requests and responses, a timed-out call,
    and a cancelled one, each as a value. _Verify:_ focused plugin-api and
    server tests; typecheck consuming packages.
-2. **Cua driver for this machine's placement** (container). _Accepts when_
+2. **Cua driver for this machine's placement** (container; built, see
+   [Built in Cua sub-slice 2](#built-in-cua-sub-slice-2)). _Accepts when_
    the conformance suite, restart included, passes against a recorded
    gRPC-Web transport built from Cua's published protocol through the
    host's real daemon port over a real socket, and tests cover the labelled
@@ -1553,24 +1567,33 @@ where Cua documents no `network` `none`.
   (`packages/plugin-api/src/protobufWire.ts`), exported from the same
   `@octant/plugin-api/desktop-provider` entry a driver already imports.
 - **Host.** `apps/server/src/computerUse/desktopDaemonPort.ts` is the port.
-  No driver declares a daemon yet, so the wiring builds none; the module is
-  a reviewed island in `scripts/check-module-wiring.ts` until the Cua driver
-  is wired. The lease service leases a provider with placements on its
+  The wiring builds it for the Cua driver since
+  [sub-slice 2](#built-in-cua-sub-slice-2). The lease service leases a provider with placements on its
   recipe's placement.
 - **Contract.** `DesktopPlacementId`; `placementId` on `DesktopRecipe`,
   `desktop.lease-requested@1`, and `DesktopLease`.
-- **Policy.** `changeCodeProjectDesktopRecipe` refuses a recipe that names
-  a placement.
+- **Policy.** `changeCodeProjectDesktopRecipe` refused a recipe that names
+  a placement until sub-slice 2 offered placements.
 
 Rules this sub-slice resolved:
 
-- **A daemon call carries four fields and nothing else.** The request is
-  the method, one unframed message, the response bound, and a signal. A
+- **A daemon call carries these fields and nothing else.** The request is
+  the method, one unframed message, the response bound, whether the method
+  streams its answer, and a signal. A
   request with any other field, `headers` among them, refuses
   `request-invalid`, because a driver that is not type-checked can send any
   shape. The host sends `content-type: application/grpc-web+proto`,
   `content-length`, and `grpc-timeout` set to the port's own bound; the HTTP
   client adds only `Host` and `Connection`.
+- **A streamed answer is read whole.** `ProcessService.StartProcess` is the
+  only way Cua starts a program in a Space, and it streams. A call that says
+  its method streams (`stream`) is answered with every message in order
+  (`messages`) and the status, read inside the same 45-second and byte
+  bounds, the byte bound counting all messages together. A unary call still
+  fails `response-invalid` on a second message, and a stream the daemon never
+  ends times out, so only a stream the daemon ends on its own is answered.
+  This extended the published seam after the port was first built, as its
+  own change.
 - **A malformed answer fails as `response-invalid`.** C1 listed three
   failures; a fourth is needed for a daemon that answers something other than
   one gRPC-Web answer: an HTTP status other than 200, another content type
@@ -1623,14 +1646,11 @@ Rules this sub-slice resolved:
   billed confirmation, the provider-expiry check, and the pane's Start;
   a transfer asks by the locality the lease journaled. A recipe whose
   placement changed counts as removed.
-- **No recipe names a placement until the editor offers one.** The
-  providers a recipe may name (`recipe-providers`) carry no placements yet,
-  so a save that names a placement is refused rather than judged by its
-  provider's own locality. Offering placements, C4's "a credential or a
-  daemon placement" rule for a cloud recipe, and recording the daemon in
-  `desktop.lease-requested@1` arrive with the first driver that declares
-  placements; until then a cloud placement still needs a credential
-  reference.
+- **No recipe named a placement until the editor offered one.** Until
+  sub-slice 2 the providers a recipe may name (`recipe-providers`) carried
+  no placements, so a save that named a placement was refused. Sub-slice 2
+  offers placements, applies C4's "a credential or a daemon placement" rule,
+  and records the daemon in `desktop.lease-requested@1`.
 
 Evidence: `desktopDaemonPort.test.ts` starts a test daemon on a real Unix
 socket in a temporary home and covers declared calls answered (a status
@@ -1651,7 +1671,9 @@ Removing each check in turn fails at least one of these tests. The same file
 passes under Bun 1.4.4, which runs the development and headless servers
 (`bun --bun x vitest run --project unit src/computerUse/desktopDaemonPort.test.ts`
 in `apps/server`), as well as under Node, which runs the packaged desktop's
-server, through `bun run test`.
+server, through `bun run test`. It also covers a whole stream, its shared
+bound, a unary call refusing two messages, a `stream` that is not a boolean,
+and a stream that never ends.
 `protobufWire.test.ts` covers protobuf's documented encodings, a negative
 `int64`, round trips of every wire type, and malformed input answered as a
 value. `desktopLeaseService.test.ts` covers a placement the provider does not
@@ -1664,6 +1686,137 @@ lease; `projectPolicy.test.ts` covers the refused save; and
 Nothing in this sub-slice is owed by the maintainer. The port has never
 spoken to Cua's daemon: that a real daemon answers it is settled by
 sub-slice 2's live smoke.
+
+### Built in Cua sub-slice 2
+
+- **Driver.** `apps/server/src/plugins/cuaDesktop/`: the `cua` provider
+  (`cuaDesktopProvider.ts`) with one placement, `this-machine` (host-local,
+  not billed), and its messages (`cuaProtocol.ts`), written by hand from
+  Cua's `.proto` files at commit `8fbdf83`. It imports only
+  `@octant/contracts` and the seam and reaches Cua only through the daemon
+  port; a test enforces both.
+- **Seam.** A launch reads `ProcessService.StartProcess` through the
+  port's streamed answer ([Built in Cua sub-slice 1](#built-in-cua-sub-slice-1)).
+- **Contract.** `LeasableDesktopProvider` carries `placements` and `daemon`;
+  `desktop.lease-requested@1` and `DesktopLease` carry `daemon` (the
+  declared socket path and the user it belongs to).
+- **Policy and host.** A recipe save and an acquire take locality from the
+  placement and apply C4. The lease service records the daemon and checks
+  it at teardown. The wiring builds the daemon port for the Cua driver.
+- **Editor.** **Runs on** lists a provider's placements
+  (`ProjectDesktopRecipeSection.tsx`).
+- **Smoke.** `bun run desktop:cloud:smoke cua run|kill|restart`
+  (`cloudDesktop.smoke.ts`), which reads no key.
+
+Rules this sub-slice resolved:
+
+- **A launch ends its stream at once.** A launch runs as E2B's does, a
+  shell that starts the app in its own session and exits, so the
+  `StartProcess` stream ends at once; a stream the daemon never ends times
+  out.
+- **Octant asks the person's daemon nothing until it has a Cua lease.** The
+  driver is loaded on Linux hosts and joins the host's providers only once
+  the journal holds a Cua lease, so teardown reaches every Cua lease a host
+  ever journaled, and a host that never leased from Cua makes no call to
+  the socket, not even a restart listing. A listing makes the daemon wait
+  for Cua's relay, and a host that never chose Cua has nothing there to
+  find. macOS loads it once Cua is offered there. Since a recipe can name
+  only a provider the host lists, offering Cua must also list the driver
+  before any Cua lease exists.
+- **The daemon a lease used is recorded and kept.** The `requested` event
+  records the declared socket path and the user id whose home holds it. A
+  provider that declares a daemon is never leased on a host that has no user
+  id. Teardown counts a listing as the provider confirming absence only
+  through that same daemon: if the driver's socket path or Octant's user
+  changed, the lease stays `release-failed`, since another user's daemon
+  listing nothing says nothing about this one's Space.
+- **A daemon-run provider takes no key.** A recipe for a provider that
+  declares a daemon is refused at save and at acquire when it names a
+  credential reference, and its driver's `listOwned` with one answers
+  `failed`. A cloud placement of such a provider needs no credential (C4).
+- **Placed here explicitly.** The create names `location` `local`, never
+  the person's default, which may be one of their clouds.
+- **A Space in creation is not absent.** The Space is named
+  `octant-<lease id>`, because a create Cua is still running is listed only
+  by name (`CreatingSpace`), without labels. `verifyGone` answers `present`
+  while one runs under the lease's name, and `listOwned` answers `failed`
+  while any `octant-` create runs, since it cannot yet tell whose it is.
+- **What counts as ready, and as the wrong Space.** A Space is ready when it
+  is `running` with a `cua-spacesd` version. One whose labels, cloud, or
+  kind differ from what was asked is deleted and the acquire fails, as is
+  one that reports another `cua.env.v1` protocol version (refused) or that
+  does not boot within five minutes, asked every two seconds. Release cancels
+  any create still running for the lease, then deletes; a delete answered
+  `NOT_FOUND` counts as asked, and only the listing proves absence.
+- **Input points at the frame the person saw.** Frames are PNG with
+  `max_dimension` at the recipe's longer edge and are refused when larger
+  than the recipe's screen. Pointer input names that frame's
+  `screenshot_id` in `COORDINATE_SPACE_SCREENSHOT`, so Cua maps it to the
+  screen; input before any frame refuses `no-frame`. Keys are the closed set
+  an X desktop takes, sent as Cua's named `Key` or as one character.
+- **Tokens the daemon offers are never read.** `GetInfoResponse` carries the
+  daemon's loopback token and `ConnectSpaceResponse` the Space's token; the
+  driver reads only the version and features, and the passthrough URL.
+- **Recorded against.** The daemon release is at least `0.9.0` (Cua's
+  workspace version at `8fbdf83`) with the `spaces` feature, and the Space
+  speaks `cua.env.v1` protocol version 1. A recipe with no image uses Cua's
+  canonical Linux image, `ghcr.io/trycua/linux:24.04`, whose VM variant
+  `kind` `vm` selects.
+- **Files.** A sent file is uploaded in chunks of at most 1 MiB, or less if
+  the Space asks, with its SHA-256 checked when the upload is committed,
+  read-only (`0444`) to a staging name, then moved into `/home/user/inbox`.
+- **The daemon's lifetime is reported, not relied on.** The acquire reports
+  the lifetime the daemon confirmed as the provider's expiry. This
+  placement does not bill, so the host's billed-expiry check does not apply,
+  and C5 still keeps billed placements out.
+
+Evidence: `cuaDesktopProvider.test.ts` runs the conformance suite, restart
+included, against a recorded Cua daemon (`cuaRecordedDaemon.test-support.ts`,
+an HTTP/1.1 gRPC-Web server on a real Unix socket in a temporary home, with
+its own field numbers written from Cua's `spaces.proto`, `daemon.proto`,
+`common.proto`, `computer.proto`, `filesystem.proto`, `process.proto`, and
+`system.proto`) through the host's real daemon port. It covers the
+labelled create with `create_id` and nothing beyond the fields above; the
+lifetime past the lease expiry with `on_expire` `delete`; an extension the
+daemon holds short; cancellation through `CancelCreateSpace` with the lease
+id; incomplete, stale, and unreachable listings answering `failed`; a create
+whose network is not `none`, and a Space placed in a cloud, destroyed; a
+Space reporting another protocol refused; refusals before any call; the
+method list pinned, with every call it makes declared and none carrying a
+caller header; readiness by daemon version and feature; frames and a
+person's input on the frame they saw; a sent file landing read-only and
+launching; listing by host; and the import boundary. Through the lease
+service over a journal on disk, a host killed with a lease `ready`, and one
+killed while Cua was creating it, each find the Space by its labels on the
+next start and destroy it. Removing each of the driver's checks in turn
+(network, cancellation, partial listing, short extension, labels, create id,
+lifetime margin, cloud placement, a create in progress) fails at least one
+test. The file passes under Node through `bun run test` and under Bun
+(`bun --bun x vitest run --project unit src/plugins/cuaDesktop` in
+`apps/server`). The method-list test also shows that no call carries the
+daemon's loopback token or a Space's token. `desktopLeaseService.test.ts`
+covers a daemon-run provider leased on its placement with no key, a key
+refused, the daemon recorded, a host with no user id refused, and teardown kept `release-failed` under another user
+until the same daemon answers. `projectPolicy.test.ts` covers a saved
+placement, network on a host-local placement, a cloud placement with no
+key, and a key refused; `ProjectDesktopRecipeSection.test.tsx` covers
+choosing and saving a placement and an unoffered saved placement; and
+`desktopLease.test.ts` covers the contract.
+
+Owed by the maintainer: on a Linux host with Cua's daemon running as the
+user Octant runs as, signed in, and QEMU installed, from `apps/server`,
+`bun run desktop:cloud:smoke cua run`, then `… cua kill` followed by
+`… cua restart`. Each must end `PASS`, and `cua spaces list` must then show
+no Space labelled `octant-host`. Besides the unverified items in
+[What Cua offers now](#what-cua-offers-now), the live run is what confirms
+what a recording cannot: that a create with `wait` off reports `network`
+`none` (if it reports nothing, every acquire fails closed), that the
+default image boots as a QEMU VM with `cua-spacesd`, that a Space name of
+the form `octant-<lease id>` is accepted, that a local Space reports no
+`cloud`, that `/home/user` exists in the guest and a launched program
+reaches its display, that each screenshot carries a `screenshot_id`, and
+whether the VM's screen matches the recipe's size (a frame larger than the
+recipe is refused). Until it passes, the driver is offered on no host.
 
 ## Rationale
 
@@ -1692,7 +1845,8 @@ screen-only desktop), `apps/server/src/computerUse/desktopHttpsPort.ts` and
 `apps/server/src/plugins/e2bDesktop/` (the cloud port and the E2B driver),
 `apps/server/src/computerUse/desktopDaemonPort.ts` and
 `packages/plugin-api/src/protobufWire.ts` (the local-daemon port and the
-seam's protobuf wire helper),
+seam's protobuf wire helper), `apps/server/src/plugins/cuaDesktop/` (the Cua
+driver),
 `apps/server/src/computerUse/computerUseToolService.ts` (a send's binding to
 a lease), `apps/server/src/desktopPaneRoutes.ts`, and the web Desktop pane
 (`apps/web/src/desktop/`). Each slice above lists its

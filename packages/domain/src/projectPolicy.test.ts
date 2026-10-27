@@ -327,7 +327,7 @@ describe("Project creation and lifecycle", () => {
       ).toEqual(keyed);
     });
 
-    it("refuses a recipe that names a placement, which no offered provider carries yet", () => {
+    it("refuses a recipe that names a placement its provider does not offer", () => {
       const project = makeProject(ids.code, "0/1", { type: "code" });
       expect(() =>
         changeCodeProjectDesktopRecipe(
@@ -337,6 +337,55 @@ describe("Project creation and lifecycle", () => {
           updatedAt,
         ),
       ).toThrow(ProjectPolicyRejected);
+    });
+
+    describe("for a provider whose daemon holds the person's sign-in", () => {
+      const daemonRun = decodeLeasableDesktopProvider({
+        providerId: "cua",
+        displayName: "Cua Spaces",
+        locality: "host-local",
+        billed: false,
+        daemon: true,
+        placements: [
+          {
+            placementId: "this-machine",
+            displayName: "This machine",
+            locality: "host-local",
+            billed: false,
+          },
+          {
+            placementId: "other-machine",
+            displayName: "Your other machine",
+            locality: "cloud",
+            billed: false,
+          },
+        ],
+      });
+      const onDaemon = { ...recipe, providerId: daemonRun.providerId };
+      const project = makeProject(ids.code, "0/1", { type: "code" });
+      const save = (next: typeof recipe) =>
+        changeCodeProjectDesktopRecipe(project, next, [daemonRun], updatedAt);
+
+      it("keeps a recipe on one of its placements, on that placement's network rule", () => {
+        const here = { ...onDaemon, placementId: decodeDesktopPlacementId("this-machine") };
+        expect(save(here).desktopRecipe).toEqual(here);
+        expect(() => save({ ...here, network: "allow" })).toThrow(ProjectPolicyRejected);
+        expect(() => save(onDaemon)).toThrow(ProjectPolicyRejected);
+        expect(() =>
+          save({ ...onDaemon, placementId: decodeDesktopPlacementId("elsewhere") }),
+        ).toThrow(ProjectPolicyRejected);
+      });
+
+      it("takes a placement off this machine in place of a credential, and refuses any key", () => {
+        const away = { ...onDaemon, placementId: decodeDesktopPlacementId("other-machine") };
+        expect(save(away).desktopRecipe).toEqual(away);
+        expect(() =>
+          save({
+            ...away,
+            credentialRef: decodeDesktopCredentialRef("5f0c6f7e-7b0a-4d43-9a3c-2f1d8f4e6a10"),
+          }),
+        ).toThrow(ProjectPolicyRejected);
+      });
     });
 
     it("refuses a Work or Chat Project and a change that changes nothing", () => {

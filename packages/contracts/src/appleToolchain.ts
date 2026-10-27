@@ -578,7 +578,17 @@ export const AppleDeviceRequest = Schema.Struct({
    */
   fromThreadId: Schema.optional(CodeThreadId),
   projectPath: Schema.optional(AppleProjectPath),
-  scheme: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
+  /**
+   * Passed to `xcodebuild` after `-scheme` as given, so it never begins with
+   * `-`: no device request may carry an option such as
+   * `-allowProvisioningUpdates` into a build.
+   */
+  scheme: Schema.optional(
+    Schema.NonEmptyTrimmedString.pipe(
+      Schema.maxLength(256),
+      Schema.filter((value) => !value.startsWith("-")),
+    ),
+  ),
   configuration: Schema.optional(AppleBuildConfiguration),
   teamId: Schema.optional(AppleTeamId),
   /** `install` only: a product an Octant build held for this thread, by reference. */
@@ -677,6 +687,17 @@ export type AppleDeviceRefusalReason = typeof AppleDeviceRefusalReason.Type;
 export const AppleDeviceLeaseHolder = Schema.Literal("this-thread", "another-thread");
 export type AppleDeviceLeaseHolder = typeof AppleDeviceLeaseHolder.Type;
 
+/**
+ * The latest screenshot the asking thread took of one device, by reference.
+ * Only that thread's local window can read its pixels.
+ */
+export const AppleDeviceScreenshot = Schema.Struct({
+  deviceId: AppleDeviceId,
+  reference: AppleEvidenceReference,
+  capturedAt: UtcTimestamp,
+}).annotations(strict);
+export type AppleDeviceScreenshot = typeof AppleDeviceScreenshot.Type;
+
 /** What `discover` answers: the host's paired iPhones and iPads and its device tooling. */
 export const AppleDeviceDiscovery = Schema.Struct({
   devices: Schema.Array(AppleDeviceRecord).pipe(Schema.maxItems(64)),
@@ -684,9 +705,78 @@ export const AppleDeviceDiscovery = Schema.Struct({
   leases: Schema.Array(
     Schema.Struct({ deviceId: AppleDeviceId, holder: AppleDeviceLeaseHolder }).annotations(strict),
   ).pipe(Schema.maxItems(64)),
+  /**
+   * The asking thread's latest screenshot of each device it captured. Optional
+   * and additive: a host that predates device screenshots omits it.
+   */
+  screenshots: Schema.optional(Schema.Array(AppleDeviceScreenshot).pipe(Schema.maxItems(64))),
   discoveredAt: UtcTimestamp,
 }).annotations(strict);
 export type AppleDeviceDiscovery = typeof AppleDeviceDiscovery.Type;
+
+/**
+ * A signing identity's SHA-1 certificate fingerprint, as `security
+ * find-identity` prints it. It names the public certificate, not the key, and
+ * with the team ID it is the only signing fact Octant records.
+ */
+export const AppleSigningIdentityFingerprint = Schema.String.pipe(
+  Schema.pattern(/^[0-9A-F]{40}$/),
+  Schema.brand("AppleSigningIdentityFingerprint"),
+);
+export type AppleSigningIdentityFingerprint = typeof AppleSigningIdentityFingerprint.Type;
+
+/** Which of the person's keychain identities signed a product, and for which team. */
+export const AppleDeviceSigning = Schema.Struct({
+  teamId: AppleTeamId,
+  identity: AppleSigningIdentityFingerprint,
+}).annotations(strict);
+export type AppleDeviceSigning = typeof AppleDeviceSigning.Type;
+
+/** The device operations that leave evidence: the effects, the console read, and a screenshot. */
+export const AppleDeviceEvidenceKind = Schema.Literal(
+  "build",
+  "run",
+  "install",
+  "launch",
+  "terminate",
+  "logs",
+  "screenshot",
+);
+export type AppleDeviceEvidenceKind = typeof AppleDeviceEvidenceKind.Type;
+
+/**
+ * What one device operation did. Like the record, it has no field for a
+ * hardware identifier, a host path, or the signing identity's name (which
+ * carries the person's name): the product is a reference only this thread's
+ * install can redeem, and signing is the team and fingerprint.
+ */
+export const AppleDeviceEvidence = Schema.Struct({
+  actionId: ToolActionId,
+  correlationId: CorrelationId,
+  authority: ToolActionAuthority,
+  kind: AppleDeviceEvidenceKind,
+  deviceId: AppleDeviceId,
+  requestedBy: EventActor,
+  outcome: AppleBuildOutcome,
+  bundleIdentifier: Schema.optional(AppleBundleIdentifier),
+  /** The signed product a build or run holds for this thread; `install` takes it by this reference. */
+  product: Schema.optional(AppleEvidenceReference),
+  signing: Schema.optional(AppleDeviceSigning),
+  diagnostics: Schema.Array(AppleDiagnostic).pipe(Schema.maxItems(64)),
+  artifacts: Schema.Array(AppleEvidenceArtifact).pipe(Schema.maxItems(16)),
+  cleanup: AppleCleanupState,
+  durationMs: Schema.Int.pipe(Schema.nonNegative()),
+  completedAt: UtcTimestamp,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((evidence) => {
+      // A product is held only once signed, and a signature always names it.
+      if ((evidence.product === undefined) !== (evidence.signing === undefined)) return false;
+      return evidence.product === undefined || evidence.kind === "build" || evidence.kind === "run";
+    }),
+  );
+export type AppleDeviceEvidence = typeof AppleDeviceEvidence.Type;
 
 /**
  * The device routes' answers. A refusal carries the policy's reason and
@@ -710,6 +800,10 @@ export const AppleDeviceResponse = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("apple-device-released"),
     deviceId: AppleDeviceId,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("apple-device-evidence"),
+    evidence: AppleDeviceEvidence,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("apple-device-refused"),
@@ -753,3 +847,7 @@ export const decodeAppleDeviceRecord = Schema.decodeUnknownSync(AppleDeviceRecor
 export const decodeAppleDeviceRequest = Schema.decodeUnknownSync(AppleDeviceRequest);
 export const decodeAppleDeviceLease = Schema.decodeUnknownSync(AppleDeviceLease);
 export const decodeAppleDeviceResponse = Schema.decodeUnknownSync(AppleDeviceResponse);
+export const decodeAppleSigningIdentityFingerprint = Schema.decodeUnknownSync(
+  AppleSigningIdentityFingerprint,
+);
+export const decodeAppleDeviceEvidence = Schema.decodeUnknownSync(AppleDeviceEvidence);

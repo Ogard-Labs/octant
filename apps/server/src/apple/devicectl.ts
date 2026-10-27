@@ -131,7 +131,10 @@ export function parseDevicectlLockState(document: unknown): DevicectlLockState {
 export interface DevicectlProbe {
   readonly operation: AppleDeviceToolingOperation | "lock-state";
   readonly subcommand: ReadonlyArray<string>;
-  /** Text the help must also contain, for an operation that is a flag of another. */
+  /**
+   * Text the help must also contain: the flag an operation is, or the option
+   * the host passes it.
+   */
   readonly requires?: string;
 }
 
@@ -141,7 +144,9 @@ export const DEVICECTL_PROBES: ReadonlyArray<DevicectlProbe> = [
   { operation: "launch-app", subcommand: ["device", "process", "launch"] },
   { operation: "terminate-process", subcommand: ["device", "process", "terminate"] },
   { operation: "uninstall-app", subcommand: ["device", "uninstall", "app"] },
-  { operation: "screenshot", subcommand: ["device", "screenshot"] },
+  // A capture is written where the host says, so a help that does not take
+  // that option cannot be driven the way the host drives it.
+  { operation: "screenshot", subcommand: ["device", "screenshot"], requires: "--destination" },
   {
     operation: "console-logs",
     subcommand: ["device", "process", "launch"],
@@ -166,6 +171,65 @@ export function devicectlOffers(
   );
   if (!usage.test(help.output)) return false;
   return probe.requires === undefined || help.output.includes(probe.requires);
+}
+
+/**
+ * What a `devicectl` subcommand's `--json-output` says happened. A failure
+ * keeps only CoreDevice's error domain and code: the error's own words can
+ * name the device by its UDID, serial number, or ECID, which never leave the
+ * host.
+ */
+export type DevicectlOutcome =
+  | { readonly kind: "succeeded"; readonly result: Readonly<Record<string, unknown>> }
+  | { readonly kind: "failed"; readonly reason: string };
+
+export function parseDevicectlOutcome(document: unknown): DevicectlOutcome {
+  if (isRecord(document) && isRecord(document.info) && document.info.outcome === "success") {
+    return { kind: "succeeded", result: isRecord(document.result) ? document.result : {} };
+  }
+  const error = isRecord(document) && isRecord(document.error) ? document.error : {};
+  const domain =
+    typeof error.domain === "string" && /^[A-Za-z0-9._-]{1,128}$/.test(error.domain)
+      ? error.domain
+      : undefined;
+  const code = typeof error.code === "number" && Number.isSafeInteger(error.code) ? error.code : 0;
+  return {
+    kind: "failed",
+    reason: domain === undefined ? "no readable answer" : `${domain} ${code}`,
+  };
+}
+
+/**
+ * The bundle identifier `devicectl device install app` reports it installed.
+ * The installation URL beside it names a per-install container and is not kept.
+ */
+export function parseDevicectlInstalledBundle(
+  result: Readonly<Record<string, unknown>>,
+): string | undefined {
+  const installed = result.installedApplications;
+  if (!Array.isArray(installed) || installed.length !== 1) return undefined;
+  const [application] = installed;
+  return isRecord(application) && typeof application.bundleID === "string"
+    ? application.bundleID
+    : undefined;
+}
+
+/**
+ * Device-layer output kept as evidence, with every token shaped like a
+ * hardware or CoreDevice identifier replaced: a UDID in either form, a UUID,
+ * and an ECID. The device's serial number has no shape of its own, which is
+ * why `devicectl`'s own words are never kept and only build output and the
+ * app's console pass through here.
+ */
+export function withoutDeviceIdentifiers(text: string): string {
+  return text
+    .replace(
+      /\b[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\b/g,
+      "[ID]",
+    )
+    .replace(/\b[0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}\b/g, "[ID]")
+    .replace(/\b[0-9A-Fa-f]{40}\b/g, "[ID]")
+    .replace(/\bECID\b\s*[:=]?\s*(?:0x[0-9A-Fa-f]+|\d+)/gi, "ECID [ID]");
 }
 
 function boundedText(value: unknown, maximum: number): string | undefined {

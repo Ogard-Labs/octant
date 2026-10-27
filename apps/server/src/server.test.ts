@@ -1094,7 +1094,7 @@ describe("startOctantServer", () => {
     let routeHandler: ((request: Request) => Response | Promise<Response>) | undefined;
     const capability = "A".repeat(43);
     const windowId = "00000000-0000-4000-8000-000000000483";
-    const deviceRequest = (kind: "discover" | "use-device") => ({
+    const deviceRequest = (kind: "discover" | "use-device" | "build") => ({
       actionId: "00000000-0000-4000-8000-000000000484",
       correlationId: "00000000-0000-4000-8000-000000000485",
       authority: {
@@ -1109,6 +1109,7 @@ describe("startOctantServer", () => {
       kind,
       requestedBy: { kind: "local-user", actorId: "00000000-0000-4000-8000-000000000002" },
       ...(kind === "discover" ? {} : { deviceId: "00000000-0000-4000-8000-00000000048b" }),
+      ...(kind === "build" ? { projectPath: "App.xcodeproj", teamId: "A1B2C3D4E5" } : {}),
       timeoutMs: 30_000,
       approval: { kind: "not-required" },
     });
@@ -1138,9 +1139,21 @@ describe("startOctantServer", () => {
           );
           expect(registered?.status).toBe(204);
 
-          for (const [path, kind] of [
-            ["/api/apple/devices", "discover"],
-            ["/api/apple/device-leases", "use-device"],
+          const { authority, threadId, checkoutId } = deviceRequest("discover");
+          for (const [path, payload] of [
+            ["/api/apple/devices", deviceRequest("discover")],
+            ["/api/apple/device-leases", deviceRequest("use-device")],
+            ["/api/apple/device-actions", deviceRequest("build")],
+            [
+              "/api/apple/device-screenshots",
+              {
+                kind: "apple-artifact-request",
+                authority,
+                threadId,
+                checkoutId,
+                reference: "apple-device-screenshot-1",
+              },
+            ],
           ] as const) {
             const response = yield* Effect.promise(() =>
               Promise.resolve(
@@ -1151,7 +1164,7 @@ describe("startOctantServer", () => {
                       "content-type": "application/json",
                       "x-octant-window-capability": capability,
                     },
-                    body: JSON.stringify(deviceRequest(kind)),
+                    body: JSON.stringify(payload),
                   }),
                 ),
               ),

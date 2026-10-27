@@ -95,10 +95,6 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "apps/server/src/persistence/sqlitePort.conformance.ts",
     "Conformance kit that sqlitePort.test.ts and sqlitePort.smoke.ts run against the SQLite port; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the port's last conformance test is retired.",
   ],
-  [
-    "apps/server/src/computerUse/desktopDaemonPort.ts",
-    "The host's local-daemon port for desktop drivers, run today by its own tests against a real test daemon on a Unix socket. No bundled driver declares a daemon yet: the Cua Spaces driver that the wiring builds it for is the next delivery sub-slice of docs/design/disposable-desktops.md. Remove once the computer-use wiring builds it for that driver.",
-  ],
   // ── Reached only through another island, so an island with it ──
   [
     "packages/contracts/src/auditEvents.ts",
@@ -662,14 +658,6 @@ export function findUnregisteredRouteModules(
  * served endpoint has a caller (or is a routing prefix).
  */
 export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
-  [
-    "/api/apple/devices",
-    "2026-10-26: physical Apple device discovery and status are served ahead of their caller, the device pane of docs/design/apple-devices.md (delivery slice 4). Remove when the workbench's device picker calls it.",
-  ],
-  [
-    "/api/apple/device-leases",
-    "2026-10-26: starting and releasing a physical device's lease is served ahead of its caller, the device pane's lease confirmation of docs/design/apple-devices.md (delivery slice 4). Remove when the pane calls it.",
-  ],
   [
     "/api/code/debug/approvals",
     "2026-10-27: confirming a debug configuration is served ahead of its caller, the Run and debug panel's confirmation card (docs/design/language-services.md, debugger delivery 8c). Remove when the panel calls it.",

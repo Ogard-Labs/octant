@@ -22,6 +22,7 @@ import {
   decodeAppleDeviceLease,
   decodeAppleDeviceRecord,
   decodeAppleDeviceRequest,
+  decodeAppleSigningIdentityFingerprint,
   decodeEventActor,
   decodeToolActionAuthority,
 } from "@octant/contracts";
@@ -1343,5 +1344,101 @@ describe("evaluateAppleDeviceRequest", () => {
         ).toEqual(denied("process-not-owned"));
       }
     });
+  });
+});
+
+describe("chooseAppleDevelopmentSigning", () => {
+  const team = "A1B2C3D4E5";
+  const now = Date.parse("2026-10-26T12:00:00.000Z");
+  const first = decodeAppleSigningIdentityFingerprint("1111111111111111111111111111111111111111");
+  const second = decodeAppleSigningIdentityFingerprint("2222222222222222222222222222222222222222");
+  const unknown = decodeAppleSigningIdentityFingerprint("9999999999999999999999999999999999999999");
+  const profile = (
+    profileId: string,
+    extra: Partial<ApplePolicy.AppleProvisioningProfileFacts> = {},
+  ): ApplePolicy.AppleProvisioningProfileFacts => ({
+    profileId,
+    teamIds: [team],
+    platforms: ["iOS"],
+    applicationIdentifier: `${team}.*`,
+    getTaskAllow: true,
+    provisionsAllDevices: false,
+    expiresAtMs: now + 86_400_000,
+    certificates: [first],
+    ...extra,
+  });
+  const choose = (
+    profiles: ReadonlyArray<ApplePolicy.AppleProvisioningProfileFacts>,
+    identities: ReadonlyArray<string> = [first, second],
+    bundleIdentifier = "sh.octant.Fixture",
+  ) =>
+    ApplePolicy.chooseAppleDevelopmentSigning({
+      teamId: team as never,
+      bundleIdentifier: bundleIdentifier as never,
+      identities: identities as never,
+      profiles,
+      nowMs: now,
+    });
+
+  it("prefers the profile that names the app over a wildcard, and signs with a keychain identity it lists", () => {
+    expect(
+      choose([
+        profile("wildcard"),
+        profile("explicit", {
+          applicationIdentifier: `${team}.sh.octant.Fixture`,
+          certificates: [unknown, second],
+        }),
+      ]),
+    ).toEqual({
+      kind: "chosen",
+      profileId: "explicit",
+      signing: { teamId: team, identity: second },
+    });
+  });
+
+  it("matches a wildcard app ID only over the bundle identifiers it covers", () => {
+    const prefixed = profile("prefixed", { applicationIdentifier: `${team}.sh.octant.*` });
+    expect(choose([prefixed])).toMatchObject({ kind: "chosen", profileId: "prefixed" });
+    expect(choose([prefixed], [first], "com.example.Other")).toEqual({
+      kind: "missing",
+      gap: "no-provisioning-profile",
+    });
+    expect(
+      choose([profile("exact", { applicationIdentifier: `${team}.sh.octant.Fixture.Extra` })]),
+    ).toEqual({ kind: "missing", gap: "no-provisioning-profile" });
+    // A more specific wildcard wins over the team-wide one.
+    expect(choose([profile("team-wide"), prefixed])).toMatchObject({ profileId: "prefixed" });
+  });
+
+  it("never signs with another team's, an expired, a distribution, or a non-iOS profile", () => {
+    for (const unusable of [
+      profile("other-team", { teamIds: ["Z9Y8X7W6V5"], applicationIdentifier: "Z9Y8X7W6V5.*" }),
+      profile("expired", { expiresAtMs: now - 1 }),
+      profile("distribution", { getTaskAllow: false }),
+      profile("enterprise", { provisionsAllDevices: true }),
+      profile("mac", { platforms: ["OSX"] }),
+      profile("mislabelled", { applicationIdentifier: "Z9Y8X7W6V5.*" }),
+    ]) {
+      expect(choose([unusable])).toEqual({ kind: "missing", gap: "no-provisioning-profile" });
+    }
+  });
+
+  it("names the step the person must take in Xcode when signing cannot be chosen", () => {
+    expect(choose([profile("wildcard")], [])).toEqual({
+      kind: "missing",
+      gap: "no-signing-identity",
+    });
+    expect(choose([])).toEqual({ kind: "missing", gap: "no-provisioning-profile" });
+    expect(choose([profile("wildcard", { certificates: [unknown] })])).toEqual({
+      kind: "missing",
+      gap: "no-identity-for-profile",
+    });
+  });
+
+  it("chooses the same profile every time from equally specific ones", () => {
+    const later = profile("b-later", { expiresAtMs: now + 2 * 86_400_000 });
+    expect(choose([profile("a-sooner"), later])).toMatchObject({ profileId: "b-later" });
+    expect(choose([later, profile("a-sooner")])).toMatchObject({ profileId: "b-later" });
+    expect(choose([profile("b"), profile("a")])).toMatchObject({ profileId: "a" });
   });
 });

@@ -30,6 +30,7 @@ export class AppleDeviceLeases {
   readonly #leases = new Map<string, AppleDeviceLease>();
   /** When each leased device was first seen gone, on the authority clock. */
   readonly #goneSince = new Map<string, number>();
+  readonly #endedListeners = new Set<(ended: EndedAppleDeviceLease) => void>();
 
   /**
    * `now` measures the disconnect grace: the host passes its suspend-aware
@@ -37,6 +38,15 @@ export class AppleDeviceLeases {
    */
   constructor(now: () => number = Date.now) {
     this.#now = now;
+  }
+
+  /**
+   * Tells the host each lease that ends, however it ends, so what the thread
+   * started on the device under it stops with it.
+   */
+  onEnded(listener: (ended: EndedAppleDeviceLease) => void): () => void {
+    this.#endedListeners.add(listener);
+    return () => this.#endedListeners.delete(listener);
   }
 
   list(): ReadonlyArray<AppleDeviceLease> {
@@ -58,7 +68,10 @@ export class AppleDeviceLeases {
     const previous = this.#leases.get(String(lease.deviceId));
     this.#leases.set(String(lease.deviceId), lease);
     this.#goneSince.delete(String(lease.deviceId));
-    return previous === undefined ? ended : [...ended, { lease: previous, reason: "moved" }];
+    if (previous === undefined) return ended;
+    const moved: EndedAppleDeviceLease = { lease: previous, reason: "moved" };
+    this.#announce(moved);
+    return [...ended, moved];
   }
 
   release(deviceId: string, threadId: string): EndedAppleDeviceLease | undefined {
@@ -136,6 +149,12 @@ export class AppleDeviceLeases {
     this.#goneSince.delete(deviceId);
     if (lease === undefined) return undefined;
     this.#leases.delete(deviceId);
-    return { lease, reason };
+    const ended = { lease, reason };
+    this.#announce(ended);
+    return ended;
+  }
+
+  #announce(ended: EndedAppleDeviceLease): void {
+    for (const listener of this.#endedListeners) listener(ended);
   }
 }

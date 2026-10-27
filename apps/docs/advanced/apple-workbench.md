@@ -230,6 +230,45 @@ treats Boot as a side effect of Run: a shut-down Simulator only offers
 is shut down, then installs and launches; that is today's toolchain behavior,
 not a workbench control.
 
+## Physical devices
+
+Physical iPhones and iPads are post-preview work, being built in stages. On
+a Mac with Xcode selected, the workbench lists the iPhones and iPads paired
+with that Mac under **Physical devices**, below the Simulators. Each shows
+its model, iOS version, whether it is on a cable or the network, and its
+state: **Ready**, **Locked**, **Developer Mode off**, **Not trusted**, or
+**Unavailable**. Choose one to see its setup rows:
+
+- **Reachable from this Mac**: connect it with a cable or join this Mac's
+  network.
+- **Paired and trusted**: tap **Trust** on the device and finish pairing in
+  Xcode › Window › Devices and Simulators.
+- **Developer Mode on**: Settings › Privacy & Security › Developer Mode on the
+  device, then restart it.
+- **Development team**: your 10-character Team ID from Xcode › Settings ›
+  Accounts. The workbench remembers it in this window only.
+
+Octant never pairs a device, turns on Developer Mode, or changes your
+developer account; the rows only say which step is left.
+
+A thread uses a device only after you let it. The **Let this thread use …**
+button, which names the device, opens a confirmation in Octant's desktop app
+that names the device and the thread. It asks under every access setting,
+Full access included, and a paired phone or a browser cannot answer it. While the thread
+uses the device, **Capture screen** takes a screenshot with the selected
+Xcode's own device tools and shows it in the pane. A physical device has no
+live view and takes no taps or typing, so the pane always shows the latest
+screenshot. If this Mac's Xcode has no device screenshot, the pane says so
+instead of offering the button. A locked phone cannot be captured; unlock it
+first. **Stop using** ends the thread's use of the device. If another thread
+is using it, the pane says so without naming that thread.
+
+The screenshot is kept as evidence on the Mac. Physical devices are listed
+only in Octant on that Mac for now: a paired phone or a browser on another
+computer cannot list them, see the screenshot, let a thread use a device, or
+capture its screen. Building and running your app on the device from the workbench, and
+the agent's own device operations, are not offered yet.
+
 ## Honest verification
 
 A coding agent may claim verification only when the surface was actually
@@ -248,8 +287,9 @@ and does not consume Simulator captures.
 
 ## Boundaries
 
-Not in V1: physical devices, signing, provisioning, archive and export,
-TestFlight, notarization, App Store submission, and release automation.
+Not in V1: physical devices (post-preview, above), signing, provisioning,
+archive and export, TestFlight, notarization, App Store submission, and
+release automation.
 Octant never silently installs or updates Xcode, SDKs, or Simulator
 runtimes. The Build iOS Apps extension is optional and contributes nothing to
 the core Apple path.

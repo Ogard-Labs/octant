@@ -1,16 +1,17 @@
-import { constants, mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import { constants, mkdir, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
-import { openConfinedPath } from "../confinedPathOpen";
+import { openConfinedPath, removeConfinedEntry } from "../confinedPathOpen";
+import { writeConfinedWorkFile } from "../work/workConfinedWrite";
+import { liveWorkFilesystem } from "../work/workFilesystemPort";
 import type { ArtifactMirrorFilePort } from "./artifactMirrorService";
 
 /**
  * The mirror's one door to the filesystem.
  *
- * Every write is proved to land under the root it was anchored to before it
- * happens. The service composes paths from a root plus a policy-checked
- * relative path, so this is the second check rather than the only one — but a
- * port that trusted its caller is how one missed decode becomes a write
- * anywhere on the disk.
+ * Every write and removal lands under the root it was anchored to. The service
+ * composes paths from a root plus a policy-checked relative path, so this is
+ * the second check rather than the only one — but a port that trusted its
+ * caller is how one missed decode becomes a write anywhere on the disk.
  */
 export function createArtifactMirrorFilePort(): ArtifactMirrorFilePort {
   return {
@@ -25,21 +26,59 @@ export function createArtifactMirrorFilePort(): ArtifactMirrorFilePort {
 
     async ensureRoot(absolutePath) {
       if (!isAbsolute(absolutePath)) return;
+      // The root is stored by its real path, so every folder above it that
+      // still exists is at its own real path too. One that is not has been
+      // swapped for a link since, and creating the root through it would put
+      // a folder wherever that link points, so it is refused before anything
+      // is created, as the export folder refuses. Node offers no
+      // directory-relative mkdir, so a swap between this check and the create
+      // can still leave one empty folder there; no file is ever written
+      // through it, because the service then refuses the root.
+      let above = dirname(absolutePath);
+      for (;;) {
+        const real = await realpath(above).catch(() => undefined);
+        if (real !== undefined) {
+          if (real !== above) throw new Error("Refusing to create the mirror root through a link.");
+          break;
+        }
+        const parent = dirname(above);
+        if (parent === above) return;
+        above = parent;
+      }
       await mkdir(absolutePath, { recursive: true });
     },
 
-    async write(absolutePath, contents) {
-      const directory = dirname(absolutePath);
-      await mkdir(directory, { recursive: true });
-      // Canonicalize after creating the directory: a symlinked parent resolves
-      // now, and the containment check below sees where the bytes would really
-      // land rather than where the path claimed.
-      const canonicalDirectory = await realpath(directory);
-      const root = await nearestExistingRoot(absolutePath);
-      if (root !== undefined && !isContained(root, canonicalDirectory)) {
-        throw new Error("Refusing to write outside the mirror root.");
-      }
-      await writeFile(absolutePath, contents, "utf8");
+    async write(absolutePath, contents, root) {
+      // A repository destination is a Code checkout or Work folder an agent
+      // can rename folders in. Creating the folders by path and then checking
+      // where they resolved compared a folder with itself, so a mirrored folder
+      // swapped for a link to a host folder received the bundle and its
+      // sidecars. Work's confined write is used instead: a replacement opens
+      // the file where it must land on its canonical path, and a new file is
+      // created by walking from the held root one no-follow folder at a time.
+      const names = namesUnderRoot(root, absolutePath);
+      if (names === undefined) throw new Error("Refusing to write outside the mirror root.");
+      const bytes = new TextEncoder().encode(contents);
+      const replaced = await writeConfinedWorkFile({
+        filesystem: liveWorkFilesystem,
+        canonicalPath: absolutePath,
+        allowCreate: false,
+        bytes,
+      });
+      if (replaced) return;
+      const opened = await liveWorkFilesystem.stat(root);
+      const created = await writeConfinedWorkFile({
+        filesystem: liveWorkFilesystem,
+        canonicalPath: absolutePath,
+        parent: {
+          absolutePath: root,
+          identity: { device: opened.device, inode: opened.inode },
+          remaining: names,
+        },
+        allowCreate: true,
+        bytes,
+      });
+      if (!created) throw new Error("Refusing to write outside the mirror root.");
     },
 
     async read(absolutePath, root) {
@@ -66,31 +105,30 @@ export function createArtifactMirrorFilePort(): ArtifactMirrorFilePort {
       }
     },
 
-    async remove(absolutePath) {
-      await rm(absolutePath, { force: true });
+    async remove(absolutePath, root) {
+      // A path removal followed a mirrored folder swapped for a host link and
+      // deleted the host file with the stale name, so the name is removed from
+      // its folder only once that folder is proved to be inside the root.
+      const names = namesUnderRoot(root, absolutePath);
+      const name = names?.[names.length - 1];
+      if (name === undefined) throw new Error("Refusing to remove outside the mirror root.");
+      await removeConfinedEntry(absolutePath.slice(0, absolutePath.lastIndexOf("/")), name);
     },
   };
 }
 
 /**
- * The deepest ancestor of this path that already exists, canonicalized.
+ * The plain names from a canonical root down to a path under it, or nothing
+ * when the path is not spelled as that root plus plain names.
  *
- * The mirror creates directories as it goes, so the root it was anchored to is
- * not always the nearest existing one. Resolving what is actually there is what
- * makes the containment check meaningful for a path several levels deep.
+ * The confined write and removal prove a handle landed on this exact path, so
+ * a spelling with `.`, `..`, or an empty name is refused here rather than
+ * failing a comparison there.
  */
-async function nearestExistingRoot(absolutePath: string): Promise<string | undefined> {
-  let candidate = dirname(absolutePath);
-  for (let depth = 0; depth < 64; depth += 1) {
-    try {
-      return await realpath(candidate);
-    } catch {
-      const parent = dirname(candidate);
-      if (parent === candidate) return undefined;
-      candidate = parent;
-    }
-  }
-  return undefined;
+function namesUnderRoot(root: string, absolutePath: string): ReadonlyArray<string> | undefined {
+  if (!absolutePath.startsWith(`${root}/`)) return undefined;
+  const names = absolutePath.slice(root.length + 1).split("/");
+  return names.every((name) => name !== "" && name !== "." && name !== "..") ? names : undefined;
 }
 
 /**

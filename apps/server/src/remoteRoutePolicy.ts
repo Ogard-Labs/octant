@@ -76,8 +76,14 @@ const LOCAL_ONLY_PREFIXES = [
   // person's act at this machine.
   "/api/thread-external-content",
   // Starting, moving, or releasing a physical device's lease is a person's
-  // act at the Mac the device is paired with.
+  // act at the Mac the device is paired with, and remote clients observe a
+  // device only: building, installing, launching, stopping, and reading an
+  // app's console, and taking a screenshot start at the Mac too. A device
+  // screenshot shows the person's own phone, so its pixels stay with windows
+  // on that Mac.
   "/api/apple/device-leases",
+  "/api/apple/device-actions",
+  "/api/apple/device-screenshots",
 ] as const;
 
 /**

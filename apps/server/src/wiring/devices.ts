@@ -14,6 +14,7 @@ import {
 } from "@octant/contracts";
 import { createHash, randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
@@ -21,7 +22,7 @@ import type { PersistenceService } from "../persistence/persistenceService";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { ValidationEventStore } from "../validation/validationEventStore";
 import { AppleRuntimeStore } from "../apple/appleRuntimeStore";
-import { AppleDeviceService } from "../apple/appleDeviceService";
+import { AppleDeviceService, type AppleDeviceExecutionContext } from "../apple/appleDeviceService";
 import { createAppleDeviceRouteHandler } from "../appleDeviceRoutes";
 import type { ClientPrincipal } from "../clientPrincipal";
 import {
@@ -51,7 +52,6 @@ import {
   decidesCodeEffectsByApproval,
   isAndroidEmulatorInputKind,
   isAppleSimulatorInputKind,
-  type AppleDeviceExecutionScope,
 } from "@octant/domain";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
@@ -127,7 +127,21 @@ export interface DeviceApprovalChecks {
     windowId: WindowId,
     request: AppleDeviceRequest,
   ) => Promise<boolean> | undefined;
+  /** Whether this window holds the one-use approval of exactly this device effect. */
+  readonly validateAppleDeviceAction: (
+    windowId: WindowId,
+    request: AppleDeviceRequest,
+  ) => Promise<boolean> | undefined;
 }
+
+// Device effects a thread's posture decides, one approval per request.
+const APPLE_DEVICE_EFFECT_KINDS: ReadonlySet<AppleDeviceRequest["kind"]> = new Set([
+  "build",
+  "run",
+  "install",
+  "launch",
+  "terminate",
+]);
 
 export type DevicesDependencies = Pick<ServerStart, "persistence"> &
   Pick<
@@ -172,15 +186,21 @@ export function wireDevices(deps: DevicesDependencies) {
     // `devicectl` writes its answers here, and a device listing names every
     // paired device's hardware identifiers, so it is private the same way.
     const devicectlOutputDirectory = join(providerDataDirectory, "apple-runtime", "devicectl");
-    const appleDeviceService = new AppleDeviceService({
-      execute: (input, signal) => appleProcess.execute(input, signal),
-      outputDirectory: devicectlOutputDirectory,
-      isolatedRoots: [appleCaptureDirectory],
-      identities: appleRuntimeStore,
-      leases: appleDeviceLeases,
-      now: () => new Date().toISOString(),
-      newId: randomUUID,
+    // A physical device's screen lands here before it becomes evidence; only
+    // its own capture launch may write it, as with the Simulator's captures.
+    const deviceCaptureDirectory = join(providerDataDirectory, "apple-runtime", "device-captures");
+    // The entitlements a device signature reads. Private like the others: no
+    // build, Simulator, or `devicectl` launch reaches it.
+    const appleSigningDirectory = join(providerDataDirectory, "apple-runtime", "signing");
+    // The signing step runs `security` and `codesign` with no network
+    // (decision 2 of docs/design/apple-devices.md); every other Apple launch
+    // keeps the toolchain port's own egress.
+    const appleSigningProcess = new RepositoryTestProcessPort({
+      receiptDirectory: join(providerDataDirectory, "apple-runtime", "signing-receipts"),
+      literalReadPaths: APPLE_TOOLCHAIN_HOST_READ_PATHS,
+      networkEgress: "none",
     });
+    yield* Effect.promise(() => appleSigningProcess.reconcile());
     // A lease ends with the thread it was confirmed for: archived, purged, or
     // bound to another checkout than the one the person saw.
     const unsubscribeAppleDeviceLeases = persistence.journal.subscribeCommitted((append) => {
@@ -208,7 +228,7 @@ export function wireDevices(deps: DevicesDependencies) {
         : { injectSimulatorInput: simulatorInputThroughDesktop(simulatorDevice) }),
       observeSimulators: (simulators) => simulatorInputGrants.closeUnlessBooted(simulators),
       captureDirectory: appleCaptureDirectory,
-      isolatedRoots: [devicectlOutputDirectory],
+      isolatedRoots: [devicectlOutputDirectory, deviceCaptureDirectory, appleSigningDirectory],
       // A host sweeps only the captures named for its own data directory, so
       // two hosts pointed at one directory never clear each other's files.
       captureOwner: createHash("sha256").update(providerDataDirectory).digest("hex").slice(0, 16),
@@ -241,7 +261,9 @@ export function wireDevices(deps: DevicesDependencies) {
       actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
     });
     const recordAppleEvidence = (
-      evidence: import("@octant/contracts").AppleBuildEvidence,
+      evidence:
+        | import("@octant/contracts").AppleBuildEvidence
+        | import("@octant/contracts").AppleDeviceEvidence,
       startedAt: string,
     ) => {
       const composed = composeAppleValidationEvents({ evidence, startedAt, newId: randomUUID });
@@ -249,6 +271,30 @@ export function wireDevices(deps: DevicesDependencies) {
       appleValidationEvents.appendEvidence({ evidence: composed.record, expectedVersion: 1 });
       appleValidationEvents.appendReport({ report: composed.report, expectedVersion: 2 });
     };
+    const appleDeviceService = new AppleDeviceService({
+      execute: (input, signal) => appleProcess.execute(input, signal),
+      executeSigning: (input, signal) => appleSigningProcess.execute(input, signal),
+      outputDirectory: devicectlOutputDirectory,
+      captureDirectory: deviceCaptureDirectory,
+      artifactRoot: appleRuntimeStore.artifactRoot,
+      signingDirectory: appleSigningDirectory,
+      // Where Xcode installs the person's provisioning profiles, the newer
+      // location first. Octant reads them and never writes there.
+      provisioningProfileDirectories: [
+        join(homedir(), "Library", "Developer", "Xcode", "UserData", "Provisioning Profiles"),
+        join(homedir(), "Library", "MobileDevice", "Provisioning Profiles"),
+      ],
+      isolatedRoots: [appleCaptureDirectory],
+      identities: appleRuntimeStore,
+      leases: appleDeviceLeases,
+      realpath,
+      writeArtifact: (reference, bytes) => appleRuntimeStore.writeArtifact(reference, bytes),
+      readArtifact: (reference) => appleRuntimeStore.readArtifact(reference),
+      recordEvidence: recordAppleEvidence,
+      now: () => new Date().toISOString(),
+      newId: randomUUID,
+    });
+    yield* Effect.addFinalizer(() => Effect.promise(() => appleDeviceService.close()));
     const androidRuntimeStore = new AndroidRuntimeStore(
       join(providerDataDirectory, "android-runtime"),
     );
@@ -404,15 +450,18 @@ export function wireDevices(deps: DevicesDependencies) {
           ...(inputGranted ? { inputGranted } : {}),
         };
       };
-      // A physical device request acts in the same thread scope. Only a lease
-      // start carries a confirmation in this slice, and it counts only when a
-      // person at a local window answered it: the host's confirmations are
-      // shown by the desktop app, never to a paired device.
+      // A physical device request acts in the same thread scope. A lease start
+      // counts only when a person at a local window answered its confirmation:
+      // the host's confirmations are shown by the desktop app, never to a
+      // paired device. A device effect follows the thread's posture like a
+      // Simulator effect: Full access runs it, approval-gated postures need
+      // this window's one-use approval of exactly this request, and Plan is
+      // refused by the device policy.
       const resolveAppleDeviceScope = async (
         windowId: WindowId,
         request: AppleDeviceRequest,
         principal: ClientPrincipal,
-      ): Promise<AppleDeviceExecutionScope | undefined> => {
+      ): Promise<AppleDeviceExecutionContext | undefined> => {
         const resolved = await resolveAppleThread(windowId, request);
         if (resolved === undefined) return undefined;
         const effectiveThread = codeSessionAuthority.effectiveThread(windowId, resolved.thread);
@@ -421,12 +470,20 @@ export function wireDevices(deps: DevicesDependencies) {
           request.approval.kind === "approved" &&
           principal.kind === "local-window" &&
           ((await approvals.validateAppleDeviceLease(windowId, request)) ?? false);
+        const effectApproved =
+          APPLE_DEVICE_EFFECT_KINDS.has(request.kind) &&
+          principal.kind === "local-window" &&
+          (effectiveThread.executionPolicy === "full-access" ||
+            (decidesCodeEffectsByApproval(effectiveThread.executionPolicy) &&
+              request.approval.kind === "approved" &&
+              ((await approvals.validateAppleDeviceAction(windowId, request)) ?? false)));
         return {
           authority: request.authority,
           threadId: resolved.thread.id,
           checkoutId: resolved.checkout.id,
+          checkoutRoot: resolved.rootPath,
           executionPolicy: effectiveThread.executionPolicy,
-          approvalValid: confirmed,
+          approvalValid: confirmed || effectApproved,
           ...(confirmed
             ? { approvedBy: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID } as const }
             : {}),
@@ -436,6 +493,14 @@ export function wireDevices(deps: DevicesDependencies) {
         windowAuthorityStore,
         service: appleDeviceService,
         resolveScope: resolveAppleDeviceScope,
+        // A screenshot's pixels are read in the same thread scope, by a local
+        // window only; the route refuses every other principal first.
+        resolveThread: async (windowId, request) => {
+          const resolved = await resolveAppleThread(windowId, request);
+          return resolved === undefined
+            ? undefined
+            : { threadId: resolved.thread.id, checkoutId: resolved.checkout.id };
+        },
       });
       const appleToolchainRoutes = createAppleToolchainRouteHandler({
         windowAuthorityStore,

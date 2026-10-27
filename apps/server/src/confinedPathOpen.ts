@@ -1,5 +1,6 @@
+import { execFile } from "node:child_process";
 import { closeSync, openSync, readlinkSync, type BigIntStats } from "node:fs";
-import { constants, open, readlink, type FileHandle } from "node:fs/promises";
+import { constants, open, readlink, unlink, type FileHandle } from "node:fs/promises";
 
 const darwinNoFollowAny = 0x20000000;
 
@@ -113,4 +114,62 @@ export async function statConfinedPath(canonicalPath: string): Promise<BigIntSta
  */
 export function confinedEnumerationPath(handle: FileHandle, canonicalPath: string): string {
   return process.platform === "linux" ? `/proc/self/fd/${handle.fd}` : canonicalPath;
+}
+
+/**
+ * Removes one name from a directory a confinement sequence canonicalized, so
+ * the entry removed is the one in the directory at that path even when an
+ * ancestor is swapped for a link to a host folder while the removal runs.
+ *
+ * A path `unlink` resolves the ancestors afresh, exactly as a path open does,
+ * so it follows such a swap and deletes the host file of the same name. The
+ * removal must instead be relative to a directory proved to sit at the
+ * canonical path:
+ *
+ * - Linux opens the directory through `openConfinedPath` and unlinks the name
+ *   under `/proc/self/fd/N`, which resolves to the held directory itself.
+ * - macOS has no descriptor-relative unlink reachable from Node or Bun
+ *   (`/dev/fd/N/name` fails), so a child process does it from its working
+ *   directory: `/bin/pwd -P` reports where that directory really is, it must
+ *   equal the canonical path, and `rm` then removes the name relative to it.
+ *   A swap after that check moves the directory the child already holds, so
+ *   the name removed is still inside the root.
+ * - Elsewhere there is no such guarantee and the removal refuses.
+ *
+ * Unlinking never follows the final name, so a link planted there is removed
+ * rather than its target. A refusal or failure is thrown.
+ */
+export async function removeConfinedEntry(canonicalDirectory: string, name: string): Promise<void> {
+  if (name === "" || name === "." || name === ".." || name.includes("/") || name.includes("\0")) {
+    throw new Error("a confined removal names one entry of its directory");
+  }
+  if (process.platform === "darwin") {
+    await new Promise<void>((resolve, reject) => {
+      execFile(
+        "/bin/sh",
+        [
+          "-c",
+          '[ "$(/bin/pwd -P)" = "$1" ] && exec /bin/rm -f -- "$2"',
+          "octant-confined-remove",
+          canonicalDirectory,
+          name,
+        ],
+        { cwd: canonicalDirectory, env: {} },
+        (error) => (error === null ? resolve() : reject(error)),
+      );
+    });
+    return;
+  }
+  if (process.platform !== "linux") {
+    throw new Error("this platform cannot prove where a removal lands");
+  }
+  const directory = await openConfinedPath(
+    canonicalDirectory,
+    constants.O_RDONLY | constants.O_DIRECTORY,
+  );
+  try {
+    await unlink(`/proc/self/fd/${directory.fd}/${name}`);
+  } finally {
+    await directory.close().catch(() => undefined);
+  }
 }

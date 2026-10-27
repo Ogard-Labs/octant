@@ -268,6 +268,8 @@ settings:
 - **Provider** lists only the desktop providers this host has ready. On Linux
   that is this host itself, offered once Bubblewrap, Xvfb, xdotool, and
   ImageMagick are installed and Octant has restarted.
+- **Runs on** appears for a provider that names where its desktops run, and
+  picks where this Project's desktops run.
 - **Screen** sets the desktop's size.
 - **Lasts**, **Longest**, and **Idle** set how long a desktop lasts at first,
   the most it can be extended to, and how long it may sit unused. They start

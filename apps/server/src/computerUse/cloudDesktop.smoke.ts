@@ -1,17 +1,28 @@
 /**
- * The maintainer's live smoke for a bundled cloud desktop provider.
+ * The maintainer's live smoke for a bundled desktop provider that runs
+ * outside this host's own capsules: a cloud API, or a provider's local daemon.
  *
- * It runs the real lease service, the real host HTTPS port, and the bundled
- * driver against the provider's real API, on the maintainer's own account. It
- * is never run by tests or CI: it spends money. The API key is read from
- * standard input, never from an argument or the environment, and is held only
- * in this process's memory, where the credential broker would otherwise
- * answer for it. A Project recipe is supplied here because no host offers a
- * cloud provider to the recipe store yet.
+ * It runs the real lease service, the real host port (HTTPS or the local
+ * daemon's Unix socket), and the bundled driver against the provider itself,
+ * on the maintainer's own account. It is never run by tests or CI: a cloud
+ * provider spends money, and a daemon provider boots a real VM. A cloud API
+ * key is read from standard input, never from an argument or the
+ * environment, and is held only in this process's memory, where the
+ * credential broker would otherwise answer for it; a daemon provider reads
+ * none, because its daemon holds the person's sign-in. A Project recipe is
+ * supplied here because no host offers these providers to the recipe store
+ * yet.
  *
  *   read -rs KEY; printf %s "$KEY" | bun run desktop:cloud:smoke e2b run
  *   read -rs KEY; printf %s "$KEY" | bun run desktop:cloud:smoke e2b kill
  *   read -rs KEY; printf %s "$KEY" | bun run desktop:cloud:smoke e2b restart
+ *
+ *   bun run desktop:cloud:smoke cua run
+ *   bun run desktop:cloud:smoke cua kill
+ *   bun run desktop:cloud:smoke cua restart
+ *
+ * Cua needs a Linux host with Cua's daemon running as this user
+ * (`cua daemon start`), signed in, and QEMU installed.
  *
  * `run` acquires a billed desktop as a person who confirmed it, reads a frame,
  * sends a person's click and text, sends a small app as the agent, launches,
@@ -34,7 +45,12 @@ import {
   type DesktopProviderId,
 } from "@octant/contracts";
 import { decodeComputerControlCommand } from "@octant/contracts/computer-use-plugin";
-import type { DesktopHttpsPort, DesktopProvider } from "@octant/plugin-api/desktop-provider";
+import type {
+  DesktopDaemonPort,
+  DesktopHttpsPort,
+  DesktopProvider,
+} from "@octant/plugin-api/desktop-provider";
+import { createDesktopDaemonPort } from "./desktopDaemonPort";
 import { createDesktopHttpsPort } from "./desktopHttpsPort";
 import { createDesktopLeaseService } from "./desktopLeaseService";
 import { Journal } from "../persistence/journal";
@@ -47,18 +63,39 @@ import {
   E2B_DESKTOP_HOSTS,
   E2B_DESKTOP_PROVIDER_ID,
 } from "../plugins/e2bDesktop/e2bDesktopProvider";
+import {
+  createCuaDesktopProvider,
+  CUA_DESKTOP_DAEMON,
+  CUA_DESKTOP_PROVIDER_ID,
+  CUA_THIS_MACHINE_PLACEMENT,
+} from "../plugins/cuaDesktop/cuaDesktopProvider";
 
-interface CloudDriver {
-  readonly id: DesktopProviderId;
-  readonly hosts: ReadonlyArray<string>;
-  readonly create: (https: DesktopHttpsPort) => DesktopProvider;
-}
+type CloudDriver =
+  | {
+      readonly reach: "https";
+      readonly id: DesktopProviderId;
+      readonly hosts: ReadonlyArray<string>;
+      readonly create: (https: DesktopHttpsPort) => DesktopProvider;
+    }
+  | {
+      readonly reach: "daemon";
+      readonly id: DesktopProviderId;
+      readonly placementId: string;
+      readonly create: (daemon: DesktopDaemonPort) => DesktopProvider;
+    };
 
 const DRIVERS: Readonly<Record<string, CloudDriver>> = {
   e2b: {
+    reach: "https",
     id: E2B_DESKTOP_PROVIDER_ID,
     hosts: E2B_DESKTOP_HOSTS,
     create: (https) => createE2bDesktopProvider(https),
+  },
+  cua: {
+    reach: "daemon",
+    id: CUA_DESKTOP_PROVIDER_ID,
+    placementId: String(CUA_THIS_MACHINE_PLACEMENT),
+    create: (daemon) => createCuaDesktopProvider(daemon),
   },
 };
 
@@ -72,8 +109,8 @@ if (driverEntry === undefined || !["run", "kill", "restart"].includes(phase)) {
 }
 const cloud: CloudDriver = driverEntry;
 
-const key = (await Bun.stdin.text()).trim();
-if (key.length === 0) {
+const key = cloud.reach === "https" ? (await Bun.stdin.text()).trim() : "";
+if (cloud.reach === "https" && key.length === 0) {
   console.error("Pipe the provider's API key on standard input.");
   process.exit(2);
 }
@@ -108,23 +145,31 @@ for (const projection of runtime.projections.all()) {
 }
 const projection = runtime.desktopLeaseProjection;
 
-const driver = cloud.create(
-  createDesktopHttpsPort({
-    hosts: () => cloud.hosts,
-    credentialPermitted: (ref) =>
-      projection
-        .list()
-        .some(
-          (record) =>
-            String(record.lease.providerId) === String(cloud.id) &&
-            String(record.lease.credentialRef ?? "") === String(ref),
-        ),
-    credential: async (ref) => (String(ref) === String(credentialRef) ? key : undefined),
-  }),
-);
+const driver =
+  cloud.reach === "https"
+    ? cloud.create(
+        createDesktopHttpsPort({
+          hosts: () => cloud.hosts,
+          credentialPermitted: (ref) =>
+            projection
+              .list()
+              .some(
+                (record) =>
+                  String(record.lease.providerId) === String(cloud.id) &&
+                  String(record.lease.credentialRef ?? "") === String(ref),
+              ),
+          credential: async (ref) => (String(ref) === String(credentialRef) ? key : undefined),
+        }),
+      )
+    : cloud.create(createDesktopDaemonPort({ daemon: () => CUA_DESKTOP_DAEMON }));
+// A daemon provider's account is the placement its daemon is signed in to,
+// never a key; a cloud provider's is the key piped in above.
+const account = cloud.reach === "https" ? credentialRef : undefined;
 const recipe = decodeDesktopRecipe({
   providerId: String(cloud.id),
-  credentialRef: String(credentialRef),
+  ...(cloud.reach === "https"
+    ? { credentialRef: String(credentialRef) }
+    : { placementId: cloud.placementId }),
   screen: { width: 1024, height: 768 },
   network: "none",
   leaseMinutes: 10,
@@ -155,6 +200,7 @@ const service = createDesktopLeaseService({
   systemActor: decodeEventActor({ kind: "system", actorId: randomUUID() }),
   now: () => Date.now(),
   uuid: randomUUID,
+  ...(process.getuid === undefined ? {} : { daemonUserId: process.getuid() }),
 });
 const owner = { mode: "code" as const, threadId };
 const caller = { owner, actor: person, scopeId: "smoke-window" };
@@ -183,7 +229,7 @@ const controlAnswered = (outcome: { readonly status: string; readonly result?: u
 
 /** Asks the provider itself whether any desktop of this host remains. */
 async function remaining(): Promise<number> {
-  const listed = await driver.listOwned(hostTag, credentialRef);
+  const listed = await driver.listOwned(hostTag, account);
   step("provider listing for this host", listed);
   if (listed.status !== "listed")
     throw new Error("The provider could not list this host's desktops.");

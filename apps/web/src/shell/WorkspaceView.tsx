@@ -136,6 +136,7 @@ import {
 import { MarkdownLinkActionsContext } from "../markdown/Markdown";
 import { openExternalUrl } from "./openExternalUrl";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
+import type { AppleDeviceClient } from "@octant/client-runtime/apple-device-client";
 import { WorkPromotionFlow } from "../work/WorkPromotionFlow";
 import type { WorkPromotionController } from "../work/useWorkPromotionController";
 import type { CodeThreadProviderChoice } from "../code/codeThreadCreate";
@@ -166,6 +167,8 @@ type CodeWorkspaceProps = import("../code/CodeWorkspace").CodeWorkspaceProps;
 
 export interface WorkspaceViewProps {
   readonly appleToolchainClient?: AppleToolchainClient;
+  /** The host's paired iPhones and iPads, shown in the Apple workbench. */
+  readonly appleDeviceClient?: AppleDeviceClient;
   readonly agentRunClient?: AgentRunClient;
   /** Reads and clears an open local thread's outside-content mark, over its composer. */
   readonly contextClient?: ContextClient;
@@ -1173,6 +1176,9 @@ function renderCodeTab(
         {...(props.appleToolchainClient === undefined
           ? {}
           : { appleToolchainClient: props.appleToolchainClient })}
+        {...(props.appleDeviceClient === undefined
+          ? {}
+          : { appleDeviceClient: props.appleDeviceClient })}
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
         {...(browserAutomationClient === undefined ? {} : { browserAvailable: true })}
         controller={codeController}

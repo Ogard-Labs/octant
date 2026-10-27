@@ -41,6 +41,7 @@ import {
 } from "../computerUse/desktopLeaseService";
 import { createHostLocalDesktopLaunch } from "../computerUse/hostLocalDesktopLaunch";
 import { createDesktopHttpsPort } from "../computerUse/desktopHttpsPort";
+import { createDesktopDaemonPort } from "../computerUse/desktopDaemonPort";
 import { leasableProvidersOf } from "../computerUse/computerUseDestination";
 import { readProjectDesktopRecipe } from "../computerUse/projectDesktopRecipe";
 import {
@@ -52,6 +53,11 @@ import {
   E2B_DESKTOP_HOSTS,
   E2B_DESKTOP_PROVIDER_ID,
 } from "../plugins/e2bDesktop/e2bDesktopProvider";
+import {
+  createCuaDesktopProvider,
+  CUA_DESKTOP_DAEMON,
+  CUA_DESKTOP_PROVIDER_ID,
+} from "../plugins/cuaDesktop/cuaDesktopProvider";
 import { makeDesktopProviderCredentialBrokerClient } from "../providers/credentialBrokerClient";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { withToolFamilyHelp } from "../providers/appManagedToolSet";
@@ -200,14 +206,33 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
       effective: false,
     },
   ];
-  const desktopProviders = [...hostLocalDesktops, ...cloudDesktops];
+  // The bundled Cua Spaces driver reaches the person's own `cua daemon` only
+  // through the host's daemon port, on the socket and methods it declares.
+  // It is loaded on Linux for teardown and offered nowhere until the
+  // maintainer's live smoke passes. Octant asks the person's daemon nothing,
+  // not even a restart listing, until this host has journaled a Cua lease:
+  // a listing makes the daemon wait for Cua's relay, and a person who never
+  // chose Cua in Octant has nothing of Octant's there to find.
+  const cuaDesktop =
+    process.platform === "linux"
+      ? createCuaDesktopProvider(createDesktopDaemonPort({ daemon: () => CUA_DESKTOP_DAEMON }))
+      : undefined;
+  const cuaLeaseJournaled = () =>
+    persistence.desktopLeaseProjection
+      .list()
+      .some((record) => String(record.lease.providerId) === String(CUA_DESKTOP_PROVIDER_ID));
+  const loadedDesktopProviders = [...hostLocalDesktops, ...cloudDesktops];
+  const desktopProviders = () =>
+    cuaDesktop === undefined || !cuaLeaseJournaled()
+      ? loadedDesktopProviders
+      : [...loadedDesktopProviders, { provider: cuaDesktop, effective: false }];
   const desktopLeases = createDesktopLeaseService({
     journal: persistence.journal,
     projection: persistence.desktopLeaseProjection,
     hostTag: desktopHostTag,
     platform: process.platform,
     hasScreen: computerUseDesktop !== undefined || options.computerUseAdapter !== undefined,
-    providers: () => desktopProviders,
+    providers: desktopProviders,
     recipe: (owner) =>
       readProjectDesktopRecipe({
         owner,
@@ -312,6 +337,7 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     systemActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
     now: () => Date.now(),
     uuid: randomUUID,
+    ...(process.getuid === undefined ? {} : { daemonUserId: process.getuid() }),
   });
   void desktopLeases.start().catch(() => undefined);
   const sweepDesktopLeases = () => void desktopLeases.sweep().catch(() => undefined);
