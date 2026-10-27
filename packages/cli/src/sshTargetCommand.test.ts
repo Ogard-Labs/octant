@@ -240,6 +240,67 @@ describe("octant ssh-target", () => {
     );
   });
 
+  it("creates, lists, and removes a managed worktree through the local routes, saying why Git kept one", async () => {
+    const worktree = {
+      id: "77777777-7777-4777-8777-777777777777",
+      projectId: "66666666-6666-4666-8666-666666666666",
+      name: "fix-login",
+      branch: "octant/fix-login",
+      path: "/home/build/.octant-worktrees/66666666-6666-4666-8666-666666666666/fix-login",
+      createdAt: "2026-10-26T10:00:00.000Z",
+    };
+    const replies: Record<string, LocalControlResponse> = {
+      "/api/desktop/ssh-targets/projects/worktrees/create": { status: 200, body: worktree },
+      "/api/desktop/ssh-targets/projects/worktrees": {
+        status: 200,
+        body: { worktrees: [worktree] },
+      },
+      "/api/desktop/ssh-targets/projects/worktrees/remove": {
+        status: 409,
+        body: { status: "refused", reason: "worktree-dirty" },
+      },
+    };
+    const out: string[] = [];
+    const err: string[] = [];
+    const sent: LocalControlRequest[] = [];
+    const codes: number[] = [];
+    for (const argv of [
+      ["worktree", "add", worktree.projectId, "fix-login"],
+      ["worktrees"],
+      ["worktree", "remove", worktree.id],
+    ]) {
+      const command = resolveSshTargetCliCommand(argv, {});
+      if (command === undefined) throw new Error("unresolved");
+      codes.push(
+        await runSshTargetCliCommand({
+          command,
+          session: {
+            kind: "opened",
+            windowId: "11111111-1111-4111-8111-111111111111",
+            send: async (request) => {
+              sent.push(request);
+              return replies[request.path] ?? { status: 404, body: {} };
+            },
+            close: async () => undefined,
+          },
+          stdout: { write: (chunk) => out.push(chunk) },
+          stderr: { write: (chunk) => err.push(chunk) },
+          ask: undefined,
+        }),
+      );
+    }
+    expect(codes).toEqual([0, 0, 1]);
+    expect(sent.map((request) => request.body)).toEqual([
+      { projectId: worktree.projectId, name: "fix-login" },
+      undefined,
+      { worktreeId: worktree.id },
+    ]);
+    expect(out.join("")).toContain("octant/fix-login");
+    expect(err.join("")).toContain("Git keeps it");
+    expect(resolveSshTargetCliCommand(["worktree", "add", "p"], {})).toBeUndefined();
+    expect(resolveSshTargetCliCommand(["worktree", "remove", "w", "extra"], {})).toBeUndefined();
+  });
+
   it("reads only the arguments each action takes", () => {
     expect(resolveSshTargetCliCommand([], {})).toEqual({ action: "list" });
     expect(resolveSshTargetCliCommand(["add", "devbox"], {})).toBeUndefined();

@@ -8,6 +8,8 @@ import { ExecutorEgress, runExecutorCommand } from "./executorLaunches";
 import { answerExecutorRead, resolveBoundRoot } from "./executorReads";
 import { openExecutorRuntimeDirectory } from "./executorRuntimeDirectory";
 import { serveSshExecutor } from "./executorSession";
+import { ExecutorTerminals } from "./executorTerminals";
+import { createExecutorWorktree, removeExecutorWorktree } from "./executorWorktrees";
 
 /**
  * `octant executor --stdio`: the process this host starts on an SSH target,
@@ -84,6 +86,13 @@ await serveSshExecutor({
   handlers: (send) => {
     const egress = new ExecutorEgress(send);
     const files = new ExecutorHarnessFiles(reads);
+    const terminals = new ExecutorTerminals(send, {
+      platform: process.platform,
+      sessionDirectory,
+      shell: process.env.SHELL,
+      path: process.env.PATH,
+      language: process.env.LANG,
+    });
     return {
       answer: async (request, signal) => {
         switch (request.kind) {
@@ -110,12 +119,34 @@ await serveSshExecutor({
             if (root.status === "refused") return { kind: "refused", reason: root.reason };
             return runExecutorCommand(reads, root.canonical, request, egress, signal);
           }
+          case "open-terminal": {
+            const root = await resolveBoundRoot(reads, request.root);
+            if (root.status === "refused") return { kind: "refused", reason: root.reason };
+            return terminals.open(root.canonical, request);
+          }
+          case "create-worktree":
+            return createExecutorWorktree(reads, request);
+          case "remove-worktree":
+            return removeExecutorWorktree(reads, request);
           default:
             return answerExecutorRead(reads, request);
         }
       },
-      receive: (frame) => egress.receive(frame),
-      end: () => egress.abandon(),
+      receive: (frame) => {
+        switch (frame.type) {
+          case "terminal-input":
+          case "terminal-resize":
+          case "terminal-close":
+          case "terminal-credit":
+            return terminals.receive(frame);
+          default:
+            return egress.receive(frame);
+        }
+      },
+      end: () => {
+        egress.abandon();
+        terminals.abandon();
+      },
     };
   },
 });

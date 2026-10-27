@@ -13,11 +13,17 @@ import {
   SshRemoteGitDiffRequest,
   SshRemoteGitStatusRequest,
   SshRemoteProjectBindRequest,
+  SshRemoteTerminalCommand,
+  SshRemoteWorktreeCreateRequest,
+  SshRemoteWorktreeRequest,
   type SshRemoteProjectList,
+  type SshRemoteWorktreeList,
 } from "@octant/contracts/ssh-remote-project";
 import { isLoopbackHostname } from "../shellRoutes";
+import type { WindowId } from "@octant/contracts/shell";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import type { SshRemoteProjectResult, SshRemoteProjectService } from "./sshRemoteProjectService";
+import type { SshRemoteTerminalService } from "./sshRemoteTerminalService";
 import type {
   SshTargetAdministrationResult,
   SshTargetConnectionService,
@@ -34,9 +40,11 @@ import type {
  * device never reaches them, because the remote gateway keeps every
  * `/api/desktop` path local and holds no bridge secret to present.
  *
- * Binding a remote root is local in the same way. The reads of a bound root
- * sit here too until remote-bound Projects join the product routes with their
- * threads: until then no paired device can reach a target's files at all.
+ * Binding a remote root is local in the same way. The reads of a bound root,
+ * its managed worktrees, and a person's terminals on it sit here too until
+ * remote-bound Projects join the product routes with their threads: until
+ * then no paired device can reach a target's files or shells at all. A
+ * terminal belongs to the window whose capability opened it.
  */
 
 const DEFAULT_BODY_LIMIT = 16 * 1_024;
@@ -54,7 +62,14 @@ export const SSH_TARGET_ROUTES = {
   file: "/api/desktop/ssh-targets/projects/file",
   gitStatus: "/api/desktop/ssh-targets/projects/git-status",
   gitDiff: "/api/desktop/ssh-targets/projects/git-diff",
+  worktrees: "/api/desktop/ssh-targets/projects/worktrees",
+  worktreeCreate: "/api/desktop/ssh-targets/projects/worktrees/create",
+  worktreeRemove: "/api/desktop/ssh-targets/projects/worktrees/remove",
+  terminal: "/api/desktop/ssh-targets/projects/terminal",
 } as const;
+
+/** A terminal's input can be a whole paste, so its route takes a larger body. */
+const TERMINAL_BODY_LIMIT = 192 * 1_024;
 
 type RouteValue = (typeof SSH_TARGET_ROUTES)[keyof typeof SSH_TARGET_ROUTES];
 const ROUTE_VALUES: ReadonlySet<string> = new Set(Object.values(SSH_TARGET_ROUTES));
@@ -64,6 +79,7 @@ export interface SshTargetAdministrationRouteOptions {
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly connections: SshTargetConnectionService;
   readonly projects: SshRemoteProjectService;
+  readonly terminals: SshRemoteTerminalService;
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
 }
@@ -88,8 +104,9 @@ export function createSshTargetAdministrationRouteHandler(
     ) {
       return failure("unauthorized", 401);
     }
+    let windowId: WindowId;
     try {
-      options.windowAuthorityStore.authenticate(
+      windowId = options.windowAuthorityStore.authenticate(
         request.headers.get("x-octant-window-capability") ?? "",
         now(),
       );
@@ -109,11 +126,19 @@ export function createSshTargetAdministrationRouteHandler(
       const list: SshRemoteProjectList = { projects: projects.list() };
       return Response.json(list);
     }
+    if (route === SSH_TARGET_ROUTES.worktrees) {
+      if (request.method !== "GET") return failure("invalid", 405);
+      const list: SshRemoteWorktreeList = { worktrees: projects.listWorktrees() };
+      return Response.json(list);
+    }
     if (request.method !== "POST") return failure("invalid", 405);
     if (request.headers.get("content-type")?.split(";", 1)[0]?.trim() !== "application/json") {
       return failure("invalid", 415);
     }
-    const body = await readJson(request, maxBody);
+    const body = await readJson(
+      request,
+      route === SSH_TARGET_ROUTES.terminal ? Math.max(maxBody, TERMINAL_BODY_LIMIT) : maxBody,
+    );
     if (body.kind !== "ok") return failure("invalid", body.kind === "too-large" ? 413 : 400);
 
     switch (route) {
@@ -162,6 +187,26 @@ export function createSshTargetAdministrationRouteHandler(
         if (decoded._tag === "Left") return failure("invalid", 400);
         return answerProject(await projects.gitDiff(decoded.right));
       }
+      case SSH_TARGET_ROUTES.worktreeCreate: {
+        const decoded = Schema.decodeUnknownEither(SshRemoteWorktreeCreateRequest)(body.value);
+        if (decoded._tag === "Left") return failure("invalid", 400);
+        return answerProject(await projects.createWorktree(decoded.right));
+      }
+      case SSH_TARGET_ROUTES.worktreeRemove: {
+        const decoded = Schema.decodeUnknownEither(SshRemoteWorktreeRequest)(body.value);
+        if (decoded._tag === "Left") return failure("invalid", 400);
+        const removed = await projects.removeWorktree(decoded.right);
+        return removed.status === "ok"
+          ? new Response(null, { status: 204 })
+          : answerProject(removed);
+      }
+      case SSH_TARGET_ROUTES.terminal: {
+        const decoded = Schema.decodeUnknownEither(SshRemoteTerminalCommand)(body.value);
+        if (decoded._tag === "Left") return failure("invalid", 400);
+        // A refusal is part of the answer, as a local Project terminal's is:
+        // the window shows the host's sentence.
+        return Response.json(await options.terminals.execute(windowId, decoded.right));
+      }
       case SSH_TARGET_ROUTES.remove: {
         const decoded = Schema.decodeUnknownEither(SshTargetRequest)(body.value);
         if (decoded._tag === "Left") return failure("invalid", 400);
@@ -184,7 +229,10 @@ function answer<T>(result: SshTargetAdministrationResult<T>): Response {
 function answerProject<T>(result: SshRemoteProjectResult<T>): Response {
   return result.status === "ok"
     ? Response.json(result.value)
-    : Response.json(result, { status: result.reason === "unknown-project" ? 404 : 409 });
+    : Response.json(result, {
+        status:
+          result.reason === "unknown-project" || result.reason === "unknown-worktree" ? 404 : 409,
+      });
 }
 
 async function readJson(

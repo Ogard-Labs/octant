@@ -7,6 +7,8 @@ import {
   SshRemoteProject,
   SshRemoteProjectList,
   SshRemoteProjectRefusal,
+  SshRemoteWorktree,
+  SshRemoteWorktreeList,
 } from "@octant/contracts/ssh-remote-project";
 import {
   SshHostKeyProbe,
@@ -48,7 +50,10 @@ export type SshTargetCliCommand =
   | { readonly action: "files"; readonly projectId: string; readonly directory?: string }
   | { readonly action: "read"; readonly projectId: string; readonly path: string }
   | { readonly action: "status"; readonly projectId: string }
-  | { readonly action: "diff"; readonly projectId: string; readonly path?: string };
+  | { readonly action: "diff"; readonly projectId: string; readonly path?: string }
+  | { readonly action: "worktrees" }
+  | { readonly action: "worktree-add"; readonly projectId: string; readonly name: string }
+  | { readonly action: "worktree-remove"; readonly worktreeId: string };
 
 /** A host answer decoded as clients decode them, or undefined when it does not read. */
 function answer<A, I>(
@@ -75,6 +80,21 @@ export function resolveSshTargetCliCommand(
   }
   if (action === "projects") {
     return rest.length === 0 && flagNames.length === 0 ? { action: "projects" } : undefined;
+  }
+  if (action === "worktrees") {
+    return rest.length === 0 && flagNames.length === 0 ? { action: "worktrees" } : undefined;
+  }
+  if (action === "worktree") {
+    const [verb, first, second, ...extra] = rest;
+    if (flagNames.length > 0 || extra.length > 0 || first === undefined) return undefined;
+    // The host checks each against its schemas before anything runs.
+    if (verb === "add" && second !== undefined) {
+      return { action: "worktree-add", projectId: first, name: second };
+    }
+    if (verb === "remove" && second === undefined) {
+      return { action: "worktree-remove", worktreeId: first };
+    }
+    return undefined;
   }
   if (action === "files" || action === "read" || action === "status" || action === "diff") {
     return resolveReadCommand(action, rest, flagNames);
@@ -181,6 +201,13 @@ export async function runSshTargetCliCommand(input: RunSshTargetCliCommandInput)
     command.action === "diff"
   ) {
     return runReadCommand(input, command);
+  }
+  if (
+    command.action === "worktrees" ||
+    command.action === "worktree-add" ||
+    command.action === "worktree-remove"
+  ) {
+    return runWorktreeCommand(input, command);
   }
   if (command.action === "list") {
     const listed = await session.send({ path: "/api/desktop/ssh-targets", method: "GET" });
@@ -440,8 +467,65 @@ const READ_REFUSAL: Readonly<
   "git-unavailable": "Git is not installed on the target.",
   "read-failed": "the target could not read it.",
   "unknown-project": "no such Project.",
+  "unknown-worktree": "no such worktree of that Project.",
   "executor-unavailable": "the session to the target ended; reconnect and try again.",
+  "not-repository-root":
+    "a worktree needs the bound folder to be its repository's own top level, with .git inside it.",
+  "worktree-exists": "a worktree or branch of that name already exists.",
+  "worktree-dirty": "the worktree holds changes or untracked files, so Git keeps it.",
+  "worktree-failed": "Git could not change the worktree on the target.",
 };
+
+function writeWorktree(
+  stdout: { readonly write: (chunk: string) => unknown },
+  worktree: SshRemoteWorktree,
+): void {
+  stdout.write(
+    `${String(worktree.id)}  ${worktree.branch}  ${worktree.path}  (Project ${String(worktree.projectId)})\n`,
+  );
+}
+
+async function runWorktreeCommand(
+  input: RunSshTargetCliCommandInput,
+  command: Extract<
+    SshTargetCliCommand,
+    { readonly action: "worktrees" | "worktree-add" | "worktree-remove" }
+  >,
+): Promise<number> {
+  if (command.action === "worktrees") {
+    const listed = await input.session.send({
+      path: "/api/desktop/ssh-targets/projects/worktrees",
+      method: "GET",
+    });
+    const decoded = listed.status === 200 ? answer(SshRemoteWorktreeList, listed.body) : undefined;
+    if (decoded === undefined) {
+      input.stderr.write(`${failureMessage(listed, "Octant refused to list worktrees.")}\n`);
+      return 1;
+    }
+    if (decoded.worktrees.length === 0) input.stdout.write("No managed worktrees.\n");
+    for (const worktree of decoded.worktrees) writeWorktree(input.stdout, worktree);
+    return 0;
+  }
+  if (command.action === "worktree-add") {
+    const sent = await input.session.send({
+      path: "/api/desktop/ssh-targets/projects/worktrees/create",
+      method: "POST",
+      body: { projectId: command.projectId, name: command.name },
+    });
+    const created = sent.status === 200 ? answer(SshRemoteWorktree, sent.body) : undefined;
+    if (created === undefined) return writeRefusal(input.stderr, sent, "Not created");
+    writeWorktree(input.stdout, created);
+    return 0;
+  }
+  const sent = await input.session.send({
+    path: "/api/desktop/ssh-targets/projects/worktrees/remove",
+    method: "POST",
+    body: { worktreeId: command.worktreeId },
+  });
+  if (sent.status !== 204) return writeRefusal(input.stderr, sent, "Not removed");
+  input.stdout.write(`Removed worktree ${command.worktreeId}; its branch stays.\n`);
+  return 0;
+}
 
 function writeProject(
   stdout: { readonly write: (chunk: string) => unknown },

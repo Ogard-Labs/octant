@@ -11,11 +11,18 @@ import {
   UtcTimestamp,
   type EventActor as EventActorValue,
 } from "@octant/contracts";
+import { CodeTerminalId } from "@octant/contracts/code";
 import type { HostExportSshTarget } from "@octant/contracts/host-export";
-import type { SshRemoteProject } from "@octant/contracts/ssh-remote-project";
+import type { ProjectId } from "@octant/contracts/projects";
+import type {
+  SshRemoteProject,
+  SshRemoteWorktree,
+  SshRemoteWorktreeId,
+} from "@octant/contracts/ssh-remote-project";
 import {
   SshAttestationFacts,
   type SshAttestation,
+  type SshConnectionId,
   type SshPinnedHostKey,
   type SshTarget,
   type SshTargetId,
@@ -24,8 +31,14 @@ import {
 import {
   SSH_REMOTE_PROJECT_AGGREGATE,
   SSH_REMOTE_PROJECT_EVENT_NAMES,
+  SSH_REMOTE_TERMINAL_AGGREGATE,
+  SSH_REMOTE_TERMINAL_EVENT_NAMES,
+  SSH_REMOTE_WORKTREE_AGGREGATE,
+  SSH_REMOTE_WORKTREE_EVENT_NAMES,
   SSH_TARGET_AGGREGATE,
   SSH_TARGET_EVENT_NAMES,
+  type SshRemoteTerminalEnded,
+  type SshRemoteTerminalStarted,
 } from "@octant/contracts/ssh-target-events";
 import { readAggregateVersion } from "../persistence/chatProjection";
 import type { Journal } from "../persistence/journal";
@@ -35,8 +48,11 @@ import {
   JournalInputInvalid,
 } from "../persistence/journalErrors";
 import {
+  readRunningSshRemoteTerminals,
   readSshRemoteProject,
   readSshRemoteProjects,
+  readSshRemoteWorktree,
+  readSshRemoteWorktrees,
   readSshTarget,
   readSshTargets,
 } from "../persistence/sshTargetProjection";
@@ -72,6 +88,7 @@ const decodeEventId = Schema.decodeUnknownSync(EventId);
 const decodeEventName = Schema.decodeUnknownSync(EventName);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 const encodeFacts = Schema.encodeSync(SshAttestationFacts);
+const decodeTerminalId = Schema.decodeUnknownSync(CodeTerminalId);
 
 export interface SshTargetStoreOptions {
   readonly journal: Pick<Journal, "append">;
@@ -204,6 +221,74 @@ export class SshTargetStore {
       SSH_REMOTE_PROJECT_EVENT_NAMES.bound,
       { project },
       { expectNew: true },
+    );
+  }
+
+  listWorktrees(projectId?: ProjectId): ReadonlyArray<SshRemoteWorktree> {
+    return readSshRemoteWorktrees(
+      this.#connection,
+      projectId === undefined ? undefined : String(projectId),
+    );
+  }
+
+  getWorktree(worktreeId: SshRemoteWorktreeId): SshRemoteWorktree | undefined {
+    return readSshRemoteWorktree(this.#connection, String(worktreeId));
+  }
+
+  /** Journals a worktree the executor of `connectionId` created and reported. */
+  recordWorktreeCreated(
+    worktree: SshRemoteWorktree,
+    connectionId: SshConnectionId,
+  ): SshTargetStoreWrite {
+    return this.#append(
+      SSH_REMOTE_WORKTREE_AGGREGATE,
+      String(worktree.id),
+      SSH_REMOTE_WORKTREE_EVENT_NAMES.created,
+      { worktree, connectionId },
+      { expectNew: true },
+    );
+  }
+
+  recordWorktreeRemoved(
+    worktreeId: SshRemoteWorktreeId,
+    connectionId: SshConnectionId,
+  ): SshTargetStoreWrite {
+    return this.#append(
+      SSH_REMOTE_WORKTREE_AGGREGATE,
+      String(worktreeId),
+      SSH_REMOTE_WORKTREE_EVENT_NAMES.removed,
+      { worktreeId, connectionId },
+    );
+  }
+
+  recordTerminalStarted(started: SshRemoteTerminalStarted): SshTargetStoreWrite {
+    return this.#append(
+      SSH_REMOTE_TERMINAL_AGGREGATE,
+      String(started.terminalId),
+      SSH_REMOTE_TERMINAL_EVENT_NAMES.started,
+      started,
+      { expectNew: true },
+    );
+  }
+
+  /** Journals a terminal's end once; a second end of the same shell changes nothing. */
+  recordTerminalEnded(ended: SshRemoteTerminalEnded): SshTargetStoreWrite {
+    const running = readRunningSshRemoteTerminals(this.#connection).some(
+      (terminal) => terminal.terminalId === String(ended.terminalId),
+    );
+    if (!running) return "refused";
+    return this.#append(
+      SSH_REMOTE_TERMINAL_AGGREGATE,
+      String(ended.terminalId),
+      SSH_REMOTE_TERMINAL_EVENT_NAMES.ended,
+      ended,
+    );
+  }
+
+  /** Remote terminals the journal still records as running. */
+  runningTerminals(): ReadonlyArray<CodeTerminalId> {
+    return readRunningSshRemoteTerminals(this.#connection).map((terminal) =>
+      decodeTerminalId(terminal.terminalId),
     );
   }
 

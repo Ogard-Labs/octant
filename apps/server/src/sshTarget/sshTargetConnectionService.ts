@@ -40,6 +40,11 @@ import {
   type SshExecutorReply,
   type SshExecutorRequest,
   type SshExecutorRunCommandRequest,
+  type SshExecutorCreateWorktreeRequest,
+  type SshExecutorOpenTerminalRequest,
+  type SshExecutorRemoveWorktreeRequest,
+  type SshExecutorWorktreeCreatedReply,
+  type SshExecutorWorktreeRemovedReply,
 } from "@octant/contracts/ssh-executor-protocol";
 import {
   SSH_CANARY_PROBES_BY_POSTURE,
@@ -50,7 +55,12 @@ import {
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { childProcessEnvironment } from "../childProcessEnvironment";
 import type { ToolEgressProxyEndpoint } from "../harness/nativeHarnessEgressProxy";
-import { ExecutorChannel, type ExecutorRequestOptions } from "./executorChannel";
+import {
+  ExecutorChannel,
+  type ExecutorRequestOptions,
+  type ExecutorTerminal,
+  type ExecutorTerminalListener,
+} from "./executorChannel";
 import { joinToStream } from "./executorStreams";
 import {
   SYSTEM_SSH_CLIENT,
@@ -141,6 +151,31 @@ export type SshTargetCallOutcome<Reply> =
 
 /** A read on a target: refused by admission, lost with its session, or answered. */
 export type SshTargetReadOutcome = SshTargetCallOutcome<SshExecutorReadReply>;
+
+/**
+ * A managed worktree's creation or removal: refused, lost, or answered on the
+ * named session, whose id the journal records as the change's provenance.
+ */
+export type SshTargetWorktreeOutcome =
+  | Exclude<SshTargetCallOutcome<never>, { readonly status: "replied" }>
+  | {
+      readonly status: "replied";
+      readonly reply:
+        | SshExecutorWorktreeCreatedReply
+        | SshExecutorWorktreeRemovedReply
+        | SshExecutorRefusedReply;
+      readonly connectionId: SshConnectionId;
+    };
+
+/** A terminal's opening: refused, lost, refused by the executor, or open on a session. */
+export type SshTargetTerminalOpening =
+  | Exclude<SshTargetCallOutcome<never>, { readonly status: "replied" }>
+  | { readonly status: "replied"; readonly reply: SshExecutorRefusedReply }
+  | {
+      readonly status: "opened";
+      readonly terminal: ExecutorTerminal;
+      readonly session: SshTargetSession;
+    };
 
 /** One connected session of a target, which work bound to it names on every call. */
 export interface SshTargetSession {
@@ -374,6 +409,77 @@ export class SshTargetConnectionService {
     return reply.kind === "command-ran" || reply.kind === "refused"
       ? { status: "replied", reply }
       : { status: "unavailable" };
+  }
+
+  /**
+   * Opens a person's terminal in a bound root (or a managed worktree of it),
+   * admitted as one of Octant's own launches in its posture. The decision and
+   * the request are made in one step on the session that was admitted, and
+   * the terminal belongs to that session: it ends when the session does.
+   */
+  async openTerminal(
+    targetId: SshTargetId,
+    admission: SshTargetAdmissionRequest,
+    request: Omit<SshExecutorOpenTerminalRequest, "terminal">,
+    listener: ExecutorTerminalListener,
+  ): Promise<SshTargetTerminalOpening> {
+    const decision = this.admit(targetId, admission);
+    if (decision.status !== "admitted") return { status: "refused", decision };
+    const record = this.#connections.get(String(targetId));
+    if (record?.state !== "connected") return { status: "unavailable" };
+    const opening = await record.channel.openTerminal(request, listener, this.#readTimeoutMs);
+    if (opening.status === "lost") return { status: "unavailable" };
+    if (opening.status === "replied") {
+      return opening.reply.kind === "refused"
+        ? { status: "replied", reply: opening.reply }
+        : { status: "unavailable" };
+    }
+    const { channel, connectionId } = record;
+    return {
+      status: "opened",
+      terminal: opening.terminal,
+      session: { targetId, connectionId, onEnd: (end) => channel.onEnd(end) },
+    };
+  }
+
+  /**
+   * Creates or removes a managed worktree of a bound root, admitted as one
+   * of Octant's own launches in its posture and sent only on the session
+   * that admitted it.
+   */
+  async worktree(
+    targetId: SshTargetId,
+    admission: SshTargetAdmissionRequest,
+    request: SshExecutorCreateWorktreeRequest | SshExecutorRemoveWorktreeRequest,
+  ): Promise<SshTargetWorktreeOutcome> {
+    const decision = this.admit(targetId, admission);
+    if (decision.status !== "admitted") return { status: "refused", decision };
+    const record = this.#connections.get(String(targetId));
+    if (record?.state !== "connected") return { status: "unavailable" };
+    const { connectionId } = record;
+    const outcome = await this.#call(
+      targetId,
+      connectionId,
+      admission,
+      request,
+      this.#readTimeoutMs,
+    );
+    if (outcome.status !== "replied") return outcome;
+    const { reply } = outcome;
+    switch (reply.kind) {
+      case "refused":
+        return { status: "replied", reply, connectionId };
+      case "worktree-created":
+        return request.kind === "create-worktree"
+          ? { status: "replied", reply, connectionId }
+          : { status: "unavailable" };
+      case "worktree-removed":
+        return request.kind === "remove-worktree"
+          ? { status: "replied", reply, connectionId }
+          : { status: "unavailable" };
+      default:
+        return { status: "unavailable" };
+    }
   }
 
   /**

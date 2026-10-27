@@ -1,14 +1,22 @@
 import { Schema } from "effect";
 import type { EventEnvelope } from "@octant/contracts/events";
-import { SshRemoteProject } from "@octant/contracts/ssh-remote-project";
+import { SshRemoteProject, SshRemoteWorktree } from "@octant/contracts/ssh-remote-project";
 import { SshTarget } from "@octant/contracts/ssh-target";
 import {
   SSH_REMOTE_PROJECT_AGGREGATE,
   SSH_REMOTE_PROJECT_EVENT_NAMES,
+  SSH_REMOTE_TERMINAL_AGGREGATE,
+  SSH_REMOTE_TERMINAL_EVENT_NAMES,
+  SSH_REMOTE_WORKTREE_AGGREGATE,
+  SSH_REMOTE_WORKTREE_EVENT_NAMES,
   SSH_TARGET_AGGREGATE,
   SSH_TARGET_EVENT_NAMES,
   SshTargetAttested,
   decodeSshRemoteProjectBound,
+  decodeSshRemoteTerminalEnded,
+  decodeSshRemoteTerminalStarted,
+  decodeSshRemoteWorktreeCreated,
+  decodeSshRemoteWorktreeRemoved,
   decodeSshTargetAttested,
   decodeSshTargetRegistered,
   decodeSshTargetRemoved,
@@ -38,6 +46,8 @@ export class SshTargetProjection implements Projection {
     connection.exec(`
       DELETE FROM ssh_target_projection;
       DELETE FROM ssh_remote_project_projection;
+      DELETE FROM ssh_remote_worktree_projection;
+      DELETE FROM ssh_remote_terminal_projection;
     `);
   }
 
@@ -46,7 +56,74 @@ export class SshTargetProjection implements Projection {
     if (event.aggregateType === SSH_TARGET_AGGREGATE) applyTargetEvent(connection, event);
     else if (event.aggregateType === SSH_REMOTE_PROJECT_AGGREGATE) {
       applyRemoteProjectEvent(connection, event);
+    } else if (event.aggregateType === SSH_REMOTE_WORKTREE_AGGREGATE) {
+      applyWorktreeEvent(connection, event);
+    } else if (event.aggregateType === SSH_REMOTE_TERMINAL_AGGREGATE) {
+      applyTerminalEvent(connection, event);
     }
+  }
+}
+
+/**
+ * A removed worktree's row is deleted: the journal keeps its history, and
+ * nothing can open a terminal in it or read it again.
+ */
+function applyWorktreeEvent(connection: SqliteConnection, event: EventEnvelope): void {
+  const aggregateId = String(event.aggregateId);
+  if (event.eventName === SSH_REMOTE_WORKTREE_EVENT_NAMES.created) {
+    const { worktree } = decodeSshRemoteWorktreeCreated(event.payload);
+    assertAggregate(String(worktree.id), aggregateId);
+    connection
+      .prepare(
+        `INSERT INTO ssh_remote_worktree_projection (
+          worktree_id, project_id, worktree_json, aggregate_version, last_sequence
+        ) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT (worktree_id) DO NOTHING`,
+      )
+      .run(
+        aggregateId,
+        String(worktree.projectId),
+        JSON.stringify(Schema.encodeSync(SshRemoteWorktree)(worktree)),
+        event.aggregateVersion,
+        event.globalSequence,
+      );
+    return;
+  }
+  if (event.eventName === SSH_REMOTE_WORKTREE_EVENT_NAMES.removed) {
+    const { worktreeId } = decodeSshRemoteWorktreeRemoved(event.payload);
+    assertAggregate(String(worktreeId), aggregateId);
+    connection
+      .prepare("DELETE FROM ssh_remote_worktree_projection WHERE worktree_id = ?")
+      .run(aggregateId);
+  }
+}
+
+/** Which remote terminals the journal still records as running, for restart. */
+function applyTerminalEvent(connection: SqliteConnection, event: EventEnvelope): void {
+  const aggregateId = String(event.aggregateId);
+  if (event.eventName === SSH_REMOTE_TERMINAL_EVENT_NAMES.started) {
+    const started = decodeSshRemoteTerminalStarted(event.payload);
+    assertAggregate(String(started.terminalId), aggregateId);
+    connection
+      .prepare(
+        `INSERT INTO ssh_remote_terminal_projection (
+          terminal_id, project_id, state, aggregate_version, last_sequence
+        ) VALUES (?, ?, 'running', ?, ?)
+        ON CONFLICT (terminal_id) DO NOTHING`,
+      )
+      .run(aggregateId, String(started.projectId), event.aggregateVersion, event.globalSequence);
+    return;
+  }
+  if (event.eventName === SSH_REMOTE_TERMINAL_EVENT_NAMES.ended) {
+    const ended = decodeSshRemoteTerminalEnded(event.payload);
+    assertAggregate(String(ended.terminalId), aggregateId);
+    connection
+      .prepare(
+        `UPDATE ssh_remote_terminal_projection
+         SET state = 'ended', aggregate_version = ?, last_sequence = ?
+         WHERE terminal_id = ? AND aggregate_version < ?`,
+      )
+      .run(event.aggregateVersion, event.globalSequence, aggregateId, event.aggregateVersion);
   }
 }
 
@@ -242,4 +319,51 @@ export function readSshRemoteProject(
     .prepare("SELECT project_json FROM ssh_remote_project_projection WHERE project_id = ?")
     .get(projectId) as RemoteProjectRow | undefined;
   return row === undefined ? undefined : decodeRemoteProject(JSON.parse(row.project_json));
+}
+
+const decodeWorktree = Schema.decodeUnknownSync(SshRemoteWorktree);
+
+/** The managed worktrees still present for a Project, oldest first; every Project's when none is named. */
+export function readSshRemoteWorktrees(
+  connection: SqliteConnection,
+  projectId?: string,
+): ReadonlyArray<SshRemoteWorktree> {
+  const rows = (
+    projectId === undefined
+      ? connection
+          .prepare(
+            "SELECT worktree_json FROM ssh_remote_worktree_projection ORDER BY last_sequence",
+          )
+          .all()
+      : connection
+          .prepare(
+            `SELECT worktree_json FROM ssh_remote_worktree_projection
+             WHERE project_id = ? ORDER BY last_sequence`,
+          )
+          .all(projectId)
+  ) as ReadonlyArray<{ readonly worktree_json: string }>;
+  return rows.map((row) => decodeWorktree(JSON.parse(row.worktree_json)));
+}
+
+export function readSshRemoteWorktree(
+  connection: SqliteConnection,
+  worktreeId: string,
+): SshRemoteWorktree | undefined {
+  const row = connection
+    .prepare("SELECT worktree_json FROM ssh_remote_worktree_projection WHERE worktree_id = ?")
+    .get(worktreeId) as { readonly worktree_json: string } | undefined;
+  return row === undefined ? undefined : decodeWorktree(JSON.parse(row.worktree_json));
+}
+
+/** Remote terminals the journal records as running: after a restart, none of them is. */
+export function readRunningSshRemoteTerminals(
+  connection: SqliteConnection,
+): ReadonlyArray<{ readonly terminalId: string; readonly version: number }> {
+  const rows = connection
+    .prepare(
+      `SELECT terminal_id, aggregate_version FROM ssh_remote_terminal_projection
+       WHERE state = 'running' ORDER BY last_sequence`,
+    )
+    .all() as ReadonlyArray<{ readonly terminal_id: string; readonly aggregate_version: number }>;
+  return rows.map((row) => ({ terminalId: row.terminal_id, version: row.aggregate_version }));
 }

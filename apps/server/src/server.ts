@@ -1127,6 +1127,7 @@ export function startOctantServer(
       privateListenerSetting,
       providerCredentialRoutes,
       remoteHost,
+      sshRemoteTerminals,
       sshTargetAdministrationRoutes,
     } = wireRemote({
       canvasPublicShareService,
@@ -1423,7 +1424,9 @@ export function startOctantServer(
             shutdownFailure ??= error;
           }
           try {
-            // Each executor exits when its session's input closes.
+            // Remote shells end as stopped, then each executor exits when its
+            // session's input closes.
+            await sshRemoteTerminals.close();
             sshTargetConnections.close();
           } catch (error) {
             shutdownFailure ??= error;

@@ -43,6 +43,7 @@ import { createPrivateListenerSetting } from "../remote/privateListenerSetting";
 import { createSelfMadeListenerCertificateStore } from "../remote/selfMadeListenerCertificate";
 import { createSshTargetAdministrationRouteHandler } from "../sshTarget/sshTargetAdministrationRoutes";
 import { SshRemoteProjectService } from "../sshTarget/sshRemoteProjectService";
+import { SshRemoteTerminalService } from "../sshTarget/sshRemoteTerminalService";
 import type { SshTargetsWiring } from "./sshTargets";
 import { boundHostRuntimeDiagnostics, type HostRuntimeDiagnostics } from "@octant/host-runtime";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
@@ -326,16 +327,25 @@ export function wireRemote(deps: RemoteDependencies) {
   // SSH targets are administered from this machine alone, like the listener:
   // the routes sit on the loopback chain beside it, never in product dispatch.
   const { sshTargetStore, sshTargetConnections } = deps;
+  const sshRemoteProjects = new SshRemoteProjectService({
+    store: sshTargetStore,
+    connections: sshTargetConnections,
+    uuid: randomUUID,
+    clock: () => new Date().toISOString(),
+  });
+  const sshRemoteTerminals = new SshRemoteTerminalService({
+    projects: sshRemoteProjects,
+    connections: sshTargetConnections,
+    store: sshTargetStore,
+  });
+  // A restart ended every session, and every remote shell with it.
+  sshRemoteTerminals.reconcile();
   const sshTargetAdministrationRoutes = createSshTargetAdministrationRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
     windowAuthorityStore,
     connections: sshTargetConnections,
-    projects: new SshRemoteProjectService({
-      store: sshTargetStore,
-      connections: sshTargetConnections,
-      uuid: randomUUID,
-      clock: () => new Date().toISOString(),
-    }),
+    projects: sshRemoteProjects,
+    terminals: sshRemoteTerminals,
     maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   });
   // One diagnostics composer is shared by the owner control socket (through
@@ -552,6 +562,7 @@ export function wireRemote(deps: RemoteDependencies) {
     privateListenerSetting,
     providerCredentialRoutes,
     remoteHost,
+    sshRemoteTerminals,
     sshTargetAdministrationRoutes,
   };
 }

@@ -20,6 +20,12 @@
  * byte streams the session carries (`stream-*` frames), whose names the host
  * asks the target to resolve and whose connections it asks the target to open
  * (`resolve`, `dial`).
+ *
+ * A person's terminal opens with a request and then lives beside the
+ * requests: what is typed and printed travels in `terminal-*` frames, the
+ * output within a window this host grants. A managed worktree is created or
+ * removed by naming the Project and a one-folder name; the executor derives
+ * the folder from the bound root.
  */
 
 import { Schema } from "effect";
@@ -39,6 +45,8 @@ import {
   SshRemoteGitDiff,
   SshRemoteGitStatus,
   SshRemoteReadRefusalReason,
+  SshRemoteWorktreeBranch,
+  SshRemoteWorktreeName,
 } from "./sshRemoteProject";
 import {
   SshAttestationFacts,
@@ -240,11 +248,77 @@ export const SshExecutorRunCommandRequest = Schema.Struct({
   );
 export type SshExecutorRunCommandRequest = typeof SshExecutorRunCommandRequest.Type;
 
+/** The most terminals one session holds open at once. */
+export const SSH_EXECUTOR_MAX_TERMINALS = 8;
+/** The most terminal output the executor sends that this host has not yet taken off. */
+export const SSH_EXECUTOR_TERMINAL_WINDOW_BYTES = 262_144;
+/** The most bytes one terminal output or input frame carries, before base64. */
+export const SSH_EXECUTOR_MAX_TERMINAL_CHUNK_BYTES = 65_536;
+
+/**
+ * One terminal of the session. This host names it when it opens it, each new
+ * one with a higher id than the last, so a late frame of a closed terminal
+ * can never be read as a new one's.
+ */
+export const SshExecutorTerminalId = Schema.Int.pipe(Schema.between(1, 2_147_483_647));
+export type SshExecutorTerminalId = typeof SshExecutorTerminalId.Type;
+
+const TerminalColumns = Schema.Int.pipe(Schema.between(1, 500));
+const TerminalRows = Schema.Int.pipe(Schema.between(1, 500));
+
+/**
+ * Opens a person's interactive shell in the bound root on a pseudo-terminal
+ * of the target, confined with the posture's attested grants. Plan opens no
+ * terminal, so it has no value here. A terminal has no egress proxy of its
+ * own: it runs offline, or on the target's own network in Full access only,
+ * as a command does.
+ */
+export const SshExecutorOpenTerminalRequest = Schema.Struct({
+  kind: Schema.Literal("open-terminal"),
+  root: SshRemotePath,
+  terminal: SshExecutorTerminalId,
+  posture: SshCommandPosture,
+  network: Schema.Literal("none", "allow"),
+  columns: TerminalColumns,
+  rows: TerminalRows,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((request) => request.network !== "allow" || request.posture === "full-access"),
+  );
+export type SshExecutorOpenTerminalRequest = typeof SshExecutorOpenTerminalRequest.Type;
+
+/**
+ * Creates a managed worktree of the bound root at
+ * `<parent of root>/.octant-worktrees/<project>/<name>` on a new branch
+ * `octant/<name>` from the root's checked-out commit. The executor derives the
+ * folder itself, so this host never names a path to write.
+ */
+export const SshExecutorCreateWorktreeRequest = Schema.Struct({
+  kind: Schema.Literal("create-worktree"),
+  root: SshRemotePath,
+  project: Schema.UUID,
+  name: SshRemoteWorktreeName,
+}).annotations(strict);
+export type SshExecutorCreateWorktreeRequest = typeof SshExecutorCreateWorktreeRequest.Type;
+
+/** Removes that managed worktree when Git finds no change in it; its branch stays. */
+export const SshExecutorRemoveWorktreeRequest = Schema.Struct({
+  kind: Schema.Literal("remove-worktree"),
+  root: SshRemotePath,
+  project: Schema.UUID,
+  name: SshRemoteWorktreeName,
+}).annotations(strict);
+export type SshExecutorRemoveWorktreeRequest = typeof SshExecutorRemoveWorktreeRequest.Type;
+
 export const SshExecutorRequest = Schema.Union(
   SshExecutorAttestRequest,
   SshExecutorReadRequest,
   SshExecutorHarnessFileRequest,
   SshExecutorRunCommandRequest,
+  SshExecutorOpenTerminalRequest,
+  SshExecutorCreateWorktreeRequest,
+  SshExecutorRemoveWorktreeRequest,
 );
 export type SshExecutorRequest = typeof SshExecutorRequest.Type;
 
@@ -358,6 +432,50 @@ export const SshExecutorResolveFrame = Schema.Struct({
 }).annotations(strict);
 export type SshExecutorResolveFrame = typeof SshExecutorResolveFrame.Type;
 
+const TerminalChunk = Base64.pipe(
+  Schema.minLength(4),
+  Schema.maxLength(Math.ceil(SSH_EXECUTOR_MAX_TERMINAL_CHUNK_BYTES / 3) * 4),
+);
+
+/** What the person typed into an open terminal. */
+export const SshExecutorTerminalInputFrame = Schema.Struct({
+  type: Schema.Literal("terminal-input"),
+  terminal: SshExecutorTerminalId,
+  data: TerminalChunk,
+}).annotations(strict);
+export type SshExecutorTerminalInputFrame = typeof SshExecutorTerminalInputFrame.Type;
+
+export const SshExecutorTerminalResizeFrame = Schema.Struct({
+  type: Schema.Literal("terminal-resize"),
+  terminal: SshExecutorTerminalId,
+  columns: TerminalColumns,
+  rows: TerminalRows,
+}).annotations(strict);
+export type SshExecutorTerminalResizeFrame = typeof SshExecutorTerminalResizeFrame.Type;
+
+/** Ends the terminal's shell and every process it started; the executor answers `terminal-exited`. */
+export const SshExecutorTerminalCloseFrame = Schema.Struct({
+  type: Schema.Literal("terminal-close"),
+  terminal: SshExecutorTerminalId,
+}).annotations(strict);
+export type SshExecutorTerminalCloseFrame = typeof SshExecutorTerminalCloseFrame.Type;
+
+/** This host took `bytes` more of the terminal's output off, so the executor may send that much more. */
+export const SshExecutorTerminalCreditFrame = Schema.Struct({
+  type: Schema.Literal("terminal-credit"),
+  terminal: SshExecutorTerminalId,
+  bytes: Schema.Int.pipe(Schema.between(1, SSH_EXECUTOR_TERMINAL_WINDOW_BYTES)),
+}).annotations(strict);
+export type SshExecutorTerminalCreditFrame = typeof SshExecutorTerminalCreditFrame.Type;
+
+export const SshExecutorTerminalHostFrame = Schema.Union(
+  SshExecutorTerminalInputFrame,
+  SshExecutorTerminalResizeFrame,
+  SshExecutorTerminalCloseFrame,
+  SshExecutorTerminalCreditFrame,
+);
+export type SshExecutorTerminalHostFrame = typeof SshExecutorTerminalHostFrame.Type;
+
 /** Every frame a host sends. */
 export const SshExecutorHostFrame = Schema.Union(
   SshExecutorRequestFrame,
@@ -365,6 +483,7 @@ export const SshExecutorHostFrame = Schema.Union(
   SshExecutorDialFrame,
   SshExecutorResolveFrame,
   SshExecutorStreamFrame,
+  SshExecutorTerminalHostFrame,
 );
 export type SshExecutorHostFrame = typeof SshExecutorHostFrame.Type;
 
@@ -536,12 +655,44 @@ export const SshExecutorCommandRanReply = Schema.Struct({
 }).annotations(strict);
 export type SshExecutorCommandRanReply = typeof SshExecutorCommandRanReply.Type;
 
+/** The terminal is open; its output follows as `terminal-output` frames. */
+export const SshExecutorTerminalOpenedReply = Schema.Struct({
+  kind: Schema.Literal("terminal-opened"),
+}).annotations(strict);
+export type SshExecutorTerminalOpenedReply = typeof SshExecutorTerminalOpenedReply.Type;
+
+/**
+ * No terminal opened: the session holds its most, the id was not new, the
+ * target has no pseudo-terminal support, or the shell could not be confined.
+ */
+export const SshExecutorTerminalUnavailableReply = Schema.Struct({
+  kind: Schema.Literal("terminal-unavailable"),
+}).annotations(strict);
+export type SshExecutorTerminalUnavailableReply = typeof SshExecutorTerminalUnavailableReply.Type;
+
+export const SshExecutorWorktreeCreatedReply = Schema.Struct({
+  kind: Schema.Literal("worktree-created"),
+  /** The worktree's canonical folder, which later requests name as its root. */
+  path: SshRemotePath,
+  branch: SshRemoteWorktreeBranch,
+}).annotations(strict);
+export type SshExecutorWorktreeCreatedReply = typeof SshExecutorWorktreeCreatedReply.Type;
+
+export const SshExecutorWorktreeRemovedReply = Schema.Struct({
+  kind: Schema.Literal("worktree-removed"),
+}).annotations(strict);
+export type SshExecutorWorktreeRemovedReply = typeof SshExecutorWorktreeRemovedReply.Type;
+
 export const SshExecutorReply = Schema.Union(
   SshExecutorAttestedReply,
   SshExecutorBusyReply,
   SshExecutorReadReply,
   SshExecutorHarnessFileReply,
   SshExecutorCommandRanReply,
+  SshExecutorTerminalOpenedReply,
+  SshExecutorTerminalUnavailableReply,
+  SshExecutorWorktreeCreatedReply,
+  SshExecutorWorktreeRemovedReply,
 );
 export type SshExecutorReply = typeof SshExecutorReply.Type;
 
@@ -579,6 +730,26 @@ export const SshExecutorResolvedFrame = Schema.Struct({
 }).annotations(strict);
 export type SshExecutorResolvedFrame = typeof SshExecutorResolvedFrame.Type;
 
+/**
+ * What an open terminal printed. The executor sends at most
+ * {@link SSH_EXECUTOR_TERMINAL_WINDOW_BYTES} of it that this host has not
+ * granted back with `terminal-credit`, and holds the shell while it waits.
+ */
+export const SshExecutorTerminalOutputFrame = Schema.Struct({
+  type: Schema.Literal("terminal-output"),
+  terminal: SshExecutorTerminalId,
+  data: TerminalChunk,
+}).annotations(strict);
+export type SshExecutorTerminalOutputFrame = typeof SshExecutorTerminalOutputFrame.Type;
+
+/** The terminal's shell ended; nothing more is sent for it. */
+export const SshExecutorTerminalExitedFrame = Schema.Struct({
+  type: Schema.Literal("terminal-exited"),
+  terminal: SshExecutorTerminalId,
+  exitCode: Schema.optional(Schema.Int),
+}).annotations(strict);
+export type SshExecutorTerminalExitedFrame = typeof SshExecutorTerminalExitedFrame.Type;
+
 /** Every frame an executor sends. */
 export const SshExecutorFrame = Schema.Union(
   SshExecutorHello,
@@ -587,5 +758,7 @@ export const SshExecutorFrame = Schema.Union(
   SshExecutorDialedFrame,
   SshExecutorResolvedFrame,
   SshExecutorStreamFrame,
+  SshExecutorTerminalOutputFrame,
+  SshExecutorTerminalExitedFrame,
 );
 export type SshExecutorFrame = typeof SshExecutorFrame.Type;
