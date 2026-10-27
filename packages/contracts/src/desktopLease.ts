@@ -98,14 +98,51 @@ export const DesktopRecipe = Schema.Struct({
   );
 export type DesktopRecipe = typeof DesktopRecipe.Type;
 
-/** A provider computer use could lease from on this host now. */
+/** One placement a provider offers a recipe, with where it runs and whether it bills. */
+export const LeasableDesktopPlacement = Schema.Struct({
+  placementId: DesktopPlacementId,
+  displayName: text(128),
+  locality: DesktopProviderLocality,
+  billed: Schema.Boolean,
+}).annotations(strict);
+export type LeasableDesktopPlacement = typeof LeasableDesktopPlacement.Type;
+
+/**
+ * A provider computer use could lease from on this host now. A provider with
+ * `placements` is leased only through a recipe that names one of them, on
+ * that placement's locality and billing. `daemon` marks a provider run by a
+ * local daemon that holds the person's own sign-in: its recipe names a
+ * placement in place of a credential, and Octant stores no key for it.
+ */
 export const LeasableDesktopProvider = Schema.Struct({
   providerId: DesktopProviderId,
   displayName: text(128),
   locality: DesktopProviderLocality,
   billed: Schema.Boolean,
+  placements: Schema.optional(Schema.Array(LeasableDesktopPlacement).pipe(Schema.maxItems(16))),
+  daemon: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type LeasableDesktopProvider = typeof LeasableDesktopProvider.Type;
+
+/**
+ * The local daemon a lease's desktop was made through: the socket path the
+ * driver declares, relative to the home directory, and the operating-system
+ * user whose home holds it. Teardown counts a listing as the provider's word
+ * only from this same daemon.
+ */
+export const DesktopLeaseDaemon = Schema.Struct({
+  socketPath: Schema.String.pipe(
+    Schema.maxLength(255),
+    Schema.pattern(/^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/),
+    Schema.filter(
+      (path) =>
+        path.split("/").every((segment) => segment !== "." && segment !== "..") ||
+        "A daemon socket path never leaves the home directory.",
+    ),
+  ),
+  userId: Schema.Int.pipe(Schema.between(0, 4_294_967_295)),
+}).annotations(strict);
+export type DesktopLeaseDaemon = typeof DesktopLeaseDaemon.Type;
 
 /**
  * `released` is written only after the provider confirms the desktop is gone.
@@ -170,6 +207,7 @@ export const DesktopLease = Schema.Struct({
   billed: Schema.Boolean,
   credentialRef: Schema.optional(DesktopCredentialRef),
   placementId: Schema.optional(DesktopPlacementId),
+  daemon: Schema.optional(DesktopLeaseDaemon),
   state: DesktopLeaseState,
   requestedAt: UtcTimestamp,
   expiresAt: UtcTimestamp,
@@ -194,7 +232,8 @@ export const DESKTOP_LEASE_EVENT_NAMES = {
  * the desktop with. It records the credential reference, never the material,
  * so teardown can still find the key after the recipe is removed. For a
  * provider that declares placements, `locality` and `billed` are the
- * placement's, and `placementId` names it.
+ * placement's, and `placementId` names it. A provider run by a local daemon
+ * records that daemon in `daemon`, never a token.
  */
 export const DesktopLeaseRequested = Schema.Struct({
   leaseId: DesktopLeaseId,
@@ -205,6 +244,7 @@ export const DesktopLeaseRequested = Schema.Struct({
   hostTag: DesktopHostTag,
   credentialRef: Schema.optional(DesktopCredentialRef),
   placementId: Schema.optional(DesktopPlacementId),
+  daemon: Schema.optional(DesktopLeaseDaemon),
   network: DesktopNetworkPosture,
   expiresAt: UtcTimestamp,
   maximumExpiresAt: UtcTimestamp,
@@ -474,6 +514,7 @@ export const decodeDesktopCredentialRef = Schema.decodeUnknownSync(DesktopCreden
 export const decodeDesktopPlacementId = Schema.decodeUnknownSync(DesktopPlacementId);
 export const decodeDesktopRecipe = Schema.decodeUnknownSync(DesktopRecipe);
 export const decodeLeasableDesktopProvider = Schema.decodeUnknownSync(LeasableDesktopProvider);
+export const decodeDesktopLeaseDaemon = Schema.decodeUnknownSync(DesktopLeaseDaemon);
 export const decodeDesktopLease = Schema.decodeUnknownSync(DesktopLease);
 export const decodeDesktopLeaseRequested = Schema.decodeUnknownSync(DesktopLeaseRequested);
 export const decodeDesktopLeaseTransitioned = Schema.decodeUnknownSync(DesktopLeaseTransitioned);
