@@ -19,7 +19,10 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { turnBlocksInPlaceRestore } from "@octant/domain/code-policy";
-import { REMOTE_CODE_THREAD_CONNECTORS_UNAVAILABLE } from "@octant/domain/ssh-target-recovery";
+import {
+  REMOTE_CODE_THREAD_CONNECTORS_UNAVAILABLE,
+  remoteCodeThreadPostureRefusal,
+} from "@octant/domain/ssh-target-recovery";
 import { describe, expect, it, vi } from "vitest";
 import {
   CodeOperationService,
@@ -30,6 +33,7 @@ import {
 import { requireLinuxConfinement } from "../process/linuxConfinement";
 import { ReviewFindingServiceError } from "./reviewFindingService";
 import { TerminalService } from "./terminalService";
+import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
 import { Schema } from "effect";
 import { DeviceId, StableHostId, RemoteSessionId } from "@octant/contracts/remote-access";
 import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
@@ -2402,7 +2406,11 @@ describe("CodeOperationService", () => {
       context: [],
       tools: { definitions: [], execute: async () => ({ result: "" }) },
     }));
-    const fixture = providerTurnFixture({ resolveSelectedExtensions, remoteRoot: true });
+    const fixture = providerTurnFixture({
+      resolveSelectedExtensions,
+      remoteRoot: true,
+      thread: decodeCodeThread({ ...thread(), executionPolicy: "approval-gated" }),
+    });
     const result = await fixture.service.execute(ids.window, {
       ...startProviderTurn,
       extensionSelections: [
@@ -2424,6 +2432,88 @@ describe("CodeOperationService", () => {
     });
     expect(resolveSelectedExtensions).not.toHaveBeenCalled();
     expect(fixture.turns.start).not.toHaveBeenCalled();
+  });
+
+  // A remote turn takes no checkpoint, so an edit made there without review
+  // has no way back. Creating or raising a thread to these postures is refused,
+  // but a thread created before that rule still holds one, and the turn itself
+  // must refuse to run in it.
+  it.each(["auto-accept-edits", "full-access"] as const)(
+    "refuses a turn on a thread on an SSH target that holds %s before anything starts or is journaled",
+    async (executionPolicy) => {
+      const fixture = providerTurnFixture({
+        remoteRoot: true,
+        thread: decodeCodeThread({
+          ...thread(),
+          executionPolicy,
+          permissionPersistence: "project-default",
+        }),
+      });
+      const result = await fixture.service.execute(ids.window, startProviderTurn);
+      expect(result).toMatchObject({
+        kind: "operation-failed",
+        admission: "refused",
+        failure: {
+          category: "unauthorized",
+          message: remoteCodeThreadPostureRefusal(executionPolicy),
+        },
+      });
+      expect(fixture.turns.start).not.toHaveBeenCalled();
+      expect(fixture.events.append).not.toHaveBeenCalled();
+    },
+  );
+
+  it("refuses a turn on a thread on an SSH target that this window holds in session Full access", async () => {
+    const sessions = new CodeSessionAuthorityStore();
+    sessions.grantFullAccess(ids.window, ids.thread);
+    const fixture = providerTurnFixture({
+      remoteRoot: true,
+      thread: decodeCodeThread({ ...thread(), executionPolicy: "approval-gated" }),
+      effectiveThread: (windowId, stored) => sessions.effectiveThread(windowId, stored),
+    });
+    const result = await fixture.service.execute(ids.window, startProviderTurn);
+    expect(result).toMatchObject({
+      kind: "operation-failed",
+      failure: { message: remoteCodeThreadPostureRefusal("full-access") },
+    });
+    expect(fixture.turns.start).not.toHaveBeenCalled();
+    expect(fixture.events.append).not.toHaveBeenCalled();
+  });
+
+  it("runs a turn that asks for approvals on a thread on an SSH target that holds Auto-accept edits", async () => {
+    // The turn runs in the narrower posture it asks for, so each edit is
+    // still approved; only a turn that would run unreviewed is refused.
+    const fixture = providerTurnFixture({
+      remoteRoot: true,
+      thread: decodeCodeThread({ ...thread(), executionPolicy: "auto-accept-edits" }),
+    });
+    const result = await fixture.service.execute(ids.window, {
+      ...startProviderTurn,
+      executionPolicy: "approval-gated",
+    });
+    expect(result).toMatchObject({ kind: "provider-turn-state", state: "running" });
+    expect(fixture.turns.start.mock.calls[0]?.[0].thread.executionPolicy).toBe("approval-gated");
+  });
+
+  it("refuses an answer that would continue a turn on a thread on an SSH target holding Auto-accept edits", async () => {
+    const fixture = providerTurnFixture({
+      remoteRoot: true,
+      thread: decodeCodeThread({ ...thread(), executionPolicy: "auto-accept-edits" }),
+    });
+    const result = await fixture.service.execute(ids.window, {
+      kind: "answer-provider-approval",
+      operationId: decodeCodeOperationId("49494949-4949-4494-8494-494949494949"),
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+      approvalId: "50505050-5050-4050-8050-505050505050",
+      decision: "approved",
+    });
+    expect(result).toMatchObject({
+      kind: "operation-failed",
+      failure: { message: remoteCodeThreadPostureRefusal("auto-accept-edits") },
+    });
+    expect(fixture.turns.answerApproval).not.toHaveBeenCalled();
+    expect(fixture.events.append).not.toHaveBeenCalled();
   });
 
   it("refuses a selected skill before Code provider execution when no material resolver exists", async () => {
@@ -2930,9 +3020,17 @@ function providerTurnFixture(
     readonly recordEvents?: boolean;
     /** The thread's checkout is a remote root on an SSH target. */
     readonly remoteRoot?: boolean;
+    /** The thread as the asking window holds it, with its session grants. */
+    readonly effectiveThread?: (windowId: WindowId, thread: CodeThread) => CodeThread;
   } = {},
 ) {
-  const { thread: threadOverride, recordEvents, remoteRoot, ...serviceOptions } = options;
+  const {
+    thread: threadOverride,
+    recordEvents,
+    remoteRoot,
+    effectiveThread,
+    ...serviceOptions
+  } = options;
   const activeThread = threadOverride ?? thread();
   const turns = {
     start: vi.fn<CodeOperationServiceOptions["turns"]["start"]>(async () => ({ state: "running" })),
@@ -2969,6 +3067,7 @@ function providerTurnFixture(
   const service = new CodeOperationService({
     authority: {
       readThread: vi.fn(() => activeThread),
+      ...(effectiveThread === undefined ? {} : { effectiveThread }),
       readCheckout: vi.fn(() =>
         decodeCodeCheckoutIdentity({
           id: ids.checkout,

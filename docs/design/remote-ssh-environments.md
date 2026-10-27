@@ -710,10 +710,21 @@ These rules settle what the step needs, each in the fail-closed direction:
   placed runtime yet (6d's prerequisite). Nothing runs on this host against
   the remote path instead. A remote-bound Project has no provider policy of
   its own, so this check is its policy.
-- **No Full access yet.** Full access on a target must be remembered for the
-  Project, and a remote-bound Project has nowhere to remember it, so a thread
-  is not created holding it, even for this session; a turn widened to it
-  later is refused `full-access-not-remembered` by admission.
+- **No Full access yet, and no Auto-accept edits.** Full access on a target
+  must be remembered for the Project, and a remote-bound Project has nowhere
+  to remember it, so a thread is not created holding it, even for this
+  session; Auto-accept edits would write with no checkpoint to return to
+  ([rationale](#in-a-local-window)). The host refuses either posture when a
+  thread is created, when its access is raised, and at turn time. A start,
+  or an answer that continues a turn, that would run in either posture is
+  refused `unauthorized` before anything binds to the target or is
+  journaled, with the same sentence telling the person to choose a narrower
+  posture. That posture is the thread's as the asking window holds it, its
+  session grant included, narrowed by the turn's own request. A thread
+  created before the create-time rule can still hold Auto-accept edits; its
+  turns run only when they ask for Ask for approvals or Plan. Admission's
+  `full-access-not-remembered` stays the target's own refusal behind this
+  one.
 - **Project authority is a local Project's.** A local window reaches a
   remote-bound Project's threads only while its workspace names that Project,
   and a paired device under the Project's authority, as for a local Project.
@@ -798,9 +809,12 @@ target. The window offers Plan and Ask for approvals, and each write there is
 approved. The host enforces the same rule: `create-code-thread` on a
 `remote-root` checkout refuses Auto-accept edits and Full access, and
 `change-code-thread-access` on such a thread refuses raising it to either,
-before any approval is consulted (`remoteCodeThreadPostureRefusal` in
+before any approval is consulted, and a turn, or an answer that continues
+one, in either posture is refused before anything binds to the target
+(`remoteCodeThreadPostureRefusal` in
 `packages/domain/src/sshTargetRecovery.ts`, applied in
-`apps/server/src/code/codeService.ts`).
+`apps/server/src/code/codeService.ts` and
+`apps/server/src/code/codeOperationService.ts`).
 
 ### Terminals and managed worktrees
 

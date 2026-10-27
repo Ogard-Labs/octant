@@ -9,6 +9,7 @@ import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import {
   REMOTE_CODE_THREAD_CONNECTORS_UNAVAILABLE,
   REMOTE_CODE_THREAD_OPERATION_UNAVAILABLE,
+  remoteCodeThreadPostureRefusal,
 } from "@octant/domain/ssh-target-recovery";
 import {
   decodeCodeOperationCommand,
@@ -1080,6 +1081,19 @@ export class CodeOperationService {
         "unavailable",
         REMOTE_CODE_THREAD_OPERATION_UNAVAILABLE,
       );
+    }
+    // A remote turn takes no checkpoint, so an edit made on the target without
+    // review has no way back. Creating or raising a thread there to Auto-accept
+    // edits or Full access is refused, yet a thread created before that rule
+    // can still hold one, and a window's session grant decides the posture a
+    // turn runs in. So a turn, or an answer that continues one, is refused in
+    // either posture before anything binds to the target or is journaled; a
+    // turn that asks for a narrower posture runs in it.
+    if (scope.checkout.kind === "remote-root") {
+      const remotePostureRefusal = remoteCodeThreadPostureRefusalForTurn(scope.thread, command);
+      if (remotePostureRefusal !== undefined) {
+        return this.#failed(command.operationId, "unauthorized", remotePostureRefusal, "refused");
+      }
     }
     // A connector or plugin runs its tools on this host, and a remote turn's
     // tools are only the harness's on the target. Selecting one is refused
@@ -4152,6 +4166,27 @@ function turnAccessPosture(
     thread: thread.executionPolicy,
     ...(requested === undefined ? {} : { requested }),
   });
+}
+
+/**
+ * Why a turn on a thread on an SSH target, or an answer that continues one,
+ * is refused in the posture it would run in, or undefined. `thread` is the
+ * thread as the asking window holds it: with its session grant, and clamped
+ * to the running turn's posture.
+ */
+function remoteCodeThreadPostureRefusalForTurn(
+  thread: CodeThread,
+  command: CodeOperationCommand,
+): string | undefined {
+  switch (command.kind) {
+    case "start-provider-turn":
+      return remoteCodeThreadPostureRefusal(turnAccessPosture(thread, command));
+    case "answer-provider-input":
+    case "answer-provider-approval":
+      return remoteCodeThreadPostureRefusal(thread.executionPolicy);
+    default:
+      return undefined;
+  }
 }
 
 function threadForTurn(
