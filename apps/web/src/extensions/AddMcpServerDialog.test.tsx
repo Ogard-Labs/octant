@@ -82,6 +82,42 @@ describe("Add MCP server", () => {
     });
   });
 
+  it("never sends a variable typed for a command as a header after switching to Address", async () => {
+    const user = userEvent.setup();
+    const addUserMcpServer = vi.fn(async () => ({ kind: "extension-state-updated" }) as never);
+    render(
+      <AddMcpServerDialog
+        client={{ addUserMcpServer }}
+        onAdded={vi.fn()}
+        onClose={vi.fn()}
+        open
+        secretsAvailable
+      />,
+    );
+    const form = screen.getByRole("form", { name: "Add an MCP server" });
+    await user.type(within(form).getByLabelText("Name"), "Docs search");
+    await user.click(within(form).getByRole("button", { name: "Add variable" }));
+    await user.type(within(form).getByLabelText("Variable name"), "DOCS_TOKEN");
+    await user.type(within(form).getByLabelText("Value"), "local-only-value");
+    await user.click(within(form).getByRole("checkbox", { name: "Secret" }));
+
+    await user.click(within(form).getByRole("button", { name: "Address" }));
+    expect(within(form).queryByLabelText("Header name")).not.toBeInTheDocument();
+    await user.type(within(form).getByLabelText("Address"), "https://mcp.example/mcp");
+    await user.click(within(form).getByRole("button", { name: "Add server" }));
+
+    await waitFor(() => expect(addUserMcpServer).toHaveBeenCalled());
+    expect(addUserMcpServer).toHaveBeenCalledWith({
+      name: "Docs search",
+      server: { type: "streamable-http", url: "https://mcp.example/mcp", headers: [] },
+    });
+    expect(JSON.stringify(addUserMcpServer.mock.calls)).not.toContain("local-only-value");
+
+    // The variable is still there for the command if the person switches back.
+    await user.click(within(form).getByRole("button", { name: "Command" }));
+    expect(within(form).getByLabelText("Variable name")).toHaveValue("DOCS_TOKEN");
+  });
+
   it("keeps a variable's name and value side by side on a phone instead of overlapping", () => {
     // Observed at 390px: the value sat in an auto-sized column that began
     // inside the name field, so the two inputs overlapped by 46px.

@@ -905,6 +905,25 @@ describe("MCP servers added by hand", () => {
     expect((await without(request("/api/extensions/user-servers", body)))?.status).toBe(503);
   });
 
+  it("refuses a command carrying headers or an address carrying environment variables before writing anything", async () => {
+    const add = vi.fn();
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      userAddedMcpServers: { add } as never,
+      now: () => now,
+    });
+    const value = [{ name: "DOCS_TOKEN", value: "local-only-value", secret: true }];
+    for (const server of [
+      { ...body.server, headers: value },
+      { type: "streamable-http", url: "https://mcp.example/mcp", headers: [], env: value },
+    ]) {
+      const answered = await handler(request("/api/extensions/user-servers", { ...body, server }));
+      expect(answered?.status).toBe(400);
+    }
+    expect(add).not.toHaveBeenCalled();
+  });
+
   it("writes the package, then installs, trusts and switches it on as one act", async () => {
     const source = { kind: "user-added", sourceRef: "user-docs-search" } as const;
     const add = vi.fn(async () => ({ source }));

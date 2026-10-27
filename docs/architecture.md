@@ -6094,7 +6094,12 @@ other destination's.
 **Connectors and user-added MCP servers.** A person connects an MCP server
 from Settings › Skills & Extensions without writing a package: Add MCP server
 takes a command Octant starts (with arguments and environment) or an address
-it connects to over Streamable HTTP (with headers). The host writes an
+it connects to over Streamable HTTP (with headers). Environment values
+belong only to a command and headers only to an address: the dialog keeps the
+two lists apart and submits only the selected transport's, and the request
+contract refuses a command carrying headers or an address carrying
+environment before anything is written, so a value meant for a local process
+never reaches a remote server. The host writes an
 ordinary Agent Plugins package for it (`plugin.json` and an `mcp.json` with
 the one server) into its own folder under the data directory and registers it
 under the `user-added` source kind, so the activation ladder, per-call
