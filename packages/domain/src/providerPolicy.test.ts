@@ -930,6 +930,79 @@ describe("provider instance policy", () => {
     expect(signedIn.configuration).toEqual(configuration);
   });
 
+  it("creates an Amazon Bedrock instance from its region and single sign-on, trimming what was pasted", () => {
+    const created = providerPolicy.createAmazonBedrockProvider({
+      id: ids.local,
+      displayName: "Bedrock",
+      configuration: {
+        kind: "amazon-bedrock-converse-http",
+        region: " us-west-2 ",
+        authentication: "cloud-iam",
+        cloudIam: {
+          startUrl: " https://contoso.awsapps.com/start/ ",
+          ssoRegion: "us-east-1",
+          accountId: " 123456789012",
+          roleName: "BedrockInvoke ",
+        },
+        manualModelIds: [" anthropic.claude-sonnet-4-20250514-v1:0 "],
+      },
+      existingInstances: [],
+      expectedVersion: version(0),
+      createdAt,
+    });
+    expect(created).toMatchObject({
+      driverKind: "amazon-bedrock",
+      configuration: {
+        region: "us-west-2",
+        authentication: "cloud-iam",
+        cloudIam: {
+          startUrl: "https://contoso.awsapps.com/start",
+          ssoRegion: "us-east-1",
+          accountId: "123456789012",
+          roleName: "BedrockInvoke",
+        },
+        manualModelIds: ["anthropic.claude-sonnet-4-20250514-v1:0"],
+      },
+    });
+    expect(providerPolicy.isNativeHarnessDriverKind("amazon-bedrock")).toBe(true);
+  });
+
+  it("refuses an Amazon Bedrock instance outside the commercial partition, at another portal, or without a model", () => {
+    const valid = {
+      kind: "amazon-bedrock-converse-http" as const,
+      region: "us-west-2",
+      authentication: "cloud-iam" as const,
+      cloudIam: {
+        startUrl: "https://contoso.awsapps.com/start",
+        ssoRegion: "us-east-1",
+        accountId: "123456789012",
+        roleName: "BedrockInvoke",
+      },
+      manualModelIds: ["anthropic.claude-sonnet-4-20250514-v1:0"],
+    };
+    const create = (configuration: typeof valid) => () =>
+      providerPolicy.createAmazonBedrockProvider({
+        id: ids.local,
+        displayName: "Bedrock",
+        configuration,
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      });
+    for (const configuration of [
+      { ...valid, region: "us-gov-west-1" },
+      { ...valid, region: "cn-northwest-1" },
+      { ...valid, cloudIam: { ...valid.cloudIam, ssoRegion: "us-gov-east-1" } },
+      { ...valid, cloudIam: { ...valid.cloudIam, startUrl: "https://contoso.example/start" } },
+      { ...valid, cloudIam: { ...valid.cloudIam, accountId: "1234" } },
+      { ...valid, cloudIam: { ...valid.cloudIam, roleName: "role name" } },
+      { ...valid, manualModelIds: [] },
+      { ...valid, manualModelIds: ["model id with spaces"] },
+    ]) {
+      expect(create(configuration)).toThrow(ProviderPolicyRejected);
+    }
+  });
+
   it("refuses a directory sign-in without GUID tenant and client ids, or at an address off the Foundry hosts", () => {
     const unbound: AzureFoundryConfigurationInput = {
       kind: "azure-foundry-openai-http",

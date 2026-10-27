@@ -67,6 +67,15 @@ import {
 import { retireClaudeHelperTokens } from "../providers/claudeHelperTokenRetirement";
 import { subscriptionOAuthHostFromBroker } from "../providers/oauth/subscriptionOAuthHost";
 import { directoryOAuthHostFromBroker } from "../providers/oauth/directoryOAuthHost";
+import {
+  cloudIamHostFromBroker,
+  makeCloudIamBrokerClient,
+} from "../providers/oauth/cloudIamBroker";
+import {
+  forgetCloudIamGrant,
+  type CloudIamSignInDependencies,
+} from "../providers/oauth/providerCloudIamSignIn";
+import { makeAmazonBedrockDriver } from "../providers/amazonBedrockDriver";
 import { readDirectoryOAuthCredential } from "@octant/provider-sdk/directory-oauth";
 import type { CompatibleFetch } from "../providers/openAiCompatibleEndpoint";
 import { type ClaudeAgentSdkPort, makeClaudeAgentSdkPort } from "../providers/claudeAgentSdkPort";
@@ -200,6 +209,8 @@ export interface ConfiguredProviderDriverOptions {
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly subscriptionOAuth?: import("@octant/provider-sdk/subscription-oauth").SubscriptionOAuthHost;
   readonly directoryOAuth?: import("@octant/provider-sdk/directory-oauth").DirectoryOAuthHost;
+  /** The broker's cloud signer; an Amazon Bedrock instance without one reads `unavailable`. */
+  readonly cloudIam?: import("@octant/provider-sdk/cloud-iam").CloudIamHost;
   readonly fetch?: CompatibleFetch;
   /** Shared by every harness driver built from these options, so a later turn can resume an earlier one. */
   readonly nativeHarnessTranscripts?: NativeHarnessTranscriptStore;
@@ -290,6 +301,21 @@ export function makeConfiguredProviderDriver(
           ? {}
           : { credentialResolver: options.credentialResolver }),
         ...(options.directoryOAuth === undefined ? {} : { directoryOAuth: options.directoryOAuth }),
+        ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+      }),
+      instance,
+      options,
+    );
+  } else if (instance.driverKind === "amazon-bedrock") {
+    driver = runDirectEndpointOnNativeHarness(
+      makeAmazonBedrockDriver({
+        instanceId: instance.id,
+        configuration: instance.configuration,
+        runtimeRegistry: options.runtimeRegistry,
+        ...(options.credentialResolver === undefined
+          ? {}
+          : { credentialResolver: options.credentialResolver }),
+        ...(options.cloudIam === undefined ? {} : { cloudIam: options.cloudIam }),
         ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
       }),
       instance,
@@ -1160,6 +1186,17 @@ export function wireProviders(deps: ProvidersDependencies) {
       oauthBroker === undefined ? undefined : subscriptionOAuthHostFromBroker(oauthBroker);
     const directoryOAuth =
       oauthBroker === undefined ? undefined : directoryOAuthHostFromBroker(oauthBroker);
+    // The cloud signer is reached on its own broker routes; the server only
+    // ever receives one request's signature headers from it.
+    const cloudIamBroker =
+      options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+        ? undefined
+        : makeCloudIamBrokerClient({
+            url: options.credentialBrokerUrl,
+            token: options.credentialBrokerToken,
+          });
+    const cloudIam =
+      cloudIamBroker === undefined ? undefined : cloudIamHostFromBroker(cloudIamBroker);
     // Clearing an instance's credential also forgets an organization
     // sign-in's grant: the pointer is the only reference to it, so deleting
     // the pointer alone would leave a live refresh token in the broker.
@@ -1177,6 +1214,11 @@ export function wireProviders(deps: ProvidersDependencies) {
       }
       const pointer = stored === undefined ? undefined : readDirectoryOAuthCredential(stored);
       if (pointer !== undefined) await oauthBroker?.forget(pointer.credentialRef);
+      // A cloud sign-in's grant goes the same way: the broker ends the portal
+      // session and deletes the grant before the pointer is deleted.
+      if (stored !== undefined && cloudIamBroker !== undefined) {
+        await forgetCloudIamGrant(cloudIamBroker, stored);
+      }
       await credentialResolver.delete(instanceId);
     };
     const providerService = new ProviderService({
@@ -1229,6 +1271,7 @@ export function wireProviders(deps: ProvidersDependencies) {
             ...(credentialResolver === undefined ? {} : { credentialResolver }),
             ...(subscriptionOAuth === undefined ? {} : { subscriptionOAuth }),
             ...(directoryOAuth === undefined ? {} : { directoryOAuth }),
+            ...(cloudIam === undefined ? {} : { cloudIam }),
           }),
           () => workRequestRuntime,
         ),
@@ -1302,11 +1345,23 @@ export function wireProviders(deps: ProvidersDependencies) {
     // The host-local device-code sign-in shares the organization sign-in's
     // dependencies; it answers only the bridge-secret caller `octant provider
     // sign-in` is, and says so even when no broker is running.
+    // A cloud sign-in shares the host's terms record and sign-in journal.
+    const cloudIamSignIn: CloudIamSignInDependencies | undefined =
+      cloudIamBroker === undefined || hostOAuth === undefined || oauthJournal === undefined
+        ? undefined
+        : {
+            broker: cloudIamBroker,
+            terms: hostOAuth,
+            journal: oauthJournal,
+            ...(credentialResolver === undefined ? {} : { credentials: credentialResolver }),
+            readInstance: (instanceId) => persistence.readProviderInstance(instanceId),
+          };
     const deviceSignInRoutes = createProviderDeviceSignInRouteHandler({
       desktopBridgeSecret: options.desktopBridgeSecret,
       windowAuthorityStore,
       readProviderInstances: () => persistence.readProviderInstances(),
       signIn: providerSignInDependencies,
+      cloudIam: cloudIamSignIn,
     });
     const providerOAuthRoutes = async (request: Request): Promise<Response | undefined> =>
       (await deviceSignInRoutes(request)) ?? (await browserSignInRoutes(request));
@@ -1375,6 +1430,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       ...(credentialResolver === undefined ? {} : { credentialResolver }),
       ...(subscriptionOAuth === undefined ? {} : { subscriptionOAuth }),
       ...(directoryOAuth === undefined ? {} : { directoryOAuth }),
+      ...(cloudIam === undefined ? {} : { cloudIam }),
       localUsageHistorySourceForInstance: (instance) => {
         const claudeConfigDirectory =
           instance.driverKind === "claude"

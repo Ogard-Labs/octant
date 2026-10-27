@@ -19,6 +19,7 @@ import {
   orderProviderModels,
   resolveCapabilitySupport,
 } from "./modelCatalogPolicy";
+import { amazonBedrockRuntimeHost } from "./cloudIamSignIn";
 import {
   isImageProfileDriverKind,
   isNativeHarnessDriverKind,
@@ -35,6 +36,7 @@ const driverLabels: Readonly<Record<Exclude<ProviderDriverKind, AcpAgentKind>, s
   "openai-compatible": "OpenAI-compatible HTTP",
   "anthropic-compatible": "Anthropic-compatible HTTP",
   "azure-foundry": "Azure AI Foundry",
+  "amazon-bedrock": "Amazon Bedrock",
   "openai-image": "OpenAI Image",
   "gemini-native-image": "Gemini Image",
   "bfl-image": "Black Forest Labs Image",
@@ -61,6 +63,8 @@ export function endpointHostOf(instance: ProviderInstance): string | undefined {
       } catch {
         return undefined;
       }
+    case "amazon-bedrock-converse-http":
+      return amazonBedrockRuntimeHost(instance.configuration.region);
     default:
       return undefined;
   }
@@ -435,6 +439,7 @@ function manualModelOrderOf(instance: ProviderInstance): ReadonlyArray<ProviderM
     case "openai-compatible-http":
     case "anthropic-compatible-http":
     case "azure-foundry-openai-http":
+    case "amazon-bedrock-converse-http":
       return instance.configuration.manualModelIds;
     default:
       return [];

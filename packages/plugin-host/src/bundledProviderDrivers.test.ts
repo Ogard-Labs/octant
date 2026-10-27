@@ -35,6 +35,7 @@ const everyDriverKind = [
   "openai-compatible",
   "anthropic-compatible",
   "azure-foundry",
+  "amazon-bedrock",
 ] as const satisfies ReadonlyArray<typeof ProviderDriverKind.Type>;
 
 describe("bundled provider-driver plugins", () => {
@@ -96,6 +97,7 @@ describe("bundled provider-driver plugins", () => {
       cline: ["12", "13"],
       qwen: ["13", "14"],
       fx: ["14", "15"],
+      "amazon-bedrock": ["19", "1a"],
     };
     for (const plugin of BUNDLED_PROVIDER_DRIVER_PLUGINS) {
       const [digestSeed, idSuffix] = seeds[plugin.driverKind as (typeof everyDriverKind)[number]];
@@ -155,7 +157,7 @@ describe("bundled provider-driver plugins", () => {
     expect(catalog.map((listing) => listing.entry.driverKind)).toEqual(
       BUNDLED_PROVIDER_DRIVER_PLUGINS.map((plugin) => plugin.driverKind),
     );
-    expect(catalog).toHaveLength(21);
+    expect(catalog).toHaveLength(22);
     for (const listing of catalog) {
       expect(listing.installed).toBe(true);
       expect(listing.trusted).toBe(true);

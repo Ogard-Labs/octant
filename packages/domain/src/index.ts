@@ -181,6 +181,7 @@ export * from "./nativeHarnessSessionPolicy";
 export * from "./projectProviderPolicy";
 export * from "./subscriptionOAuthCatalog";
 export * from "./directorySignIn";
+export * from "./cloudIamSignIn";
 export * from "./connectorCatalog";
 export * from "./turnMetricsPolicy";
 export * from "./liveTurnPolicy";

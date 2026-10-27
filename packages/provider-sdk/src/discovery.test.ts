@@ -43,13 +43,18 @@ describe("provider discovery descriptors", () => {
     const directKinds = DISCOVERY_DESCRIPTORS.filter((d) => d.isDirectEndpoint).map(
       (d) => d.driverKind,
     );
-    expect(directKinds).toEqual(["openai-compatible", "anthropic-compatible", "azure-foundry"]);
+    expect(directKinds).toEqual([
+      "openai-compatible",
+      "anthropic-compatible",
+      "azure-foundry",
+      "amazon-bedrock",
+    ]);
   });
 
   it("excludes direct endpoints from discoverableDescriptors", () => {
     const discoverable = discoverableDescriptors();
     expect(discoverable.every((d) => !d.isDirectEndpoint)).toBe(true);
-    expect(discoverable.length).toBe(DISCOVERY_DESCRIPTORS.length - 3);
+    expect(discoverable.length).toBe(DISCOVERY_DESCRIPTORS.length - 4);
   });
 
   it("every discoverable descriptor has executable names and version probe", () => {

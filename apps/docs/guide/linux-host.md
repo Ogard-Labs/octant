@@ -243,7 +243,14 @@ headless host does not have. Sign it in with a code instead:
 
 Your administrator's app registration must also set **Authentication ›
 Allow public client flows** to **Yes**; otherwise the command says your
-organization refused the sign-in. The command needs the same Secret Service
+organization refused the sign-in.
+
+An [Amazon Bedrock endpoint](../advanced/providers#amazon-bedrock-with-your-organization-s-single-sign-on)
+signs in only this way, with no setting to turn on: run the same command, open
+the page it names (on `device.sso.<region>.amazonaws.com` or your
+organization's access portal), and enter the code. If the portal does not give
+you the endpoint's account and role, the command says so and nothing is
+saved. The command needs the same Secret Service
 session as `octant provider key set`. A paired device cannot run it or start
 a sign-in, and the browser's Settings never shows a code.
 

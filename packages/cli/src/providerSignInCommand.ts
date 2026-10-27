@@ -19,8 +19,10 @@ export interface ProviderSignInCliCommand {
 
 /**
  * `octant provider sign-in <instance>`: sign an organization endpoint in with
- * a device code, for a host without the desktop app. It takes no flags; the
- * instance must already allow a device-code sign-in in its Settings.
+ * a device code, for a host without the desktop app. It takes no flags; an
+ * Azure AI Foundry instance must already allow a device-code sign-in in its
+ * Settings, and an Amazon Bedrock instance signs in at its organization's
+ * single sign-on portal only this way.
  */
 export function resolveProviderSignInCliCommand(
   positional: readonly string[],
@@ -235,6 +237,10 @@ function describeRefusal(
           return "The code ran out before the sign-in finished, so nothing was saved. Run the command again for a new code.";
         case "exchange-refused":
           return "Your organization refused the sign-in, so nothing was saved. Its app registration must allow public client flows, and its policies may block signing in with a code.";
+        case "portal-refused":
+          return "Your organization's single sign-on portal refused the sign-in, so nothing was saved. Check the endpoint's access portal URL and the region it runs in.";
+        case "not-authorized":
+          return "You signed in, but your organization's portal does not give you the endpoint's account and role, so nothing was saved. Ask an administrator to assign it to you.";
         default:
           return "The sign-in did not finish, so nothing was saved.";
       }

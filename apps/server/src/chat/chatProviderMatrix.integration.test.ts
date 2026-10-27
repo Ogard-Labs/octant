@@ -5,6 +5,7 @@ import {
 } from "../providers/chatProviderMatrixEvidence.test-support";
 
 import "../providers/acpConformance.test";
+import "../providers/amazonBedrockConformance.test";
 import "../providers/anthropicCompatibleConformance.test";
 import "../providers/azureFoundryConformance.test";
 import "../providers/claudeConformance.test";
@@ -36,6 +37,7 @@ const REGISTERED_PROVIDER_DRIVER_KINDS = {
   "openai-compatible": true,
   "anthropic-compatible": true,
   "azure-foundry": true,
+  "amazon-bedrock": true,
   "openai-image": true,
   "gemini-native-image": true,
   "bfl-image": true,
@@ -71,6 +73,7 @@ const CHAT_OUTCOMES = {
   "openai-compatible": "complete",
   "anthropic-compatible": "complete",
   "azure-foundry": "complete",
+  "amazon-bedrock": "complete",
   "openai-image": "unavailable",
   "gemini-native-image": "unavailable",
   "bfl-image": "unavailable",
@@ -81,7 +84,7 @@ const CHAT_OUTCOMES = {
 
 describe("Chat provider matrix", () => {
   it("consumes Chat conformance evidence for every registered provider kind", () => {
-    expect(new Set(registeredProviderDriverKinds).size).toBe(26);
+    expect(new Set(registeredProviderDriverKinds).size).toBe(27);
 
     for (const driverKind of registeredProviderDriverKinds) {
       if (CHAT_OUTCOMES[driverKind] === "unavailable") continue;

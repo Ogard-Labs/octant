@@ -2922,7 +2922,17 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   the issuer, client, the one gateway scope, and the gateway's origin, with no
   host list. A gateway signs in on the loopback redirect only; device code
   stays Azure AI Foundry's opt-in.
-  `cloud-iam` is not built.
+  Amazon Bedrock speaks `cloud-iam`: the person signs in at the organization's
+  single sign-on portal with a device code from the host-local
+  `octant provider sign-in` command, and the broker keeps that session and the
+  temporary credentials it mints for the instance's one account and role. The
+  server describes each Converse request to the broker's
+  `/v1/cloud-iam/sign` route by its fields (method, host, path, query, the
+  content type and accept headers, and the body's hash); the broker checks
+  them against the signing scope it stored at sign-in (the Bedrock runtime
+  host of one commercial region, the `/model/` path prefix, `POST`), builds
+  the canonical request itself, and answers with that one request's signature
+  headers. No route answers with a key, and the server never holds one.
   Secrets
   Octant holds for an integration use the same host credential path: the host
   keeps an opaque reference; plugins, the renderer, the journal, and diagnostics
@@ -7187,7 +7197,7 @@ mechanisms are:
   | Pi                        | `pi`                                                                                                             | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
   | ACP agents                | `kilo`, `devin`, `mistral-vibe`, `kimi-code`, `grok`, `goose`, `glm`, `gemini`, `copilot`, `cline`, `qwen`, `fx` | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
   | Ollama                    | `ollama`                                                                                                         | `yes` | `verified-models` | `verified-models` | `octant-harness` |
-  | Harness endpoints         | `openai-compatible`, `anthropic-compatible`, `azure-foundry`                                                     | `yes` | `verified-models` | `verified-models` | `octant-harness` |
+  | Harness endpoints         | `openai-compatible`, `anthropic-compatible`, `azure-foundry`, `amazon-bedrock`                                   | `yes` | `verified-models` | `verified-models` | `octant-harness` |
   | Outside harness endpoints | `outside-harness-endpoint`                                                                                       | `yes` | `verified-models` | `verified-models` | `octant-harness` |
   | Oh My Pi                  | `oh-my-pi`                                                                                                       | `no`  | `no`              | `no`              | `none`           |
 
@@ -8077,8 +8087,28 @@ mechanisms are:
   authorization URL from its closed issuer host and refuses a verification
   page off a closed list; the server follows an issued code until the broker
   settles it, so an interrupted command never leaves a grant without a
-  pointer. [Enterprise provider identity](design/enterprise-provider-identity.md)
+  pointer. An Amazon Bedrock endpoint signs in at its organization's single
+  sign-on portal only this way, with no opt-in, since the portal's device
+  authorization is its one flow; the broker accepts a verification page only
+  on the portal region's device host or the organization's own access portal
+  host. [Enterprise provider identity](design/enterprise-provider-identity.md)
   owns the rules.
+- **Cloud request signing.** The credential broker signs cloud requests
+  itself ([`cloudIam.ts`](../packages/host-runtime/src/cloudIam.ts),
+  [`sigV4.ts`](../packages/host-runtime/src/sigV4.ts)): Signature Version 4
+  from the published algorithm with the platform's crypto, never a cloud SDK.
+  A sign request names a credential reference and the request's own fields
+  and nothing else; a digest, a date, or a scope of the caller's own is a
+  malformed request, and a request outside the scope stored at sign-in (one
+  partition, service, host, path prefix, and method from the broker's closed
+  table) is refused before any credential is renewed or signature made. The
+  portal session, its refresh token, the client registration, and the role's
+  secret key never leave the broker; the raw resolve route refuses the grant.
+  A signature answer carries the authorization, the date, and the role's
+  session token, which the cloud requires beside every signature and which
+  signs nothing without the secret key. Removing the endpoint, or changing its
+  region, portal, account, or role, ends the portal session and deletes the
+  grant before the change is journaled.
 - **Artifact replica membership.** Each replica entry carries a detached
   Ed25519 signature from the device signing key the writing host holds for its
   replica instance, in a credential namespace of its own that provider

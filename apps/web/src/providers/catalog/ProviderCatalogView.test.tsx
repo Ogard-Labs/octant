@@ -107,14 +107,14 @@ function openSetup(name: RegExp) {
 }
 
 describe("ProviderCatalogView", () => {
-  it("lists all 21 bundled drivers as installed and trusted, split into runtimes and endpoints", () => {
+  it("lists all 22 bundled drivers as installed and trusted, split into runtimes and endpoints", () => {
     render(<ProviderCatalogView {...props()} />);
     const runtimes = screen.getByRole("list", { name: "Agent runtimes" });
     const endpoints = screen.getByRole("list", { name: "Model endpoints" });
     expect(within(runtimes).getAllByRole("listitem")).toHaveLength(17);
-    expect(within(endpoints).getAllByRole("listitem")).toHaveLength(4);
+    expect(within(endpoints).getAllByRole("listitem")).toHaveLength(5);
     expect(screen.getByRole("status", { name: "Provider catalog summary" }).textContent).toBe(
-      "21 drivers · 0 ready · 0 need you",
+      "22 drivers · 0 ready · 0 need you",
     );
     expect(screen.getByText(/each is already installed and trusted/)).toBeDefined();
   });
@@ -128,6 +128,15 @@ describe("ProviderCatalogView", () => {
     expect(view.onConnect).not.toHaveBeenCalled();
     expect(view.onProbe).not.toHaveBeenCalled();
     expect(view.onSetEnabled).not.toHaveBeenCalled();
+  });
+
+  it("says Amazon Bedrock cannot be added in Settings yet and offers no Add endpoint for it", () => {
+    render(<ProviderCatalogView {...props()} />);
+    openSetup(/^Amazon Bedrock, /);
+    expect(
+      screen.getByText(/cannot add Amazon Bedrock with your organization's single sign-on yet/),
+    ).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Open Model endpoints" })).toBeNull();
   });
 
   it("says plainly that a bundled driver needs no install or trust step and offers none", () => {
@@ -362,7 +371,7 @@ describe("ProviderCatalogView outside drivers", () => {
     expect(row.textContent).toContain("Model endpoint · Outside driver");
     expect(row.textContent).not.toContain("Bundled");
     expect(screen.getByRole("status", { name: "Provider catalog summary" }).textContent).toBe(
-      "22 drivers · 0 ready · 0 need you",
+      "23 drivers · 0 ready · 0 need you",
     );
     expect(screen.getByText(/Outside drivers are listed once you have trusted/)).toBeDefined();
   });

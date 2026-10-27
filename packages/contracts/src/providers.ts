@@ -54,6 +54,7 @@ export const ProviderDriverKind = Schema.Literal(
   "openai-compatible",
   "anthropic-compatible",
   "azure-foundry",
+  "amazon-bedrock",
   "openai-image",
   "gemini-native-image",
   "bfl-image",
@@ -508,6 +509,97 @@ export const AzureFoundryProviderConfiguration = Schema.Union(
 export type AzureFoundryProviderConfiguration = typeof AzureFoundryProviderConfiguration.Type;
 
 /**
+ * A region of the cloud's commercial partition, such as `us-east-1`. The
+ * government (`us-gov-…`), isolated (`us-iso…`), sovereign (`eusc-…`), and
+ * China (`cn-…`) partitions sign in and sign requests under other hosts and
+ * keys; they wait for an organization that needs one.
+ */
+const CLOUD_REGION = /^(?!cn-)[a-z]{2}-[a-z]{4,9}-[1-9]$/;
+export const CloudIamRegion = Schema.String.pipe(
+  Schema.pattern(CLOUD_REGION),
+  Schema.brand("CloudIamRegion"),
+);
+export type CloudIamRegion = typeof CloudIamRegion.Type;
+/**
+ * The access portal a person signs in at, exactly as the organization's
+ * single sign-on instance publishes it: `https://<alias>.awsapps.com/start`
+ * or `https://ssoins-<id>.portal.<region>.app.aws`. Both are the cloud's own
+ * hosts, so a configuration cannot name a look-alike page.
+ */
+export const CloudIamStartUrl = Schema.String.pipe(
+  Schema.filter(
+    (value) =>
+      /^https:\/\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.awsapps\.com\/start$/.test(value) ||
+      /^https:\/\/ssoins-[0-9a-f]{16}\.portal\.(?!cn-)[a-z]{2}-[a-z]{4,9}-[1-9]\.app\.aws$/.test(
+        value,
+      ),
+  ),
+  Schema.brand("CloudIamStartUrl"),
+);
+export type CloudIamStartUrl = typeof CloudIamStartUrl.Type;
+export const CloudAccountId = Schema.String.pipe(
+  Schema.pattern(/^[0-9]{12}$/),
+  Schema.brand("CloudAccountId"),
+);
+export type CloudAccountId = typeof CloudAccountId.Type;
+/** A role (permission set) name the account grants through single sign-on. */
+export const CloudRoleName = Schema.String.pipe(
+  Schema.pattern(/^[A-Za-z0-9+=,.@_-]{1,64}$/),
+  Schema.brand("CloudRoleName"),
+);
+export type CloudRoleName = typeof CloudRoleName.Type;
+/**
+ * Where a `cloud-iam` instance's identity comes from: the organization's
+ * single sign-on portal and region, and the one account and role the broker
+ * mints temporary credentials for. None of it is secret.
+ */
+export const CloudIamSourceIdentity = Schema.Struct({
+  startUrl: CloudIamStartUrl,
+  ssoRegion: CloudIamRegion,
+  accountId: CloudAccountId,
+  roleName: CloudRoleName,
+}).annotations(strict);
+export type CloudIamSourceIdentity = typeof CloudIamSourceIdentity.Type;
+/**
+ * The requests a `cloud-iam` grant may sign, fixed when it is signed in. The
+ * vocabulary is closed: one partition, one service, the service's own host in
+ * the grant's region, one path prefix, and one method. The broker refuses to
+ * sign anything outside it, so a signer that holds a grant cannot be turned
+ * into a general cloud oracle.
+ */
+export const CloudIamSigningScope = Schema.Struct({
+  partition: Schema.Literal("aws"),
+  region: CloudIamRegion,
+  service: Schema.Literal("bedrock"),
+  host: Schema.String,
+  pathPrefix: Schema.Literal("/model/"),
+  method: Schema.Literal("POST"),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((scope) => scope.host === `bedrock-runtime.${scope.region}.amazonaws.com`, {
+      description: "the host is the service's own runtime host in the scope's region",
+    }),
+  );
+export type CloudIamSigningScope = typeof CloudIamSigningScope.Type;
+
+/**
+ * Amazon Bedrock's Converse API, signed per request by the host credential
+ * broker (`cloud-iam`). The endpoint is built from the region alone, so no
+ * configuration names a host; the models are the instance's own list, since
+ * listing them needs a permission a model request does not. A Bedrock API key
+ * stays available through an OpenAI-compatible instance.
+ */
+export const AmazonBedrockProviderConfiguration = Schema.Struct({
+  kind: Schema.Literal("amazon-bedrock-converse-http"),
+  region: CloudIamRegion,
+  authentication: Schema.Literal("cloud-iam"),
+  cloudIam: CloudIamSourceIdentity,
+  manualModelIds: UniqueManualModelIds.pipe(Schema.minItems(1), Schema.maxItems(64)),
+}).annotations(strict);
+export type AmazonBedrockProviderConfiguration = typeof AmazonBedrockProviderConfiguration.Type;
+
+/**
  * The exact package an outside driver instance runs. The instance binds the
  * version and content digest it was added with: a package with any other
  * digest is not the driver this instance names, whatever its name.
@@ -846,6 +938,13 @@ export const AzureFoundryProviderInstance = Schema.Struct({
 }).annotations(strict);
 export type AzureFoundryProviderInstance = typeof AzureFoundryProviderInstance.Type;
 
+export const AmazonBedrockProviderInstance = Schema.Struct({
+  ...ProviderInstanceFields,
+  driverKind: Schema.Literal("amazon-bedrock"),
+  configuration: AmazonBedrockProviderConfiguration,
+}).annotations(strict);
+export type AmazonBedrockProviderInstance = typeof AmazonBedrockProviderInstance.Type;
+
 export const OpenAiImageProviderInstance = Schema.Struct({
   ...ProviderInstanceFields,
   driverKind: Schema.Literal("openai-image"),
@@ -893,6 +992,7 @@ export const ProviderInstance = Schema.Union(
   OpenAiCompatibleProviderInstance,
   AnthropicCompatibleProviderInstance,
   AzureFoundryProviderInstance,
+  AmazonBedrockProviderInstance,
   OpenAiImageProviderInstance,
   GeminiImageProviderInstance,
   BflImageProviderInstance,
@@ -982,6 +1082,7 @@ export const ProviderInstanceConfigurationChanged = Schema.Struct({
     OpenAiCompatibleProviderInstance,
     AnthropicCompatibleProviderInstance,
     AzureFoundryProviderInstance,
+    AmazonBedrockProviderInstance,
     OpenAiImageProviderInstance,
     GeminiImageProviderInstance,
     BflImageProviderInstance,
@@ -1725,6 +1826,12 @@ export const ProviderRegistryCommand = Schema.Union(
     configuration: AzureFoundryProviderConfiguration,
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("create-amazon-bedrock-provider"),
+    ...CreateProviderCommandFields,
+    displayName: Schema.NonEmptyTrimmedString,
+    configuration: AmazonBedrockProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("create-openai-image-provider"),
     ...CreateProviderCommandFields,
     displayName: Schema.NonEmptyTrimmedString,
@@ -1815,6 +1922,11 @@ export const ProviderRegistryCommand = Schema.Union(
     kind: Schema.Literal("change-azure-foundry-configuration"),
     ...ProviderInstanceCommandFields,
     configuration: AzureFoundryProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-amazon-bedrock-configuration"),
+    ...ProviderInstanceCommandFields,
+    configuration: AmazonBedrockProviderConfiguration,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-openai-image-configuration"),
@@ -2546,6 +2658,10 @@ export const decodeDirectoryClientId = Schema.decodeUnknownSync(DirectoryClientI
 export const decodeDirectoryIssuer = Schema.decodeUnknownSync(DirectoryIssuer);
 export const decodeDirectoryIssuerClientId = Schema.decodeUnknownSync(DirectoryIssuerClientId);
 export const decodeDirectoryResourceScope = Schema.decodeUnknownSync(DirectoryResourceScope);
+export const decodeCloudIamRegion = Schema.decodeUnknownSync(CloudIamRegion);
+export const decodeCloudIamStartUrl = Schema.decodeUnknownSync(CloudIamStartUrl);
+export const decodeCloudAccountId = Schema.decodeUnknownSync(CloudAccountId);
+export const decodeCloudRoleName = Schema.decodeUnknownSync(CloudRoleName);
 export const decodeProviderModelId = Schema.decodeUnknownSync(ProviderModelId);
 export const decodeProviderDriverKind = Schema.decodeUnknownSync(ProviderDriverKind);
 export const decodeProviderInstance = Schema.decodeUnknownSync(ProviderInstance);

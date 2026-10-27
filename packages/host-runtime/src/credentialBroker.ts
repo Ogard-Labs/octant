@@ -8,6 +8,12 @@ import {
   type CredentialStore,
 } from "./credentialStore";
 import {
+  createCloudIamRuntime,
+  handleCloudIamBrokerRoute,
+  isCloudIamGrantMaterial,
+  type CloudIamRuntime,
+} from "./cloudIam";
+import {
   createHostOAuthRuntime,
   handleHostOAuthBrokerRoute,
   isHostOAuthGrantMaterial,
@@ -52,6 +58,10 @@ const ROUTES = new Set([
   "/v1/oauth/refresh",
   "/v1/oauth/access",
   "/v1/oauth/revoke",
+  "/v1/cloud-iam/begin",
+  "/v1/cloud-iam/status",
+  "/v1/cloud-iam/sign",
+  "/v1/cloud-iam/revoke",
 ]);
 const REPLICA_DEVICE_KEY_PREFIX = "/v1/replica-device-keys/";
 const REPLICA_STORE_CREDENTIAL_PREFIX = "/v1/replica-store-credentials/";
@@ -129,6 +139,14 @@ export async function startCredentialBroker(
     ...(oauth?.timeoutMs === undefined ? {} : { timeoutMs: oauth.timeoutMs }),
     ...(oauth?.sleep === undefined ? {} : { sleep: oauth.sleep }),
   });
+  // The cloud signer shares the store, the network, and the clock with the
+  // OAuth runner: a cloud grant is one more entry the raw resolve refuses.
+  const cloudIam = createCloudIamRuntime({
+    store,
+    ...(oauth?.fetch === undefined ? {} : { fetch: oauth.fetch }),
+    ...(oauth?.now === undefined ? {} : { now: oauth.now }),
+    ...(oauth?.sleep === undefined ? {} : { sleep: oauth.sleep }),
+  });
   let brokerUrl: string | undefined;
   const server = createServer((incoming, outgoing) => {
     void handleIncoming(
@@ -138,6 +156,7 @@ export async function startCredentialBroker(
       store,
       purgeStore,
       runtime,
+      cloudIam,
       replicaDeviceKeys,
       replicaStoreCredentials,
       canvasPublicShareSecrets,
@@ -186,6 +205,7 @@ export async function startCredentialBroker(
     if (closing !== undefined) return closing;
     closing = (async () => {
       await runtime.close();
+      await cloudIam.close();
       await new Promise<void>((resolve, reject) => {
         if (!server.listening) {
           resolve();
@@ -210,6 +230,7 @@ export async function startCredentialBroker(
         store,
         purgeStore,
         runtime,
+        cloudIam,
         replicaDeviceKeys,
         replicaStoreCredentials,
         canvasPublicShareSecrets,
@@ -226,6 +247,7 @@ async function handleIncoming(
   store: CredentialStore,
   purgeStore: CredentialPurgeStore | undefined,
   runtime: HostOAuthRuntime,
+  cloudIam: CloudIamRuntime,
   replicaDeviceKeys: CredentialStore | undefined,
   replicaStoreCredentials: CredentialStore | undefined,
   canvasPublicShareSecrets: CredentialStore | undefined,
@@ -260,6 +282,7 @@ async function handleIncoming(
         store,
         purgeStore,
         runtime,
+        cloudIam,
         replicaDeviceKeys,
         replicaStoreCredentials,
         canvasPublicShareSecrets,
@@ -277,6 +300,7 @@ async function handleBrokerRequest(
   store: CredentialStore,
   purgeStore: CredentialPurgeStore | undefined,
   runtime: HostOAuthRuntime,
+  cloudIam: CloudIamRuntime,
   replicaDeviceKeys: CredentialStore | undefined,
   replicaStoreCredentials: CredentialStore | undefined,
   canvasPublicShareSecrets: CredentialStore | undefined,
@@ -299,6 +323,10 @@ async function handleBrokerRequest(
 
   if (url.pathname.startsWith("/v1/oauth/")) {
     return handleHostOAuthBrokerRoute(url.pathname, request, runtime);
+  }
+
+  if (url.pathname.startsWith("/v1/cloud-iam/")) {
+    return handleCloudIamBrokerRoute(url.pathname, request, cloudIam);
   }
 
   if (url.pathname.startsWith(REPLICA_DEVICE_KEY_PREFIX)) {
@@ -399,6 +427,9 @@ async function handleBrokerRequest(
     }
     const credential = await store.resolve(decoded.id);
     if (isHostOAuthGrantMaterial(credential)) return failure("oauth-material", 403);
+    // A cloud grant holds the portal session and the role's secret key; only
+    // the signer may read it.
+    if (isCloudIamGrantMaterial(credential)) return failure("cloud-iam-material", 403);
     return Response.json({ credential });
   } catch (error) {
     return credentialStoreFailure(error);

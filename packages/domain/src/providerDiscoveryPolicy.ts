@@ -73,6 +73,7 @@ const MANUAL_ENDPOINT_DRIVERS: ReadonlySet<ProviderDriverKind> = new Set([
   "openai-compatible",
   "anthropic-compatible",
   "azure-foundry",
+  "amazon-bedrock",
 ]);
 
 export function canAutoDetectDriverKind(driverKind: ProviderDriverKind): boolean {

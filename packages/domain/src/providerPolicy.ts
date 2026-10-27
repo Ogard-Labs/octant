@@ -23,6 +23,12 @@ import {
   DirectoryResourceScope,
   type DirectoryIssuerBinding,
 } from "@octant/contracts/providers";
+import {
+  CloudAccountId,
+  CloudIamRegion,
+  CloudIamStartUrl,
+  CloudRoleName,
+} from "@octant/contracts/providers";
 import { Schema } from "effect";
 import type {
   AcpAgentConfiguration,
@@ -35,6 +41,8 @@ import type {
   AzureFoundryProviderConfiguration,
   DirectoryBinding,
   AzureFoundryProviderInstance,
+  AmazonBedrockProviderConfiguration,
+  AmazonBedrockProviderInstance,
   BflImageProviderConfiguration,
   BflImageProviderInstance,
   ClaudeAccountAccent,
@@ -177,12 +185,14 @@ export function isNativeHarnessDriverKind(
   | "openai-compatible"
   | "anthropic-compatible"
   | "azure-foundry"
+  | "amazon-bedrock"
   | "ollama"
   | "outside-harness-endpoint" {
   return (
     driverKind === "openai-compatible" ||
     driverKind === "anthropic-compatible" ||
     driverKind === "azure-foundry" ||
+    driverKind === "amazon-bedrock" ||
     driverKind === "ollama" ||
     driverKind === "outside-harness-endpoint"
   );
@@ -552,6 +562,74 @@ function normalizeAzureFoundryConfiguration(
     };
   }
   return { ...shared, authentication: "api-key" };
+}
+
+export interface AmazonBedrockConfigurationInput {
+  readonly kind: AmazonBedrockProviderConfiguration["kind"];
+  readonly region: string;
+  readonly authentication: AmazonBedrockProviderConfiguration["authentication"];
+  readonly cloudIam: {
+    readonly startUrl: string;
+    readonly ssoRegion: string;
+    readonly accountId: string;
+    readonly roleName: string;
+  };
+  readonly manualModelIds: ReadonlyArray<string>;
+}
+
+// A Bedrock model, inference profile, or their ARN. The driver percent-encodes
+// the id into the request path; anything else names no model Bedrock serves.
+const BEDROCK_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/;
+
+/**
+ * Bedrock signs in only with the organization's single sign-on and its
+ * temporary credentials (`cloud-iam`); a Bedrock API key belongs on an
+ * OpenAI-compatible instance. The region picks the one host requests go to,
+ * so the configuration names no address at all.
+ */
+function normalizeAmazonBedrockConfiguration(
+  configuration: AmazonBedrockConfigurationInput,
+): AmazonBedrockProviderConfiguration {
+  if (configuration.authentication !== "cloud-iam") {
+    reject(
+      "invalid-authentication",
+      "Amazon Bedrock signs in with your organization's single sign-on.",
+    );
+  }
+  const region = configuration.region.trim();
+  if (!Schema.is(CloudIamRegion)(region)) {
+    reject("invalid-base-url", "Choose an Amazon Bedrock region such as us-east-1.");
+  }
+  const startUrl = stripTrailingSlashes(configuration.cloudIam.startUrl.trim());
+  const ssoRegion = configuration.cloudIam.ssoRegion.trim();
+  const accountId = configuration.cloudIam.accountId.trim();
+  const roleName = configuration.cloudIam.roleName.trim();
+  if (!Schema.is(CloudIamStartUrl)(startUrl) || !Schema.is(CloudIamRegion)(ssoRegion)) {
+    reject(
+      "invalid-authentication",
+      "Single sign-on needs your organization's access portal URL (https://<name>.awsapps.com/start) and the region it runs in.",
+    );
+  }
+  if (!Schema.is(CloudAccountId)(accountId) || !Schema.is(CloudRoleName)(roleName)) {
+    reject(
+      "invalid-authentication",
+      "Single sign-on needs the 12-digit account ID and the role (permission set) name to use.",
+    );
+  }
+  const manualModelIds = normalizeManualModelIds(configuration.manualModelIds);
+  if (manualModelIds.length === 0 || manualModelIds.length > 64) {
+    reject("invalid-model-ids", "Amazon Bedrock needs between 1 and 64 model IDs.");
+  }
+  if (!manualModelIds.every((modelId) => BEDROCK_MODEL_ID.test(modelId))) {
+    reject("invalid-model-id", "A Bedrock model ID, inference profile ID, or ARN is expected.");
+  }
+  return {
+    kind: configuration.kind,
+    region,
+    authentication: "cloud-iam",
+    cloudIam: { startUrl, ssoRegion, accountId, roleName },
+    manualModelIds: manualModelIds as AmazonBedrockProviderConfiguration["manualModelIds"],
+  };
 }
 
 interface CreateProviderInput {
@@ -1134,6 +1212,45 @@ export function createAzureFoundryProvider(
     version: nextVersion(input.expectedVersion),
     createdAt: input.createdAt,
     updatedAt: input.createdAt,
+  };
+}
+
+export interface CreateAmazonBedrockProviderInput {
+  readonly id: ProviderInstanceId;
+  readonly displayName: string;
+  readonly configuration: AmazonBedrockConfigurationInput;
+  readonly existingInstances: ReadonlyArray<ProviderInstance>;
+  readonly expectedVersion: AggregateVersion;
+  readonly createdAt: UtcTimestamp;
+  readonly enabled?: boolean;
+}
+
+export function createAmazonBedrockProvider(
+  input: CreateAmazonBedrockProviderInput,
+): AmazonBedrockProviderInstance {
+  return {
+    id: input.id,
+    displayName: normalizeName(input.displayName, input.existingInstances),
+    driverKind: "amazon-bedrock",
+    configuration: normalizeAmazonBedrockConfiguration(input.configuration),
+    enabled: input.enabled ?? true,
+    environmentPolicy: "inherit-host",
+    version: nextVersion(input.expectedVersion),
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+  };
+}
+
+export function changeAmazonBedrockConfiguration(
+  current: AmazonBedrockProviderInstance,
+  input: AmazonBedrockConfigurationInput,
+  updatedAt: UtcTimestamp,
+): AmazonBedrockProviderInstance {
+  return {
+    ...current,
+    configuration: normalizeAmazonBedrockConfiguration(input),
+    version: nextVersion(current.version),
+    updatedAt,
   };
 }
 
