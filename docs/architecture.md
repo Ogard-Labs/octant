@@ -6576,13 +6576,24 @@ mechanisms are:
   nested user namespace: its inherited mounts stay locked, and mapping the
   host's uid 0 needs a capability it no longer has.
   Full access's deny-only host-root bind keeps the host's own authority and
-  does not drop them. On a root host its extension and host-auth denials are
-  therefore not a boundary: the runtime is host root and shares the host's
-  process namespace, so it can read a denied file through another process's
-  `/proc/<pid>/root`. Measured on bwrap 0.9.0, that worked with no
-  capabilities at all, and dropping `CAP_SYS_ADMIN` stopped only `umount`;
-  hiding host processes would take away what Full access grants. The capsule
-  binds `/etc` and `/sys` read-only because
+  does not drop them. It shares the host's process namespace, so its
+  extension and host-auth denials hold only while the runtime sits in a user
+  namespace of its own, which is how Bubblewrap runs for an ordinary user:
+  reading another process's `/proc/<pid>/root` needs `CAP_SYS_PTRACE` over
+  that process's user namespace, and the capsule never holds it over the
+  host's, so the same uid is not enough. Measured on bwrap 0.9.0 as an
+  ordinary user, the runtime was refused the `/proc/<pid>/root` and
+  `/proc/<pid>/cwd` of both its Bubblewrap parent and another of that user's
+  processes. On a root host the denials are therefore not a boundary:
+  Bubblewrap started by uid 0 makes no user namespace, so the runtime is host
+  root in the host's namespaces and can read a denied file through another
+  process's `/proc/<pid>/root`. Measured on bwrap 0.9.0, that worked with no
+  capabilities at all, and dropping `CAP_SYS_ADMIN` stopped only `umount`.
+  A setuid-root Bubblewrap makes no user namespace for an ordinary user
+  either; measured on bwrap 0.9.0 installed setuid, the runtime read the
+  denied file through both processes, and Octant does not refuse such an
+  install. Hiding host processes would take away what Full access grants.
+  The capsule binds `/etc` and `/sys` read-only because
   workloads read them: resolver and `nsswitch` files, TLS roots, `passwd`,
   the dynamic linker cache, `alternatives` links, and login shell startup
   files from `/etc`; cgroup limits and CPU topology from `/sys`, which
