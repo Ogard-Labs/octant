@@ -687,10 +687,11 @@ These rules settle what the seam needs, each in the fail-closed direction:
   launched in closes.
 - **Conformance holds the claim.** A driver that declares nothing must be
   refused `unsupported` with nothing launched on the target or this host. A
-  driver that declares placement must run a turn whose runtime started only
-  through the placement, at an absolute path; must fail the turn, not run
-  here, when the target refuses the launch; and must stop every process it
-  placed when its scope closes. A declaration that names no posture fails.
+  driver that declares placement must, in every posture it declares, run a
+  turn whose runtime started only through the placement, at an absolute path;
+  must fail the turn, not run here, when the target refuses the launch; and
+  must stop every process it placed when its scope closes. A declaration that
+  names no posture, or one twice, fails.
 
 The executor does not yet start a runtime process, and no in-tree driver
 declares placement. Starting one is its own change: a protocol request for a
@@ -929,10 +930,10 @@ agent can implement and verify it in a Linux container with OpenSSH installed an
    provider-sdk conformance and one wrapped runtime launched on a target. Built
    2026-10-26 in part: the seam, its conformance, and admission from a driver's
    declaration. Its evidence is `processPlacementConformance.test.ts` (a driver
-   that places its runtime passes; one that runs here, falls back here on a
-   refusal, leaks a placed process, or declares no posture fails; an undeclared
-   driver and a Chat or Work acquisition are refused before anything
-   launches), `acpConformance.test.ts` (each ACP profile reports placement
+   that places its runtime passes; one that runs here, in any declared
+   posture, falls back here on a refusal, leaks a placed process, or declares
+   no posture fails; an undeclared driver and a Chat or Work acquisition are
+   refused before anything launches), `acpConformance.test.ts` (each ACP profile reports placement
    unsupported and launches nothing), and `sshTargetConnectionService.test.ts`
    (a placed runtime admitted only in a declared posture, and refused
    `runtime-not-attestable` for no declaration, an undeclared posture, Full

@@ -16,7 +16,10 @@ export interface ProviderRemotePlacementConformanceFixture {
    * supplies the placement.
    */
   readonly acquireInput: Omit<ProviderAcquireInput, "placement"> & { readonly mode: "code" };
-  /** A session in a posture the driver declares; unused for a driver that declares none. */
+  /**
+   * The session to start; the harness starts it once in each posture the
+   * driver declares. Unused for a driver that declares none.
+   */
   readonly sessionStart: ProviderSessionStart;
   readonly turn: ProviderTurnInput;
   /** The stand-in target, which runs what the driver places on it. */
@@ -46,10 +49,10 @@ const isProviderFailure = Schema.is(ProviderFailure);
 /**
  * Holds a driver to its remote placement claim. A driver that declares none
  * must be refused `unsupported` before it, the target, or this host launches
- * anything. A driver that declares it must run a turn whose runtime starts
- * only through the placement, at an absolute path; must fail, not fall back
- * to this host, when the target refuses the launch; and must stop every
- * process it placed when its scope closes.
+ * anything. A driver that declares it must, in every posture it declares, run
+ * a turn whose runtime starts only through the placement, at an absolute
+ * path; must fail, not fall back to this host, when the target refuses the
+ * launch; and must stop every process it placed when its scope closes.
  */
 export async function runRemotePlacementConformance(
   fixture: ProviderRemotePlacementConformanceFixture,
@@ -84,11 +87,29 @@ export async function runRemotePlacementConformance(
     new Set(support.postures).size === support.postures.length,
     "remote placement names a posture twice",
   );
-  assert(
-    support.postures.some((posture) => posture === fixture.sessionStart.executionPolicy),
-    "the fixture's session runs in a posture the driver does not declare",
-  );
+  // Admission places the runtime in every posture the driver declares, so the
+  // claim is held in each one: a driver could place in one and run here in another.
+  for (const posture of support.postures) {
+    await holdsPlacementInPosture(fixture, { ...fixture.sessionStart, executionPolicy: posture });
+  }
 
+  return {
+    claim: "supported",
+    refusedBeforeAnyLaunch: false,
+    ranOnTarget: true,
+    refusedWithoutLocalFallback: true,
+    placedProcessesStopped: true,
+  };
+}
+
+/**
+ * Runs a turn on the stand-in target and one on a target that refuses the
+ * launch, in one declared posture.
+ */
+async function holdsPlacementInPosture(
+  fixture: ProviderRemotePlacementConformanceFixture,
+  sessionStart: ProviderSessionStart,
+): Promise<void> {
   const placed = countingPlacement(fixture.target);
   const events = await Effect.runPromise(
     Effect.scoped(
@@ -97,14 +118,12 @@ export async function runRemotePlacementConformance(
           ...fixture.acquireInput,
           placement: placed.placement,
         });
-        yield* connection.start(fixture.sessionStart);
+        yield* connection.start(sessionStart);
         const subscription = yield* connection.subscribe;
-        const collected = yield* Effect.fork(
-          throughTerminal(subscription, fixture.sessionStart.sessionId),
-        );
+        const collected = yield* Effect.fork(throughTerminal(subscription, sessionStart.sessionId));
         yield* connection.send(fixture.turn);
         const turnEvents = Array.from(yield* Fiber.join(collected));
-        yield* connection.stop(fixture.sessionStart.sessionId);
+        yield* connection.stop(sessionStart.sessionId);
         return turnEvents;
       }),
     ),
@@ -131,11 +150,9 @@ export async function runRemotePlacementConformance(
           ...fixture.acquireInput,
           placement: refusing,
         });
-        yield* connection.start(fixture.sessionStart);
+        yield* connection.start(sessionStart);
         const subscription = yield* connection.subscribe;
-        const collected = yield* Effect.fork(
-          throughTerminal(subscription, fixture.sessionStart.sessionId),
-        );
+        const collected = yield* Effect.fork(throughTerminal(subscription, sessionStart.sessionId));
         yield* connection.send(fixture.turn);
         return Array.from(yield* Fiber.join(collected));
       }).pipe(Effect.timeout(REFUSED_TURN_DEADLINE)),
@@ -156,14 +173,6 @@ export async function runRemotePlacementConformance(
       "a target that refused the launch left the turn waiting, or failed it untyped",
     );
   }
-
-  return {
-    claim: "supported",
-    refusedBeforeAnyLaunch: false,
-    ranOnTarget: true,
-    refusedWithoutLocalFallback: true,
-    placedProcessesStopped: true,
-  };
 }
 
 /** The placement the driver sees, counting launches and the ones still open. */

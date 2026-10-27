@@ -62,7 +62,9 @@ type Placing =
   /** Starts through the placement, and on this host when the target refuses. */
   | "falls-back-locally"
   /** Starts through the placement in a scope it never closes. */
-  | "leaks-process";
+  | "leaks-process"
+  /** Starts through the placement, and its session on this host outside Plan. */
+  | "runs-locally-outside-plan";
 
 /**
  * A stand-in target whose runtime answers each line it reads with `reply:`
@@ -151,8 +153,8 @@ function placedDriverFixture(options: {
     acquire: (input) =>
       Effect.acquireRelease(
         Effect.gen(function* () {
-          acquired += 1;
           const process = yield* runtime(input.placement);
+          acquired += 1;
           const events = yield* Queue.unbounded<ProviderRuntimeEvent>();
           const reply = (prompt: string) =>
             process === undefined
@@ -167,7 +169,16 @@ function placedDriverFixture(options: {
                 });
           const connection: ProviderConnection = {
             subscribe: Effect.succeed(Stream.fromQueue(events)),
-            start: () => Effect.succeed({ sessionId }),
+            start: (start) =>
+              Effect.sync(() => {
+                if (
+                  options.placing === "runs-locally-outside-plan" &&
+                  start.executionPolicy !== "plan"
+                ) {
+                  localLaunches += 1;
+                }
+                return { sessionId };
+              }),
             resume: () => Effect.fail({ category: "unsupported", message: "No resume." }),
             send: (turn) =>
               Effect.gen(function* () {
@@ -252,6 +263,19 @@ describe("remote placement conformance", () => {
         placedDriverFixture({ placing: "leaks-process", remotePlacement: declared }),
       ),
     ).rejects.toThrow("a process placed on the target outlived its scope");
+  });
+
+  it("fails a driver that places its runtime in one declared posture and runs it on this host in another", async () => {
+    const fixture = placedDriverFixture({
+      placing: "runs-locally-outside-plan",
+      remotePlacement: { postures: ["plan", "approval-gated"], appToolTransport: "stdio" },
+    });
+    await expect(
+      runRemotePlacementConformance({
+        ...fixture,
+        sessionStart: { ...fixture.sessionStart, executionPolicy: "plan" },
+      }),
+    ).rejects.toThrow("the driver started its runtime on this host");
   });
 
   it("fails a declaration that names no posture", async () => {
