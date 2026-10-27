@@ -12,6 +12,7 @@ import type {
 import { decodeExtensionEffectiveSnapshot } from "@octant/contracts/extension-rpc";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import {
+  isExtensionComponentHostConfined,
   isExtensionComponentModeSafe,
   resolveExtensionActivation,
 } from "@octant/plugin-host/activation";
@@ -37,6 +38,7 @@ export interface ExtensionScopeAuthorityPort {
 
 export function createLocalExtensionActivationPolicy(
   authority: ExtensionScopeAuthorityPort,
+  platform: string = process.platform,
 ): ExtensionActivationPolicyPort {
   return {
     resolve: ({ scope, packageState, component }) => {
@@ -46,7 +48,8 @@ export function createLocalExtensionActivationPolicy(
         revision: 0,
         projectRevision: project.revision,
         threadRevision: thread.revision,
-        hostAllowed: scope.hostId === LOCAL_HOST_ID,
+        hostAllowed:
+          scope.hostId === LOCAL_HOST_ID && isExtensionComponentHostConfined(platform, component),
         modeAllowed:
           packageState.compatibility.modes.includes(scope.mode) &&
           isExtensionComponentModeSafe(scope.mode, component),

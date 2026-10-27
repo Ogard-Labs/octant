@@ -138,6 +138,12 @@ describe("resolving what the right utility dock shows", () => {
         modes: ["code"],
         scope: "thread",
       },
+      {
+        id: "desktop",
+        label: "Desktop",
+        modes: ["code"],
+        scope: "thread",
+      },
     ]);
   });
 

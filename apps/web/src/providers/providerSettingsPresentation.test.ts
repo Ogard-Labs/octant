@@ -72,6 +72,17 @@ describe("provider Settings presentation", () => {
       nextStep:
         "Octant runs this provider only once its driver package is installed, trusted, and enabled.",
     });
+    expect(
+      providerRefusalGuidance(instance, {
+        ...blocked,
+        readiness: "incompatible",
+        reason: "driver-incompatible",
+      }),
+    ).toEqual({
+      reason: "This provider's driver package does not speak a protocol Octant can use.",
+      nextStep:
+        "Octant stopped the driver. Install a version of the package built for this Octant, then check the connection again.",
+    });
   });
 
   it("turns technical readiness states into compact next-action labels", () => {

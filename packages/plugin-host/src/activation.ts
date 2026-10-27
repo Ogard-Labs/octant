@@ -80,6 +80,25 @@ export function isExtensionComponentModeSafe(
   );
 }
 
+/**
+ * Whether a host may ever run a stored component's process. A stored
+ * provider-driver component is an outside driver, and only macOS confines one
+ * (deny-default Seatbelt with no network, exec, or fork). Extension processes
+ * have no Linux or Windows confinement, so there the component is
+ * `host-prohibited` rather than started unconfined.
+ */
+export function isExtensionComponentHostConfined(
+  platform: string,
+  component: ExtensionComponent,
+): boolean {
+  return component.kind !== "provider-driver" || isOutsideDriverHostConfined(platform);
+}
+
+/** Whether this platform confines an outside provider driver's process. */
+export function isOutsideDriverHostConfined(platform: string): boolean {
+  return platform === "darwin";
+}
+
 export interface ExtensionActivationContext extends ExtensionActivationState {
   readonly hostAllowed: boolean;
   readonly modeAllowed: boolean;

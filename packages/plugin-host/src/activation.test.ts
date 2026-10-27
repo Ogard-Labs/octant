@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { ExtensionActivationState } from "@octant/contracts/extensions";
-import { isExtensionComponentModeSafe, resolveExtensionActivation } from "./activation";
+import {
+  isExtensionComponentHostConfined,
+  isExtensionComponentModeSafe,
+  resolveExtensionActivation,
+} from "./activation";
 
 const effective: ExtensionActivationState = {
   installed: true,
@@ -62,6 +66,25 @@ describe("effective extension activation", () => {
           kind,
           displayName: "Component",
           declaredCapabilities,
+        }),
+      ).toBe(expected);
+    },
+  );
+
+  it.each([
+    ["darwin", "provider-driver", true],
+    ["linux", "provider-driver", false],
+    ["win32", "provider-driver", false],
+    ["linux", "mcp-server", true],
+  ] as const)(
+    "lets a %s host run a stored %s component only where it is confined: %s",
+    (platform, kind, expected) => {
+      expect(
+        isExtensionComponentHostConfined(platform, {
+          id: "component" as never,
+          kind,
+          displayName: "Component",
+          declaredCapabilities: [],
         }),
       ).toBe(expected);
     },

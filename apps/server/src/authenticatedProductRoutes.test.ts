@@ -97,6 +97,12 @@ describe("authenticated product route dispatch", () => {
         new Request("https://octant.example/api/code/local-servers/commands", { method: "POST" }),
       ),
     ).toBe("code.local-servers.list");
+    // A person's Desktop tab, its frames included, is its own action.
+    for (const path of ["/api/code/desktops", "/api/code/desktops/frame"]) {
+      expect(
+        classifyProductAction(new Request(`https://octant.example${path}`, { method: "POST" })),
+      ).toBe("code.desktop.operate");
+    }
     // Language reads, and the open documents they read, are their own action.
     for (const path of ["/api/code/language/read", "/api/code/language/documents"]) {
       expect(

@@ -4,9 +4,15 @@
  * promises unless a test switches a behaviour off, and it records every call
  * so a test can prove the host made none.
  */
-import type { DesktopHostTag, DesktopProviderId, UtcTimestamp } from "@octant/contracts";
+import type {
+  DesktopHostTag,
+  DesktopInputEvent,
+  DesktopProviderId,
+  UtcTimestamp,
+} from "@octant/contracts";
 import { decodeDesktopProviderId, decodeUtcTimestamp } from "@octant/contracts";
 import type {
+  DesktopFrame,
   DesktopHandle,
   DesktopProvider,
   DesktopProviderStatusResult,
@@ -22,12 +28,20 @@ export interface FakeDesktopBehaviour {
   unreachable: boolean;
   /** A billed provider that forgets to set its own expiry. */
   omitProviderExpiry: boolean;
+  /** The frame each screen read answers with; undefined answers no frame. */
+  frame: DesktopFrame | undefined;
 }
 
 export interface FakeDesktop {
   readonly handle: DesktopHandle;
   readonly hostTag: DesktopHostTag;
   readonly providerExpiresAt: UtcTimestamp | undefined;
+}
+
+/** One input a desktop's screen took. */
+export interface FakeInput {
+  readonly resource: string;
+  readonly event: DesktopInputEvent;
 }
 
 /** One file a transfer wrote into a desktop's inbox. */
@@ -41,10 +55,22 @@ export interface FakeDesktopBackend {
   readonly behaviour: FakeDesktopBehaviour;
   readonly desktops: () => ReadonlyArray<FakeDesktop>;
   readonly delivered: () => ReadonlyArray<FakeDelivery>;
+  readonly inputs: () => ReadonlyArray<FakeInput>;
   readonly calls: () => ReadonlyArray<string>;
   /** A desktop left behind by an earlier host process. */
   readonly plant: (desktop: FakeDesktop) => void;
 }
+
+/** A 1x1 PNG's signature and header. Nothing reads its pixels. */
+export const FAKE_DESKTOP_FRAME: DesktopFrame = {
+  mediaType: "image/png",
+  width: 1,
+  height: 1,
+  bytes: new Uint8Array([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 1,
+    0, 0, 0, 1, 8, 6, 0, 0, 0,
+  ]),
+};
 
 /** Billed providers set their own expiry this long after the lease's. */
 const PROVIDER_EXPIRY_MARGIN_MS = 5 * 60_000;
@@ -65,11 +91,13 @@ export function createFakeDesktopProvider(
     lingerAfterRelease: false,
     unreachable: false,
     omitProviderExpiry: false,
+    frame: FAKE_DESKTOP_FRAME,
     ...options.behaviour,
   };
   const desktops = new Map<string, FakeDesktop>();
   const calls: Array<string> = [];
   const delivered: Array<FakeDelivery> = [];
+  const inputs: Array<FakeInput> = [];
   let sequence = 0;
 
   const providerExpiry = (expiresAt: string): UtcTimestamp | undefined =>
@@ -112,9 +140,30 @@ export function createFakeDesktopProvider(
       desktops.set(handle.resource, { ...desktop, providerExpiresAt });
       return { status: "extended", expiresAt: providerExpiresAt ?? expiresAt };
     },
-    screen: async () => {
+    screen: async (handle) => {
       calls.push("screen");
-      return { status: "refused", reason: "unsupported" };
+      if (!desktops.has(handle.resource)) return { status: "failed", reason: "not-found" };
+      return {
+        status: "ready",
+        screen: {
+          frame: async () => {
+            calls.push("frame");
+            if (!desktops.has(handle.resource)) return { status: "failed", reason: "not-found" };
+            return behaviour.frame === undefined
+              ? { status: "failed", reason: "no-frame" }
+              : { status: "frame", frame: behaviour.frame };
+          },
+          input: async (event) => {
+            calls.push("input");
+            if (!desktops.has(handle.resource)) return { status: "failed", reason: "not-found" };
+            inputs.push({ resource: handle.resource, event });
+            return { status: "delivered" };
+          },
+          close: async () => {
+            calls.push("close-screen");
+          },
+        },
+      };
     },
     control: async (handle, command) => {
       calls.push("control");
@@ -163,6 +212,7 @@ export function createFakeDesktopProvider(
       behaviour,
       desktops: () => [...desktops.values()],
       delivered: () => [...delivered],
+      inputs: () => [...inputs],
       calls: () => [...calls],
       plant: (desktop) => {
         desktops.set(desktop.handle.resource, desktop);

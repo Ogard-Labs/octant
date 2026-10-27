@@ -18,12 +18,18 @@ import {
 } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
+import {
+  makeProcessConfinementLive,
+  seatbeltAllowLiteralMetadataRule,
+  seatbeltAllowLiteralReadRule,
+} from "../process/seatbeltProfile";
 import type {
   ExtensionProcessExit,
   ExtensionProcessHandle,
   ExtensionProcessPort,
   ExtensionProcessReceipt,
   ExtensionProcessStartInput,
+  OutsideDriverProcessSandbox,
 } from "./extensionSupervisor";
 
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 2_000;
@@ -43,6 +49,8 @@ export interface NodeExtensionProcessPortOptions {
   readonly processIdentity?: (pid: number) => Promise<string | undefined>;
   readonly platform?: NodeJS.Platform;
   readonly sandboxPath?: string;
+  /** The home folder whose private paths the driver profile denies; the host's by default. */
+  readonly homeDirectory?: string;
 }
 
 interface DurableReceipt {
@@ -78,6 +86,7 @@ export function createNodeExtensionProcessPort(
         processIdentity,
         platform,
         sandboxPath,
+        options.homeDirectory,
       ),
     receipts: () => readReceipts(options.receiptDirectory, shutdownTimeoutMs, processIdentity),
   };
@@ -91,6 +100,7 @@ async function startProcess(
   processIdentity: (pid: number) => Promise<string | undefined>,
   platform: NodeJS.Platform,
   sandboxPath: string,
+  homeDirectory: string | undefined,
 ): Promise<ExtensionProcessHandle> {
   if (!isAbsolute(input.command) || !isAbsolute(input.cwd)) {
     throw new Error("Extension process launch metadata must use absolute paths.");
@@ -100,11 +110,14 @@ async function startProcess(
 
   let child: ChildProcessWithoutNullStreams;
   try {
-    const launch = await prepareProcessLaunch(input, platform, sandboxPath);
+    const launch = await prepareProcessLaunch(input, platform, sandboxPath, homeDirectory);
     child = spawn(launch.command, launch.args, {
       cwd: input.cwd,
       detached: process.platform !== "win32",
-      env: { PATH: SAFE_PATH, ...input.env },
+      env:
+        input.sandbox?.kind === "outside-driver"
+          ? outsideDriverEnvironment(input.sandbox)
+          : { PATH: SAFE_PATH, ...input.env },
       shell: false,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -219,9 +232,19 @@ async function prepareProcessLaunch(
   input: ExtensionProcessStartInput,
   platform: NodeJS.Platform,
   sandboxPath: string,
+  homeDirectory: string | undefined,
 ): Promise<{ readonly command: string; readonly args: string[] }> {
   if (input.sandbox === undefined) {
     return { command: input.command, args: [...input.args] };
+  }
+  if (input.sandbox.kind === "outside-driver") {
+    return await prepareOutsideDriverLaunch(
+      input,
+      input.sandbox,
+      platform,
+      sandboxPath,
+      homeDirectory,
+    );
   }
   if (input.sandbox.kind !== "macos-seatbelt" || platform !== "darwin") {
     throw new Error("Extension process sandbox is unavailable on this host.");
@@ -283,6 +306,106 @@ async function prepareProcessLaunch(
     command: sandboxPath,
     args: ["-p", `${profile}\n`, "--", input.command, ...input.args],
   };
+}
+
+/**
+ * The system roots the extension profile above measured an interpreted
+ * runtime reading to start, less what a driver has no use for: `/bin` and
+ * `/sbin` hold only programs it may not exec, and `/dev` is narrowed to the
+ * data devices, because the person's own terminals are devices there that
+ * their user may read.
+ */
+const OUTSIDE_DRIVER_SYSTEM_READ_ROOTS = [
+  "/System",
+  "/usr",
+  "/private/etc",
+  "/private/var/db",
+  "/Library/Apple",
+] as const;
+const OUTSIDE_DRIVER_DEVICE_READS = ["/dev/null", "/dev/zero", "/dev/random", "/dev/urandom"];
+
+/**
+ * The whole environment an outside driver gets, whatever the caller passed:
+ * the system search path, a fixed locale, and its own temporary folder as both
+ * `TMPDIR` and `HOME`, so a runtime that keeps a cache under its home writes
+ * only into the folder removed at stop and learns no path of the person's.
+ * Nothing is inherited: no provider or cloud key, no broker coordinates, no
+ * Project or checkout path.
+ */
+function outsideDriverEnvironment(
+  sandbox: OutsideDriverProcessSandbox,
+): Readonly<Record<string, string>> {
+  return {
+    PATH: SAFE_PATH,
+    LANG: "en_US.UTF-8",
+    HOME: sandbox.temporaryDirectory,
+    TMPDIR: sandbox.temporaryDirectory,
+  };
+}
+
+/**
+ * An outside provider driver runs under the shared confinement builder's
+ * deny-default Seatbelt profile, stricter than an MCP server's: no network, no
+ * exec but the runtime itself, no fork, the package read-only, and writes only
+ * into the process's own temporary folder. Extension processes have no Linux
+ * confinement, so any other platform refuses before a process exists.
+ */
+async function prepareOutsideDriverLaunch(
+  input: ExtensionProcessStartInput,
+  sandbox: OutsideDriverProcessSandbox,
+  platform: NodeJS.Platform,
+  sandboxPath: string,
+  homeDirectory: string | undefined,
+): Promise<{ readonly command: string; readonly args: string[] }> {
+  if (platform !== "darwin") {
+    throw new Error("Extension process sandbox is unavailable on this host.");
+  }
+  if (!isAbsolute(sandbox.packageRoot) || !isAbsolute(sandbox.temporaryDirectory)) {
+    throw new Error("Extension sandbox paths must be absolute.");
+  }
+  const runtime = await realpath(input.command).catch(() => input.command);
+  const runtimeFolder = dirname(runtime);
+  const readRoots = uniqueAbsolutePaths([
+    sandbox.packageRoot,
+    runtimeFolder,
+    dirname(runtimeFolder),
+    ...homebrewRuntimeRoots(runtime),
+    ...OUTSIDE_DRIVER_SYSTEM_READ_ROOTS,
+  ]);
+  // As for the extension profile: the runtime reads "/" and stats every parent
+  // folder of what it loads, and starts through a PATH link that must itself
+  // be readable. Names and metadata only, never a parent folder's contents.
+  const readLiterals = uniqueAbsolutePaths([
+    "/",
+    ...OUTSIDE_DRIVER_DEVICE_READS,
+    ...(runtime === input.command ? [] : [input.command]),
+  ]);
+  const metadataLiterals = uniqueAbsolutePaths(
+    [...readRoots, ...readLiterals, sandbox.temporaryDirectory].flatMap((path) =>
+      parentFolders(path),
+    ),
+  );
+  const launch = makeProcessConfinementLive({
+    platform,
+    sandboxPath,
+    ...(homeDirectory === undefined ? {} : { homeDirectory }),
+  }).prepare({
+    executable: input.command,
+    args: input.args,
+    boundRoot: sandbox.packageRoot,
+    writeBoundRoot: false,
+    temporaryDirectory: sandbox.temporaryDirectory,
+    readRoots,
+    networkEgress: "none",
+    allowProcessExec: false,
+    allowProcessFork: false,
+    interpreterSearchPath: SAFE_PATH,
+    extraRules: [
+      ...readLiterals.map(seatbeltAllowLiteralReadRule),
+      ...metadataLiterals.map(seatbeltAllowLiteralMetadataRule),
+    ],
+  });
+  return { command: launch.command, args: [...launch.args] };
 }
 
 function uniqueAbsolutePaths(paths: ReadonlyArray<string>): string[] {

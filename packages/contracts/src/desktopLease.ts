@@ -335,6 +335,102 @@ export const DesktopInputEvent = Schema.Union(
 );
 export type DesktopInputEvent = typeof DesktopInputEvent.Type;
 
+/**
+ * One Desktop tab's view of one lease. The host mints it when a person opens
+ * the view and keeps it in memory only, so a reloaded window or a restarted
+ * host holds none and a restored tab cannot stream or send input until a
+ * person opens a view again.
+ */
+export const DesktopViewId = Schema.UUID.pipe(Schema.brand("DesktopViewId"));
+export type DesktopViewId = typeof DesktopViewId.Type;
+
+/**
+ * Why a view refuses beyond the lease's own refusals: `view-ended` names a
+ * view the host does not hold for this caller (closed, lapsed, from another
+ * window or device, or minted before a restart); `view-limit` is the per-lease
+ * cap on open views.
+ */
+export const DesktopViewRefusalReason = Schema.Literal("view-ended", "view-limit");
+export type DesktopViewRefusalReason = typeof DesktopViewRefusalReason.Type;
+
+export const DesktopPaneRefusal = Schema.Struct({
+  status: Schema.Literal("refused"),
+  reason: Schema.Union(DesktopLeaseRefusalReason, DesktopViewRefusalReason),
+}).annotations(strict);
+export type DesktopPaneRefusal = typeof DesktopPaneRefusal.Type;
+
+const paneThread = { threadId: Schema.UUID };
+const paneLease = { ...paneThread, leaseId: DesktopLeaseId };
+const paneView = { ...paneLease, viewId: DesktopViewId };
+
+/**
+ * What a person's Desktop tab asks the host for one Code thread. The host
+ * derives the person from the authenticated window or paired device that
+ * sent it, never from the body.
+ */
+export const DesktopPaneRequest = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("overview"), ...paneThread }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("acquire"), ...paneThread }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("release"), ...paneLease }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("retry-release"), ...paneLease }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("extend"),
+    ...paneLease,
+    byMinutes: leaseMinutes,
+  }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("open-view"), ...paneLease }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("close-view"), ...paneView }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("input"),
+    ...paneView,
+    event: DesktopInputEvent,
+  }).annotations(strict),
+);
+export type DesktopPaneRequest = typeof DesktopPaneRequest.Type;
+
+/** One frame of a view. The answer is the image itself, never stored by the host. */
+export const DesktopFrameRequest = Schema.Struct(paneView).annotations(strict);
+export type DesktopFrameRequest = typeof DesktopFrameRequest.Type;
+
+/** Whether the thread could start a desktop now, or the refusal that stands in the way. */
+export const DesktopPaneStart = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("available"),
+    provider: LeasableDesktopProvider,
+  }).annotations(strict),
+  DesktopLeaseRefusal,
+);
+export type DesktopPaneStart = typeof DesktopPaneStart.Type;
+
+const leaseAnswer = <S extends string>(status: S) =>
+  Schema.Struct({ status: Schema.Literal(status), lease: DesktopLease }).annotations(strict);
+
+export const DesktopPaneAnswer = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("overview"),
+    /** The thread's leases that may still hold a desktop, then its most recent ended one. */
+    leases: Schema.Array(DesktopLease),
+    /** Every provider the host has loaded, so a lease names its provider even once it is not leasable. */
+    providers: Schema.Array(LeasableDesktopProvider),
+    start: DesktopPaneStart,
+  }).annotations(strict),
+  leaseAnswer("acquired"),
+  leaseAnswer("not-acquired"),
+  leaseAnswer("released"),
+  leaseAnswer("releasing"),
+  leaseAnswer("release-failed"),
+  leaseAnswer("extended"),
+  Schema.Struct({ status: Schema.Literal("viewing"), viewId: DesktopViewId }).annotations(strict),
+  Schema.Struct({ status: Schema.Literal("view-closed") }).annotations(strict),
+  /** A frame the desktop could not give, or the host would not pass on; the view stays open. */
+  Schema.Struct({ status: Schema.Literal("no-frame") }).annotations(strict),
+  Schema.Struct({ status: Schema.Literal("delivered") }).annotations(strict),
+  /** The host journaled the input, but the desktop did not take it. */
+  Schema.Struct({ status: Schema.Literal("not-delivered") }).annotations(strict),
+  DesktopPaneRefusal,
+);
+export type DesktopPaneAnswer = typeof DesktopPaneAnswer.Type;
+
 export const decodeDesktopLeaseId = Schema.decodeUnknownSync(DesktopLeaseId);
 export const decodeDesktopHostTag = Schema.decodeUnknownSync(DesktopHostTag);
 export const decodeDesktopProviderId = Schema.decodeUnknownSync(DesktopProviderId);
@@ -349,3 +445,7 @@ export const decodeDesktopLeaseOperated = Schema.decodeUnknownSync(DesktopLeaseO
 export const decodeComputerUseDestinationSelection = Schema.decodeUnknownSync(
   ComputerUseDestinationSelection,
 );
+export const decodeDesktopViewId = Schema.decodeUnknownSync(DesktopViewId);
+export const decodeDesktopPaneRequest = Schema.decodeUnknownSync(DesktopPaneRequest);
+export const decodeDesktopFrameRequest = Schema.decodeUnknownSync(DesktopFrameRequest);
+export const decodeDesktopPaneAnswer = Schema.decodeUnknownSync(DesktopPaneAnswer);

@@ -16,8 +16,8 @@ import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
 import { CodexPluginPackageResolver } from "./codexPluginResolver";
 import {
+  createLocalExtensionActivationPolicy,
   ExtensionActivationService,
-  LOCAL_EXTENSION_ACTIVATION_POLICY,
 } from "./extensionActivationService";
 import { ExtensionApiService } from "./extensionApiService";
 import { buildCatalogs } from "./extensionChatResolver";
@@ -503,18 +503,7 @@ describe("an installed outside provider driver", () => {
     const context = await installed();
     const snapshot = context.lifecycle.snapshot();
     const head = context.journal.headSequence();
-    const effective = new ExtensionActivationService({
-      policy: LOCAL_EXTENSION_ACTIVATION_POLICY,
-      catalogStatus: () => "available",
-    }).resolve(snapshot, {
-      scope: {
-        hostId: LOCAL_HOST_ID,
-        mode: "chat",
-        projectId: null,
-        threadId: null,
-        providerFamily: "outside-harness-endpoint" as never,
-      },
-    });
+    const effective = effectiveOn("darwin", snapshot);
     const { addressing } = buildCatalogs(snapshot, effective, {
       mode: "chat",
       threadId: null,
@@ -537,4 +526,41 @@ describe("an installed outside provider driver", () => {
     expect(context.journal.headSequence()).toBe(head);
     expect(driverState(context.lifecycle.snapshot())).toEqual(driverState(snapshot));
   });
+
+  it("is host-prohibited on a Linux host, which has no confinement to start it in", async () => {
+    const context = await installed();
+    const snapshot = context.lifecycle.snapshot();
+    for (const [platform, reason] of [
+      ["linux", "host-prohibited"],
+      ["darwin", "quarantined"],
+    ] as const) {
+      const driver = effectiveOn(platform, snapshot).packages.find(
+        (candidate) => String(candidate.extensionId) === String(context.entry.extensionId),
+      );
+      expect(driver?.components.map((component) => component.effectiveState)).toEqual([
+        { kind: "blocked", reason },
+      ]);
+    }
+  });
 });
+
+function effectiveOn(platform: string, snapshot: ExtensionSnapshot) {
+  return new ExtensionActivationService({
+    policy: createLocalExtensionActivationPolicy(
+      {
+        project: (scope) => ({ allowed: scope.projectId === null, revision: 0 }),
+        thread: (scope) => ({ allowed: scope.threadId === null, revision: 0 }),
+      },
+      platform,
+    ),
+    catalogStatus: () => "available",
+  }).resolve(snapshot, {
+    scope: {
+      hostId: LOCAL_HOST_ID,
+      mode: "chat",
+      projectId: null,
+      threadId: null,
+      providerFamily: "outside-harness-endpoint" as never,
+    },
+  });
+}

@@ -207,6 +207,32 @@ another OS user can read while that process runs, and the token is valid until t
 it. A caller that wins that race gets one browser session and the person's browser shows the launch
 guidance instead.
 
+### AC6 — Rogue outside provider driver
+
+A provider-driver package from outside Octant (malicious, compromised, or just broken) tries to
+steal or misdirect the instance's key, reach another instance's key, claim tools, approvals, or
+other capabilities its endpoint does not have, put its own text in Settings or a failure, or hang
+and flood the host. The rules live in
+[Outside provider drivers](../design/outside-provider-drivers.md).
+
+| Layer                | Control                                                                                                                                                                     | Module                                                                                                        | State           |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | --------------- |
+| Admission            | Installed quarantined from a local window only; until admission, an instance reports `driver-not-admitted` before any driver code runs                                      | `apps/server/src/extensions/outsideProviderDriverPackage.ts`, `providerService.ts`                            | Exists today    |
+| Strict wire decoding | Every line is size-capped and decoded against strict schemas; an unreadable or unexpected one stops the driver as `driver-incompatible` with no models                      | `packages/contracts/src/outsideDriverProtocol.ts`, `apps/server/src/providers/outsideHarnessEndpointProxy.ts` | Exists today    |
+| Closed failures      | A driver's failure is read only as a category and numbers; the host writes every message, and anything else becomes a fixed protocol failure                                | `outsideHarnessEndpointProxy.ts`                                                                              | Exists today    |
+| Capability ceiling   | Probe claims are clamped to the bundled harness endpoints' column; tools reach only models the host verified; `admitTurn`, cancel, and release are answered by the host     | `apps/server/src/providers/outsideDriverCeiling.ts`, `outsideHarnessEndpointProxy.ts`                         | Exists today    |
+| Brokered egress      | The host leases this instance's key, sends it only to the configured origin (checked before the key is read), follows no redirect, and strips the key header from the reply | `outsideHarnessEndpointProxy.ts`, `providerApiKeyPool.ts`                                                     | Exists today    |
+| Confined process     | One deny-default Seatbelt process per instance with no network, no exec, and a minimal environment; Linux never launches one                                                | `apps/server/src/providers/outsideDriverProcess.ts`, `extensions/nodeExtensionProcessPort.ts`                 | Exists today    |
+| Provenance           | Digest-bound trust, a publisher key pinned at first trust, quarantined updates that clear Verify tools                                                                      | Extension lifecycle and package store                                                                         | Newly specified |
+
+The proxy's tests run the harness endpoint conformance kit against it with a misbehaving fixture
+driver, and cover hostile failure text, over-claims, protocol violations, and the brokered call's
+origin, lease, header, and redirect negatives. The confined process's escape tests
+(`outsideDriverProcess.escape.test.ts`) try the network, files outside the package and its folder,
+the home folder and its keychains, another program, and the host's environment from a real Seatbelt
+process; they run on macOS only, and until they pass there the process control is built but not
+accepted.
+
 ## Server-Side Tool-Call Policy Engine
 
 ### What exists today
@@ -681,6 +707,8 @@ crosses a server authority or sandbox boundary without additional local compromi
 | Live-grant-derived child clamping and Code worktree children         | Exists today    | `agentRunLiveGrant.ts`, `clampAgentRunAuthorityAgainstLiveGrant`, Code receipt port            |
 | Extension quarantine, activation ladder, supervised processes        | Exists          | `packages/plugin-host/src/activation.ts`, `apps/server/src/extensions/`                        |
 | Declared-capability ceiling enforced at call resolution              | Newly specified | policy engine + extension manifest data                                                        |
+| Outside driver proxy: strict decoding, closed failures, brokered key | Exists          | `apps/server/src/providers/outsideHarnessEndpointProxy.ts`, `outsideDriverCeiling.ts`          |
+| Outside driver process confinement                                   | Exists          | `outsideDriverProcess.ts`, `nodeExtensionProcessPort.ts` (macOS escape acceptance pending)     |
 | Remote principal separation, closed action catalog, clamps           | Exists          | `remoteAccessPolicy.ts`, `clientPrincipal.ts`, `remoteRoutePolicy.ts`, `codePolicy.ts`         |
 | Consolidated audit taxonomy with principal attribution               | Newly specified | `packages/contracts/src/events.ts` or audit payload schemas + owning services                  |
 | Escape suite fixtures and exit gate                                  | Newly specified | `apps/server/src/security/escapeSuite/` (new) + domain policy tests                            |

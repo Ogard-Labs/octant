@@ -5666,7 +5666,11 @@ same. This holds in Chat, Work, and Code.
   `<prefix>/etc/openssl@3`, never the rest of the prefix. It also grants
   `/` and metadata of every parent folder of those roots, because a runtime
   such as node will not start without them. Metadata names a folder; it does
-  not read its contents.
+  not read its contents. An outside provider driver's process takes a stricter
+  profile from the shared confinement builder (no network, no exec but its
+  runtime, no fork, a read-only package, one temporary folder, and a fixed
+  environment), and on any host but macOS its component is `host-prohibited`
+  ([Outside provider drivers](design/outside-provider-drivers.md#driver-process-rules)).
 - Skills are discovered only from valid `.agents/skills/` and `.claude/skills/`
   packages between the working directory and the Project or repository root
   (the closed `PROJECT_SKILL_ROOTS` allow-list), plus the user-global
@@ -5962,10 +5966,10 @@ same. This holds in Chat, Work, and Code.
   [Disposable desktops](design/disposable-desktops.md). The lease contract,
   the `desktop-provider` seam with its conformance suite, the host lease
   service, the host-local provider (a virtual X display in a dedicated
-  Bubblewrap launch, Linux only), artifact transfer, and a Code send's binding
-  of `octant_computer` to one of its thread's leases are built; no recipe
-  storage or Desktop pane is, so every lease command refuses as a value and no
-  lease exists to bind.
+  Bubblewrap launch, Linux only), artifact transfer, a Code send's binding
+  of `octant_computer` to one of its thread's leases, and the Code dock's
+  Desktop tool are built; no recipe storage is, so every lease command
+  refuses as a value and no lease exists to bind.
 
 **Canvas export.** A destination plugin contributes an export target through
 `@octant/plugin-api`. The contribution names the formats it accepts. The host
@@ -6258,9 +6262,12 @@ harness endpoint port; the harness loop, endpoint registry, lead fallback,
 retries, and context-window memory stay host-owned
 ([Native harness](#native-harness)). Admitting outside (non-bundled) drivers in
 that harness-endpoint shape is a design accepted on 2026-10-26, in
-[Outside provider drivers](design/outside-provider-drivers.md). Their identity
-and their inspection and quarantined install from a local folder are built;
-nothing admits one yet.
+[Outside provider drivers](design/outside-provider-drivers.md). Their identity,
+their inspection and quarantined install from a local folder, and the host
+proxy that runs one over the harness endpoint wire protocol (closed failures,
+a capability ceiling, and a brokered request with this instance's key to its
+configured origin only), and the confined process per instance that carries
+that protocol on macOS are built; nothing admits one yet.
 
 The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a
@@ -7125,9 +7132,10 @@ mechanisms are:
     Chat and Work compaction is the host's, not the endpoint's.
   - **Outside harness endpoints** are driver packages that do not ship with
     Octant ([Outside provider drivers](design/outside-provider-drivers.md)).
-    Each cell is a ceiling: the bundled Harness endpoints' declaration, which
-    an outside driver's own claims can never exceed, and Octant's tools reach
-    only models the host itself verified. No outside driver package is
+    Each cell is a ceiling: the bundled Harness endpoints' declaration, held
+    by the host's clamp on every probe claim (`outsideDriverCeiling.ts`), which
+    an outside driver's own claims can lower but never exceed, and Octant's
+    tools reach only models the host itself verified. No outside driver package is
     admitted yet, so an instance reports `driver-not-admitted` with no models
     and runs no turn.
   - **Oh My Pi** lists models and starts no session; its driver refuses

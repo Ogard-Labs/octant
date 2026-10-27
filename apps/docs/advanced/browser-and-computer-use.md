@@ -226,6 +226,35 @@ assertion verifying a tap — is not yet built. Today that workbench offers
 Simulator screenshots, destination controls, and the `octant_apple` tool;
 see [Apple Development Workbench](/advanced/apple-workbench).
 
+### Disposable desktops
+
+On a Linux host, a Code thread can lease a throwaway Linux desktop to run what
+it built. Open **Desktop** from the dock's **Add tool** (under Devices). The
+desktop runs on this host with no network, no checkout, and nothing of the
+host's; a file reaches it only when the agent sends one.
+
+- **Start desktop** creates one. Octant does not ask again, because you
+  started it; Plan mode refuses. A thread holds at most two, and the host runs
+  at most two at once.
+- While it is live, click the screen to use it: clicks, the wheel, and typing
+  go to the desktop, and **Ctrl+Esc** (**⌘Esc** on a Mac) moves focus back out.
+  The agent can use the same desktop at the same time; whatever either of you
+  does is recorded as yours or the agent's.
+- A desktop lasts 30 minutes. **Add 30 minutes** extends it up to four hours,
+  and it is released after 15 minutes with no open tab and nobody using it.
+  **Release** destroys it after you confirm.
+- Closing the tab leaves the desktop running. A tab that comes back after a
+  reload shows **Show desktop** instead of reconnecting by itself, and a
+  desktop ended by a host restart shows as ended.
+- **Still running** means Octant could not confirm the desktop is gone. It
+  keeps trying, starts no new desktop on that provider meanwhile, and
+  **Retry** tries again now.
+
+A paired phone or browser that can open the thread can watch and use its
+desktop too. Desktop needs a desktop recipe for the Project, and this version
+of Octant has no place to set one yet, so the pane says so instead of offering
+**Start desktop**.
+
 ## Picture in Picture
 
 When an agent has a Browser open for a Work or Code thread and you cannot see
