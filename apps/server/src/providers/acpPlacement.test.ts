@@ -9,7 +9,7 @@ import {
 } from "@octant/contracts";
 import type { ProviderPlacedLaunch } from "@octant/provider-sdk/driver";
 import { acquireProviderConnection } from "@octant/provider-sdk/process-placement";
-import { Cause, Effect, Exit, Option } from "effect";
+import { Cause, Effect, Exit, Option, Scope } from "effect";
 import { describe, expect, it } from "vitest";
 import { makeAcpDriver } from "./acpDriver";
 import { acpRemotePlacement, makeAcpPlacedProcessLive } from "./acpPlacement";
@@ -172,6 +172,60 @@ describe("an ACP agent placed on a remote target", () => {
     expect(failureOf(await start(acpStandInTarget({ agentName: "another-agent" })))).toMatchObject({
       category: "incompatible",
     });
+  });
+  it("survives a write the target fails after the agent was asked to stop", async () => {
+    // A write still crossing the session when the agent's input closes, then
+    // failed by a session that ended, must not surface as an unhandled
+    // stream error that takes the host down.
+    const target = acpStandInTarget();
+    let initialized = false;
+    const failingLate: ReturnType<typeof acpStandInTarget> = {
+      ...target,
+      launch: (launch) =>
+        Effect.map(target.launch(launch), (process) => ({
+          ...process,
+          write: (bytes) => {
+            if (!initialized) {
+              initialized = true;
+              return process.write(bytes);
+            }
+            return Effect.zipRight(
+              Effect.sleep("20 millis"),
+              Effect.fail({ category: "unavailable", message: "The session ended." } as const),
+            );
+          },
+        })),
+    };
+    const placement = acpRemotePlacement(placeableAcpProfile, undefined);
+    if (placement === undefined) throw new Error("the fixture profile is placeable");
+    const scope = Effect.runSync(Scope.make());
+    const connection = await Effect.runPromise(
+      makeAcpPlacedProcessLive({ startupTimeoutMs: 2_000 })
+        .start({
+          profile: placeableAcpProfile,
+          placement: failingLate,
+          launch: placement,
+          root: remoteRoot,
+          clientCapabilities: { readTextFile: true, writeTextFile: false, terminal: false },
+        })
+        .pipe(Effect.provideService(Scope.Scope, scope)),
+    );
+    const unhandled: unknown[] = [];
+    const record = (error: unknown) => unhandled.push(error);
+    process.on("uncaughtException", record);
+    try {
+      const cancelled = connection.acp
+        .notify("session/cancel", { sessionId: "placed" })
+        .catch(() => "refused");
+      // The write is under way on the session before the agent is stopped.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+      expect(await cancelled).toBe("refused");
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("uncaughtException", record);
+    }
   });
 });
 

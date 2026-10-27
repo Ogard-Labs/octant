@@ -190,6 +190,11 @@ export function makeAcpPlacedProcessLive(
             );
           },
         });
+        // Each write's own callback carries its failure to the ACP client. The
+        // client stops listening for stream errors once it is closed, so a write
+        // still crossing the session then, failed by a session that ended, would
+        // otherwise be an unhandled stream error that takes this host down.
+        stdin.on("error", () => undefined);
         const acp = makeAcpClient({
           stdin,
           stdout,

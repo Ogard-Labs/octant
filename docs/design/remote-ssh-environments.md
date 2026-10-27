@@ -1164,6 +1164,13 @@ Each is its own reviewable change with this section updated in place.
     host's proxy and is journaled, and a reconnect resumes or rebuilds its
     session. The result is recorded here with the agent, the versions, and the
     target's distribution.
+  - _Before it can run:_ no shipped ACP profile is placeable after 6c (each
+    sets guards or variables a placed launch cannot carry;
+    [As built in 6c](#as-built-in-6c)), and the Code turn runtime does not yet
+    compose a remote-bound Project's ACP thread. Both are container work that
+    precedes the maintainer's run: one real profile made placeable, with any
+    seam change its launch needs reviewed as its own step, and the turn
+    runtime composing the placed thread.
 
 #### As built in 6b
 
