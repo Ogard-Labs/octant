@@ -3658,7 +3658,11 @@ _Journaling._ All on the subject's `context-ledger` aggregate:
   reader; older records keep decoding). It summarizes
   the turns before the latest one, as many of the oldest as fit one request to
   the session's own endpoint with no tools, and nothing is journaled unless the
-  summary came back. Earlier messages stay in the aggregate; resume and replay
+  summary came back. That request carries each message, tool call, tool
+  result, and the earlier summary as at most 4,000 characters; a longer one
+  keeps its opening and its end around a marker saying how many characters
+  were left out, because a fresh Chat or Work session's first message carries
+  the planned history with the person's request at its end. Earlier messages stay in the aggregate; resume and replay
   build requests from the summary and the turns after it, and a later
   compaction supersedes an earlier one. The model reads the summary behind a
   line saying how many of the session's first turns it stands for and that
@@ -3667,8 +3671,9 @@ _Journaling._ All on the subject's `context-ledger` aggregate:
   no folder, is told only of its task list and is not asked by its summary
   request for files or changes. Because the lead keeps its task list only
   through `todo-write` calls, the summary carries the arguments of the latest
-  successful `todo-write` in the summarized turns verbatim (or the list the
-  earlier summary carried) instead of trusting the model to restate it. The
+  successful `todo-write` in the summarized turns verbatim, clipped the same
+  way when longer than 4,000 characters (or the list the earlier summary
+  carried), instead of trusting the model to restate it. The
   same compaction runs automatically mid-turn when a request in any mode would
   otherwise lose whole exchanges (see the native harness loop). A fork copies the latest compaction
   its source had read by the turn it was forked at, including one made
