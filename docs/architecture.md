@@ -794,8 +794,9 @@ A Work or Code thread started without a chosen Project lands in the mode's
 `<default folder>/Code` on first use, binds it as an ordinary Project marked
 `origin: "default-folder"`, and reuses it after. The default folder is the
 `defaultFolder` shell setting (`~/Octant` unless changed, always inside the
-user's home), and artifact files mirror under its `Artifacts` subfolder until a
-mirror setting says otherwise. It sits at the top of home rather than in
+user's home, and stored by its real path when chosen; see
+[host reads of a bound root](#security-and-authority)), and artifact files
+mirror under its `Artifacts` subfolder until a mirror setting says otherwise. It sits at the top of home rather than in
 `~/Documents`, which macOS guards with a privacy prompt. Work always offers its
 default Project. Code has one choice, the `requireGitRepository` setting ("Code
 needs a Git repository", on by default). Off, a Code thread may start in a
@@ -2315,7 +2316,15 @@ flowchart LR
 - **Artifact mirror.** After each committed artifact version the host
   rewrites that artifact's mirrored files in place (removing old names on
   rename) and journals every outcome as a receipt, including skipped and
-  refused; a write failure never unwinds the version. Plan, an unbound or
+  refused, with the refusal reason; a write failure never unwinds the
+  version. The mirror settings read (`GET /api/artifacts/mirror`) returns the
+  settings with each Project's latest outcome for the destination it uses
+  now, rebuilt from the receipts at startup. A Plan-mode refusal, which says
+  nothing about the destination, and a receipt for a destination the Project
+  no longer uses are not reported, so choosing a folder again clears a
+  refusal at once. Mirror Settings shows each refused or failed Project with
+  the host's reason and asks for the folder again; it never resubmits the
+  stored path, which a link could now lead elsewhere. Plan, an unbound or
   unavailable destination (including a folder that no longer resolves to the
   real path it was stored by; see
   [host reads of a bound root](#security-and-authority)), and an unauthorized
@@ -7391,9 +7400,21 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   no longer resolves to exactly that path is refused as an unavailable
   destination before anything is written or removed. A folder stored earlier
   by a path that is not its real path, and the host default
-  `<default folder>/Artifacts` when the default folder is named through a
-  link, refuse the same way until a mirror folder is chosen again; the
-  refusal is recorded only in the mirror receipt. Resolving the root afresh
+  `<default folder>/Artifacts` under a default folder stored as typed through
+  a link before the default folder was stored by its real path, refuse the
+  same way until a folder is chosen again. The refusal is journaled in the
+  mirror receipt, which records the refusal reason, and the mirror settings
+  read reports it for the Project (see the artifact mirror under
+  [Persistence](#persistence)), because a receipt nothing on screen read left
+  a mirror that stopped writing with nothing shown. The default folder is
+  stored by its real path when it is chosen, and until one is chosen it sits
+  under the home folder's real path, so the host default holds to the same
+  rule. The inside-home check for a mirror, export, or synced replica folder
+  and for the default folder compares real paths on both sides: folders are
+  stored by their real path, so where the home folder is itself a link
+  (some Linux hosts) a home compared as written refused every newly chosen
+  folder, and a link inside home that leads out of it is outside home.
+  Resolving the root afresh
   for each use let a folder inside a checkout, swapped itself for a link to a
   host folder, receive every write the confinement above then held inside the
   link's target. A missing root is created on demand only beneath a folder

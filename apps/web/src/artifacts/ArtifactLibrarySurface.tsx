@@ -115,6 +115,8 @@ export function ArtifactLibrarySurface(props: ArtifactLibrarySurfaceProps) {
         {...(mirror.message === undefined ? {} : { message: mirror.message })}
         onChangeAutoCommit={(autoCommit) => void mirror.changeAutoCommit(autoCommit)}
         onChangeDestination={(destination) => void mirror.changeDestination(destination)}
+        onChooseFolderAgain={(status, folder) => void mirror.chooseFolderAgain(status, folder)}
+        projects={mirror.projects}
         settings={mirror.settings}
       />
       <SyncedArtifactDialog

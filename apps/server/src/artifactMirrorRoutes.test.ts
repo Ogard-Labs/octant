@@ -25,7 +25,10 @@ function route() {
   return {
     execute,
     handler: createArtifactMirrorRouteHandler({
-      mirror: { settings: () => settings, execute } as unknown as ArtifactMirrorService,
+      mirror: {
+        view: () => ({ settings, projects: [] }),
+        execute,
+      } as unknown as ArtifactMirrorService,
       windowAuthorityStore: store,
       now: () => 1,
     }),
@@ -48,7 +51,7 @@ describe("settling where artifacts are mirrored", () => {
     const response = await route().handler(request("GET"));
 
     expect(response?.status).toBe(200);
-    expect(await response?.json()).toEqual({ settings });
+    expect(await response?.json()).toEqual({ settings, projects: [] });
   });
 
   it("takes a change the window is entitled to make", async () => {

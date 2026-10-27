@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { CanvasVersion } from "@octant/contracts";
-import { ARTIFACT_MIRROR_AGGREGATE_TYPE } from "@octant/contracts/artifact-mirror";
+import {
+  ARTIFACT_MIRROR_AGGREGATE_TYPE,
+  ARTIFACT_MIRROR_EVENT_NAMES,
+} from "@octant/contracts/artifact-mirror";
 import { afterEach, describe, expect, it } from "vitest";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
@@ -53,6 +56,7 @@ function setup(
   options: {
     readonly journalAppend?: Journal["append"];
     readonly receiptNotJournaled?: (failure: unknown) => void;
+    readonly outsideRootApproved?: boolean;
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-mirror-journal-"));
@@ -67,6 +71,16 @@ function setup(
     clock: () => now,
   });
   const files = new Map<string, string>();
+  const events = new ArtifactMirrorEventStore({
+    journal: {
+      append: options.journalAppend ?? ((input) => journal.append(input)),
+      replayAggregate: (cursor) => journal.replayAggregate(cursor),
+      replayAggregateType: (cursor) => journal.replayAggregateType(cursor),
+    },
+    uuid: randomUUID,
+    clock: () => now,
+    actor: { kind: "system", actorId: "00000000-0000-4000-8000-000000000002" },
+  });
   const makeService = () =>
     new ArtifactMirrorService({
       files: {
@@ -78,21 +92,13 @@ function setup(
       currentVersion: () => undefined,
       projects: { read: () => ({ name: "Storefront" }) },
       defaultFallback: () => ({ kind: "global-folder", canonicalRoot: "/Users/me/Artifacts" }),
-      outsideRootApproved: () => true,
+      outsideRootApproved: () => options.outsideRootApproved ?? true,
       planMode: () => false,
       appendVersionFromBundle: () => ({ kind: "denied", message: "unused" }),
       ...(options.receiptNotJournaled === undefined
         ? {}
         : { receiptNotJournaled: options.receiptNotJournaled }),
-      journal: new ArtifactMirrorEventStore({
-        journal: {
-          append: options.journalAppend ?? ((input) => journal.append(input)),
-          replayAggregate: (cursor) => journal.replayAggregate(cursor),
-        },
-        uuid: randomUUID,
-        clock: () => now,
-        actor: { kind: "system", actorId: "00000000-0000-4000-8000-000000000002" },
-      }),
+      journal: events,
       clock: () => now,
     });
   const receipts = () =>
@@ -104,7 +110,7 @@ function setup(
         limit: 100,
       })
       .filter((event) => event.eventName === "artifact.mirror-written@1");
-  return { service: makeService(), restart: makeService, receipts };
+  return { service: makeService(), restart: makeService, receipts, events };
 }
 
 describe("journaling mirror receipts", () => {
@@ -232,5 +238,53 @@ describe("replaying mirror settings at startup", () => {
       version: 0,
       fallback: { kind: "global-folder", canonicalRoot: "/Users/me/Artifacts" },
     });
+  });
+});
+
+describe("rebuilding each Project's mirror outcome at startup", () => {
+  it("still shows a refused mirror after a restart", async () => {
+    const h = setup({ outsideRootApproved: false });
+
+    await h.service.materialize(version(1, "30000000-0000-4000-8000-000000000001"));
+
+    expect(h.restart().view().projects).toEqual([
+      {
+        projectId,
+        projectName: "Storefront",
+        source: "host",
+        destination: { kind: "global-folder", canonicalRoot: "/Users/me/Artifacts" },
+        outcome: "refused",
+        reason: "destination-unauthorized",
+        detail: "Writing to that folder has not been approved.",
+        observedAt: now,
+      },
+    ]);
+  });
+
+  // Receipts journaled before refusals recorded a reason carry only words, and
+  // a Plan-mode refusal was one of them, so such a frame must still decode at
+  // startup without being reported as the destination's outcome.
+  it("still starts from a refusal journaled without a reason and keeps the outcome before it", async () => {
+    const h = setup();
+    await h.service.materialize(version(1, "30000000-0000-4000-8000-000000000001"));
+    h.events.append({
+      aggregateId: canvasId,
+      eventName: ARTIFACT_MIRROR_EVENT_NAMES.written,
+      payload: {
+        receipt: {
+          canvasId,
+          versionId: "30000000-0000-4000-8000-000000000002",
+          projectId,
+          destination: { kind: "global-folder", canonicalRoot: "/Users/me/Artifacts" },
+          paths: [],
+          outcome: "refused",
+          commit: { status: "not-requested" },
+          detail: "Plan mode does not write files.",
+          observedAt: now,
+        },
+      },
+    });
+
+    expect(h.restart().view().projects).toMatchObject([{ projectId, outcome: "written" }]);
   });
 });

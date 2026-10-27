@@ -13,7 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createArtifactMirrorFilePort } from "./artifactMirrorFilePort";
+import { createArtifactMirrorFilePort, isInsideHomeDirectory } from "./artifactMirrorFilePort";
 
 /**
  * Runs just before the port resolves, opens, creates, or removes a path, so a
@@ -255,5 +255,37 @@ describe("removing a stale mirrored file from an agent-writable root", () => {
 
     expect(swapped).toBe(true);
     expect(checkout.host()).toEqual(before);
+  });
+});
+
+describe("judging whether a chosen folder is inside the home folder", () => {
+  function homeBehindLink() {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), "octant-mirror-home-")));
+    directories.push(base);
+    const realHome = join(base, "volume", "ada");
+    mkdirSync(join(realHome, "Artifacts"), { recursive: true });
+    const linkedHome = join(base, "home-ada");
+    symlinkSync(realHome, linkedHome);
+    return { base, realHome, linkedHome };
+  }
+
+  // Folders are stored by their real path, but the home folder was compared as
+  // written, so where home is itself a link every newly chosen folder was
+  // refused as outside it.
+  it("counts a folder stored by its real path as inside a home folder that is a link", () => {
+    const home = homeBehindLink();
+
+    expect(isInsideHomeDirectory(join(home.realHome, "Artifacts"), home.linkedHome)).toBe(true);
+    expect(isInsideHomeDirectory(join(home.realHome, "Not yet made"), home.linkedHome)).toBe(true);
+    expect(isInsideHomeDirectory(home.realHome, home.linkedHome)).toBe(false);
+  });
+
+  it("counts a link inside home that leads out of it as outside home", () => {
+    const home = homeBehindLink();
+    const outside = join(home.base, "elsewhere");
+    mkdirSync(outside);
+    symlinkSync(outside, join(home.realHome, "Elsewhere"));
+
+    expect(isInsideHomeDirectory(join(home.realHome, "Elsewhere"), home.realHome)).toBe(false);
   });
 });

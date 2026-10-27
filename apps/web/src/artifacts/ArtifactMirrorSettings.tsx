@@ -1,5 +1,6 @@
 import type {
   ArtifactMirrorDestination,
+  ArtifactMirrorProjectStatus,
   ArtifactMirrorSettings as MirrorSettings,
 } from "@octant/contracts/artifact-mirror";
 import { ChevronDown, ChevronUp } from "lucide-react";
@@ -12,11 +13,14 @@ import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggl
 
 export interface ArtifactMirrorSettingsProps {
   readonly settings: MirrorSettings | undefined;
+  /** Each Project's latest outcome for the destination it uses now, as the host reports it. */
+  readonly projects: ReadonlyArray<ArtifactMirrorProjectStatus>;
   readonly busy: boolean;
   readonly defaultOpen?: boolean;
   readonly message?: string;
   readonly onChangeDestination: (destination: ArtifactMirrorDestination) => void;
   readonly onChangeAutoCommit: (autoCommit: boolean) => void;
+  readonly onChooseFolderAgain: (status: ArtifactMirrorProjectStatus, folder: string) => void;
 }
 
 const TIERS = [
@@ -52,6 +56,9 @@ export function ArtifactMirrorSettings(props: ArtifactMirrorSettingsProps) {
   const [folder, setFolder] = useState("");
   const [directory, setDirectory] = useState("docs/artifacts");
   const current = props.settings?.fallback.kind ?? "internal-only";
+  const notMirrored = props.projects.filter(
+    (status) => status.outcome === "refused" || status.outcome === "failed",
+  );
 
   return (
     <SurfaceSection className="artifact-mirror" label="File mirroring">
@@ -82,6 +89,21 @@ export function ArtifactMirrorSettings(props: ArtifactMirrorSettingsProps) {
           </OctantButton>
         </div>
       </div>
+
+      {notMirrored.length === 0 ? null : (
+        // Outside the collapsed body: a mirror that stopped writing is the one
+        // thing here a person needs to see without opening anything.
+        <ul aria-label="Projects not being mirrored" className="artifact-mirror__refusals">
+          {notMirrored.map((status) => (
+            <RefusedProjectMirror
+              busy={props.busy}
+              key={String(status.projectId)}
+              onChooseFolderAgain={props.onChooseFolderAgain}
+              status={status}
+            />
+          ))}
+        </ul>
+      )}
 
       {open ? (
         <div className="artifact-mirror__body">
@@ -174,5 +196,83 @@ export function ArtifactMirrorSettings(props: ArtifactMirrorSettingsProps) {
         </div>
       ) : null}
     </SurfaceSection>
+  );
+}
+
+/**
+ * One Project whose last mirror wrote nothing, in the host's words.
+ *
+ * Choosing the folder again asks for the path rather than resubmitting the
+ * stored one: a folder refused because it now resolves through a link would
+ * otherwise be re-stored at wherever that link points with one click.
+ */
+function RefusedProjectMirror(props: {
+  readonly status: ArtifactMirrorProjectStatus;
+  readonly busy: boolean;
+  readonly onChooseFolderAgain: (status: ArtifactMirrorProjectStatus, folder: string) => void;
+}) {
+  const { status } = props;
+  const [choosing, setChoosing] = useState(false);
+  const [folder, setFolder] = useState("");
+  const storedFolder =
+    status.destination.kind === "global-folder" ? status.destination.canonicalRoot : undefined;
+
+  return (
+    <li className="artifact-mirror__refusal">
+      <span className="oct-row-label">{status.projectName}</span>
+      <span className="oct-row-detail">
+        {status.detail ?? "The last change in this Project was not mirrored."}
+      </span>
+      {storedFolder === undefined ? null : (
+        <span className="oct-row-detail">Folder: {storedFolder}</span>
+      )}
+      {storedFolder === undefined ? null : choosing ? (
+        <form
+          className="artifact-mirror__refusal-choice"
+          noValidate
+          onSubmit={(event) => {
+            event.preventDefault();
+            const chosen = folder.trim();
+            if (chosen.length === 0) return;
+            props.onChooseFolderAgain(status, chosen);
+            setChoosing(false);
+            setFolder("");
+          }}
+        >
+          <label className="artifact-mirror__field">
+            <span>
+              {status.source === "project"
+                ? `Folder for ${status.projectName}`
+                : "Folder for every Project without its own"}
+            </span>
+            <OctantInput
+              className="input"
+              disabled={props.busy}
+              onChange={(event) => setFolder(event.target.value)}
+              placeholder="/Users/you/Artifacts"
+              value={folder}
+            />
+          </label>
+          <OctantButton
+            disabled={props.busy || folder.trim().length === 0}
+            size="sm"
+            type="submit"
+            variant="secondary"
+          >
+            Use this folder
+          </OctantButton>
+        </form>
+      ) : (
+        <OctantButton
+          disabled={props.busy}
+          onClick={() => setChoosing(true)}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          Choose the folder again
+        </OctantButton>
+      )}
+    </li>
   );
 }

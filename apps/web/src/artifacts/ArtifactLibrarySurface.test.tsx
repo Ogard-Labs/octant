@@ -32,10 +32,12 @@ vi.mock("./useArtifactLibrary", async (importOriginal) => ({
 vi.mock("./useArtifactMirror", () => ({
   useArtifactMirror: () => ({
     settings: undefined,
+    projects: [],
     busy: false,
     message: undefined,
     changeAutoCommit: vi.fn(),
     changeDestination: vi.fn(),
+    chooseFolderAgain: vi.fn(),
   }),
 }));
 

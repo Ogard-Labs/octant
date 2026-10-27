@@ -69,6 +69,25 @@ They can originate from attachment cards, the Work file browser, artifact
 entries, the Code file tree, test and diagnostic evidence, search results,
 deep links, and recent items.
 
+## Artifact files on disk
+
+An artifact can also be mirrored to plain files for other tools to read.
+Choose where under **File mirroring** in the artifact library: keep artifacts
+in Octant only, a folder you pick, or the Project's repository. Until you
+choose, artifacts mirror under the `Artifacts` folder inside the default
+folder (`~/Octant` unless you chose another). A mirrored file is a copy:
+deleting one does not delete the artifact.
+
+Octant remembers the mirror folder, and the default folder, by where they
+really are. If a folder, or a folder above it, is later replaced by a link to
+somewhere else, mirroring stops instead of following the link. A mirror
+folder saved through a link by an earlier version of Octant stops the same
+way. **File mirroring** then names each Project whose last change was not
+mirrored, with the reason, and **Choose the folder again** asks you for the
+folder; Octant does not reuse the old path on its own. A folder must be inside
+your home folder. When your home folder is itself a link, a folder inside it
+still counts; a link inside your home folder that leads outside it does not.
+
 ## Agent-authored documents and canvases
 
 Agents receive usage instructions with the tools available to their current

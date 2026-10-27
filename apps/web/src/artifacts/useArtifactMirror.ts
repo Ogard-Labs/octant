@@ -5,6 +5,7 @@ import {
 } from "@octant/client-runtime/artifact-mirror-client";
 import type {
   ArtifactMirrorDestination,
+  ArtifactMirrorProjectStatus,
   ArtifactMirrorSettings,
 } from "@octant/contracts/artifact-mirror";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -18,10 +19,20 @@ export interface ArtifactMirrorOptions {
 
 export interface ArtifactMirror {
   readonly settings: ArtifactMirrorSettings | undefined;
+  /** Each Project's latest outcome for the destination it uses now, as the host reports it. */
+  readonly projects: ReadonlyArray<ArtifactMirrorProjectStatus>;
   readonly busy: boolean;
   readonly message: string | undefined;
   readonly changeDestination: (destination: ArtifactMirrorDestination) => Promise<void>;
   readonly changeAutoCommit: (autoCommit: boolean) => Promise<void>;
+  /**
+   * Name the folder for a Project whose mirror the host refused: its own
+   * destination when it has one, the host-wide one otherwise.
+   */
+  readonly chooseFolderAgain: (
+    status: ArtifactMirrorProjectStatus,
+    folder: string,
+  ) => Promise<void>;
 }
 
 /**
@@ -45,6 +56,7 @@ export function useArtifactMirror(options: ArtifactMirrorOptions): ArtifactMirro
   }, [injected, serverUrl, windowCapability]);
 
   const [settings, setSettings] = useState<ArtifactMirrorSettings>();
+  const [projects, setProjects] = useState<ReadonlyArray<ArtifactMirrorProjectStatus>>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string>();
 
@@ -52,9 +64,11 @@ export function useArtifactMirror(options: ArtifactMirrorOptions): ArtifactMirro
     if (client === undefined) return;
     const controller = new AbortController();
     void client
-      .settings(controller.signal)
+      .read(controller.signal)
       .then((next) => {
-        if (!controller.signal.aborted) setSettings(next);
+        if (controller.signal.aborted) return;
+        setSettings(next.settings);
+        setProjects(next.projects);
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
@@ -74,8 +88,18 @@ export function useArtifactMirror(options: ArtifactMirrorOptions): ArtifactMirro
       setMessage(undefined);
       try {
         const result = await client.execute(build(Number(settings.version)));
-        if (result.kind === "mirror-settings") setSettings(result.settings);
-        else if (result.kind === "mirror-refused") setMessage(result.message);
+        if (result.kind === "mirror-settings") {
+          setSettings(result.settings);
+          // The host decides which Project outcomes still apply to the new
+          // destinations, so they are read again rather than guessed here.
+          // The change already landed, so a failed read keeps the outcomes
+          // shown rather than reporting the change as failed.
+          const next = await client.read().catch(() => undefined);
+          if (next !== undefined) {
+            setSettings(next.settings);
+            setProjects(next.projects);
+          }
+        } else if (result.kind === "mirror-refused") setMessage(result.message);
       } catch (error) {
         setMessage(
           error instanceof ArtifactMirrorClientFailure
@@ -91,6 +115,7 @@ export function useArtifactMirror(options: ArtifactMirrorOptions): ArtifactMirro
 
   return {
     settings,
+    projects,
     busy,
     message,
     changeDestination: useCallback(
@@ -109,6 +134,25 @@ export function useArtifactMirror(options: ArtifactMirrorOptions): ArtifactMirro
           expectedVersion: expectedVersion as never,
           autoCommit,
         })),
+      [run],
+    ),
+    chooseFolderAgain: useCallback(
+      (status, folder) =>
+        run((expectedVersion) => {
+          const destination = { kind: "global-folder", canonicalRoot: folder as never } as const;
+          return status.source === "project"
+            ? {
+                kind: "set-artifact-mirror-override",
+                expectedVersion: expectedVersion as never,
+                projectId: status.projectId,
+                destination,
+              }
+            : {
+                kind: "set-artifact-mirror-fallback",
+                expectedVersion: expectedVersion as never,
+                destination,
+              };
+        }),
       [run],
     ),
   };
