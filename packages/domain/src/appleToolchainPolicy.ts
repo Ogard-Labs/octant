@@ -7,12 +7,15 @@ import type {
   AppleDeviceRecord,
   AppleDeviceRefusalReason,
   AppleDeviceRequest,
+  AppleDeviceSigning,
   AppleDeviceToolingOperation,
   AppleEvidenceReference,
   ApplePlatform,
   AppleRuntimeSnapshot,
+  AppleSigningIdentityFingerprint,
   AppleSimulatorRecord,
   AppleSimulatorRequest,
+  AppleTeamId,
   AppleToolchainDiscovery,
   EventActor,
   ToolActionAuthority,
@@ -512,6 +515,120 @@ function confirmedByLocalPerson(
   }
   if (scope.approvedBy.kind !== "local-user") return deviceDenied("local-person-required");
   return deviceAllowed;
+}
+
+/**
+ * What the host read from one provisioning profile the person installed
+ * through Xcode. `certificates` are the SHA-1 fingerprints of the developer
+ * certificates the profile admits; `profileId` is the host's own key for it.
+ */
+export interface AppleProvisioningProfileFacts {
+  readonly profileId: string;
+  readonly teamIds: ReadonlyArray<string>;
+  readonly platforms: ReadonlyArray<string>;
+  /** The profile's `application-identifier`, `TEAMID.bundle` or a `TEAMID.prefix.*` wildcard. */
+  readonly applicationIdentifier: string;
+  readonly getTaskAllow: boolean;
+  readonly provisionsAllDevices: boolean;
+  readonly expiresAtMs: number;
+  readonly certificates: ReadonlyArray<AppleSigningIdentityFingerprint>;
+}
+
+export interface AppleDevelopmentSigningInput {
+  readonly teamId: AppleTeamId;
+  readonly bundleIdentifier: AppleBundleIdentifier;
+  /** The keychain's valid code-signing identities, in the order the keychain lists them. */
+  readonly identities: ReadonlyArray<AppleSigningIdentityFingerprint>;
+  readonly profiles: ReadonlyArray<AppleProvisioningProfileFacts>;
+  readonly nowMs: number;
+}
+
+/**
+ * Which missing piece stops a development signature, so the setup checklist
+ * can name the step the person takes in Xcode. Octant never creates any of
+ * them: no certificate, no profile, and no `-allowProvisioningUpdates`.
+ */
+export type AppleDevelopmentSigningGap =
+  | "no-signing-identity"
+  | "no-provisioning-profile"
+  | "no-identity-for-profile";
+
+export type AppleDevelopmentSigningChoice =
+  | {
+      readonly kind: "chosen";
+      readonly profileId: string;
+      readonly signing: AppleDeviceSigning;
+    }
+  | { readonly kind: "missing"; readonly gap: AppleDevelopmentSigningGap };
+
+/**
+ * Chooses the person's own development identity and provisioning profile for
+ * one app, selected by team (decision 1 of docs/design/apple-devices.md). A
+ * usable profile is the team's, for iOS, development-signed (`get-task-allow`),
+ * not for every device, unexpired, and its app ID covers the bundle. The one
+ * naming the app beats a wildcard, a longer wildcard beats a shorter one, then
+ * the latest expiry, then the host's key, so the same inputs always sign alike.
+ * The identity is the first keychain identity the profile admits.
+ */
+export function chooseAppleDevelopmentSigning(
+  input: AppleDevelopmentSigningInput,
+): AppleDevelopmentSigningChoice {
+  if (input.identities.length === 0) return { kind: "missing", gap: "no-signing-identity" };
+  const usable = input.profiles.flatMap((profile) => {
+    const specificity = applicationIdentifierSpecificity(
+      profile.applicationIdentifier,
+      input.teamId,
+      input.bundleIdentifier,
+    );
+    return specificity !== undefined &&
+      profile.teamIds.includes(input.teamId) &&
+      profile.platforms.includes("iOS") &&
+      profile.getTaskAllow &&
+      !profile.provisionsAllDevices &&
+      profile.expiresAtMs > input.nowMs
+      ? [{ profile, specificity }]
+      : [];
+  });
+  if (usable.length === 0) return { kind: "missing", gap: "no-provisioning-profile" };
+  usable.sort(
+    (left, right) =>
+      right.specificity - left.specificity ||
+      right.profile.expiresAtMs - left.profile.expiresAtMs ||
+      (left.profile.profileId < right.profile.profileId ? -1 : 1),
+  );
+  for (const { profile } of usable) {
+    const identity = input.identities.find((candidate) =>
+      profile.certificates.some((certificate) => String(certificate) === String(candidate)),
+    );
+    if (identity !== undefined) {
+      return {
+        kind: "chosen",
+        profileId: profile.profileId,
+        signing: { teamId: input.teamId, identity },
+      };
+    }
+  }
+  return { kind: "missing", gap: "no-identity-for-profile" };
+}
+
+/**
+ * How closely an app ID names this bundle: the full length for an exact match,
+ * the prefix's length for a wildcard that covers it, undefined otherwise.
+ */
+function applicationIdentifierSpecificity(
+  applicationIdentifier: string,
+  teamId: AppleTeamId,
+  bundleIdentifier: AppleBundleIdentifier,
+): number | undefined {
+  const prefix = `${teamId}.`;
+  if (!applicationIdentifier.startsWith(prefix)) return undefined;
+  const pattern = applicationIdentifier.slice(prefix.length);
+  if (pattern === bundleIdentifier) return Number.MAX_SAFE_INTEGER;
+  if (pattern === "*") return 0;
+  if (pattern.endsWith(".*") && bundleIdentifier.startsWith(pattern.slice(0, -1))) {
+    return pattern.length;
+  }
+  return undefined;
 }
 
 export function canUseSimulator(simulator: AppleSimulatorRecord, platform: ApplePlatform): boolean {

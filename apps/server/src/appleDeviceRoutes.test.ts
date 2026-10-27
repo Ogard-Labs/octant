@@ -1,7 +1,7 @@
 import type { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
 import type { AppleDeviceRequest } from "@octant/contracts";
-import type { AppleDeviceExecutionScope } from "@octant/domain";
 import { describe, expect, it, vi } from "vitest";
+import type { AppleDeviceExecutionContext } from "./apple/appleDeviceService";
 import { createAppleDeviceRouteHandler } from "./appleDeviceRoutes";
 import { createRemoteDevicePrincipal } from "./clientPrincipal";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
@@ -42,6 +42,13 @@ function body(kind: AppleDeviceRequest["kind"], requestedBy: unknown = person) {
     kind,
     requestedBy,
     ...(kind === "discover" ? {} : { deviceId }),
+    ...(kind === "build" || kind === "run"
+      ? { projectPath: "SimulatorFixture.xcodeproj", teamId: "A1B2C3D4E5" }
+      : {}),
+    ...(kind === "install" ? { artifact: "apple-device-product-1" } : {}),
+    ...(kind === "launch" || kind === "terminate" || kind === "logs" || kind === "uninstall"
+      ? { bundleIdentifier: "sh.octant.SimulatorFixture" }
+      : {}),
     timeoutMs: 30_000,
     approval: { kind: "not-required" },
   };
@@ -69,10 +76,11 @@ function post(path: string, payload: unknown, remote = false) {
 function routes() {
   const store = new WindowAuthorityStore();
   store.register({ windowId: windowId as never, capability, now: 1 });
-  const scope = (request: AppleDeviceRequest): AppleDeviceExecutionScope => ({
+  const scope = (request: AppleDeviceRequest): AppleDeviceExecutionContext => ({
     authority: request.authority,
     threadId: request.threadId,
     checkoutId: request.checkoutId,
+    checkoutRoot: "/checkout",
     executionPolicy: "approval-gated",
     approvalValid: false,
   });
@@ -155,6 +163,38 @@ describe("Apple device routes", () => {
       expect(response?.status).toBe(403);
     }
     expect(service.request).toHaveBeenCalledTimes(1);
+  });
+
+  const actionKinds = ["build", "run", "install", "launch", "terminate", "logs"] as const;
+
+  it("takes the app's build, install, launch, stop, and console read only on the local action route", async () => {
+    const { handler, service } = routes();
+    for (const kind of actionKinds) {
+      expect((await handler(post("/api/apple/devices", body(kind))))?.status).toBe(400);
+      expect((await handler(post("/api/apple/device-leases", body(kind))))?.status).toBe(400);
+    }
+    for (const kind of ["discover", "use-device", "uninstall", "provisioning-update"] as const) {
+      expect((await handler(post("/api/apple/device-actions", body(kind))))?.status).toBe(400);
+    }
+    expect(service.request).not.toHaveBeenCalled();
+    for (const kind of actionKinds) {
+      expect((await handler(post("/api/apple/device-actions", body(kind))))?.status).toBe(200);
+    }
+    expect(service.request).toHaveBeenCalledTimes(actionKinds.length);
+  });
+
+  it("lets a paired device start nothing on a device, not even a console read", async () => {
+    const { handler, service, resolveScope } = routes();
+    for (const kind of actionKinds) {
+      for (const requestedBy of [remotePerson, person]) {
+        const response = await handler(
+          post("/api/apple/device-actions", body(kind, requestedBy), true),
+        );
+        expect(response?.status).toBe(403);
+      }
+    }
+    expect(resolveScope).not.toHaveBeenCalled();
+    expect(service.request).not.toHaveBeenCalled();
   });
 
   it("refuses a window that cannot reach the thread", async () => {
