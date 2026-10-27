@@ -1893,9 +1893,12 @@ function InstalledPackageCard(props: InstalledPackageCardProps) {
                     ? "Disable component"
                     : "Enable component"}
                 </OctantButton>
-                {props.signIn !== undefined &&
-                pkg.source.kind === "user-added" &&
-                componentState.component.kind === "mcp-server" ? (
+                {/* The host reports the packages it writes for servers a
+                    person added as "plugin-package", so the card cannot tell
+                    them apart; the host's sign-in status answers
+                    "not-applicable" for every other server, and the control
+                    then shows nothing. */}
+                {props.signIn !== undefined && componentState.component.kind === "mcp-server" ? (
                   <McpServerSignInControl
                     client={props.signIn}
                     componentId={String(componentState.component.id)}
@@ -1912,7 +1915,11 @@ function InstalledPackageCard(props: InstalledPackageCardProps) {
       props.onPin !== undefined &&
       props.projectPins.projects.length > 0 &&
       pkg.activation.installed ? (
-        <SettingsDisclosure title="Use in a Project" variant="inline">
+        <SettingsDisclosure
+          className="extensions-settings__pins-disclosure"
+          title="Use in a Project"
+          variant="inline"
+        >
           <p className="extensions-settings__effective">
             A pinned plugin is offered on every Work and Code turn in that Project without typing @.
             Each tool call still asks for approval.

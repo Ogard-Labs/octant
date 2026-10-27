@@ -234,9 +234,20 @@
   font-size: var(--oct-text-xs);
 }
 
+/* On a phone the name and value share the first line in equal halves and
+   Secret and Remove take the second. An auto value column began inside the
+   name field at 390px and the two inputs overlapped. */
 @media (max-width: 640px) {
   .mcp-server-values__row {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .mcp-server-values__row > input {
+    min-width: 0;
+  }
+
+  .mcp-server-values__row > :last-child {
+    justify-self: end;
   }
 }
 
@@ -524,6 +535,12 @@
   font-size: var(--oct-text-xs);
 }
 
+/* The Installed / Marketplace / Connectors toggle drops under the title when
+   both do not fit: at 390px "Connectors" beside it ran 9px past the column. */
+.extensions-settings__section > .settings-section-head {
+  flex-wrap: wrap;
+}
+
 /* Connectors: a category heading, then one row per hosted service. */
 .connectors__category {
   margin: var(--oct-space-4) 0 var(--oct-space-1);
@@ -532,8 +549,12 @@
   font-weight: var(--oct-weight-medium);
 }
 
+/* The rows and their text take the column's width rather than their
+   content's: an open key form otherwise held its row at the field's natural
+   width and the Settings column scrolled sideways at 390px. */
 .connectors {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -553,6 +574,7 @@
 
 .connectors__text {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   flex: 1;
   gap: var(--oct-space-1);
   min-width: 0;
@@ -582,6 +604,16 @@
   align-items: center;
   flex-wrap: wrap;
   gap: var(--oct-space-2);
+}
+
+.connectors__key > input {
+  min-width: 0;
+}
+
+/* The card is a three-column grid; without a column the disclosure fell into
+   the 16px icon track and wrapped one word a line. */
+.extcard > .extensions-settings__pins-disclosure {
+  grid-column: 2 / -1;
 }
 
 /* Use in a Project: one switch per Project a plugin can be pinned to. */

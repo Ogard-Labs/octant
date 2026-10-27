@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ExtensionSnapshot } from "@octant/contracts/extension-rpc";
@@ -26,7 +28,9 @@ function addedPackage(
     displayName: slug,
     version: "1.0.0",
     digest: `sha256:${"a".repeat(64)}`,
-    source: { kind: "user-added", sourceRef: "user-linear" },
+    // What the host reports for a package it wrote: inspection rewrites the
+    // installed source to the generic kind, so it never reads "user-added".
+    source: { kind: "plugin-package", sourceRef: "local-linear" },
     activation: { installed: true, trusted: true, pluginDesired: true },
     components: [
       {
@@ -221,6 +225,22 @@ describe("Connectors", () => {
     expect(mcpServerSignIn).not.toHaveBeenCalledWith(
       expect.objectContaining({ extensionId: other }),
     );
+  });
+
+  it("keeps an open key form and the view's header inside a phone-width column", () => {
+    // Observed at 390px: the header's three-way toggle did not wrap, and an
+    // open key form held its row at the field's natural width, so the whole
+    // Settings column scrolled sideways.
+    const styles = readFileSync(
+      resolve(process.cwd(), "src/styles/extensions-settings.css"),
+      "utf8",
+    ).replace(/\s+/g, " ");
+    expect(styles).toMatch(
+      /\.extensions-settings__section > \.settings-section-head \{[^}]*flex-wrap: wrap;/,
+    );
+    expect(styles).toMatch(/\.connectors \{[^}]*grid-template-columns: minmax\(0, 1fr\);/);
+    expect(styles).toMatch(/\.connectors__text \{[^}]*grid-template-columns: minmax\(0, 1fr\);/);
+    expect(styles).toMatch(/\.connectors__key > input \{[^}]*min-width: 0;/);
   });
 
   it("explains that a browser-hosted Settings cannot connect", () => {

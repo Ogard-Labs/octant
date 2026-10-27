@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -2086,5 +2088,83 @@ describe("Use in a Project", () => {
     await waitFor(() =>
       expect(screen.getByRole("switch", { name: "Use in Studio" })).toBeChecked(),
     );
+  });
+
+  it("lays the Project switches out across the card instead of in its icon column", async () => {
+    // Observed at 1440px: the disclosure sat in the card grid's 16px icon
+    // column, so "Use in a Project" and its sentence wrapped one word a line.
+    const { container } = render(
+      <ExtensionsSettingsView
+        client={{
+          ...client({
+            snapshot: installedSnapshot({
+              activation: baseActivation({ trusted: true, pluginDesired: true }),
+            }),
+          }),
+          projectPins: vi.fn(async () => ({
+            projects: [
+              { projectId: "72000000-0000-4000-8000-00000000000a", name: "Studio", type: "work" },
+            ],
+            pins: [],
+          })) as never,
+          toolGrantsAvailable: true,
+        }}
+        scope={scope}
+      />,
+    );
+    const styles = readFileSync(
+      resolve(process.cwd(), "src/styles/extensions-settings.css"),
+      "utf8",
+    ).replace(/\s+/g, " ");
+    await screen.findByText("Use in a Project");
+    expect(container.querySelector("li.extcard > details")).toHaveClass(
+      "extensions-settings__pins-disclosure",
+    );
+    expect(styles).toMatch(
+      /\.extcard > \.extensions-settings__pins-disclosure \{[^}]*grid-column: 2 \/ -1;/,
+    );
+  });
+});
+
+describe("Sign in to a server you added", () => {
+  it("offers Sign in on the card of a hosted server the host reports as a plain plugin package", async () => {
+    // The host rewrites a generated package's installed source to
+    // "plugin-package", so the card cannot wait for "user-added": the host's
+    // own sign-in status says which components can sign in.
+    const added = installedSnapshot({
+      activation: baseActivation({ trusted: true, pluginDesired: true, componentDesired: true }),
+    });
+    const [pkg] = added.packages;
+    if (pkg === undefined) throw new Error("Expected the installed package.");
+    const snapshot = {
+      ...added,
+      packages: [{ ...pkg, source: { kind: "plugin-package", sourceRef: "local-docs" } }],
+    } as never;
+    const mcpServerSignIn = vi.fn(async () => ({ kind: "signed-out" }) as const);
+    render(
+      <ExtensionsSettingsView
+        client={{ ...client({ snapshot }), mcpServerSignIn, toolGrantsAvailable: true }}
+        scope={scope}
+      />,
+    );
+    expect(await screen.findByRole("button", { name: "Sign in" })).toBeVisible();
+    expect(mcpServerSignIn).toHaveBeenCalledWith({
+      kind: "status",
+      extensionId,
+      componentId: "server",
+    });
+  });
+
+  it("asks nothing of a paired device, which cannot sign in", async () => {
+    const mcpServerSignIn = vi.fn(async () => ({ kind: "signed-out" }) as const);
+    render(
+      <ExtensionsSettingsView
+        client={{ ...client(), mcpServerSignIn, toolGrantsAvailable: false }}
+        scope={scope}
+      />,
+    );
+    await screen.findByText("Build Helper");
+    expect(screen.queryByRole("button", { name: "Sign in" })).not.toBeInTheDocument();
+    expect(mcpServerSignIn).not.toHaveBeenCalled();
   });
 });
