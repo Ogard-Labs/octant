@@ -1606,18 +1606,22 @@ Rules this sub-slice resolved:
   `socket-unsafe`. Directories above the home are not checked, so a home
   under a symlinked `/home` still works.
 - **Where the walk starts, and what a swap could do.** The home is the one
-  `os.userInfo()` reports. Under Node, which runs the packaged desktop's
-  server, that is the one the operating system records whatever `$HOME`
-  says; Bun, which runs the development and headless servers, reports
-  `$HOME` when it is set (observed on Bun 1.4.4), so there C1's "no
-  environment override" holds only for the declared path, not for the home
-  it is under. The owner and mode checks apply from that directory down
-  either way, so the walk still ends only at a socket Octant's own user
-  controls. The checks and the connect are two steps on a path, because
-  Node can neither connect through an opened directory nor ask a socket for
-  its peer: between them, only Octant's user, who can already reach the
-  daemon, or whoever can write a directory above the home, normally only
-  root, could swap a component.
+  the system's user database records for Octant's uid, read by
+  `/usr/bin/getent passwd <uid>` on Linux and `/usr/bin/id -P <uid>` on
+  macOS, each run by absolute path with an empty environment, so `$HOME`
+  never moves it, under Node or Bun alike. `os.userInfo()` is not used:
+  Bun, which runs the development and headless servers, answers it with the
+  `$HOME` it was launched with (observed on Bun 1.4.4). A program is run
+  rather than `/etc/passwd` read because macOS keeps a person's account in
+  Open Directory, not that file, and a Linux account can come from a
+  directory service. The answer must be one `passwd` record whose uid is
+  Octant's and whose home is absolute; a lookup that fails, answers
+  anything else, or runs on another platform refuses `socket-unsafe`, and
+  the next call asks again. The checks and the connect are two steps on a
+  path, because Node can neither connect through an opened directory nor
+  ask a socket for its peer: between them, only Octant's user, who can
+  already reach the daemon, or whoever can write a directory above the
+  home, normally only root, could swap a component.
 - **A missing socket is a daemon that is not running.** A path component
   that does not exist answers `failed` `daemon-unreachable`, so the driver
   can report "start the daemon"; any other error reading a component refuses
@@ -1659,9 +1663,14 @@ that are absolute or escape; a missing socket; driver headers, the
 `x-cua-host-caller` and `x-cua-share-caller` caller headers among them;
 requests over 4 MiB; responses over the driver's bound, the host's bound,
 and a stream that claims a huge message; a time-out; cancellation before,
-during the socket checks, and while waiting; and seven malformed answers.
-Removing each check in turn fails at least one of these tests. The same file
-passes under Bun 1.4.4, which runs the development and headless servers
+during the socket checks, and while waiting; seven malformed answers; a
+`HOME` pointing at a home with a live test daemon, and no `HOME` at all,
+both leaving the walk at the recorded home (under Bun the call runs in a Bun
+launched with that environment, since Bun reads `HOME` only at launch; this
+case failed under Bun before the home came from the user database); and a
+uid the user database has no record of. Removing each socket check in turn
+fails at least one of these tests. The same file passes under Bun 1.4.4,
+which runs the development and headless servers
 (`bun --bun x vitest run --project unit src/computerUse/desktopDaemonPort.test.ts`
 in `apps/server`), as well as under Node, which runs the packaged desktop's
 server, through `bun run test`. It also covers a whole stream, its shared
