@@ -3,10 +3,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  CommittedAppend,
   decodeEventActor,
   decodeThreadMessageQueueCommand,
   decodeThreadMessageQueueScope,
   WindowId,
+  type ThreadMessageQueueScope,
   type ThreadMessageQueueSnapshot,
 } from "@octant/contracts";
 import { Schema } from "effect";
@@ -802,4 +804,282 @@ describe("durable ordinary thread queue", () => {
       expect(f.p.admit).toHaveBeenCalledTimes(1);
     },
   );
+});
+
+describe("scoped queue wakes", () => {
+  const decodeAppend = Schema.decodeUnknownSync(CommittedAppend);
+  function appendWith(
+    events: ReadonlyArray<{ readonly eventName: string; readonly payload: unknown }>,
+  ): CommittedAppend {
+    return decodeAppend({
+      events: events.map((event, index) => ({
+        eventId: randomUUID(),
+        globalSequence: index + 1,
+        aggregateType: "queue-wake-test",
+        aggregateId: randomUUID(),
+        aggregateVersion: index + 1,
+        eventName: event.eventName,
+        eventVersion: 1,
+        hostId: randomUUID(),
+        correlationId: randomUUID(),
+        actor,
+        occurredAt: now,
+        payload: event.payload,
+      })),
+      firstSequence: 1,
+      lastSequence: events.length,
+      aggregateVersion: events.length,
+    });
+  }
+  function scoped(mode: ThreadMessageQueueScope["mode"]) {
+    return decodeThreadMessageQueueScope({ mode, threadId: randomUUID() });
+  }
+  function enqueueFor(
+    target: ThreadMessageQueueScope,
+    expectedVersion = 0,
+    messageId = randomUUID(),
+  ) {
+    const result = decodeThreadMessageQueueCommand({
+      kind: "enqueue",
+      scope: target,
+      requestId: randomUUID(),
+      expectedVersion,
+      messageId,
+      payload: { mode: target.mode, prompt: "private prompt" },
+    });
+    if (result.kind !== "enqueue") throw new Error("Expected enqueue");
+    return result;
+  }
+
+  it.each([
+    {
+      name: "a Chat attempt completing",
+      mode: "chat" as const,
+      events: (first: ThreadMessageQueueScope) => [
+        {
+          eventName: "chat.attempt-updated@1",
+          payload: { attempt: { outcome: "completed", threadId: first.threadId } },
+        },
+      ],
+    },
+    {
+      name: "a Chat attempt being cancelled",
+      mode: "chat" as const,
+      events: (first: ThreadMessageQueueScope) => [
+        {
+          eventName: "chat.attempt-updated@1",
+          payload: { attempt: { outcome: "cancelled", threadId: first.threadId } },
+        },
+      ],
+    },
+    {
+      name: "a Work turn completing",
+      mode: "work" as const,
+      events: (first: ThreadMessageQueueScope) => [
+        {
+          eventName: "work.turn-updated@1",
+          payload: { status: "completed", threadId: first.threadId },
+        },
+      ],
+    },
+    {
+      name: "a Code runtime completing",
+      mode: "code" as const,
+      events: (first: ThreadMessageQueueScope) => [
+        {
+          eventName: "code.runtime-work-updated@1",
+          payload: { work: { state: "completed", threadId: first.threadId } },
+        },
+      ],
+    },
+  ])("wakes only its thread's dispatcher when $name lands", async (row) => {
+    const f = fixture();
+    const first = scoped(row.mode);
+    const second = scoped(row.mode);
+    const firstCommand = enqueueFor(first);
+    const secondCommand = enqueueFor(second);
+    expect((await f.service.execute(windowId, firstCommand)).status).toBe("applied");
+    expect((await f.service.execute(windowId, secondCommand)).status).toBe("applied");
+    f.p.inspect.mockClear();
+    await f.service.onCommittedAppend(appendWith(row.events(first)));
+    expect(f.p.admit).toHaveBeenCalledTimes(1);
+    expect(f.p.admit.mock.calls[0]?.[0].messageId).toBe(firstCommand.messageId);
+    expect(
+      f.p.inspect.mock.calls.some(
+        ([input]) => String(input.scope.threadId) === String(second.threadId),
+      ),
+    ).toBe(false);
+    const held = await f.service.read(windowId, second);
+    expect(held.status).toBe("ready");
+  });
+
+  it("does not inspect, admit, or rescan queues for streaming deltas and unrelated journal writes", async () => {
+    const f = fixture();
+    const second = scoped("chat");
+    expect((await f.service.execute(windowId, enqueue())).status).toBe("applied");
+    expect((await f.service.execute(windowId, enqueueFor(second))).status).toBe("applied");
+    const discovery = vi.spyOn(ThreadMessageQueuePersistence.prototype, "scopes");
+    f.p.inspect.mockClear();
+    await f.service.onCommittedAppend(
+      appendWith([
+        {
+          eventName: "chat.attempt-response-appended@1",
+          payload: { attempt: { threadId: scope.threadId }, delta: "text" },
+        },
+        {
+          eventName: "work.turn-updated@1",
+          payload: { status: "running", threadId: randomUUID() },
+        },
+        {
+          eventName: "code.operation-event-recorded@1",
+          payload: { threadId: randomUUID(), event: { kind: "assistant-text" } },
+        },
+      ]),
+    );
+    expect(discovery).not.toHaveBeenCalled();
+    expect(f.p.inspect).not.toHaveBeenCalled();
+    expect(f.p.admit).not.toHaveBeenCalled();
+    expect(f.p.reconcile).not.toHaveBeenCalled();
+    expect((await snapshot(f.service)).items).toHaveLength(1);
+    discovery.mockRestore();
+  });
+
+  it("admits a woken scope once even when one append carries several events for it", async () => {
+    const f = fixture();
+    const command = enqueue();
+    expect((await f.service.execute(windowId, command)).status).toBe("applied");
+    await f.service.onCommittedAppend(
+      appendWith([
+        { eventName: "thread.message-queue-changed@1", payload: { state: { scope } } },
+        { eventName: "chat.thread-updated@1", payload: { thread: { id: scope.threadId } } },
+      ]),
+    );
+    expect(f.p.admit).toHaveBeenCalledTimes(1);
+    expect(f.p.admit.mock.calls[0]?.[0].messageId).toBe(command.messageId);
+  });
+
+  it("coalesces concurrent full passes into one discovery and discovers again afterwards", async () => {
+    const f = fixture();
+    expect((await f.service.execute(windowId, enqueue())).status).toBe("applied");
+    const discovery = vi.spyOn(ThreadMessageQueuePersistence.prototype, "scopes");
+    await Promise.all([f.service.tick(), f.service.tick(), f.service.tick()]);
+    expect(discovery).toHaveBeenCalledTimes(1);
+    expect(f.p.admit).toHaveBeenCalledTimes(1);
+    await f.service.tick();
+    expect(discovery).toHaveBeenCalledTimes(2);
+    discovery.mockRestore();
+  });
+
+  it("lets a later full pass discover and admit another queue while one admission is still pending", async () => {
+    const f = fixture();
+    const second = scoped("chat");
+    let secondReady = false;
+    f.p.inspect.mockImplementation(async (input) =>
+      String(input.scope.threadId) === String(second.threadId) && !secondReady
+        ? { status: "busy", binding: "authorized-target" }
+        : { status: "ready", binding: "authorized-target" },
+    );
+    const firstCommand = enqueue();
+    const secondCommand = enqueueFor(second);
+    expect((await f.service.execute(windowId, firstCommand)).status).toBe("applied");
+    expect((await f.service.execute(windowId, secondCommand)).status).toBe("applied");
+    let finish: ((value: { status: "accepted" }) => void) | undefined;
+    f.p.admit.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const slow = f.service.tick();
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+    secondReady = true;
+    const later = f.service.tick();
+    await vi.waitFor(() => expect(f.p.admit).toHaveBeenCalledTimes(2));
+    expect(f.p.admit.mock.calls[1]?.[0].messageId).toBe(secondCommand.messageId);
+    expect(f.p.admit.mock.calls[0]?.[0].messageId).toBe(firstCommand.messageId);
+    finish?.({ status: "accepted" });
+    await Promise.all([slow, later]);
+    expect(f.p.admit).toHaveBeenCalledTimes(2);
+  });
+
+  it("recovers from a failed full pass and leaves nothing running after dispose", async () => {
+    const f = fixture();
+    const discovery = vi
+      .spyOn(ThreadMessageQueuePersistence.prototype, "scopes")
+      .mockImplementationOnce(() => {
+        throw new Error("store unavailable");
+      });
+    await expect(f.service.tick()).rejects.toThrow("store unavailable");
+    expect((await f.service.execute(windowId, enqueue())).status).toBe("applied");
+    await f.service.tick();
+    expect(discovery).toHaveBeenCalledTimes(2);
+    expect(f.p.admit).toHaveBeenCalledTimes(1);
+    const inspected = f.p.inspect.mock.calls.length;
+    const deferred = f.service.tick();
+    f.service.dispose();
+    await f.service.awaitIdle();
+    await deferred;
+    await f.service.tick();
+    expect(discovery).toHaveBeenCalledTimes(2);
+    expect(f.p.inspect).toHaveBeenCalledTimes(inspected);
+    expect(f.p.admit).toHaveBeenCalledTimes(1);
+    expect(f.p.reconcile).not.toHaveBeenCalled();
+    discovery.mockRestore();
+  });
+
+  it("reads only queue identities during discovery", async () => {
+    const f = fixture();
+    const second = scoped("work");
+    expect((await f.service.execute(windowId, enqueue())).status).toBe("applied");
+    expect((await f.service.execute(windowId, enqueueFor(second))).status).toBe("applied");
+    const persistence = new ThreadMessageQueuePersistence({
+      connection: f.connection,
+      journal: f.journal,
+      actor,
+      clock: () => now,
+    });
+    const discovered = persistence.scopes();
+    expect(discovered).toHaveLength(2);
+    expect(discovered).toEqual(
+      expect.arrayContaining([
+        decodeThreadMessageQueueScope({ mode: "chat", threadId: scope.threadId }),
+        decodeThreadMessageQueueScope({ mode: "work", threadId: second.threadId }),
+      ]),
+    );
+  });
+
+  it("still waits for a scoped dispatch when the full pass it also covers rejects", async () => {
+    const f = fixture();
+    expect((await f.service.execute(windowId, enqueue())).status).toBe("applied");
+    let admit!: () => void;
+    f.p.admit.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          admit = () => resolve({ status: "accepted" });
+        }),
+    );
+    const scopedTick = f.service.tick(scope);
+    await vi.waitFor(() => expect(f.p.admit).toHaveBeenCalledTimes(1));
+    const discovery = vi
+      .spyOn(ThreadMessageQueuePersistence.prototype, "scopes")
+      .mockImplementationOnce(() => {
+        throw new Error("store unavailable");
+      });
+    const global = f.service.tick();
+    let idle: "pending" | "resolved" | "rejected" = "pending";
+    const idlePromise = f.service.awaitIdle().then(
+      () => {
+        idle = "resolved";
+      },
+      () => {
+        idle = "rejected";
+      },
+    );
+    await expect(global).rejects.toThrow("store unavailable");
+    expect(idle).toBe("pending");
+    admit();
+    await Promise.all([scopedTick, idlePromise]);
+    expect(idle).toBe("resolved");
+    discovery.mockRestore();
+  });
 });

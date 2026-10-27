@@ -37,7 +37,10 @@ import type { WorkspaceWiring } from "./workspace";
 import type { ProvidersWiring } from "./providers";
 
 export type BrowserDependencies = Pick<ServerStart, "options" | "persistence"> &
-  Pick<AuthorityWiring, "browserCaptures" | "onWindowRevoked" | "windowAuthorityStore"> &
+  Pick<
+    AuthorityWiring,
+    "browserCaptures" | "machineChangeFeed" | "onWindowRevoked" | "windowAuthorityStore"
+  > &
   Pick<AgentRunsWiring, "externalContentIngestionStore"> &
   Pick<WorkspaceWiring, "projectService" | "shellService"> &
   Pick<ProvidersWiring, "providerDataDirectory"> &
@@ -49,6 +52,7 @@ export function wireBrowser(deps: BrowserDependencies) {
     browserCaptures,
     codeEvidence,
     externalContentIngestionStore,
+    machineChangeFeed,
     onWindowRevoked,
     options,
     persistence,
@@ -107,6 +111,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       rememberOrigin: (origin, windowId) => rememberBrowserOrigin(windowId, origin),
       isOriginRemembered: (origin) => rememberedBrowserOrigins().includes(origin),
       isHostScope: isRoutineHostScope,
+      onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
     });
     onWindowRevoked((windowId) => browserToolApprovalService.revokeWindow(windowId));
     const headlessBrowserRuntime = createPlaywrightBrowserRuntime({

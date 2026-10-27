@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { BrowserToolApprovalService } from "./browserToolApprovalService";
 
@@ -45,6 +45,60 @@ describe("BrowserToolApprovalService", () => {
     ).toBe(true);
     await expect(pending).resolves.toBe("approved");
     expect(service.list(windowId)).toEqual([]);
+  });
+
+  it("reports a new prompt and every way it leaves the waiting list", async () => {
+    vi.useFakeTimers();
+    try {
+      const lists: Array<number> = [];
+      const service = new BrowserToolApprovalService({
+        uuid: () => crypto.randomUUID(),
+        now: Date.now,
+        ttlMs: 1_000,
+        authorityIsCurrent: () => true,
+        onChanged: () => lists.push(service.list(windowId).length),
+      });
+      const ask = (origin: string, signal?: AbortSignal) =>
+        service.request({
+          windowId,
+          threadId,
+          authority,
+          origin,
+          ...(signal === undefined ? {} : { signal }),
+        });
+      const controller = new AbortController();
+      const threadId = "50000000-0000-4000-8000-000000000001";
+      const first = ask("https://one.example");
+      expect(lists).toEqual([1]);
+      service.decide(windowId, {
+        approvalId: service.list(windowId)[0]?.approvalId as never,
+        decision: "approved",
+      });
+      await expect(first).resolves.toBe("approved");
+      expect(lists).toEqual([1, 0]);
+
+      const second = ask("https://two.example", controller.signal);
+      controller.abort();
+      await expect(second).resolves.toBe("cancelled");
+      expect(lists).toEqual([1, 0, 1, 0]);
+
+      const third = ask("https://three.example");
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(third).resolves.toBe("expired");
+      expect(lists).toEqual([1, 0, 1, 0, 1, 0]);
+
+      const fourth = ask("https://four.example");
+      service.revokeWindow(windowId);
+      await expect(fourth).resolves.toBe("cancelled");
+      expect(lists).toEqual([1, 0, 1, 0, 1, 0, 1, 0]);
+
+      const fifth = ask("https://five.example");
+      service.close();
+      await expect(fifth).resolves.toBe("cancelled");
+      expect(lists).toEqual([1, 0, 1, 0, 1, 0, 1, 0, 1, 0]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("a browser approval from a routine's Work turn reaches an open local window", async () => {

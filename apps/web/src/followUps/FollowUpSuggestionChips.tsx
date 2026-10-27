@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -21,7 +22,11 @@ import {
 } from "@octant/client-runtime/follow-up-suggestion-client";
 import type { SideTaskClient } from "@octant/client-runtime/side-task-client";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
-import { scheduleVisibleInterval } from "../polling/documentVisibility";
+import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
+import {
+  THREAD_ACTIVITY_RECOVERY_MS,
+  useThreadActivityRevision,
+} from "../polling/ThreadActivityRevisions";
 import { SideTaskCards } from "./SideTaskCards";
 import { EnvironmentCard } from "../environment/EnvironmentGroup";
 import "./follow-up-suggestions.css";
@@ -111,16 +116,19 @@ export function useComposerSuggestion(): ComposerSuggestion | undefined {
   const context = useContext(FollowUpSuggestionContext);
   const client = context?.client;
   const threadId = context?.threadId;
+  const revision = useThreadActivityRevision("threadFollowUps");
+  const effectiveMs = revision === undefined ? 4_000 : THREAD_ACTIVITY_RECOVERY_MS;
   const subscribe = useCallback(
     (listener: () => void) =>
       client === undefined || threadId === undefined
         ? noFollowUps()
-        : subscribeFollowUps(client, threadId, 4_000, listener),
-    [client, threadId],
+        : subscribeFollowUps(client, threadId, effectiveMs, listener),
+    [client, threadId, effectiveMs],
   );
   const suggestions = useSyncExternalStore(subscribe, () =>
     threadId === undefined ? null : (followUpFeeds.get(threadId)?.value ?? null),
   );
+  useFollowUpRevision(client, threadId, revision);
   const dismissedTurnId = useDismissedTurn(threadId ?? "");
   if (client === undefined || threadId === undefined || suggestions === null) return undefined;
   const turnId = suggestions.followUps.turnId;
@@ -152,6 +160,7 @@ interface FollowUpFeed {
   readonly client: Pick<FollowUpSuggestionClient, "suggestions">;
   value: ThreadFollowUpSuggestions | null;
   readonly listeners: Set<() => void>;
+  revision: number | undefined;
   stop: () => void;
   load: () => Promise<void>;
 }
@@ -174,12 +183,23 @@ function subscribeFollowUps(
   if (feed === undefined || feed.client !== client) {
     feed?.stop();
     let inFlight = false;
+    let readAgain = false;
     const created: FollowUpFeed = {
       client,
       value: feed?.value ?? null,
       listeners: feed?.listeners ?? new Set(),
+      revision: undefined,
       stop: () => undefined,
+      // A notice that lands during a read earns one trailing read, never more.
+      // The guard comes first: a hidden window and a replaced feed read
+      // nothing, so the trailing read also ends with the last unsubscribe.
       load: async () => {
+        if (followUpFeeds.get(threadId) !== created || !documentIsVisible()) return;
+        if (inFlight) {
+          readAgain = true;
+          return;
+        }
+        inFlight = true;
         try {
           const next = await client.suggestions(threadId);
           if (followUpFeeds.get(threadId) !== created) return;
@@ -189,20 +209,26 @@ function subscribeFollowUps(
           for (const notify of created.listeners) notify();
         } catch {
           // Suggestions are an offer, not state the person is waiting on; a
-          // failed read keeps what was shown and the next tick tries again.
+          // failed read keeps what was shown and the next read tries again.
+        } finally {
+          inFlight = false;
+          if (readAgain) {
+            readAgain = false;
+            void created.load();
+          }
         }
       },
     };
-    const tick = () => {
-      if (inFlight) return;
-      inFlight = true;
-      void created.load().finally(() => {
-        inFlight = false;
-      });
-    };
+    const tick = () => void created.load();
     followUpFeeds.set(threadId, created);
     tick();
-    created.stop = scheduleVisibleInterval(tick, intervalMs);
+    const onOnline = () => tick();
+    window.addEventListener("online", onOnline);
+    const stopInterval = scheduleVisibleInterval(tick, intervalMs);
+    created.stop = () => {
+      window.removeEventListener("online", onOnline);
+      stopInterval();
+    };
     feed = created;
   }
   const active = feed;
@@ -216,16 +242,35 @@ function subscribeFollowUps(
   };
 }
 
+function useFollowUpRevision(
+  client: Pick<FollowUpSuggestionClient, "suggestions"> | undefined,
+  threadId: string | undefined,
+  revision: number | undefined,
+): void {
+  useEffect(() => {
+    if (client === undefined || threadId === undefined || revision === undefined) return;
+    const feed = followUpFeeds.get(threadId);
+    if (feed === undefined || feed.client !== client || feed.revision === revision) return;
+    const previouslyObserved = feed.revision;
+    feed.revision = revision;
+    if (previouslyObserved !== undefined) void feed.load();
+  }, [client, revision, threadId]);
+}
+
 function useThreadFollowUps(
   client: Pick<FollowUpSuggestionClient, "suggestions">,
   threadId: string,
   intervalMs: number,
 ): ThreadFollowUpSuggestions | null {
+  const revision = useThreadActivityRevision("threadFollowUps");
+  const effectiveMs = revision === undefined ? intervalMs : THREAD_ACTIVITY_RECOVERY_MS;
   const subscribe = useCallback(
-    (listener: () => void) => subscribeFollowUps(client, threadId, intervalMs, listener),
-    [client, intervalMs, threadId],
+    (listener: () => void) => subscribeFollowUps(client, threadId, effectiveMs, listener),
+    [client, effectiveMs, threadId],
   );
-  return useSyncExternalStore(subscribe, () => followUpFeeds.get(threadId)?.value ?? null);
+  const value = useSyncExternalStore(subscribe, () => followUpFeeds.get(threadId)?.value ?? null);
+  useFollowUpRevision(client, threadId, revision);
+  return value;
 }
 
 /** Reads a thread's suggestions again now, for every surface showing them. */
