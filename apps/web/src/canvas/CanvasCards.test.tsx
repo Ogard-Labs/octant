@@ -769,6 +769,27 @@ describe("Canvas create panel and card list", () => {
       );
     });
 
+    it("offers a Canvas taller than its frame in the sidebar under a name apart from the header's", async () => {
+      const user = userEvent.setup();
+      localStorage.clear();
+      const onOpen = vi.fn();
+      const tall = vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(2000);
+      try {
+        render(<InlineThreadCanvas card={inlineCard()} client={clientWith()} onOpen={onOpen} />);
+        await screen.findByRole("button", { name: "Show the whole Canvas" });
+
+        // The header's icon keeps its own name; the offer under the fade names the Canvas.
+        expect(screen.getAllByRole("button", { name: "Open in sidebar" })).toHaveLength(1);
+        await user.click(screen.getByRole("button", { name: "Open in sidebar: Weekly signups" }));
+        expect(onOpen).toHaveBeenCalledWith(
+          expect.objectContaining({ canvasId: "20000000-0000-4000-8000-000000000002" }),
+        );
+      } finally {
+        tall.mockRestore();
+        localStorage.clear();
+      }
+    });
+
     it("folds to a card on request and stays folded when the thread is opened again", async () => {
       const user = userEvent.setup();
       localStorage.clear();
@@ -786,8 +807,8 @@ describe("Canvas create panel and card list", () => {
       localStorage.clear();
     });
 
-    // A long document with a board: the agent could never ask for it inline,
-    // so the thread first shows it as a row.
+    // A long document with a board the agent placed in the sidebar, so the
+    // thread first shows it as a row.
     const longDefinition = {
       ...definition,
       title: "Launch review",
@@ -1019,6 +1040,174 @@ describe("Canvas create panel and card list", () => {
       render(<InlineThreadCanvas card={inlineCard()} client={clientWith()} />);
       expect(screen.getByTestId("thread-canvas")).toHaveAttribute("data-shown-as", "card");
       localStorage.clear();
+    });
+
+    describe("visualizations the agent asked to show inline", () => {
+      const clientShowing = (
+        blocks: ReadonlyArray<unknown>,
+        presentation: "inline" | "sidebar" = "inline",
+      ) => {
+        const runDesign = vi.fn(async () => ({
+          kind: "ready" as const,
+          url: "http://127.0.0.1:13773/api/canvas/design-page?ticket=t",
+        }));
+        const client = {
+          get: vi.fn().mockResolvedValue({
+            kind: "ready",
+            version: {
+              schemaVersion: 18,
+              canvasId: "20000000-0000-4000-8000-000000000002",
+              versionId: "20000000-0000-4000-8000-000000000003",
+              sequence: 1,
+              definition: { ...definition, schemaVersion: 18, presentation, blocks },
+              createdBy: definition.provenance.actor,
+              createdAt: "2026-08-01T21:00:00.000Z",
+            },
+          }),
+          runDesign,
+        } as unknown as CanvasClient;
+        return { client, runDesign };
+      };
+      const chart = {
+        blockId: "signups-chart",
+        schemaVersion: 1,
+        kind: "chart",
+        chartType: "bar",
+        series: [
+          {
+            seriesId: "signups",
+            label: "Signups",
+            points: [
+              { x: "Mon", y: 180 },
+              { x: "Tue", y: 214 },
+            ],
+          },
+        ],
+      };
+      const board = {
+        blockId: "architecture",
+        schemaVersion: 1,
+        kind: "diagram",
+        nodes: [
+          { nodeId: "web", label: "Web" },
+          { nodeId: "api", label: "API" },
+        ],
+        edges: [{ edgeId: "calls", source: "web", target: "api" }],
+      };
+
+      it("draws a chart in the conversation without expanding it", async () => {
+        localStorage.clear();
+        render(<ThreadCanvases cards={[inlineCard()]} client={clientShowing([chart]).client} />);
+        expect(await screen.findByText("View chart data")).toBeInTheDocument();
+        expect(screen.getByTestId("thread-canvas")).toHaveAttribute("data-shown-as", "inline");
+        localStorage.clear();
+      });
+
+      it("draws a board in the conversation that can be looked at but not rearranged", async () => {
+        localStorage.clear();
+        render(<ThreadCanvases cards={[inlineCard()]} client={clientShowing([board]).client} />);
+        const drawn = await screen.findByRole("group", { name: "Board" });
+        expect(screen.getByTestId("thread-canvas")).toHaveAttribute("data-shown-as", "inline");
+        // No layout runtime reaches the thread, so a drag can never journal a version.
+        expect(drawn).toHaveAttribute("data-editable", "false");
+        localStorage.clear();
+      });
+
+      it("draws a document that runs script in the conversation and waits for the person's Run", async () => {
+        const user = userEvent.setup();
+        localStorage.clear();
+        const page = {
+          blockId: "explorer",
+          schemaVersion: 18,
+          kind: "design",
+          title: "Rate explorer",
+          size: "document",
+          theme: "none",
+          runsScript: true,
+          frames: [
+            {
+              frameId: "explorer",
+              title: "Explorer",
+              html: '<input type="range" oninput="draw(this.value)"><output>4%</output>',
+            },
+          ],
+        };
+        const { client, runDesign } = clientShowing([page]);
+        render(<ThreadCanvases cards={[inlineCard()]} client={client} />);
+
+        const run = await screen.findByRole("button", { name: "Run" });
+        expect(screen.getByTestId("thread-canvas")).toHaveAttribute("data-shown-as", "inline");
+        expect(runDesign).not.toHaveBeenCalled();
+        expect(screen.queryByTitle("Rate explorer, running prototype")).toBeNull();
+
+        await user.click(run);
+        // The same frame the sidebar draws: scripts and nothing else.
+        const frame = await screen.findByTitle("Rate explorer, running prototype");
+        expect(frame).toHaveAttribute("sandbox", "allow-scripts");
+        expect(runDesign).toHaveBeenCalledTimes(1);
+        localStorage.clear();
+      });
+
+      it("shows a device-size design asked for inline as a read-only preview card that opens the sidebar", async () => {
+        const user = userEvent.setup();
+        localStorage.clear();
+        const onOpen = vi.fn();
+        const phone = {
+          blockId: "checkout",
+          schemaVersion: 18,
+          kind: "design",
+          title: "Checkout",
+          size: "phone",
+          frames: [{ frameId: "cart", title: "Cart", html: "<h1>Cart</h1>" }],
+        };
+        // The host lists it as a sidebar Canvas; its definition keeps the inline request.
+        const sidebarCard = referenceCardFixture({
+          title: "Checkout",
+          presentation: "sidebar",
+          canvasCreatedAt: "2026-08-01T21:00:00.000Z",
+        });
+        render(
+          <ThreadCanvases
+            cards={[sidebarCard]}
+            client={clientShowing([phone]).client}
+            onOpen={onOpen}
+          />,
+        );
+
+        await waitFor(() =>
+          expect(screen.getByTestId("canvas-card")).toHaveAttribute("data-shown-as", "preview"),
+        );
+        expect(screen.queryByTestId("thread-canvas")).toBeNull();
+        // The miniature is a picture: nothing in it can take focus or a click.
+        const preview = screen.getByTestId("canvas-card").querySelector(".canvas-ref__preview");
+        expect(preview).toHaveAttribute("inert");
+        expect(preview).toHaveAttribute("aria-hidden", "true");
+        await user.click(screen.getByRole("button", { name: "Open Checkout" }));
+        expect(onOpen).toHaveBeenCalledWith(
+          expect.objectContaining({ canvasId: "20000000-0000-4000-8000-000000000002" }),
+        );
+        localStorage.clear();
+      });
+
+      it("keeps a Canvas the agent put in the sidebar as a row", async () => {
+        localStorage.clear();
+        const phone = {
+          blockId: "checkout",
+          schemaVersion: 18,
+          kind: "design",
+          title: "Checkout",
+          size: "phone",
+          frames: [{ frameId: "cart", title: "Cart", html: "<h1>Cart</h1>" }],
+        };
+        const { client } = clientShowing([phone], "sidebar");
+        render(<ThreadCanvases cards={[rowCard()]} client={client} />);
+        await waitFor(() => expect(client.get).toHaveBeenCalled());
+        await act(async () => {
+          await Promise.resolve();
+        });
+        expect(screen.getByTestId("canvas-card")).toHaveAttribute("data-shown-as", "row");
+        localStorage.clear();
+      });
     });
   });
 });

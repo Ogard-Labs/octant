@@ -169,7 +169,7 @@ const canvasDefinitionSchema = {
       type: "string",
       enum: ["inline", "sidebar"],
       description:
-        "For create and revise: inline draws the Canvas inside the conversation (any reading blocks, or one document-size design without script; no diagram board, plan, mockup, or other design); sidebar, the default, shows a card that opens it beside the thread. Revise keeps the current choice when omitted.",
+        "For create and revise: inline draws the Canvas in the conversation (a plan, mockup, or device-size design shows there as a preview card instead); sidebar, the default, shows a card that opens it beside the thread. Revise keeps the current choice when omitted.",
     },
   },
   required: ["operation"],
@@ -646,7 +646,7 @@ function toolDescription(
     "Operations: describe, list, read, create, revise, preview. Before you author, call describe: with no block kinds it lists every kind, when to use the structured ones, the document recipes to start from, and a create example; with up to three blockKinds it returns their exact schemas, guidance, and examples. Start from a document recipe before inventing a shape, and make it look finished: typed blocks for data, a design frame only for the look.",
     "Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, or CSS; only a design block's frames are HTML and CSS; they load nothing, and run script only in a design that declares it. Mermaid is never drawn; describe code-excerpt for how a Mermaid diagram you already have becomes a typed diagram. Text renders as plain text, not Markdown: give each section its own heading block (the Canvas title is already shown, so do not repeat it), and use key-value, table, status, or callout blocks instead of Markdown lists, bold, or code spans.",
     "A Canvas is a document: it grants no file, shell, Git, or network access. Creation adds a card to this thread and offers the Canvas in its dock; the user can also select Open Canvas. Do not claim the user has read it or invent a download URL.",
-    "Choose where the thread shows it. Use presentation inline for a visual or a reading document that answers the question in place, such as a chart, a few metrics, a short table, a diagram, or an article made of reading blocks or one document-size design; it is drawn in the conversation just below your reply to this turn, so refer to it as below. A long one starts as a faded teaser the user can expand in place. Leave presentation out (sidebar) for plans, boards, mockups, other designs, and anything the user will keep working on; inline never holds those, and when the host shows a card instead, the result says so in presentationNote.",
+    "Choose where the thread shows it. A visualization that answers the current question (a chart, a few metrics, a small dashboard, a short table, a diagram, or an interactive visual as a document-size design) goes inline: it is drawn just below your reply to this turn, so refer to it as below. Longer documents, plans, mockups, device-size designs, and work the user will keep editing stay in the sidebar (leave presentation out); when the host shows a card instead, the result says why in presentationNote.",
     "Revise with the canvasId, the last observed expectedSequence, and the complete replacement blocks; people edit Canvases too, so read before revising and keep their changes. Reference blocks require source ids already in the Canvas source manifest; create attaches no sources. Never invent file or artifact references.",
     "Preview once after you create or revise a chart, treemap, design, or inline Canvas, revise to fix what its warnings or picture show, then reply. An unchanged document previews the same.",
   ].join(" ");
@@ -1645,10 +1645,13 @@ function readerMarked(
 }
 
 /**
- * The presentation to record for an authoring call. Inline is recorded only
- * when the host would draw these blocks in the thread; otherwise the Canvas
- * is recorded as sidebar and the agent is told why, so it never believes a
- * document sits in the conversation when the person sees a card.
+ * The presentation to record for an authoring call, and why an inline request
+ * is not drawn in the thread. The request is recorded as asked: a Canvas whose
+ * blocks the thread cannot draw is still a sidebar Canvas
+ * (`effectiveCanvasPresentation`), and the recorded request is what lets the
+ * thread show it as a preview card rather than a row. The agent is told, so it
+ * never believes a document sits in the conversation when the person sees a
+ * card.
  */
 function placement(input: CanvasAuthoringInput): {
   readonly presentation?: CanvasPresentation;
@@ -1660,7 +1663,7 @@ function placement(input: CanvasAuthoringInput): {
   const refusal = canvasInlineRefusal(input.blocks);
   return refusal === undefined
     ? { presentation: "inline" }
-    : { presentation: "sidebar", note: refusal };
+    : { presentation: "inline", note: refusal };
 }
 
 /**

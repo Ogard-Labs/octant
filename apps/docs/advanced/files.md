@@ -199,10 +199,10 @@ beside the conversation.
 
 ### Canvases inside the thread
 
-When you ask for a chart, a few numbers, a table, a diagram such as a
-sequence, state, entity-relationship, swimlane, or mind map, or a document you
-read, such as a brief or an article, the agent can ask for it to be shown in
-the thread (`"presentation": "inline"`). The Canvas then appears at the end of
+When you ask for a chart, a few numbers, a small dashboard, a table, a
+formula, a diagram, an interactive visual, or a document you read, such as a
+brief or an article, the agent can ask for it to be shown in the thread
+(`"presentation": "inline"`). The Canvas then appears at the end of
 the turn that made it, drawn with the same blocks it has in the sidebar. It is
 still one Canvas: it keeps its versions, it appears in your library, and you
 can share or export it (a Canvas made in a Chat thread filed under no Project
@@ -213,11 +213,11 @@ there as a row that opens it.
   Code thread. There you can comment, edit a board or plan, and see its
   history. Chat has no Canvas sidebar tool, so its button says **Open Canvas** and
   opens the Canvas in its own tab.
-- **Expand in thread** (the expand icon, on the frame or on a row) shows the
-  whole Canvas in place, including a board, a plan, or a mockup. It grows
+- **Expand in thread** (the expand icon, on the frame, a row, or a preview
+  card) shows the whole Canvas in place, including a plan or a mockup. It grows
   with its content up to about the height of the thread. **Collapse** returns
-  it to its faded frame; on a Canvas that started as a row, **Show as card**
-  returns it to the row. This window remembers your choice.
+  it to its faded frame; on a Canvas that started as a row or a preview card,
+  **Show as card** returns it there. This window remembers your choice.
 - **Show as card** (the fold icon in its header) folds an inline Canvas to a
   single row. **Show in thread** unfolds it. This window remembers that too.
 - Scrolling moves the thread while the pointer passes over a Canvas. Click
@@ -247,19 +247,30 @@ there as a row that opens it.
   this changes the Canvas: the agent, exports, and shares keep the table as it
   was written.
 - A tall inline Canvas starts cut off at a fixed height and fades out. **Show
-  the whole Canvas** expands it in place.
+  the whole Canvas** expands it in place, and **Open in sidebar** (or **Open
+  Canvas** in Chat) opens it beside the thread.
+- An inline Canvas is as wide as the conversation, on a phone too. A wide
+  table, a long formula, or a large board scrolls or pans inside its own block
+  instead of widening the page.
 
 What you see in the thread is read-only, even expanded: dragging a board node
 or changing a plan's task happens in the sidebar, or in the Canvas tab in Chat,
-where comments and sharing are too. The agent can show a document of any length
-inline, including an article or spec it wrote as a document-size design. A
-Canvas with a diagram board (the generic diagram you can drag), a plan, a
-mockup, a design at a device size (phone, tablet, desktop, or slide), or a
-running prototype always first appears as a row, because you work on those in
-the sidebar. Sequence, state, entity-relationship, swimlane, and mind
-map diagrams can be shown inline. If an inline Canvas gains one of those
-blocks, later or through your own edits, it turns back into a row. The agent is
-told when that happens.
+where comments and sharing are too. A board shown inline can be panned and
+zoomed but not rearranged. The agent can show a document of any length
+inline, including an article, a spec, or an HTML page it wrote as a
+document-size design. An interactive document (a document-size design that
+runs script, such as a calculator or an explorer) waits in the thread for you to
+press **Run**, in the same locked-down frame the sidebar uses, and cannot change
+the Canvas from there. An HTML page you give the agent can be shown inline the
+same way once it puts the page in a Canvas as a document-size design.
+
+A plan, a mockup, or a design at a device size (phone, tablet, desktop, or
+slide) is worked on in the sidebar. When the agent asks to show one inline, the
+thread shows a preview card instead: a picture of the Canvas across the
+conversation with its title beneath. Click the card to open it. A Canvas the
+agent put in the sidebar on purpose appears as a smaller row. If an inline
+Canvas gains a plan, a mockup, or a device-size design, later or through your
+own edits, it turns into a preview card. The agent is told when that happens.
 
 ### The agent looks at a Canvas before it replies
 
