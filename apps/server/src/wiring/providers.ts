@@ -3,7 +3,7 @@ import { createLocalUsageHistoryLastReadStore } from "../persistence/localUsageH
 import { createSelectedExtensionResolver } from "../extensions/selectedExtensions";
 import { randomUUID } from "node:crypto";
 import { lstatSync, realpathSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   decodeCodeCheckoutId,
@@ -48,6 +48,8 @@ import { makeOpenAiCompatibleDriver } from "../providers/openAiCompatibleDriver"
 import { makeAnthropicCompatibleDriver } from "../providers/anthropicCompatibleDriver";
 import { makeAzureFoundryDriver } from "../providers/azureFoundryDriver";
 import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
+import { OutsideDriverAdmission } from "../providers/outsideDriverAdmission";
+import { OutsideDriverProcesses } from "../providers/outsideDriverProcess";
 import {
   makeCredentialBrokerClient,
   makeMcpServerCredentialBrokerClient,
@@ -206,6 +208,8 @@ export interface ConfiguredProviderDriverOptions {
   readonly nativeHarness?: NativeHarnessEndpointHooks;
   readonly onRuntimeEvent?: (event: ProviderRuntimeEvent) => void;
   readonly admittedDriverKinds?: ReadonlySet<ProviderDriverKind>;
+  /** Admits outside drivers per instance and digest; absent, every outside instance is blocked. */
+  readonly outsideDrivers?: Pick<OutsideDriverAdmission, "isAdmitted" | "endpoint">;
   readonly localUsageHistorySourceForInstance?: (
     instance: ProviderInstance,
   ) => ProviderLocalUsageHistorySource | undefined;
@@ -222,11 +226,26 @@ export function makeConfiguredProviderDriver(
     throw new ProviderDriverConfigurationError();
   }
   const admitted = options.admittedDriverKinds ?? admittedBundledProviderDriverKinds();
-  if (!admitted.has(instance.driverKind)) {
+  // One family kind covers every outside driver, so an outside instance is
+  // admitted at the package and digest it binds, never by its kind.
+  if (
+    instance.driverKind === "outside-harness-endpoint"
+      ? options.outsideDrivers?.isAdmitted(instance) !== true
+      : !admitted.has(instance.driverKind)
+  ) {
     throw new Error("Provider driver plugin is not effective.");
   }
   let driver: ProviderDriver;
-  if (instance.driverKind === "openai-compatible") {
+  if (instance.driverKind === "outside-harness-endpoint") {
+    if (options.outsideDrivers === undefined) {
+      throw new Error("Provider driver plugin is not effective.");
+    }
+    driver = runDirectEndpointOnNativeHarness(
+      options.outsideDrivers.endpoint(instance),
+      instance,
+      options,
+    );
+  } else if (instance.driverKind === "openai-compatible") {
     driver = runDirectEndpointOnNativeHarness(
       makeOpenAiCompatibleDriver({
         instanceId: instance.id,
@@ -494,11 +513,27 @@ export function wireProviders(deps: ProvidersDependencies) {
         authorizeLaunch: (input) => extensionPackageStore.authorizeRuntimeLaunch(input),
         evidence: (event) => recordExtensionRuntimeEvidence?.(event),
       });
+    // Set once the provider service exists. An uninstall stops the package's
+    // outside driver processes before the supervisor drains it, so their exits
+    // are stops the host asked for and never count toward a crash limit.
+    let stopOutsideDriversOf: ((extensionId: string) => Promise<void>) | undefined;
+    let reconcileOutsideDrivers: (() => Promise<void>) | undefined;
     const extensionLifecycleService = new ExtensionLifecycleService({
       connection: persistence.connection,
       journal: persistence.journal,
       store: extensionPackageStore,
-      supervisor: extensionSupervisor,
+      supervisor: {
+        blockNewActivation: async (extensionId) => {
+          await stopOutsideDriversOf?.(extensionId);
+          await extensionSupervisor.blockNewActivation(extensionId);
+        },
+        drain: (extensionId) => extensionSupervisor.drain(extensionId),
+        unregister: (extensionId) => extensionSupervisor.unregister(extensionId),
+        receipts: () => extensionSupervisor.receipts(),
+        ...(extensionSupervisor.reconcile === undefined
+          ? {}
+          : { reconcile: async () => await extensionSupervisor.reconcile?.() }),
+      },
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       isCompatible: (manifest) => isExtensionPackageCompatible(manifest, version, process.platform),
@@ -745,6 +780,10 @@ export function wireProviders(deps: ProvidersDependencies) {
         // Settings has no thread authority. Drain only package/components whose
         // lifecycle state changed; unrelated in-flight MCP calls remain intact.
         await agentPluginMcpSessionManager.reconcileLifecycleSnapshot(snapshot);
+        // A driver that stopped being effective (uninstall, rollback, withdrawn
+        // trust, a switch turned off) stops its processes, and its instances
+        // report the block.
+        await reconcileOutsideDrivers?.();
       },
       userAddedMcpServers: {
         owns: (sourceRef) => userAddedMcpServers.owns(sourceRef),
@@ -999,6 +1038,40 @@ export function wireProviders(deps: ProvidersDependencies) {
           });
     const credentialResolver =
       credentialBroker === undefined ? undefined : makeProviderApiKeyPool(credentialBroker);
+    // An outside driver runs only under the supervisor this host owns, which
+    // builds the driver profile; an injected supervisor starts none.
+    const outsideDriverProcesses =
+      extensionSupervisor instanceof ExtensionSupervisor
+        ? new OutsideDriverProcesses({
+            supervisor: extensionSupervisor,
+            platform: process.platform,
+            runtime: process.versions.bun === undefined ? undefined : process.execPath,
+            temporaryRoot: tmpdir(),
+          })
+        : {
+            start: async () => ({ status: "refused" as const, reason: "start-failed" as const }),
+            stop: async () => undefined,
+          };
+    const outsideDriverAdmission = new OutsideDriverAdmission({
+      platform: process.platform,
+      packages: () => extensionLifecycleService.snapshot().packages,
+      isCompatible: (packageState) =>
+        isExtensionCompatibilityCompatible(packageState.compatibility, version, process.platform),
+      entry: (driver) =>
+        extensionPackageStore.verifiedDriverEntry(
+          {
+            extensionId: String(driver.extensionId),
+            packageId: String(driver.packageId),
+            version: String(driver.version),
+            digest: String(driver.digest),
+          },
+          String(driver.componentId),
+        ),
+      processes: outsideDriverProcesses,
+      runtimeRegistry: providerRuntimeRegistry,
+      ...(credentialResolver === undefined ? {} : { credentialResolver }),
+    });
+    stopOutsideDriversOf = (extensionId) => outsideDriverAdmission.stopPackage(extensionId);
     // The retirement reads the stored value as it is, so it asks the broker
     // and not the key pool, which answers with one key of a pool.
     void retireClaudeHelperTokens({
@@ -1111,6 +1184,8 @@ export function wireProviders(deps: ProvidersDependencies) {
       persistence,
       runtimeRegistry: providerRuntimeRegistry,
       isProviderExecutableAvailable,
+      isOutsideDriverAdmitted: (instance) => outsideDriverAdmission.isAdmitted(instance),
+      outsideDriverListings: () => outsideDriverAdmission.listings(),
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       clearResumeIdentities: async (instanceId) => {
@@ -1151,6 +1226,7 @@ export function wireProviders(deps: ProvidersDependencies) {
             runtimeRegistry: providerRuntimeRegistry,
             permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
             onRuntimeEvent: recordProviderRuntimeUsage,
+            outsideDrivers: outsideDriverAdmission,
             ...(credentialResolver === undefined ? {} : { credentialResolver }),
             ...(subscriptionOAuth === undefined ? {} : { subscriptionOAuth }),
             ...(directoryOAuth === undefined ? {} : { directoryOAuth }),
@@ -1158,6 +1234,12 @@ export function wireProviders(deps: ProvidersDependencies) {
           () => workRequestRuntime,
         ),
     });
+    // Processes first: a stopped driver leaves its own closed observation,
+    // which the provider service then replaces with the block it reports.
+    reconcileOutsideDrivers = async () => {
+      await outsideDriverAdmission.reconcile(persistence.readProviderInstances());
+      providerService.reconcileConfiguredProviders();
+    };
     const probeProviderForThreads: (
       providerInstanceId: ProviderInstance["id"],
     ) => Promise<ProviderProbeResult> = (providerInstanceId) =>
@@ -1290,6 +1372,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       runtimeRegistry: providerRuntimeRegistry,
       permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
       onRuntimeEvent: recordProviderRuntimeUsage,
+      outsideDrivers: outsideDriverAdmission,
       ...(credentialResolver === undefined ? {} : { credentialResolver }),
       ...(subscriptionOAuth === undefined ? {} : { subscriptionOAuth }),
       ...(directoryOAuth === undefined ? {} : { directoryOAuth }),

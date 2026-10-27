@@ -2,6 +2,7 @@ import {
   decodeProviderInstanceId,
   decodeProviderSessionId,
   decodeProviderTurnInput,
+  type OutsideDriverKeyPlacement,
   type ProviderFailure,
   type ProviderInstanceId,
   type ProviderModelId,
@@ -78,6 +79,7 @@ function harness(
     readonly httpResponseBytes?: number;
     readonly httpConnectionTimeoutMs?: number;
     readonly httpIdleTimeoutMs?: number;
+    readonly key?: OutsideDriverKeyPlacement | undefined;
   } = {},
 ) {
   const channel = makeInMemoryOutsideDriverChannel();
@@ -88,6 +90,8 @@ function harness(
     instanceId: id,
     channel: channel.host,
     baseUrl,
+    // The placement most of these drivers ask for; a test that needs another names it.
+    key: "key" in options ? options.key : { header: "authorization" },
     modelIds: [modelId],
     runtimeRegistry: registry,
     ...(options.credentialResolver === undefined
@@ -550,7 +554,11 @@ describe("outside driver brokered requests", () => {
     );
     const { probe, proxy, driver } = harness(
       { "session/send": call.handler },
-      { fetch, credentialResolver: keys.resolver },
+      {
+        fetch,
+        credentialResolver: keys.resolver,
+        key: { header: "authorization", scheme: "Bearer" },
+      },
     );
     await probe();
     const session = await proxy.harnessEndpoint.open(modelId);
@@ -579,7 +587,12 @@ describe("outside driver brokered requests", () => {
     );
     const { probe, proxy } = harness(
       { "session/send": call.handler },
-      { fetch, credentialResolver: keys.resolver, instanceId: instanceB },
+      {
+        fetch,
+        credentialResolver: keys.resolver,
+        instanceId: instanceB,
+        key: { header: "x-api-key" },
+      },
     );
     await probe();
     const session = await proxy.harnessEndpoint.open(modelId);
@@ -644,6 +657,32 @@ describe("outside driver brokered requests", () => {
       const { probe, proxy } = harness(
         { "session/send": call.handler },
         { fetch, credentialResolver: keys.resolver },
+      );
+      await probe();
+      const session = await proxy.harnessEndpoint.open(modelId);
+      await session.send(request(), { signal: new AbortController().signal, onEvent: () => {} });
+
+      expect(call.seen()?.error).toMatchObject({ data: { category: "unauthorized" } });
+      expect(keys.lease).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ["another header", { header: "x-api-key" }, { header: "authorization" }],
+    ["another scheme", { header: "authorization" }, { header: "authorization", scheme: "Bearer" }],
+    ["a provider that takes no key", { header: "authorization" }, undefined],
+  ] as const)(
+    "refuses to send the key for %s than the person chose, before it reads the key",
+    async (_name, asked, chosen) => {
+      const keys = credentials({ [String(instanceA)]: "KEY-A" });
+      const fetch = vi.fn<OutsideDriverFetch>(async () => new Response("ok"));
+      const call = sendThrough((context) =>
+        context.http({ url: `${baseUrl}chat`, method: "GET", auth: asked }),
+      );
+      const { probe, proxy } = harness(
+        { "session/send": call.handler },
+        { fetch, credentialResolver: keys.resolver, key: chosen },
       );
       await probe();
       const session = await proxy.harnessEndpoint.open(modelId);
