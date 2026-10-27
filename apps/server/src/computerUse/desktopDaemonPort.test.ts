@@ -396,7 +396,10 @@ describe("desktop daemon port", () => {
     if (entry.uid !== userId || (entry.mode & 0o022) !== 0) {
       context.skip("the recorded home is not this user's alone, so the port refuses to walk it");
     }
-    const socket = ".octant-daemon-port-test/daemon.sock";
+    // Short, since macOS caps a socket path at 104 bytes and its temporary
+    // folder is long: `.octant-daemon-port-test/daemon.sock` there left no
+    // socket to chmod (observed on the macos-15 runner).
+    const socket = ".octant-port-test/cua.sock";
     const { home, seen } = await daemonHome({}, socket);
     const unreachable = { status: "failed", reason: "daemon-unreachable" };
     await expect(callWithHome(home, socket)).resolves.toEqual(unreachable);
