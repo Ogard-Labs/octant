@@ -1,29 +1,27 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { NativeHarnessSessionView } from "@octant/contracts";
 import {
   NativeHarnessClientFailure,
   type NativeHarnessClient,
 } from "@octant/client-runtime/native-harness-client";
-import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import "./native-harness.css";
 import { UnreachedSteeringFollowUp } from "./UnreachedSteeringFollowUp";
-import {
-  createThreadMessageQueueClient,
-  type ThreadMessageQueueClient,
-} from "../messageQueue/threadMessageQueueClient";
+import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 
 export interface ThreadHarnessSteeringProps {
-  readonly client: Pick<NativeHarnessClient, "session" | "steer" | "takeSteering">;
+  readonly client: Pick<NativeHarnessClient, "steer" | "takeSteering">;
   readonly threadId: string;
-  /** The thread list says a turn is running; it starts and stops the quick refresh. */
+  /** The thread list says a turn is running. */
   readonly running: boolean;
-  readonly refreshIntervalMs?: number;
-  readonly serverUrl?: string;
-  readonly windowCapability?: string;
-  readonly queueClient?: ThreadMessageQueueClient;
+  /** The thread's session as `ThreadHarnessCards` last read it. */
+  readonly view: NativeHarnessSessionView | null | undefined;
+  readonly reload: () => Promise<unknown>;
+  readonly queue: ThreadMessageQueueClient | undefined;
+  /** Says while a claimed note's retry still needs the session read. */
+  readonly onRetryPending: (pending: boolean) => void;
 }
 
 /**
@@ -38,90 +36,27 @@ export interface ThreadHarnessSteeringProps {
  * thread reads one `null` and renders nothing.
  */
 export function ThreadHarnessSteering(props: ThreadHarnessSteeringProps) {
-  const { client, threadId, running } = props;
-  const queue = useMemo(
-    () =>
-      props.queueClient ??
-      (props.serverUrl === undefined || props.windowCapability === undefined
-        ? undefined
-        : createThreadMessageQueueClient({
-            serverUrl: props.serverUrl,
-            windowCapability: props.windowCapability,
-          })),
-    [props.queueClient, props.serverUrl, props.windowCapability],
-  );
-  const [read, setRead] = useState<{
-    readonly threadId: string;
-    readonly view: NativeHarnessSessionView | null;
-  }>();
+  const { client, threadId, running, view, reload, queue } = props;
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [forwarding, setForwarding] = useState(false);
-  const [retryPending, setRetryPending] = useState(false);
   const forwardingRef = useRef(false);
   const forwardingChanged = useCallback((value: boolean) => {
     forwardingRef.current = value;
     setForwarding(value);
   }, []);
   const [notice, setNotice] = useState<string>();
-  const generation = useRef(0);
-  const inFlight = useRef(false);
   // A retried send of the same text keeps its id, so the host lands the note
   // once however many times the request had to be repeated. An edited draft is
   // a different note and gets a new id; reusing the old one would be taken as
   // already accepted and queue none of the edit.
   const pendingNote = useRef<{ readonly id: string; readonly text: string } | undefined>(undefined);
 
-  const load = useCallback(async () => {
-    if (inFlight.current) return undefined;
-    inFlight.current = true;
-    const mine = ++generation.current;
-    try {
-      const view = await client.session(threadId);
-      // A response for a thread the control has left must not paint over the
-      // one it shows now.
-      if (generation.current === mine) setRead({ threadId, view });
-      return view;
-    } catch {
-      // Keep what was last read while the host reconnects.
-      return undefined;
-    } finally {
-      inFlight.current = false;
-    }
-  }, [client, threadId]);
-
-  useEffect(
-    () => () => {
-      generation.current += 1;
-    },
-    [],
-  );
   useEffect(() => {
     setDraft("");
     setNotice(undefined);
     pendingNote.current = undefined;
   }, [threadId]);
-
-  const view = read?.threadId === threadId ? read.view : undefined;
-  const hasSession = view !== null;
-  // The thread list leaves out a turn parked on an approval or a question, but
-  // the session is still running then; keep reading while it says so, or a turn
-  // that settles between list refreshes would leave the input showing.
-  const live = running || view?.session.status === "running";
-  // A separate session control can resume a held turn without changing the
-  // thread-list props. Keep observing until its unreached notes are claimed.
-  const hasPendingFollowUp =
-    retryPending ||
-    (queue !== undefined && view?.steering?.some((note) => note.status === "queued") === true);
-  // One read when the thread opens and when a turn starts or ends, so notes
-  // the lead never reached show up at the turn's end.
-  useEffect(() => {
-    void load();
-  }, [load, running]);
-  useEffect(() => {
-    if ((!live && !hasPendingFollowUp) || !hasSession) return;
-    return scheduleVisibleInterval(() => void load(), props.refreshIntervalMs ?? 2_000);
-  }, [load, live, hasPendingFollowUp, hasSession, props.refreshIntervalMs]);
 
   const send = useCallback(
     async (text: string) => {
@@ -147,10 +82,10 @@ export function ThreadHarnessSteering(props: ThreadHarnessSteeringProps) {
         );
       } finally {
         setBusy(false);
-        await load();
+        await reload();
       }
     },
-    [busy, client, threadId, load],
+    [busy, client, threadId, reload],
   );
 
   const discard = useCallback(async () => {
@@ -167,9 +102,9 @@ export function ThreadHarnessSteering(props: ThreadHarnessSteeringProps) {
       );
     } finally {
       setBusy(false);
-      await load();
+      await reload();
     }
-  }, [busy, client, threadId, load]);
+  }, [busy, client, threadId, reload]);
 
   if (view === null || view === undefined) return null;
   const steerable = view.session.status === "running";
@@ -189,9 +124,9 @@ export function ThreadHarnessSteering(props: ThreadHarnessSteeringProps) {
           settled={!running && (view.session.status === "idle" || view.session.status === "failed")}
           blocked={busy}
           onBusy={forwardingChanged}
-          onRetryPending={setRetryPending}
+          onRetryPending={props.onRetryPending}
           notes={notes}
-          refresh={load}
+          refresh={reload}
         />
       )}
       {notes.length === 0 ? null : (

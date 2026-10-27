@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { NativeHarnessSessionView } from "@octant/contracts";
-import { ThreadHarnessQuestion } from "./ThreadHarnessQuestion";
+import { ThreadHarnessCards } from "./ThreadHarnessCards";
 
 const threadId = "00000000-0000-4000-8000-000000000020";
 const question = {
@@ -83,7 +83,7 @@ describe("the agent's question card in a Work thread", () => {
   it("shows the agent's own pending question and sends the chosen answer through the session route", async () => {
     const user = userEvent.setup();
     const client = clientFor(async () => view());
-    render(<ThreadHarnessQuestion client={client as never} threadId={threadId} />);
+    render(<ThreadHarnessCards client={client as never} threadId={threadId} />);
 
     const card = await screen.findByRole("region", { name: "Provider question" });
     expect(within(card).getByText("Which quarter should the summary cover?")).toBeVisible();
@@ -100,7 +100,7 @@ describe("the agent's question card in a Work thread", () => {
   it("sends an answer the person types when no option fits", async () => {
     const user = userEvent.setup();
     const client = clientFor(async () => view({ questions: [{ ...question, options: [] }] }));
-    render(<ThreadHarnessQuestion client={client as never} threadId={threadId} />);
+    render(<ThreadHarnessCards client={client as never} threadId={threadId} />);
 
     const card = await screen.findByRole("region", { name: "Provider question" });
     await user.click(within(card).getByRole("radio", { name: "Type your own answer" }));
@@ -122,7 +122,7 @@ describe("the agent's question card in a Work thread", () => {
       reason: "already-settled",
       message: "That question was already answered.",
     });
-    render(<ThreadHarnessQuestion client={client as never} threadId={threadId} />);
+    render(<ThreadHarnessCards client={client as never} threadId={threadId} />);
 
     const card = await screen.findByRole("region", { name: "Provider question" });
     await user.click(within(card).getByRole("radio", { name: "Q3" }));
@@ -134,7 +134,7 @@ describe("the agent's question card in a Work thread", () => {
     let current = view();
     const client = clientFor(async () => current);
     render(
-      <ThreadHarnessQuestion client={client as never} threadId={threadId} refreshIntervalMs={20} />,
+      <ThreadHarnessCards client={client as never} threadId={threadId} refreshIntervalMs={20} />,
     );
     await screen.findByRole("region", { name: "Provider question" });
     current = view({
@@ -147,31 +147,57 @@ describe("the agent's question card in a Work thread", () => {
     );
   });
 
+  it("keeps one refresh going while the question, an approval, and the running turn's notes all show", async () => {
+    const approval = {
+      id: "00000000-0000-4000-8000-000000000061",
+      toolName: "write",
+      summary: "write: summary.md",
+      approvalClass: "file-writes",
+      status: "pending",
+      askedAt: "2026-10-16T12:06:00.000Z",
+    };
+    const client = clientFor(async () => ({ ...view(), approvals: [approval] }) as never);
+    render(
+      <ThreadHarnessCards
+        client={client as never}
+        refreshIntervalMs={25}
+        running
+        threadId={threadId}
+        waiting
+      />,
+    );
+    await screen.findByRole("region", { name: "Provider question" });
+    await screen.findByRole("region", { name: "Approval requested" });
+    const before = client.session.mock.calls.length;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    // One timer reads about twelve times in 300 ms; a reader per card would
+    // read about three times as often.
+    expect(client.session.mock.calls.length - before).toBeLessThanOrEqual(14);
+  });
+
   it("says nothing for a subagent's question, which the Agents tab answers", async () => {
     const client = clientFor(async () => view({ questions: [childQuestion] }));
-    render(<ThreadHarnessQuestion client={client as never} threadId={threadId} />);
+    render(<ThreadHarnessCards client={client as never} threadId={threadId} />);
     await waitFor(() => expect(client.session).toHaveBeenCalled());
     expect(screen.queryByRole("region", { name: "Provider question" })).toBeNull();
   });
 
   it("says nothing for a question a restart left behind, which no turn can receive", async () => {
     const client = clientFor(async () => view({ status: "recovery-required" }));
-    render(<ThreadHarnessQuestion client={client as never} threadId={threadId} />);
+    render(<ThreadHarnessCards client={client as never} threadId={threadId} />);
     await waitFor(() => expect(client.session).toHaveBeenCalled());
     expect(screen.queryByRole("region", { name: "Provider question" })).toBeNull();
   });
 
   it("says nothing for a Code or Chat session, whose own thread view shows the question", async () => {
     const code = clientFor(async () => view({ mode: "code" }));
-    const { unmount } = render(
-      <ThreadHarnessQuestion client={code as never} threadId={threadId} />,
-    );
+    const { unmount } = render(<ThreadHarnessCards client={code as never} threadId={threadId} />);
     await waitFor(() => expect(code.session).toHaveBeenCalled());
     expect(screen.queryByRole("region", { name: "Provider question" })).toBeNull();
     unmount();
 
     const none = clientFor(async () => null);
-    render(<ThreadHarnessQuestion client={none as never} threadId={threadId} />);
+    render(<ThreadHarnessCards client={none as never} threadId={threadId} />);
     await waitFor(() => expect(none.session).toHaveBeenCalled());
     expect(screen.queryByRole("region", { name: "Provider question" })).toBeNull();
   });

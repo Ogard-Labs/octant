@@ -5097,7 +5097,14 @@ the model at another size.
   thread.
 - **Surfaces.** `/api/native-harness/routing` and
   `/api/native-harness/sessions/:threadId` serve the web, desktop, phone, and
-  `octant agent` / `octant harness` from one `NativeHarnessSessionView`.
+  `octant agent` / `octant harness` from one `NativeHarnessSessionView`. A
+  thread pane reads that view once for everything above its composer (the
+  lead's approval card, a Work lead's question card, and the steering notes)
+  and refreshes it on one timer: quickly while the thread waits on the person
+  or shows a card, more slowly while a turn runs or unreached notes wait to be
+  handed on, and not at all for a thread whose lead is not the harness.
+  `WorkspaceView.test.tsx` pins the single read when a Work thread opens and
+  `ThreadHarnessQuestion.test.tsx` the single timer while every card shows.
 
 - **Parity checklist.** The 2026-10-16 parity run found Harness leads that
   could not record task progress, were offered `second-opinion` and
@@ -5174,7 +5181,14 @@ the model at another size.
      without a plan approval. Not yet pinned at the offered-set level beyond
      item 1; the progress states are covered by `nativeHarnessTodo.test.ts`.
   4. **One session everywhere.** The same session state is visible in web,
-     terminal, and phone.
+     desktop, terminal, and phone: each reads and changes the one journaled
+     session through `/api/native-harness/sessions/:threadId`, and none keeps
+     a copy it could act on. `nativeHarnessSessionRoutes.test.ts` pins that
+     the app window (web and desktop share it), `octant agent`'s own window,
+     and a paired phone read the identical view, that a pause from the
+     terminal is what the others read next, and that a command sent against a
+     version read before another surface's change is refused as
+     `stale-version` and changes nothing.
   5. **Terminal focus escape.** A keyboard user can leave the terminal pane
      with a documented chord (Mod+Escape to the next control,
      Mod+Shift+Escape to the previous one, rebindable), and the pane says so.
