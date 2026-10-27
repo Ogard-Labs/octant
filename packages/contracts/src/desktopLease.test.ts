@@ -6,6 +6,8 @@ import {
   decodeDesktopLeaseOperated,
   decodeDesktopLeaseRequested,
   decodeDesktopLeaseTransitioned,
+  decodeDesktopPaneAnswer,
+  decodeDesktopPaneRequest,
   decodeDesktopRecipe,
 } from "./desktopLease";
 
@@ -114,5 +116,32 @@ describe("desktop lease contract", () => {
       decodeComputerUseDestinationSelection({ kind: "desktop-lease", leaseId, providerId: "x" }),
     ).toThrow();
     expect(() => decodeComputerUseDestinationSelection({ kind: "this-mac" })).toThrow();
+  });
+
+  it("takes a Desktop tab's request with no person in it, so the host names who sent it", () => {
+    const viewId = "d1000000-0000-4000-8000-000000000005";
+    const input = {
+      kind: "input",
+      threadId,
+      leaseId,
+      viewId,
+      event: { kind: "pointer", action: "down", button: "left", x: 10, y: 20 },
+    } as const;
+    expect(decodeDesktopPaneRequest(input)).toEqual(input);
+    expect(() => decodeDesktopPaneRequest({ ...input, windowId: threadId })).toThrow();
+    expect(() =>
+      decodeDesktopPaneRequest({ ...input, actor: { kind: "agent", actorId: threadId } }),
+    ).toThrow();
+    expect(() =>
+      decodeDesktopPaneRequest({ kind: "extend", threadId, leaseId, byMinutes: 0 }),
+    ).toThrow();
+  });
+
+  it("answers a view refusal apart from the lease's own refusals", () => {
+    expect(decodeDesktopPaneAnswer({ status: "refused", reason: "view-ended" })).toEqual({
+      status: "refused",
+      reason: "view-ended",
+    });
+    expect(() => decodeDesktopPaneAnswer({ status: "refused", reason: "stream-lost" })).toThrow();
   });
 });

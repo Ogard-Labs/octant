@@ -789,4 +789,104 @@ describe("host-local desktop under real Bubblewrap and Xvfb", () => {
     // Every action waits on an approval and a screen grab inside a capsule.
     120_000,
   );
+
+  it.runIf(canRunDesktop && executable("/usr/bin/xev"))(
+    "lets a person watch and operate a running app from a Desktop tab, journaled as the person and asked nothing",
+    async () => {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-host-desktop-")));
+      directories.push(root);
+      const directory = join(root, "desktop-leases");
+      const checkout = join(root, "checkout");
+      mkdirSync(join(checkout, "dist"), { recursive: true });
+      const app = '#!/bin/sh\nexec xev -geometry 320x200+0+0 > "$HOME/events" 2>/dev/null\n';
+      writeFileSync(join(checkout, "dist", "notes-app"), app);
+      const connection = openSqlite(join(root, "octant.sqlite3"));
+      applyMigrations(connection, MIGRATIONS, () => new Date(START).toISOString());
+      // Approval-gated: a person's own input is still asked nothing.
+      const { service } = hostOver(connection, directory, checkout, "approval-gated");
+      const threadId = randomUUID();
+      const tab = {
+        owner: { mode: "code" as const, threadId },
+        actor: decodeEventActor({ kind: "local-user", actorId: randomUUID() }),
+        scopeId: randomUUID(),
+      };
+      const acquired = await service.acquire(tab);
+      if (acquired.status !== "acquired") throw new Error("not acquired");
+      const leaseId = acquired.lease.leaseId;
+      try {
+        await expect(
+          service.transfer({ ...tab, leaseId, path: "dist/notes-app" }),
+        ).resolves.toMatchObject({ status: "delivered" });
+        const agent = decodeEventActor({
+          kind: "agent",
+          actorId: randomUUID(),
+          providerInstanceId: randomUUID(),
+          threadId,
+        });
+        await expect(
+          service.control({
+            owner: tab.owner,
+            actor: agent,
+            leaseId,
+            command: decodeComputerControlCommand({ operation: "launch", appId: "notes-app" }),
+          }),
+        ).resolves.toMatchObject({ status: "answered", result: { kind: "windows" } });
+
+        const opened = await service.openView({ ...tab, leaseId });
+        if (opened.status !== "viewing") throw new Error(`no view: ${JSON.stringify(opened)}`);
+        const view = { ...tab, leaseId, viewId: opened.viewId };
+        const frame = await service.frame(view);
+        expect(frame).toMatchObject({ status: "frame", frame: { width: 640, height: 480 } });
+
+        // The window takes a moment to map before it takes the pointer.
+        const events = join(directory, "desktops", String(leaseId), "home", "events");
+        const received = () => (existsSync(events) ? readFileSync(events, "utf8") : "");
+        for (let attempt = 0; attempt < 50 && !received().includes("MapNotify"); attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 200));
+        }
+        for (const event of [
+          { kind: "pointer", action: "move", x: 40, y: 40 },
+          { kind: "pointer", action: "down", button: "left", x: 40, y: 40 },
+          { kind: "pointer", action: "up", button: "left", x: 40, y: 40 },
+          { kind: "text", text: "hi" },
+          { kind: "key", action: "down", key: "Enter" },
+          { kind: "key", action: "up", key: "Enter" },
+        ] as const) {
+          await expect(service.input({ ...view, event })).resolves.toEqual({ status: "delivered" });
+        }
+        for (let attempt = 0; attempt < 50 && !received().includes("Return"); attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 200));
+        }
+        expect(received()).toContain("ButtonPress event");
+        expect(received()).toMatch(/KeyPress event[^]*keysym 0x[0-9a-f]+, h\)/);
+        expect(received()).toMatch(/KeyPress event[^]*keysym 0x[0-9a-f]+, Return\)/);
+
+        const journaled = connection
+          .prepare(
+            "SELECT actor_kind, payload_json FROM event_journal WHERE aggregate_id = ? AND event_name = ? ORDER BY global_sequence",
+          )
+          .all(String(leaseId), "desktop.operated@1") as Array<{
+          actor_kind: string;
+          payload_json: string;
+        }>;
+        expect(
+          journaled.map((row) => [
+            row.actor_kind,
+            (JSON.parse(row.payload_json) as { operation: string }).operation,
+          ]),
+        ).toEqual([
+          ["agent", "launch"],
+          ["local-user", "click"],
+          ["local-user", "type"],
+          ["local-user", "press"],
+        ]);
+        expect(journaled.map((row) => row.payload_json).join("")).not.toContain('"hi"');
+      } finally {
+        await service.release({ ...tab, leaseId });
+        connection.close();
+      }
+      expect(existsSync(join(directory, "desktops", String(leaseId)))).toBe(false);
+    },
+    120_000,
+  );
 });

@@ -38,7 +38,10 @@ export type RoutesDependencies = Pick<ServerStart, "latencyStats" | "persistence
     | "usageRoutes"
     | "validationEvidenceRoutes"
   > &
-  Pick<ComputerUseWiring, "computerUseRoutes" | "launchSessionRoutes" | "machineChangeRoutes"> &
+  Pick<
+    ComputerUseWiring,
+    "computerUseRoutes" | "desktopPaneRoutes" | "launchSessionRoutes" | "machineChangeRoutes"
+  > &
   Pick<
     WorkspaceWiring,
     | "githubCloneRoutes"
@@ -153,6 +156,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     codeProjectAccess,
     codeRoutes,
     computerUseRoutes,
+    desktopPaneRoutes,
     contextRoutes,
     diagnosticsExportRoutes,
     discoveryRoutes,
@@ -297,6 +301,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await zenRoutes(request)) ??
     (await navigatorAssistantRoutes(request)) ??
     (await localServerRoutes(request)) ??
+    (await desktopPaneRoutes(request)) ??
     (await remoteServerGrantLocalRoutes(request)) ??
     (await threadMentionRoutes(request)) ??
     (await fileMentionRoutes(request)) ??

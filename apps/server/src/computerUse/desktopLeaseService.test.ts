@@ -88,6 +88,8 @@ interface HostState {
   readonly threads: Map<string, { active: boolean; executionPolicy: ProviderExecutionPolicy }>;
   readonly recipes: Map<string, DesktopRecipe>;
   providers: Array<RegisteredDesktopProvider>;
+  /** Windows and devices that may not open any thread. */
+  readonly deniedScopes: Set<string>;
 }
 
 function openJournal(connection: SqliteConnection) {
@@ -120,7 +122,9 @@ function serviceOver(connection: SqliteConnection, state: HostState): DesktopLea
     providers: () => state.providers,
     recipe: (owner) => state.recipes.get(String(owner.threadId)),
     thread: (owner) => state.threads.get(String(owner.threadId)),
-    callerMayOpen: (_actor, owner) => state.threads.has(String(owner.threadId)),
+    callerMayOpen: (_actor, owner, scopeId) =>
+      state.threads.has(String(owner.threadId)) &&
+      (scopeId === undefined || !state.deniedScopes.has(scopeId)),
     computerUseEnabled: () => state.computerUse,
     confirm: async (request) => {
       state.asked.push(request.asks);
@@ -174,6 +178,7 @@ function host(
       ]),
     ),
     providers: providers.map(({ provider }) => ({ provider, effective: true })),
+    deniedScopes: new Set(),
   };
   return {
     state,
@@ -1191,5 +1196,250 @@ describe.runIf(process.platform === "linux")("desktop artifact transfer", () => 
     await expect(
       service.transfer({ owner: code(threadA), actor: agentOf(threadA), leaseId, path: "app.bin" }),
     ).resolves.toEqual({ status: "refused", reason: "no-root" });
+  });
+});
+
+describe("desktop lease service for a person's Desktop tab", () => {
+  const windowScope = "e1000000-0000-4000-8000-0000000000c1";
+  const deviceScope = String((paired as Extract<EventActor, { kind: "remote-device" }>).deviceId);
+  const at = (threadId: string, actor: EventActor = person, scopeId = windowScope) => ({
+    owner: code(threadId),
+    actor,
+    scopeId,
+  });
+
+  async function viewing(
+    service: DesktopLeaseService,
+    leaseId: DesktopLeaseId,
+    caller = at(threadA),
+  ) {
+    const opened = await service.openView({ ...caller, leaseId });
+    if (opened.status !== "viewing") throw new Error(`no view: ${JSON.stringify(opened)}`);
+    return opened.viewId;
+  }
+
+  it("lets a person watch and operate the thread's desktop, journaling each press as theirs and asking nothing", async () => {
+    const harness = host({ executionPolicy: "approval-gated" });
+    const { service, state, backend, connection } = harness;
+    const started = await service.acquire(at(threadA));
+    if (started.status !== "acquired") throw new Error("not acquired");
+    const leaseId = started.lease.leaseId;
+    const viewId = await viewing(service, leaseId);
+
+    await expect(service.frame({ ...at(threadA), leaseId, viewId })).resolves.toMatchObject({
+      status: "frame",
+      frame: { mediaType: "image/png", width: 1, height: 1 },
+    });
+    for (const event of [
+      { kind: "pointer", action: "move", x: 4, y: 4 },
+      { kind: "pointer", action: "down", button: "left", x: 4, y: 4 },
+      { kind: "pointer", action: "up", button: "left", x: 4, y: 4 },
+      { kind: "text", text: "a secret the person typed" },
+      { kind: "key", action: "down", key: "Enter" },
+      { kind: "key", action: "up", key: "Enter" },
+    ] as const) {
+      await expect(service.input({ ...at(threadA), leaseId, viewId, event })).resolves.toEqual({
+        status: "delivered",
+      });
+    }
+    const pairedView = await viewing(service, leaseId, at(threadA, paired, deviceScope));
+    await expect(
+      service.input({
+        ...at(threadA, paired, deviceScope),
+        leaseId,
+        viewId: pairedView,
+        event: { kind: "scroll", x: 4, y: 4, deltaX: 0, deltaY: 120 },
+      }),
+    ).resolves.toEqual({ status: "delivered" });
+
+    expect(state.asked).toEqual([]);
+    expect(backend.inputs()).toHaveLength(7);
+    const operated = operatedEvents(connection);
+    expect(
+      operated.map((row) => [row.actor, (row.payload as { operation: string }).operation]),
+    ).toEqual([
+      ["local-user", "click"],
+      ["local-user", "type"],
+      ["local-user", "press"],
+      ["remote-device", "scroll"],
+    ]);
+    expect(JSON.stringify(operated)).not.toContain("secret");
+  });
+
+  it("refuses a view of another thread's lease, to an agent, and to a window that may not open the thread", async () => {
+    const { service, state, backend } = host();
+    const leaseId = await acquired(service, threadA);
+    await expect(service.openView({ ...at(threadB), leaseId })).resolves.toEqual({
+      status: "refused",
+      reason: "leased-by-another-thread",
+    });
+    await expect(
+      service.openView({ owner: code(threadA), actor: agentOf(threadA), leaseId }),
+    ).resolves.toEqual({ status: "refused", reason: "not-permitted" });
+    await expect(
+      service.openView({ owner: code(threadA), actor: person, leaseId }),
+    ).resolves.toEqual({
+      status: "refused",
+      reason: "not-permitted",
+    });
+    state.deniedScopes.add(windowScope);
+    await expect(service.openView({ ...at(threadA), leaseId })).resolves.toEqual({
+      status: "refused",
+      reason: "not-permitted",
+    });
+    expect(backend.calls()).not.toContain("screen");
+  });
+
+  it("keeps a view to the window that opened it, and a restarted host holds no view and reconnects nothing", async () => {
+    const harness = host();
+    const leaseId = await acquired(harness.service, threadA);
+    const viewId = await viewing(harness.service, leaseId);
+    const otherWindow = "e1000000-0000-4000-8000-0000000000c2";
+    await expect(
+      harness.service.frame({ ...at(threadA, person, otherWindow), leaseId, viewId }),
+    ).resolves.toEqual({ status: "refused", reason: "view-ended" });
+    await expect(
+      harness.service.input({
+        ...at(threadA, paired, deviceScope),
+        leaseId,
+        viewId,
+        event: { kind: "pointer", action: "down", x: 1, y: 1 },
+      }),
+    ).resolves.toEqual({ status: "refused", reason: "view-ended" });
+
+    const restarted = harness.restart();
+    await restarted.start();
+    await expect(restarted.frame({ ...at(threadA), leaseId, viewId })).resolves.toEqual({
+      status: "refused",
+      reason: "view-ended",
+    });
+    await expect(restarted.openView({ ...at(threadA), leaseId })).resolves.toEqual({
+      status: "refused",
+      reason: "lease-ended",
+    });
+    await expect(restarted.overview(at(threadA))).resolves.toMatchObject({
+      status: "overview",
+      leases: [{ leaseId, state: "released", endReason: "host-restart" }],
+    });
+    expect(operatedEvents(harness.connection)).toEqual([]);
+  });
+
+  it("holds idle release off while a view is read, and lets it lapse once nobody reads it", async () => {
+    const { service, state, backend } = host();
+    state.recipes.set(
+      threadA,
+      decodeDesktopRecipe({ ...recipeFor("fake-desktop"), leaseMinutes: 60 }),
+    );
+    const leaseId = await acquired(service, threadA);
+    const viewId = await viewing(service, leaseId);
+    for (let minute = 1; minute <= 16; minute += 1) {
+      state.now = START + minute * MINUTE;
+      await expect(service.frame({ ...at(threadA), leaseId, viewId })).resolves.toMatchObject({
+        status: "frame",
+      });
+      await service.sweep();
+    }
+    expect(backend.desktops()).toHaveLength(1);
+
+    state.now += MINUTE;
+    await service.sweep();
+    await expect(service.frame({ ...at(threadA), leaseId, viewId })).resolves.toEqual({
+      status: "refused",
+      reason: "view-ended",
+    });
+    state.now += 15 * MINUTE;
+    await service.sweep();
+    expect(backend.desktops()).toHaveLength(0);
+    await expect(service.overview(at(threadA))).resolves.toMatchObject({
+      leases: [{ leaseId, state: "released", endReason: "idle" }],
+    });
+  });
+
+  it("ends a view when its tab closes, and when its lease ends", async () => {
+    const { service, backend } = host();
+    const leaseId = await acquired(service, threadA);
+    const closing = await viewing(service, leaseId);
+    await expect(service.closeView({ ...at(threadA), leaseId, viewId: closing })).resolves.toEqual({
+      status: "view-closed",
+    });
+    await expect(service.frame({ ...at(threadA), leaseId, viewId: closing })).resolves.toEqual({
+      status: "refused",
+      reason: "view-ended",
+    });
+    const open = await viewing(service, leaseId);
+    await service.release({ ...at(threadA), leaseId });
+    await expect(service.frame({ ...at(threadA), leaseId, viewId: open })).resolves.toEqual({
+      status: "refused",
+      reason: "view-ended",
+    });
+    expect(backend.calls().filter((call) => call === "close-screen")).toHaveLength(2);
+  });
+
+  it("caps the views one lease holds", async () => {
+    const { service } = host();
+    const leaseId = await acquired(service, threadA);
+    for (let view = 0; view < 4; view += 1) await viewing(service, leaseId);
+    await expect(service.openView({ ...at(threadA), leaseId })).resolves.toEqual({
+      status: "refused",
+      reason: "view-limit",
+    });
+  });
+
+  it("passes on no frame larger than the recipe's screen or not the image it claims to be", async () => {
+    const fake = createFakeDesktopProvider({
+      behaviour: {
+        frame: { mediaType: "image/png", width: 4_000, height: 10, bytes: new Uint8Array(32) },
+      },
+    });
+    const { service } = host({ providers: [fake] });
+    const leaseId = await acquired(service, threadA);
+    const viewId = await viewing(service, leaseId);
+    await expect(service.frame({ ...at(threadA), leaseId, viewId })).resolves.toEqual({
+      status: "no-frame",
+    });
+    fake.backend.behaviour.frame = {
+      mediaType: "image/png",
+      width: 1,
+      height: 1,
+      bytes: new TextEncoder().encode("<svg onload=alert(1)>"),
+    };
+    await expect(service.frame({ ...at(threadA), leaseId, viewId })).resolves.toEqual({
+      status: "no-frame",
+    });
+  });
+
+  it("tells a person whether the thread can start a desktop, and why not", async () => {
+    const { service, state } = host();
+    await expect(service.overview(at(threadA))).resolves.toEqual({
+      status: "overview",
+      leases: [],
+      providers: [
+        {
+          providerId: "fake-desktop",
+          displayName: "Fake desktop",
+          locality: "host-local",
+          billed: false,
+        },
+      ],
+      start: {
+        status: "available",
+        provider: {
+          providerId: "fake-desktop",
+          displayName: "Fake desktop",
+          locality: "host-local",
+          billed: false,
+        },
+      },
+    });
+    state.recipes.delete(threadA);
+    await expect(service.overview(at(threadA))).resolves.toMatchObject({
+      status: "overview",
+      start: { status: "refused", reason: "no-provider-configured" },
+    });
+    state.deniedScopes.add(windowScope);
+    await expect(service.overview(at(threadA))).resolves.toEqual({
+      status: "refused",
+      reason: "not-permitted",
+    });
   });
 });

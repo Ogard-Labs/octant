@@ -1,6 +1,8 @@
 import type {
   DesktopArtifactRefusalReason,
+  DesktopInputEvent,
   DesktopLeaseEndReason,
+  DesktopLeaseOperation,
   DesktopLeaseOwner,
   DesktopLeaseState,
   DesktopProviderLocality,
@@ -228,4 +230,23 @@ export function decideDesktopArtifactTransfer(input: {
     return { kind: "proceed" };
   }
   return { kind: "ask", asks: "in-thread" };
+}
+
+/**
+ * The input a person's Desktop tab sent, as the journal names it, or
+ * undefined for one it does not record. A press is journaled once, when the
+ * button or key goes down; moving the pointer and letting go change nothing
+ * on their own, and journaling them would write a row per pointer frame.
+ */
+export function desktopInputOperation(event: DesktopInputEvent): DesktopLeaseOperation | undefined {
+  switch (event.kind) {
+    case "pointer":
+      return event.action === "down" ? "click" : undefined;
+    case "key":
+      return event.action === "down" ? "press" : undefined;
+    case "text":
+      return "type";
+    case "scroll":
+      return "scroll";
+  }
 }
