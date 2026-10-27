@@ -89,6 +89,22 @@ export interface ProviderPlacedLaunch {
   /** The runtime's absolute path on the target. */
   readonly executable: string;
   readonly args: ReadonlyArray<string>;
+  /**
+   * The paths the driver's profile declares for its sign-in, at most four,
+   * each relative to the target user's home (never absolute, never `..`), so
+   * none can name a folder of this host. Read-only unless the runtime's own
+   * local launch writes that path. A launch that names more, or a path the
+   * target refuses, is refused.
+   */
+  readonly accountState?: ReadonlyArray<ProviderPlacedAccountState>;
+}
+
+/** One home-relative path a placed runtime signs in with on the target. */
+export interface ProviderPlacedAccountState {
+  readonly path: string;
+  readonly access: "read-only" | "read-write";
+  /** The variable that points the runtime at the path; the target sets its value. */
+  readonly variable?: string;
 }
 
 /**

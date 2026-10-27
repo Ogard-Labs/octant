@@ -85,6 +85,7 @@ export interface EgressHarnessOptions {
   readonly taint?: () => { readonly threadTainted: boolean; readonly parentTainted: boolean };
   readonly rulesRead?: () => ReadonlyArray<ToolEgressRule>;
   readonly clock?: () => string;
+  readonly decision?: "tool-rules" | "public-destinations";
 }
 
 export interface EgressHarness {
@@ -133,6 +134,7 @@ export async function startEgressHarness(
     clock: options.clock ?? (() => new Date(now).toISOString()),
     endpoint: options.endpoint ?? { kind: "loopback" },
     ...(options.limits === undefined ? {} : { limits: options.limits }),
+    ...(options.decision === undefined ? {} : { decision: options.decision }),
     resolveAll: async (host) => {
       resolved.push(host);
       return options.resolve === undefined ? ["93.184.216.10"] : options.resolve(host);

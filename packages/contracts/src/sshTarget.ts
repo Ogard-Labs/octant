@@ -181,7 +181,9 @@ export type SshConfinedPosture = typeof SshConfinedPosture.Type;
 
 /**
  * One action a canary probe tries and a confined posture forbids. Which probes
- * each posture needs is the admission policy's table, not the executor's.
+ * each posture needs is the admission policy's table, not the executor's. The
+ * `runtime-` probes run with the grant shape of a placed provider runtime (its
+ * own home and account state) rather than a command's.
  */
 export const SshConfinementCanaryProbe = Schema.Literal(
   "write-inside-root",
@@ -193,6 +195,14 @@ export const SshConfinementCanaryProbe = Schema.Literal(
   "connect-bypassing-forwarder",
   "read-sibling-folder",
   "read-other-session-runtime",
+  "runtime-write-inside-root",
+  "runtime-write-read-only-account-state",
+  "runtime-exec-after-start",
+  "runtime-fork-after-start",
+  "runtime-write-outside-root-and-home",
+  "runtime-read-ssh-directory",
+  "runtime-read-other-runtime-home",
+  "runtime-connect-bypassing-proxy",
 );
 export type SshConfinementCanaryProbe = typeof SshConfinementCanaryProbe.Type;
 

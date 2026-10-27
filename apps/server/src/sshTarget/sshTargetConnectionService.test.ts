@@ -1,17 +1,28 @@
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Schema } from "effect";
+import { Effect, Exit, Fiber, Schema, Scope, Stream } from "effect";
+import { decodeProviderInstanceId, type ProviderFailure } from "@octant/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SshDestination, SshExecutorPath, SshRemotePath } from "@octant/contracts/ssh-target";
-import { SSH_EXECUTOR_PREAMBLE } from "@octant/contracts/ssh-executor-protocol";
-import { SSH_CANARY_PROBES_BY_POSTURE } from "@octant/domain/ssh-target-admission-policy";
+import {
+  SSH_EXECUTOR_PREAMBLE,
+  SSH_EXECUTOR_PROTOCOL_VERSION,
+} from "@octant/contracts/ssh-executor-protocol";
+import {
+  SSH_CANARY_PROBES_BY_POSTURE,
+  SSH_RUNTIME_CANARY_PROBES_BY_POSTURE,
+} from "@octant/domain/ssh-target-admission-policy";
 import { bindSshRemoteHarness } from "./sshRemoteHarness";
 import { decodeCodeTerminalId } from "@octant/contracts/code";
 import { WindowId } from "@octant/contracts/shell";
 import { SshRemoteProjectService } from "./sshRemoteProjectService";
 import { SshRemoteTerminalService } from "./sshRemoteTerminalService";
-import { SshTargetConnectionService } from "./sshTargetConnectionService";
+import type { ProviderRuntimeEgress } from "./providerRuntimeEgress";
+import {
+  SshTargetConnectionService,
+  type SshTargetPlacementInput,
+} from "./sshTargetConnectionService";
 import type { SshTargetStore } from "./sshTargetStore";
 import { openSshTargetTestStore } from "./sshTargetStore.test-support";
 
@@ -87,10 +98,15 @@ const answer = (request) => {
       return { kind: "worktree-created", path: "/srv/.octant-worktrees/" + request.project + "/" + request.name, branch: "octant/" + request.name };
     case "remove-worktree":
       return { kind: "worktree-removed" };
+    case "start-process":
+      placed.add(request.stream);
+      return { kind: "process-started", stream: request.stream };
     default:
       return { kind: "refused", reason: "read-failed" };
   }
 };
+// A placed process here echoes what it is sent, and ends when it is stopped.
+const placed = new Set();
 let buffered = Buffer.alloc(0);
 process.stdin.on("data", (chunk) => {
   buffered = Buffer.concat([buffered, chunk]);
@@ -107,8 +123,20 @@ process.stdin.on("data", (chunk) => {
       process.stdout.write(frame({ type: "terminal-exited", terminal: request.terminal, exitCode: 0 }));
       continue;
     }
+    if (request.type === "stream-data" && placed.has(request.stream)) {
+      process.stdout.write(frame({ type: "stream-data", stream: request.stream, data: request.data }));
+      continue;
+    }
+    if (request.type === "stop-process" && placed.has(request.stream)) {
+      placed.delete(request.stream);
+      fs.appendFileSync(process.env.FAKE_SSH_REQUEST + ".log", "stop-process\n");
+      process.stdout.write(frame({ type: "stream-end", stream: request.stream }));
+      process.stdout.write(frame({ type: "process-ended", stream: request.stream, signal: "SIGTERM", stderr: "" }));
+      continue;
+    }
     if (request.type !== "request") continue;
     if (request.request.kind === "attest") fs.writeFileSync(process.env.FAKE_SSH_REQUEST, JSON.stringify(request));
+    if (request.request.kind === "start-process") fs.writeFileSync(process.env.FAKE_SSH_REQUEST + ".start-process", JSON.stringify(request));
     fs.appendFileSync(process.env.FAKE_SSH_REQUEST + ".log", request.request.kind + "\n");
     const outOfTurn = mode === "answers-out-of-turn" && request.request.kind !== "attest";
     process.stdout.write(frame({ type: "reply", id: request.id + (outOfTurn ? 1 : 0), reply: answer(request.request) }));
@@ -119,7 +147,11 @@ process.stdin.on("end", () => process.exit(0));
 
 function passingFacts() {
   return {
-    identity: { buildVersion: BUILD, protocolVersion: 1, installVerified: true },
+    identity: {
+      buildVersion: BUILD,
+      protocolVersion: SSH_EXECUTOR_PROTOCOL_VERSION,
+      installVerified: true,
+    },
     platform: { operatingSystem: "linux", architecture: "x64", uid: 1000 },
     backend: {
       kind: "bubblewrap",
@@ -129,7 +161,10 @@ function passingFacts() {
     },
     canaries: (["plan", "approval-gated", "auto-accept-edits"] as const).map((posture) => ({
       posture,
-      results: SSH_CANARY_PROBES_BY_POSTURE[posture].map((probe) => ({
+      results: [
+        ...SSH_CANARY_PROBES_BY_POSTURE[posture],
+        ...SSH_RUNTIME_CANARY_PROBES_BY_POSTURE[posture],
+      ].map((probe) => ({
         probe,
         outcome: "refused",
       })),
@@ -155,9 +190,15 @@ afterEach(() => {
 });
 
 function service(
-  overrides: { readonly mode?: string; readonly identity?: object; readonly facts?: object } = {},
+  overrides: {
+    readonly mode?: string;
+    readonly identity?: object;
+    readonly facts?: object;
+    readonly runtimeEgress?: ProviderRuntimeEgress;
+  } = {},
 ) {
   return new SshTargetConnectionService({
+    ...(overrides.runtimeEgress === undefined ? {} : { runtimeEgress: overrides.runtimeEgress }),
     store: registry,
     buildVersion: BUILD,
     sshExecutable: join(directory, "ssh"),
@@ -229,11 +270,16 @@ describe("SSH target connection service", () => {
     expect(args).toContain(`UserKnownHostsFile="${pin}"`);
     expect(readFileSync(join(directory, "args.json.secret"), "utf8")).toBe("undefined");
     const request = JSON.parse(readFileSync(join(directory, "request.json"), "utf8"));
-    expect(request.request.postures).toEqual([
-      { posture: "plan", probes: SSH_CANARY_PROBES_BY_POSTURE.plan },
-      { posture: "approval-gated", probes: SSH_CANARY_PROBES_BY_POSTURE["approval-gated"] },
-      { posture: "auto-accept-edits", probes: SSH_CANARY_PROBES_BY_POSTURE["auto-accept-edits"] },
-    ]);
+    // Each posture's own probes, then a placed runtime's grant shape in it.
+    expect(request.request.postures).toEqual(
+      (["plan", "approval-gated", "auto-accept-edits"] as const).map((posture) => ({
+        posture,
+        probes: [
+          ...SSH_CANARY_PROBES_BY_POSTURE[posture],
+          ...SSH_RUNTIME_CANARY_PROBES_BY_POSTURE[posture],
+        ],
+      })),
+    );
     connections.close();
   });
 
@@ -268,12 +314,20 @@ describe("SSH target connection service", () => {
       ["exits-after-introduction", {}, "target-unreachable"],
       [
         "executor",
-        { buildVersion: "0.8.9", protocolVersion: 1, installVerified: true },
+        {
+          buildVersion: "0.8.9",
+          protocolVersion: SSH_EXECUTOR_PROTOCOL_VERSION,
+          installVerified: true,
+        },
         "executor-version-mismatch",
       ],
       [
         "executor",
-        { buildVersion: BUILD, protocolVersion: 1, installVerified: false },
+        {
+          buildVersion: BUILD,
+          protocolVersion: SSH_EXECUTOR_PROTOCOL_VERSION,
+          installVerified: false,
+        },
         "executor-version-mismatch",
       ],
     ] as const;
@@ -776,4 +830,218 @@ describe("SSH target connection service", () => {
     ).toMatchObject({ status: "refused", reason: "destination-mismatch" });
     connections.close();
   });
+
+  it("places a runtime only where its posture's runtime canaries passed, refusing before any frame elsewhere", async () => {
+    const requests = () =>
+      readFileSync(join(directory, "request.json.log"), "utf8").trim().split("\n");
+    const facts = passingFacts();
+    // The approval-gated runtime grant shape did not show it keeps ~/.ssh out.
+    const unproven = {
+      ...facts,
+      canaries: facts.canaries.map((entry) =>
+        entry.posture === "approval-gated"
+          ? {
+              ...entry,
+              results: entry.results.map((result) =>
+                result.probe === "runtime-read-ssh-directory"
+                  ? { ...result, outcome: "inconclusive" }
+                  : result,
+              ),
+            }
+          : entry,
+      ),
+    };
+    let proxies = 0;
+    let proxiesClosed = 0;
+    const connections = service({
+      facts: unproven,
+      runtimeEgress: {
+        start: async () => {
+          proxies += 1;
+          return {
+            status: "listening",
+            endpoint: { kind: "unix-socket", path: join(directory, "runtime-proxy.sock") },
+            token: "b".repeat(64),
+            close: async () => {
+              proxiesClosed += 1;
+            },
+          };
+        },
+      },
+    });
+    const status = await registered(connections);
+    const session = connections.session(status.target.id);
+    if (session === undefined) throw new Error("no session");
+
+    const refused = await launchExit(connections.placement(placementOn(session, "approval-gated")));
+    expect(refused).toMatchObject({ category: "unavailable" });
+    expect(proxies).toBe(0);
+    expect(requests()).toEqual(["attest"]);
+    // Commands in that posture are still admitted; only the runtime grant shape is unproven.
+    expect(
+      connections.admit(status.target.id, {
+        posture: "approval-gated",
+        permissionPersistence: "current-session",
+        subject: { kind: "octant-launch" },
+      }),
+    ).toEqual({ status: "admitted" });
+
+    // Plan's runtime canaries passed, and Plan's runtime runs on a proxy of its own too.
+    const scope = Effect.runSync(Scope.make());
+    const placed = await Effect.runPromise(
+      Scope.extend(
+        connections.placement(placementOn(session, "plan")).launch({
+          executable: "/opt/agent/bin/agent",
+          args: ["--acp"],
+        }),
+        scope,
+      ),
+    );
+    const output = Effect.runFork(
+      placed.output.pipe(
+        Stream.map((chunk) => Buffer.from(chunk).toString()),
+        Stream.takeUntil((text) => text.includes("hello")),
+        Stream.runCollect,
+      ),
+    );
+    await Effect.runPromise(placed.write(Buffer.from("hello")));
+    expect([...(await Effect.runPromise(Fiber.join(output)))].join("")).toBe("hello");
+    expect(requests()).toEqual(["attest", "start-process"]);
+    expect(proxies).toBe(1);
+    expect(
+      JSON.parse(readFileSync(join(directory, "request.json.start-process"), "utf8")).request,
+    ).toMatchObject({ posture: "plan", network: "proxied", egressToken: "b".repeat(64) });
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    expect(requests()).toEqual(["attest", "start-process", "stop-process"]);
+    expect(proxiesClosed).toBe(1);
+    connections.close();
+  });
+
+  it("ends a placed runtime with its session, and places nothing on the next session", async () => {
+    const requests = () =>
+      readFileSync(join(directory, "request.json.log"), "utf8").trim().split("\n");
+    const connections = service({ runtimeEgress: listeningEgress() });
+    const status = await registered(connections);
+    const session = connections.session(status.target.id);
+    if (session === undefined) throw new Error("no session");
+    const placement = connections.placement(placementOn(session, "plan"));
+    const scope = Effect.runSync(Scope.make());
+    const placed = await Effect.runPromise(
+      Scope.extend(placement.launch({ executable: "/opt/agent/bin/agent", args: [] }), scope),
+    );
+    await connections.connect(status.target.id);
+    expect(await Effect.runPromise(placed.ended)).toEqual({ kind: "lost" });
+    // The placement named the session that ended; the next one is not borrowed.
+    expect(await launchExit(placement)).toMatchObject({ category: "unavailable" });
+    expect(requests().filter((kind) => kind === "start-process")).toHaveLength(1);
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    connections.close();
+  });
+
+  it("refuses a launch whose arguments or home cannot be placed, without a frame and keeping the session", async () => {
+    const requests = () =>
+      readFileSync(join(directory, "request.json.log"), "utf8").trim().split("\n");
+    const connections = service();
+    const status = await registered(connections);
+    const session = connections.session(status.target.id);
+    if (session === undefined) throw new Error("no session");
+    const failure = async (input: SshTargetPlacementInput, args: ReadonlyArray<string>) => {
+      const exit = await Effect.runPromiseExit(
+        Effect.scoped(
+          connections.placement(input).launch({ executable: "/opt/agent/bin/agent", args }),
+        ),
+      );
+      return Exit.isFailure(exit) && exit.cause._tag === "Fail" ? exit.cause.error : undefined;
+    };
+    for (const args of [["a\u0000b"], ["x".repeat(4_097)], Array.from({ length: 65 }, () => "x")]) {
+      expect(await failure(placementOn(session, "plan"), args)).toMatchObject({
+        category: "invalid-configuration",
+      });
+    }
+    expect(
+      await failure({ ...placementOn(session, "plan"), projectId: "not-a-project" }, []),
+    ).toMatchObject({ category: "invalid-configuration" });
+    const fiveStates = await Effect.runPromiseExit(
+      Effect.scoped(
+        connections.placement(placementOn(session, "plan")).launch({
+          executable: "/opt/agent/bin/agent",
+          args: [],
+          accountState: Array.from({ length: 5 }, (_, index) => ({
+            path: `.agent${String(index)}`,
+            access: "read-only" as const,
+          })),
+        }),
+      ),
+    );
+    expect(
+      Exit.isFailure(fiveStates) && fiveStates.cause._tag === "Fail"
+        ? fiveStates.cause.error
+        : undefined,
+    ).toMatchObject({ category: "invalid-configuration" });
+    // Nothing reached the executor, and the session every other launch shares is still up.
+    expect(requests()).toEqual(["attest"]);
+    expect(connections.session(status.target.id)?.connectionId).toBe(session.connectionId);
+    connections.close();
+  });
+
+  it("places no runtime, in any posture, on a host without a runtime proxy", async () => {
+    const requests = () =>
+      readFileSync(join(directory, "request.json.log"), "utf8").trim().split("\n");
+    const connections = service();
+    const status = await registered(connections);
+    const session = connections.session(status.target.id);
+    if (session === undefined) throw new Error("no session");
+    for (const posture of ["plan", "approval-gated"] as const) {
+      expect(await launchExit(connections.placement(placementOn(session, posture)))).toMatchObject({
+        category: "unavailable",
+      });
+    }
+    expect(requests()).toEqual(["attest"]);
+    connections.close();
+  });
 });
+
+/** A runtime proxy that listens on a socket nothing serves; the fake executor never dials it. */
+function listeningEgress(): ProviderRuntimeEgress {
+  return {
+    start: async () => ({
+      status: "listening",
+      endpoint: { kind: "unix-socket", path: join(directory, "runtime-proxy.sock") },
+      token: "b".repeat(64),
+      close: async () => undefined,
+    }),
+  };
+}
+
+const placementDriver = {
+  remotePlacement: { postures: ["plan", "approval-gated"], appToolTransport: "stdio" },
+} as const;
+
+function placementOn(
+  session: SshTargetPlacementInput["session"],
+  posture: "plan" | "approval-gated",
+): SshTargetPlacementInput {
+  return {
+    session,
+    driver: placementDriver,
+    root: "/srv/app",
+    projectId: "55555555-5555-4555-8555-555555555555",
+    threadId: "66666666-6666-4666-8666-666666666666",
+    providerInstanceId: decodeProviderInstanceId("77777777-7777-4777-8777-777777777777"),
+    posture,
+    permissionPersistence: "current-session",
+    currentPosture: () => posture,
+  };
+}
+
+/** The failure a launch through the placement ends with, or undefined when it started. */
+async function launchExit(
+  placement: ReturnType<SshTargetConnectionService["placement"]>,
+): Promise<ProviderFailure | undefined> {
+  const exit = await Effect.runPromiseExit(
+    Effect.scoped(placement.launch({ executable: "/opt/agent/bin/agent", args: [] })),
+  );
+  if (Exit.isSuccess(exit)) return undefined;
+  const failure = exit.cause._tag === "Fail" ? exit.cause.error : undefined;
+  return failure;
+}

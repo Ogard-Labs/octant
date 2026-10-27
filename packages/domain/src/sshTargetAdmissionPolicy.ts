@@ -93,6 +93,41 @@ export const SSH_CANARY_PROBES_BY_POSTURE: Readonly<
   "auto-accept-edits": WRITING_POSTURE_PROBES,
 };
 
+/**
+ * The probes a placed provider runtime's grant shape must see refused in each
+ * confined posture, beside the posture's own: its home and account state are
+ * grants a command does not have, so the canaries prove them before a runtime
+ * is placed. A posture whose runtime probes did not all report a refusal
+ * refuses placed runtimes while its commands may still be admitted.
+ */
+export const SSH_RUNTIME_CANARY_PROBES_BY_POSTURE: Readonly<
+  Record<SshConfinedPosture, ReadonlyArray<SshConfinementCanaryProbe>>
+> = {
+  plan: [
+    "runtime-write-inside-root",
+    "runtime-write-read-only-account-state",
+    "runtime-exec-after-start",
+    "runtime-fork-after-start",
+    "runtime-read-ssh-directory",
+    "runtime-read-other-runtime-home",
+    "runtime-connect-bypassing-proxy",
+  ],
+  "approval-gated": [
+    "runtime-write-outside-root-and-home",
+    "runtime-write-read-only-account-state",
+    "runtime-read-ssh-directory",
+    "runtime-read-other-runtime-home",
+    "runtime-connect-bypassing-proxy",
+  ],
+  "auto-accept-edits": [
+    "runtime-write-outside-root-and-home",
+    "runtime-write-read-only-account-state",
+    "runtime-read-ssh-directory",
+    "runtime-read-other-runtime-home",
+    "runtime-connect-bypassing-proxy",
+  ],
+};
+
 /** CPUs the Plan process filter is built for, as the local launch requires. */
 const PLAN_FILTER_ARCHITECTURES: ReadonlySet<string> = new Set(["x64", "arm64"]);
 
@@ -180,6 +215,12 @@ export function decideSshAdmission(request: SshAdmissionRequest): SshAdmissionDe
   const platform = supportedPlatform(facts.platform.operatingSystem);
   if (platform === undefined) return refused("unsupported-platform");
   if (facts.platform.uid === 0) return refused("remote-root-user");
+  // A placed runtime always runs proxied or offline, and on macOS the proxied
+  // forwarder would be a loopback port the executor listens on, which no
+  // design has settled; so runtimes are placed on Linux targets only.
+  if (request.subject.kind === "provider-runtime" && platform === "macos") {
+    return refused("runtime-not-attestable");
+  }
 
   // Every posture launches through the same backend and executor, so an
   // escape in one is not evidence Octant can discount in another.
@@ -205,7 +246,11 @@ export function decideSshAdmission(request: SshAdmissionRequest): SshAdmissionDe
   const entries = facts.canaries.filter((candidate) => candidate.posture === posture);
   if (entries.length === 0) return { status: "refused", reason: "not-attested", posture };
   const results = entries.flatMap((candidate) => candidate.results);
-  for (const probe of SSH_CANARY_PROBES_BY_POSTURE[posture]) {
+  const required =
+    request.subject.kind === "provider-runtime"
+      ? [...SSH_CANARY_PROBES_BY_POSTURE[posture], ...SSH_RUNTIME_CANARY_PROBES_BY_POSTURE[posture]]
+      : SSH_CANARY_PROBES_BY_POSTURE[posture];
+  for (const probe of required) {
     const refusedEveryTime =
       results.some((result) => result.probe === probe) &&
       results.every((result) => result.probe !== probe || result.outcome === "refused");

@@ -18,6 +18,7 @@ import {
 } from "@octant/contracts";
 import {
   canonicalToolEgressHost,
+  decideProviderRuntimeEgress,
   decideToolEgress,
   type ToolEgressDecision,
   type ToolEgressLaunchFacts,
@@ -131,7 +132,25 @@ export interface ToolEgressProxyOptions {
    * is decided and answered; nothing it does or throws changes a decision.
    */
   readonly onProposable?: (refusal: ToolEgressProposableRefusal) => void;
+  /**
+   * What decides each request. `tool-rules` (the default) is a harness
+   * command's: the thread's and Project's rules. `public-destinations` is a
+   * provider runtime's on an SSH target: any public name, no rule, nothing
+   * proposed; resolution and the private-address check still refuse every
+   * loopback, private, and link-local answer.
+   */
+  readonly decision?: "tool-rules" | "public-destinations";
 }
+
+/** A decision as the proxy acts on it: an allowance names its rule when a rule made it. */
+type ProxyDecision =
+  | Exclude<ToolEgressDecision, { readonly kind: "allow" }>
+  | {
+      readonly kind: "allow";
+      readonly host: string;
+      readonly port: number;
+      readonly ruleId: ToolEgressRuleId | undefined;
+    };
 
 export interface ToolEgressProposableRefusal {
   readonly host: string;
@@ -490,7 +509,7 @@ export class ToolEgressProxy {
     tunnel: Tunnel,
     head: ProxyRequestHead,
     leftover: Buffer,
-    ruleId: ToolEgressRuleId,
+    ruleId: ToolEgressRuleId | undefined,
   ): void {
     const { client: socket, upstream } = tunnel;
     this.#tunnels.add(tunnel);
@@ -520,7 +539,11 @@ export class ToolEgressProxy {
     socket: Socket,
     destination: { readonly host: string; readonly port: number },
   ): Promise<
-    | { readonly upstream: Duplex; readonly tally: Tally; readonly ruleId: ToolEgressRuleId }
+    | {
+        readonly upstream: Duplex;
+        readonly tally: Tally;
+        readonly ruleId: ToolEgressRuleId | undefined;
+      }
     | undefined
   > {
     const addresses = await this.#resolve(destination.host);
@@ -710,8 +733,12 @@ export class ToolEgressProxy {
     return false;
   }
 
-  /** Wakes an idle tunnel at its rule's expiry; the per-chunk decision stays the authority. */
-  #scheduleExpiry(tunnel: Tunnel, ruleId: ToolEgressRuleId): void {
+  /**
+   * Wakes an idle tunnel at its rule's expiry; the per-chunk decision stays
+   * the authority. An allowance no rule made has no expiry to wake for.
+   */
+  #scheduleExpiry(tunnel: Tunnel, ruleId: ToolEgressRuleId | undefined): void {
+    if (ruleId === undefined) return;
     const rule = this.#rules().find((candidate) => String(candidate.id) === String(ruleId));
     const remaining = rule === undefined ? 0 : Date.parse(rule.expiresAt) - Date.parse(this.#now());
     const delay = Number.isFinite(remaining) ? Math.min(Math.max(remaining, 0), MAX_TIMER_MS) : 0;
@@ -766,7 +793,11 @@ export class ToolEgressProxy {
     }
   }
 
-  #decide(host: string, port: number): ToolEgressDecision {
+  #decide(host: string, port: number): ProxyDecision {
+    if (this.#options.decision === "public-destinations") {
+      const decision = decideProviderRuntimeEgress({ host, port });
+      return decision.kind === "allow" ? { ...decision, ruleId: undefined } : decision;
+    }
     return decideToolEgress({
       launch: this.#facts(),
       destination: { host, port },

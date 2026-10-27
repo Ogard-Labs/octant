@@ -1,13 +1,18 @@
 import { homedir, tmpdir, userInfo } from "node:os";
 import { inspectHeadlessArtifact, resolveReportedHostVersion } from "@octant/host-runtime";
-import { SSH_EXECUTOR_PROTOCOL_VERSION } from "@octant/contracts/ssh-executor-protocol";
+import {
+  SSH_EXECUTOR_MAX_PLACED_PROCESSES,
+  SSH_EXECUTOR_PROTOCOL_VERSION,
+} from "@octant/contracts/ssh-executor-protocol";
 import type { SshExecutorIdentityFacts } from "@octant/contracts/ssh-target";
 import { attestExecutorConfinement, sshServerAddressFrom } from "./executorAttestation";
 import { ExecutorHarnessFiles } from "./executorHarnessFiles";
-import { ExecutorEgress, runExecutorCommand } from "./executorLaunches";
+import { ExecutorEgress, MAX_DIALED_CONNECTIONS, runExecutorCommand } from "./executorLaunches";
+import { ExecutorProcesses } from "./executorProcesses";
 import { answerExecutorRead, resolveBoundRoot } from "./executorReads";
 import { openExecutorRuntimeDirectory } from "./executorRuntimeDirectory";
 import { serveSshExecutor } from "./executorSession";
+import { ExecutorStreams } from "./executorStreams";
 import { ExecutorTerminals } from "./executorTerminals";
 import { createExecutorWorktree, removeExecutorWorktree } from "./executorWorktrees";
 
@@ -19,8 +24,9 @@ import { createExecutorWorktree, removeExecutorWorktree } from "./executorWorktr
  * It opens no network listener, acts only on requests, and exits when its
  * input closes; every process it launched is confined with die-with-parent
  * (Linux) or its process group (macOS), so nothing keeps running unseen. The
- * one socket it listens on is a proxied command's forwarder: a Unix socket in
- * its owner-only runtime directory, open only while that command runs.
+ * only sockets it listens on are proxied launches' forwarders: a Unix socket
+ * per launch in its owner-only runtime directory, open only while that
+ * command or placed runtime runs.
  */
 
 /**
@@ -84,7 +90,30 @@ await serveSshExecutor({
   write: (bytes) => process.stdout.write(bytes),
   identity,
   handlers: (send) => {
-    const egress = new ExecutorEgress(send);
+    // One registry of the streams the host opens, so a dialed connection and
+    // a placed process can never share an id.
+    const hostOpened = new ExecutorStreams({
+      send,
+      opens: "odd",
+      maxStreams: MAX_DIALED_CONNECTIONS + SSH_EXECUTOR_MAX_PLACED_PROCESSES,
+    });
+    const egress = new ExecutorEgress(send, hostOpened);
+    const processes = new ExecutorProcesses(
+      send,
+      {
+        platform: process.platform,
+        uid,
+        homeDirectory: homedir(),
+        stateHome: process.env.XDG_STATE_HOME,
+        sessionDirectory,
+        sessionParent,
+        path: process.env.PATH,
+        language: process.env.LANG,
+        resolveRoot: (root) => resolveBoundRoot(reads, root),
+      },
+      hostOpened,
+      egress,
+    );
     const files = new ExecutorHarnessFiles(reads);
     const terminals = new ExecutorTerminals(send, {
       platform: process.platform,
@@ -94,7 +123,7 @@ await serveSshExecutor({
       language: process.env.LANG,
     });
     return {
-      answer: async (request, signal) => {
+      answer: async (request, signal, id) => {
         switch (request.kind) {
           case "attest":
             return attestExecutorConfinement(
@@ -117,7 +146,7 @@ await serveSshExecutor({
           case "run-command": {
             const root = await resolveBoundRoot(reads, request.root);
             if (root.status === "refused") return { kind: "refused", reason: root.reason };
-            return runExecutorCommand(reads, root.canonical, request, egress, signal);
+            return runExecutorCommand(reads, root.canonical, request, egress, signal, id);
           }
           case "open-terminal": {
             const root = await resolveBoundRoot(reads, request.root);
@@ -128,12 +157,17 @@ await serveSshExecutor({
             return createExecutorWorktree(reads, request);
           case "remove-worktree":
             return removeExecutorWorktree(reads, request);
+          case "start-process":
+            return processes.start(request, id);
           default:
             return answerExecutorRead(reads, request);
         }
       },
+      replied: (id, reply) => processes.replied(id, reply),
       receive: (frame) => {
         switch (frame.type) {
+          case "stop-process":
+            return processes.receive(frame);
           case "terminal-input":
           case "terminal-resize":
           case "terminal-close":
@@ -144,6 +178,7 @@ await serveSshExecutor({
         }
       },
       end: () => {
+        processes.abandon();
         egress.abandon();
         terminals.abandon();
       },

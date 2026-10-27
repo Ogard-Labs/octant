@@ -1109,16 +1109,63 @@ describe("Linux Bubblewrap confinement", () => {
     expect(readFileSync(forwarder, "utf8")).toBe(LINUX_EGRESS_FORWARDER_SOURCE);
   });
 
-  it("refuses a proxied launch without its socket, or one that may not start a process", () => {
+  it("starts a process-denied proxied launch in a nested capsule that loads the filter onto the command alone", () => {
     const { root, boundRoot, temporaryDirectory, bwrapPath } = fixture();
-    const socket = join(root, "proxy.sock");
+    const sockets = join(root, "egress-plan");
+    mkdirSync(sockets, { mode: 0o700 });
+    const socket = join(sockets, "proxy.sock");
+    const runtimeDirectory = join(root, "runtime");
+    mkdirSync(runtimeDirectory);
+    const runtime = join(runtimeDirectory, "node");
+    writeFileSync(runtime, "", { mode: 0o755 });
+
+    const launch = buildBubblewrapLaunch(
+      {
+        executable: "/bin/true",
+        args: ["--acp"],
+        boundRoot,
+        temporaryDirectory,
+        networkEgress: { kind: "proxied", endpoint: { kind: "unix-socket", path: socket } },
+        allowProcessExec: false,
+        allowProcessFork: false,
+        writeBoundRoot: false,
+      },
+      { bwrapPath, forwarderRuntime: runtime },
+    );
+
+    // The forwarder runs unfiltered: no outer `--seccomp`, and no shell to hand it one.
+    expect(launch.command).toBe(bwrapPath);
+    const command = launch.args.slice(launch.args.indexOf("--") + 1);
+    expect(command.slice(0, 6)).toEqual([
+      runtime,
+      "--no-warnings",
+      join(sockets, "forwarder.cjs"),
+      socket,
+      String(LINUX_EGRESS_FORWARDER_PORT),
+      "--child-seccomp",
+    ]);
+    const filter = command[6] ?? "";
+    expect(readFileSync(filter).byteLength).toBeGreaterThan(0);
+    // The nested capsule loads that filter onto the command, in a pid namespace
+    // of its own with its own `/proc`, keeping every mount of the outer one.
+    const nested = command.slice(7);
+    expect(nested[0]).toBe(bwrapPath);
+    expect(nested).toEqual(
+      expect.arrayContaining(["--unshare-pid", "--seccomp", "3", "--cap-drop", "ALL"]),
+    );
+    expect(nested).not.toContain("--share-net");
+    expect(nested).not.toContain("--unshare-net");
+    expect(nested.slice(nested.indexOf("--") + 1)).toEqual(["/bin/true", "--acp"]);
+    // The masks still hide host programs; the forwarder's runtime and Bubblewrap are bound alone.
+    expect(boundPairs(launch.args, "--ro-bind")).toContainEqual([runtime, runtime]);
+    expect(boundPairs(launch.args, "--ro-bind")).toContainEqual([bwrapPath, bwrapPath]);
+  });
+
+  it("refuses a proxied launch without its socket", () => {
+    const { boundRoot, temporaryDirectory, bwrapPath } = fixture();
     for (const input of [
       { networkEgress: { kind: "proxied", endpoint: { kind: "loopback", port: 3128 } } },
       { networkEgress: { kind: "proxied", endpoint: { kind: "unix-socket", path: "proxy.sock" } } },
-      {
-        networkEgress: { kind: "proxied", endpoint: { kind: "unix-socket", path: socket } },
-        allowProcessFork: false,
-      },
     ] as const) {
       expect(() =>
         buildBubblewrapLaunch(

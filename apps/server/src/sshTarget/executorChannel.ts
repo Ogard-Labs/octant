@@ -1,10 +1,13 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { Schema } from "effect";
 import {
+  SSH_EXECUTOR_MAX_PLACED_PROCESSES,
   SSH_EXECUTOR_MAX_TERMINAL_CHUNK_BYTES,
   SSH_EXECUTOR_TERMINAL_WINDOW_BYTES,
   SshExecutorFrame,
   type SshExecutorOpenTerminalRequest,
+  type SshExecutorProcessEndedFrame,
+  type SshExecutorStartProcessRequest,
   type SshEgressAddress,
   type SshEgressHostName,
   type SshExecutorHello,
@@ -28,10 +31,16 @@ import { ExecutorStreams, type ExecutorStream } from "./executorStreams";
  * answer in time ends the session too, so a late answer can never be read as
  * the reply to the request after it.
  *
- * A proxied command's request carries its egress while it runs: each stream
- * the executor opens for it goes to that egress, and only then may this host
- * ask the target to resolve a name or open a connection. A stream opened
- * while no proxied command runs is a violation.
+ * A proxied launch carries its egress while it runs, a command until its
+ * reply and a placed process until its end: each stream the executor opens
+ * names its launch and goes to that launch's egress, and only while some
+ * launch runs may this host ask the target to resolve a name or open a
+ * connection. A stream that names no running launch is a violation.
+ *
+ * A placed process lives beside the requests on a stream this host opened.
+ * Its output goes to that stream, and its end is the `process-ended` frame;
+ * a frame on its stream after that, or an end for a process never started,
+ * is a violation. Every placed process ends with the session.
  *
  * An open terminal lives beside the requests. Its output goes to the listener
  * that opened it, within the window this host grants back as the listener
@@ -70,6 +79,46 @@ export interface ExecutorRequestOptions {
   readonly egress?: ExecutorLaunchEgress | undefined;
 }
 
+/** How a request that places a process keeps its launch's egress past the reply. */
+interface ExecutorRequestPlacement {
+  /** Whether the launch's egress outlives this reply, as a started process's does. */
+  readonly keepEgress?: (reply: SshExecutorReply) => boolean;
+  /** Told the request's id as it is written: the id the launch's connections name. */
+  readonly sent?: (id: number) => void;
+}
+
+/** How a placed process ended: on the target, or with the session that carried it. */
+export type ExecutorProcessEnd =
+  | {
+      readonly kind: "exited";
+      readonly exitCode: number | undefined;
+      readonly signal: string | undefined;
+      /** The last of its standard error. */
+      readonly stderr: Buffer;
+    }
+  | { readonly kind: "lost" };
+
+/** One placed process of this session, as this host drives it. */
+export interface ExecutorPlacedProcess {
+  /** Its standard input and output. Output ends when the process does. */
+  readonly stream: ExecutorStream;
+  /** Resolves once, when the process ended or the session was lost. */
+  readonly ended: Promise<ExecutorProcessEnd>;
+  /** Asks the executor to stop it: a terminate, then a kill five seconds later. */
+  readonly stop: () => void;
+}
+
+export type ExecutorProcessStart =
+  | { readonly status: "started"; readonly process: ExecutorPlacedProcess }
+  | { readonly status: "replied"; readonly reply: SshExecutorReply }
+  | { readonly status: "lost" };
+
+interface RunningProcess {
+  readonly launch: number;
+  readonly stream: ExecutorStream;
+  readonly settle: (end: ExecutorProcessEnd) => void;
+}
+
 /** What becomes of one open terminal's output and its end. */
 export interface ExecutorTerminalListener {
   readonly output: (bytes: Buffer) => void;
@@ -96,8 +145,12 @@ export type ExecutorTerminalOpening =
 
 interface InFlight {
   readonly id: number;
-  readonly egress: ExecutorLaunchEgress | undefined;
   readonly settle: (outcome: ExecutorRequestOutcome) => void;
+}
+
+interface LaunchEgress {
+  readonly egress: ExecutorLaunchEgress;
+  readonly forwarded: Set<ExecutorStream>;
 }
 
 export class ExecutorChannel {
@@ -106,11 +159,16 @@ export class ExecutorChannel {
   readonly #waiting: Array<() => void> = [];
   readonly #endListeners = new Set<() => void>();
   readonly #introduction: Promise<ExecutorIntroduction>;
-  /** Connections the executor forwarded from a running command (odd ids). */
+  /** Connections the executor forwarded from a running launch (odd ids). */
   readonly #forwarded: ExecutorStreams;
-  /** Connections this host asked the target to open (even ids). */
-  readonly #dialed: ExecutorStreams;
+  /** Streams this host opened (even ids): connections it asked the target for, and placed processes. */
+  readonly #hostOpened: ExecutorStreams;
   readonly #dialing = new Map<number, ExecutorStream>();
+  readonly #dialed = new Set<ExecutorStream>();
+  /** The egress of every proxied launch running now, by its request id. */
+  readonly #launches = new Map<number, LaunchEgress>();
+  readonly #processes = new Map<number, RunningProcess>();
+  readonly #endedProcesses = new Set<number>();
   readonly #questions = new Map<number, (addresses: ReadonlyArray<string> | undefined) => void>();
   /** Open terminals, and output each sent that this host has not granted back yet. */
   readonly #terminals = new Map<
@@ -131,7 +189,11 @@ export class ExecutorChannel {
     this.#child = child;
     const send = (frame: SshExecutorHostFrame) => this.#write(frame);
     this.#forwarded = new ExecutorStreams({ send, opens: "even", maxStreams: MAX_STREAMS });
-    this.#dialed = new ExecutorStreams({ send, opens: "even", maxStreams: MAX_STREAMS });
+    this.#hostOpened = new ExecutorStreams({
+      send,
+      opens: "even",
+      maxStreams: MAX_STREAMS + SSH_EXECUTOR_MAX_PLACED_PROCESSES,
+    });
     this.#introduction = new Promise((resolve) => {
       let settled = false;
       const timer = setTimeout(() => {
@@ -179,10 +241,24 @@ export class ExecutorChannel {
   }
 
   /** Writes one request after the last one was answered, and waits for its reply. */
-  async request(
+  request(
     request: SshExecutorRequest,
     timeoutMs: number,
     options: ExecutorRequestOptions = {},
+  ): Promise<ExecutorRequestOutcome> {
+    return this.#queued(() => request, timeoutMs, options);
+  }
+
+  /**
+   * Waits for the request slot, then builds the request and writes it with
+   * nothing in between, so a stream id it takes is the newest the executor
+   * has seen when the frame arrives. A build that yields nothing is answered
+   * `busy` without a frame.
+   */
+  async #queued(
+    build: () => SshExecutorRequest | undefined,
+    timeoutMs: number,
+    options: ExecutorRequestOptions & ExecutorRequestPlacement,
   ): Promise<ExecutorRequestOutcome> {
     if (this.#ended !== undefined) return { status: "lost", cause: this.#ended };
     if (this.#busy) {
@@ -194,6 +270,8 @@ export class ExecutorChannel {
     }
     this.#busy = true;
     try {
+      const request = build();
+      if (request === undefined) return { status: "replied", reply: { kind: "busy" } };
       return await this.#send(request, timeoutMs, options);
     } finally {
       this.#busy = false;
@@ -202,11 +280,11 @@ export class ExecutorChannel {
   }
 
   /**
-   * The target's answers for a name, asked only while a proxied command runs;
-   * undefined when it did not resolve or no such command runs.
+   * The target's answers for a name, asked only while a proxied launch runs;
+   * undefined when it did not resolve or no such launch runs.
    */
   resolve(host: SshEgressHostName): Promise<ReadonlyArray<string> | undefined> {
-    if (this.#ended !== undefined || this.#inFlight?.egress === undefined) {
+    if (this.#ended !== undefined || this.#launches.size === 0) {
       return Promise.resolve(undefined);
     }
     const question = this.#nextQuestion;
@@ -226,14 +304,19 @@ export class ExecutorChannel {
   /**
    * A connection from the target to an address this host checked, as a
    * stream that emits `connect` once the target reached it and closes if it
-   * could not. Undefined when no proxied command runs or past the limit.
+   * could not. Undefined when no proxied launch runs or past the limit.
    */
   dial(address: SshEgressAddress, port: number): ExecutorStream | undefined {
-    if (this.#ended !== undefined || this.#inFlight?.egress === undefined) return undefined;
-    const stream = this.#dialed.open();
+    if (this.#ended !== undefined || this.#launches.size === 0) return undefined;
+    if (this.#dialed.size >= MAX_STREAMS) return undefined;
+    const stream = this.#hostOpened.open();
     if (stream === undefined) return undefined;
     this.#dialing.set(stream.id, stream);
-    stream.once("close", () => this.#dialing.delete(stream.id));
+    this.#dialed.add(stream);
+    stream.once("close", () => {
+      this.#dialing.delete(stream.id);
+      this.#dialed.delete(stream);
+    });
     this.#write({ type: "dial", stream: stream.id, address, port });
     return stream;
   }
@@ -288,6 +371,75 @@ export class ExecutorChannel {
     };
   }
 
+  /**
+   * Places a process on the target as the session's one request, on a stream
+   * this host opens for it. Its output may follow the reply at once, so the
+   * stream exists before the request is written. A reply other than
+   * `process-started` is handed back and the stream is dropped unused. A
+   * proxied process's egress stays its own until the process ends.
+   */
+  async startProcess(
+    request: Omit<SshExecutorStartProcessRequest, "stream">,
+    egress: ExecutorLaunchEgress | undefined,
+    timeoutMs: number,
+  ): Promise<ExecutorProcessStart> {
+    if (this.#ended !== undefined) return { status: "lost" };
+    let settle: (end: ExecutorProcessEnd) => void = () => undefined;
+    const ended = new Promise<ExecutorProcessEnd>((resolve) => {
+      settle = resolve;
+    });
+    let opened: ExecutorStream | undefined;
+    const outcome = await this.#queued(
+      () => {
+        // Taken as the request is written, after any connection a proxy
+        // asked for while it waited, so its id is the newest the executor
+        // has seen. Closed by its `process-ended`, never on its own, so a
+        // close cannot reach the executor while the process is still exiting.
+        opened = this.#hostOpened.open(false);
+        return opened === undefined ? undefined : { ...request, stream: opened.id };
+      },
+      timeoutMs,
+      {
+        egress,
+        keepEgress: (reply) => reply.kind === "process-started",
+        sent: (id) => {
+          if (opened !== undefined) {
+            this.#processes.set(opened.id, { launch: id, stream: opened, settle });
+          }
+        },
+      },
+    );
+    const stream = opened;
+    if (stream === undefined) {
+      return outcome.status === "replied"
+        ? { status: "replied", reply: outcome.reply }
+        : { status: "lost" };
+    }
+    if (
+      outcome.status !== "replied" ||
+      outcome.reply.kind !== "process-started" ||
+      !this.#processes.has(stream.id)
+    ) {
+      this.#processes.delete(stream.id);
+      stream.abandon();
+      return outcome.status === "replied"
+        ? { status: "replied", reply: outcome.reply }
+        : { status: "lost" };
+    }
+    return {
+      status: "started",
+      process: {
+        stream,
+        ended,
+        stop: () => {
+          if (this.#processes.has(stream.id)) {
+            this.#write({ type: "stop-process", stream: stream.id });
+          }
+        },
+      },
+    };
+  }
+
   /** Ends the session; the executor exits when its input closes. */
   close(): void {
     this.#end("ended");
@@ -296,7 +448,7 @@ export class ExecutorChannel {
   #send(
     request: SshExecutorRequest,
     timeoutMs: number,
-    options: ExecutorRequestOptions,
+    options: ExecutorRequestOptions & ExecutorRequestPlacement,
   ): Promise<ExecutorRequestOutcome> {
     return new Promise((resolve) => {
       const id = this.#nextId;
@@ -308,16 +460,21 @@ export class ExecutorChannel {
       }
       const timer = setTimeout(() => this.#end("timed-out"), timeoutMs);
       const cancel = () => this.#write({ type: "cancel", id });
+      if (options.egress !== undefined) {
+        this.#launches.set(id, { egress: options.egress, forwarded: new Set() });
+      }
+      options.sent?.(id);
       this.#inFlight = {
         id,
-        egress: options.egress,
         settle: (outcome) => {
           clearTimeout(timer);
           options.signal?.removeEventListener("abort", cancel);
           this.#inFlight = undefined;
           // A command's egress ends with it: its streams close and no
-          // question about it is answered any more.
-          if (options.egress !== undefined) this.#endLaunchEgress();
+          // question about it is answered any more. A placed process keeps
+          // its egress until it ends.
+          const keep = outcome.status === "replied" && options.keepEgress?.(outcome.reply) === true;
+          if (options.egress !== undefined && !keep) this.#endLaunchEgress(id);
           resolve(outcome);
         },
       };
@@ -378,17 +535,24 @@ export class ExecutorChannel {
         inFlight.settle({ status: "replied", reply: frame.reply });
         return "accepted";
       case "stream-open": {
-        if (inFlight?.egress === undefined) return "violated";
+        const launch = this.#launches.get(frame.launch);
+        if (launch === undefined) return "violated";
         const stream = this.#forwarded.adopt(frame.stream);
         if (stream === "violated") return "violated";
-        if (stream !== "refused") inFlight.egress.onStream(stream);
+        if (stream !== "refused") {
+          launch.forwarded.add(stream);
+          stream.once("close", () => launch.forwarded.delete(stream));
+          launch.egress.onStream(stream);
+        }
         return "accepted";
       }
+      case "process-ended":
+        return this.#processEnded(frame);
       case "dialed": {
         const stream = this.#dialing.get(frame.stream);
         // A dial this host already gave up on can still be answered.
         if (stream === undefined)
-          return this.#dialed.opened(frame.stream) ? "accepted" : "violated";
+          return this.#hostOpened.opened(frame.stream) ? "accepted" : "violated";
         this.#dialing.delete(frame.stream);
         if (frame.connected) stream.emit("connect");
         else stream.destroy();
@@ -428,13 +592,46 @@ export class ExecutorChannel {
         return "accepted";
       }
       default:
-        return (frame.stream % 2 === 1 ? this.#forwarded : this.#dialed).receive(frame);
+        // A placed process's stream is over once its end arrived.
+        if (this.#endedProcesses.has(frame.stream)) return "violated";
+        return (frame.stream % 2 === 1 ? this.#forwarded : this.#hostOpened).receive(frame);
     }
   }
 
-  #endLaunchEgress(): void {
-    this.#forwarded.closeAll();
-    this.#dialed.closeAll();
+  #processEnded(frame: SshExecutorProcessEndedFrame): "accepted" | "violated" {
+    const running = this.#processes.get(frame.stream);
+    if (running === undefined) return "violated";
+    this.#processes.delete(frame.stream);
+    this.#endedProcesses.add(frame.stream);
+    this.#endLaunchEgress(running.launch);
+    // Its output is complete: what the stream holds is still read, and it
+    // closes once read, without a word to the executor, which forgot it.
+    const { stream } = running;
+    stream.receiveEnd();
+    if (stream.readableEnded) stream.abandon();
+    else stream.once("end", () => stream.abandon());
+    running.settle({
+      kind: "exited",
+      exitCode: frame.exitCode,
+      signal: frame.signal,
+      stderr: Buffer.from(frame.stderr, "base64"),
+    });
+    return "accepted";
+  }
+
+  /**
+   * Ends one launch's egress: the connections it forwarded close. Once no
+   * proxied launch runs, the connections this host asked for close and no
+   * question is answered any more.
+   */
+  #endLaunchEgress(launch: number): void {
+    const entry = this.#launches.get(launch);
+    this.#launches.delete(launch);
+    if (entry !== undefined) {
+      for (const stream of entry.forwarded) stream.destroy();
+    }
+    if (this.#launches.size > 0) return;
+    for (const stream of this.#dialed) stream.destroy();
     this.#dialing.clear();
     for (const answer of this.#questions.values()) answer(undefined);
   }
@@ -473,8 +670,13 @@ export class ExecutorChannel {
     const cause = this.#ended ?? "ended";
     // The session is gone, so its streams go without a word to it.
     this.#forwarded.abandonAll();
-    this.#dialed.abandonAll();
+    this.#hostOpened.abandonAll();
     this.#dialing.clear();
+    this.#launches.clear();
+    // Every placed process died with the session.
+    const processes = [...this.#processes.values()];
+    this.#processes.clear();
+    for (const running of processes) running.settle({ kind: "lost" });
     for (const answer of this.#questions.values()) answer(undefined);
     // Every shell on the target died with the session.
     const terminals = [...this.#terminals.values()];

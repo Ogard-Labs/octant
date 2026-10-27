@@ -33,11 +33,16 @@ no product route reaches a target's tools; that step, reconnecting on its own,
 and restart recovery of remote turns are not built. Slice 6 is built in part:
 the provider-sdk process-placement seam, its conformance harness, and this
 host's admission of a placed runtime from its driver's declaration
-([Provider runtimes on a target](#provider-runtimes-on-a-target)). No
-driver declares remote placement yet, the executor cannot yet start a
-runtime process, and so no runtime has been launched on a target; its
-executor-backed placement was [accepted](#runtime-placement) on 2026-10-27
-and is next. Slice 7 is
+([Provider runtimes on a target](#provider-runtimes-on-a-target)), and
+since 6b the executor's runtime launches
+([Runtime placement](#runtime-placement), accepted 2026-10-27): a confined
+runtime process beside the request slot on a stream of its own, its home,
+binary, and account-state checks, the runtime canaries, and its egress
+through a proxy of its own on this host, journaled
+(`apps/server/src/sshTarget/executorProcesses.ts`,
+`executorRuntimeGrants.ts`, `providerRuntimeEgress.ts`). No driver declares
+remote placement yet, so no provider's runtime has been launched on a
+target; ACP's declaration (6c) is next. Slice 7 is
 built: a person's terminals and managed worktrees on a remote-bound Project,
 under the same admission
 ([Terminals and managed worktrees](#terminals-and-managed-worktrees)),
@@ -286,6 +291,9 @@ leaves open:
   terminal and worktree requests and terminal frames, joined protocol 1
   before any build with protocol 1 shipped, so the version did not change; the
   exact build match still refuses any executor of another build.
+- **Protocol 2 placed processes.** `start-process`, `stop-process`,
+  `process-started`, `process-ended`, and the launch a forwarded connection
+  names joined as protocol 2 ([Runtime placement](#runtime-placement), R1).
 - **Terminals are frames with their own windows.** Opening a terminal is a
   request that answers at once (`terminal-opened`); the shell then lives
   beside the requests, so a command or a read never waits for it. This host
@@ -302,18 +310,20 @@ leaves open:
   reply a minute past its timeout before it ends the session. A `cancel`
   names the request in flight and stops it, and the command then answers
   `cancelled`; a `cancel` for any other id is ignored.
-- **Streams are channels with their own windows.** A proxied command's
+- **Streams are channels with their own windows.** A proxied launch's
   connections are streams beside the requests, not requests: the executor
-  opens odd ids, one per connection the command makes to its forwarder, and
-  this host opens even ids, one per connection its proxy asks the target to
-  make (`dial`). Either side sends at most 256 KiB on a stream the other has
+  opens odd ids, one per connection the launch makes to its forwarder, each
+  naming that launch's request id, and this host opens even ids, one per
+  connection its proxy asks the target to make (`dial`) and one per process
+  it places. Either side sends at most 256 KiB on a stream the other has
   not taken off it, in chunks of at most 64 KiB, and the reader grants room
   back as it reads, so a stalled connection holds a bounded amount and
   starves neither the others nor the requests. Data past the window, a
-  stream id that was never opened or is reused, or a stream opened while no
-  proxied command runs ends the session; frames for a stream either side
+  stream id that was never opened or is reused, or a stream that names no
+  running launch ends the session; frames for a stream either side
   already closed are dropped. `resolve` and `dial` are answered only while a
-  proxied command runs, and every stream closes when it ends.
+  proxied launch runs; a launch's forwarded streams close when it ends, and
+  the dialed ones when no proxied launch is left.
 - **Why a session failed.** The client's own message is the only evidence of a
   refused key, so "host key verification failed" or "remote host identification
   has changed" reads as `host-key-changed`. The remote shell's 126 or 127 reads
@@ -360,9 +370,10 @@ remote user is uid 0 is refused `remote-root-user`, because a root executor's
 confined children can undo their own confinement. It creates one owner-only
 runtime directory per session for scratch, temporary files, and the egress
 forwarder, removes it when the session ends, and sweeps stale ones at start. It
-opens no network listener: the one socket it listens on is a proxied
-command's forwarder, a Unix socket in a fresh owner-only directory of its
-runtime directory, open only while that command runs. A socket path longer
+opens no network listener: the only sockets it listens on are proxied
+launches' forwarders, one per command or placed runtime, each a Unix socket in
+a fresh owner-only directory of its runtime directory, open only while that
+launch runs. A socket path longer
 than the kernel takes (107 bytes) is refused and the command reports
 unavailable, because Node binds a longer one cut short without a word. The
 runtime directories sit under one
@@ -810,23 +821,25 @@ These rules settle what the seam needs, each in the fail-closed direction:
   must stop every process it placed when its scope closes. A declaration that
   names no posture, or one twice, fails.
 
-The executor does not yet start a runtime process, and no in-tree driver
-declares placement. Starting one is its own change: a protocol request for a
+Since 6b the executor starts a runtime process: a protocol request for a
 long-lived confined process whose standard streams are a session stream, the
 grants a runtime needs beyond a command's (its own home on the target, its
 binary's folder, and the target's own account state), and the network a
-placed runtime gets, which locally is open under the provider-endpoint policy
-and on a target is not yet decided. A wrapped runtime's driver (ACP, OpenCode,
-or Pi) then declares placement and passes this conformance against the
-loopback target before the real-provider smoke. The three choices are
-settled under [Runtime placement](#runtime-placement).
+placed runtime gets, all settled under [Runtime placement](#runtime-placement).
+A driver reaches it through the placement this host hands it
+(`placement` in `apps/server/src/sshTarget/sshTargetConnectionService.ts`). No
+in-tree driver declares placement yet; a wrapped runtime's driver (ACP first)
+then declares it and passes this conformance against the loopback target
+before the real-provider smoke.
 
 ### Runtime placement
 
 **Status: accepted by the maintainer on 2026-10-27, with every decision as
-recommended.** This section answers the three choices slice 6 left open.
-Nothing here is built yet. Each **Decision** names its rule and the rejected
-alternatives; the rest follows from rules above.
+recommended; 6b (the executor's runtime launches) is built.** This section
+answers the three choices slice 6 left open. Each **Decision** names its rule
+and the rejected alternatives; the rest follows from rules above. The rules
+6b settled on the way close the section, under
+[As built in 6b](#as-built-in-6b).
 
 #### R1. A placed process beside the request slot
 
@@ -998,6 +1011,32 @@ On macOS targets `proxied` waits for slice 8's forwarder, as the writing
 postures' commands do, so a placed runtime is admitted only on Linux targets
 until then.
 
+**Plan, as built: proxied through a nested capsule (maintainer decision,
+2026-10-27).** A Plan runtime runs on `proxied` as R3 says. Linux confinement
+starts a proxied launch's command from its forwarder, which needs the fork
+and exec Plan's process filter denies, so for a process-denied launch the
+forwarder alone runs outside the filter and starts a nested Bubblewrap that
+keeps every mount of the capsule, takes a pid namespace and `/proc` of its
+own, and loads Plan's filter onto the runtime
+(`apps/server/src/process/linuxConfinement.ts`). The forwarder's fork and
+exec of that nested capsule is the whole loosening: the runtime keeps Plan's
+read-only root and every other Plan restriction, cannot start a process
+(fork and `execveat` are refused, which the `runtime-fork-after-start` and
+`runtime-exec-after-start` canaries prove in the nested capsule), and cannot
+see or trace the forwarder. Residual, as for every Plan launch: the filter
+does not refuse `execve`, so the runtime can replace itself with a program
+its capsule shows (its binary's folders and interpreter, the forwarder's
+runtime, Bubblewrap, which cannot clone there, or a file with an execute bit
+in what it may write); host program folders stay masked. The outer capsule
+leaves `/proc/sys` uncovered, because the kernel refuses a new `/proc` under
+a covered one (measured on bubblewrap 0.9.0); the nested capsule covers its
+own, and only the forwarder sees the outer one. On a root host the nested
+capsule cannot map its uid and the runtime never starts, and the executor
+refuses a root target anyway. Rejected: running Plan offline, as 6b first
+built it, which left a Plan runtime unable to reach its model; and allowing
+fork and exec to the whole Plan capsule, which would let the runtime start
+programs.
+
 #### Which runtimes first
 
 **Decision R4: ACP first, with its
@@ -1045,6 +1084,26 @@ Each is its own reviewable change with this section updated in place.
     lost session ends it, and nothing runs on the next session.
   - _Verify:_ protocol, executor, connection-service, and loopback smoke tests;
     `git diff --check`.
+  - _Built 2026-10-27_ (`executorProcesses.ts`, `executorRuntimeGrants.ts`,
+    `providerRuntimeEgress.ts` in `apps/server/src/sshTarget/`). Its evidence
+    is `sshTargetLoopback.smoke.test.ts` (a fixture runtime under Bubblewrap
+    on the loopback target, in Plan and approval-gated, echoing while a read
+    and a command run beside it and reaching a public name through its
+    journaled proxy in both, the Plan one refused starting its own binary or
+    a shell; refused a write outside its root and home,
+    `~/.ssh`, the target's loopback, a private name, and an address, and its
+    allowed public connection and refusals journaled here; a binary inside
+    the root or in a world-writable folder, a linked home, and a fifth
+    runtime refused; a runtime killed with its session and the old placement
+    refused on the next), `executorProcesses.test.ts` (the reply before any
+    output, the end after the last output, stop and session end, the bound,
+    and each check before a launch), `sshTargetConnectionService.test.ts` (a
+    runtime placed only where its posture's runtime canaries passed, refused
+    before any frame elsewhere and without a runtime proxy, and ended with its
+    session), `sshTargetAdmissionPolicy.test.ts` and `toolEgressPolicy.test.ts`
+    (the runtime canary table, macOS refused, and the runtime rule),
+    `nativeHarnessEgressProxy.test.ts` (the proxy under the runtime rule), and
+    `sshExecutorProtocol.test.ts`.
 - **6c. ACP declares placement.** Container.
   - The ACP driver declares Plan, approval-gated, and auto-accept-edits with
     `stdio`, launches through the placement, and routes its client file and
@@ -1063,6 +1122,89 @@ Each is its own reviewable change with this section updated in place.
     host's proxy and is journaled, and a reconnect resumes or rebuilds its
     session. The result is recorded here with the agent, the versions, and the
     target's distribution.
+
+#### As built in 6b
+
+6b settled these details the decisions above leave open, each in the
+fail-closed direction:
+
+- **Plan runs proxied through a nested capsule** (maintainer decision,
+  2026-10-27). See the end of R3: the forwarder alone runs outside Plan's
+  process filter, and the runtime keeps it.
+- **Stopping is a frame, not a request.** `stop-process` names the stream
+  and travels beside the request slot, so a stop never waits behind a
+  ten-minute command. One for a stream that never carried a process ends the
+  session; one that crosses the process's own end is ignored.
+- **The end is the stream's last word.** The executor sends a runtime's
+  output, then `stream-end`, then `process-ended`, and never closes the
+  stream with `stream-close`: a close reaching this host first would discard
+  output it has not read yet. Neither side closes a process stream on its
+  own when both directions end. A frame on that stream after
+  `process-ended` ends the session.
+- **The stream id is taken as the request is written.** A start waiting
+  behind another request takes its even id only when it goes out, so a
+  connection a proxy asked for meanwhile cannot take a higher id first and
+  make it look reused.
+- **Only the request id tags a connection.** `stream-open` names its launch;
+  `resolve` and `dial` do not, and are answered while any proxied launch
+  runs, each tied on this host to the proxy that asked. A launch's forwarded
+  connections close with it; the dialed ones close with their proxy, or when
+  no proxied launch is left.
+- **Admission refuses runtimes on macOS.** The policy refuses a provider
+  runtime on a macOS target `runtime-not-attestable` after the platform
+  fact, and the executor reports the runtime canaries there `inconclusive`
+  and refuses the launch, until slice 8 settles the forwarder.
+- **The runtime canary rows.** A placed runtime is admitted only where its
+  posture's command probes and these runtime probes all reported a refusal:
+  in Plan, writing the root, writing read-only account state, exec, fork,
+  reading `~/.ssh`, reading another runtime's home, and connecting around the
+  proxy, each run proxied in the nested capsule a Plan runtime gets; in the
+  writing postures, writing outside the root and home, writing
+  read-only account state, reading `~/.ssh`, reading another runtime's home,
+  and connecting around the proxy. An escape in any of them refuses the whole
+  connection, as any escape does. The probes run with the same grant
+  function the launches use (`runtimeLaunchGrants`), against a scratch home
+  and a scratch account state in the session's own folder. No deny cover is
+  put over `~/.ssh`: the capsule never mounts the home, and a cover would
+  only mount an empty folder there, which the canary rightly read as an
+  escape.
+- **The binary's folders.** The binary is its resolved path, and that file,
+  its folder, and every folder above it must belong to the remote user or
+  root; the binary and its folder must be writable by no one else, and a
+  folder above may be writable by others only with its sticky bit. Its
+  folder may not be, hold, or sit inside the bound root, `~/.ssh`, the
+  executor's folder, or the runtime homes; its parent is granted read-only
+  only when it holds none of those and is not the home or above it.
+- **The home's folders.** The home is
+  `<state>/octant-runtime-homes/<Project>/<provider instance>`, where
+  `<state>` is `XDG_STATE_HOME` when absolute, else `~/.local/state`. Each
+  of its three folders is made owner-only if missing and must be a real
+  folder of the remote user's that no one else can enter; the resolved home
+  may not overlap the bound root, `~/.ssh`, or the executor's folder.
+- **Account state.** Each path must exist, belong to the remote user, and
+  resolve inside the home but not to the home itself, and may not overlap
+  `~/.ssh`, the bound root, the executor's folder, or the runtime homes; the
+  grant and the variable's value are the resolved path. A variable may not be
+  named twice, and besides the names R2 refuses, any name holding `PROXY`, and
+  `SHELL`, `USER`, and `LOGNAME`, are refused, so account state cannot
+  redirect the runtime's proxy.
+- **One posture per placement.** A placement is made for one posture. A
+  launch, and every write to a placed runtime, reads the thread's posture,
+  and another one stops the runtime and fails with `interrupted`, so the
+  runtime is acquired again in the new posture.
+- **No proxy, no networked runtime.** A host without a runtime proxy (any
+  platform but macOS and Linux) places no runtime in any posture, rather
+  than run it offline or on the target's own network.
+- **What the records hold.** The runtime egress aggregate is
+  `provider-runtime-egress`, one per launch: `launch-started` names the
+  thread, Project, provider instance, target, and session; decisions and the
+  summary carry the proxy's own entries, without a thread's taint.
+
+Not built in 6b, and named here so a later change owns it: the person's
+per-target binary setting R2 names (6c records it with the first driver that
+declares placement), summarizing a runtime egress launch that a host restart
+left open (as `thread.egress-launch-incomplete@1` does for commands), and
+removing a thread's runtime egress records when the thread is purged.
 
 ### Credential custody
 
@@ -1300,12 +1442,10 @@ agent can implement and verify it in a Linux container with OpenSSH installed an
    unsupported and launches nothing), and `sshTargetConnectionService.test.ts`
    (a placed runtime admitted only in a declared posture, and refused
    `runtime-not-attestable` for no declaration, an undeclared posture, Full
-   access, or a loopback tool listener). Launching a wrapped runtime on a
-   target remains, as the executor's own change before a driver declares
-   placement; see
-   [Provider runtimes on a target](#provider-runtimes-on-a-target). That
-   change and the driver after it are 6b to 6d under
-   [Runtime placement](#runtime-placement).
+   access, or a loopback tool listener). The executor's runtime launches are
+   built as 6b under [Runtime placement](#runtime-placement), with its
+   evidence there; a driver declaring placement (6c) and the real-provider
+   smoke (6d) remain.
 7. **Terminals, managed worktrees, and Settings.** Container for behavior and
    rendered QA in a browser; desktop packaged smoke needs a Mac (maintainer).
    Remote terminals and worktrees under the same admission, the SSH targets

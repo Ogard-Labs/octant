@@ -45,16 +45,34 @@ export function proxiedLaunchEnvironment(
  * socket, then runs the command and exits with its status. It holds no policy;
  * the token and every decision stay with the host proxy. When it cannot listen
  * or start the command it exits 125 before the command runs.
+ *
+ * `forwarder <socket> <port> --child-seccomp <filter> <command> [args...]`
+ * opens the filter file before anything else runs and hands it to the
+ * command as file descriptor 3. That form starts a launch whose own process
+ * is denied (Plan): the command is a nested Bubblewrap that loads the filter
+ * onto the workload, so the forwarder can start it while the workload still
+ * cannot fork or start another program.
  */
 export const LINUX_EGRESS_FORWARDER_SOURCE = `"use strict";
+const fs = require("node:fs");
 const net = require("node:net");
 const os = require("node:os");
 const { spawn } = require("node:child_process");
-const [socketPath, portText, executable, ...args] = process.argv.slice(2);
+const [socketPath, portText, ...rest] = process.argv.slice(2);
 function refuse(message) {
   process.stderr.write("octant-egress-forwarder: " + message + "\\n");
   process.exit(125);
 }
+let childFilter;
+if (rest[0] === "--child-seccomp") {
+  try {
+    childFilter = fs.openSync(rest[1] || "", "r");
+  } catch (error) {
+    refuse("cannot open the filter: " + error.message);
+  }
+  rest.splice(0, 2);
+}
+const [executable, ...args] = rest;
 if (!socketPath || !executable || !/^[0-9]{1,5}$/.test(portText || "")) refuse("invalid arguments");
 const server = net.createServer({ allowHalfOpen: true }, (client) => {
   const upstream = net.connect({ path: socketPath, allowHalfOpen: true });
@@ -73,7 +91,11 @@ server.on("error", (error) => refuse("cannot listen: " + error.message));
 server.listen({ host: "127.0.0.1", port: Number(portText), exclusive: true }, () => {
   const environment = { ...process.env };
   delete environment.ELECTRON_RUN_AS_NODE;
-  const child = spawn(executable, args, { stdio: "inherit", env: environment });
+  const child = spawn(executable, args, {
+    stdio: childFilter === undefined ? "inherit" : ["inherit", "inherit", "inherit", childFilter],
+    env: environment,
+  });
+  if (childFilter !== undefined) fs.closeSync(childFilter);
   child.on("error", (error) => refuse("cannot start the command: " + error.message));
   child.on("exit", (code, signal) => {
     const number = signal === null ? 0 : os.constants.signals[signal] || 0;

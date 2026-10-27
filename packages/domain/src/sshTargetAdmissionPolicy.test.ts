@@ -10,6 +10,7 @@ import {
 } from "@octant/contracts/ssh-target";
 import {
   SSH_CANARY_PROBES_BY_POSTURE,
+  SSH_RUNTIME_CANARY_PROBES_BY_POSTURE,
   decideSshAdmission,
   type SshAdmissionRequest,
   type SshAdmissionSubject,
@@ -38,7 +39,10 @@ function canaries(
 ): SshAttestationFacts["canaries"] {
   return CONFINED_POSTURES.map((posture) => ({
     posture,
-    results: SSH_CANARY_PROBES_BY_POSTURE[posture].flatMap((probe) => {
+    results: [
+      ...SSH_CANARY_PROBES_BY_POSTURE[posture],
+      ...SSH_RUNTIME_CANARY_PROBES_BY_POSTURE[posture],
+    ].flatMap((probe) => {
       const result = outcome(posture, probe);
       return result === "missing" ? [] : [{ probe, outcome: result }];
     }),
@@ -585,5 +589,98 @@ describe("SSH target admission", () => {
         }),
       ),
     ).toEqual({ status: "refused", reason: "runtime-not-attestable" });
+  });
+
+  it("refuses a placed runtime in a posture whose runtime canaries did not all report a refusal, while still admitting commands there", () => {
+    const wrapped = {
+      kind: "provider-runtime",
+      octantWrapsInPosture: true,
+      remotePlacement: "declared",
+      appToolTransportListensOnLoopback: false,
+    } as const;
+    expect(SSH_RUNTIME_CANARY_PROBES_BY_POSTURE).toEqual({
+      plan: [
+        "runtime-write-inside-root",
+        "runtime-write-read-only-account-state",
+        "runtime-exec-after-start",
+        "runtime-fork-after-start",
+        "runtime-read-ssh-directory",
+        "runtime-read-other-runtime-home",
+        "runtime-connect-bypassing-proxy",
+      ],
+      "approval-gated": [
+        "runtime-write-outside-root-and-home",
+        "runtime-write-read-only-account-state",
+        "runtime-read-ssh-directory",
+        "runtime-read-other-runtime-home",
+        "runtime-connect-bypassing-proxy",
+      ],
+      "auto-accept-edits": [
+        "runtime-write-outside-root-and-home",
+        "runtime-write-read-only-account-state",
+        "runtime-read-ssh-directory",
+        "runtime-read-other-runtime-home",
+        "runtime-connect-bypassing-proxy",
+      ],
+    });
+    for (const posture of CONFINED_POSTURES) {
+      for (const probe of SSH_RUNTIME_CANARY_PROBES_BY_POSTURE[posture]) {
+        for (const result of ["inconclusive", "missing"] as const) {
+          const facts = linuxFacts({
+            canaries: canaries((entry, candidate) =>
+              entry === posture && candidate === probe ? result : "refused",
+            ),
+          });
+          expect(
+            decideSshAdmission(
+              request({ attestation: attested(facts), posture, subject: wrapped }),
+            ),
+          ).toEqual({ status: "refused", reason: "not-attested", posture, probe });
+          expect(
+            decideSshAdmission(
+              request({
+                attestation: attested(facts),
+                posture,
+                subject: { kind: "octant-launch" },
+              }),
+            ),
+          ).toEqual({ status: "admitted" });
+        }
+      }
+    }
+  });
+
+  it("refuses a placed runtime on a macOS target, whose forwarder is not settled", () => {
+    const wrapped = {
+      kind: "provider-runtime",
+      octantWrapsInPosture: true,
+      remotePlacement: "declared",
+      appToolTransportListensOnLoopback: false,
+    } as const;
+    for (const posture of CONFINED_POSTURES) {
+      expect(
+        decideSshAdmission(
+          request({ attestation: attested(macosFacts()), posture, subject: wrapped }),
+        ),
+      ).toEqual({ status: "refused", reason: "runtime-not-attestable" });
+    }
+  });
+
+  it("refuses everything on a connection where a runtime canary escaped", () => {
+    const facts = linuxFacts({
+      canaries: canaries((posture, probe) =>
+        posture === "plan" && probe === "runtime-read-ssh-directory" ? "escaped" : "refused",
+      ),
+    });
+    expect(
+      decideSshAdmission(
+        request({ attestation: attested(facts), subject: { kind: "file-operation" } }),
+      ),
+    ).toEqual({
+      status: "refused",
+      reason: "confinement-canary-escaped",
+      posture: "plan",
+      probe: "runtime-read-ssh-directory",
+    });
   });
 });
