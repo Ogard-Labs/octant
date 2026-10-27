@@ -4595,6 +4595,7 @@ function LaunchedShell(
       setProjectColor: projectController.setColor,
       setProjectProviderPolicy: projectController.setProviderPolicy,
       setProjectBrandKit: projectController.setBrandKit,
+      setProjectDesktopRecipe: projectController.setDesktopRecipe,
       setProjectWorkStatusFile: projectController.setWorkStatusFile,
       setProjectsListOpen,
       setRailPlaceholder,

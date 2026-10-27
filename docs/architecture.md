@@ -5975,9 +5975,9 @@ same. This holds in Chat, Work, and Code.
   the `desktop-provider` seam with its conformance suite, the host lease
   service, the host-local provider (a virtual X display in a dedicated
   Bubblewrap launch, Linux only), artifact transfer, a Code send's binding
-  of `octant_computer` to one of its thread's leases, and the Code dock's
-  Desktop tool are built; no recipe storage is, so every lease command
-  refuses as a value and no lease exists to bind.
+  of `octant_computer` to one of its thread's leases, the Code dock's
+  Desktop tool, and a Code Project's stored desktop recipe with its settings
+  editor are built; only the cloud provider driver is not.
 
 **Canvas export.** A destination plugin contributes an export target through
 `@octant/plugin-api`. The contribution names the formats it accepts. The host

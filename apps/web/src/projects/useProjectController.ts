@@ -18,6 +18,7 @@ import {
   type WorkProjectStatusFile,
 } from "@octant/contracts/projects";
 import type { CanvasDesignBrand } from "@octant/contracts/canvas";
+import type { DesktopRecipe } from "@octant/contracts/desktop-lease";
 import type { AggregateVersion } from "@octant/contracts/events";
 import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
 import { createProjectClient, type ProjectClient } from "@octant/client-runtime/project-client";
@@ -307,6 +308,24 @@ export function useProjectController(options: ProjectControllerOptions) {
         brandKit,
       },
       Object.keys(brandKit).length === 0 ? "Brand kit cleared." : "Brand kit saved.",
+    );
+  }
+
+  /** Set, replace, or (with `null`) remove a Code Project's disposable desktop recipe. */
+  async function setDesktopRecipe(
+    projectId: ProjectId,
+    recipe: DesktopRecipe | null,
+  ): Promise<boolean> {
+    const project = projectById.get(projectId);
+    if (project?.type !== "code") return false;
+    return execute(
+      {
+        kind: "change-code-project-desktop-recipe",
+        projectId,
+        expectedVersion: project.version,
+        recipe,
+      },
+      recipe === null ? "Desktop recipe removed." : "Desktop recipe saved.",
     );
   }
 
@@ -679,6 +698,7 @@ export function useProjectController(options: ProjectControllerOptions) {
     setCodePullRequestBackgroundRefresh,
     setProviderPolicy,
     setBrandKit,
+    setDesktopRecipe,
     setWorkStatusFile,
     setArchived,
     status,

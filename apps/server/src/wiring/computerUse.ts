@@ -36,6 +36,8 @@ import {
   createLeasedComputerUsePort,
 } from "../computerUse/desktopLeaseService";
 import { createHostLocalDesktopLaunch } from "../computerUse/hostLocalDesktopLaunch";
+import { leasableProvidersOf } from "../computerUse/computerUseDestination";
+import { readProjectDesktopRecipe } from "../computerUse/projectDesktopRecipe";
 import {
   createHostLocalDesktopProvider,
   HOST_LOCAL_DESKTOP_PROGRAMS,
@@ -116,9 +118,9 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
   });
   const computerUseDesktop =
     options.computerUseDesktop ?? createDesktopComputerUsePort(process.env);
-  // No Project stores a recipe yet, so every lease command refuses as a
-  // value; the service still reconciles and sweeps so a lease journaled by any
-  // later build is torn down on start. An agent's turn bound to one of its
+  // A Code thread leases from the recipe its Project stores; with none, every
+  // lease command refuses as a value. The service reconciles and sweeps so a
+  // lease journaled before a restart is torn down on start. An agent's turn bound to one of its
   // thread's leases operates it as that thread's agent and asks in its thread
   // through the Computer tool. A person reaches a Code thread's leases from
   // its Desktop tab, as the window or paired device that may open the thread.
@@ -158,7 +160,13 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     platform: process.platform,
     hasScreen: computerUseDesktop !== undefined || options.computerUseAdapter !== undefined,
     providers: () => hostLocalDesktops,
-    recipe: () => undefined,
+    recipe: (owner) =>
+      readProjectDesktopRecipe({
+        owner,
+        codeThreadProject: (threadId) =>
+          persistence.readCodeThread(decodeCodeThreadId(threadId))?.projectId,
+        readProject: (projectId) => persistence.readProject(projectId),
+      }),
     thread: (owner) => {
       const current =
         owner.mode === "code"
@@ -451,6 +459,8 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     desktopPaneRoutes,
     launchSessionRoutes,
     machineChangeRoutes,
+    /** The providers a Project's desktop recipe may name on this host now. */
+    offeredDesktopProviders: () => leasableProvidersOf(desktopLeases.destination()),
     stopComputerSettingsWatch,
     stopDesktopLeases,
     webAssets,

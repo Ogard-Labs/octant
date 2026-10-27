@@ -8,6 +8,7 @@ import {
   type EventActor,
 } from "@octant/contracts";
 import type { ClientPrincipal } from "./clientPrincipal";
+import { leasableProvidersOf } from "./computerUse/computerUseDestination";
 import type { DesktopLeaseCaller, DesktopLeaseService } from "./computerUse/desktopLeaseService";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
@@ -31,6 +32,7 @@ export interface DesktopPaneRouteDependencies {
     | "closeView"
     | "frame"
     | "input"
+    | "destination"
   >;
   /** The actor id the journal gives a person at a local window. */
   readonly localActorId: string;
@@ -128,6 +130,12 @@ async function answer(
   actor: EventActor,
   scopeId: string,
 ): Promise<DesktopPaneAnswer> {
+  // The recipe editor asks which providers a recipe may name: the ones this
+  // host offers for leasing now, the same list destination reporting uses.
+  // It names no thread, and reading it changes nothing.
+  if (request.kind === "recipe-providers") {
+    return { status: "recipe-providers", providers: leasableProvidersOf(service.destination()) };
+  }
   const caller = callerFor(request.threadId, actor, scopeId);
   switch (request.kind) {
     case "overview":

@@ -1149,6 +1149,35 @@ describe("ProjectService", () => {
     expect(fixture.append).toHaveBeenCalledTimes(1);
   });
 
+  it("refuses a desktop recipe the recipe schema refuses and journals nothing", async () => {
+    const fixture = fixtureService({ projects: [codeProject()] });
+    const recipe = {
+      providerId: "host-local",
+      screen: { width: 1280, height: 800 },
+      network: "none",
+      leaseMinutes: 30,
+      maximumLeaseMinutes: 240,
+      idleMinutes: 15,
+    };
+    for (const invalid of [
+      { ...recipe, leaseMinutes: 60, maximumLeaseMinutes: 30 },
+      { ...recipe, maximumLeaseMinutes: 241 },
+      { ...recipe, screen: { width: 100, height: 800 } },
+      { ...recipe, providerId: "Host Local" },
+      { ...recipe, command: "rm -rf /" },
+    ]) {
+      await expect(
+        fixture.service.executeProject(windowId, {
+          kind: "change-code-project-desktop-recipe",
+          projectId: workId,
+          expectedVersion: 1,
+          recipe: invalid,
+        }),
+      ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    }
+    expect(fixture.append).not.toHaveBeenCalled();
+  });
+
   it("journals one event per Project colour change and refuses it on an archived Project", async () => {
     const fixture = fixtureService({ projects: [chatProject()] });
     const result = await fixture.service.executeProject(windowId, {
