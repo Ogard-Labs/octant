@@ -175,7 +175,14 @@ import {
   AgentMessageDelivered,
   AgentMessageRefused,
   AgentMessageAcknowledged,
+  ThreadEgressDecisionsRecordedPayload,
+  ThreadEgressLaunchStartedPayload,
+  ThreadEgressLaunchSummarizedPayload,
 } from "@octant/contracts";
+import {
+  CODE_LANGUAGE_SERVER_EVENT_NAMES,
+  CodeLanguageServerApprovalGranted,
+} from "@octant/contracts/code-language";
 import { HostOAuthJournalRecord } from "@octant/contracts/host-oauth";
 import { ProviderKeyJournalRecord } from "@octant/contracts/provider-key-journal";
 import {
@@ -409,6 +416,28 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("code.operation-event-recorded@1", 1, CodeOperationEventFrame)
     .register("code.planner-designation-updated@1", 1, CodePlannerDesignationUpdated)
     .register("code.planner-proposal-updated@1", 1, CodePlannerProposalUpdated)
+    .register(
+      CODE_LANGUAGE_SERVER_EVENT_NAMES.approvalGranted,
+      1,
+      CodeLanguageServerApprovalGranted,
+    )
+    // A `repo-tooling` language server's egress is audited with the payloads
+    // a harness command's `proxied` launch uses, under names of its own.
+    .register(
+      CODE_LANGUAGE_SERVER_EVENT_NAMES.egressLaunchStarted,
+      1,
+      ThreadEgressLaunchStartedPayload,
+    )
+    .register(
+      CODE_LANGUAGE_SERVER_EVENT_NAMES.egressDecisionsRecorded,
+      1,
+      ThreadEgressDecisionsRecordedPayload,
+    )
+    .register(
+      CODE_LANGUAGE_SERVER_EVENT_NAMES.egressLaunchSummarized,
+      1,
+      ThreadEgressLaunchSummarizedPayload,
+    )
     .register(AGENT_RUN_REQUESTED, 1, AgentRunRequested)
     .register(AGENT_RUN_STATUS_CHANGED, 1, AgentRunStatusChanged)
     .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged)

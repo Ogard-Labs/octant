@@ -123,6 +123,28 @@ const REFUSAL_TEXT: Readonly<Record<CodeLanguageRefusalReason, string>> = {
   "approval-required": "this server needs an approval first",
 };
 
+/**
+ * What a `repo-tooling` server asks of the person at a local window: the
+ * class's grant in words, because that is what allowing it gives.
+ */
+export const LANGUAGE_APPROVAL_TEXT =
+  "This language server runs the repository's own tools. Allowing it lets it write this checkout, run programs, and reach the hosts your Project's network rules allow.";
+
+/** The notice for an approval that did not take effect, or nothing when it did. */
+export function approvalOutcomeNotice(
+  outcome: "approved" | "refused" | "not-recorded" | "failed",
+): string | undefined {
+  switch (outcome) {
+    case "not-recorded":
+      return "The approval could not be recorded, so the server did not start.";
+    case "failed":
+      return "The approval did not reach the host. Try again.";
+    case "approved":
+    case "refused":
+      return undefined;
+  }
+}
+
 /** The status line for a state, or nothing when there is nothing to say. */
 export function languageStatusText(state: CodeLanguageEditorState): string | undefined {
   switch (state.kind) {

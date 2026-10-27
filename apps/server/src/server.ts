@@ -691,6 +691,7 @@ export function startOctantServer(
       codeExternalEditorRoutes,
       codeOperationApprovalRoutes,
       codeRoutes,
+      languageServerApprovals,
       localServerRoutes,
       projectTerminals,
       remoteServerGrantLocalRoutes,
@@ -711,6 +712,7 @@ export function startOctantServer(
       roots,
       routeCodeService,
       terminalProcessPort,
+      toolEgressRules,
       version,
       windowAuthorityStore,
     });
@@ -1140,6 +1142,7 @@ export function startOctantServer(
       credentialResolver,
       externalContentIngestionStore,
       generatedImageStore,
+      languageServerApprovals,
       options,
       persistence,
       providerDataDirectory,

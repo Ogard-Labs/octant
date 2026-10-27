@@ -200,7 +200,15 @@ calls those routes through the Code client: it shows the server's diagnostics
 as markers and opens a definition in another file through the ordinary
 file-open path, locally and from a paired device. A Settings › Code switch,
 stored in the journaled Code settings, turns the bundled server off, and the
-host then answers `turned-off`.
+host then answers `turned-off`. A person can also add a `repo-tooling` server,
+which runs the repository's own tooling: it starts only after the person at a
+local window approves it for a checkout or the Code Project (a journaled
+`shell-commands` approval through the local-only
+`POST /api/code/language/approvals`), never in Plan or for a paired device,
+may then write the checkout and run programs as a terminal does, and reaches
+the network through its own `proxied` egress proxy under the Project's rules,
+audited like a harness command's launch
+([Repository tooling](design/language-services.md#repository-tooling)).
 
 **Host resources.** `GET /api/host/resources` is a read-only snapshot of this
 host's load: CPU use averaged over a short sample of the process's CPU times,
@@ -5093,7 +5101,12 @@ Codex, OpenCode, ACP, Pi) are out of scope: their inference and tool traffic
 share one process, so a proxy could not tell them apart, and 0132's
 provider-endpoints-only exception still materializes as `allow` for them.
 Saying so is the honest boundary; routing those runtimes through the proxy
-with provider-endpoint rules is a separate follow-up.
+with provider-endpoint rules is a separate follow-up. An approved
+`repo-tooling` language server also runs on `proxied`, whatever the starting
+thread's posture, with the same proxy and launch records on an aggregate of
+its own: it serves a checkout, so only its Project's rules apply, its bytes
+taint no thread, and it raises no proposals
+([Repository tooling](design/language-services.md#repository-tooling)).
 
 **Enforcement point.** A forward proxy owned by the server process, one
 listener per confined launch:

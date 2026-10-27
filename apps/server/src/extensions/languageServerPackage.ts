@@ -14,7 +14,7 @@ import {
 /**
  * A folder holding a language server a person adds, as the local folder
  * registry read it. `layout` tells it apart from the plugin layouts a folder
- * can have. Canonical: docs/design/language-services.md (user-added `static`
+ * can have. Canonical: docs/design/language-services.md (user-added
  * servers).
  */
 export interface LanguageServerPackageInput {
@@ -108,10 +108,8 @@ export function languageServerPackageRefusalMessage(
       return "This language server claims the name or binary of the one bundled with Octant.";
     case "not-one-language-server":
       return "A language server package holds exactly one language server and nothing else.";
-    case "launch-class-unsupported":
-      return "Octant runs only language servers that read the checkout without running its tools.";
     case "declares-capabilities":
-      return "A language server you add may only read files; it cannot ask for the shell, the network or credentials.";
+      return "A language server you add may only read files, or, if it runs the repository's tools, also use the shell and the network; it cannot ask for credentials or anything else.";
     case "declares-contributions":
       return "A language server adds nothing to Octant's windows.";
     case "not-for-code":

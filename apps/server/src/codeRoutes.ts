@@ -123,10 +123,13 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import {
+  decodeCodeLanguageApprovalRequest,
+  decodeCodeLanguageApprovalResult,
   decodeCodeLanguageDocumentRequest,
   decodeCodeLanguageDocumentResult,
   decodeCodeLanguageReadRequest,
   decodeCodeLanguageReadResult,
+  type CodeLanguageApprovalRequest,
   type CodeLanguageDocumentRequest,
   type CodeLanguageReadRequest,
 } from "@octant/contracts/code-language";
@@ -466,7 +469,7 @@ export interface CodeRouteDependencies {
    * Language reads answered by confined language servers; absent on a host
    * without them, which then answers `unavailable` rather than 404.
    */
-  readonly language?: Pick<CodeLanguageService, "syncDocument" | "read">;
+  readonly language?: Pick<CodeLanguageService, "syncDocument" | "read" | "approve">;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxJsonBodySize?: number;
   readonly maxFileBodySize?: number;
@@ -633,6 +636,51 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
                 authenticatedWindowId,
                 callerKind,
                 command,
+              ),
+            ),
+            200,
+            origin,
+          );
+        }
+        case "language-approvals": {
+          requireMethodAndEmptyQuery(request, url, "POST");
+          requireJsonContentType(request);
+          // Approving a server that runs the repository's tooling is the
+          // person's act at the machine. The remote gate never forwards this
+          // route; a paired device that reached it anyway is refused here
+          // before its body is read, and the service refuses it again.
+          if (callerKind !== "local-window") {
+            return failureResponse(
+              {
+                category: "unauthorized",
+                message: "Only this host's own windows can approve a language server.",
+              },
+              403,
+              origin,
+            );
+          }
+          if (dependencies.language === undefined) {
+            return failureResponse(
+              { category: "unavailable", message: "Code language services are unavailable." },
+              503,
+              origin,
+            );
+          }
+          const value = parseJson(await readBoundedBytes(request, jsonLimit));
+          if (isRecord(value) && Object.prototype.hasOwnProperty.call(value, "windowId")) {
+            throw new CodeRouteRejected("Code requests cannot supply window identity.", 400);
+          }
+          let approval: CodeLanguageApprovalRequest;
+          try {
+            approval = decodeCodeLanguageApprovalRequest(value);
+          } catch {
+            throw new CodeRouteRejected("Code language approval is invalid.", 400);
+          }
+          return jsonResponse(
+            decodeCodeLanguageApprovalResult(
+              await dependencies.language.approve(
+                { scopeId: authenticatedWindowId, principal: callerKind },
+                approval,
               ),
             ),
             200,
@@ -1592,6 +1640,7 @@ type MatchedRoute =
         | "project-terminals"
         | "language-documents"
         | "language-read"
+        | "language-approvals"
         | "file-save"
         | "file-open"
         | "git-history"
@@ -1746,6 +1795,7 @@ function matchRoute(pathname: string): MatchedRoute | undefined {
   }
   if (pathname === "/api/code/language/documents") return { kind: "language-documents" };
   if (pathname === "/api/code/language/read") return { kind: "language-read" };
+  if (pathname === "/api/code/language/approvals") return { kind: "language-approvals" };
   if (pathname === "/api/code/files/content") return { kind: "file-save" };
   if (pathname === "/api/code/files/open") return { kind: "file-open" };
   if (pathname === "/api/code/git/history") return { kind: "git-history" };
