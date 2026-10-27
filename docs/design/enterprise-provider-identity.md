@@ -25,7 +25,9 @@ waits only on the maintainer's real-gateway smoke below. Slice 4 is built: an
 Amazon Bedrock endpoint signs in at the organization's single sign-on portal
 with a device code, and the broker signs each Converse request (`cloud-iam`),
 against fakes; closing it waits only on the maintainer's real-account smoke
-below.
+below. Settings adds an Amazon Bedrock endpoint, lists it under Model
+endpoints, and signs it out; its sign-in still begins only in the host's
+terminal.
 Each slice below lands with its own implementation, tests, and the edits to
 this file that record what it built.
 
@@ -145,6 +147,13 @@ see a provider-sdk port, `DirectoryOAuthHost`, shaped like
 reasons add `interaction-required`, and `access` adds `binding-mismatch`. A
 grant the broker no longer holds reads `sign-in-again` (`expired`), as a
 subscription grant does.
+
+A settled sign-in attempt, of either route family, stays readable through
+`status` for five minutes past its deadline (longer than the server follows
+one) and is then forgotten when the next attempt begins, so abandoned
+attempts do not accumulate in a long-running broker; a forgotten attempt
+reads `unknown`. An attempt still waiting on the issuer is kept, since its
+answer may yet store a grant that only that attempt names.
 
 ## Tenant, audience, and endpoint binding
 
@@ -424,9 +433,14 @@ Rules slice 2 resolved, each the most conservative reading of decision 2:
   5xx, or no answer is `unavailable`.
 - **Polling.** `authorization_pending` and `slow_down` wait;
   `authorization_declined` or `access_denied` is `denied`; `expired_token` is
-  `timeout`; any other refusal is `exchange-refused`; a network failure or a
-  5xx ends the attempt `unavailable`, as the standard device flow already
-  does. A finished sign-in passes the loopback flow's scope and identity-token
+  `timeout`; any other refusal is `exchange-refused`. No answer, a 429, or a
+  5xx is transient: the broker polls again after a wait that doubles with
+  each such answer in a row (up to a minute) and returns to the directory's
+  interval after the next real answer, until the code expires. A code that
+  runs out while the directory is still failing ends the attempt
+  `unavailable` rather than `timeout`, since the person may never have been
+  able to enter it. Rejected: ending the attempt at the first 5xx, which
+  turned a brief outage into a failed sign-in and a new code. A finished sign-in passes the loopback flow's scope and identity-token
   checks without a nonce: none can be sent, and the token is the tenant
   token endpoint's answer to the attempt's own device code.
 - **Consent.** The command prints the same consent line Settings shows (terms
@@ -454,7 +468,13 @@ conservative reading of decision 4 and the broker operations above:
   anything, so a person the portal does not give the account and role holds
   no grant (`not-authorized`). Every address is built from the portal's
   region (`oidc.<region>.amazonaws.com`, `portal.sso.<region>.amazonaws.com`);
-  nothing in a descriptor or an answer names a host.
+  nothing in a descriptor or an answer names a host. Polling the device code
+  follows slice 2's rule: a poll the portal does not answer, or answers with
+  a 429 or a 5xx, is retried with a doubling wait until the code expires, and
+  a code that runs out during the outage reads `unavailable`. Every portal
+  request is abandoned after 30 seconds and read as no answer, so a stalled
+  connection cannot hold an attempt awaiting consent past its code's expiry
+  or keep Sign out waiting.
 - **One partition.** Regions are the commercial partition's (`us-east-1`
   form); the government, isolated, sovereign, and China partitions sign under
   other hosts and keys and wait for an organization that needs one. The
@@ -542,11 +562,23 @@ conservative reading of decision 4 and the broker operations above:
   when that cannot be done; changing only the model list keeps it. Signing out
   asks the portal to end the session and deletes the grant whatever the
   portal answers.
-- **Settings.** This slice adds none: an instance is created with the
-  provider registry command and signed in with `octant provider sign-in`;
-  Settings shows its row and readiness under its own label. Add endpoint
-  fields, the Model endpoints rows, and a Sign out button follow in their own
-  change.
+- **Settings.** Add endpoint creates an instance from the region, portal,
+  portal region, account, role, and models, with no key; it is listed under
+  Model endpoints, and its page names who is signed in and offers Sign out
+  ([Providers and model endpoints](model-endpoints.md) owns the rows and
+  copy). Settings' `/api/providers/oauth` route answers only `status` (whether
+  the instance's stored pointer names a grant for its current binding; the
+  account label is built from the configuration, so no broker call is made;
+  the panel therefore defers to the endpoint's last check, and does not say
+  Signed in as when that check found no grant) and `sign-out` for the Bedrock
+  descriptor. Sign out is refused for a remote
+  principal before the pointer is read; otherwise the broker asks the portal
+  to end the session and deletes the grant, and only then is the pointer
+  deleted and `host-oauth.signed-out` journaled, so a grant the broker could
+  not delete stays named and can be signed out again. Every other command
+  (`begin`, `acknowledge`, `poll`, `sign-out-locally`) is refused
+  (`terminal-sign-in-only`) before any broker call: the sign-in still begins
+  only in the host's terminal.
 
 ## Expiry, refresh, and revocation
 
@@ -871,7 +903,22 @@ or changed is forgotten; provider policy and the contract refuse other
 partitions and look-alike portals; changing the region, portal, account, or
 role, or removing the instance, forgets the grant, and a model list change
 does not; Settings' route never begins a cloud sign-in, and a remote principal
-is refused one before any broker call.
+is refused one before any broker call. The Settings follow-up's evidence:
+end to end with the real broker, Settings' route reads an instance signed
+out, then signed in as its role and account after the host-local sign-in,
+and its Sign out asks the portal to end the session and leaves no grant or
+pointer; a remote principal's Sign out and every other Settings command are
+refused with no broker call; and web tests add an endpoint from the Connect
+fields (tidying a pasted account and portal, refusing a look-alike portal),
+read each row state, name the terminal command with Check again as the only
+fix, and save the role on the endpoint's page with no key. Device-code
+polls that the directory or portal could not answer are retried with a
+doubling wait until the code expires, and settled attempts are forgotten
+five minutes past their deadline, each proved against the HTTP fake
+directory and the in-memory portal; a portal poll that never answers is
+abandoned and polled again, a directory `slow_down` keeps its longer interval
+through a later outage, and the endpoint's page does not say Signed in as when
+its last check found no grant.
 **Needs the maintainer:** a real-account smoke with an AWS organization using
 IAM Identity Center and billed Bedrock access in one commercial region (for
 example `us-west-2`): a permission set allowing `bedrock:InvokeModel` and

@@ -1597,6 +1597,7 @@ function providerSettingsViewProps(
     onChangeIdeogramImageConfiguration: controller.changeIdeogramImageConfiguration,
     onChangeAnthropicCompatibleConfiguration: controller.changeAnthropicCompatibleConfiguration,
     onChangeAzureFoundryConfiguration: controller.changeAzureFoundryConfiguration,
+    onChangeAmazonBedrockConfiguration: controller.changeAmazonBedrockConfiguration,
     onClearProviderCredential: controller.clearProviderCredential,
     ...(controller.providerOAuth === undefined
       ? {}
@@ -1611,6 +1612,7 @@ function providerSettingsViewProps(
     onCreateOpenAiCompatible: controller.createOpenAiCompatible,
     onCreateAnthropicCompatible: controller.createAnthropicCompatible,
     onCreateAzureFoundry: controller.createAzureFoundry,
+    onCreateAmazonBedrock: controller.createAmazonBedrock,
     onCreateOpenAiImage: controller.createOpenAiImage,
     onCreateGeminiImage: controller.createGeminiImage,
     onCreateBflImage: controller.createBflImage,

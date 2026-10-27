@@ -621,7 +621,8 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("provider-authentication"),
           label: "Provider sign-in method",
           scope: "host",
-          keywords: "provider authentication sign in login subscription oauth",
+          keywords:
+            "provider authentication sign in login subscription oauth organization single sign-on access portal account role region",
         },
         {
           id: settingId("provider-api-key"),
@@ -673,7 +674,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Model endpoints",
           scope: "host",
           keywords:
-            "model endpoints add endpoint api openai-compatible anthropic-compatible ollama azure ai foundry base url address api key replace key sign in with chatgpt plan openrouter subscription sign out check now try again can't connect not working key refused no models diagnostics remove endpoint where your data goes eu zero data retention models shown hidden reads images chat only verify tools",
+            "model endpoints add endpoint api openai-compatible anthropic-compatible ollama azure ai foundry amazon bedrock base url address api key replace key sign in with chatgpt plan openrouter subscription sign out check now try again can't connect not working key refused no models diagnostics remove endpoint where your data goes eu zero data retention models shown hidden reads images chat only verify tools",
         },
         {
           id: settingId("model-roles"),

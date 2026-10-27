@@ -301,6 +301,8 @@ const COMPUTED_SETTING_ROWS: Readonly<Record<string, string>> = {
   "provider-*-directory-device-code": "provider-authentication",
   "provider-*-directory-issuer": "provider-authentication",
   "provider-*-directory-scope": "provider-authentication",
+  "provider-*-bedrock-*": "provider-authentication",
+  "provider-*-bedrock-models": "provider-manual-model-ids",
   "provider-*-api-key": "provider-api-key",
   "provider-*-base-url": "provider-base-url",
   "provider-*-protocol": "provider-protocol",

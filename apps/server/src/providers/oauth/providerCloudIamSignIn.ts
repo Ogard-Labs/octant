@@ -18,6 +18,7 @@ import {
 import type { ProviderCredentialStore } from "../credentialBrokerClient";
 import type { CloudIamBrokerPort } from "./cloudIamBroker";
 import type { HostOAuthService } from "./hostOAuthService";
+import type { ProviderOAuthCommand, ProviderOAuthView } from "./providerOAuthRoutes";
 
 /**
  * Cloud single sign-on for one Amazon Bedrock instance. The descriptor is
@@ -220,6 +221,70 @@ export async function settleCloudIamSignIn(input: {
     credentialRef,
   });
   return { kind: "signed-in", accountLabel: current.accountLabel };
+}
+
+/**
+ * Settings' commands for a cloud sign-in: whether the instance holds one, and
+ * Sign out. Settings never begins one: the portal's device code is shown only
+ * in the terminal where the person ran `octant provider sign-in`, because a
+ * code shown on a page someone else can reach is how device-code phishing
+ * works. Every other command is refused before any broker call, and a remote
+ * principal's sign-out is refused before the pointer is read.
+ */
+export async function answerCloudIamSettingsCommand(input: {
+  readonly dependencies: CloudIamSignInDependencies | undefined;
+  readonly instanceId: ProviderInstanceId;
+  readonly kind: ProviderOAuthCommand["kind"];
+  readonly principal: PrincipalKind;
+}): Promise<ProviderOAuthView> {
+  const { dependencies } = input;
+  if (input.kind !== "status" && input.kind !== "sign-out") {
+    return { kind: "refused", reason: "terminal-sign-in-only" };
+  }
+  if (
+    input.kind === "sign-out" &&
+    authorizePrincipalAction({ principalKind: input.principal, action: "provider.oauth.sign-out" })
+      .kind === "deny"
+  ) {
+    return { kind: "refused", reason: "local-host-required" };
+  }
+  if (dependencies === undefined) return { kind: "refused", reason: "unavailable" };
+  const target = cloudIamSignInTarget(dependencies.readInstance(input.instanceId));
+  if (target === undefined) return { kind: "refused", reason: "unsupported-driver" };
+  const signedOut = (termsRequired: boolean): ProviderOAuthView => ({
+    kind: "signed-out",
+    termsRequired,
+    termsSummary: AMAZON_BEDROCK_CLOUD_IAM_SIGN_IN.termsSummary,
+    accountLabel: target.accountLabel,
+  });
+  let stored: string | undefined;
+  try {
+    stored = await dependencies.credentials?.resolve(input.instanceId);
+  } catch {
+    stored = undefined;
+  }
+  const pointer = stored === undefined ? undefined : readCloudIamCredential(stored);
+  if (input.kind === "status") {
+    return pointer !== undefined && sameCloudIamGrant(pointer, target.descriptor)
+      ? { kind: "signed-in", accountLabel: target.accountLabel }
+      : signedOut(dependencies.terms.offer(termsOf(target.descriptor)).oauth.termsRequired);
+  }
+  // Sign out: the broker asks the portal to end the session and deletes the
+  // grant whatever the portal answers; only then is the pointer deleted, so a
+  // grant the broker could not delete stays named and can be signed out again.
+  if (stored === undefined || pointer === undefined) return signedOut(false);
+  try {
+    await forgetCloudIamGrant(dependencies.broker, stored);
+    await dependencies.credentials?.delete(input.instanceId);
+  } catch {
+    return { kind: "refused", reason: "unavailable" };
+  }
+  append(dependencies, {
+    name: "host-oauth.signed-out",
+    descriptorId: target.descriptor.descriptorId,
+    credentialRef: pointer.credentialRef,
+  });
+  return signedOut(false);
 }
 
 /**

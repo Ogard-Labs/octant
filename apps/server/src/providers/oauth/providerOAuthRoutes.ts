@@ -3,7 +3,11 @@ import {
   type ProviderInstance,
   type ProviderInstanceId,
 } from "@octant/contracts";
-import { subscriptionDescriptorIdOf, subscriptionOAuthOffers } from "@octant/domain";
+import {
+  AMAZON_BEDROCK_CLOUD_IAM_SIGN_IN,
+  subscriptionDescriptorIdOf,
+  subscriptionOAuthOffers,
+} from "@octant/domain";
 import {
   decodeHostOAuthDescriptor,
   type HostOAuthDescriptor,
@@ -21,6 +25,10 @@ import { WindowAuthorityError, type WindowAuthorityStore } from "../../windowAut
 import { readPrincipalRouteContext } from "../../principalRouteContext";
 import type { ProviderCredentialStore } from "../credentialBrokerClient";
 import type { HostOAuthService } from "./hostOAuthService";
+import {
+  answerCloudIamSettingsCommand,
+  type CloudIamSignInDependencies,
+} from "./providerCloudIamSignIn";
 import { dispatchDirectorySignIn, isDirectorySignIn } from "./providerDirectorySignIn";
 
 const METHODS = "POST, OPTIONS";
@@ -31,6 +39,11 @@ export interface ProviderOAuthRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly credentials?: ProviderCredentialStore;
   readonly offers?: readonly SubscriptionOAuthOffer[];
+  /**
+   * An Amazon Bedrock instance's cloud sign-in, for its status and Sign out
+   * only; undefined when the server started without a credential broker.
+   */
+  readonly cloudIam?: CloudIamSignInDependencies | undefined;
   readonly readInstance?: (instanceId: ProviderInstanceId) => ProviderInstance | undefined;
   readonly bindDescriptor?: (
     instance: ProviderInstance,
@@ -150,6 +163,24 @@ export function createProviderOAuthRouteHandler(dependencies: ProviderOAuthRoute
     const principal = principalKind(request);
     const command = readCommand(body);
     if (command === undefined) return json({ kind: "refused", reason: "invalid" }, 400, origin);
+    // A cloud sign-in begins only from the host's terminal; Settings reads
+    // whether one is held and signs it out.
+    if (command.descriptorId === AMAZON_BEDROCK_CLOUD_IAM_SIGN_IN.descriptorId) {
+      try {
+        return json(
+          await answerCloudIamSettingsCommand({
+            dependencies: dependencies.cloudIam,
+            instanceId: command.instanceId,
+            kind: command.kind,
+            principal,
+          }),
+          200,
+          origin,
+        );
+      } catch {
+        return json({ kind: "refused", reason: "unavailable" }, 503, origin);
+      }
+    }
     const offer = offers.find(
       (candidate) => candidate.descriptor.descriptorId === command.descriptorId,
     );

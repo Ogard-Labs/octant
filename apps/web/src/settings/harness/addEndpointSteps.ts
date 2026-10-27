@@ -10,9 +10,10 @@ import {
 } from "@octant/contracts";
 import type { VoiceModelHint } from "./voiceModels";
 
-/** The kinds of endpoint Add endpoint connects by address, in the order it offers them. */
+/** The kinds of endpoint Add endpoint connects, in the order it offers them. */
 export type EndpointKind =
   | "azure-foundry"
+  | "amazon-bedrock"
   | "openai-compatible"
   | "anthropic-compatible"
   | "ollama";
@@ -39,6 +40,18 @@ export const ENDPOINT_KINDS: ReadonlyArray<EndpointKindPresentation> = [
     urlLabel: "Foundry address",
     urlPlaceholder: "https://<resource>.openai.azure.com/openai/v1/",
     urlHint: "Ends in /openai/v1/. The key is sent as the api-key header.",
+  },
+  {
+    // Signs in at the organization's single sign-on portal, never with a key;
+    // its address is built from the region, so the form asks for none.
+    kind: "amazon-bedrock",
+    title: "Amazon Bedrock",
+    detail: "Your organization's AWS account and role, through its single sign-on portal.",
+    key: "none",
+    urlLabel: "Access portal",
+    urlPlaceholder: "https://<name>.awsapps.com/start",
+    urlHint: "Your organization's AWS access portal address, as IAM Identity Center shows it.",
+    defaultName: "Amazon Bedrock",
   },
   {
     kind: "openai-compatible",

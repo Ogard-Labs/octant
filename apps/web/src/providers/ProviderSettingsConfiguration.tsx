@@ -24,3 +24,7 @@ export {
   IdeogramImageConfigurationForm,
   OpenAiImageConfigurationForm,
 } from "./configuration/ImageConfigurationForms";
+export {
+  BedrockConfigurationForm,
+  CloudEndpointSignIn,
+} from "./configuration/BedrockConfigurationForms";
