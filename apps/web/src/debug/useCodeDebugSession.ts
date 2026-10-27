@@ -19,6 +19,7 @@ const RUNNING_POLL_MS = 400;
 const STOPPED_POLL_MS = 1_000;
 /** Console lines the panel keeps; older ones scroll away, as the host's ring does. */
 const MAX_CONSOLE_LINES = 1_000;
+const UNREACHABLE_TEXT = "The host could not be reached.";
 
 export type DebugConsoleItem =
   | { readonly kind: "output"; readonly entry: CodeDebugOutputEntry }
@@ -146,11 +147,13 @@ export function useCodeDebugSession(input: {
         if (error instanceof CodeDebugClientFailure && error.kind === "local-only") {
           end(LOCAL_ONLY_TEXT);
         } else {
-          setNotice("The host could not be reached.");
+          setNotice(UNREACHABLE_TEXT);
         }
         return undefined;
       }
       if (!mounted.current) return undefined;
+      // The host answered, so a notice that it could not be reached is stale.
+      setNotice((current) => (current === UNREACHABLE_TEXT ? undefined : current));
       switch (answer.status) {
         case "ended":
           end(endReasonText(answer.endReason));

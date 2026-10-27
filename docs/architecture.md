@@ -2133,7 +2133,11 @@ flowchart LR
   Project name. A packet carrying this section or the `hostHealth` counters
   (see the development loop) is version 2; a version 1 packet carries neither. One grouped query over the `event_journal_occurred_at` index
   reads it when diagnostics are exported or Settings opens, never on a timer,
-  and Settings shows the same table.
+  and Settings shows the same table. An export also counts Code debug
+  sessions started, and ended per end reason, over the same window
+  (`debugSessions`, a version 3 packet, absent when there were none), with
+  no session, thread, or Project named; the rule is in
+  [Debugger session rules](design/language-services.md#debugger-session-rules).
 - **Recovery.** Sequence-based reconnect replay for local and remote clients —
   a dropped stream catches up from the authoritative snapshot before it reopens,
   keeps retrying while the host is unreachable, and a remote session whose window

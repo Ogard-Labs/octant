@@ -1263,7 +1263,14 @@ the addendum left a choice open.
   and block comments and trailing commas, and maps it with the import
   policy. A comment between a trailing comma and its bracket reads as
   `unreadable` rather than guessed at.
-- **Not built yet.** Session counts and end reasons in Diagnostics exports.
+- **Diagnostics.** A diagnostics export carries `debugSessions`: over the
+  journal growth window, how many sessions started and how many ended for
+  each end reason, read by one grouped query on the journal's time index. It
+  names no session, configuration, thread, or Project, the contract admits
+  only the closed end reasons, and a packet that carries it is version 3. A
+  host where no session started or ended in the window exports no section,
+  so its packets stay version 2. A purged thread's or erased Project's
+  sessions are no longer counted, since their records are gone.
 
 ### Debugger panel rules
 
@@ -1281,8 +1288,9 @@ the addendum left a choice open.
   They are held in the renderer's memory for the thread on its checkout,
   shared by the editor and the panel and never persisted, so a reload
   starts with none. A toggle past 256 lines in a file or 64 files takes
-  none, since the host would refuse the Start. Start sends them all; while a
-  session runs, each file whose lines change is sent at once with
+  none, since the host would refuse the Start, and the editor says which
+  bound it reached until the next toggle it takes. Start sends them all;
+  while a session runs, each file whose lines change is sent at once with
   `set-breakpoints`. The panel offers no conditions, exception filters,
   watches, or hover evaluation yet: the adapter's default exception filters
   apply, as the host sends them.
@@ -1290,11 +1298,14 @@ the addendum left a choice open.
   from the editor file the person last opened or focused for the thread,
   and the panel lists again when it changes.
 - **Confirming.** A proposal or a written configuration opens the same card:
-  the adapter, program, each argument, the working folder, each environment
-  entry, whether it pauses at the first line, every field Octant does not
+  the adapter with the package and version it came from (the host lists
+  both, as Settings names the package), program, each argument, the
+  working folder, each environment entry, whether it pauses at the first line, every field Octant does not
   use, and that the values are kept in the Project's record. A written
   configuration is checked against the contract's shape before the card;
-  the host checks paths and everything else when it is confirmed.
+  the host checks paths and everything else when it is confirmed. Where two
+  effective adapters share a name, the list and the adapter picker name each
+  one's package and version too, and its id when even those match.
 - **One session per thread.** While a session runs, the panel shows it in
   place of the configuration list, so a person stops it before starting
   another. A `busy` answer for a session the panel does not hold (another
@@ -1307,10 +1318,15 @@ the addendum left a choice open.
   expensive scope is read when opened, and nested values open on demand to a
   depth of eight. What it read is dropped when the program runs again or
   the session ends; the console keeps its last 1,000 lines in the
-  renderer's memory for the session only.
+  renderer's memory for the session only. A notice that the host could not
+  be reached clears at the host's next answer, so a recovered poll leaves
+  no stale warning.
 - **The stopped place.** At each stop the top frame's checkout file opens
   through the ordinary file-open path at its line, and the editor marks the
-  line until the program runs or the session ends. A frame outside the
+  line until the program runs, the session ends, or the Run and debug tool
+  closes. With the tool closed nothing polls the session, so a kept mark
+  could name a line the program has left; the session keeps running, and
+  reopening the tool reads the stop and marks it again. A frame outside the
   checkout opens nothing; an `adapter-source` frame's text is fetched by
   reference and shown read-only in the panel.
 - **Evaluate.** The console sends what the person typed as `repl` in the
@@ -1427,7 +1443,20 @@ Each sub-slice is its own pull request with this addendum updated in place.
     expression and an adapter error, a step to the next line, and Stop
     clearing the mark, with no horizontal overflow. The same run against a
     Plan thread showed the host's refusal on confirming, and against a
-    paired device's `403` showed that debugging stays on this computer. The
+    paired device's `403` showed that debugging stays on this computer.
+    Review follow-ups are built too: a gutter toggle past either breakpoint
+    bound says which one (`MonacoEditorPane.test.tsx`); two adapters that
+    share a name are told apart by package and version in the list and on
+    the card; closing the tool clears the editor's stopped line and
+    reopening it marks the line again; and the unreachable-host notice
+    clears once the session answers (`RunDebugPanel.test.tsx`). The listing
+    names each adapter's package and version
+    (`codeDebugServiceProcess.test.ts`), and a diagnostics export counts
+    sessions by end reason (`diagnosticsExportService.test.ts`). Rendered
+    QA of these on 2026-10-27 (the real Monaco editor and the panel against
+    a fake host, Chromium at 1280 and 390 px, light and dark) showed both
+    breakpoint notices, the shared-name list and card, and the unreachable
+    notice clearing, with no horizontal overflow or console errors. The
     rules are under [Debugger panel rules](#debugger-panel-rules).
 - **8d. macOS confined-program smoke.** Container: no; a Mac (the `macos-15`
   CI job where it can, otherwise the maintainer).
@@ -1737,8 +1766,9 @@ accounts or hardware.
    - _Verify:_ set by the addendum, including a macOS confined-debuggee smoke
      on a Mac.
    - _State:_ the [Debugger addendum](#debugger-addendum) was accepted on
-     2026-10-27; its sub-slices 8a to 8d are the delivery plan, and 8a is
-     built.
+     2026-10-27; its sub-slices 8a to 8d are the delivery plan. 8a to 8c are
+     built; 8d needs a Mac. Debugging a program's child processes (debugpy's
+     `debugpyAttach`) needs its own rule and is not built.
 
 The extension host is not planned (D7). Each slice is reviewable and leaves
 the editor working when the companion is off or refused.

@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { CodeDebugSessionEndReason } from "./codeDebug";
 import { CorrelationId, UtcTimestamp } from "./events";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -17,6 +18,12 @@ export const DIAGNOSTICS_PACKET_VERSION = 1 as const;
  * packets with neither stay valid.
  */
 export const DIAGNOSTICS_PACKET_VERSION_WITH_JOURNAL_GROWTH = 2 as const;
+
+/**
+ * Version of a packet that carries `debugSessions`, which a version 1 or 2
+ * decoder rejects. It may carry the version 2 sections too.
+ */
+export const DIAGNOSTICS_PACKET_VERSION_WITH_DEBUG_SESSIONS = 3 as const;
 
 /** Upper bounds keep a packet reviewable and deny unbounded store dumps. */
 export const MAX_DIAGNOSTIC_VERSIONS = 32;
@@ -209,6 +216,33 @@ export const JournalGrowth = Schema.Struct({
 }).annotations(strict);
 export type JournalGrowth = typeof JournalGrowth.Type;
 
+/** How many debug sessions ended for one reason. */
+export const DiagnosticDebugSessionEnding = Schema.Struct({
+  endReason: CodeDebugSessionEndReason,
+  count: Schema.Int.pipe(Schema.positive()),
+}).annotations(strict);
+export type DiagnosticDebugSessionEnding = typeof DiagnosticDebugSessionEnding.Type;
+
+/**
+ * Debug sessions started, and ended by reason, in the journal growth window.
+ * Counts and the closed end reasons only: no session, configuration, thread,
+ * or Project, and nothing a session showed. Canonical:
+ * docs/design/language-services.md § Debugger data and privacy.
+ */
+export const DiagnosticDebugSessions = Schema.Struct({
+  /** The first UTC day counted, as YYYY-MM-DD. */
+  since: Schema.String.pipe(Schema.pattern(/^\d{4}-\d{2}-\d{2}$/)),
+  started: Schema.NonNegativeInt,
+  ended: Schema.Array(DiagnosticDebugSessionEnding).pipe(
+    Schema.maxItems(CodeDebugSessionEndReason.literals.length),
+    Schema.filter(
+      (endings) => new Set(endings.map((ending) => ending.endReason)).size === endings.length,
+      { message: () => "Each end reason is counted once." },
+    ),
+  ),
+}).annotations(strict);
+export type DiagnosticDebugSessions = typeof DiagnosticDebugSessions.Type;
+
 /**
  * A supported, fully redacted diagnostics evidence packet. `redacted` is a
  * literal `true` so a packet can never claim it skipped redaction, and no field
@@ -219,6 +253,7 @@ export const DiagnosticEvidencePacket = Schema.Struct({
   packetVersion: Schema.Literal(
     DIAGNOSTICS_PACKET_VERSION,
     DIAGNOSTICS_PACKET_VERSION_WITH_JOURNAL_GROWTH,
+    DIAGNOSTICS_PACKET_VERSION_WITH_DEBUG_SESSIONS,
   ),
   packetId: DiagnosticPacketId,
   domain: DiagnosticFailureDomain,
@@ -245,14 +280,22 @@ export const DiagnosticEvidencePacket = Schema.Struct({
   /** Version 2 only; absent when the host reports no counters. */
   hostHealth: Schema.optional(DiagnosticHostHealth),
   generatedAt: UtcTimestamp,
-  /** Version 2 only; absent when the host could not read the journal. */
+  /** Version 2 or later; absent when the host could not read the journal. */
   journalGrowth: Schema.optional(JournalGrowth),
+  /** Version 3 only, and always there: absent when no session started or ended in the window. */
+  debugSessions: Schema.optional(DiagnosticDebugSessions),
 }).pipe(
   Schema.filter(
     (packet) =>
-      packet.packetVersion === 2 ||
-      (packet.journalGrowth === undefined && packet.hostHealth === undefined),
-    { message: () => "Only a version 2 packet carries journal growth or host health." },
+      packet.packetVersion === DIAGNOSTICS_PACKET_VERSION_WITH_DEBUG_SESSIONS
+        ? packet.debugSessions !== undefined
+        : packet.debugSessions === undefined &&
+          (packet.packetVersion === DIAGNOSTICS_PACKET_VERSION_WITH_JOURNAL_GROWTH ||
+            (packet.journalGrowth === undefined && packet.hostHealth === undefined)),
+    {
+      message: () =>
+        "Only a version 2 or 3 packet carries journal growth or host health, and only a version 3 packet carries debug sessions.",
+    },
   ),
   Schema.annotations(strict),
 );
@@ -406,3 +449,4 @@ export const decodeDiagnosticsExportReceiptRecorded = Schema.decodeUnknownSync(
 );
 export const decodeDiagnosticsExportOutcome = Schema.decodeUnknownSync(DiagnosticsExportOutcome);
 export const decodeJournalGrowth = Schema.decodeUnknownSync(JournalGrowth);
+export const decodeDiagnosticDebugSessions = Schema.decodeUnknownSync(DiagnosticDebugSessions);

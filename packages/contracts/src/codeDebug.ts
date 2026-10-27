@@ -1,6 +1,11 @@
 import { Schema } from "effect";
 import { CodeCheckoutId, CodeRelativePath, CodeThreadId } from "./code";
-import { ExtensionComponentId, ExtensionContentDigest, ToolExtensionId } from "./extensionIdentity";
+import {
+  ExtensionComponentId,
+  ExtensionContentDigest,
+  ExtensionPackageVersion,
+  ToolExtensionId,
+} from "./extensionIdentity";
 import { ExtensionComponentQualifiedId, ExtensionDebugRuntimeId } from "./extensions";
 import { ProjectId } from "./projects";
 
@@ -348,6 +353,12 @@ export const CodeDebugAdapterSummary = Schema.Struct({
   adapter: ExtensionComponentQualifiedId,
   displayName: boundedText(128),
   runtimes: Schema.Array(ExtensionDebugRuntimeId).pipe(Schema.maxItems(8)),
+  /**
+   * The installed package as Settings names it, and its version, so the
+   * confirmation card says which adapter it allows when two share a name.
+   */
+  packageName: boundedText(128),
+  packageVersion: ExtensionPackageVersion,
 }).annotations(strict);
 export type CodeDebugAdapterSummary = typeof CodeDebugAdapterSummary.Type;
 
