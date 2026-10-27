@@ -231,6 +231,7 @@ Code exposes repository-valid engineering surfaces:
 - Side Chat, a Chat-mode lane that can ask about this thread without interrupting its Lead turn. It reads the thread's conversation, branch and changes, files, and subagent results, and cannot change any of them. Type `#` in the composer to mention another thread as read-only context, or drag a sidebar thread onto the composer, or choose **Attach as context** from that row's menu. `@` names a file in this checkout.
 - Browser surfaces
 - iOS Simulator and Android emulator device panes, when the host has those destinations
+- A Desktop pane for the thread's [disposable desktops](/advanced/browser-and-computer-use#disposable-desktops) on a Linux host
 - Extension-contributed surfaces approved by effective activation policy
 
 The active Code thread's composer shows a circular context-usage meter. Opening
@@ -241,7 +242,7 @@ or thread. The right sidebar is a compact launcher when empty and a tool strip
 when open. It can host Side Chat, Browser, Files, Canvas, Plan when this thread
 has a current plan artifact, Pull requests for the thread's Project, Delivery
 when a target is enabled, Changes,
-Terminal, Tests, iOS Simulator, or Android emulator instead of replacing the Code thread. iOS
+Terminal, Tests, iOS Simulator, Android emulator, or Desktop instead of replacing the Code thread. iOS
 Simulator is absent until Octant has found an Xcode project and Apple
 toolchain. Android emulator is always launchable on Code; a host without the
 SDK shows the destination as unavailable. When either pane is open it shows a

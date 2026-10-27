@@ -5,6 +5,7 @@ import {
   decideDesktopArtifactTransfer,
   decideDesktopLeaseAcquire,
   decideDesktopLeaseExtension,
+  desktopInputOperation,
   desktopLeaseClockEnds,
   desktopLeaseFits,
   desktopLeaseTransitionAllowed,
@@ -227,5 +228,19 @@ describe("desktop lease policy", () => {
         externalContentIngested: true,
       }),
     ).toEqual({ kind: "refused", reason: "plan-mode" });
+  });
+
+  it("journals a person's press, typing, key, and scroll, and not the pointer moving or letting go", () => {
+    expect(
+      desktopInputOperation({ kind: "pointer", action: "down", button: "left", x: 1, y: 2 }),
+    ).toBe("click");
+    expect(desktopInputOperation({ kind: "pointer", action: "move", x: 1, y: 2 })).toBeUndefined();
+    expect(desktopInputOperation({ kind: "pointer", action: "up", x: 1, y: 2 })).toBeUndefined();
+    expect(desktopInputOperation({ kind: "text", text: "hi" })).toBe("type");
+    expect(desktopInputOperation({ kind: "key", action: "down", key: "Enter" })).toBe("press");
+    expect(desktopInputOperation({ kind: "key", action: "up", key: "Enter" })).toBeUndefined();
+    expect(desktopInputOperation({ kind: "scroll", x: 1, y: 2, deltaX: 0, deltaY: 120 })).toBe(
+      "scroll",
+    );
   });
 });

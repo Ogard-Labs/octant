@@ -7,6 +7,7 @@ import {
   EventId,
   decodeAggregateVersion,
   decodeDesktopLeaseId,
+  decodeDesktopViewId,
   decodeEventActor,
   decodeUtcTimestamp,
   type ComputerControlCommand,
@@ -14,6 +15,7 @@ import {
   type DesktopArtifactRefusal,
   type DesktopArtifactSent,
   type DesktopHostTag,
+  type DesktopInputEvent,
   type DesktopLease,
   type DesktopLeaseEndReason,
   type DesktopLeaseId,
@@ -25,7 +27,10 @@ import {
   type DesktopLeaseRequested,
   type DesktopLeaseState,
   type DesktopLeaseTransitioned,
+  type DesktopPaneRefusal,
+  type DesktopPaneStart,
   type DesktopRecipe,
+  type DesktopViewId,
   type EventActor,
   type LeasableDesktopProvider,
   type OctantMode,
@@ -38,6 +43,7 @@ import {
   decideDesktopArtifactTransfer,
   decideDesktopLeaseAcquire,
   decideDesktopLeaseExtension,
+  desktopInputOperation,
   desktopLeaseClockEnds,
   desktopLeaseFits,
   desktopLeaseHoldsDesktop,
@@ -47,8 +53,10 @@ import {
   type CacheBackoff,
 } from "@octant/domain";
 import type {
+  DesktopFrame,
   DesktopHandle,
   DesktopProvider,
+  DesktopScreen,
   DesktopTeardownPort,
 } from "@octant/plugin-api/desktop-provider";
 import type { ComputerUseOwner } from "@octant/contracts/computer-use-plugin";
@@ -116,8 +124,16 @@ export interface DesktopLeaseServiceOptions {
   readonly providers: () => ReadonlyArray<RegisteredDesktopProvider>;
   readonly recipe: (owner: DesktopLeaseOwner) => DesktopRecipe | undefined;
   readonly thread: (owner: DesktopLeaseOwner) => DesktopLeaseThread | undefined;
-  /** Whether a person's window or device, or an agent's turn, may open the thread. */
-  readonly callerMayOpen: (actor: EventActor, owner: DesktopLeaseOwner) => boolean;
+  /**
+   * Whether a person's window or device, or an agent's turn, may open the
+   * thread. A person's request names the authenticated window or device scope
+   * it came from; one that names none may not.
+   */
+  readonly callerMayOpen: (
+    actor: EventActor,
+    owner: DesktopLeaseOwner,
+    scopeId: string | undefined,
+  ) => boolean;
   readonly computerUseEnabled: () => boolean;
   readonly confirm: (request: DesktopLeaseConfirmation) => Promise<"approved" | "declined">;
   /** The thread's bound root now: its Code checkout, or its Work Project root. */
@@ -130,12 +146,46 @@ export interface DesktopLeaseServiceOptions {
   readonly uuid: () => string;
   /** How long one teardown call may take before it counts as failed. */
   readonly teardownTimeoutMs?: number;
+  /** How long a Desktop tab's view lives with no frame read and no input. */
+  readonly viewIdleMs?: number;
 }
 
 export interface DesktopLeaseCaller {
   readonly owner: { readonly mode: OctantMode; readonly threadId: string };
   readonly actor: EventActor;
+  /** The authenticated window or paired device a person's request came from. */
+  readonly scopeId?: string;
 }
+
+/** What a person's Desktop tab shows for one thread. */
+export interface DesktopLeaseOverview {
+  readonly status: "overview";
+  /** Leases that may still hold a desktop, oldest first, then the most recent ended one. */
+  readonly leases: ReadonlyArray<DesktopLease>;
+  readonly providers: ReadonlyArray<LeasableDesktopProvider>;
+  readonly start: DesktopPaneStart;
+}
+
+export type DesktopViewOpenResult =
+  | { readonly status: "viewing"; readonly viewId: DesktopViewId }
+  | DesktopPaneRefusal;
+
+export type DesktopViewFrameResult =
+  | { readonly status: "frame"; readonly frame: DesktopFrame }
+  /** The desktop answered no frame the host would pass on; the view stays open. */
+  | { readonly status: "no-frame" }
+  | DesktopPaneRefusal;
+
+export type DesktopViewInputResult =
+  | { readonly status: "delivered" }
+  /** Journaled, but the desktop did not take it. */
+  | { readonly status: "not-delivered" }
+  | DesktopPaneRefusal;
+
+type DesktopViewCaller = DesktopLeaseCaller & {
+  readonly leaseId: DesktopLeaseId;
+  readonly viewId: DesktopViewId;
+};
 
 export type DesktopLeaseAcquireResult =
   | { readonly status: "acquired"; readonly lease: DesktopLease }
@@ -229,6 +279,26 @@ export interface DesktopLeaseService {
   ) => Promise<DesktopLeaseTransferResult>;
   /** A Desktop tab opened or closed on a lease; an open tab holds idle release off. */
   readonly markTab: (leaseId: DesktopLeaseId, change: "opened" | "closed") => void;
+  /** The thread's leases and whether it could start one now, for a person's Desktop tab. */
+  readonly overview: (
+    caller: DesktopLeaseCaller,
+  ) => Promise<DesktopLeaseOverview | DesktopLeaseRefusal>;
+  /**
+   * Opens a person's view of a running lease. Only a person's window or
+   * device opens one, and only it may read frames or send input through it.
+   */
+  readonly openView: (
+    caller: DesktopLeaseCaller & { readonly leaseId: DesktopLeaseId },
+  ) => Promise<DesktopViewOpenResult>;
+  /** One frame for a view. Frames are never journaled or stored. */
+  readonly frame: (caller: DesktopViewCaller) => Promise<DesktopViewFrameResult>;
+  /** A person's input through a view: journaled as theirs before the driver gets it, and never asked. */
+  readonly input: (
+    caller: DesktopViewCaller & { readonly event: DesktopInputEvent },
+  ) => Promise<DesktopViewInputResult>;
+  readonly closeView: (
+    caller: DesktopViewCaller,
+  ) => Promise<{ readonly status: "view-closed" } | DesktopPaneRefusal>;
   /** Ends leases whose clock, thread, recipe, provider, or setting ended them; retries failed releases. */
   readonly sweep: () => Promise<void>;
 }
@@ -242,6 +312,20 @@ interface LiveLease {
   lastActivityAt: number;
   openTabs: number;
   backoff?: CacheBackoff;
+}
+
+/**
+ * A person's view of one lease: host memory only. The screen is the one the
+ * driver served when it was last resolved; a driver resolved afresh serves a
+ * fresh screen.
+ */
+interface DesktopView {
+  readonly viewId: string;
+  readonly leaseId: DesktopLeaseId;
+  /** The person and the window or device that opened it; no one else reads through it. */
+  readonly holder: string;
+  screen?: { readonly provider: DesktopProvider; readonly screen: DesktopScreen };
+  lastSeenAt: number;
 }
 
 /** A tagged desktop with no live lease that a destroy has not yet verified gone. */
@@ -260,6 +344,14 @@ const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 const DEFAULT_TEARDOWN_TIMEOUT_MS = 60_000;
+/**
+ * A view nobody reads for this long is closed, so a window that went away
+ * without closing its tab does not hold idle release off for good. A tab that
+ * is on screen reads frames far more often than this.
+ */
+const DEFAULT_VIEW_IDLE_MS = 30_000;
+/** Open views one lease may hold: two leases' worth of windows and a phone, with room to spare. */
+const MAX_VIEWS_PER_LEASE = 4;
 const ACQUIRE_FAILURE_DETAIL = {
   refused: "The provider refused to create the desktop.",
   failed: "The provider failed to create the desktop.",
@@ -295,6 +387,78 @@ function operationOf(command: ComputerControlCommand): DesktopLeaseOperation | u
 
 const isPerson = (actor: EventActor): boolean =>
   actor.kind === "local-user" || actor.kind === "remote-device";
+
+/** Who holds a view: the person's kind and the scope they asked from. */
+function viewHolder(caller: DesktopLeaseCaller): string | undefined {
+  if (!isPerson(caller.actor) || caller.scopeId === undefined) return undefined;
+  const device = caller.actor.kind === "remote-device" ? String(caller.actor.deviceId) : "";
+  return `${caller.actor.kind}:${device}:${caller.scopeId}`;
+}
+
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] as const;
+
+/**
+ * Whether a frame a driver returned may be passed on: no larger than the
+ * recipe's screen, in bytes or in pixels, and the image it says it is. The
+ * image's own header must name the size the driver reported: a PNG's IHDR, or
+ * a JPEG's first frame header, since a few kilobytes of JPEG can declare a
+ * picture far larger than the screen. Nothing here decodes pixels; the bounds
+ * come first so nothing later does either on a frame that fails them. A
+ * driver is untrusted code, and a renderer is told the media type it may
+ * decode, so a type outside the two never passes.
+ */
+export function desktopFrameFits(frame: DesktopFrame, screen: DesktopRecipe["screen"]): boolean {
+  const { width, height, bytes } = frame;
+  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height)) return false;
+  if (width < 1 || height < 1 || width > screen.width || height > screen.height) return false;
+  if (bytes.byteLength > screen.width * screen.height * 4 + screen.height + 1_048_576) return false;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (frame.mediaType === "image/jpeg") {
+    const size = jpegFrameSize(bytes, view);
+    return size !== undefined && size.width === width && size.height === height;
+  }
+  if (frame.mediaType !== "image/png") return false;
+  if (bytes.byteLength < 24 || !PNG_SIGNATURE.every((byte, index) => bytes[index] === byte)) {
+    return false;
+  }
+  if (String.fromCharCode(...bytes.subarray(12, 16)) !== "IHDR") return false;
+  return view.getUint32(16) === width && view.getUint32(20) === height;
+}
+
+/**
+ * The size a JPEG's first start-of-frame segment names, walking the marker
+ * segments before it, or undefined when the bytes reach scan data or end
+ * before one. DHT (C4), JPG (C8), and DAC (CC) share the SOF range but are
+ * not frame headers.
+ */
+function jpegFrameSize(
+  bytes: Uint8Array,
+  view: DataView,
+): { readonly width: number; readonly height: number } | undefined {
+  if (bytes[0] !== 0xff || bytes[1] !== 0xd8) return undefined;
+  let offset = 2;
+  while (offset + 4 <= bytes.byteLength) {
+    if (bytes[offset] !== 0xff) return undefined;
+    const marker = view.getUint8(offset + 1);
+    if (marker === 0xff) {
+      offset += 1;
+      continue;
+    }
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd8)) {
+      offset += 2;
+      continue;
+    }
+    if (marker === 0xd9 || marker === 0xda) return undefined;
+    const length = view.getUint16(offset + 2);
+    if (length < 2) return undefined;
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      if (length < 7 || offset + 9 > bytes.byteLength) return undefined;
+      return { height: view.getUint16(offset + 5), width: view.getUint16(offset + 7) };
+    }
+    offset += 2 + length;
+  }
+  return undefined;
+}
 const sameOwner = (left: DesktopLeaseOwner, right: DesktopLeaseOwner): boolean =>
   left.mode === right.mode && String(left.threadId) === String(right.threadId);
 
@@ -340,11 +504,13 @@ export function createDesktopLeaseService(
 ): DesktopLeaseService {
   const { journal, projection, hostTag } = options;
   const teardownTimeoutMs = options.teardownTimeoutMs ?? DEFAULT_TEARDOWN_TIMEOUT_MS;
+  const viewIdleMs = options.viewIdleMs ?? DEFAULT_VIEW_IDLE_MS;
   const live = new Map<string, LiveLease>();
   const orphans = new Map<string, Orphan>();
   const serial = new Map<string, Promise<unknown>>();
   /** Leases with a transfer between its read and its delivery. */
   const transferring = new Set<string>();
+  const views = new Map<string, DesktopView>();
   let reconciliation: Promise<DesktopLeaseReconciliation> | undefined;
   let sweeping: Promise<void> | undefined;
   let sweepAgain = false;
@@ -532,6 +698,8 @@ export function createDesktopLeaseService(
     const record = read(leaseId);
     const state = record.lease.state;
     if (!desktopLeaseHoldsDesktop(state)) return refused("lease-ended");
+    // A lease that is ending shows nothing more to anyone.
+    closeViewsOf(leaseId);
     const entry = live.get(key);
     if (entry?.acquiring !== undefined) {
       // The provider is still creating it. The acquire path finishes the
@@ -655,7 +823,7 @@ export function createDesktopLeaseService(
     const owner: DesktopLeaseOwner = { mode, threadId };
     const thread = options.thread(owner);
     if (thread === undefined || !thread.active) return refused("thread-not-active");
-    const authorityRefusal = refuseCaller(caller.actor, owner);
+    const authorityRefusal = refuseCaller(caller, owner);
     if (authorityRefusal !== undefined) return authorityRefusal;
     if (!options.computerUseEnabled()) return refused("computer-use-off");
     const recipe = options.recipe(owner);
@@ -674,14 +842,15 @@ export function createDesktopLeaseService(
   }
 
   function refuseCaller(
-    actor: EventActor,
+    caller: Pick<DesktopLeaseCaller, "actor" | "scopeId">,
     owner: DesktopLeaseOwner,
   ): DesktopLeaseRefusal | undefined {
+    const { actor } = caller;
     if (actor.kind === "system") return refused("not-permitted");
     if (actor.kind === "agent" && String(actor.threadId) !== String(owner.threadId)) {
       return refused("not-permitted");
     }
-    if (!options.callerMayOpen(actor, owner)) return refused("not-permitted");
+    if (!options.callerMayOpen(actor, owner, caller.scopeId)) return refused("not-permitted");
     return undefined;
   }
 
@@ -814,6 +983,7 @@ export function createDesktopLeaseService(
     readonly handle: DesktopHandle;
     readonly provider: DesktopProvider;
     readonly thread: DesktopLeaseThread;
+    readonly recipe: DesktopRecipe;
   };
 
   /** Every operating command: the lease is the caller's thread's, ready, and still authorized. */
@@ -826,19 +996,20 @@ export function createDesktopLeaseService(
     if (mode !== "work" && mode !== "code") return refused("not-leasable-mode");
     const owner: DesktopLeaseOwner = { mode, threadId };
     if (!sameOwner(record.lease.owner, owner)) return refused("leased-by-another-thread");
-    const authorityRefusal = refuseCaller(caller.actor, owner);
+    const authorityRefusal = refuseCaller(caller, owner);
     if (authorityRefusal !== undefined) return authorityRefusal;
     const handle = live.get(String(caller.leaseId))?.handle;
     if (record.lease.state !== "ready" || handle === undefined) return refused("lease-ended");
     const thread = options.thread(owner);
     if (thread === undefined || !thread.active) return refused("thread-not-active");
-    if (!recipeStillCovers(options.recipe(owner), record.lease)) {
+    const recipe = options.recipe(owner);
+    if (recipe === undefined || !recipeStillCovers(recipe, record.lease)) {
       return refused("no-provider-configured");
     }
     const loaded = registered(String(record.lease.providerId));
     if (loaded === undefined || !loaded.effective) return refused("provider-disabled");
     if (!options.computerUseEnabled()) return refused("computer-use-off");
-    return { status: "operating", record, handle, provider: loaded.provider, thread };
+    return { status: "operating", record, handle, provider: loaded.provider, thread, recipe };
   }
 
   /**
@@ -1026,7 +1197,7 @@ export function createDesktopLeaseService(
     if (!sameOwner(record.lease.owner, { mode, threadId })) {
       return refused("leased-by-another-thread");
     }
-    const authorityRefusal = refuseCaller(caller.actor, { mode, threadId });
+    const authorityRefusal = refuseCaller(caller, { mode, threadId });
     if (authorityRefusal !== undefined) return authorityRefusal;
     return inOrder(caller.leaseId, () => end(caller.leaseId, "released", caller.actor));
   };
@@ -1052,6 +1223,185 @@ export function createDesktopLeaseService(
     entry.lastActivityAt = options.now();
   };
 
+  function closeView(viewId: string, view: DesktopView): void {
+    views.delete(viewId);
+    markTab(view.leaseId, "closed");
+    const screen = view.screen?.screen;
+    if (screen !== undefined) void driverCall(() => screen.close()).catch(() => undefined);
+  }
+
+  function closeViewsOf(leaseId: DesktopLeaseId): void {
+    for (const [viewId, view] of views) {
+      if (String(view.leaseId) === String(leaseId)) closeView(viewId, view);
+    }
+  }
+
+  const overview: DesktopLeaseService["overview"] = async (caller) => {
+    await start();
+    const { mode, threadId } = caller.owner;
+    if (mode !== "work" && mode !== "code") return refused("not-leasable-mode");
+    const owner: DesktopLeaseOwner = { mode, threadId };
+    const authorityRefusal = refuseCaller(caller, owner);
+    if (authorityRefusal !== undefined) return authorityRefusal;
+    const leases = projection
+      .list()
+      .map((record) => record.lease)
+      .filter((lease) => sameOwner(lease.owner, owner));
+    const holding = leases
+      .filter((lease) => desktopLeaseHoldsDesktop(lease.state))
+      .sort((left, right) => Date.parse(left.requestedAt) - Date.parse(right.requestedAt));
+    const lastEnded = leases
+      .filter((lease) => !desktopLeaseHoldsDesktop(lease.state))
+      .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
+      .slice(0, 1);
+    const admitted = admitAcquire(caller);
+    return {
+      status: "overview",
+      leases: [...holding, ...lastEnded],
+      providers: options.providers().map((entry) => leasableOf(entry.provider)),
+      start:
+        admitted.status === "refused"
+          ? admitted
+          : { status: "available", provider: leasableOf(admitted.provider) },
+    };
+  };
+
+  /** A view the caller holds on this lease, with the lease still operable by them. */
+  function admitView(
+    caller: DesktopViewCaller,
+  ):
+    | { readonly status: "viewing"; readonly view: DesktopView; readonly operating: Operating }
+    | DesktopPaneRefusal {
+    const view = views.get(String(caller.viewId));
+    const holder = viewHolder(caller);
+    if (
+      view === undefined ||
+      holder === undefined ||
+      view.holder !== holder ||
+      String(view.leaseId) !== String(caller.leaseId)
+    ) {
+      return { status: "refused", reason: "view-ended" };
+    }
+    const operating = admitOperating(caller);
+    if (operating.status === "refused") return operating;
+    view.lastSeenAt = options.now();
+    return { status: "viewing", view, operating };
+  }
+
+  /** The view's screen from the driver resolved now; a different driver serves a fresh one. */
+  async function screenOf(
+    view: DesktopView,
+    operating: Operating,
+  ): Promise<DesktopScreen | undefined> {
+    if (view.screen?.provider === operating.provider) return view.screen.screen;
+    const opened = await bounded(() => operating.provider.screen(operating.handle), {
+      status: "failed" as const,
+      reason: "timed-out",
+    });
+    if (opened.status !== "ready") return undefined;
+    // The view may have closed while the driver answered.
+    if (views.get(view.viewId) !== view) {
+      void driverCall(() => opened.screen.close()).catch(() => undefined);
+      return undefined;
+    }
+    const previous = view.screen?.screen;
+    if (previous !== undefined) void driverCall(() => previous.close()).catch(() => undefined);
+    view.screen = { provider: operating.provider, screen: opened.screen };
+    return opened.screen;
+  }
+
+  const openView: DesktopLeaseService["openView"] = async (caller) => {
+    const holder = viewHolder(caller);
+    if (holder === undefined) return refused("not-permitted");
+    const operating = admitOperating(caller);
+    if (operating.status === "refused") return operating;
+    const held = [...views.values()].filter(
+      (view) => String(view.leaseId) === String(caller.leaseId),
+    ).length;
+    if (held >= MAX_VIEWS_PER_LEASE) return { status: "refused", reason: "view-limit" };
+    const viewId = decodeDesktopViewId(options.uuid());
+    const view: DesktopView = {
+      viewId: String(viewId),
+      leaseId: caller.leaseId,
+      holder,
+      lastSeenAt: options.now(),
+    };
+    views.set(String(viewId), view);
+    markTab(caller.leaseId, "opened");
+    if ((await screenOf(view, operating)) === undefined) {
+      if (views.get(String(viewId)) === view) closeView(String(viewId), view);
+      return refused("provider-unavailable");
+    }
+    return { status: "viewing", viewId };
+  };
+
+  const frame: DesktopLeaseService["frame"] = async (caller) => {
+    const admitted = admitView(caller);
+    if (admitted.status === "refused") return admitted;
+    const screen = await screenOf(admitted.view, admitted.operating);
+    if (screen === undefined) return { status: "no-frame" };
+    const answered = await bounded(() => screen.frame(), {
+      status: "failed" as const,
+      reason: "timed-out",
+    });
+    if (
+      answered.status !== "frame" ||
+      !desktopFrameFits(answered.frame, admitted.operating.recipe.screen)
+    ) {
+      return { status: "no-frame" };
+    }
+    return { status: "frame", frame: answered.frame };
+  };
+
+  /**
+   * A person's input runs in the lease's order like an agent's command, and
+   * is journaled with the person as actor before the driver gets it. Nothing
+   * is asked: the person is not an agent, and what they do in the tab is
+   * their own act.
+   */
+  const input: DesktopLeaseService["input"] = (caller) =>
+    inOrder(caller.leaseId, async (): Promise<DesktopViewInputResult> => {
+      const admitted = admitView(caller);
+      if (admitted.status === "refused") return admitted;
+      const { record } = admitted.operating;
+      const operation = desktopInputOperation(caller.event);
+      if (operation !== undefined) {
+        const operated: DesktopLeaseOperated = {
+          leaseId: caller.leaseId,
+          owner: record.lease.owner,
+          providerId: record.lease.providerId,
+          operation,
+        };
+        append(record, caller.leaseId, DESKTOP_LEASE_EVENT_NAMES.operated, operated, caller.actor);
+      }
+      const entry = live.get(String(caller.leaseId));
+      if (entry !== undefined) entry.lastActivityAt = options.now();
+      const screen = await screenOf(admitted.view, admitted.operating);
+      if (screen === undefined) return { status: "not-delivered" };
+      const delivered = await bounded(() => screen.input(caller.event), {
+        status: "failed" as const,
+        reason: "timed-out",
+      });
+      return delivered.status === "delivered"
+        ? { status: "delivered" }
+        : { status: "not-delivered" };
+    });
+
+  const closeViewByCaller: DesktopLeaseService["closeView"] = async (caller) => {
+    const view = views.get(String(caller.viewId));
+    const holder = viewHolder(caller);
+    if (
+      view === undefined ||
+      holder === undefined ||
+      view.holder !== holder ||
+      String(view.leaseId) !== String(caller.leaseId)
+    ) {
+      return { status: "refused", reason: "view-ended" };
+    }
+    closeView(String(caller.viewId), view);
+    return { status: "view-closed" };
+  };
+
   /** Why a running lease must end now, when something has ended it. */
   function endReasonFor(record: DesktopLeaseRecord): DesktopLeaseEndReason | undefined {
     const lease = record.lease;
@@ -1074,6 +1424,9 @@ export function createDesktopLeaseService(
   async function sweepOnce(): Promise<void> {
     await start();
     const now = options.now();
+    for (const [viewId, view] of views) {
+      if (now - view.lastSeenAt >= viewIdleMs) closeView(viewId, view);
+    }
     for (const record of projection.list()) {
       const leaseId = record.lease.leaseId;
       if (!desktopLeaseHoldsDesktop(record.lease.state)) continue;
@@ -1136,6 +1489,11 @@ export function createDesktopLeaseService(
     control,
     transfer,
     markTab,
+    overview,
+    openView,
+    frame,
+    input,
+    closeView: closeViewByCaller,
     sweep,
   };
 }

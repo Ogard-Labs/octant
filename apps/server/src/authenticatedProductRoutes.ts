@@ -92,6 +92,15 @@ export function classifyProductAction(request: Request): string | undefined {
     if (method === "POST" && path === "/api/code/local-servers/commands") {
       return "code.local-servers.list";
     }
+    // A person's Desktop tab watches and operates the thread's leased desktop.
+    // The route re-derives the person from the bound principal and the lease
+    // service re-checks the thread on every request, frames included.
+    if (
+      method === "POST" &&
+      (path === "/api/code/desktops" || path === "/api/code/desktops/frame")
+    ) {
+      return "code.desktop.operate";
+    }
     // Language services are a read of a thread the device already reaches.
     // Syncing the editor's open documents feeds that read and writes nothing,
     // so both ride on the read action; the service re-checks reach, the

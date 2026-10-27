@@ -8,20 +8,22 @@ app-managed ([Architecture: extensions and skills](../architecture.md#extensions
 launches go through the shared confinement port, and authority is checked on the
 server ([Architecture: security and authority](../architecture.md#security-and-authority)).
 
-**Delivery state.** Accepted 2026-10-26; slices 1–4 are built and slices
-5–6 are not. The maintainer authorized this scope as post-preview work and
+**Delivery state.** Accepted 2026-10-26; slices 1–5 are built and slice 6
+is not. The maintainer authorized this scope as post-preview work and
 accepted the [maintainer decisions](#maintainer-decisions) below on 2026-10-26;
 it is not part of the first release, and the
 [Current Release Boundary](../../AGENTS.md#current-release-boundary) is
 unchanged by this document. The lease contract, the `desktop-provider` seam
 and its conformance suite, the host lease service, the host-local provider,
-artifact transfer, and the agent's binding of `octant_computer` to a lease
-exist; no recipe storage or Desktop pane does, so a running host refuses every
-lease command as a value and no lease exists for a send to bind (see
+artifact transfer, the agent's binding of `octant_computer` to a lease, and
+the Desktop pane exist; no recipe storage does, so a running host's Desktop
+tab shows that the Project has no recipe, every lease command refuses as a
+value, and no lease exists for a send to bind (see
 [Built in slice 1](#built-in-slice-1),
 [Built in slice 2](#built-in-slice-2),
-[Built in slice 3](#built-in-slice-3), and
-[Built in slice 4](#built-in-slice-4)). Slice 4's real-provider smoke is
+[Built in slice 3](#built-in-slice-3),
+[Built in slice 4](#built-in-slice-4), and
+[Built in slice 5](#built-in-slice-5)). Slice 4's real-provider smoke is
 still owed by the maintainer.
 
 **Name.** The product calls it a _disposable desktop_. "Computer" already names
@@ -700,8 +702,8 @@ through the lease service lands in a running desktop's inbox.
   `launch NAME` and `alive PID`. Readiness also requires `mkdir`, `rm`, `cp`,
   and `chmod`.
 - **Wiring.** An agent caller may open its own thread's lease while it is the
-  thread's current provider; a person still may not until the Desktop pane
-  (slice 5) brings their authority. Acquire confirmation still declines for
+  thread's current provider. A person's authority came with the Desktop pane
+  ([slice 5](#built-in-slice-5)). Acquire confirmation still declines for
   every caller.
 
 Rules this slice resolved:
@@ -788,6 +790,101 @@ credential's image-capable model driving a leased desktop through
 `octant_computer`. Until recipe storage exists, that smoke needs a
 development host that supplies a recipe.
 
+### Built in slice 5
+
+- **Contract.** `packages/contracts/src/desktopLease.ts`: `DesktopViewId`,
+  `DesktopPaneRequest` (`overview`, `acquire`, `release`, `retry-release`,
+  `extend`, `open-view`, `close-view`, `input`), `DesktopFrameRequest`,
+  `DesktopPaneAnswer`, and the view refusals `view-ended` and `view-limit`.
+  No request names a person: the host takes the person from the
+  authenticated principal.
+- **Policy.** `desktopInputOperation` in
+  `packages/domain/src/desktopLeasePolicy.ts`, and the remote action
+  `code.desktop.operate` in `packages/domain/src/remoteAccessPolicy.ts`
+  ([decision 3](#maintainer-decisions)).
+- **Host.** The lease service's `overview`, `openView`, `frame`, `input`, and
+  `closeView`, and `apps/server/src/desktopPaneRoutes.ts` at
+  `/api/code/desktops` and `/api/code/desktops/frame`, wired in
+  `apps/server/src/wiring/computerUse.ts`. A local window is `local-user`, a
+  paired device is `remote-device`, and `callerMayOpen` judges the window or
+  device the request came from.
+- **Client and pane.** `packages/client-runtime/src/desktopPaneClient.ts`, and
+  the Code dock's **Desktop** tool (`apps/web/src/desktop/`,
+  `apps/web/src/dockModules/DesktopModule.tsx`) with the states setup,
+  acquiring, live, interrupted, releasing, release-failed, and ended, plus
+  not-shown for a running desktop the tab is not showing
+  ([Workspace](workspace.md#tool-lifecycles)).
+
+Rules this slice resolved:
+
+- **A view is host memory, minted by a person's act.** A tab shows a screen
+  only through a view the host mints when the person starts a desktop in that
+  tab or presses **Show desktop**. Views are never journaled or persisted, so
+  a reloaded window and a restarted host hold none. A tab restored from a
+  saved layout, or reloaded, shows a running desktop as not shown and opens
+  nothing until the person asks; a desktop the restart ended shows as ended,
+  says why, and never reconnects. The pane keeps no lease id across a reload,
+  so it cannot rebind; it reads the thread's leases afresh. A view belongs to
+  the person, window, or device that opened it, and a frame or input naming
+  it from anywhere else refuses `view-ended`.
+- **Frames are polled one at a time through the host.** Each frame is its own
+  request, so every frame is authorized like a screenshot: the lease service
+  re-checks the thread, the caller's window or device, the recipe, the
+  driver, and the Computer use setting before reading it, and nothing is
+  stored. A held stream would have needed its own re-check loop. A tab reads
+  about four frames a second while its window shows and one every ten seconds
+  while hidden.
+- **A frame is bounded before anyone decodes it.** The host passes on a frame
+  only when its declared size fits the recipe's screen, its bytes fit that
+  screen uncompressed, and it is the image it claims to be: a PNG's own
+  header, or a JPEG's first frame header, must name the declared size, and
+  any other media type is refused. Otherwise the answer is `no-frame` and the
+  view stays open.
+- **A view lapses after 30 seconds unread.** An open view holds idle release
+  off, as an open tab does; a window that went away without closing its tab
+  stops holding it after 30 seconds. Views per lease are capped at four
+  (`view-limit`). Ending a lease ends its views.
+- **What a person's input journals.** `desktop.operated@1` with the person as
+  actor and no approval, written before the driver gets the input, in the
+  lease's order: a button press (`click`), a key going down (`press`), typed
+  text (`type`), and a scroll (`scroll`). Pointer moves and releases are sent
+  and not journaled: they change nothing alone and would write a row per
+  pointer frame. The pane gathers typed characters into one `text` input and
+  wheel movement into one scroll per tenth of a second. Input counts as an
+  operator acting for idle release.
+- **Who may open a thread from the pane.** A local window must be live and
+  hold the thread's Code Project; a paired device reaches the thread of any
+  active Code Project, as for other Code reads ([decision 3](#maintainer-decisions)).
+  Only Code threads have a Desktop tab.
+- **A person's acquire.** A person starting a host-local desktop is not asked
+  again (Plan still refuses). A billed lease still declines: the person's
+  billed confirmation arrives with the cloud provider (slice 6).
+- **The pane sends no file.** Transfer stays the agent's `send-file` and the
+  lease service's own path; the pane offers no transfer, so it adds no route
+  that could replace a file an app grant was given for.
+- **Release asks the person first.** Release destroys the desktop and its
+  contents, so the pane confirms it; Retry and extension do not ask. Extension
+  adds up to 30 minutes at a time, never past the recipe maximum.
+
+Evidence: `desktopLeaseService.test.ts` covers a person's view and input
+journaled as `local-user` and `remote-device` with nothing asked, views
+refused to another thread, an agent, and a window that may not open the
+thread, a view kept to its window and gone after a restart that ended its
+lease, idle release held while a view is read and resumed once it lapses,
+views ended by closing and by release, the view cap, frame bounds, and the
+overview's start and refusals. `desktopPaneRoutes.test.ts` covers the actor
+taken from a local window and a paired device, refusals of a request that
+names a window or actor, and a frame answered as the image.
+`hostLocalDesktopProcess.test.ts` drives a real Bubblewrap and `Xvfb` desktop
+through a person's view: a frame, then a click, text, and Enter that reach an
+`xev` window, journaled as `local-user`. `DesktopPane.test.tsx` covers the
+setup state with no recipe, Start to live with a click sent, a running desktop
+not reconnected on mount, a desktop ended by restart, Retry, and an
+interrupted view. Rendered QA ran the pane in a headless browser at a desktop
+and a narrow width in both themes, its live state against a real host-local
+desktop through the real route with a development recipe supplied by the QA
+fixture, since no recipe storage exists.
+
 ## Rationale
 
 The original plan leaned on execution capsules for isolation and a cloud
@@ -811,6 +908,7 @@ host-local launch through `apps/server/src/process/linuxConfinement.ts`),
 `apps/server/src/computerUse/desktopArtifactRead.ts` (the transfer's read),
 `apps/server/src/plugins/hostLocalDesktop/` (the host-local driver and its
 agent control), `apps/server/src/computerUse/computerUseToolService.ts` (a
-send's binding to a lease), and, once built, the web Desktop pane. Each slice above lists its
+send's binding to a lease), `apps/server/src/desktopPaneRoutes.ts`, and the
+web Desktop pane (`apps/web/src/desktop/`). Each slice above lists its
 evidence. Lease negatives, restart reconciliation, and real-`bwrap` permission
 negatives are the load-bearing checks; a cloud smoke is maintainer-run.

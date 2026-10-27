@@ -87,6 +87,10 @@ const REMOTE_APPROVABLE_ACTIONS = new Set([
   // already reaches, answered by a confined server. Starting a server that runs
   // the repository's own tooling is not a read and is not listed here.
   "code.language.read",
+  // Disposable desktops: any client that may open a Code thread may watch and
+  // operate the thread's leased desktop, which holds nothing of the host's.
+  // Starting one that bills the person still needs that person's confirmation.
+  "code.desktop.operate",
   // Companion surfaces: a paired device may watch what the host is already
   // showing for a thread, and may act inside that view. Reading the browser's
   // observation, a simulator screenshot the Apple toolchain recorded, and a

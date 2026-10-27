@@ -7,13 +7,19 @@ import type { ComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { randomUUID } from "node:crypto";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { decodeChatThreadId, decodeCodeThreadId, decodeWorkThreadId } from "@octant/contracts";
+import {
+  decodeChatThreadId,
+  decodeCodeThreadId,
+  decodeWindowId,
+  decodeWorkThreadId,
+} from "@octant/contracts";
 import { createMachineChangeRouteHandler } from "../machineChangeRoutes";
 import { decodeBrowserThreadId } from "@octant/contracts/browser-automation";
 import { createComputerUseRuntime } from "../computerUse/computerUseRuntime";
 import { createNodeComputerUseProcessPort } from "../computerUse/nodeComputerUseProcessPort";
 import { createComputerUseValidationEvidenceRecorder } from "../computerUse/computerUseValidationEvidence";
 import { createComputerUseRouteHandler } from "../computerUseRoutes";
+import { createDesktopPaneRouteHandler } from "../desktopPaneRoutes";
 import { LaunchSessionStore } from "../launchSessionStore";
 import { createLaunchSessionRouteHandler } from "../launchSessionRoutes";
 import { createWebAssetsHandler } from "../webAssets";
@@ -114,9 +120,10 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
   // value; the service still reconciles and sweeps so a lease journaled by any
   // later build is torn down on start. An agent's turn bound to one of its
   // thread's leases operates it as that thread's agent and asks in its thread
-  // through the Computer tool. A person's window or device brings its own
-  // authority and approval surface with the Desktop pane, so until then no
-  // person may open a thread here and their confirmations decline.
+  // through the Computer tool. A person reaches a Code thread's leases from
+  // its Desktop tab, as the window or paired device that may open the thread.
+  // A person acquiring a host-local desktop has already decided; a billed
+  // lease still declines until a person's billed confirmation exists.
   //
   // On Linux the bundled host-local driver is always loaded, so teardown and
   // restart reconciliation can reap its desktops even after the programs it
@@ -174,8 +181,26 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     },
     // The lease service already refuses an agent naming another thread. The
     // agent must also be the thread's current provider: one the thread has
-    // since switched away from no longer speaks for it.
-    callerMayOpen: (actor, owner) => {
+    // since switched away from no longer speaks for it. A person is the
+    // window or paired device the request came from: a local window must be
+    // live and hold the thread's Project, and a paired device reaches any
+    // active Code Project's thread, as it does for every other Code read.
+    // Only Code threads have a Desktop tab yet.
+    callerMayOpen: (actor, owner, scopeId) => {
+      if (actor.kind === "local-user" || actor.kind === "remote-device") {
+        if (scopeId === undefined || owner.mode !== "code") return false;
+        const thread = decodeBrowserThreadId(owner.threadId);
+        if (actor.kind === "remote-device") {
+          return (
+            String(actor.deviceId) === scopeId &&
+            browserAuthority.resolve(thread, "code") !== undefined
+          );
+        }
+        return (
+          windowAuthorityStore.listWindowIds().some((id) => String(id) === scopeId) &&
+          browserAuthority.canAccessWindow(decodeWindowId(scopeId), thread, "code")
+        );
+      }
       if (actor.kind !== "agent") return false;
       const current =
         owner.mode === "code"
@@ -402,6 +427,11 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     launchSessionStore,
     windowAuthorityStore,
   });
+  const desktopPaneRoutes = createDesktopPaneRouteHandler({
+    windowAuthorityStore,
+    service: desktopLeases,
+    localActorId: String(OCTANT_LOCAL_ACTOR_ID),
+  });
   const machineChangeRoutes = createMachineChangeRouteHandler({
     feed: machineChangeFeed,
     windowAuthorityStore,
@@ -418,6 +448,7 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     computerUseRoutes,
     computerUseRuntime,
     computerUseTools,
+    desktopPaneRoutes,
     launchSessionRoutes,
     machineChangeRoutes,
     stopComputerSettingsWatch,
