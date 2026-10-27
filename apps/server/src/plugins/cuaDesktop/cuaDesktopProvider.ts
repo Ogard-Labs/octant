@@ -18,10 +18,11 @@
  * so a restarted host finds what it left by listing those labels, and a host
  * that never comes back has its Space reaped when the daemon next runs.
  *
- * A Space on another machine reaches this daemon over Cua's mesh or relay.
- * Its screen, input, files, and launches go only over a route the relay
- * cannot read: the driver asks `GetSpaceRoute` before each one and refuses
- * `relay_https`, where the relay can read the session in transit.
+ * A Space on another machine runs on the one the recipe names, and reaches
+ * this daemon over Cua's mesh or relay. Its screen, input, files, and
+ * launches go only over a route the relay cannot read: the driver asks
+ * `GetSpaceRoute` before each one and refuses `relay_https`, where the relay
+ * can read the session in transit.
  *
  * The rules are in docs/design/disposable-desktops.md ("Cua Spaces through
  * the local daemon").
@@ -39,6 +40,7 @@ import {
   type UtcTimestamp,
 } from "@octant/contracts";
 import {
+  DESKTOP_SESSION_READABLE,
   maxDesktopFrameBytes,
   pngDimensions,
   ScreenshotDesktopControl,
@@ -50,6 +52,7 @@ import {
   type DesktopFrameResult,
   type DesktopHandle,
   type DesktopInputResult,
+  type DesktopListMachinesResult,
   type DesktopOwnedResource,
   type DesktopPlacement,
   type DesktopProvider,
@@ -96,24 +99,27 @@ import {
 
 export const CUA_DESKTOP_PROVIDER_ID = decodeDesktopProviderId("cua");
 /**
- * The placements offered now: a Space on this machine, and one on another of
- * the person's machines, which leaves this one through Cua's mesh or relay
- * and bills nothing. Billed clouds wait for decision C5.
+ * The placements offered now: a Space on this computer, and one on another
+ * of the person's machines, which leaves this one through Cua's mesh or relay
+ * and bills nothing; the recipe names which machine. Billed clouds wait for
+ * decision C5. The names say "computer", as all copy the host writes does,
+ * and never name this host's platform, which a paired device would read.
  */
 export const CUA_THIS_MACHINE_PLACEMENT = decodeDesktopPlacementId("this-machine");
 export const CUA_OTHER_MACHINE_PLACEMENT = decodeDesktopPlacementId("other-machine");
 export const CUA_DESKTOP_PLACEMENTS: ReadonlyArray<DesktopPlacement> = [
   {
     id: CUA_THIS_MACHINE_PLACEMENT,
-    displayName: "This machine",
+    displayName: "This computer",
     locality: "host-local",
     billed: false,
   },
   {
     id: CUA_OTHER_MACHINE_PLACEMENT,
-    displayName: "Your other machine",
+    displayName: "Your other computer",
     locality: "cloud",
     billed: false,
+    choosesMachine: true,
   },
 ];
 
@@ -380,25 +386,44 @@ export function createCuaDesktopProvider(
   }
 
   /**
-   * The one machine of the person's, other than this one, that provides
-   * Spaces now. More than one is refused rather than chosen for the person,
-   * who confirmed only "your other machine".
+   * The person's machines that provide Spaces, as this daemon lists them,
+   * keeping only those a Space can be created on: an id Octant can pass back
+   * and a route of `relay` or `direct`.
    */
-  async function otherMachine(
+  async function machines(
     signal: AbortSignal,
-  ): Promise<{ readonly status: "chosen"; readonly host: CuaHost } | DesktopAcquireResult> {
+  ): Promise<
+    | { readonly status: "listed"; readonly hosts: ReadonlyArray<CuaHost> }
+    | { readonly status: "cancelled" }
+    | { readonly status: "not-connected" }
+    | { readonly status: "failed"; readonly reason: string }
+  > {
     const listed = await call(`${SPACE}/ListHosts`, cuaListHostsRequest(), { signal });
     if (listed.kind === "cancelled") return { status: "cancelled" };
     if (listed.kind === "unreachable") return { status: "not-connected" };
     const hosts = listed.kind === "ok" ? readCuaListHosts(listed.message) : undefined;
     if (hosts === undefined) return failed("hosts-unreadable");
-    const online = hosts.filter((host) => host.online);
-    const [host] = online;
-    if (host === undefined) return { status: "refused", reason: "no-other-machine" };
-    if (online.length > 1) return { status: "refused", reason: "other-machine-ambiguous" };
-    if (!HOST_ID.test(host.id) || (host.via !== "relay" && host.via !== "direct")) {
-      return failed("hosts-unreadable");
-    }
+    return {
+      status: "listed",
+      hosts: hosts.filter(
+        (host) => HOST_ID.test(host.id) && (host.via === "relay" || host.via === "direct"),
+      ),
+    };
+  }
+
+  /**
+   * The machine the recipe names, when the daemon lists it and it answers
+   * now. The person confirmed that machine, so no other is ever chosen.
+   */
+  async function namedMachine(
+    machineId: string,
+    signal: AbortSignal,
+  ): Promise<{ readonly status: "chosen"; readonly host: CuaHost } | DesktopAcquireResult> {
+    const listed = await machines(signal);
+    if (listed.status !== "listed") return listed;
+    const host = listed.hosts.find((candidate) => candidate.id === machineId);
+    if (host === undefined) return { status: "refused", reason: "machine-not-found" };
+    if (!host.online) return { status: "refused", reason: "machine-offline" };
     return { status: "chosen", host };
   }
 
@@ -420,7 +445,7 @@ export function createCuaDesktopProvider(
     if (transport !== undefined && UNREAD_ROUTES.has(transport)) return { status: "unread" };
     return {
       status: "refused",
-      reason: transport === "relay_https" ? "relay-reads-session" : "route-unverified",
+      reason: transport === "relay_https" ? DESKTOP_SESSION_READABLE : "route-unverified",
     };
   }
 
@@ -620,6 +645,24 @@ export function createCuaDesktopProvider(
     daemon: CUA_DESKTOP_DAEMON,
     // The daemon is the person's to install, start, and sign in; Octant only
     // checks that it answers and is a release this driver was written for.
+    // Lists the machines a person may name for a Space on another of their
+    // machines. It creates nothing.
+    listMachines: async (placementId, signal): Promise<DesktopListMachinesResult> => {
+      if (String(placementId) !== String(CUA_OTHER_MACHINE_PLACEMENT)) {
+        return { status: "refused", reason: "placement-not-offered" };
+      }
+      const listed = await machines(signal);
+      if (listed.status === "cancelled") return failed("cancelled");
+      if (listed.status !== "listed") return listed;
+      return {
+        status: "listed",
+        machines: listed.hosts.map((host) => ({
+          id: host.id,
+          name: host.name,
+          online: host.online,
+        })),
+      };
+    },
     status: async () => {
       const info = await call("/cua.daemon.v1.DaemonService/GetInfo", cuaGetInfoRequest());
       if (info.kind === "unreachable") return { status: "not-connected" };
@@ -649,9 +692,14 @@ export function createCuaDesktopProvider(
       if (recipe.credentialRef !== undefined) {
         return { status: "refused", reason: "credential-not-used" };
       }
+      // A Space on another machine runs only on the one the recipe names.
+      if (!offMachine && recipe.machine !== undefined) {
+        return { status: "refused", reason: "machine-not-offered" };
+      }
       let host: CuaHost | undefined;
       if (offMachine) {
-        const chosen = await otherMachine(request.signal);
+        if (recipe.machine === undefined) return { status: "refused", reason: "machine-not-named" };
+        const chosen = await namedMachine(String(recipe.machine.machineId), request.signal);
         if (chosen.status !== "chosen") return chosen;
         host = chosen.host;
       }

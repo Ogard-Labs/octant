@@ -5,7 +5,7 @@ import {
   type DesktopRecipe,
 } from "@octant/contracts/desktop-lease";
 import { decodeProjectSummary, type ProjectSummary } from "@octant/contracts/projects";
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ProjectDesktopRecipeSection } from "./ProjectDesktopRecipeSection";
@@ -49,22 +49,39 @@ const spaces = {
   placements: [
     {
       placementId: "this-machine",
-      displayName: "This machine",
+      displayName: "This computer",
       locality: "host-local",
       billed: false,
     },
     {
       placementId: "other-machine",
-      displayName: "Your other machine",
+      displayName: "Your other computer",
       locality: "cloud",
       billed: false,
+      choosesMachine: true,
     },
   ],
 } as const;
 
-function client(providers: ReadonlyArray<object>) {
-  const request = vi.fn<DesktopPaneClient["request"]>(async () =>
-    decodeDesktopPaneAnswer({ status: "recipe-providers", providers }),
+/** The person's machines the host lists for a placement that chooses one. */
+const MACHINES = [
+  { machineId: "m-7f3a", displayName: "spare mini", online: true },
+  { machineId: "m-0b1c", displayName: "old laptop", online: false },
+] as const;
+
+function client(
+  providers: ReadonlyArray<object>,
+  machines:
+    | { readonly status: "recipe-machines"; readonly machines: ReadonlyArray<object> }
+    | {
+        readonly status: "refused";
+        readonly reason: "provider-unavailable";
+      } = { status: "recipe-machines", machines: MACHINES },
+) {
+  const request = vi.fn<DesktopPaneClient["request"]>(async (asked) =>
+    decodeDesktopPaneAnswer(
+      asked.kind === "recipe-machines" ? machines : { status: "recipe-providers", providers },
+    ),
   );
   return { request };
 }
@@ -132,7 +149,7 @@ describe("ProjectDesktopRecipeSection", () => {
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(null));
   });
 
-  it("offers a provider's placements and saves the one chosen, with no key, starting from its first", async () => {
+  it("offers a provider's placements and saves the one chosen, with no key and the computer it runs on, starting from its first", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn(async () => true);
     render(
@@ -152,15 +169,26 @@ describe("ProjectDesktopRecipeSection", () => {
     await user.click(screen.getByRole("combobox", { name: "Desktop provider" }));
     await user.click(await screen.findByRole("option", { name: "Spaces" }));
     expect(screen.getByRole("combobox", { name: "Where the desktop runs" })).toHaveTextContent(
-      "This machine",
+      "This computer",
     );
+    // This computer's placement chooses no machine.
+    expect(screen.queryByRole("combobox", { name: "Which computer" })).toBeNull();
     await user.click(screen.getByRole("combobox", { name: "Where the desktop runs" }));
-    await user.click(await screen.findByRole("option", { name: "Your other machine" }));
+    await user.click(await screen.findByRole("option", { name: "Your other computer" }));
+    // The person names the computer before the recipe can be set.
+    const computer = await screen.findByRole("combobox", { name: "Which computer" });
+    expect(screen.getByRole("button", { name: "Set recipe" })).toBeDisabled();
+    await user.click(computer);
+    expect(
+      await screen.findByRole("option", { name: "old laptop (not answering now)" }),
+    ).toBeTruthy();
+    await user.click(screen.getByRole("option", { name: "spare mini" }));
     await user.click(screen.getByRole("button", { name: "Set recipe" }));
 
     expect(onChange).toHaveBeenCalledWith({
       providerId: "spaces.example",
       placementId: "other-machine",
+      machine: { machineId: "m-7f3a", displayName: "spare mini" },
       screen: { width: 1280, height: 800 },
       network: "none",
       leaseMinutes: 30,
@@ -193,6 +221,48 @@ describe("ProjectDesktopRecipeSection", () => {
     await user.click(screen.getByRole("combobox", { name: "Desktop screen size" }));
     await user.click(await screen.findByRole("option", { name: "1920 × 1080" }));
     expect(screen.getByRole("button", { name: "Save recipe" })).toBeDisabled();
+  });
+
+  it("shows the computer a saved recipe names, and says so when the host cannot list them", async () => {
+    const saved = project(
+      decodeDesktopRecipe({
+        ...savedRecipe,
+        providerId: "spaces.example",
+        placementId: "other-machine",
+        machine: { machineId: "m-7f3a", displayName: "spare mini" },
+      }),
+    );
+    const listed = client([spaces]);
+    render(
+      <ProjectDesktopRecipeSection
+        client={listed}
+        onChange={vi.fn(async () => true)}
+        project={saved}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Which computer" })).toHaveTextContent(
+        "spare mini",
+      ),
+    );
+    expect(listed.request).toHaveBeenCalledWith(
+      { kind: "recipe-machines", providerId: "spaces.example", placementId: "other-machine" },
+      expect.anything(),
+    );
+    cleanup();
+
+    render(
+      <ProjectDesktopRecipeSection
+        client={client([spaces], { status: "refused", reason: "provider-unavailable" })}
+        onChange={vi.fn(async () => true)}
+        project={saved}
+      />,
+    );
+    expect(await screen.findByText(/couldn't list your computers/)).toBeTruthy();
+    // The saved computer still shows, so the person sees where the desktop runs.
+    expect(screen.getByRole("combobox", { name: "Which computer" })).toHaveTextContent(
+      "spare mini",
+    );
   });
 
   it("offers nothing to set when the host offers no provider", async () => {

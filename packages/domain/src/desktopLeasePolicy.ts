@@ -15,6 +15,22 @@ import type {
  * applies them; docs/design/disposable-desktops.md owns them.
  */
 
+/**
+ * Whether a recipe on these terms may give its desktop network. A host-local
+ * desktop gets network only by sharing the host's namespace, which reaches
+ * the Octant server. No placement offers network yet: every placement offered
+ * is a VM whose user networking can reach the loopback of the machine it runs
+ * on, which on this computer holds the Octant server and on another of the
+ * person's machines holds their own services there. So only a provider with
+ * no placements, running off this computer, may allow it.
+ */
+export function desktopNetworkAllowed(input: {
+  readonly locality: DesktopProviderLocality;
+  readonly placed: boolean;
+}): boolean {
+  return input.locality === "cloud" && !input.placed;
+}
+
 /** A thread holds at most two leases; a host runs at most two host-local ones. */
 export const DESKTOP_LEASE_CAPS = { perThread: 2, hostLocalPerHost: 2 } as const;
 

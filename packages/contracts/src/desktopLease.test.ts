@@ -96,13 +96,21 @@ describe("desktop lease contract", () => {
       placements: [
         {
           placementId: "this-machine",
-          displayName: "This machine",
+          displayName: "This computer",
           locality: "host-local",
           billed: false,
+        },
+        {
+          placementId: "other-machine",
+          displayName: "Your other computer",
+          locality: "cloud",
+          billed: false,
+          choosesMachine: true,
         },
       ],
     });
     expect(offered.placements?.[0]?.placementId).toBe("this-machine");
+    expect(offered.placements?.[1]?.choosesMachine).toBe(true);
     expect(() => decodeLeasableDesktopProvider({ ...offered, daemon: false })).toThrow();
   });
 
@@ -183,10 +191,52 @@ describe("desktop lease contract", () => {
     ).toThrow();
   });
 
+  it("names the person's machine in a recipe, its lease, and a person's confirmation, and refuses one that is not an id", () => {
+    const machine = { machineId: "m-7f3a", displayName: "spare mini" };
+    expect(decodeDesktopRecipe({ ...recipe, machine }).machine).toEqual(machine);
+    expect(decodeDesktopLeaseRequested({ ...requested, machine }).machine).toEqual(machine);
+    expect(
+      decodeDesktopPaneRequest({ kind: "acquire", threadId, confirmedMachine: "m-7f3a" }),
+    ).toMatchObject({ confirmedMachine: "m-7f3a" });
+    for (const machineId of ["", "../m", "-m", "m/7", "a".repeat(129)]) {
+      expect(() =>
+        decodeDesktopRecipe({ ...recipe, machine: { ...machine, machineId } }),
+      ).toThrow();
+    }
+    expect(() =>
+      decodeDesktopRecipe({ ...recipe, machine: { ...machine, token: "secret" } }),
+    ).toThrow();
+  });
+
+  it("lists the person's machines for the recipe editor, at most 64", () => {
+    const machine = { machineId: "m-7f3a", displayName: "spare mini", online: true };
+    expect(
+      decodeDesktopPaneRequest({
+        kind: "recipe-machines",
+        providerId: "cua",
+        placementId: "other-machine",
+      }),
+    ).toMatchObject({ kind: "recipe-machines" });
+    expect(decodeDesktopPaneAnswer({ status: "recipe-machines", machines: [machine] })).toEqual({
+      status: "recipe-machines",
+      machines: [machine],
+    });
+    expect(() =>
+      decodeDesktopPaneAnswer({
+        status: "recipe-machines",
+        machines: Array.from({ length: 65 }, () => machine),
+      }),
+    ).toThrow();
+  });
+
   it("answers a view refusal apart from the lease's own refusals", () => {
     expect(decodeDesktopPaneAnswer({ status: "refused", reason: "view-ended" })).toEqual({
       status: "refused",
       reason: "view-ended",
+    });
+    expect(decodeDesktopPaneAnswer({ status: "refused", reason: "session-readable" })).toEqual({
+      status: "refused",
+      reason: "session-readable",
     });
     expect(() => decodeDesktopPaneAnswer({ status: "refused", reason: "stream-lost" })).toThrow();
   });

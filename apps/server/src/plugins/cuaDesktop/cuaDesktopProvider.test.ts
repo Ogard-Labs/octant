@@ -7,6 +7,7 @@ import {
   decodeDesktopCredentialRef,
   decodeDesktopHostTag,
   decodeDesktopLeaseId,
+  decodeDesktopMachineId,
   decodeDesktopPlacementId,
   decodeDesktopProviderId,
   decodeDesktopRecipe,
@@ -19,6 +20,7 @@ import {
   type ComputerControlResult,
 } from "@octant/contracts/computer-use-plugin";
 import {
+  DESKTOP_SESSION_READABLE,
   desktopDaemonMethodDeclared,
   type DesktopProvider,
 } from "@octant/plugin-api/desktop-provider";
@@ -35,6 +37,8 @@ import {
   CUA_DESKTOP_PROVIDER_ID,
   CUA_HOST_LABEL,
   CUA_LEASE_LABEL,
+  CUA_OTHER_MACHINE_PLACEMENT,
+  CUA_THIS_MACHINE_PLACEMENT,
 } from "./cuaDesktopProvider";
 import {
   mapOf,
@@ -59,12 +63,15 @@ const recipe: DesktopRecipe = decodeDesktopRecipe({
   maximumLeaseMinutes: 240,
   idleMinutes: 15,
 });
-const otherMachineRecipe: DesktopRecipe = decodeDesktopRecipe({
-  ...recipe,
-  placementId: "other-machine",
-});
 /** The person's spare machine, set up with `cua host setup --provide-spaces`. */
 const SPARE: RecordedCuaHost = { id: "m-7f3a", name: "spare mini", via: "relay", online: true };
+const onMachine = (host: RecordedCuaHost): DesktopRecipe =>
+  decodeDesktopRecipe({
+    ...recipe,
+    placementId: "other-machine",
+    machine: { machineId: host.id, displayName: host.name },
+  });
+const otherMachineRecipe = onMachine(SPARE);
 const hostTag = decodeDesktopHostTag("c5000000-0000-4000-8000-0000000000aa");
 const ELEMENT_CLICK = decodeComputerControlCommand({
   operation: "click",
@@ -254,9 +261,10 @@ describe("Cua desktop provider", () => {
     });
   });
 
-  it("creates a Space on the person's one other machine that answers, and refuses to choose among several or none", async () => {
+  it("creates a Space on the machine the recipe names, and refuses one the daemon does not list or that is asleep", async () => {
     const asleep = { ...SPARE, id: "m-0b1c", name: "old laptop", online: false };
-    const { daemon, provider } = await harness({ hosts: [asleep, SPARE] });
+    const second = { ...SPARE, id: "m-9d2e", name: "studio" };
+    const { daemon, provider } = await harness({ hosts: [asleep, SPARE, second] });
     await acquired(provider, otherMachineRecipe);
     const [space] = daemon.spaces();
     const create = space?.createRequest ?? [];
@@ -270,22 +278,76 @@ describe("Cua desktop provider", () => {
       "/cua.daemon.v1.SpaceService/CreateSpace",
     ]);
 
-    const second = { ...SPARE, id: "m-9d2e", name: "studio" };
-    for (const [hosts, reason] of [
-      [[], "no-other-machine"],
-      [[asleep], "no-other-machine"],
-      [[SPARE, second], "other-machine-ambiguous"],
-      // A long listing is read whole, so a machine that answers far down it still counts.
-      [[SPARE, ...Array.from({ length: 300 }, () => asleep), second], "other-machine-ambiguous"],
+    // Another online machine is never chosen in place of the one named.
+    const onSecond = await harness({ hosts: [SPARE, second] });
+    await acquired(onSecond.provider, onMachine(second));
+    expect(onSecond.daemon.spaces().map((space) => space.host)).toEqual(["m-9d2e"]);
+    // A long listing is read whole, so the named machine far down it is found.
+    const far = await harness({
+      hosts: [SPARE, ...Array.from({ length: 300 }, () => asleep), second],
+    });
+    await acquired(far.provider, onMachine(second));
+    expect(far.daemon.spaces().map((space) => space.host)).toEqual(["m-9d2e"]);
+
+    for (const [hosts, named, reason] of [
+      [[], SPARE, "machine-not-found"],
+      [[second], SPARE, "machine-not-found"],
+      [[asleep, SPARE], asleep, "machine-offline"],
     ] as const) {
       const other = await harness({ hosts });
       await expect(
-        other.provider.acquire(
-          acquireRequest(30, new AbortController().signal, otherMachineRecipe),
-        ),
+        other.provider.acquire(acquireRequest(30, new AbortController().signal, onMachine(named))),
       ).resolves.toEqual({ status: "refused", reason });
       expect(methodsCalled(other.daemon)).toEqual(["/cua.daemon.v1.SpaceService/ListHosts"]);
     }
+    // A recipe that names no machine, or names one for this computer, asks nothing.
+    const unnamed = await harness({ hosts: [SPARE] });
+    await expect(
+      unnamed.provider.acquire(
+        acquireRequest(
+          30,
+          new AbortController().signal,
+          decodeDesktopRecipe({ ...recipe, placementId: "other-machine" }),
+        ),
+      ),
+    ).resolves.toEqual({ status: "refused", reason: "machine-not-named" });
+    await expect(
+      unnamed.provider.acquire(
+        acquireRequest(
+          30,
+          new AbortController().signal,
+          decodeDesktopRecipe({ ...otherMachineRecipe, placementId: "this-machine" }),
+        ),
+      ),
+    ).resolves.toEqual({ status: "refused", reason: "machine-not-offered" });
+    expect(methodsCalled(unnamed.daemon)).toEqual([]);
+  });
+
+  it("lists the person's machines a Space can run on, for a recipe to name one", async () => {
+    const asleep = { ...SPARE, id: "m-0b1c", name: "old laptop", online: false };
+    const unreachable = { ...SPARE, id: "m-1aa0", name: "nowhere", via: "cloud" };
+    const { daemon, provider } = await harness({ hosts: [asleep, SPARE, unreachable] });
+    const listMachines = provider.listMachines;
+    if (listMachines === undefined) throw new Error("the driver lists no machines");
+    await expect(
+      listMachines(CUA_OTHER_MACHINE_PLACEMENT, new AbortController().signal),
+    ).resolves.toEqual({
+      status: "listed",
+      machines: [
+        { id: "m-0b1c", name: "old laptop", online: false },
+        { id: "m-7f3a", name: "spare mini", online: true },
+      ],
+    });
+    await expect(
+      listMachines(CUA_THIS_MACHINE_PLACEMENT, new AbortController().signal),
+    ).resolves.toEqual({ status: "refused", reason: "placement-not-offered" });
+    expect(methodsCalled(daemon)).toEqual(["/cua.daemon.v1.SpaceService/ListHosts"]);
+    expect(
+      provider.placements?.map((placement) => [placement.displayName, placement.choosesMachine]),
+    ).toEqual([
+      ["This computer", undefined],
+      ["Your other computer", true],
+    ]);
   });
 
   it("destroys a Space the daemon reports on another machine than the one asked", async () => {
@@ -309,14 +371,14 @@ describe("Cua desktop provider", () => {
     const { daemon, provider } = await harness({ hosts: [SPARE], route: "relay_https" });
     const { result } = await acquired(provider, otherMachineRecipe);
     const acquiring = daemon.calls().length;
-    const relayReads = { status: "refused", reason: "relay-reads-session" };
+    const relayReads = { status: "refused", reason: DESKTOP_SESSION_READABLE };
     await expect(provider.screen(result.handle)).resolves.toEqual(relayReads);
     await expect(
       provider.deliver(result.handle, "app", new TextEncoder().encode("#!/bin/sh\n")),
     ).resolves.toEqual(relayReads);
     await expect(provider.control(result.handle, { operation: "apps" })).resolves.toMatchObject({
       kind: "refused",
-      reason: "relay-reads-session",
+      reason: DESKTOP_SESSION_READABLE,
     });
     // Each was refused on the route alone: nothing reached the Space.
     expect(methodsCalled(daemon).slice(acquiring)).toEqual(
@@ -350,7 +412,7 @@ describe("Cua desktop provider", () => {
     }
   });
 
-  it("asks a person before a Space starts on another machine, and starts it only for the placement they confirmed", async () => {
+  it("asks a person before a Space starts on another machine, and starts it only for the placement and machine they confirmed", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-cua-away-"));
     directories.push(directory);
     const connection = openSqlite(join(directory, "octant.sqlite3"));
@@ -379,7 +441,9 @@ describe("Cua desktop provider", () => {
       }),
     ).resolves.toEqual({ status: "refused", reason: "declined" });
     expect(asked).toEqual(["off-machine"]);
-    // A person's Start without their confirmation of this placement starts nothing.
+    // A person's Start without their confirmation of this placement and
+    // machine starts nothing.
+    const away = decodeDesktopPlacementId("other-machine");
     for (const unconfirmed of [
       caller,
       { ...caller, confirmedProvider: cua },
@@ -387,6 +451,13 @@ describe("Cua desktop provider", () => {
         ...caller,
         confirmedProvider: cua,
         confirmedPlacement: decodeDesktopPlacementId("this-machine"),
+      },
+      { ...caller, confirmedProvider: cua, confirmedPlacement: away },
+      {
+        ...caller,
+        confirmedProvider: cua,
+        confirmedPlacement: away,
+        confirmedMachine: decodeDesktopMachineId("m-9d2e"),
       },
     ]) {
       await expect(service.acquire(unconfirmed)).resolves.toEqual({
@@ -401,11 +472,17 @@ describe("Cua desktop provider", () => {
       service.acquire({
         ...caller,
         confirmedProvider: cua,
-        confirmedPlacement: decodeDesktopPlacementId("other-machine"),
+        confirmedPlacement: away,
+        confirmedMachine: decodeDesktopMachineId("m-7f3a"),
       }),
     ).resolves.toMatchObject({
       status: "acquired",
-      lease: { placementId: "other-machine", locality: "cloud", billed: false },
+      lease: {
+        placementId: "other-machine",
+        machine: { machineId: "m-7f3a", displayName: "spare mini" },
+        locality: "cloud",
+        billed: false,
+      },
     });
     expect(daemon.spaces().map((space) => space.host)).toEqual(["m-7f3a"]);
   });

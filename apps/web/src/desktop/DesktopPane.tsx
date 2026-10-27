@@ -6,6 +6,7 @@ import type {
   DesktopInputEvent,
   DesktopLease,
   DesktopLeaseId,
+  DesktopMachine,
   DesktopPaneAnswer,
   DesktopPaneRequest,
   DesktopPlacementId,
@@ -22,6 +23,7 @@ import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import {
   desktopKeyIntent,
   desktopPaneState,
+  desktopWhere,
   endedMessage,
   extensionMinutes,
   providerName,
@@ -50,15 +52,16 @@ interface OpenView {
   readonly viewId: DesktopViewId;
 }
 
-/** The provider and placement a person is asked to confirm before a desktop starts. */
+/** The provider, placement, and machine a person is asked to confirm before a desktop starts. */
 interface StartToConfirm {
   readonly provider: LeasableDesktopProvider;
   readonly placementId?: DesktopPlacementId;
+  readonly machine?: DesktopMachine;
 }
 
 /** What this tab holds of one lease's screen in this window session. */
 type Shown =
-  | { readonly leaseId: DesktopLeaseId; readonly presence: "opening" | "lost" }
+  | { readonly leaseId: DesktopLeaseId; readonly presence: "opening" | "lost" | "readable" }
   | { readonly leaseId: DesktopLeaseId; readonly presence: "open"; readonly view: OpenView };
 
 /**
@@ -171,6 +174,12 @@ export function DesktopPane(props: {
         setNotice(undefined);
         return;
       }
+      // The stage says why in full; a notice would only repeat it.
+      if (answer?.status === "refused" && answer.reason === "session-readable") {
+        setShown({ leaseId, presence: "readable" });
+        setNotice(undefined);
+        return;
+      }
       setShown({ leaseId, presence: "lost" });
       setNotice(
         answer?.status === "refused"
@@ -213,6 +222,9 @@ export function DesktopPane(props: {
           ...(confirmed?.placementId === undefined
             ? {}
             : { confirmedPlacement: confirmed.placementId }),
+          ...(confirmed?.machine === undefined
+            ? {}
+            : { confirmedMachine: confirmed.machine.machineId }),
         });
         if (answer?.status === "acquired") await show(answer.lease.leaseId);
         else if (answer?.status === "not-acquired") {
@@ -246,10 +258,21 @@ export function DesktopPane(props: {
     [refresh],
   );
 
+  // The host stopped the open view because the connection could be read.
+  const readable = useCallback(() => {
+    setShown((current) =>
+      current === undefined ? undefined : { leaseId: current.leaseId, presence: "readable" },
+    );
+    void refresh();
+  }, [refresh]);
+
   const leases = overview === undefined ? [] : runningDesktops(overview);
   const providers = overview?.providers ?? [];
+  const where = selected === undefined ? undefined : desktopWhere(providers, selected);
   const title =
-    selected === undefined ? "Desktop" : providerName(providers, String(selected.providerId));
+    selected === undefined
+      ? "Desktop"
+      : `${providerName(providers, String(selected.providerId))}${where === undefined ? "" : ` · ${where}`}`;
 
   return (
     <section aria-label="Desktop" className="device-pane desktop-pane">
@@ -289,14 +312,15 @@ export function DesktopPane(props: {
         <DesktopStage
           client={client}
           onLost={lost}
+          onReadable={readable}
           onRetry={(lease) =>
             void act("retry", { kind: "retry-release", threadId, leaseId: lease.leaseId })
           }
           onShow={(lease) => void show(lease.leaseId)}
           onStart={() => {
             // A billed desktop spends the person's money, and one off this
-            // machine runs elsewhere and can outlive it, so they confirm
-            // every one here, for the provider and placement they see.
+            // computer runs elsewhere and can outlive it, so they confirm
+            // every one here, for the provider, placement, and machine they see.
             const offered = overview?.start.status === "available" ? overview.start : undefined;
             if (
               offered !== undefined &&
@@ -305,6 +329,7 @@ export function DesktopPane(props: {
               setConfirmStart({
                 provider: offered.provider,
                 ...(offered.placementId === undefined ? {} : { placementId: offered.placementId }),
+                ...(offered.machine === undefined ? {} : { machine: offered.machine }),
               });
             } else void start();
           }}
@@ -340,19 +365,34 @@ export function DesktopPane(props: {
 
 /**
  * What a person agrees to before a desktop that bills, or runs off this
- * machine, starts: whose account bills, or where it runs and what is left
- * running there if this machine stops.
+ * computer, starts: whose account bills, or which computer it runs on and
+ * what is left running there if this computer stops.
  */
 function StartConfirmation(props: {
   readonly confirm: StartToConfirm;
   readonly onCancel: () => void;
   readonly onConfirm: () => void;
 }) {
-  const { provider, placementId } = props.confirm;
+  const { provider, placementId, machine } = props.confirm;
   const placement = provider.placements?.find(
     (entry) => String(entry.placementId) === String(placementId ?? ""),
   );
   const where = placement === undefined ? undefined : placement.displayName;
+  if (!provider.billed && machine !== undefined) {
+    return (
+      <OctantConfirmDialog
+        confirmLabel="Start desktop"
+        onCancel={props.onCancel}
+        onConfirm={props.onConfirm}
+        title={`Start a desktop on ${machine.displayName}?`}
+      >
+        {provider.displayName} runs it on {machine.displayName}
+        {where === undefined ? "" : ` (${where})`}, not on this computer, and it does not bill you.
+        It ends when you release it or when it expires. If this computer stops, Octant cannot end
+        it, and it may keep running there until you delete it in {provider.displayName}.
+      </OctantConfirmDialog>
+    );
+  }
   if (provider.billed) {
     const account =
       where === undefined ? provider.displayName : `${provider.displayName} · ${where}`;
@@ -373,11 +413,11 @@ function StartConfirmation(props: {
       confirmLabel="Start desktop"
       onCancel={props.onCancel}
       onConfirm={props.onConfirm}
-      title="Start a desktop off this machine?"
+      title="Start a desktop off this computer?"
     >
-      {provider.displayName} runs it off this machine
+      {provider.displayName} runs it off this computer
       {where === undefined ? "" : ` (${where})`}, and it does not bill you. It ends when you release
-      it or when it expires. If this machine stops, Octant cannot end it, and it may keep running
+      it or when it expires. If this computer stops, Octant cannot end it, and it may keep running
       there until you delete it in {provider.displayName}.
     </OctantConfirmDialog>
   );
@@ -461,6 +501,7 @@ function dotFor(state: DesktopPaneState): "running" | "busy" | "lost" | "idle" {
     case "not-shown":
       return "busy";
     case "interrupted":
+    case "session-readable":
     case "release-failed":
       return "lost";
     default:
@@ -491,10 +532,17 @@ export function stateWords(state: DesktopPaneState, now: number): string {
       return "Ended";
     case "live":
     case "interrupted":
+    case "session-readable":
     case "not-shown": {
       const minutes = Math.max(0, Math.floor((now - Date.parse(state.lease.requestedAt)) / 60_000));
       const word =
-        state.kind === "live" ? "Live" : state.kind === "interrupted" ? "Interrupted" : "Running";
+        state.kind === "live"
+          ? "Live"
+          : state.kind === "interrupted"
+            ? "Interrupted"
+            : state.kind === "session-readable"
+              ? "Not shown"
+              : "Running";
       return `${word} · ${minutes} min · ends ${clock(Date.parse(state.lease.expiresAt))}`;
     }
   }
@@ -511,6 +559,7 @@ function DesktopStage(props: {
   readonly onShow: (lease: DesktopLease) => void;
   readonly onRetry: (lease: DesktopLease) => void;
   readonly onLost: (reason?: string) => void;
+  readonly onReadable: () => void;
 }) {
   const { state } = props;
   switch (state.kind) {
@@ -550,6 +599,14 @@ function DesktopStage(props: {
           action={{ label: "Reconnect", run: () => props.onShow(state.lease), icon: "reconnect" }}
           lede="The live view stopped. The desktop is still running."
           title="Live view interrupted"
+        />
+      );
+    case "session-readable":
+      return (
+        <DesktopCard
+          action={{ label: "Try again", run: () => props.onShow(state.lease), icon: "reconnect" }}
+          lede={`Right now ${providerName(props.providers, String(state.lease.providerId))} reaches this desktop only through a connection that could be read on its way, so Octant shows nothing and sends nothing. The desktop is still running. Try again once it connects another way.`}
+          title="Not shown: the connection could be read"
         />
       );
     case "releasing":
@@ -601,6 +658,7 @@ function DesktopStage(props: {
           client={props.client}
           key={String(props.view.viewId)}
           onLost={props.onLost}
+          onReadable={props.onReadable}
           threadId={props.threadId}
           view={props.view}
         />
@@ -656,8 +714,9 @@ function DesktopScreen(props: {
   readonly threadId: string;
   readonly view: OpenView;
   readonly onLost: (reason?: string) => void;
+  readonly onReadable: () => void;
 }) {
-  const { client, threadId, view, onLost } = props;
+  const { client, threadId, view, onLost, onReadable } = props;
   const [picture, setPicture] = useState<string>();
   const [natural, setNatural] = useState<{ readonly width: number; readonly height: number }>();
   const [focused, setFocused] = useState(false);
@@ -666,6 +725,8 @@ function DesktopScreen(props: {
   const captionId = useId();
   const onLostRef = useRef(onLost);
   onLostRef.current = onLost;
+  const onReadableRef = useRef(onReadable);
+  onReadableRef.current = onReadable;
 
   // Frames: one request at a time, quickly while the window shows, rarely
   // while it is hidden so the host keeps the view.
@@ -692,9 +753,12 @@ function DesktopScreen(props: {
           shown = url;
           setPicture(url);
         } else if (answer.status === "refused") {
-          onLostRef.current(
-            answer.reason === "view-ended" ? undefined : startRefusalMessage(answer.reason),
-          );
+          if (answer.reason === "session-readable") onReadableRef.current();
+          else {
+            onLostRef.current(
+              answer.reason === "view-ended" ? undefined : startRefusalMessage(answer.reason),
+            );
+          }
           return;
         } else {
           missed += 1;
@@ -744,7 +808,9 @@ function DesktopScreen(props: {
           .request(decodeDesktopPaneRequest({ kind: "input", threadId, ...view, event: outgoing }))
           .catch(() => undefined);
         if (answer === undefined) onLostRef.current("The host could not be reached.");
-        else if (answer.status === "refused") {
+        else if (answer.status === "refused" && answer.reason === "session-readable") {
+          onReadableRef.current();
+        } else if (answer.status === "refused") {
           onLostRef.current(
             answer.reason === "view-ended" ? undefined : startRefusalMessage(answer.reason),
           );
