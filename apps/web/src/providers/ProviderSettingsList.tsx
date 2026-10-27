@@ -2,6 +2,7 @@ import type {
   AgentEligibleModelRef,
   DiscoverySnapshot,
   HiddenProviderModelRef,
+  HostPlatform,
   ProviderInstance,
   ProviderInstanceId,
   ProviderDataTag,
@@ -25,7 +26,7 @@ import { CheckCircle2, ChevronDown, ChevronRight, ChevronUp } from "lucide-react
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ProviderToolVerification } from "./ProviderToolVerification";
 import { ModelContextWindowField } from "./ModelContextWindowField";
-import { useHostPlatform } from "../platform";
+import { hostCredentialStore, useHostPlatform } from "../platform";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
@@ -732,6 +733,7 @@ function ProviderRow(props: ProviderRowProps) {
     props.instance,
     readiness,
     props.onUpdateProviderCli !== undefined && supportsProviderCliUpdate(props.instance.driverKind),
+    hostPlatform,
     props.observed,
   );
   const hasSetupGuidance =
@@ -935,7 +937,8 @@ function ProviderRow(props: ProviderRowProps) {
               ) : null}
               {usesCredential ? (
                 <p className="provider-card__credential-status">
-                  Credential: <strong>{credentialStatusLabel(credential.status)}</strong>
+                  Credential:{" "}
+                  <strong>{credentialStatusLabel(credential.status, hostPlatform)}</strong>
                 </p>
               ) : null}
               {usesCredential && acceptsApiKeyPool(props.instance) && !browserClaudeKeySetup ? (
@@ -1926,7 +1929,10 @@ function providerBinaryPath(instance: ProviderInstance): string | undefined {
   return "binaryPath" in instance.configuration ? instance.configuration.binaryPath : undefined;
 }
 
-function authenticationGuidance(instance: ProviderInstance): string {
+function authenticationGuidance(
+  instance: ProviderInstance,
+  hostPlatform: HostPlatform | undefined,
+): string {
   // An endpoint a sign-in created takes no key: telling its owner to add one
   // pointed at a field its configuration does not show.
   if (
@@ -1954,12 +1960,12 @@ function authenticationGuidance(instance: ProviderInstance): string {
       return "Install and authenticate Oh My Pi (`omp`), then check the connection again. Octant treats Oh My Pi as distinct from Pi.";
     case "claude":
       return instance.configuration.authentication === "api-key"
-        ? "Add or replace the Anthropic API key in the Octant host. It remains write-only and is stored in Keychain, then check the connection again."
+        ? `Add or replace the Anthropic API key in the Octant host. It remains write-only and is stored in ${hostCredentialStore(hostPlatform)}, then check the connection again.`
         : "Authenticate with the official Claude Code app or CLI, then check the connection again.";
     case "anthropic-compatible":
-      return "Add or replace the Anthropic API key in the Octant host. It remains write-only and is stored in Keychain, then check the connection again.";
+      return `Add or replace the Anthropic API key in the Octant host. It remains write-only and is stored in ${hostCredentialStore(hostPlatform)}, then check the connection again.`;
     case "azure-foundry":
-      return "Add or replace the Azure AI Foundry API key in the Octant host. It is stored in Keychain and sent as the api-key header, then check the connection again.";
+      return `Add or replace the Azure AI Foundry API key in the Octant host. It is stored in ${hostCredentialStore(hostPlatform)} and sent as the api-key header, then check the connection again.`;
     default:
       return "Add a bearer API key in the Octant host, then check the connection again.";
   }
@@ -1969,6 +1975,7 @@ function guidance(
   instance: ProviderInstance,
   readiness: ProviderObservedState["readiness"] | undefined,
   canUpdateCli: boolean,
+  hostPlatform: HostPlatform | undefined,
   observed?: ProviderObservedState,
 ) {
   const driverKind = instance.driverKind;
@@ -1980,7 +1987,7 @@ function guidance(
       <>
         {refusal === undefined ? null : <p className="provider-card__guidance">{refusal.reason}</p>}
         <p className="provider-card__guidance">
-          {refusal?.nextStep ?? authenticationGuidance(instance)}
+          {refusal?.nextStep ?? authenticationGuidance(instance, hostPlatform)}
         </p>
       </>
     );

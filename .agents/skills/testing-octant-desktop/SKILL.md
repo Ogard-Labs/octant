@@ -143,7 +143,7 @@ description: How to test the packaged Octant macOS desktop app end-to-end — la
 - That keychain entry is USELESS to Octant: Vibe's confined spawn sets `VIBE_TEST_DISABLE_KEYRING=1`,
   so "Sign in required" persists. The working path is Settings →
   Providers → Mistral Vibe ACP → Configure → "Mistral API key (leave blank to preserve)" → Save
-  ("Stored in Keychain") → Check connection → Ready.
+  ("Stored in this Mac's Keychain") → Check connection → Ready.
 - Provider-card Save buttons can be unresponsive; pressing Enter inside the API-key field submits reliably
   (even while the row still shows "Checking"). Remove leaves a "Provider removal failed" banner even on
   successful removal.

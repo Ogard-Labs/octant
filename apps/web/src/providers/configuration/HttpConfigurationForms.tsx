@@ -14,6 +14,7 @@ import {
 } from "@octant/domain";
 import type { SubscriptionOAuthOffer } from "@octant/contracts/host-oauth";
 import { useRef, useState } from "react";
+import { hostCredentialStore, useHostPlatform } from "../../platform";
 import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantCheckbox } from "../../ui/base/OctantCheckbox";
@@ -490,6 +491,7 @@ interface FoundryConfigurationFormProps {
 }
 
 export function FoundryConfigurationForm(props: FoundryConfigurationFormProps) {
+  const hostPlatform = useHostPlatform();
   const credentialInput = useRef<HTMLInputElement>(null);
   const saved = props.instance.configuration;
   // The form keeps the way the instance signs in unless the person changes
@@ -630,7 +632,7 @@ export function FoundryConfigurationForm(props: FoundryConfigurationFormProps) {
         id={`endpoint-guidance-${props.instance.id}`}
       >
         {signIn === "api-key"
-          ? "The base URL must end with /openai/v1/. API keys are stored write-only in Keychain and sent as the api-key header. List deployments in the order you want them to appear."
+          ? `The base URL must end with /openai/v1/. API keys are stored write-only in ${hostCredentialStore(hostPlatform)} and sent as the api-key header. List deployments in the order you want them to appear.`
           : "The base URL must end with /openai/v1/ on an openai.azure.com, services.ai.azure.com, or cognitiveservices.azure.com address. Changing the tenant, client, or address signs this endpoint out. List deployments in the order you want them to appear."}
       </p>
       {problem === undefined ? null : (

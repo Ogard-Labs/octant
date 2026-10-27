@@ -550,7 +550,7 @@ and listed:
 
 Allowlists are manual-entry; suggested IDs are not the only values Octant
 accepts. Black Forest Labs and Ideogram profiles take an optional base URL for
-a proxy (HTTPS, or HTTP on this Mac); leave it blank to call the provider
+a proxy (HTTPS, or HTTP on this computer); leave it blank to call the provider
 directly. Changing it removes the stored API key, so enter the key again.
 The other image profiles have no editable base URL. GPT Image models require
 OpenAI Organization Verification. Black Forest Labs generates exactly one

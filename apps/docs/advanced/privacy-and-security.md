@@ -86,7 +86,8 @@ is kept.
 ## Credentials
 
 Provider credentials are write-only and stored as **indirect references in
-the macOS Keychain** — never returned to the interface, never journaled,
+the host's credential store** (the macOS Keychain, or Secret Service on
+Linux) — never returned to the interface, never journaled,
 never placed in process arguments, never exported, and never included in
 diagnostics. Provider OAuth and subscription login are delegated to the
 provider's own runtime, and Octant does not store, render, export, or journal
@@ -96,7 +97,7 @@ Where you choose **Sign in** on a direct endpoint that offers it (today
 OpenRouter), Octant runs the sign-in itself and stores the API key it issues
 in the same credential store as a typed-in key, under the same rules.
 Secrets Octant holds for an integration follow the same
-Keychain path: the host keeps an opaque reference, plugins and the
+credential-store path: the host keeps an opaque reference, plugins and the
 interface never receive the raw token, and nothing is journaled, exported,
 or included in diagnostics. Remote keys, session secrets, and raw headers
 never enter the database, URLs, logs, exports, screenshots, or diagnostics.

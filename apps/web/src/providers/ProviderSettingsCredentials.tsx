@@ -1,10 +1,12 @@
 import type {
   ClaudeAuthentication,
+  HostPlatform,
   ProviderCredentialStatus,
   ProviderInstanceId,
   ProviderObservedState,
 } from "@octant/contracts";
 import { useEffect, useRef, useState, type RefObject } from "react";
+import { credentialStoreName, hostCredentialStore } from "../platform";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import type { TransientProviderCredential } from "./useProviderController";
@@ -249,9 +251,12 @@ export function useCredentialStatus(
   };
 }
 
-export function credentialStatusLabel(status: CredentialStatusView): string {
-  if (status === "checking") return "Checking Keychain…";
-  if (status === "stored") return "Stored in Keychain";
+export function credentialStatusLabel(
+  status: CredentialStatusView,
+  hostPlatform: HostPlatform | undefined,
+): string {
+  if (status === "checking") return `Checking the ${credentialStoreName(hostPlatform)}…`;
+  if (status === "stored") return `Stored in ${hostCredentialStore(hostPlatform)}`;
   if (status === "missing") return "Not configured";
   return "Unavailable";
 }

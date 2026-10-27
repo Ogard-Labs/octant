@@ -41,8 +41,8 @@ On the host, Octant holds:
 - **A local profile** — an optional display name, address, accent,
   and inlined avatar. The profile authenticates nothing
   and authorizes nothing.
-- **Credential references** — opaque Keychain pointers, never the secret
-  values.
+- **Credential references** — opaque pointers into the host's credential
+  store, never the secret values.
 - **Secrets in the credential store** — the API keys you entered and the key
   a direct endpoint sign-in issued. They sit in the macOS Keychain (the
   Secret Service on Linux) behind those references, never in the journal.
@@ -102,7 +102,7 @@ Revoke it with Anthropic; Octant cannot.
 
 A direct HTTP provider pointed at OpenRouter's API offers **Sign in** beside
 **Use an API key**. After you acknowledge a short terms summary, Octant runs
-OpenRouter's own browser sign-in on this Mac. You authorize at openrouter.ai,
+OpenRouter's own browser sign-in on this computer. You authorize at openrouter.ai,
 and the browser returns to a loopback address that Octant opened for that one
 attempt.
 
@@ -117,7 +117,7 @@ attempt.
   service receives it.
 - **How to remove it.** Press **Sign out** under that provider, which deletes
   the key from the credential store. Sign out before you remove the provider.
-  Only a window on this Mac can sign in or out. Octant does not revoke the key
+  Only a window on this computer can sign in or out. Octant does not revoke the key
   with OpenRouter, so it stays valid there until you revoke it there.
 
 ### Update checks
@@ -291,16 +291,17 @@ content trace of a purged thread; the purge outcome names exactly which
 scopes it deleted and which it retained.
 
 **Remove local data.** Reset, remove-all, and delete-remote-host are
-explicit, reported per scope, and never implicit. Keychain cleanup is
+explicit, reported per scope, and never implicit. On macOS, Keychain cleanup is
 attempted through the native host boundary and reports residual credentials
 without values.
 
 ## Credentials
 
-API keys are write-only Keychain items reached through the desktop broker
-by opaque reference. They are never returned to the interface, never
+API keys are write-only items in the host's credential store (the macOS
+Keychain, or Secret Service on Linux) reached through the desktop broker by
+opaque reference. They are never returned to the interface, never
 journaled, never placed in process arguments, never exported, and never
-included in diagnostics. Headless or non-macOS sessions report Keychain
+included in diagnostics. Headless or non-macOS sessions report credential
 cleanup as not integrated rather than writing secrets to disk.
 
 The key a direct endpoint sign-in issues is held the same way and is never

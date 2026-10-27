@@ -5,7 +5,7 @@ description: "Complete the first-run flow: configure a provider, create a Projec
 # First Run
 
 After launching Octant for the first time, the welcome surface asks only what
-your first task needs, in three steps: **Providers** (what this Mac can
+your first task needs, in three steps: **Providers** (what this computer can
 reach), **Project** (the folder the task works in), and **Model** (the model it
 starts with). Every step is optional. **Skip setup** is available from the
 first step and keeps answers that have already been saved. Quitting without
