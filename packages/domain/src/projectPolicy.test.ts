@@ -1,3 +1,7 @@
+import {
+  decodeDesktopRecipe,
+  decodeLeasableDesktopProvider,
+} from "@octant/contracts/desktop-lease";
 import type { UtcTimestamp } from "@octant/contracts/events";
 import {
   decodeBindingRevisionId,
@@ -12,6 +16,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ProjectPolicyRejected,
   changeCodeProjectAccess,
+  changeCodeProjectDesktopRecipe,
   changeCodeProjectPullRequestBackgroundRefresh,
   changeProjectBrandKit,
   changeProjectColor,
@@ -252,6 +257,76 @@ describe("Project creation and lifecycle", () => {
     expect(() =>
       changeProjectBrandKit(makeProject(ids.work, "0/1", { type: "work" }), {}, updatedAt),
     ).toThrow(ProjectPolicyRejected);
+  });
+
+  describe("a Code Project's desktop recipe", () => {
+    const hostLocal = decodeLeasableDesktopProvider({
+      providerId: "host-local",
+      displayName: "This host",
+      locality: "host-local",
+      billed: false,
+    });
+    const recipe = decodeDesktopRecipe({
+      providerId: "host-local",
+      screen: { width: 1280, height: 800 },
+      network: "none",
+      leaseMinutes: 30,
+      maximumLeaseMinutes: 240,
+      idleMinutes: 15,
+    });
+
+    it("is set, replaced, and removed on a Code Project", () => {
+      const project = makeProject(ids.code, "0/1", { type: "code" });
+      const set = changeCodeProjectDesktopRecipe(project, recipe, [hostLocal], updatedAt);
+      expect(set).toMatchObject({ desktopRecipe: recipe, version: 2 });
+      const wider = { ...recipe, screen: { width: 1920, height: 1080 } };
+      expect(
+        changeCodeProjectDesktopRecipe(set, wider, [hostLocal], updatedAt).desktopRecipe,
+      ).toEqual(wider);
+      // Removing needs no offered provider: a Project can always drop its recipe.
+      const removed = changeCodeProjectDesktopRecipe(set, null, [], updatedAt);
+      expect(removed).not.toHaveProperty("desktopRecipe");
+      expect(removed.version).toBe(3);
+    });
+
+    it("refuses a provider this host does not offer and network on a host-local desktop", () => {
+      const project = makeProject(ids.code, "0/1", { type: "code" });
+      expect(() => changeCodeProjectDesktopRecipe(project, recipe, [], updatedAt)).toThrow(
+        ProjectPolicyRejected,
+      );
+      expect(() =>
+        changeCodeProjectDesktopRecipe(
+          project,
+          { ...recipe, network: "allow" },
+          [hostLocal],
+          updatedAt,
+        ),
+      ).toThrow(ProjectPolicyRejected);
+    });
+
+    it("refuses a Work or Chat Project and a change that changes nothing", () => {
+      for (const [id, type] of [
+        [ids.chat, "chat"],
+        [ids.work, "work"],
+      ] as const) {
+        expect(() =>
+          changeCodeProjectDesktopRecipe(
+            makeProject(id, "0/1", { type }),
+            recipe,
+            [hostLocal],
+            updatedAt,
+          ),
+        ).toThrow(ProjectPolicyRejected);
+      }
+      const project = makeProject(ids.code, "0/1", { type: "code" });
+      expect(() => changeCodeProjectDesktopRecipe(project, null, [hostLocal], updatedAt)).toThrow(
+        ProjectPolicyRejected,
+      );
+      const set = changeCodeProjectDesktopRecipe(project, recipe, [hostLocal], updatedAt);
+      expect(() => changeCodeProjectDesktopRecipe(set, recipe, [hostLocal], updatedAt)).toThrow(
+        ProjectPolicyRejected,
+      );
+    });
   });
 
   it("refuses to give the default-folder Project a status file", () => {

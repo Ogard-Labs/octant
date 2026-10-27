@@ -1,4 +1,5 @@
 import type { CanvasDesignBrand } from "@octant/contracts/canvas";
+import type { DesktopRecipe, LeasableDesktopProvider } from "@octant/contracts/desktop-lease";
 import type { AggregateVersion, UtcTimestamp } from "@octant/contracts/events";
 import { designBrandTokenRefusal } from "./canvasDesignFrameKit";
 import {
@@ -27,6 +28,7 @@ export type ProjectPolicyRejectionCode =
   | "binding-revision-conflict"
   | "binding-unchanged"
   | "invalid-brand-kit"
+  | "invalid-desktop-recipe"
   | "invalid-lifecycle"
   | "invalid-name"
   | "invalid-neighbor"
@@ -333,6 +335,65 @@ export function changeProjectBrandKit(
     version: nextVersion(project),
     updatedAt,
   };
+}
+
+/**
+ * Set, replace, or (with `null`) remove a Code Project's disposable desktop
+ * recipe. A recipe names a provider this host offers for leasing now, so the
+ * Project never stores a provider nothing could lease from; removing one is
+ * always allowed. A host-local desktop gets network only by sharing the host's
+ * namespace, which would reach the Octant server, so its recipe cannot allow
+ * network until it has egress of its own. A no-op is refused so the journal
+ * never carries an event that changed nothing.
+ */
+export function changeCodeProjectDesktopRecipe(
+  project: Project,
+  recipe: DesktopRecipe | null,
+  offered: ReadonlyArray<LeasableDesktopProvider>,
+  updatedAt: UtcTimestamp,
+): CodeProject {
+  if (project.type !== "code") {
+    reject("binding-not-allowed", "Only Code Projects have a desktop recipe");
+  }
+  if (recipe !== null) {
+    const provider = offered.find(
+      (candidate) => String(candidate.providerId) === String(recipe.providerId),
+    );
+    if (provider === undefined) {
+      reject("invalid-desktop-recipe", "That desktop provider isn't available on this host");
+    }
+    if (provider.locality === "host-local" && recipe.network === "allow") {
+      reject("invalid-desktop-recipe", "A desktop on this host cannot have network access yet");
+    }
+  }
+  if (sameDesktopRecipe(project.desktopRecipe, recipe ?? undefined)) {
+    reject("invalid-lifecycle", "Project desktop recipe is already selected");
+  }
+  const { desktopRecipe: _previous, ...rest } = project;
+  return {
+    ...rest,
+    ...(recipe === null ? {} : { desktopRecipe: recipe }),
+    version: nextVersion(project),
+    updatedAt,
+  };
+}
+
+function sameDesktopRecipe(
+  left: DesktopRecipe | undefined,
+  right: DesktopRecipe | undefined,
+): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  return (
+    String(left.providerId) === String(right.providerId) &&
+    left.image === right.image &&
+    left.screen.width === right.screen.width &&
+    left.screen.height === right.screen.height &&
+    String(left.credentialRef ?? "") === String(right.credentialRef ?? "") &&
+    left.network === right.network &&
+    left.leaseMinutes === right.leaseMinutes &&
+    left.maximumLeaseMinutes === right.maximumLeaseMinutes &&
+    left.idleMinutes === right.idleMinutes
+  );
 }
 
 /** Whether Octant reads, seeds, and asks tasks to keep this Project's `STATUS.md`. */

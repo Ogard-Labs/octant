@@ -39,18 +39,21 @@ import type { AuthorityWiring } from "./authority";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { IntegrationsWiring } from "./integrations";
 import type { FoundationsWiring } from "./foundations";
+import type { ComputerUseWiring } from "./computerUse";
 
 export type WorkspaceDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<AuthorityWiring, "bindingReceiptStore" | "onWindowRevoked" | "windowAuthorityStore"> &
   Pick<AgentRunsWiring, "spendCeilingHolder"> &
   Pick<IntegrationsWiring, "githubCapabilityService" | "githubIntegrationIsEffective"> &
-  Pick<FoundationsWiring, "providerRuntimeRegistry" | "workThreadProjection">;
+  Pick<FoundationsWiring, "providerRuntimeRegistry" | "workThreadProjection"> &
+  Pick<ComputerUseWiring, "offeredDesktopProviders">;
 
 export function wireWorkspace(deps: WorkspaceDependencies) {
   const {
     bindingReceiptStore,
     githubCapabilityService,
     githubIntegrationIsEffective,
+    offeredDesktopProviders,
     onWindowRevoked,
     options,
     persistence,
@@ -332,6 +335,7 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
       seedWorkProjectStatusFile: async (canonicalRoot, name, today) => {
         await workProjectStatusFiles.seed(canonicalRoot, name, today);
       },
+      offeredDesktopProviders,
     });
     return {
       authorizeWorkThreadForWindow,

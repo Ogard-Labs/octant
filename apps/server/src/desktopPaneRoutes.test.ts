@@ -1,5 +1,5 @@
 import type { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
-import { decodeDesktopViewId } from "@octant/contracts";
+import { decodeDesktopProviderId, decodeDesktopViewId } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { createRemoteDevicePrincipal } from "./clientPrincipal";
 import type { DesktopLeaseService } from "./computerUse/desktopLeaseService";
@@ -86,6 +86,18 @@ function routes() {
       frame: { mediaType: "image/png", width: 1, height: 1, bytes: png },
     })),
     input: vi.fn<DesktopLeaseService["input"]>(async () => ({ status: "delivered" })),
+    destination: vi.fn<DesktopLeaseService["destination"]>(() => ({
+      status: "leasable",
+      kind: "disposable-desktop",
+      leasable: [
+        {
+          providerId: decodeDesktopProviderId("host-local"),
+          displayName: "This host",
+          locality: "host-local",
+          billed: false,
+        },
+      ],
+    })),
   };
   const handler = createDesktopPaneRouteHandler({
     windowAuthorityStore: store,
@@ -182,6 +194,28 @@ describe("Desktop pane routes", () => {
     const ended = await handler(post("/api/code/desktops/frame", { threadId, leaseId, viewId }));
     expect(ended?.headers.get("content-type")).toContain("application/json");
     await expect(ended?.json()).resolves.toEqual({ status: "refused", reason: "view-ended" });
+  });
+
+  it("lists the providers a recipe may name, naming no thread, and none when the host offers none", async () => {
+    const { handler, service } = routes();
+    const listed = await handler(post("/api/code/desktops", { kind: "recipe-providers" }));
+    await expect(listed?.json()).resolves.toEqual({
+      status: "recipe-providers",
+      providers: [
+        {
+          providerId: "host-local",
+          displayName: "This host",
+          locality: "host-local",
+          billed: false,
+        },
+      ],
+    });
+    service.destination.mockReturnValue({ status: "unavailable", kind: "no-provider-configured" });
+    const none = await handler(post("/api/code/desktops", { kind: "recipe-providers" }));
+    await expect(none?.json()).resolves.toEqual({ status: "recipe-providers", providers: [] });
+    expect(
+      (await handler(post("/api/code/desktops", { kind: "recipe-providers", threadId })))?.status,
+    ).toBe(400);
   });
 
   it("leaves every other path to the routes that own it", async () => {
