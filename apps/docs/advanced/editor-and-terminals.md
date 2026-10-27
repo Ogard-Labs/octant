@@ -88,7 +88,8 @@ shell. The terminal shows the chord under its output while it has focus. See
 Terminal settings are independent of editor typography: font family, size,
 line height, ligatures, cursor style, scrollback, shell, and theme-derived
 colors. An open terminal follows a light/dark, theme, or contrast change in
-place. It also lifts any colored output too faint to read against its
+place, and a switch between an opaque and a Glass sidebar or of reduced
+transparency. It also lifts any colored output too faint to read against its
 background, so deliberately faint text, such as a dim prompt hint or a dark
 grey 256-color, shows lighter in a dark theme and darker in a light one; text
 a program marks as dim keeps a lower bar than ordinary text. The
