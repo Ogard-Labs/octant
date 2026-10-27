@@ -1493,4 +1493,22 @@ describe("desktop lease service for a person's Desktop tab", () => {
       reason: "not-permitted",
     });
   });
+
+  it("tells a person a thread in Plan cannot start a desktop, and still refuses one it is asked for", async () => {
+    const { service, state, backend } = host();
+    state.threads.set(threadA, { active: true, executionPolicy: "plan" });
+    await expect(service.overview(at(threadA))).resolves.toMatchObject({
+      status: "overview",
+      start: { status: "refused", reason: "plan-mode" },
+    });
+    await expect(service.acquire(at(threadA))).resolves.toEqual({
+      status: "refused",
+      reason: "plan-mode",
+    });
+    expect(backend.calls()).not.toContain("acquire");
+    state.threads.set(threadA, { active: true, executionPolicy: "approval-gated" });
+    await expect(service.overview(at(threadA))).resolves.toMatchObject({
+      start: { status: "available" },
+    });
+  });
 });
