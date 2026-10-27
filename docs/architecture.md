@@ -154,7 +154,8 @@ server through `@octant/cli` (`octant server run`, `octant web`). The
 installable headless artifact (`scripts/package-headless.ts`) is self-contained:
 it carries the bundled CLI (`bin/octant`), the bundled server (`lib/server`), the
 web assets, and a top-level `node_modules` holding the third-party and native
-dependencies both bundles leave external, built on the target platform itself.
+dependencies both bundles leave external, built on the target platform itself,
+and the target's bundled TypeScript language server with its license notice.
 An installed CLI starts that server under its own Bun runtime with
 `OCTANT_ARTIFACT_ROOT` and `OCTANT_ARTIFACT_VERSION` set. The server verifies
 every listed file before it opens the store, and reports that version on
@@ -182,6 +183,9 @@ next step.
 **Language services.** Code editor language services and, later, a debugger
 run as confined children the server launches per checkout, under the
 [Language services](design/language-services.md) design accepted on 2026-10-26.
+The desktop app and the headless artifact carry the bundled server's binary for
+their target with its license notice, signed with the app on macOS
+([packaging rules](design/language-services.md#packaging-rules)).
 Its seam and companion are built: the `language-server` component kind, the
 pure launch policy, the read and document contracts, the remote-approvable
 `code.language.read` action, and the server's confined, receipted,
