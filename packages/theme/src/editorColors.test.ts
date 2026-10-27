@@ -1,6 +1,6 @@
 import { DEFAULT_THEME_SETTINGS, decodeThemeSemanticOverrideEntry } from "@octant/contracts/theme";
 import { describe, expect, it } from "vitest";
-import { resolveEditorColorProjection } from "./editorColors";
+import { INCREASED_CONTRAST_EDITOR_TEXT, resolveEditorColorProjection } from "./editorColors";
 import { resolveEffectiveTokens } from "./fallback";
 
 describe("editor color projection", () => {
@@ -41,6 +41,25 @@ describe("editor color projection", () => {
     );
 
     expect(projection.background).toBe("#fff8ee");
+  });
+
+  it("draws the increased-contrast ink in place of the theme's text under increased contrast", () => {
+    const resolved = resolveEffectiveTokens(
+      {
+        ...DEFAULT_THEME_SETTINGS,
+        mode: "dark",
+        semanticOverrides: [
+          decodeThemeSemanticOverrideEntry({ role: "text-primary", color: "#dddddd" }),
+        ],
+      },
+      false,
+    );
+
+    expect(resolveEditorColorProjection(resolved).foreground).toBe("#dddddd");
+    expect(resolveEditorColorProjection(resolved, { increasedContrast: true })).toMatchObject({
+      background: "#1a1a1a",
+      ...INCREASED_CONTRAST_EDITOR_TEXT.dark,
+    });
   });
 
   it("falls back to the mode's default for a role a theme does not carry", () => {

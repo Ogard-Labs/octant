@@ -262,12 +262,16 @@ describe("CodeSettingsView", () => {
     await user.click(screen.getByRole("switch", { name: "Language services" }));
 
     expect(update).not.toHaveBeenCalled();
-    // Said beside the switch that snapped back, naming the field to finish.
+    // Said at the field that needs finishing, not beside the switch that
+    // happened to send the change.
     expect(
-      within(screen.getByRole("region", { name: "Editor" })).getByText(
+      within(screen.getByRole("region", { name: "External editor" })).getByText(
         "External editor executable must be an absolute path.",
       ),
     ).toBeVisible();
+    expect(
+      screen.getAllByText("External editor executable must be an absolute path."),
+    ).toHaveLength(1);
     expect(screen.getByRole("switch", { name: "Language services" })).toBeChecked();
     expect(field).toHaveValue("editor");
   });

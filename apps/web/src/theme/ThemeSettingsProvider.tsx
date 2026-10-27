@@ -214,8 +214,11 @@ export function ThemeSettingsProvider(props: {
   }, [applied, increasedContrast]);
   const resolved = applied?.resolved;
   const editorColors = useMemo(
-    () => (resolved === undefined ? undefined : resolveEditorColorProjection(resolved)),
-    [resolved],
+    () =>
+      resolved === undefined
+        ? undefined
+        : resolveEditorColorProjection(resolved, { increasedContrast }),
+    [resolved, increasedContrast],
   );
   return (
     <IncreasedContrastContext.Provider value={increasedContrast}>

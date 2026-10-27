@@ -26,15 +26,32 @@ export interface EditorColorProjection {
   readonly removed: string;
 }
 
+/**
+ * The ink the renderer stylesheet swaps in under increased contrast, whatever
+ * the theme's own text roles say; its `--octant-text-*-high-contrast` values
+ * mirror these. Without them the editor was the one surface that ignored the
+ * setting.
+ */
+export const INCREASED_CONTRAST_EDITOR_TEXT: Readonly<
+  Record<"light" | "dark", Pick<EditorColorProjection, "foreground" | "mutedForeground">>
+> = {
+  light: { foreground: "#0e0f11", mutedForeground: "#565656" },
+  dark: { foreground: "#ffffff", mutedForeground: "#a5a4a0" },
+};
+
 export function resolveEditorColorProjection(
   resolved: Pick<ResolvedTheme, "mode" | "tokens">,
+  options: { readonly increasedContrast?: boolean } = {},
 ): EditorColorProjection {
   const role = (id: string): string => resolved.tokens[id] ?? getDefaultToken(id, resolved.mode);
+  const ink =
+    options.increasedContrast === true
+      ? INCREASED_CONTRAST_EDITOR_TEXT[resolved.mode]
+      : { foreground: role("text-primary"), mutedForeground: role("text-muted") };
   return {
     mode: resolved.mode,
     background: role("workspace"),
-    foreground: role("text-primary"),
-    mutedForeground: role("text-muted"),
+    ...ink,
     selection: role("selection"),
     lineHighlightBorder: role("border"),
     widgetBackground: role("floating"),

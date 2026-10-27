@@ -37,10 +37,12 @@ export interface CodeSettingsViewProps {
 type CodeSettingsSectionId = "thread-defaults" | "editor" | "external-editor";
 
 /**
- * Why the last change was not kept, said in the section whose control made
- * it: one message under External editor answered a Language services switch
- * two sections up, out of sight (observed in rendered QA). A later change
- * replaces it wherever it is.
+ * Why the last change was not kept. A refusal is said in the section whose
+ * control made the change: one message under External editor answered a
+ * Language services switch two sections up, out of sight (observed in
+ * rendered QA). An unfinished external editor field is said at that field,
+ * whichever control sent the change, because that is what needs fixing. A
+ * later change replaces it wherever it is.
  */
 interface CodeSettingsFeedback {
   readonly section: CodeSettingsSectionId;
@@ -174,12 +176,18 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     const trimmedExecutable = draft.executable.trim();
     if (trimmedExecutable !== "" && !trimmedExecutable.startsWith("/")) {
       restoreUnsavedPicks(change);
-      setFeedback({ section, message: "External editor executable must be an absolute path." });
+      setFeedback({
+        section: "external-editor",
+        message: "External editor executable must be an absolute path.",
+      });
       return;
     }
     if (arguments_.length > 32) {
       restoreUnsavedPicks(change);
-      setFeedback({ section, message: "External editor arguments are limited to 32 entries." });
+      setFeedback({
+        section: "external-editor",
+        message: "External editor arguments are limited to 32 entries.",
+      });
       return;
     }
     let updated = false;
