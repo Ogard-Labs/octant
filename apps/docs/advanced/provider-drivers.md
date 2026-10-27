@@ -127,7 +127,8 @@ let baseUrl = "";
 serveOutsideDriver({
   // The address and model IDs the person entered when they added the provider.
   initialize(configuration) {
-    baseUrl = configuration.baseUrl;
+    // Ends in "/" so `new URL("models", baseUrl)` keeps a path such as `/v1`.
+    baseUrl = configuration.baseUrl.replace(/\/?$/, "/");
   },
   // The models the service can serve; Octant offers only the ones the person listed.
   async probe(host) {

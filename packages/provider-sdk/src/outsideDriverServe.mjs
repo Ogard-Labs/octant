@@ -175,12 +175,12 @@ export function serveOutsideDriver(driver, io = standardIo()) {
         return;
     }
     if (typeof id !== "number") return;
-    Promise.resolve()
-      .then(() => call(id, method, params))
-      .then(
-        (result) => write({ jsonrpc: "2.0", id, result }),
-        (error) => write({ jsonrpc: "2.0", id, error: wireError(error) }),
-      );
+    // Started now rather than on a later tick: a send and its cancel can arrive
+    // in one read of stdin, and the cancel must find the send to abort.
+    call(id, method, params).then(
+      (result) => write({ jsonrpc: "2.0", id, result }),
+      (error) => write({ jsonrpc: "2.0", id, error: wireError(error) }),
+    );
   });
 }
 

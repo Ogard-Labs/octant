@@ -65,9 +65,11 @@ export function createLoopbackChatDriver() {
       const answer = await readCompletionStream(response, turn);
       return {
         text: answer.text,
+        // The host reads an id or name as trimmed text of at most 128
+        // characters, and stops a driver whose answer it cannot read.
         toolCalls: answer.toolCalls.map((call) => ({
-          toolCallId: call.id.trim().length > 0 ? call.id.trim() : `call-${nextToolCall++}`,
-          toolName: call.name,
+          toolCallId: isToolText(call.id) ? call.id.trim() : `call-${nextToolCall++}`,
+          toolName: call.name.trim(),
           argumentsJson: call.arguments.trim().length > 0 ? call.arguments : "{}",
         })),
         ...(answer.usage === undefined ? {} : { usage: answer.usage }),
@@ -149,10 +151,7 @@ async function readCompletionStream(response, turn) {
     }
     if (chunk?.error !== undefined) throw new OutsideDriverFailure("provider-failed");
     const reported = chunk?.usage;
-    if (
-      Number.isInteger(reported?.prompt_tokens) &&
-      Number.isInteger(reported?.completion_tokens)
-    ) {
+    if (isTokenCount(reported?.prompt_tokens) && isTokenCount(reported?.completion_tokens)) {
       usage = { inputTokens: reported.prompt_tokens, outputTokens: reported.completion_tokens };
     }
     for (const choice of Array.isArray(chunk?.choices) ? chunk.choices : []) {
@@ -197,12 +196,22 @@ async function readCompletionStream(response, turn) {
   readLine(pending.trim());
 
   const toolCalls = [...calls.entries()].sort(([a], [b]) => a - b).map(([, call]) => call);
-  // A call with no name, or more calls than the host takes in one answer, is
-  // not an answer the host could read.
-  if (toolCalls.some((call) => call.name.trim().length === 0) || toolCalls.length > 64) {
+  // A call with no name or one too long to read, or more calls than the host
+  // takes in one answer, is not an answer the host could read.
+  if (toolCalls.some((call) => !isToolText(call.name)) || toolCalls.length > 64) {
     throw new OutsideDriverFailure("protocol");
   }
   return { text, toolCalls, usage, stopReason: toolCalls.length > 0 ? undefined : stopReason };
+}
+
+function isToolText(value) {
+  const trimmed = value.trim();
+  return trimmed.length > 0 && trimmed.length <= 128;
+}
+
+/** A count the host reads; a server's negative or runaway count is left out. */
+function isTokenCount(value) {
+  return Number.isInteger(value) && value >= 0 && value <= 1_000_000_000;
 }
 
 /** The failure a refused request becomes; the host writes the words for it. */

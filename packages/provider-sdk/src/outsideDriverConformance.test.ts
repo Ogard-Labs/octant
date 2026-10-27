@@ -276,6 +276,52 @@ describe("outside driver conformance kit", () => {
     ]);
   });
 
+  it("keeps a model's untidy tool call and impossible usage within what the host reads", async () => {
+    const { createLoopbackChatDriver } = await exampleModules();
+    const server = fakeLocalModelServer(() =>
+      sse([
+        {
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: `call_${"x".repeat(200)}`,
+                    type: "function",
+                    function: { name: " octant_capability_echo\n", arguments: "{}" },
+                  },
+                ],
+              },
+              finish_reason: "tool_calls",
+            },
+          ],
+        },
+        { choices: [], usage: { prompt_tokens: -1, completion_tokens: 2 } },
+      ]),
+    );
+    const kit = inProcessChannel();
+    const { serveOutsideDriver } = await exampleModules();
+    serveOutsideDriver(createLoopbackChatDriver(), kit.driver);
+    const answers: Array<unknown> = [];
+    kit.kit.onLine((line) => answers.push(JSON.parse(line)));
+
+    await expect(runOutsideDriverConformance(fixture(kit.kit, server.fetch))).resolves.toEqual(
+      passed,
+    );
+    expect(answers).toContainEqual({
+      jsonrpc: "2.0",
+      id: 4,
+      result: {
+        text: "",
+        toolCalls: [
+          { toolCallId: "call-1", toolName: "octant_capability_echo", argumentsJson: "{}" },
+        ],
+      },
+    });
+  });
+
   it("reports a request that outgrew the model's window as structure the host reads", async () => {
     const { createLoopbackChatDriver } = await exampleModules();
     const server = fakeLocalModelServer(
@@ -381,6 +427,26 @@ describe("outside driver conformance kit", () => {
     await expect(
       runOutsideDriverConformance(fixture(channel, fakeLocalModelServer().fetch)),
     ).rejects.toThrow("the session/send answer did not decode");
+  });
+
+  it("aborts a send the host cancels in the same breath as it sent it", async () => {
+    // Over stdio, a send and its cancel can arrive in one read, and the cancel
+    // is handled before the send has started.
+    let sends = 0;
+    let cancelledSignal: AbortSignal | undefined;
+    const channel = await served({
+      ...wellBehaved,
+      send: (params, turn) => {
+        sends += 1;
+        if (sends === 1) return wellBehaved.send(params, turn);
+        cancelledSignal = turn.signal;
+        return new Promise(() => undefined);
+      },
+    });
+    await expect(
+      runOutsideDriverConformance(fixture(channel, fakeLocalModelServer().fetch)),
+    ).resolves.toEqual(passed);
+    expect(cancelledSignal?.aborted).toBe(true);
   });
 
   it("fails a driver that stops answering after a cancel", async () => {
