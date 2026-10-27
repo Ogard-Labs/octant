@@ -1354,10 +1354,11 @@ accounts or hardware.
      `ExtensionsSettingsView.test.tsx`; a Project erase removes the
      approvals, from the running host too, and the egress records
      (`threadPurge.test.ts`). A revoked Project rule, or a thread taking in
-     outside content, closes a server's idle tunnel at once
+     outside content, closes a server's idle tunnel at once,
+     and a proxy that cannot join that recheck does not start
      (`nativeHarnessEgress.hostile.test.ts`), and a tainted thread in
-     another Project bound to the same folder, or to one holding it,
-     suspends the rules (`codeLanguageServiceProcess.test.ts`). The `macos-15` CI
+     another Project bound to the same folder, to one holding it, or to one
+     inside it (a child named `..cache` included) suspends the rules (`codeLanguageServiceProcess.test.ts`). The `macos-15` CI
      job runs the same process test for Seatbelt evidence; it has not yet run
      on a Mac. The rules are under [Repository tooling](#repository-tooling).
 7. **Agent read tools** (D5; after the editor slices ship). Container: yes.

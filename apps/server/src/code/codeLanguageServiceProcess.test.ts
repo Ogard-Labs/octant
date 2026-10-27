@@ -650,6 +650,9 @@ describe("Code language service authority", () => {
     // A Project bound to a folder that holds the checkout can write it too.
     test.state.folders.set(String(sameFolder.id), paths.root);
     expect(scope.checkoutTainted()).toBe(true);
+    // So can one bound to a folder inside it, whatever that folder is named.
+    test.state.folders.set(String(sameFolder.id), join(paths.checkout, "..cache"));
+    expect(scope.checkoutTainted()).toBe(true);
     // A folder that cannot be told counts as the server's.
     test.state.folders.delete(String(sameFolder.id));
     expect(scope.checkoutTainted()).toBe(true);

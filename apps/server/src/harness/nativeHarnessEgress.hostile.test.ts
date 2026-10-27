@@ -3561,6 +3561,27 @@ describe("native harness tool egress grants and learn mode", () => {
       await waitFor(() => tunnel.socket.closed);
       expect(origin.seen()).toBe("before");
     });
+
+    it("refuses to start a server's proxy that no revocation could reach", async () => {
+      const host = egressHost();
+      const egress = createLanguageServerEgress({
+        journal: host.journal,
+        projectRules: (projectId) => host.rules.projectRules(projectId),
+        joinRecheck: () => {
+          throw new Error("the recheck cannot take another proxy");
+        },
+        endpoint: { kind: "loopback" },
+        hostActor,
+        uuid: randomUUID,
+        clock: () => new Date(egressStart).toISOString(),
+      });
+      const started = await egress.start({
+        projectId: String(egressProject),
+        threadId: String(egressThread),
+        checkoutTainted: () => false,
+      });
+      expect(started.status).toBe("refused");
+    });
   });
 
   describe("records", () => {

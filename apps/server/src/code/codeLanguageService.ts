@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { realpath } from "node:fs/promises";
-import { extname, join } from "node:path";
+import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import type {
   CodeCheckoutId,
@@ -31,7 +31,6 @@ import {
   type LanguageServerHostPlatform,
   type PrincipalKind,
 } from "@octant/domain";
-import { isPathWithinDirectory } from "../persistence/storePath";
 import { readConfinedCodeFile } from "./codeConfinedFileRead";
 import { liveCodeTestSourcePort, type CodeTestSourcePort } from "./codeDirectoryPort";
 import { joinCodePath, resolveContainedPath } from "./codePathConfinement";
@@ -972,8 +971,8 @@ export class CodeLanguageService {
     }
     return (
       folder === undefined ||
-      isPathWithinDirectory(record.rootPath, folder) ||
-      isPathWithinDirectory(folder, record.rootPath)
+      folderHolds(record.rootPath, folder) ||
+      folderHolds(folder, record.rootPath)
     );
   }
 
@@ -1262,6 +1261,16 @@ function documentItem(document: OpenDocument) {
     version: document.version,
     text: document.text,
   };
+}
+
+/**
+ * Whether a folder is the directory or lies inside it. Only a `..` segment
+ * leaves it: a child named `..cache` is inside, and a test on the `..` prefix
+ * alone would let a tainted thread bound there keep the server's rules.
+ */
+function folderHolds(directory: string, folder: string): boolean {
+  const path = relative(resolve(directory), resolve(folder));
+  return path === "" || (!isAbsolute(path) && path !== ".." && !path.startsWith(`..${sep}`));
 }
 
 function initializeParams(rootPath: string) {
