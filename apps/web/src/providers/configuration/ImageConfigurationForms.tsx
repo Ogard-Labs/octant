@@ -7,6 +7,7 @@ import {
 } from "@octant/contracts";
 import { normalizeOpenAiCompatibleBaseUrl } from "@octant/domain";
 import { useRef, useState, type ReactNode, type RefObject } from "react";
+import { hostCredentialStore, thisComputerName, useHostPlatform } from "../../platform";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
 import { OctantSelectField } from "../../ui/base/OctantSelect";
@@ -50,6 +51,7 @@ export function OpenAiImageFields(props: {
   readonly credentialManagementAvailable: boolean;
   readonly instance?: Extract<ProviderInstance, { driverKind: "openai-image" }>;
 }) {
+  const hostPlatform = useHostPlatform();
   const configuration = props.instance?.configuration;
   const settingId = (field: string) =>
     props.instance === undefined ? undefined : `provider-${props.instance.id}-${field}`;
@@ -144,8 +146,8 @@ export function OpenAiImageFields(props: {
       <p className="provider-settings__field-guidance">
         Suggested models are data, not a catalog Octant maintains:{" "}
         {OPENAI_IMAGE_MODEL_PRESETS.join(", ")}. Enter any model IDs. GPT Image models require
-        OpenAI Organization Verification. The API key is stored write-only in Keychain. This profile
-        has no editable base URL.
+        OpenAI Organization Verification. The API key is stored write-only in{" "}
+        {hostCredentialStore(hostPlatform)}. This profile has no editable base URL.
       </p>
       {!props.credentialManagementAvailable ? (
         <p className="provider-settings__field-guidance">
@@ -162,6 +164,7 @@ export function GeminiImageFields(props: {
   readonly credentialManagementAvailable: boolean;
   readonly instance?: Extract<ProviderInstance, { driverKind: "gemini-native-image" }>;
 }) {
+  const hostPlatform = useHostPlatform();
   const configuration = props.instance?.configuration;
   const settingId = (field: string) =>
     props.instance === undefined ? undefined : `provider-${props.instance.id}-${field}`;
@@ -265,8 +268,8 @@ export function GeminiImageFields(props: {
       <p className="provider-settings__field-guidance">
         Suggested models are data, not a catalog Octant maintains:{" "}
         {GEMINI_IMAGE_MODEL_PRESETS.join(", ")}. Enter any model IDs. gemini-2.5-flash-image is a
-        legacy suggestion. The API key is stored write-only in Keychain. This profile has no
-        editable base URL.
+        legacy suggestion. The API key is stored write-only in {hostCredentialStore(hostPlatform)}.
+        This profile has no editable base URL.
       </p>
       {!props.credentialManagementAvailable ? (
         <p className="provider-settings__field-guidance">
@@ -344,6 +347,7 @@ export function BflImageFields(props: {
   readonly credentialManagementAvailable: boolean;
   readonly instance?: Extract<ProviderInstance, { driverKind: "bfl-image" }>;
 }) {
+  const hostPlatform = useHostPlatform();
   const configuration = props.instance?.configuration;
   const settingId = (field: string) =>
     props.instance === undefined ? undefined : `provider-${props.instance.id}-${field}`;
@@ -409,9 +413,10 @@ export function BflImageFields(props: {
       <p className="provider-settings__field-guidance">
         Suggested models are data, not a catalog Octant maintains:{" "}
         {BFL_IMAGE_MODEL_PRESETS.join(", ")}. Enter any model IDs. The API key is stored write-only
-        in Keychain. Leave the base URL blank to call Black Forest Labs directly, or enter a proxy
-        (HTTPS, or HTTP on this Mac). This profile has no quality or size — Black Forest Labs
-        generates one image per request with its own defaults.
+        in {hostCredentialStore(hostPlatform)}. Leave the base URL blank to call Black Forest Labs
+        directly, or enter a proxy (HTTPS, or HTTP on {thisComputerName(hostPlatform)}). This
+        profile has no quality or size — Black Forest Labs generates one image per request with its
+        own defaults.
       </p>
       {!props.credentialManagementAvailable ? (
         <p className="provider-settings__field-guidance">
@@ -428,6 +433,7 @@ export function IdeogramImageFields(props: {
   readonly credentialManagementAvailable: boolean;
   readonly instance?: Extract<ProviderInstance, { driverKind: "ideogram-image" }>;
 }) {
+  const hostPlatform = useHostPlatform();
   const configuration = props.instance?.configuration;
   const settingId = (field: string) =>
     props.instance === undefined ? undefined : `provider-${props.instance.id}-${field}`;
@@ -493,9 +499,10 @@ export function IdeogramImageFields(props: {
       <p className="provider-settings__field-guidance">
         Suggested models are data, not a catalog Octant maintains:{" "}
         {IDEOGRAM_IMAGE_MODEL_PRESETS.join(", ")}. Enter any model IDs. The API key is stored
-        write-only in Keychain. Leave the base URL blank to call Ideogram directly, or enter a proxy
-        (HTTPS, or HTTP on this Mac). This profile has no rendering speed or aspect ratio — Ideogram
-        generates images with its own defaults.
+        write-only in {hostCredentialStore(hostPlatform)}. Leave the base URL blank to call Ideogram
+        directly, or enter a proxy (HTTPS, or HTTP on {thisComputerName(hostPlatform)}). This
+        profile has no rendering speed or aspect ratio — Ideogram generates images with its own
+        defaults.
       </p>
       {!props.credentialManagementAvailable ? (
         <p className="provider-settings__field-guidance">

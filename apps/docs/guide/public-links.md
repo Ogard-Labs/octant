@@ -1,5 +1,5 @@
 ---
-description: How to share a Canvas with a public link — what you turn on, what leaves your Mac, who can open it, and how to update, expire, or revoke it.
+description: How to share a Canvas with a public link — what you turn on, what leaves your computer, who can open it, and how to update, expire, or revoke it.
 ---
 
 # Share a Canvas with a public link
@@ -49,7 +49,7 @@ see your links and copy one, but cannot publish, update, or revoke.
 Nothing is sent until you approve. Declining sends nothing. Octant sends exactly
 the content on the card and does not render it again after you approve.
 
-## What leaves your Mac
+## What leaves your computer
 
 Octant sends one document built from the Canvas's current version:
 

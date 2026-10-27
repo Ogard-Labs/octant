@@ -1,29 +1,29 @@
 ---
-description: Keep a Code Project's folder on a machine you reach with ssh, and open terminals and managed worktrees there under the same confinement as on your Mac.
+description: Keep a Code Project's folder on a machine you reach with ssh, and open terminals and managed worktrees there under the same confinement as on your computer.
 ---
 
 # Code on an SSH target
 
-An SSH target is a machine this Mac reaches with `ssh`: a Linux build box, a
+An SSH target is a machine this computer reaches with `ssh`: a Linux build box, a
 cloud VM, a workstation under your desk. A Code Project can keep its folder on
-one. Octant on your Mac keeps the Project's record and every decision; the
+one. Octant on your computer keeps the Project's record and every decision; the
 target is only where the files are and where commands run, and only after it
-proves it confines them as your Mac would.
+proves it confines them as your computer would.
 
 In this technical preview you can register targets, bind a folder on one as a
 Code Project, read its files, Git status, and diff, open terminals there, and
 create managed worktrees. **The composer does not offer remote Projects for
 a new task yet**: its Project picker lists them so you can see them. Octant
-on your Mac can already run a remote Project's thread, and the composer step
+on your computer can already run a remote Project's thread, and the composer step
 is next. Such a thread runs only on Octant's own harness (a model you reach
 through an endpoint, such as an OpenAI-compatible one), whose inference
-stays on your Mac while its file tools and commands act on the target with
+stays on your computer while its file tools and commands act on the target with
 the usual approvals; any other provider is refused for it, and Full access
 is not offered there. macOS targets are not admitted yet either.
 
 ## What the target needs
 
-- Linux on an x64 or arm64 CPU, reachable with `ssh` from this Mac as you
+- Linux on an x64 or arm64 CPU, reachable with `ssh` from this computer as you
   already set it up (aliases, `ProxyJump`, and hardware keys in your SSH
   configuration all work).
 - A user other than root. Octant refuses a root login.
@@ -47,7 +47,7 @@ to your own `~/.ssh/known_hosts` never re-trusts a target. If the key ever
 changes, the target shows **Host key changed** until you choose **Check host
 key…** and confirm the new one.
 
-The same steps work from a terminal on this Mac:
+The same steps work from a terminal on this computer:
 
 ```sh
 octant ssh-target add build@devbox --executor /home/build/.local/octant/bin/octant
@@ -114,7 +114,7 @@ octant ssh-target worktree remove <worktree-id>
 
 A provider's own runtime runs on a target only from the path you set for it
 there, never from one the model, the repository, or the target suggests. Set
-it from a terminal on this Mac, naming the target, the provider instance's
+it from a terminal on this computer, naming the target, the provider instance's
 id, and the program's path on the target:
 
 ```sh
@@ -132,10 +132,10 @@ Octant ships can run on a target yet.
 
 **Remove…** on a target ends its session, which stops any turn running in
 one of its Projects, and forgets its pinned key. Its
-Projects stay listed on this Mac and take no new work. Nothing on the target
+Projects stay listed on this computer and take no new work. Nothing on the target
 is deleted: not the folder, not its worktrees.
 
-## What stays on this Mac
+## What stays on this computer
 
 Octant journals each target, its pinned key, a digest of each connection's
 attestation, the Projects bound to it, each worktree's folder, and when each

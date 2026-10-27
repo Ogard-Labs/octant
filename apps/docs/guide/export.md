@@ -7,7 +7,7 @@ description: How exporting a Canvas or artifact works — to a folder you choose
 Export writes a readable copy of a Canvas or an artifact somewhere you choose.
 The copy is Markdown, HTML, PNG images, or a PDF, so any editor, viewer, or
 other tool can open it.
-Three destinations ship today: a folder on this Mac, a GitHub Gist, and a
+Three destinations ship today: a folder on this computer, a GitHub Gist, and a
 public link.
 
 Whatever the destination, Octant renders the document first and shows it to you
@@ -123,7 +123,7 @@ The gist destination reports one of three states:
   starts, so connecting GitHub shows up the next time you open it.
 - **Ready** — GitHub is connected and the export will post as your account.
 - **Refused**, with the reason — GitHub is signed in, but its credential is
-  stored in plain text on this Mac, so Octant will not send through it. The same
+  stored in plain text on this computer, so Octant will not send through it. The same
   rule applies to Octant's other GitHub features.
 
 ## Publish a public link

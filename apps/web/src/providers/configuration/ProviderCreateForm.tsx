@@ -10,6 +10,7 @@ import {
 } from "@octant/contracts";
 import { ChevronDown } from "lucide-react";
 import { useRef, useState } from "react";
+import { hostCredentialStore, useHostPlatform } from "../../platform";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
 import { OctantSelectField } from "../../ui/base/OctantSelect";
@@ -121,6 +122,7 @@ export interface ProviderCreateFormPresentationProps {
 export function ProviderCreateForm(
   props: ProviderCreateFormProps & ProviderCreateFormPresentationProps,
 ) {
+  const hostPlatform = useHostPlatform();
   const [creating, setCreating] = useState(false);
   const [validationMessage, setValidationMessage] = useState<string | undefined>(undefined);
   const [manualOpenState, setManualOpen] = useState(props.openWithNameFocused === true);
@@ -636,8 +638,9 @@ export function ProviderCreateForm(
                   id="foundry-create-endpoint-guidance"
                 >
                   Reuses the OpenAI-compatible transport against the documented /openai/v1/
-                  endpoint. API keys are stored write-only in the Octant host Keychain and sent as
-                  the api-key header. List deployments in the order you want them to appear.
+                  endpoint. API keys are stored write-only in {hostCredentialStore(hostPlatform)}{" "}
+                  and sent as the api-key header. List deployments in the order you want them to
+                  appear.
                 </p>
                 {!props.credentialManagementAvailable ? (
                   <p className="provider-settings__field-guidance">
@@ -832,6 +835,7 @@ export function ProviderCreateForm(
 }
 
 export function BedrockMantleGuide() {
+  const hostPlatform = useHostPlatform();
   return (
     <section aria-labelledby="bedrock-mantle-heading" className="bedrock-mantle-guide">
       <h3 id="bedrock-mantle-heading">Amazon Bedrock Mantle setup</h3>
@@ -850,8 +854,8 @@ export function BedrockMantleGuide() {
           .
         </li>
         <li>
-          Create a Bedrock API key in IAM under your user or role and store it in the Octant
-          Keychain-backed credential for this provider.
+          Create a Bedrock API key in IAM under your user or role and enter it as this
+          provider&apos;s key. Octant keeps it in {hostCredentialStore(hostPlatform)}.
         </li>
         <li>
           Add the provider with authentication set to{" "}

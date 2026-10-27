@@ -249,7 +249,7 @@ a design it also reports a screen whose content is wider than the screen, the
 hardest-to-read text on each screen, an image it could not show, and, for a
 running prototype, each error its script threw as it started. To find those
 errors Octant runs the prototype once in the preview browser, which is started
-with no way to reach the network or other programs on your Mac. An error that
+with no way to reach the network or other programs on your computer. An error that
 only happens after a click is not seen by a preview. The agent fixes what the
 warnings name with a revision, then replies.
 
@@ -424,7 +424,7 @@ agent asks for your theme.
   **Stop** button. The prototype never sees that key, so it cannot keep the
   keyboard. Typing through an input method's composition (for example,
   Japanese or Chinese input) does not reach a prototype in the Octant app.
-- In a web browser connected to your Mac, a prototype runs in the browser
+- In a web browser connected to your Octant host, a prototype runs in the browser
   and Octant cannot stop it from opening another page before it removes it,
   or from connecting to another computer, so the **Run** control says it is
   not network-contained there and Octant says its script can still connect out.
@@ -481,10 +481,10 @@ A shared snapshot keeps every block, including charts (funnels, radars, and
 sankeys too), dashboards, tables, treemaps,
 heatmaps, bar lists, comparison matrices, and formulas, with their number formats. A design is
 shared once you tick that its markup is shared as written. An action block
-that runs a command on this Mac stops a share: Share then says the canvas
+that runs a command on this computer stops a share: Share then says the canvas
 cannot be shared safely.
 A treemap or bar list in a shared snapshot offers no **Open file**, because
-those files are on your Mac.
+those files are on your computer.
 Board templates are not available yet. Revisions
 do not force a document the user closed to reopen. Agents should identify the
 created document rather than invent a download URL or claim a preview opened

@@ -28,7 +28,8 @@ decide how to state it in a published notice.
 ## Bring-your-own key
 
 You create a provider instance and supply an API key. Octant stores that
-key as a write-only reference in the macOS Keychain and resolves it through
+key as a write-only reference in the host's credential store (the macOS
+Keychain, or Secret Service on Linux) and resolves it through
 the desktop broker at call time. The key never enters the event journal,
 the renderer, diagnostics, or a thread export.
 
