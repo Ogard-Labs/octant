@@ -159,6 +159,7 @@ export function startSecretServiceCredentialBroker(
     makeStore({ namespace: "replica-store-credential" }),
     makeStore({ namespace: "canvas-public-share-secret" }),
     makeStore({ namespace: "mcp-server-credential" }),
+    makeStore({ namespace: "desktop-provider-credential" }),
   );
 }
 

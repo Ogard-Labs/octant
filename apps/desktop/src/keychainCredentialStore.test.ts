@@ -81,6 +81,22 @@ describe("keychainHelperSpec", () => {
     });
   });
 
+  it("sends a desktop provider's key to its own namespace, named by the recipe's reference", () => {
+    const spec = keychainHelperSpec(
+      helperPath,
+      { operation: "resolve", providerInstanceId },
+      storeScope,
+      "desktop-provider-credential",
+    );
+    expect(JSON.parse(spec.stdin)).toEqual({
+      version: 1,
+      storeScope,
+      namespace: "desktop-provider-credential",
+      credentialRef: providerInstanceId,
+      operation: "resolve",
+    });
+  });
+
   it("passes set credentials through stdin and never process arguments", () => {
     const spec = keychainHelperSpec(
       helperPath,

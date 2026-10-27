@@ -370,7 +370,15 @@ const paneView = { ...paneLease, viewId: DesktopViewId };
  */
 export const DesktopPaneRequest = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("overview"), ...paneThread }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("acquire"), ...paneThread }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("acquire"),
+    ...paneThread,
+    /**
+     * The billed provider the person confirmed in the tab before asking. A
+     * billed desktop starts only with it, and only on that provider.
+     */
+    confirmedBilledProvider: Schema.optional(DesktopProviderId),
+  }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("release"), ...paneLease }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("retry-release"), ...paneLease }).annotations(strict),
   Schema.Struct({
@@ -434,6 +442,7 @@ export type DesktopPaneAnswer = typeof DesktopPaneAnswer.Type;
 export const decodeDesktopLeaseId = Schema.decodeUnknownSync(DesktopLeaseId);
 export const decodeDesktopHostTag = Schema.decodeUnknownSync(DesktopHostTag);
 export const decodeDesktopProviderId = Schema.decodeUnknownSync(DesktopProviderId);
+export const decodeDesktopCredentialRef = Schema.decodeUnknownSync(DesktopCredentialRef);
 export const decodeDesktopRecipe = Schema.decodeUnknownSync(DesktopRecipe);
 export const decodeDesktopLease = Schema.decodeUnknownSync(DesktopLease);
 export const decodeDesktopLeaseRequested = Schema.decodeUnknownSync(DesktopLeaseRequested);

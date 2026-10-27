@@ -133,7 +133,11 @@ async function answer(
     case "overview":
       return service.overview(caller);
     case "acquire":
-      return service.acquire(caller);
+      return service.acquire(
+        request.confirmedBilledProvider === undefined
+          ? caller
+          : { ...caller, confirmedBilledProvider: request.confirmedBilledProvider },
+      );
     case "release":
       return service.release({ ...caller, leaseId: request.leaseId });
     case "retry-release":

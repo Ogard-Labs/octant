@@ -27,6 +27,10 @@ private let canvasPublicShareSecretNamespace = "canvas-public-share-secret"
 // id the server's package references. A person may replace one.
 private let mcpServerCredentialService = "app.octant.mcp-server-credentials.v1"
 private let mcpServerCredentialNamespace = "mcp-server-credential"
+// A cloud desktop provider's API key lives in a service of its own, keyed by
+// the desktop recipe's credential reference. A person may replace one.
+private let desktopProviderCredentialService = "app.octant.desktop-provider-credentials.v1"
+private let desktopProviderCredentialNamespace = "desktop-provider-credential"
 private let hostIdentityNamespace = "app.octant.host-identity.v1"
 private let hostIdentityKeyId = "host-identity"
 private let maximumPurgeProviderInstances = 128
@@ -62,6 +66,7 @@ private let octantOwnedServices = [
     replicaStoreCredentialService,
     canvasPublicShareSecretService,
     mcpServerCredentialService,
+    desktopProviderCredentialService,
 ]
 
 // A credential namespace of its own: the Keychain service it reaches, the
@@ -91,6 +96,11 @@ private let separateNamespaces: [String: SeparateNamespace] = [
     mcpServerCredentialNamespace: SeparateNamespace(
         service: mcpServerCredentialService,
         idField: "secretId",
+        replaceable: true
+    ),
+    desktopProviderCredentialNamespace: SeparateNamespace(
+        service: desktopProviderCredentialService,
+        idField: "credentialRef",
         replaceable: true
     ),
 ]

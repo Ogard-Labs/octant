@@ -8,7 +8,7 @@ import {
   type DesktopPaneAnswer,
   type DesktopPaneRequest,
 } from "@octant/contracts";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DesktopPane } from "./DesktopPane";
 
@@ -135,6 +135,35 @@ describe("Desktop pane", () => {
     );
     expect(kinds(requests).slice(0, 2)).toEqual(["acquire", "open-view"]);
     expect(screen.getByText(/^Live · /)).toBeTruthy();
+  });
+
+  it("asks the person before starting a billed desktop, and names that provider when they agree", async () => {
+    const billed = {
+      providerId: decodeDesktopProviderId("e2b"),
+      displayName: "E2B",
+      locality: "cloud",
+      billed: true,
+    } as const;
+    const { client, requests } = fakeClient({
+      overview: overviewOf([], { status: "available", provider: billed }),
+    });
+    render(<DesktopPane client={client} threadId={threadId} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Start desktop" }));
+    expect(await screen.findByText("Start a desktop on E2B?")).toBeTruthy();
+    expect(kinds(requests)).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(kinds(requests)).toEqual([]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Start desktop" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Start desktop" }));
+    await waitFor(() =>
+      expect(requests).toContainEqual({
+        kind: "acquire",
+        threadId,
+        confirmedBilledProvider: "e2b",
+      }),
+    );
   });
 
   it("sends a person's moves, scrolls, and presses in the order they made them", async () => {

@@ -592,6 +592,63 @@ describe("startCredentialBroker", () => {
     }
   });
 
+  it("keeps a desktop provider's key out of reach of every other route that names the same id", async () => {
+    const credentialRef = randomUUID();
+    const desktopKeys = memoryStore();
+    const broker = await startCredentialBroker(
+      memoryStore(),
+      undefined,
+      undefined,
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      desktopKeys,
+    );
+    try {
+      const call = async (path: string, body: Record<string, string>) =>
+        broker.fetchForTest(
+          brokerRequest(broker.url, broker.token, path, { body: JSON.stringify(body) }),
+        );
+      expect(
+        (
+          await call("/v1/desktop-provider-credentials/set", {
+            credentialRef,
+            credential: "desktop-api-key",
+          })
+        ).status,
+      ).toBe(200);
+      expect(
+        (await call("/v1/credentials/resolve", { providerInstanceId: credentialRef })).status,
+      ).toBe(404);
+      for (const route of [
+        "/v1/replica-store-credentials/resolve",
+        "/v1/canvas-public-share-secrets/resolve",
+      ]) {
+        expect((await call(route, { credentialRef })).status).toBe(404);
+      }
+      expect(
+        (await call("/v1/mcp-server-credentials/resolve", { secretId: credentialRef })).status,
+      ).toBe(404);
+      expect(
+        await (await call("/v1/desktop-provider-credentials/resolve", { credentialRef })).json(),
+      ).toEqual({ credential: "desktop-api-key" });
+      expect(
+        (
+          await call("/v1/desktop-provider-credentials/resolve", {
+            providerInstanceId: credentialRef,
+          })
+        ).status,
+      ).toBe(400);
+      expect(
+        await (await call("/v1/desktop-provider-credentials/delete", { credentialRef })).json(),
+      ).toEqual({ deleted: true });
+      expect(await desktopKeys.has(credentialRef)).toBe(false);
+    } finally {
+      await broker.close();
+    }
+  });
+
   it("replaces and deletes a sync bucket's key pair", async () => {
     const credentialRef = randomUUID();
     const broker = await startCredentialBroker(

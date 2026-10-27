@@ -14,6 +14,7 @@ import {
   type ComputerControlResult,
   type DesktopArtifactRefusal,
   type DesktopArtifactSent,
+  type DesktopCredentialRef,
   type DesktopHostTag,
   type DesktopInputEvent,
   type DesktopLease,
@@ -29,6 +30,7 @@ import {
   type DesktopLeaseTransitioned,
   type DesktopPaneRefusal,
   type DesktopPaneStart,
+  type DesktopProviderId,
   type DesktopRecipe,
   type DesktopViewId,
   type EventActor,
@@ -229,7 +231,15 @@ export interface DesktopLeaseService {
   readonly start: () => Promise<DesktopLeaseReconciliation>;
   readonly destination: () => ComputerUseDestinationReport;
   readonly acquire: (
-    caller: DesktopLeaseCaller & { readonly signal?: AbortSignal },
+    caller: DesktopLeaseCaller & {
+      readonly signal?: AbortSignal;
+      /**
+       * The billed provider a person confirmed in their own tab before
+       * asking. A person's billed lease starts only with it, and only for
+       * that provider.
+       */
+      readonly confirmedBilledProvider?: DesktopProviderId;
+    },
   ) => Promise<DesktopLeaseAcquireResult>;
   /** A person's or the owning agent's release of one of the thread's leases. */
   readonly release: (
@@ -333,6 +343,8 @@ interface Orphan {
   readonly teardown: DesktopTeardownPort;
   readonly leaseId: DesktopLeaseId;
   readonly handle?: DesktopHandle;
+  /** The account to list when there is no handle. */
+  readonly credentialRef?: DesktopCredentialRef;
   backoff?: CacheBackoff;
 }
 
@@ -477,7 +489,7 @@ function teardownPortOf(provider: DesktopTeardownPort): DesktopTeardownPort {
     id: provider.id,
     release: (handle) => provider.release(handle),
     verifyGone: (handle) => provider.verifyGone(handle),
-    listOwned: (hostTag) => provider.listOwned(hostTag),
+    listOwned: (hostTag, credentialRef) => provider.listOwned(hostTag, credentialRef),
   };
 }
 
@@ -626,17 +638,18 @@ export function createDesktopLeaseService(
 
   /**
    * Destroys a lease's desktop and confirms it is absent. Without a handle the
-   * provider's own tagged listing finds it; a listing that answers without it
-   * is the provider confirming absence.
+   * provider's own tagged listing of the lease's account finds it; a listing
+   * that answers without it is the provider confirming absence.
    */
   async function destroy(
     teardown: DesktopTeardownPort,
     leaseId: DesktopLeaseId,
     handle: DesktopHandle | undefined,
+    credentialRef: DesktopCredentialRef | undefined,
   ): Promise<Destroyed> {
     let handles: ReadonlyArray<DesktopHandle>;
     if (handle === undefined) {
-      const listed = await bounded(() => teardown.listOwned(hostTag), {
+      const listed = await bounded(() => teardown.listOwned(hostTag, credentialRef), {
         status: "failed" as const,
         reason: "timed-out",
       });
@@ -718,7 +731,7 @@ export function createDesktopLeaseService(
     const destroyed: Destroyed =
       teardown === undefined
         ? { kind: "still-running", detail: "The provider's driver is not loaded on this host." }
-        : await destroy(teardown, leaseId, entry?.handle);
+        : await destroy(teardown, leaseId, entry?.handle, record.lease.credentialRef);
     if (destroyed.kind === "gone") {
       live.delete(key);
       return { status: "released", lease: transition(leaseId, "released", options.systemActor) };
@@ -738,7 +751,12 @@ export function createDesktopLeaseService(
   }
 
   async function destroyOrphan(key: string, orphan: Orphan): Promise<boolean> {
-    const destroyed = await destroy(orphan.teardown, orphan.leaseId, orphan.handle);
+    const destroyed = await destroy(
+      orphan.teardown,
+      orphan.leaseId,
+      orphan.handle,
+      orphan.credentialRef,
+    );
     if (destroyed.kind === "gone") {
       orphans.delete(key);
       return true;
@@ -749,8 +767,16 @@ export function createDesktopLeaseService(
   }
 
   /** After a failed acquire, makes sure the provider kept nothing under that lease id. */
-  async function reapStray(teardown: DesktopTeardownPort, leaseId: DesktopLeaseId): Promise<void> {
-    await destroyOrphan(`stray:${String(leaseId)}`, { teardown, leaseId });
+  async function reapStray(
+    teardown: DesktopTeardownPort,
+    leaseId: DesktopLeaseId,
+    credentialRef: DesktopCredentialRef | undefined,
+  ): Promise<void> {
+    await destroyOrphan(`stray:${String(leaseId)}`, {
+      teardown,
+      leaseId,
+      ...(credentialRef === undefined ? {} : { credentialRef }),
+    });
   }
 
   async function reconcile(): Promise<DesktopLeaseReconciliation> {
@@ -760,28 +786,41 @@ export function createDesktopLeaseService(
       .list()
       .filter((record) => desktopLeaseHoldsDesktop(record.lease.state));
     const unreleasedIds = new Set(unreleased.map((record) => String(record.lease.leaseId)));
-    const listings = new Map<string, ReadonlyArray<DesktopHandle>>();
+    const listings = new Map<string, Array<DesktopHandle>>();
     for (const entry of options.providers()) {
+      const providerId = String(entry.provider.id);
       const teardown = teardownPortOf(entry.provider);
-      const listed = await bounded(() => teardown.listOwned(hostTag), {
-        status: "failed" as const,
-        reason: "timed-out",
-      });
-      if (listed.status !== "listed") continue;
-      const handles = listed.resources
-        .filter((resource) => String(resource.hostTag) === String(hostTag))
-        .map((resource) => resource.handle);
-      listings.set(String(entry.provider.id), handles);
-      for (const handle of handles) {
-        if (unreleasedIds.has(String(handle.leaseId))) continue;
-        if (
-          await destroyOrphan(`orphan:${String(entry.provider.id)}:${handle.resource}`, {
-            teardown,
-            leaseId: handle.leaseId,
-            handle,
-          })
-        ) {
-          orphansDestroyed += 1;
+      // A provider that needs a credential lists one account at a time: each
+      // one a lease of this provider recorded, since those are the only keys
+      // the host lets its driver use. One with no credential lists once.
+      const accounts = new Map<string, DesktopCredentialRef | undefined>([["", undefined]]);
+      for (const record of projection.list()) {
+        const ref = record.lease.credentialRef;
+        if (ref !== undefined && String(record.lease.providerId) === providerId) {
+          accounts.set(String(ref), ref);
+        }
+      }
+      for (const credentialRef of accounts.values()) {
+        const listed = await bounded(() => teardown.listOwned(hostTag, credentialRef), {
+          status: "failed" as const,
+          reason: "timed-out",
+        });
+        if (listed.status !== "listed") continue;
+        const handles = listed.resources
+          .filter((resource) => String(resource.hostTag) === String(hostTag))
+          .map((resource) => resource.handle);
+        listings.set(providerId, [...(listings.get(providerId) ?? []), ...handles]);
+        for (const handle of handles) {
+          if (unreleasedIds.has(String(handle.leaseId))) continue;
+          if (
+            await destroyOrphan(`orphan:${providerId}:${handle.resource}`, {
+              teardown,
+              leaseId: handle.leaseId,
+              handle,
+            })
+          ) {
+            orphansDestroyed += 1;
+          }
         }
       }
     }
@@ -830,6 +869,11 @@ export function createDesktopLeaseService(
     if (recipe === undefined) return refused("no-provider-configured");
     const loaded = registered(String(recipe.providerId));
     if (loaded === undefined) return refused("no-provider-configured");
+    // A cloud desktop runs on the person's own account, so a recipe that
+    // names no credential for one configures nothing that could run.
+    if (loaded.provider.locality === "cloud" && recipe.credentialRef === undefined) {
+      return refused("no-provider-configured");
+    }
     if (!loaded.effective) return refused("provider-disabled");
     if (blocked(String(recipe.providerId))) return refused("release-pending");
     const fits = desktopLeaseFits({
@@ -869,14 +913,21 @@ export function createDesktopLeaseService(
     });
     if (gate.kind === "refused") return refused(gate.reason);
     if (gate.kind === "ask") {
-      const answer = await options
-        .confirm({
-          owner: first.owner,
-          provider: leasableOf(first.provider),
-          asks: gate.asks,
-          leaseMinutes: first.recipe.leaseMinutes,
-        })
-        .catch(() => "declined" as const);
+      // A person confirms a billed lease in their own tab before asking, for
+      // the provider they saw; nothing else stands in for that answer.
+      const answer =
+        gate.asks === "billed" && isPerson(caller.actor)
+          ? String(caller.confirmedBilledProvider ?? "") === String(first.provider.id)
+            ? "approved"
+            : "declined"
+          : await options
+              .confirm({
+                owner: first.owner,
+                provider: leasableOf(first.provider),
+                asks: gate.asks,
+                leaseMinutes: first.recipe.leaseMinutes,
+              })
+              .catch(() => "declined" as const);
       if (answer !== "approved") return refused("declined");
     }
     // Authority may have changed while a person was deciding, and an answer
@@ -948,7 +999,7 @@ export function createDesktopLeaseService(
             ...(pending?.requestedBy === undefined ? {} : { requestedBy: pending.requestedBy }),
           },
         );
-        await reapStray(teardownPortOf(provider), leaseId);
+        await reapStray(teardownPortOf(provider), leaseId, recipe.credentialRef);
         return { status: "not-acquired", lease };
       }
       entry.handle = result.handle;
@@ -970,6 +1021,7 @@ export function createDesktopLeaseService(
           teardown: teardownPortOf(provider),
           leaseId,
           handle: result.handle,
+          ...(recipe.credentialRef === undefined ? {} : { credentialRef: recipe.credentialRef }),
         });
         return { status: "not-acquired", lease };
       }

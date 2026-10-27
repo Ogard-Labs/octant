@@ -23,6 +23,8 @@ export type DesktopCredentialBackend =
       readonly canvasPublicShareSecrets: CredentialStore;
       /** Secrets given to MCP servers a person added by hand, in their own Keychain service. */
       readonly mcpServerCredentials: CredentialStore;
+      /** Cloud desktop providers' API keys, in their own Keychain service. */
+      readonly desktopProviderCredentials: CredentialStore;
     }
   | {
       readonly kind: "secret-service";
@@ -36,6 +38,8 @@ export type DesktopCredentialBackend =
       readonly canvasPublicShareSecrets: CredentialStore;
       /** Secrets given to MCP servers a person added by hand, under their own attribute. */
       readonly mcpServerCredentials: CredentialStore;
+      /** Cloud desktop providers' API keys, under their own attribute. */
+      readonly desktopProviderCredentials: CredentialStore;
     }
   | {
       readonly kind: "credential-manager";
@@ -45,6 +49,7 @@ export type DesktopCredentialBackend =
       readonly replicaStoreCredentials?: undefined;
       readonly canvasPublicShareSecrets?: undefined;
       readonly mcpServerCredentials?: undefined;
+      readonly desktopProviderCredentials?: undefined;
     }
   | {
       readonly kind: "unavailable";
@@ -54,6 +59,7 @@ export type DesktopCredentialBackend =
       readonly replicaStoreCredentials?: undefined;
       readonly canvasPublicShareSecrets?: undefined;
       readonly mcpServerCredentials?: undefined;
+      readonly desktopProviderCredentials?: undefined;
     };
 
 /**
@@ -94,6 +100,10 @@ export async function resolveDesktopCredentialBackend(options: {
         storeScope: options.storeScope,
         namespace: "mcp-server-credential",
       }),
+      desktopProviderCredentials: makeKeychainCredentialStore(options.keychainHelperPath, {
+        storeScope: options.storeScope,
+        namespace: "desktop-provider-credential",
+      }),
     };
   }
   if (options.platform === "linux") {
@@ -111,6 +121,9 @@ export async function resolveDesktopCredentialBackend(options: {
       }),
       mcpServerCredentials: makeSecretServiceCredentialStore({
         namespace: "mcp-server-credential",
+      }),
+      desktopProviderCredentials: makeSecretServiceCredentialStore({
+        namespace: "desktop-provider-credential",
       }),
     };
   }

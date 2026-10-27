@@ -7,6 +7,7 @@ import {
   DESKTOP_ARTIFACT_MAXIMUM_BYTES,
   decodeDesktopHostTag,
   decodeDesktopLeaseId,
+  decodeDesktopProviderId,
   decodeDesktopRecipe,
   decodeEventActor,
   decodeUtcTimestamp,
@@ -61,9 +62,13 @@ const agentOf = (threadId: string): EventActor =>
     threadId,
   });
 
-const recipeFor = (providerId: string): DesktopRecipe =>
+/** The person's key for a cloud provider, by reference only. */
+const cloudCredential = "e1000000-0000-4000-8000-0000000000c1";
+
+const recipeFor = (providerId: string, credentialRef?: string): DesktopRecipe =>
   decodeDesktopRecipe({
     providerId,
+    ...(credentialRef === undefined ? {} : { credentialRef }),
     screen: { width: 1280, height: 800 },
     network: "none",
     leaseMinutes: 30,
@@ -175,7 +180,10 @@ function host(
     recipes: new Map(
       [threadA, threadB, threadC].map((threadId) => [
         threadId,
-        recipeFor(String(providers[0]?.provider.id ?? "fake-desktop")),
+        recipeFor(
+          String(providers[0]?.provider.id ?? "fake-desktop"),
+          providers[0]?.provider.locality === "cloud" ? cloudCredential : undefined,
+        ),
       ]),
     ),
     providers: providers.map(({ provider }) => ({ provider, effective: true })),
@@ -273,6 +281,56 @@ describe("desktop lease service", () => {
     const result = await service.acquire({ owner: code(threadA), actor: agentOf(threadA) });
     expect(result.status).toBe("acquired");
     expect(state.asked).toEqual(["billed"]);
+  });
+
+  it("starts a person's billed lease only with their own confirmation of that provider", async () => {
+    const cloud = createFakeDesktopProvider({
+      id: "cloud.example",
+      locality: "cloud",
+      billed: true,
+    });
+    const { service, state } = host({ providers: [cloud] });
+    const caller = { owner: code(threadA), actor: person, scopeId: "window-1" };
+
+    await expect(service.acquire(caller)).resolves.toEqual({
+      status: "refused",
+      reason: "declined",
+    });
+    await expect(
+      service.acquire({
+        ...caller,
+        confirmedBilledProvider: decodeDesktopProviderId("other.example"),
+      }),
+    ).resolves.toEqual({ status: "refused", reason: "declined" });
+    expect(cloud.backend.calls()).not.toContain("acquire");
+
+    const started = await service.acquire({
+      ...caller,
+      confirmedBilledProvider: decodeDesktopProviderId("cloud.example"),
+    });
+    expect(started).toMatchObject({ status: "acquired", lease: { billed: true } });
+    // The person answered in their own tab; the host asks nobody else.
+    expect(state.asked).toEqual([]);
+  });
+
+  it("refuses a cloud recipe that names no credential before any provider call", async () => {
+    const cloud = createFakeDesktopProvider({
+      id: "cloud.example",
+      locality: "cloud",
+      billed: true,
+    });
+    const { service, state } = host({ providers: [cloud] });
+    state.recipes.set(threadA, recipeFor("cloud.example"));
+    await expect(
+      service.acquire({
+        owner: code(threadA),
+        actor: person,
+        scopeId: "window-1",
+        confirmedBilledProvider: decodeDesktopProviderId("cloud.example"),
+      }),
+    ).resolves.toEqual({ status: "refused", reason: "no-provider-configured" });
+    // Restart reconciliation's listing is the only call the provider saw.
+    expect(cloud.backend.calls()).toEqual(["listOwned"]);
   });
 
   it("journals the lease before asking the provider to create a desktop", async () => {
@@ -596,6 +654,42 @@ describe("desktop lease service", () => {
         .map((desktop) => desktop.handle.resource)
         .sort(),
     ).toEqual(["another-host", "desktop-2"]);
+  });
+
+  it("finds a killed host's cloud desktops by listing the account each lease recorded", async () => {
+    const cloud = createFakeDesktopProvider({
+      id: "cloud.example",
+      locality: "cloud",
+      billed: true,
+    });
+    const listedAccounts: Array<string> = [];
+    // A cloud provider lists one account at a time and cannot list without one.
+    const perAccount: DesktopProvider = {
+      ...cloud.provider,
+      listOwned: async (tag, credentialRef) => {
+        listedAccounts.push(String(credentialRef ?? "none"));
+        return credentialRef === undefined
+          ? { status: "failed", reason: "credential-required" }
+          : cloud.provider.listOwned(tag, credentialRef);
+      },
+    };
+    const first = host({ providers: [{ provider: perAccount }] });
+    await acquired(first.service, threadA);
+    cloud.backend.plant({
+      handle: { leaseId: decodeDesktopLeaseId(randomUUID()), resource: "left-by-a-crash" },
+      hostTag,
+      providerExpiresAt: undefined,
+    });
+
+    // The host process is gone; its replacement holds no handle, only the journal.
+    const restarted = first.restart();
+    await expect(restarted.start()).resolves.toEqual({
+      released: 1,
+      stillRunning: 0,
+      orphansDestroyed: 1,
+    });
+    expect(listedAccounts).toContain(cloudCredential);
+    expect(cloud.backend.desktops()).toEqual([]);
   });
 
   it("keeps tearing down other leases when a driver throws instead of answering", async () => {
