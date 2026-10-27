@@ -34,6 +34,15 @@ export interface ComposerContextMeterScopeValue {
   readonly fallback?: ComposerContextUsageFallback;
   readonly status: ContextControllerStatus;
   readonly subjectKey?: string;
+  /**
+   * Whether the thread's runtime reports usage at all, as the host's last
+   * connection check described it. `not-reported` (an ACP agent) means no
+   * figure will ever arrive, which an empty meter must not present as one
+   * that simply has not arrived yet. It belongs to the thread's runtime, not
+   * to a usage report, so a Work or Chat thread whose context Octant plans
+   * carries it too.
+   */
+  readonly usageReporting?: ProviderUsageReporting;
   readonly visible: boolean;
 }
 
@@ -64,13 +73,6 @@ export interface ComposerContextUsageFallback {
    * popover says whose number it is.
    */
   readonly modelContextWindow?: number;
-  /**
-   * Whether the thread's runtime reports usage at all, as the host's last
-   * connection check described it. `not-reported` (an ACP agent) means no
-   * figure will ever arrive, which an empty meter must not present as one
-   * that simply has not arrived yet.
-   */
-  readonly usageReporting?: ProviderUsageReporting;
 }
 
 function ignoredRebuild(): void {}
@@ -102,6 +104,7 @@ export interface ComposerContextMeterProviderProps {
   readonly fallback?: ComposerContextUsageFallback;
   readonly status: ContextControllerStatus;
   readonly subjectKey?: string;
+  readonly usageReporting?: ProviderUsageReporting;
 }
 
 export function ComposerContextMeterProvider(props: ComposerContextMeterProviderProps) {
@@ -126,6 +129,7 @@ export function ComposerContextMeterProvider(props: ComposerContextMeterProvider
       ...(props.snapshot === undefined ? {} : { snapshot: props.snapshot }),
       ...(props.fallback === undefined ? {} : { fallback: props.fallback }),
       ...(props.subjectKey === undefined ? {} : { subjectKey: props.subjectKey }),
+      ...(props.usageReporting === undefined ? {} : { usageReporting: props.usageReporting }),
     }),
     [
       props.busy,
@@ -136,6 +140,7 @@ export function ComposerContextMeterProvider(props: ComposerContextMeterProvider
       props.fallback,
       props.status,
       props.subjectKey,
+      props.usageReporting,
       rebuild,
       requestOpen,
       setExcluded,

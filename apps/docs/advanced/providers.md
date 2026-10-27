@@ -169,8 +169,9 @@ it instead of imitating it.
 - **Most** for ACP agents: they reopen a session only when the agent offers to,
   and they ask questions on every agent except Mistral Vibe and fx.
 - **Token usage** is not measured for ACP agents. A spend ceiling leaves their
-  turns out and says so, and a Code thread's context meter says the runtime
-  reports no usage rather than waiting for a figure that will not come.
+  turns out and says so, and a thread's context meter, in Code, Work, or
+  Chat, says the runtime reports no usage rather than waiting for a figure
+  that will not come.
 - **Ollama** runs Octant Harness against the Ollama service on this computer:
   Octant tools reach only models you verified, and it reports no file changes
   or approvals of its own. Octant asks Ollama for each model's window

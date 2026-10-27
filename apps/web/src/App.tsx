@@ -3448,20 +3448,45 @@ function LaunchedShell(
       return usage;
     }
     const observed = providerController.observedByInstance.get(activeCodeThreadProviderInstanceId);
-    const usageReporting = observed?.integration?.context.usage;
-    const reported = usageReporting === undefined ? usage : { ...usage, usageReporting };
     const model = observed?.models.find(
       (listed) => String(listed.id) === String(activeCodeThreadModelId),
     );
     const declared = model === undefined ? undefined : resolveModelContextWindow(model);
-    if (usage.contextWindow !== undefined || declared === undefined) return reported;
-    return { ...reported, modelContextWindow: declared.contextWindow };
+    if (usage.contextWindow !== undefined || declared === undefined) return usage;
+    return { ...usage, modelContextWindow: declared.contextWindow };
   }, [
     activeCodeThreadModelId,
     activeCodeThreadProviderInstanceId,
     activeCodeThreadUsage,
     providerController.observedByInstance,
   ]);
+  /**
+   * Whether the active thread's runtime reports usage, as the host's last
+   * connection check described it. Every mode carries it: Octant plans Work
+   * and Chat turns itself, but an ACP agent still reports nothing, and the
+   * meter must say so there as it does for a Code thread.
+   */
+  const activeThreadProviderInstanceId =
+    activeMode === "code"
+      ? activeCodeThreadProviderInstanceId === undefined
+        ? undefined
+        : String(activeCodeThreadProviderInstanceId)
+      : activeMode === "work"
+        ? workNavigation.navigation.find(
+            (thread) => thread.threadId === String(activeWorkThreadId ?? ""),
+          )?.providerInstanceId
+        : chatController.navigation.find(
+            (thread) => thread.threadId === String(activeChatThreadId ?? ""),
+          )?.providerInstanceId;
+  const activeThreadUsageReporting = useMemo(() => {
+    if (activeThreadProviderInstanceId === undefined) return undefined;
+    for (const [instanceId, observed] of providerController.observedByInstance) {
+      if (String(instanceId) === activeThreadProviderInstanceId) {
+        return observed.integration?.context.usage;
+      }
+    }
+    return undefined;
+  }, [activeThreadProviderInstanceId, providerController.observedByInstance]);
   // Turns starting and ending move each mode's navigation feed, which is when
   // the host's answer about compacting the thread can change.
   const sessionCompaction = useSessionCompaction({
@@ -6731,6 +6756,9 @@ function LaunchedShell(
                 actions={actions}
                 activeCodeThreadUsageFallback={activeCodeThreadUsageFallback}
                 activeMode={activeMode}
+                {...(activeThreadUsageReporting === undefined
+                  ? {}
+                  : { activeThreadUsageReporting })}
                 agentProfiles={agentProfiles}
                 {...(browserToolThreadId === undefined ? {} : { browserToolThreadId })}
                 chatController={chatController}
