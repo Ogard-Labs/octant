@@ -435,10 +435,12 @@ export const DesktopPaneRequest = Schema.Union(
     kind: Schema.Literal("acquire"),
     ...paneThread,
     /**
-     * The billed provider the person confirmed in the tab before asking. A
-     * billed desktop starts only with it, and only on that provider.
+     * The provider, and its placement when it has one, the person confirmed
+     * in the tab before asking. A desktop that bills or runs off this machine
+     * starts only with them, and only on that provider and placement.
      */
-    confirmedBilledProvider: Schema.optional(DesktopProviderId),
+    confirmedProvider: Schema.optional(DesktopProviderId),
+    confirmedPlacement: Schema.optional(DesktopPlacementId),
   }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("release"), ...paneLease }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("retry-release"), ...paneLease }).annotations(strict),
@@ -468,6 +470,8 @@ export const DesktopPaneStart = Schema.Union(
   Schema.Struct({
     status: Schema.Literal("available"),
     provider: LeasableDesktopProvider,
+    /** The placement the thread's recipe names, which a person confirms with the provider. */
+    placementId: Schema.optional(DesktopPlacementId),
   }).annotations(strict),
   DesktopLeaseRefusal,
 );

@@ -843,9 +843,15 @@ design accepted on 2026-10-26. Its admission policy, the executor, the SSH
 transport, host-key pinning from a local window or the local CLI, Linux
 confinement attestation, binding a remote root with Files, Git status, and
 diff reads through the executor, and the native harness's file tools,
-commands, and egress for a remote-bound Project's turn are built; the Code
-turn runtime does not yet start a thread there, so no product route reaches a
-target's tools. A person's terminals and managed worktrees on a remote-bound
+commands, and egress for a remote-bound Project's turn are built. A Code
+thread can be created in a remote-bound Project through the Code commands, on
+a `remote-root` checkout no local Files, Git, terminal, test, or checkpoint
+path resolves, and the Code turn runtime runs its turns on the native harness
+with that remote tool set alone; every other provider is refused before
+anything launches, other Code operations on the thread are refused, and Full
+access is not offered there yet. The composer does not offer such a Project
+yet, so a local window starts no remote thread; a paired device can, under
+the Project's authority. A person's terminals and managed worktrees on a remote-bound
 Project are built, from a local window (Settings › SSH targets) or the local
 CLI, under the same admission; the composer's Project picker lists such a
 Project without offering it for a thread. The provider-sdk seam for placing a
@@ -4992,8 +4998,9 @@ the model at another size.
   approval is the same wait a question is: while a turn is blocked on it, the
   thread reads as parked on the person, not running, in every mode. Work's and
   Code's boards file it under Waiting with the awaiting-input reason; Work's
-  navigation row carries `awaitingInput` with the `approval` kind, and Chat's and
-  Code's carry `awaitingInput` with `executing` false, so the sidebar mark and
+  navigation row carries `awaitingInput` with the `approval` kind, Chat's carries
+  it with `executing` false and the `approval` kind, and Code's carries
+  `awaitingInput` with `executing` false, so the sidebar mark and
   the pane header say the thread needs the person (**Needs you**, not
   **Running**) and the thread's attention signal reads "Waiting for your
   approval". The pending-requests read lists it as a `lead-approval` row (see
@@ -5009,7 +5016,25 @@ the model at another size.
   keeps its attention and the row and card say the call did not run and offer
   only **Resume**. An answer sent to it anyway settles it `cancelled`, never
   approved, and returns `lost-in-restart`; resuming expires it, and the lead asks
-  again if it still wants the call. At most 32
+  again if it still wants the call. The lead's own `ask-user` question raises
+  the same attention while a turn is blocked on it. A Chat lead's question
+  parks the Chat attempt like any provider question (below), and Chat's
+  navigation row carries `awaitingInput` with `executing` false and
+  `awaitingKind` naming the wait (`approval` or `user-input`) for any turn
+  parked on a question this process can still answer, so a Chat question,
+  the lead's or a provider's, reads "Waiting for your answer" in the sidebar
+  mark, the pane header, and the Inbox. A Work lead's question waits in
+  `NativeHarnessQuestionStore`: Work's board files the thread under Waiting
+  and its navigation row carries `awaitingInput` with the `user-input` kind,
+  exactly as for a pending Work question (a pending Work request, then the
+  lead's approval, names the wait first), so the same sidebar mark and Inbox
+  entry follow; it is answered from the Agents tab's session card. Code shows
+  it through its inline question path. Only a question with a live waiter
+  counts: one a restart left pending reaches no turn, the session already
+  asks to be resumed, and the cut-off turn raises its own attention. An
+  answer, an expiry, or a cancellation from any surface clears it. The
+  question and its answer stay journaled on the session (Work, Code) or the
+  attempt (Chat) and nowhere else. At most 32
   questions and 32 approvals wait at once across the whole host, the cap MCP
   and browser tool approvals use; one
   past it is refused at once as `question-too-many-waiting` or
@@ -5112,17 +5137,24 @@ the model at another size.
      set per mode with every port supplied, the Code set under each access
      posture, the Side Chat set, the reduced set without them, and that the
      composition call site still supplies each port.
-  2. **Approval attention.** A pending approval raises the same attention as
-     a pending question: the thread's state, the Inbox, and the sidebar mark,
-     and it shows inline in the thread. `workThreadBoardService.test.ts` pins
+  2. **Approval and question attention.** A pending approval, and the lead's
+     own pending question, raise the same attention as a pending provider
+     question: the thread's state, the Inbox, and the sidebar mark, and each
+     shows in the thread. `workThreadBoardService.test.ts` pins
      that a Work thread parked on the lead's approval, live or after a
      restart, reads exactly as one parked on a question (same state, same
-     board column), differing only in naming the wait an approval;
-     `chatService.test.ts` and `codeService.test.ts` pin the Chat and Code
+     board column), differing only in naming the wait an approval, and that
+     one parked on the lead's question reads exactly as one parked on a Work
+     question; `leadApprovalAttention.test.ts` pins when the lead's question
+     counts (asked until answered, cancelled, or expired; never a
+     subagent's, nor one a restart left behind); `chatService.test.ts` and
+     `codeService.test.ts` pin the Chat and Code
      navigation rows, `leadApprovalAttention.test.ts` and
-     `pendingRequestRoutes.test.ts` the Inbox row,
-     `collectThreadAttention.test.ts` the sidebar mark, and
-     `ThreadHarnessApproval.test.tsx` the inline card.
+     `pendingRequestRoutes.test.ts` the approval's Inbox row,
+     `collectThreadAttention.test.ts` the sidebar mark and Inbox entry for an
+     approval and a question, `machineChangeFeed.test.ts` that asking or
+     settling either refreshes the navigation reads, and
+     `ThreadHarnessApproval.test.tsx` the inline approval card.
   3. **Task list.** `todo-write` records pending, in-progress, and done
      without a plan approval. Not yet pinned at the offered-set level beyond
      item 1; the progress states are covered by `nativeHarnessTodo.test.ts`.
@@ -6111,8 +6143,8 @@ same. This holds in Chat, Work, and Code.
   editor, and E2B, the first of the two named cloud providers (E2B and Cua
   Spaces), are built; Cua Spaces, reached through the person's local Cua daemon, is
   designed (accepted on 2026-10-27), and its local-daemon port and its driver
-  for a Space on this machine are built but offered on no host until the
-  maintainer's live smoke passes; see
+  for a Space on this machine or on the person's other machine are built but
+  offered on no host until the maintainer's live smokes pass; see
   [Disposable desktops](design/disposable-desktops.md#cua-spaces-through-the-local-daemon).
   A driver whose provider runs a daemon on this machine reaches it only
   through the host's daemon port: one Unix socket under the home of Octant's
@@ -6125,7 +6157,8 @@ same. This holds in Chat, Work, and Code.
   HTTPS port, which sends nothing outside the hosts the driver declares and
   attaches the person's key from the credential broker's
   `/v1/desktop-provider-credentials/*` namespace itself; a person confirms
-  every billed desktop. No host offers a cloud provider yet, so a recipe can
+  every billed desktop and every desktop off this machine. No host offers a
+  cloud provider yet, so a recipe can
   name only the host-local provider.
 
 **Canvas export.** A destination plugin contributes an export target through
@@ -6691,9 +6724,10 @@ mechanisms are:
   each mode's own bounds and sanitization. The read is local-window only: its
   path is outside every prefix the remote listener forwards, the remote action
   classifier names no action for it, and the route refuses a paired device's
-  principal. Freshness rides the Machine change feed: a child agent's approval or
-  question asked or settled publishes `work-navigation` and `code-navigation`
-  (a lead's own question publishes nothing new), and any harness approval, the
+  principal. Freshness rides the Machine change feed: any harness question,
+  the lead's own or a child's, asked or settled publishes `work-navigation` and
+  `code-navigation` (a Chat lead's question is journaled on the attempt), and
+  any harness approval, the
   lead's or a child's, asked or settled publishes `chat-navigation`,
   `work-navigation`, and `code-navigation`,
   a Work request's

@@ -93,6 +93,7 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { readDiagnosticsFailureIncident } from "../persistence/diagnosticsExportProjection";
 import {
   CHAT_SETTINGS_AGGREGATE_ID,
+  readChatAttempt,
   readChatContent,
   readChatSettings,
   readChatThreadView,
@@ -482,6 +483,7 @@ function openFixture(options?: {
       request: Parameters<PersistenceService["readChatThreadWindow"]>[1],
     ) => readChatThreadWindow(connection, threadId, request),
     readChatContent: (contentId: string) => readChatContent(connection, contentId),
+    readChatAttempt: (attemptId: string) => readChatAttempt(connection, attemptId),
     searchChatThreads: (query: string) => searchChatThreads(connection, query),
     searchChatTranscript: (query: string, excludeThreadIds?: ReadonlySet<string>) =>
       searchChatTranscript(connection, query, excludeThreadIds ?? new Set()),
@@ -5649,7 +5651,11 @@ describe("ChatService", () => {
     // person, so it is not reported as working.
     approvalWaiting = true;
     const parked = service.navigation().threads[0];
-    expect(parked).toMatchObject({ executing: false, awaitingInput: true });
+    expect(parked).toMatchObject({
+      executing: false,
+      awaitingInput: true,
+      awaitingKind: "approval",
+    });
     expect(parked).not.toHaveProperty("turnStartedAt");
     approvalWaiting = false;
     expect(service.navigation().threads[0]).toMatchObject({ executing: true });
@@ -6419,6 +6425,7 @@ describe("ChatService", () => {
     expect(service.navigation().threads[0]).toMatchObject({
       executing: false,
       awaitingInput: true,
+      awaitingKind: "approval",
     });
   });
 
@@ -6453,6 +6460,13 @@ describe("ChatService", () => {
       prompt: "Ask me anything",
     });
     await until(() => service.listPendingQuestions().length === 1);
+    // Parked on the question, the thread needs the person rather than working,
+    // as one parked on the agent's own approval does, and names the wait.
+    expect(service.navigation().threads[0]).toMatchObject({
+      executing: false,
+      awaitingInput: true,
+      awaitingKind: "user-input",
+    });
 
     const [listed] = service.listPendingQuestions();
     if (listed?.mode !== "chat" || listed.kind !== "question") {
@@ -6492,6 +6506,8 @@ describe("ChatService", () => {
       () => service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "completed",
     );
     expect(service.listPendingQuestions()).toEqual([]);
+    expect(service.navigation().threads[0]).not.toHaveProperty("awaitingInput");
+    expect(service.navigation().threads[0]).not.toHaveProperty("awaitingKind");
     expect(answered.map((answer) => answer.requestId)).toEqual(["q-first", "q-second"]);
   });
 

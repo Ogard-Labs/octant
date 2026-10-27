@@ -1,6 +1,7 @@
 import type { DesktopPaneClient } from "@octant/client-runtime/desktop-pane-client";
 import {
   decodeDesktopLease,
+  decodeDesktopPlacementId,
   decodeDesktopProviderId,
   decodeDesktopViewId,
   type DesktopInputEvent,
@@ -180,7 +181,54 @@ describe("Desktop pane", () => {
       expect(requests).toContainEqual({
         kind: "acquire",
         threadId,
-        confirmedBilledProvider: "e2b",
+        confirmedProvider: "e2b",
+      }),
+    );
+  });
+
+  it("asks the person before starting a desktop off this machine, saying where it runs and what a stopped host leaves behind", async () => {
+    const spaces = {
+      providerId: decodeDesktopProviderId("cua"),
+      displayName: "Cua Spaces",
+      locality: "cloud",
+      billed: false,
+      daemon: true,
+      placements: [
+        {
+          placementId: decodeDesktopPlacementId("this-machine"),
+          displayName: "This machine",
+          locality: "host-local",
+          billed: false,
+        },
+        {
+          placementId: decodeDesktopPlacementId("other-machine"),
+          displayName: "Your other machine",
+          locality: "cloud",
+          billed: false,
+        },
+      ],
+    } as const;
+    const { client, requests } = fakeClient({
+      overview: overviewOf([], {
+        status: "available",
+        provider: spaces,
+        placementId: decodeDesktopPlacementId("other-machine"),
+      }),
+    });
+    render(<DesktopPane client={client} threadId={threadId} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Start desktop" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Start a desktop off this machine?")).toBeTruthy();
+    expect(dialog.textContent).toContain("Your other machine");
+    expect(dialog.textContent).toContain("If this machine stops, Octant cannot end it");
+    expect(kinds(requests)).toEqual([]);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Start desktop" }));
+    await waitFor(() =>
+      expect(requests).toContainEqual({
+        kind: "acquire",
+        threadId,
+        confirmedProvider: "cua",
+        confirmedPlacement: "other-machine",
       }),
     );
   });

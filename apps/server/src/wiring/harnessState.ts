@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { decodeChatThreadId, decodeCodeThreadId, decodeWorkThreadId } from "@octant/contracts";
 import { createAgentRunInteractions } from "../agentRun/agentRunInteractions";
 import { readApprovalOutsideContent } from "../context/externalContentTaintProjection";
+import { awaitsLeadQuestion } from "../harness/leadApprovalAttention";
 import { NativeHarnessApprovalStore } from "../harness/nativeHarnessApprovals";
 import {
   NativeHarnessQuestionStore,
@@ -90,6 +91,15 @@ export function wireHarnessState(deps: HarnessStateDependencies) {
     },
   });
 
+  // The lead's own question parks a Work thread on the person as a pending
+  // Work question does. Code shows it through its inline question path, and a
+  // Chat lead's question is journaled on the Chat attempt, not here.
+  const threadAwaitsHarnessQuestion = (threadId: string): boolean =>
+    awaitsLeadQuestion(
+      { questions: nativeHarnessQuestions, sessions: nativeHarnessSessions },
+      threadId,
+    );
+
   return {
     agentRunInteractions,
     nativeHarnessApprovals,
@@ -97,6 +107,7 @@ export function wireHarnessState(deps: HarnessStateDependencies) {
     nativeHarnessSessions,
     onHarnessQuestionAsked,
     onHarnessQuestionSettled,
+    threadAwaitsHarnessQuestion,
   };
 }
 

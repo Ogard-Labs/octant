@@ -31,7 +31,6 @@ export class MachineChangeFeed {
   readonly #frames: MachineChangeFrame[] = [];
   readonly #subscribers = new Set<Subscriber>();
   readonly #maxFrames: number;
-  readonly #childQuestionIds = new Set<string>();
   #nextSequence = 1;
   #closed = false;
 
@@ -69,7 +68,7 @@ export class MachineChangeFeed {
         topics.add("chat-navigation");
         topics.add("work-navigation");
         topics.add("code-navigation");
-      } else if (this.#childQuestionChanged(event)) {
+      } else if (this.#questionChanged(event)) {
         topics.add("work-navigation");
         topics.add("code-navigation");
       }
@@ -109,33 +108,20 @@ export class MachineChangeFeed {
   }
 
   /**
-   * Whether this event asks or settles a question a subagent made. Only those
-   * reach the navigation reads: the lead's own question is answered where it is
-   * asked. An ask names its subagent in `source`; a settle names only the
-   * question, so the ask's id is remembered until its settle, which every ask
-   * reaches (answered, expired, or cancelled).
+   * Whether this event asks or settles a harness question, the lead's own or a
+   * subagent's. Either one parks a Work or Code thread on the person and
+   * moves its sidebar mark, board status, and Inbox entry; a Chat lead's
+   * question is journaled on the Chat attempt, which the Chat topic covers.
+   * A settle can come from a surface or a resume that never saw the ask, so
+   * none is filtered.
    */
-  #childQuestionChanged(event: {
+  #questionChanged(event: {
     readonly aggregateType: string;
     readonly eventName?: string;
-    readonly payload?: unknown;
   }): boolean {
     if (event.aggregateType !== NATIVE_HARNESS_SESSION_AGGREGATE_TYPE) return false;
-    const payload = event.payload as
-      | { readonly id?: unknown; readonly source?: unknown; readonly questionId?: unknown }
-      | null
-      | undefined;
-    if (payload === undefined || payload === null) return false;
     const names = NATIVE_HARNESS_SESSION_EVENT_NAMES;
-    if (event.eventName === names.questionAsked) {
-      if (payload.source === undefined) return false;
-      this.#childQuestionIds.add(String(payload.id));
-      return true;
-    }
-    if (event.eventName === names.questionSettled) {
-      return this.#childQuestionIds.delete(String(payload.questionId));
-    }
-    return false;
+    return event.eventName === names.questionAsked || event.eventName === names.questionSettled;
   }
 
   publish(topics: ReadonlyArray<MachineChangeTopic>): void {

@@ -85,8 +85,13 @@ export function sameLiveTurn(a: LiveTurnFacts | undefined, b: LiveTurnFacts | un
 
 export interface ChatThreadNavigationSource {
   readonly executing?: boolean;
-  /** The agent's own approval waits on the person; the thread is parked, not working. */
+  /**
+   * The agent's own approval, or a question the turn asked, waits on the
+   * person; the thread is parked, not working.
+   */
   readonly awaitingInput?: boolean;
+  /** What the person is asked. Absent from an older host, which only reported an approval. */
+  readonly awaitingKind?: "approval" | "user-input";
   /** When the running turn began and what it is doing; absent outside a live turn. */
   readonly turnStartedAt?: string | undefined;
   readonly liveStep?: ThreadLiveStep | undefined;
@@ -254,7 +259,7 @@ export function buildChatThreadNavigation(
 ): ReadonlyArray<ChatThreadNavigationItem> {
   return threads.map((thread) => ({
     ...(thread.awaitingInput === true
-      ? { activity: "attention" as const, awaitingKind: "approval" as const }
+      ? { activity: "attention" as const, awaitingKind: thread.awaitingKind ?? "approval" }
       : thread.executing === true
         ? { activity: "working" as const }
         : {}),

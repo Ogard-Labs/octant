@@ -4191,8 +4191,9 @@ function LaunchedShell(
     const markedChatNavigation = chatController.navigation.map((thread) => ({
       ...withProviderMark(thread),
       // Chat's durable follow-up never wakes a row, but the agent's own
-      // approval is the host's live signal that the thread needs the person.
-      ...threadRest(thread, { now: minuteNow, awaitingInput: thread.awaitingKind === "approval" }),
+      // approval or the turn's question is the host's live signal that the
+      // thread needs the person.
+      ...threadRest(thread, { now: minuteNow, awaitingInput: thread.awaitingKind !== undefined }),
     }));
     // The pane header says "Running" for exactly the threads the sidebar's
     // status mark calls working, so the two never disagree.

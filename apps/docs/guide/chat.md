@@ -98,6 +98,11 @@ answer stays in the transcript under a **Regenerated** mark, and the thread
 carries the newest answer onward: later turns read the regenerated exchange,
 not the replaced one.
 
+While a reply waits on your answer to a question, or on your approval, the
+thread is not running: its sidebar mark and the pane header say **Needs you**,
+and the Inbox lists it as waiting for your answer or your approval, until you
+answer or the turn ends.
+
 A provider question left parked when the app restarts can no longer be
 answered — the provider session that was waiting on it is gone. Answering the
 restored card settles the turn as interrupted rather than leaving it parked,
@@ -126,7 +131,7 @@ sending it a new message. Octant refuses to put a thread away while an answer
 is still running.
 
 **Snooze** hides a thread until a time you pick, in its own collapsed shelf
-with the time until it returns. It comes back early if the answer that was running when you snoozed it finishes. When a snooze
+with the time until it returns. It comes back early if the reply needs you, or if the answer that was running when you snoozed it finishes. When a snooze
 ends the row reappears marked **Woke** until you open it; **Wake** ends a
 snooze by hand.
 

@@ -1,6 +1,7 @@
 /**
  * The Cua Spaces desktop provider: a disposable desktop in a Cua Space, a
- * QEMU VM the person's own `cua daemon` runs on this machine.
+ * QEMU VM the person's own `cua daemon` runs on this machine, or on another
+ * of the person's machines that provides Spaces.
  *
  * It is a plugin-shaped driver. It imports only `@octant/contracts` and the
  * desktop-provider seam and reaches Cua only through the
@@ -16,6 +17,11 @@
  * labels with the host's tag, with a daemon lifetime past the lease expiry,
  * so a restarted host finds what it left by listing those labels, and a host
  * that never comes back has its Space reaped when the daemon next runs.
+ *
+ * A Space on another machine reaches this daemon over Cua's mesh or relay.
+ * Its screen, input, files, and launches go only over a route the relay
+ * cannot read: the driver asks `GetSpaceRoute` before each one and refuses
+ * `relay_https`, where the relay can read the session in transit.
  *
  * The rules are in docs/design/disposable-desktops.md ("Cua Spaces through
  * the local daemon").
@@ -37,6 +43,7 @@ import {
   pngDimensions,
   ScreenshotDesktopControl,
   x11Keysym,
+  type DesktopAcquireResult,
   type DesktopDaemonDeclaration,
   type DesktopDaemonPort,
   type DesktopDaemonResult,
@@ -57,6 +64,7 @@ import {
   cuaGetCapabilitiesRequest,
   cuaGetInfoRequest,
   cuaKeyRequest,
+  cuaListHostsRequest,
   cuaListSpacesRequest,
   cuaMoveRequest,
   cuaPointerRequest,
@@ -72,25 +80,39 @@ import {
   readCuaCreateSpace,
   readCuaGetInfo,
   readCuaLifetime,
+  readCuaListHosts,
   readCuaListSpaces,
   readCuaProcessRun,
   readCuaProtocolVersion,
   readCuaResolve,
+  readCuaRouteTransport,
   readCuaScreenshot,
   readCuaUploadChunk,
+  type CuaHost,
   type CuaKey,
   type CuaPointer,
   type CuaSpace,
 } from "./cuaProtocol";
 
 export const CUA_DESKTOP_PROVIDER_ID = decodeDesktopProviderId("cua");
-/** The one placement offered now: a Space on this machine (decisions C5 and C7). */
+/**
+ * The placements offered now: a Space on this machine, and one on another of
+ * the person's machines, which leaves this one through Cua's mesh or relay
+ * and bills nothing. Billed clouds wait for decision C5.
+ */
 export const CUA_THIS_MACHINE_PLACEMENT = decodeDesktopPlacementId("this-machine");
+export const CUA_OTHER_MACHINE_PLACEMENT = decodeDesktopPlacementId("other-machine");
 export const CUA_DESKTOP_PLACEMENTS: ReadonlyArray<DesktopPlacement> = [
   {
     id: CUA_THIS_MACHINE_PLACEMENT,
     displayName: "This machine",
     locality: "host-local",
+    billed: false,
+  },
+  {
+    id: CUA_OTHER_MACHINE_PLACEMENT,
+    displayName: "Your other machine",
+    locality: "cloud",
     billed: false,
   },
 ];
@@ -113,6 +135,8 @@ export const CUA_DESKTOP_DAEMON: DesktopDaemonDeclaration = {
     `${SPACE}/ListSpaces`,
     `${SPACE}/ResolveSpace`,
     `${SPACE}/ConnectSpace`,
+    `${SPACE}/ListHosts`,
+    `${SPACE}/GetSpaceRoute`,
     `${ENV}.SystemService/GetCapabilities`,
     `${ENV}.ComputerService/Screenshot`,
     `${ENV}.ComputerService/Pointer`,
@@ -150,6 +174,15 @@ const INBOX = "/home/user/inbox";
 const INCOMING = "/home/user/.octant-incoming";
 /** gRPC's status for a Space the daemon does not know. */
 const GRPC_NOT_FOUND = 5;
+/**
+ * The routes to a Space on another machine that carry its session where
+ * Cua's relay cannot read it: end to end over the mesh (straight or relayed
+ * as ciphertext), straight to the machine, or on this one. `relay_https`,
+ * and anything else, is refused.
+ */
+const UNREAD_ROUTES: ReadonlySet<string> = new Set(["mesh", "direct", "local"]);
+/** A machine id the driver passes back to Cua as `host:<id>`. */
+const HOST_ID = /^[A-Za-z0-9][A-Za-z0-9 ._:@-]{0,127}$/;
 
 /**
  * Copies a sent file out of the inbox, makes the copy executable by the
@@ -177,6 +210,8 @@ export interface CuaDesktopProviderOptions {
 
 interface Session {
   readonly spaceId: string;
+  /** The Space runs on another of the person's machines, reached over Cua's mesh or relay. */
+  readonly offMachine: boolean;
   /** The env passthrough key `ConnectSpace` minted; never journaled. */
   readonly envKey: string;
   readonly screen: DesktopRecipe["screen"];
@@ -344,10 +379,57 @@ export function createCuaDesktopProvider(
     return lifetime.kind === "ok" ? readCuaLifetime(lifetime.message) : undefined;
   }
 
+  /**
+   * The one machine of the person's, other than this one, that provides
+   * Spaces now. More than one is refused rather than chosen for the person,
+   * who confirmed only "your other machine".
+   */
+  async function otherMachine(
+    signal: AbortSignal,
+  ): Promise<{ readonly status: "chosen"; readonly host: CuaHost } | DesktopAcquireResult> {
+    const listed = await call(`${SPACE}/ListHosts`, cuaListHostsRequest(), { signal });
+    if (listed.kind === "cancelled") return { status: "cancelled" };
+    if (listed.kind === "unreachable") return { status: "not-connected" };
+    const hosts = listed.kind === "ok" ? readCuaListHosts(listed.message) : undefined;
+    if (hosts === undefined) return failed("hosts-unreadable");
+    const online = hosts.filter((host) => host.online);
+    const [host] = online;
+    if (host === undefined) return { status: "refused", reason: "no-other-machine" };
+    if (online.length > 1) return { status: "refused", reason: "other-machine-ambiguous" };
+    if (!HOST_ID.test(host.id) || (host.via !== "relay" && host.via !== "direct")) {
+      return failed("hosts-unreadable");
+    }
+    return { status: "chosen", host };
+  }
+
+  /**
+   * Whether a Space on another machine is reached now over a route Cua's
+   * relay cannot read. A Space on this machine is never asked.
+   */
+  async function unreadRoute(
+    session: Session,
+  ): Promise<
+    | { readonly status: "unread" }
+    | { readonly status: "refused"; readonly reason: string }
+    | { readonly status: "not-connected" }
+  > {
+    if (!session.offMachine) return { status: "unread" };
+    const asked = await call(`${SPACE}/GetSpaceRoute`, cuaSpaceRequest(session.spaceId));
+    if (asked.kind === "unreachable") return { status: "not-connected" };
+    const transport = asked.kind === "ok" ? readCuaRouteTransport(asked.message) : undefined;
+    if (transport !== undefined && UNREAD_ROUTES.has(transport)) return { status: "unread" };
+    return {
+      status: "refused",
+      reason: transport === "relay_https" ? "relay-reads-session" : "route-unverified",
+    };
+  }
+
   /** Waits until a new Space runs with its in-guest agent and carries what was asked. */
   async function untilReady(
     spaceId: string,
     request: { readonly leaseId: DesktopLeaseId; readonly hostTag: DesktopHostTag },
+    /** The machine asked for, or undefined for this one. */
+    host: CuaHost | undefined,
     signal: AbortSignal,
   ): Promise<"ready" | "cancelled" | "mismatched" | "not-ready"> {
     const deadline = now() + readyWithinMs;
@@ -365,6 +447,9 @@ export function createCuaDesktopProvider(
           current.labels.get(CUA_LEASE_LABEL) !== String(request.leaseId) ||
           current.labels.get(CUA_HOST_LABEL) !== String(request.hostTag) ||
           current.cloud !== "" ||
+          (host === undefined
+            ? current.host !== ""
+            : current.host === "" || (host.via === "relay" && current.host !== host.id)) ||
           (current.kind !== "" && current.kind !== "vm")
         ) {
           return "mismatched";
@@ -551,19 +636,30 @@ export function createCuaDesktopProvider(
     acquire: async (request) => {
       if (request.signal.aborted) return { status: "cancelled" };
       const { recipe, leaseId } = request;
-      if (String(recipe.placementId ?? "") !== String(CUA_THIS_MACHINE_PLACEMENT)) {
+      const placement = String(recipe.placementId ?? "");
+      const offMachine = placement === String(CUA_OTHER_MACHINE_PLACEMENT);
+      if (!offMachine && placement !== String(CUA_THIS_MACHINE_PLACEMENT)) {
         return { status: "refused", reason: "placement-not-offered" };
       }
-      // A QEMU guest with user networking can reach the host's loopback, and
-      // so the Octant server, until a live check shows otherwise (C7).
+      // A QEMU guest with user networking can reach its host's loopback: on
+      // this machine the Octant server, on another the person's own
+      // services there. So no placement has network until a live check
+      // shows otherwise (C7).
       if (recipe.network !== "none") return { status: "refused", reason: "network-not-offered" };
       if (recipe.credentialRef !== undefined) {
         return { status: "refused", reason: "credential-not-used" };
+      }
+      let host: CuaHost | undefined;
+      if (offMachine) {
+        const chosen = await otherMachine(request.signal);
+        if (chosen.status !== "chosen") return chosen;
+        host = chosen.host;
       }
       const created = await call(
         `${SPACE}/CreateSpace`,
         cuaCreateSpaceRequest({
           image: recipe.image ?? CUA_DEFAULT_IMAGE,
+          location: host === undefined ? "local" : `host:${host.id}`,
           name: spaceName(leaseId),
           createId: String(leaseId),
           labels: { [CUA_LEASE_LABEL]: String(leaseId), [CUA_HOST_LABEL]: String(request.hostTag) },
@@ -608,7 +704,7 @@ export function createCuaDesktopProvider(
         await discard(leaseId, spaceId);
         return failed("lifetime-not-set");
       }
-      const ready = await untilReady(spaceId, request, request.signal);
+      const ready = await untilReady(spaceId, request, host, request.signal);
       if (ready !== "ready") {
         await discard(leaseId, spaceId);
         return ready === "cancelled" ? { status: "cancelled" } : failed(`space-${ready}`);
@@ -640,6 +736,7 @@ export function createCuaDesktopProvider(
       const { screen } = recipe;
       const session: Session = {
         spaceId,
+        offMachine,
         envKey,
         screen,
         control: new ScreenshotDesktopControl({
@@ -680,14 +777,25 @@ export function createCuaDesktopProvider(
         ? failed("lifetime-not-set")
         : { status: "extended", expiresAt: reported };
     },
+    // A view, and every frame and input in it, goes only over a route the
+    // relay cannot read; a route can fall back to the relay's HTTPS path
+    // while a view is open.
     screen: async (handle) => {
       const session = sessionOf(handle);
       if (session === undefined) return failed("not-running");
+      const route = await unreadRoute(session);
+      if (route.status !== "unread") return route;
       return {
         status: "ready",
         screen: {
-          frame: (signal) => frameOf(session, signal),
-          input: (event) => inputTo(session, event),
+          frame: async (signal) => {
+            const current = await unreadRoute(session);
+            return current.status === "unread" ? frameOf(session, signal) : current;
+          },
+          input: async (event) => {
+            const current = await unreadRoute(session);
+            return current.status === "unread" ? inputTo(session, event) : current;
+          },
           // Closing a view leaves the Space running; only release ends it.
           close: async () => undefined,
         },
@@ -695,15 +803,34 @@ export function createCuaDesktopProvider(
     },
     control: async (handle, command): Promise<ComputerControlResult> => {
       const session = sessionOf(handle);
-      return session === undefined
-        ? { kind: "failed", reason: "not-running", message: "The desktop is not running." }
-        : session.control.control(command);
+      if (session === undefined) {
+        return { kind: "failed", reason: "not-running", message: "The desktop is not running." };
+      }
+      const route = await unreadRoute(session);
+      if (route.status === "not-connected") {
+        return {
+          kind: "failed",
+          reason: "desktop-unavailable",
+          message: "The desktop stopped answering. Release it and lease another.",
+        };
+      }
+      if (route.status === "refused") {
+        return {
+          kind: "refused",
+          reason: route.reason,
+          message:
+            "Octant cannot confirm that Cua reaches this desktop over a route its relay cannot read, so it sends nothing to the desktop and reads nothing from it.",
+        };
+      }
+      return session.control.control(command);
     },
     // The file lands whole and read-only under a staging name, then moves
     // into the inbox, so a desktop never sees a partial file.
     deliver: async (handle, name, bytes) => {
       const session = sessionOf(handle);
       if (session === undefined) return failed("not-running");
+      const route = await unreadRoute(session);
+      if (route.status !== "unread") return route;
       const staged = `${INCOMING}/${name}`;
       const written = await upload(session, staged, bytes);
       if (written === "unreachable") return { status: "not-connected" };

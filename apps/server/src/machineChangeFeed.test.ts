@@ -101,28 +101,16 @@ describe("MachineChangeFeed", () => {
     await expect(stream.next()).resolves.toMatchObject({ done: true });
   });
 
-  it("invalidates the navigation reads for every harness approval, asked and settled, but only for a subagent's question", async () => {
+  it("invalidates the navigation reads for every harness approval and question, asked and settled", async () => {
     const feed = new MachineChangeFeed();
     const controller = new AbortController();
     const stream = feed.subscribe({ afterSequence: 0, signal: controller.signal });
     const harness = "native-harness-session";
     const source = { runId: "00000000-0000-4000-8000-000000000090" };
 
-    // The lead's own question, a turn event, and a question settle nobody listed publish nothing.
+    // A turn event alone publishes nothing.
     feed.publishCommitted({
-      events: [
-        {
-          aggregateType: harness,
-          eventName: "native-harness-question-asked@1",
-          payload: { id: "lead-question" },
-        },
-        {
-          aggregateType: harness,
-          eventName: "native-harness-question-settled@1",
-          payload: { questionId: "lead-question" },
-        },
-        { aggregateType: harness, eventName: "native-harness-turn-settled@1" },
-      ],
+      events: [{ aggregateType: harness, eventName: "native-harness-turn-settled@1" }],
     });
     expect(feed.head()).toBe(0);
 
@@ -164,7 +152,27 @@ describe("MachineChangeFeed", () => {
       });
     }
 
-    // A subagent's question is a Needs you row on its parent in Work or Code.
+    // A question, the lead's own or a subagent's, parks a Work or Code thread
+    // on the person, so its ask and its settle move those sidebars and boards.
+    // A Chat lead's question is journaled on the Chat attempt instead.
+    feed.publishCommitted({
+      events: [
+        {
+          aggregateType: harness,
+          eventName: "native-harness-question-asked@1",
+          payload: { id: "lead-question" },
+        },
+      ],
+    });
+    feed.publishCommitted({
+      events: [
+        {
+          aggregateType: harness,
+          eventName: "native-harness-question-settled@1",
+          payload: { questionId: "lead-question" },
+        },
+      ],
+    });
     feed.publishCommitted({
       events: [
         {
@@ -183,24 +191,14 @@ describe("MachineChangeFeed", () => {
         },
       ],
     });
-    // The same settle again has nothing left to invalidate.
-    feed.publishCommitted({
-      events: [
-        {
-          aggregateType: harness,
-          eventName: "native-harness-question-settled@1",
-          payload: { questionId: "child-question" },
-        },
-      ],
-    });
-    for (const sequence of [4, 5]) {
+    for (const sequence of [4, 5, 6, 7]) {
       await expect(stream.next()).resolves.toMatchObject({
         value: { sequence, topics: ["work-navigation", "code-navigation"] },
       });
     }
     controller.abort();
     await expect(stream.next()).resolves.toMatchObject({ done: true });
-    expect(feed.head()).toBe(5);
+    expect(feed.head()).toBe(7);
   });
 
   it("requires a snapshot when the requested cursor fell outside replay", async () => {

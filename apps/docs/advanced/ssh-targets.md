@@ -12,10 +12,14 @@ proves it confines them as your Mac would.
 
 In this technical preview you can register targets, bind a folder on one as a
 Code Project, read its files, Git status, and diff, open terminals there, and
-create managed worktrees. **Threads in a remote Project are not available
-yet**: the composer's Project picker lists remote Projects so you can see
-them, but does not offer them for a new task. macOS targets are not
-admitted yet either.
+create managed worktrees. **The composer does not offer remote Projects for
+a new task yet**: its Project picker lists them so you can see them. Octant
+on your Mac can already run a remote Project's thread, and the composer step
+is next. Such a thread runs only on Octant's own harness (a model you reach
+through an endpoint, such as an OpenAI-compatible one), whose inference
+stays on your Mac while its file tools and commands act on the target with
+the usual approvals; any other provider is refused for it, and Full access
+is not offered there. macOS targets are not admitted yet either.
 
 ## What the target needs
 
@@ -120,13 +124,14 @@ octant ssh-target runtime <target-id> <provider-id> /home/build/.local/bin/agent
 Octant checks the file on the target before every launch: it must be an
 executable that only you or root can change, outside the Project's folder
 and your `~/.ssh`. Setting another path takes effect the next time the
-runtime starts. Threads in remote Projects are not available yet, so nothing
-runs from this path until they are, and no provider Octant ships can run on
-a target yet.
+runtime starts. A remote Project's thread does not start a provider's own
+runtime yet, so nothing runs from this path until it does, and no provider
+Octant ships can run on a target yet.
 
 ## Removing a target
 
-**Remove…** on a target ends its session and forgets its pinned key. Its
+**Remove…** on a target ends its session, which stops any turn running in
+one of its Projects, and forgets its pinned key. Its
 Projects stay listed on this Mac and take no new work. Nothing on the target
 is deleted: not the folder, not its worktrees.
 

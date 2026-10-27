@@ -75,6 +75,8 @@ import type { IntegrationsWiring } from "./integrations";
 import type { WorkspaceWiring } from "./workspace";
 import type { ProvidersWiring } from "./providers";
 import type { FoundationsWiring } from "./foundations";
+import type { SshTargetsWiring } from "./sshTargets";
+import { withRemoteCodeCheckouts } from "../sshTarget/sshRemoteCodeThreads";
 
 export function createExistingWorktreeCodeFileRootAuthority(options: {
   readonly projects: Pick<ProjectService, "bootstrap">;
@@ -137,6 +139,9 @@ export function createExistingWorktreeCodeFileRootAuthority(options: {
         });
         if (checkout.id !== expectedCheckoutId) return undefined;
         rootPath = repositoryRoot;
+      } else if (checkout.kind === "remote-root") {
+        // A remote root is a path on an SSH target and never a folder here.
+        return undefined;
       } else {
         if (options.managedReceipts === undefined) return undefined;
         const receipt = await options.managedReceipts.load(checkout.ownershipReceiptId);
@@ -516,7 +521,8 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "managedWorktreeSourcePreview"
     | "probeProviderForThreads"
     | "refreshStandaloneSkills"
-  >;
+  > &
+  Pick<SshTargetsWiring, "sshTargetStore">;
 
 export function wireCode(deps: CodeDependencies) {
   const {
@@ -548,6 +554,7 @@ export function wireCode(deps: CodeDependencies) {
     projectService,
     refreshStandaloneSkills,
     selectCodeConversation,
+    sshTargetStore,
     windowAuthorityStore,
   } = deps;
   return Effect.gen(function* () {
@@ -595,7 +602,7 @@ export function wireCode(deps: CodeDependencies) {
       }
     }
     const repository = options.codeRepositoryPort ?? createManagedWorktreeNodePorts().repository;
-    const checkouts = createExistingWorktreeCodeCheckoutObservation({
+    const localCheckouts = createExistingWorktreeCodeCheckoutObservation({
       projects: projectService,
       readProject: persistence.readProject,
       repository,
@@ -604,6 +611,14 @@ export function wireCode(deps: CodeDependencies) {
       requireGitRepository: () =>
         persistence.readCodeSettings()?.settings.requireGitRepository ?? true,
     });
+    // A remote-bound Project's checkout is the root its binding names on the
+    // SSH target, derived from that binding alone: nothing here observes a
+    // folder of this host for it, and no local root resolves it.
+    const checkouts = withRemoteCodeCheckouts(sshTargetStore, localCheckouts);
+    const isRemoteCodeProject = (projectId: ProjectId) =>
+      sshTargetStore.getProject(String(projectId)) !== undefined;
+    const isCodeProject = (projectId: ProjectId) =>
+      projectService.hasActiveProject(projectId, "code") || isRemoteCodeProject(projectId);
     const roots = createExistingWorktreeCodeFileRootAuthority({
       projects: projectService,
       readProject: persistence.readProject,
@@ -665,7 +680,7 @@ export function wireCode(deps: CodeDependencies) {
     });
     const codeProjectAccess = new CodeProjectAccess({
       readWorkspace: (scopeId) => persistence.readWindowWorkspace(scopeId)?.workspace,
-      hasActiveCodeProject: (id) => projectService.hasActiveProject(id, "code"),
+      hasActiveCodeProject: isCodeProject,
       // A renderer reload keeps its registration; a crashed or closed primary
       // window that reopens registers the same window id again.
       isWindowLive: (scopeId) =>
@@ -678,6 +693,9 @@ export function wireCode(deps: CodeDependencies) {
       readonly providerInstanceId: ProviderInstance["id"];
       readonly modelId: ProviderModel["id"];
     }): boolean => {
+      // A remote-bound Project has no provider policy of its own; its turn
+      // admits only the harness, or a runtime placed on the target.
+      if (isRemoteCodeProject(input.projectId)) return true;
       const project = persistence.readProject(input.projectId);
       if (project?.type !== "code") return false;
       return isProjectPolicyTargetAllowed(project, input.providerInstanceId, input.modelId);
@@ -694,7 +712,7 @@ export function wireCode(deps: CodeDependencies) {
           gitHistory: new GitHistoryPort(),
           persistence,
           access: {
-            canBrowseProject: (projectId) => projectService.hasActiveProject(projectId, "code"),
+            canBrowseProject: isCodeProject,
             canAccessProject: canAccessCodeProject,
           },
           checkouts,

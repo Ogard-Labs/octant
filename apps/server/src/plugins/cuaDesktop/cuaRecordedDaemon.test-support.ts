@@ -16,6 +16,11 @@
  * here are written from those files independently of the driver's own, so a
  * wrong number in either fails a test.
  *
+ * It also plays the person's other machines that provide Spaces
+ * (`ListHosts`, a create `on` `host:<id>`), and the route its connection to
+ * a Space on one of them takes now (`GetSpaceRoute`), which a test can move
+ * to the relay's HTTPS path while a view is open.
+ *
  * Inside a Space it plays a small Linux: it runs the two programs the driver
  * starts (by the name each script is started under), keeps files, and
  * records screen input, so tests can see what reached the desktop. It never
@@ -60,6 +65,19 @@ export interface RecordedCuaScenario {
   readonly features?: ReadonlyArray<string>;
   /** The display a Space's screenshots show, before `max_dimension`. */
   readonly display?: { readonly width: number; readonly height: number };
+  /** The person's other machines that provide Spaces, as `ListHosts` reports them. */
+  readonly hosts?: ReadonlyArray<RecordedCuaHost>;
+  /** The machine the daemon reports a Space on, whatever was asked. */
+  readonly placesOnHost?: string;
+  /** What carries the connection to a Space on another machine (`GetSpaceRoute`'s transport). */
+  readonly route?: string;
+}
+
+export interface RecordedCuaHost {
+  readonly id: string;
+  readonly name: string;
+  readonly via: "relay" | "direct";
+  readonly online: boolean;
 }
 
 type Fields = ReadonlyArray<ProtobufField>;
@@ -68,6 +86,8 @@ interface RecordedSpace {
   readonly id: string;
   readonly name: string;
   readonly createId: string;
+  /** The machine that provides it, as `Space.host` names it; empty on this machine. */
+  readonly host: string;
   readonly labels: ReadonlyMap<string, string>;
   readonly createRequest: Fields;
   expiresAt?: number;
@@ -183,12 +203,14 @@ export class RecordedCuaDaemon {
     }
   >();
   readonly #calls: Array<RecordedCall> = [];
+  #transport: string;
   #sequence = 0;
   #pid = 700;
 
   private constructor(home: string, scenario: RecordedCuaScenario, now: () => number) {
     this.home = home;
     this.#scenario = scenario;
+    this.#transport = scenario.route ?? "mesh";
     this.#now = now;
     this.#server = createServer((request, response) => {
       const chunks: Array<Buffer> = [];
@@ -242,6 +264,7 @@ export class RecordedCuaDaemon {
     readonly id: string;
     readonly name: string;
     readonly createId: string;
+    readonly host: string;
     readonly labels: ReadonlyMap<string, string>;
     readonly createRequest: Fields;
     readonly expiresAt: number | undefined;
@@ -257,6 +280,11 @@ export class RecordedCuaDaemon {
   /** Creates the daemon is still running. */
   creating(): ReadonlyArray<string> {
     return [...this.#creating.keys()];
+  }
+
+  /** Moves the connection to Spaces on other machines to another transport, as Cua's fallback does. */
+  routeOver(transport: string): void {
+    this.#transport = transport;
   }
 
   #route(method: string, request: Fields, response: ServerResponse): void {
@@ -347,6 +375,42 @@ export class RecordedCuaDaemon {
       }
       case "/cua.daemon.v1.SpaceService/ListSpaces":
         return this.#list(response);
+      case "/cua.daemon.v1.SpaceService/ListHosts": {
+        const writer = new ProtobufWriter();
+        for (const host of this.#scenario.hosts ?? []) {
+          writer.bytes(
+            1,
+            new ProtobufWriter()
+              .string(1, host.id)
+              .string(2, host.name)
+              .string(3, host.via)
+              .bool(4, host.online)
+              .finish(),
+          );
+        }
+        return answer(response, [writer.finish()]);
+      }
+      case "/cua.daemon.v1.SpaceService/GetSpaceRoute": {
+        const space = this.#spaces.get(textOf(request, 1));
+        if (space === undefined) return fail(response, 5);
+        const transport = space.host === "" ? "local" : this.#transport;
+        const route =
+          transport === "local"
+            ? "local 127.0.0.1:3211"
+            : transport === "relay_https"
+              ? "relay https://relay.example.invalid"
+              : transport === "mesh"
+                ? "mesh relayed"
+                : transport;
+        return answer(response, [
+          new ProtobufWriter()
+            .string(1, route)
+            .bool(2, transport === "local" || transport === "direct")
+            .string(3, transport)
+            .string(4, transport === "relay_https" ? "the mesh did not answer" : "")
+            .finish(),
+        ]);
+      }
       default:
         return fail(response, 12);
     }
@@ -355,12 +419,23 @@ export class RecordedCuaDaemon {
   #create(request: Fields, response: ServerResponse): void {
     const createId = textOf(request, 17);
     const name = textOf(request, 5);
+    // `local`, or `host:<id>` for one of the person's machines that answers;
+    // a Space a relay host provides is named by that host's relay machine id.
+    const location = textOf(request, 2);
+    const asked = location.startsWith("host:")
+      ? (this.#scenario.hosts ?? []).find((host) => host.online && `host:${host.id}` === location)
+      : undefined;
+    if (location !== "local" && asked === undefined) return fail(response, 5);
+    const host =
+      this.#scenario.placesOnHost ??
+      (asked === undefined ? "" : asked.via === "relay" ? asked.id : "direct:10.0.0.9:3211");
     const respond = () => {
       const existing = [...this.#spaces.values()].find((space) => space.createId === createId);
       const space: RecordedSpace = existing ?? {
         id: `space-${(this.#sequence += 1)}`,
         name,
         createId,
+        host,
         labels: mapOf(request, 21),
         createRequest: request,
         bootPolls: this.#scenario.bootPolls ?? 1,
@@ -400,6 +475,7 @@ export class RecordedCuaDaemon {
       .string(2, space.name)
       .string(3, booted ? "0.9.0" : "")
       .string(12, "vm")
+      .string(14, space.host)
       .string(17, booted ? "running" : "")
       .string(18, this.#scenario.placesInCloud ?? "")
       .string(20, this.#scenario.placesInCloud === undefined ? "" : "here");

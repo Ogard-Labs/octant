@@ -383,7 +383,7 @@ describe("E2B desktop provider", () => {
         owner: { mode: "code", threadId },
         actor: person,
         scopeId: "window-1",
-        confirmedBilledProvider: decodeDesktopProviderId("e2b"),
+        confirmedProvider: decodeDesktopProviderId("e2b"),
       });
       if (killedWhile === "ready") {
         await expect(started).resolves.toMatchObject({ status: "acquired" });
