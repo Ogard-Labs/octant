@@ -55,14 +55,16 @@ export function ExtensionToolApprovalPrompt(props: {
     },
     [client, threadId],
   );
+  // A running turn's call is blocked on the answer, so a stalled change stream
+  // must not delay the prompt: the active beat stays as the recovery read.
   useVisibleRefresh(
     refresh,
     revision,
-    revision === undefined
-      ? turnActive
-        ? ACTIVE_TOOL_APPROVAL_POLL_MS
-        : IDLE_TOOL_APPROVAL_POLL_MS
-      : THREAD_ACTIVITY_RECOVERY_MS,
+    turnActive
+      ? ACTIVE_TOOL_APPROVAL_POLL_MS
+      : revision === undefined
+        ? IDLE_TOOL_APPROVAL_POLL_MS
+        : THREAD_ACTIVITY_RECOVERY_MS,
   );
 
   const pending = approvals[0];

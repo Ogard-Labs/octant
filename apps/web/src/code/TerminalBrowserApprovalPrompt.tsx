@@ -1,10 +1,7 @@
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { BrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
 import { useCallback, useEffect, useState } from "react";
-import {
-  THREAD_ACTIVITY_RECOVERY_MS,
-  useThreadActivityRevision,
-} from "../polling/ThreadActivityRevisions";
+import { useThreadActivityRevision } from "../polling/ThreadActivityRevisions";
 import { samePollingData } from "../polling/samePollingData";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 import { announceShellSettingsWritten } from "../shell/shellSettingsNotifications";
@@ -66,11 +63,9 @@ export function TerminalBrowserApprovalPrompt(props: TerminalBrowserApprovalProm
     },
     [listApprovals, props.threadId],
   );
-  useVisibleRefresh(
-    refresh,
-    revision,
-    revision === undefined ? POLL_MS : THREAD_ACTIVITY_RECOVERY_MS,
-  );
+  // Notices stay the fast path; the short read stays as recovery because a
+  // waiting CLI gives the window no turn to tell a stalled stream from quiet.
+  useVisibleRefresh(refresh, revision, POLL_MS);
 
   const pending = approvals[0];
   if (pending === undefined || props.client.decideApproval === undefined) {

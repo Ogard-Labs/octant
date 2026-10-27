@@ -407,11 +407,11 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   useVisibleRefresh(
     refreshBrowserApprovals,
     browserApprovalRevision,
-    browserApprovalRevision === undefined
-      ? turnActive
-        ? ACTIVE_TOOL_APPROVAL_POLL_MS
-        : IDLE_TOOL_APPROVAL_POLL_MS
-      : THREAD_ACTIVITY_RECOVERY_MS,
+    turnActive
+      ? ACTIVE_TOOL_APPROVAL_POLL_MS
+      : browserApprovalRevision === undefined
+        ? IDLE_TOOL_APPROVAL_POLL_MS
+        : THREAD_ACTIVITY_RECOVERY_MS,
   );
   const threadMentions = useThreadMentions({
     ...(props.threadMentionClient === undefined ? {} : { client: props.threadMentionClient }),
