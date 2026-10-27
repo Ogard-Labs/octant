@@ -1519,9 +1519,14 @@ function ProviderCatalogSection(props: {
                 onConnect: discoveryController.connect,
               },
             })}
+        credentialManagementAvailable={controller.credentialManagementAvailable}
         instances={controller.instances}
         {...(controller.message === undefined ? {} : { message: controller.message })}
         observedByInstance={controller.observedByInstance}
+        onAddOutsideProvider={controller.createOutsideHarnessEndpoint}
+        {...(controller.snapshot?.outsideDrivers === undefined
+          ? {}
+          : { outsideDrivers: controller.snapshot.outsideDrivers })}
         onDetailChange={props.onDetailChange}
         onOpenModelEndpoints={props.onOpenModelEndpoints}
         onOpenProviders={props.onOpenProviders}

@@ -2005,12 +2005,12 @@ describe("mapCodexMessage", () => {
     expect(results[1]).not.toHaveProperty("event.resetsAt");
   });
 
-  it("keeps per-window status tied to utilization when the account limit was reached", () => {
+  it("reports a window exhausted mid-turn when Codex says the account limit was reached below 100%", () => {
     const results = map(
       context({ terminal: true }),
       notification("account/rateLimits/updated", {
         rateLimits: {
-          primary: { usedPercent: 100 },
+          primary: { usedPercent: 40, windowDurationMins: 300 },
           secondary: { usedPercent: 130, windowDurationMins: 10_080 },
           rateLimitReachedType: "rate_limit_reached",
         },
@@ -2018,7 +2018,7 @@ describe("mapCodexMessage", () => {
     );
 
     expect(results.map((result) => (result.kind === "event" ? result.event : result))).toEqual([
-      expect.objectContaining({ window: "primary", status: "exhausted", utilization: 1 }),
+      expect.objectContaining({ window: "primary_5h", status: "exhausted", utilization: 0.4 }),
     ]);
     expect(results).toHaveLength(1);
   });

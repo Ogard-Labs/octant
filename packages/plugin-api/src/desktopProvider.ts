@@ -13,6 +13,7 @@ import type {
   ComputerControlResult,
 } from "@octant/contracts/computer-use-plugin";
 import type {
+  DesktopCredentialRef,
   DesktopHostTag,
   DesktopInputEvent,
   DesktopLeaseId,
@@ -28,10 +29,14 @@ export type DesktopProviderContributionKind = typeof DESKTOP_PROVIDER_CONTRIBUTI
 /**
  * The driver's reference to one desktop. `resource` is the provider's own id;
  * it never carries a stream URL or token, which stay inside the driver.
+ * `credentialRef` names the account a cloud desktop lives in: the driver copies
+ * it from the recipe it created the desktop for, and from the listing it found
+ * the desktop in, so teardown after a restart reaches the right account.
  */
 export interface DesktopHandle {
   readonly leaseId: DesktopLeaseId;
   readonly resource: string;
+  readonly credentialRef?: DesktopCredentialRef;
 }
 
 /** `refused` is authority or configuration; `not-connected` is reach. */
@@ -127,6 +132,12 @@ export interface DesktopProvider {
   readonly locality: DesktopProviderLocality;
   /** Whether a lease spends the person's money. A person confirms every billed lease. */
   readonly billed: boolean;
+  /**
+   * The HTTPS hosts a cloud provider's API answers on, fixed in the driver's
+   * code. The host's {@link DesktopHttpsPort} sends nothing anywhere else. A
+   * host-local provider declares none.
+   */
+  readonly hosts?: ReadonlyArray<string>;
   /** Whether the provider can be used on this host now. Performs no work. */
   readonly status: () => Promise<DesktopProviderStatusResult>;
   /** Creates one desktop tagged with the lease id and host tag. */
@@ -151,8 +162,16 @@ export interface DesktopProvider {
   ) => Promise<DesktopDeliverResult>;
   readonly release: (handle: DesktopHandle) => Promise<DesktopReleaseResult>;
   readonly verifyGone: (handle: DesktopHandle) => Promise<DesktopVerifyGoneResult>;
-  /** Every tagged desktop the provider holds for `hostTag`, for restart reconciliation. */
-  readonly listOwned: (hostTag: DesktopHostTag) => Promise<DesktopListOwnedResult>;
+  /**
+   * Every tagged desktop the provider holds for `hostTag`, for restart
+   * reconciliation. A provider that needs a credential lists the account
+   * `credentialRef` names, and with none answers `failed`: an answer of
+   * `listed` is the provider confirming every other desktop is absent.
+   */
+  readonly listOwned: (
+    hostTag: DesktopHostTag,
+    credentialRef?: DesktopCredentialRef,
+  ) => Promise<DesktopListOwnedResult>;
 }
 
 /**
@@ -237,3 +256,103 @@ export type DesktopTeardownPort = Pick<
   DesktopProvider,
   "id" | "release" | "verifyGone" | "listOwned"
 >;
+
+/**
+ * How the host attaches a cloud provider's API key to one call. The driver
+ * names the recipe's credential reference and the header its provider reads;
+ * the host reads the key from its credential store and sets it, so the driver
+ * never holds the key.
+ */
+export interface DesktopHttpsCredential {
+  readonly ref: DesktopCredentialRef;
+  readonly header: string;
+  readonly scheme?: "Bearer";
+}
+
+export interface DesktopHttpsRequest {
+  readonly method: "GET" | "POST" | "PUT" | "DELETE";
+  readonly url: string;
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly body?: string | Uint8Array;
+  /** Absent sends no key: a call to a desktop's own endpoint carries the driver's token instead. */
+  readonly credential?: DesktopHttpsCredential;
+  /** The most response bytes this call needs. The host's own bound still applies. */
+  readonly maxResponseBytes: number;
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * `answered` is any HTTP status, error statuses included; the body is read
+ * whole and bounded. `refused` is the host declining before anything left:
+ * a host the driver did not declare, a credential no lease of this provider
+ * recorded, a credential the store does not hold, a body over the bound, or
+ * a header or method the host will not send.
+ */
+export type DesktopHttpsResult =
+  | {
+      readonly status: "answered";
+      readonly httpStatus: number;
+      /** Response headers, names lower-cased. */
+      readonly headers: Readonly<Record<string, string>>;
+      readonly body: Uint8Array;
+    }
+  | {
+      readonly status: "refused";
+      readonly reason:
+        | "host-not-declared"
+        | "credential-not-permitted"
+        | "credential-missing"
+        | "request-too-large"
+        | "request-invalid";
+    }
+  | {
+      readonly status: "failed";
+      readonly reason: "unreachable" | "timed-out" | "redirected" | "response-too-large";
+    }
+  | { readonly status: "cancelled" };
+
+/**
+ * The capability-scoped port a cloud driver receives in place of network
+ * access. It reaches only HTTPS on the default port of a host the driver
+ * declares, never follows a redirect, bounds every call in time and bytes,
+ * and attaches a credential only when one of this provider's leases recorded
+ * that reference. A driver imports no network module of its own.
+ */
+export interface DesktopHttpsPort {
+  readonly request: (request: DesktopHttpsRequest) => Promise<DesktopHttpsResult>;
+}
+
+/**
+ * Whether a call may go to `url`: HTTPS, on the default port, with no
+ * credentials in the URL, to one of `hosts`. `*.example.com` matches every
+ * subdomain of `example.com`, never `example.com` itself.
+ */
+export function desktopProviderHostDeclared(url: string, hosts: ReadonlyArray<string>): boolean {
+  let target: URL;
+  try {
+    target = new URL(url);
+  } catch {
+    return false;
+  }
+  if (target.protocol !== "https:" || target.port !== "") return false;
+  if (target.username !== "" || target.password !== "") return false;
+  const hostname = target.hostname.toLowerCase();
+  return hosts.some((entry) => {
+    const host = entry.toLowerCase();
+    if (host.startsWith("*.")) {
+      const domain = host.slice(2);
+      return hostname.endsWith(`.${domain}`);
+    }
+    return hostname === host;
+  });
+}
+
+export {
+  maxDesktopFrameBytes,
+  pngDimensions,
+  SCREENSHOT_DESKTOP_APP_ID,
+  ScreenshotDesktopControl,
+  x11Keysym,
+  type ScreenshotDesktopLaunch,
+  type ScreenshotDesktopSurface,
+} from "./desktopScreenshotControl";

@@ -26,14 +26,20 @@ process) is built: one supervised process per instance under the driver
 profile from the shared confinement builder, a fixed environment, the
 process's stdio as the proxy's channel, the crash limit, and `host-prohibited`
 on Linux (see [Driver process rules](#driver-process-rules)); its acceptance,
-the escape tests on macOS, is the maintainer's to run. Nothing admits an
-outside driver yet, so an outside instance reports `driver-not-admitted` with
-no models and runs no turn; slice 5 is next. The maintainer authorized
-this scope as post-preview work and accepted the
-[maintainer decisions](#maintainer-decisions) below on 2026-10-26; the release
-boundary in `AGENTS.md` and the architecture is updated separately. Today only
-bundled drivers are admitted. Slices and their evidence are tracked in Linear;
-this file states the rules they implement.
+the escape tests on macOS, is the maintainer's to run. Slice 5 (admission end
+to end) is built: trusting the source admits the selected digest, a provider
+is added from an effective driver (off, at a local window), its first check
+starts the driver's process, the host runs Verify tools through the proxy,
+every record binds the digest, disable and uninstall stop the process and
+keep the provider blocked, and the provider catalog lists effective outside
+drivers in their own group (see [Admission rules](#admission-rules)). Its
+product acceptance, the live loopback smoke on macOS with a local model
+server, is the maintainer's to run; on Linux every outside driver stays
+`host-prohibited`. Slice 6 is next. The maintainer authorized this scope as
+post-preview work and accepted the [maintainer decisions](#maintainer-decisions)
+below on 2026-10-26; the release boundary in `AGENTS.md` and the architecture
+is updated separately. Slices and their evidence are tracked in Linear; this
+file states the rules they implement.
 
 ## Outcome
 
@@ -380,6 +386,82 @@ takes the fail-closed option.
   `@octant/provider-sdk` lands with the author kit in slice 7, by
   [decision 8](#maintainer-decisions).
 
+### Admission rules
+
+These rules resolve what the admission lifecycle and the catalog left to
+implementation; each takes the fail-closed option.
+
+- **Trust is admission.** Trusting an outside driver's source lifts the
+  install hold for the version and digest selected at that moment (the
+  command carries the package's state version, so the person trusts what they
+  saw). Any later install, update, or rollback holds it again and clears
+  trust, so trust never outlives its digest; withdrawing trust holds it again,
+  so trusting stays the review step. The hold is its own projection fact
+  (`awaitingAdmission`), apart from a quarantine for a failed integrity check
+  or a supervisor verdict, which trust never lifts. Switches still start off.
+- **Admission is per instance.** One family kind covers every outside driver,
+  so no kind is admitted: an instance is admitted when the package it binds is
+  effective on the ladder at host scope (`resolveOutsideDriverActivation` in
+  `@octant/plugin-host`): installed, trusted, switched on, compatible, safe in
+  all three modes, on a host that confines it, and still selecting the exact
+  version and digest the instance was added with. Any other selection is
+  `superseded`. The provider service, the driver factory, and every process
+  start ask this before any driver code runs.
+- **Adding a provider.** `create-outside-harness-endpoint-provider` carries
+  the name, the driver reference, the address, how the key is sent, and the
+  listed model IDs (one to 64, unique), and no `enabled`: the provider is
+  created off. The host refuses it unless the driver is admitted, normalizes
+  the address under the endpoint rule (HTTPS, or HTTP on loopback; no
+  credentials, query, or fragment), and, as for any endpoint, refuses a
+  provider that sends no key unless its address is on loopback. The key goes
+  to the credential broker through the existing per-instance key routes. No
+  command reconfigures an outside instance: its package, address, key
+  placement, and models are fixed when it is added, so its records cannot
+  outlive what they were made for; a change is a removal and a new provider.
+- **Key placement.** The person chooses the one header the key travels in
+  (lowercase, never `proxy-authorization`, `cookie`, `set-cookie`, or `host`)
+  and whether it goes as `Bearer`. A brokered request that asks for the key
+  anywhere else, or on a provider that sends none, is refused before the key
+  is read.
+- **Local window only.** The route refuses adding a provider from an outside
+  driver, and Verify tools, from a paired device, in addition to remote
+  forwarding never admitting provider commands.
+- **When the process runs.** Nothing starts when a provider is added or
+  turned on, when the catalog opens, or when the host starts (the warm pass
+  skips outside instances). The first connection check, Verify tools, or turn
+  starts one process, and later uses share it until it ends. Turning the
+  provider off or removing it, turning the plugin or component off, a
+  rollback, withdrawn trust, or another digest stops it; an uninstall stops
+  it before the supervisor drains the package, so none of these counts toward
+  the crash limit. A stopped process fails its calls in flight at once, and
+  the instance then reports the block.
+- **A crash is the instance's.** Runtime evidence that one driver process
+  crashed is kept as a diagnostic but does not mark the package broken: one
+  package serves every instance added from it, and the per-instance crash
+  limit decides what a crash costs.
+- **Verify tools.** The host opens one session through the proxy and sends one
+  request with the echo tool and its fixed prompt. The model is verified only
+  when the response holds a call to the echo tool; the driver's own words
+  count for nothing. It is offered only for models the person listed that the
+  last check reported, and its record lands in the provider catalogue like
+  every endpoint's.
+- **Digest-bound records.** An instance's observation, Verify tools record,
+  and conformance belong to the digest it binds. A package that selects
+  another digest leaves the instance `driver-not-admitted` with no models,
+  keeping the instance, its records, threads, and key until the person
+  removes them; slice 6 rebinds an instance on trust and clears its records.
+- **The catalog group.** The registry snapshot lists every effective outside
+  driver from a local folder (`outsideDrivers`), with the package's name, the
+  exact reference, and installed and trusted from the activation context.
+  Settings shows them under their own heading, labelled "Outside driver"
+  rather than bundled, and continues only the providers bound to that digest.
+  The setup adds a provider in place (name, address, how the key is sent, the
+  key, the model IDs); the provider's card on Providers & Models holds its
+  key, its facts, and Verify tools, since it has no Model endpoints page. The
+  Package facts say "Local folder, unsigned", trusted by the person at this
+  digest. A driver that is not effective is not listed; its instances show
+  the block on their cards.
+
 ### Credentials and egress
 
 - The driver never holds a credential. `http/request` names a URL, method,
@@ -472,11 +554,12 @@ takes the fail-closed option.
   a stored package holding a provider-driver component is an outside driver.
   The extension projection holds it `quarantined`, untrusted, and switched off
   whenever its selected version changes (install, update, rollback), with an
-  `outside-driver-quarantined` diagnostic. Trust, switches, and runtime
-  evidence are recorded but leave the quarantine in place: lifting it is
-  admission's step, which binds trust to the digest, and until it lands every
-  component reports `quarantined`, so no structured reference or mention can
-  select one and no process exists.
+  `outside-driver-quarantined` diagnostic. Switches and runtime evidence are
+  recorded but leave the hold in place; trusting the source is the admission
+  step that lifts it at the selected digest (see
+  [Admission rules](#admission-rules)). Until then every component reports
+  `quarantined`, so no structured reference or mention can select one and no
+  process exists.
 - **Local window only.** The lifecycle route refuses every command from a
   paired device, in addition to remote forwarding never admitting it, and a
   paired device cannot inspect or preview a registered driver folder, since
@@ -544,13 +627,13 @@ put a package in front of the person. Controls marked new are this design's;
 | Steals or replays a credential                                      | New, built for the brokered call: never holds one; host injects the header per request and strips it from responses; broker coordinates absent from the environment |
 | Uses another instance's or provider's credential                    | New, built: one process and one request channel per instance; the lease is keyed by that instance                                                                   |
 | Escapes to the host (files, processes, other extensions)            | New, built (macOS acceptance pending): deny-default Seatbelt without exec or fork; Linux refuses to launch                                                          |
-| Over-claims capabilities (tools, approvals, resume)                 | New, built: host ceiling clamp; `admitTurn` computed by the host. New: host-run Verify tools                                                                        |
+| Over-claims capabilities (tools, approvals, resume)                 | New, built: host ceiling clamp; `admitTurn` computed by the host; host-run Verify tools                                                                             |
 | Fabricates tool calls or injects instructions in output             | Existing: model output is untrusted; the harness offers, approves, and runs tools under thread authority; taint rules apply                                         |
 | Puts attacker text in Settings or diagnostics                       | New, built: closed reasons only; stderr bounded and kept out of clients                                                                                             |
-| Swaps code under a trusted name (update, mirror, typosquat)         | New: digest-bound trust, publisher key pin, quarantined updates that clear verification                                                                             |
+| Swaps code under a trusted name (update, mirror, typosquat)         | New, built for trust: digest-bound trust and records. New: publisher key pin, quarantined updates that clear verification                                           |
 | Points the key at an internal service or attacker host              | Existing endpoint rule, built for the brokered call: HTTPS or loopback HTTP, origin-checked before the key is read; no redirect                                     |
 | Exhausts the host (floods, hangs, crash loops)                      | Existing supervisor bounds; new, built: per-message cap, host-owned deadlines, bounded brokered calls, per-instance crash limit                                     |
-| An agent, mention, routine, or paired device installs or trusts one | Existing and new, built: lifecycle actions only from a local window; structured references stay inert; install stays quarantined                                    |
+| An agent, mention, routine, or paired device installs or trusts one | Existing and new, built: lifecycle, add-provider, and Verify tools only from a local window; structured references stay inert; install stays held until trusted     |
 | Impersonates a bundled provider                                     | New, built: one reserved family; package-name identity with an outside label; no bundled logo, account profile, or sign-in dialect                                  |
 
 Residual risk: the configured endpoint receives what the person sends it, as

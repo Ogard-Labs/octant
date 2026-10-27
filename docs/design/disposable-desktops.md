@@ -8,23 +8,27 @@ app-managed ([Architecture: extensions and skills](../architecture.md#extensions
 launches go through the shared confinement port, and authority is checked on the
 server ([Architecture: security and authority](../architecture.md#security-and-authority)).
 
-**Delivery state.** Accepted 2026-10-26; slices 1–5 are built and slice 6
-is not. The maintainer authorized this scope as post-preview work and
-accepted the [maintainer decisions](#maintainer-decisions) below on 2026-10-26;
-it is not part of the first release, and the
+**Delivery state.** Accepted 2026-10-26; slices 1–5 and recipe storage are
+built, and slice 6 is built for E2B; its Cua Spaces driver is blocked on a
+design decision (see [Built in slice 6](#built-in-slice-6)). The maintainer
+authorized this scope as post-preview work and accepted the
+[maintainer decisions](#maintainer-decisions) below on 2026-10-26, naming the
+two cloud providers on 2026-10-27; it is not part of the first release, and the
 [Current Release Boundary](../../AGENTS.md#current-release-boundary) is
 unchanged by this document. The lease contract, the `desktop-provider` seam
 and its conformance suite, the host lease service, the host-local provider,
-artifact transfer, the agent's binding of `octant_computer` to a lease, and
-the Desktop pane exist; no recipe storage does, so a running host's Desktop
-tab shows that the Project has no recipe, every lease command refuses as a
-value, and no lease exists for a send to bind (see
+artifact transfer, the agent's binding of `octant_computer` to a lease, the
+Desktop pane, a Code Project's stored recipe with its settings editor, the
+cloud HTTPS port, and the E2B driver exist; no host offers E2B for leasing yet,
+so a recipe can name only the host-local provider (see
 [Built in slice 1](#built-in-slice-1),
 [Built in slice 2](#built-in-slice-2),
 [Built in slice 3](#built-in-slice-3),
-[Built in slice 4](#built-in-slice-4), and
-[Built in slice 5](#built-in-slice-5)). Slice 4's real-provider smoke is
-still owed by the maintainer.
+[Built in slice 4](#built-in-slice-4),
+[Built in slice 5](#built-in-slice-5),
+[Built in slice 6](#built-in-slice-6), and
+[Built: recipe storage](#built-recipe-storage)). Slice 4's real-provider smoke
+and slice 6's E2B live smoke are still owed by the maintainer.
 
 **Name.** The product calls it a _disposable desktop_. "Computer" already names
 the Mac computer-use destination and the paired-host Computers card, and a
@@ -348,7 +352,13 @@ translation to its provider.
 The host gives the driver capability-scoped ports, never raw handles: a confined
 launch port for a host-local provider, and an authenticated HTTPS call port for a
 cloud provider. Each port is added to the seam with the slice whose driver
-needs it (2 and 6). The confined launch port, `DesktopLaunchPort`, launches one
+needs it (2 and 6). The HTTPS port, `DesktopHttpsPort`, reaches only the hosts
+a driver declares in its code (`hosts`), attaches the person's key itself, and
+answers every call as a value ([Built in slice 6](#built-in-slice-6)). A cloud
+desktop's handle names the credential reference of the account it lives in,
+and `listOwned(hostTag, credentialRef)` lists one account; a provider that
+needs a credential answers `failed` without one, because `listed` is the
+provider confirming every other desktop is absent. The confined launch port, `DesktopLaunchPort`, launches one
 named program only for a lease the host is provisioning and only once per
 lease, always as the host's dedicated desktop launch; the driver chooses the
 program and its arguments and nothing about the capsule. A driver the host keeps only for
@@ -358,8 +368,10 @@ teardown is held as `DesktopTeardownPort` (`id`, `release`, `verifyGone`,
 `packages/provider-sdk/src/imageGenerationConformance.ts`, proves that a driver
 stops when cancelled, tags what it creates, sets provider-side expiry when it
 bills, reports an extension only when the provider confirms the new expiry,
-reports absence only when absent, and refuses rather than degrades an
-unsupported command. Its fixture maps two scenarios onto whatever backs the
+reports absence only when absent, refuses rather than degrades an
+unsupported command, and, given a second driver over the same provider, lets
+a restarted host find by its tag and destroy what a killed one left; a billed
+driver must prove the last. Its fixture maps two scenarios onto whatever backs the
 driver, a provider that declines an extension and a desktop that outlives its
 destroy, so a recorded transport can drive the same checks. The in-memory
 driver tests use (`packages/plugin-api/src/fakeDesktopProvider.ts`) is test
@@ -392,16 +404,22 @@ alternatives considered and the reason for the choice follow it.
 
 1. **First provider.** The first provider is a host-local virtual display in a
    Bubblewrap launch: no new runtime, no account, no cost, Linux hosts only,
-   contents are the host's installed apps, kernel-shared isolation. The second
-   is a cloud provider on the person's account (the original plan named E2B):
-   VM isolation and image templates, but an account, a key, billing, and data
-   leaving the machine. The host-local provider exercises the whole seam,
-   teardown, transfer, and pane in a Linux container with no account, so the
-   risky host-owned parts are proven before money is involved. Not planned: a
-   host-local OCI container provider (rootless Podman), which offers real
-   per-Project images but needs a container runtime the person installs and a
-   second confinement mechanism Octant must verify; it is reconsidered only if
-   per-Project images prove necessary locally.
+   contents are the host's installed apps, kernel-shared isolation. The cloud
+   providers, on the person's own account, are **E2B** and **Cua Spaces**
+   (named 2026-10-27): VM isolation and image templates, but an account,
+   billing, and data leaving the machine. Each is its own bundled driver
+   through the same `desktop-provider` seam, so neither gets a shortcut the
+   other, or a third-party plugin, could not take. E2B is delivered first. The host-local
+   provider exercises the whole seam, teardown, transfer, and pane in a Linux
+   container with no account, so the risky host-owned parts are proven before
+   money is involved. Not planned: a host-local OCI container provider
+   (rootless Podman), which offers real per-Project images but needs a
+   container runtime the person installs and a second confinement mechanism
+   Octant must verify; it is reconsidered only if per-Project images prove
+   necessary locally. _Why two cloud providers:_ offering two keeps the seam
+   honest about what is provider-specific, and a person can use the account
+   they already have. Rejected: one cloud provider only, which would let the
+   seam quietly take one vendor's shape.
 2. **Who may acquire a billed lease.** A person confirms every billed lease in
    every posture. Rejected: ordinary posture rules, as for any effect. Spending
    the person's money is not a code effect Full access covers.
@@ -467,11 +485,12 @@ container with no account or hardware.
    [Workspace](workspace.md) and the user guide. _Accepts when_ person input is
    journaled as `local-user`/`remote-device` with no approval, and a restored
    tab never reconnects. _Verify:_ component tests and rendered QA at each state.
-6. **Cloud provider driver** (per decisions 1 and 2; needs a maintainer-owned
-   account, an API key, and billing authority). Bundled driver through the seam,
-   declared hosts, provider-side expiry and its extension, tag reconciliation.
-   _Accepts when_ the conformance suite passes against a recorded transport, and
-   a maintainer-run smoke acquires, drives, releases, and confirms at the
+6. **Cloud provider drivers** (per decisions 1 and 2: E2B, then Cua Spaces;
+   needs a maintainer-owned account, an API key, and billing authority for
+   each). Bundled drivers through the seam, declared hosts, provider-side
+   expiry and its extension, tag reconciliation. _Accepts when_ the
+   conformance suite passes against a recorded transport, and a
+   maintainer-run smoke acquires, drives, releases, and confirms at the
    provider that nothing remains, including after a forced host kill.
 
 Later, each with its own design note here: a forwarded Local server port,
@@ -497,9 +516,9 @@ and Work-mode leasing if it is not delivered with Code.
 The running host registers no desktop provider, and no Project stores a
 recipe. No caller can open a thread through the service and confirmation
 always declines, because the Desktop pane (slice 5) and the agent's lease
-binding (slice 4) bring their own caller authority and approval surface. Recipe
-storage and its Project settings editor are not yet assigned to a slice; a
-Project's recipe will take decision 4's limits as defaults.
+binding (slice 4) bring their own caller authority and approval surface.
+Recipe storage and its Project settings editor came later
+([Built: recipe storage](#built-recipe-storage)).
 
 ### Built in slice 2
 
@@ -534,7 +553,8 @@ Rules this slice resolved:
   The host-local driver refuses a recipe whose network is `allow`
   (`network-allow-unsupported`) until a desktop gets egress that keeps its own
   namespace, as proxied tool launches do through the host's egress proxy.
-  Decision 5's per-recipe `allow` stays the target; no recipe can set it yet.
+  Decision 5's per-recipe `allow` stays the target; the host refuses to store
+  a host-local recipe that sets it ([recipe storage](#built-recipe-storage)).
 - **Loaded for teardown, offered when ready.** The driver is loaded on every
   Linux host, so teardown and restart reconciliation can reap its desktops
   after its programs were removed. It is effective, and so leasable and
@@ -787,8 +807,9 @@ covers a destination reaching the turn's tool set and its approval in the
 thread. `computerUseRuntime.test.ts` and the earlier tool-service tests pass.
 Owed by the maintainer: a real-provider smoke, a turn on a provider
 credential's image-capable model driving a leased desktop through
-`octant_computer`. Until recipe storage exists, that smoke needs a
-development host that supplies a recipe.
+`octant_computer`. The smoke sets the Project's recipe in its settings
+([recipe storage](#built-recipe-storage)) and starts the desktop from the
+Desktop tab.
 
 ### Built in slice 5
 
@@ -859,8 +880,9 @@ Rules this slice resolved:
   active Code Project, as for other Code reads ([decision 3](#maintainer-decisions)).
   Only Code threads have a Desktop tab.
 - **A person's acquire.** A person starting a host-local desktop is not asked
-  again (Plan still refuses). A billed lease still declines: the person's
-  billed confirmation arrives with the cloud provider (slice 6).
+  again (Plan still refuses). A billed lease declined here until the person's
+  billed confirmation arrived with the cloud providers
+  ([slice 6](#built-in-slice-6)).
 - **The pane offers Start only when acquire would not refuse at once.** The
   overview's `start` carries every refusal acquire meets before it asks the
   provider, Plan's `plan-mode` included, so a thread in Plan shows why it
@@ -895,6 +917,624 @@ and a narrow width in both themes, its live state against a real host-local
 desktop through the real route with a development recipe supplied by the QA
 fixture, since no recipe storage exists.
 
+### Built: recipe storage
+
+Not one of the numbered slices: the Project-side half of the model's
+**Recipe**, delivered after slice 5 so a shipped host can lease at all.
+
+- **Contract.** `packages/contracts/src/projects.ts`: `desktopRecipe` on the
+  Code Project record and its summary (a `DesktopRecipe`, absent when none),
+  the command `change-code-project-desktop-recipe` (`recipe: null` removes
+  it), its result, and the event `project.code-desktop-recipe-changed@1`,
+  which carries the whole Project as every Project event does. The Desktop
+  pane request `recipe-providers` answers the providers a recipe may name.
+- **Policy.** `changeCodeProjectDesktopRecipe` in
+  `packages/domain/src/projectPolicy.ts`.
+- **Host.** `ProjectService` journals the event; the Project projection
+  stores it with the rest of the Project, so it rebuilds from the journal
+  like any other Project field. `apps/server/src/computerUse/projectDesktopRecipe.ts`
+  is the lease service's recipe lookup, wired in
+  `apps/server/src/wiring/computerUse.ts`.
+- **Editor.** **Disposable desktop** in a Code Project's settings
+  (`apps/web/src/projects/ProjectDesktopRecipeSection.tsx`): provider, screen
+  size, how long a desktop lasts, its longest run, and idle time, with Set,
+  Save, and Remove.
+
+Rules this delivery resolved:
+
+- **Only a Code Project holds a recipe.** Only Code threads have a Desktop
+  tab, so a Work recipe could never start a desktop; Work gets one when Work
+  leasing is delivered. A Chat Project never does.
+- **Set from a local window; read anywhere the Project is.** Setting or
+  removing a recipe chooses what this host runs, so only a local window may:
+  the Project route refuses the command from a paired device, which the
+  remote route policy already denies a Project command. A paired device sees
+  the recipe with the Project, and still watches and operates its desktops
+  ([decision 3](#maintainer-decisions)). An agent has no command that
+  reaches it.
+- **The host validates every save.** The command decodes against
+  `DesktopRecipe`, so the screen, lease limits, and provider id are bounded
+  and a lease cannot start longer than its maximum. The recipe must name a
+  provider the host offers for leasing now (the same list destination
+  reporting gives); a host-local recipe cannot allow network
+  ([slice 2](#built-in-slice-2)), while a cloud recipe may, and must name a
+  credential reference ([slice 6](#built-in-slice-6)). A save that changes
+  nothing, and any change to an archived Project, is refused. Removing is
+  always allowed.
+- **Read afresh on every lease command.** The lease service asks for the
+  recipe on each acquire, operating command, and sweep, from the thread's
+  Project as stored now. A new screen size or limit applies to the next
+  desktop; a running desktop's frames stay bounded by the screen it was
+  acquired with, so shrinking the recipe does not blank it and growing it
+  does not let its driver pass a larger frame. Removing the recipe, changing its provider or credential
+  reference, or archiving the Project ends the Project's running desktops at
+  the next sweep as `recipe-removed`, through the teardown path that outlives
+  revocation.
+- **What the editor offers.** It lists only the providers the host answers
+  for `recipe-providers`; a saved provider the host no longer offers is shown
+  as not available and cannot be saved again. Screen sizes and the three
+  lease limits are choices from short preset lists, each inside the
+  four-hour bound, and a saved value off a list is offered too, so opening
+  the editor never changes a recipe by itself. A new recipe starts from
+  decision 4's limits: a 30-minute lease, four hours at most, idle after
+  15 minutes. Network is always none. Image and credential reference are for
+  a cloud provider and are not editable until a host offers one (slice 6
+  builds E2B but offers it nowhere yet); a save keeps the ones already stored
+  for the same provider. Remove asks first,
+  because it destroys running desktops.
+
+Evidence: `projectDesktopRecipe.test.ts` saves a recipe through
+`ProjectService` on a real journal, restarts the host, acquires a lease from
+the stored recipe with the recipe's limits and screen reaching the driver,
+then removes the recipe and sees the sweep release the desktop as
+`recipe-removed` and the next start refused `no-provider-configured`; it also
+refuses a provider the host does not offer. Before the lookup existed the
+same acquire was refused `no-provider-configured`. `projectService.test.ts`
+refuses recipes the schema refuses and journals nothing while the host
+offers the provider; `desktopLeaseService.test.ts` keeps a running desktop's
+frames bounded by its own screen after the recipe's screen changes;
+`projectPolicy.test.ts` covers set, replace, remove, the provider and network
+refusals, a cloud recipe kept only with a credential, Work and Chat Projects,
+and no-ops; `projectRoutes.test.ts` refuses
+a paired device's change and keeps a local window's; `desktopPaneRoutes.test.ts`
+lists the offered providers; `ProjectDesktopRecipeSection.test.tsx` sets a
+recipe on an offered provider, keeps an unavailable saved provider from being
+saved, removes after asking, and offers nothing when the host offers no
+provider. Rendered QA ran the editor in a Project overview in a headless
+browser, light and dark, at 1280 and 390 pixels wide, for a new recipe set on
+the host's provider, a saved recipe, a saved provider the host no longer
+offers, and a host that offers none, with no console error and no horizontal
+overflow.
+
+### Built in slice 6
+
+Slice 6 lands the shared cloud pieces with the E2B driver. The Cua Spaces
+driver is not built; why is recorded at the end of this section.
+
+- **Seam.** `DesktopHttpsPort` and `desktopProviderHostDeclared` in
+  `packages/plugin-api/src/desktopProvider.ts`; `DesktopProvider.hosts`;
+  `DesktopHandle.credentialRef`; `listOwned(hostTag, credentialRef)`. The
+  conformance suite's fixture may name `restarted`, a second driver over the
+  same provider, and a billed driver must. The screenshot-only control the
+  host-local driver had (`ScreenshotDesktopControl`), with `x11Keysym`,
+  `pngDimensions`, and `maxDesktopFrameBytes`, moved into the seam
+  (`desktopScreenshotControl.ts`) so every screen-only driver translates
+  `octant_computer` the same way.
+- **Host.** `apps/server/src/computerUse/desktopHttpsPort.ts` is the port.
+  The lease service lists each account a provider's leases recorded, refuses
+  a cloud recipe that names no credential, and takes a person's billed
+  confirmation from their request. The broker gains the
+  `/v1/desktop-provider-credentials/*` namespace (Keychain service and Secret
+  Service attribute `desktop-provider-credentials.v1`), and the wiring reads
+  keys from it.
+- **Contract.** The pane's `acquire` carries `confirmedBilledProvider`.
+- **Driver.** `apps/server/src/plugins/e2bDesktop/`: the `e2b` provider and
+  its in-sandbox process and file calls. It imports only `@octant/contracts`
+  and the seam, and has no network of its own; a test enforces both.
+- **Pane.** Start on a billed provider asks the person first, naming the
+  provider, and sends that provider with the acquire.
+- **Smoke.** `apps/server/src/computerUse/cloudDesktop.smoke.ts`
+  (`bun run desktop:cloud:smoke`), the maintainer's live run.
+
+Rules this slice resolved:
+
+- **The HTTPS port decides where anything goes.** A call reaches only HTTPS,
+  on the default port, with no credentials in the URL, to a host the driver
+  declares (`*.example.com` matches subdomains only). It never follows a
+  redirect, refuses headers the transport or another identity owns (`Host`,
+  `Content-Length`, `Cookie`, and the like), and is bounded at 45 seconds,
+  129 MiB out (a transfer's largest file), and the response size the driver
+  names, capped at one uncompressed frame of the largest screen. The host
+  checks the URL before it reads any key.
+- **A key goes only where one of the provider's leases recorded it.** The
+  driver names a credential reference and the header its provider reads; the
+  host attaches the key only when a journaled lease of that provider recorded
+  that reference. Journal-before-create records it before the first call, so
+  teardown after revocation still reaches the account, and a driver can never
+  name another provider's key. The key never reaches the driver.
+- **Desktop keys have their own broker namespace.** A recipe's credential
+  reference names a key in `/v1/desktop-provider-credentials/*`, apart from
+  model providers' keys, so neither can stand in for the other. A host with
+  no broker attaches no key. No editor enters a key yet; that arrives with
+  the person's opt-in to a billed provider.
+- **A cloud recipe must name a credential.** A recipe for a cloud provider
+  with no credential reference configures nothing that could run: the lease
+  service refuses it `no-provider-configured` before any provider call, and
+  the recipe store refuses to save it
+  ([recipe storage](#built-recipe-storage)).
+- **Restart lists account by account.** Reconciliation lists each provider
+  once with no credential and once per credential reference any of its leases
+  recorded, and destroys tagged desktops that have no live lease. A listing
+  that fails for one account skips only that account's orphans; each
+  unreleased lease is still destroyed through its own account's listing.
+- **A person's billed confirmation is theirs.** A person confirms a billed
+  desktop in their own tab, which names the provider they saw
+  (`confirmedBilledProvider`); the host starts a person's billed lease only
+  with it and only for that provider, re-checking authority, provider, and
+  posture before the call. No other answer stands in for it. An agent still
+  acquires nothing.
+- **Loaded for teardown, offered after the person opts in.** The E2B driver
+  is loaded on every host, so teardown and restart reconciliation reach any
+  E2B lease a host ever journaled. It is not effective: no host offers it for
+  leasing, reports it as a destination, or lets a recipe name it until the
+  person can choose it and enter its key. A billed provider is never on by
+  default.
+- **E2B.** The control plane is `api.e2b.app` with the key in `X-API-Key`.
+  A desktop is a sandbox created from the recipe's template (E2B's public
+  `desktop` template when it names none) through `POST /v2/sandboxes` with the
+  lease id as its `Idempotency-Key`, `octantLease` and `octantHost` metadata,
+  E2B's timeout set to the lease expiry plus two minutes, `autoPause` off,
+  internet only when the recipe allows it, and no public traffic to its
+  ports. E2B's own `endAt` is the provider-side expiry; an extension sets the
+  timeout again and counts only when the `endAt` E2B then reports reaches
+  the new expiry, since a plan may hold a sandbox below what was asked.
+  Release is `DELETE` (204, or 404 for one already gone); only a `GET` that
+  answers 404 is gone, and a paused sandbox is present. A listing filters by
+  `octantHost` over running and paused sandboxes, reads at most 20 pages, and
+  past that answers `failed`. The screen, input, and files go through the
+  sandbox's own daemon at `sandbox.e2b.app` with the sandbox's own token,
+  which stays in the driver's memory and is never journaled; the person's key
+  never goes there. A sandbox E2B reports on another domain is destroyed and
+  the acquire fails. Inside, the driver starts `Xvfb` at the recipe's size, as
+  E2B's desktop SDK does, takes frames with `scrot`, sends input as `xdotool`
+  argument lists with no shell, lands a sent file read-only in
+  `/home/user/inbox` through a staging file, and launches a copy as host-local
+  does.
+- **A cloud recipe may allow the network.** A cloud desktop is a VM with its
+  own network and never shares the host's, so decision 5's per-recipe
+  `allow` applies to it as written; `none` turns the sandbox's internet off.
+
+Evidence: `e2bDesktopProvider.test.ts` runs the conformance suite, restart
+included, against a recorded E2B (`e2bRecordedApi.test-support.ts`, built
+from E2B's published OpenAPI documents and its SDK's envd transport) through
+the host's real HTTPS port, and covers the tagged create with E2B's timeout
+past the lease expiry, the key reaching only `api.e2b.app`, frames and a
+person's input as argument lists, a sent file landing in the inbox and
+launching, an extension E2B holds short refused, a sandbox on another domain
+destroyed, paged listing by host, a rejected key, and the import boundary. Through
+the lease service over a journal on disk, a host killed with a lease
+`ready`, and one killed while E2B was still creating it, each find the
+sandbox by its tag on the next start and destroy it. `desktopHttpsPort.test.ts`
+covers undeclared hosts, plain HTTP, ports and URL credentials refused before
+any key is read, a credential no lease recorded, host-owned headers,
+redirects, response bounds, time-outs, and cancellation.
+`desktopLeaseService.test.ts` covers a person's billed confirmation for the
+right provider only, a cloud recipe with no credential, and a killed host's
+cloud desktops found through each lease's account. The conformance tests cover
+the restart check and its refusals, `DesktopPane.test.tsx` the billed
+confirmation, and `credentialBroker.test.ts` the new namespace's isolation.
+The real-`bwrap` host-local suite passes over the moved screenshot control.
+
+Owed by the maintainer, for E2B: an E2B account with billing, an API key, and
+`bun run desktop:cloud:smoke e2b run`, then `… e2b kill` followed by
+`… e2b restart`, from `apps/server`, each with the key piped on standard input
+(`read -rs KEY; printf %s "$KEY" | bun run desktop:cloud:smoke e2b run`). Each
+run must end `PASS`, and the E2B dashboard must then list no sandbox with
+`octantHost` metadata. The live run is also what confirms what a recording
+cannot: that envd answers the process service in Connect's JSON codec, that
+`Xvfb` and a launched app outlive the command that started them, that the
+`desktop` template carries `Xvfb`, `xdpyinfo`, `scrot`, `xdotool`, and
+`setsid`, that a killed sandbox answers 404 at once, and how the account's
+plan caps an extension.
+
+**Cua Spaces is blocked on a design decision.** Cua's own documentation
+(read 2026-10-27 from its public repository) gives no endpoint a host can call
+over HTTPS with a stored key. Cua's hosted cloud, the only such API, ended on
+18 October 2026. A Space is now created, listed, given a lifetime
+(`set_lifetime`), and deleted through the local `cua daemon` on the person's
+own machine, over gRPC on a Unix socket (`cua.daemon.v1.SpaceService`). That
+daemon runs Spaces on the machine itself, on the person's other machines, or
+in their own AWS, Google Cloud, or Azure account (linked by OIDC, with no
+stored key) or Hetzner or Modal account (a token Cua seals to their devices).
+The screen, input, and files go through `cua-spacesd` (gRPC or gRPC-Web on
+port 3211, with a per-Space bearer token) and Cua's relay. So the shared
+pieces above do not fit it: there are no declared hosts or API-key header for
+`DesktopHttpsPort`, and no key for the desktop-provider namespace. A Cua
+driver needs a seam port for a provider's local daemon (reached confined, the
+way `DesktopLaunchPort` reaches a capsule), a rule for whose cloud
+credentials that daemon uses, and whether its own lifetime and `cua-expires`
+tag satisfy provider-side expiry when the daemon's host is the one that may
+die. The maintainer accepted those decisions on 2026-10-27 in
+[Cua Spaces through the local daemon](#cua-spaces-through-the-local-daemon).
+
+## Cua Spaces through the local daemon
+
+**Status: accepted by the maintainer on 2026-10-27, every decision as
+recommended.** Cua is delivered first for this machine's placement, then the
+person's other machines; billed cloud placements wait for C5's condition. Cua
+ships on Linux hosts first; on macOS, transfer stays refused until its own
+handle-path check exists. The decisions below are rules; the sub-slices under
+[Delivery sub-slices](#delivery-sub-slices) are the delivery plan, each its own
+change with this section updated in place.
+
+### What Cua offers now
+
+Read on 2026-10-27 from Cua's public repository at commit `8fbdf83`
+([trycua/cua](https://github.com/trycua/cua/tree/8fbdf83c1e05bf0a8b84a6199fe697cc58f0e24f)).
+Cua's documentation site (`cua.ai/docs`) did not resolve from the
+environment this was written in, so every fact below comes from the
+repository's own documentation sources, its `.proto` files, and its daemon
+source, and is cited with the file it came from.
+
+- **Cua Cloud ended on 18 October 2026.** `on="cloud"` and Cua's hosted
+  pools fail with a message that says so; the replacements are a local
+  sandbox, the person's own AWS, Google Cloud, or Modal account, or a
+  machine the person runs
+  ([migration page](https://github.com/trycua/cua/blob/8fbdf83c1e05bf0a8b84a6199fe697cc58f0e24f/docs/content/docs/cua-sdk/guides/cua-cloud-ended.mdx)).
+  `cua-computer-server` is no longer maintained; the in-guest agent is
+  `cua-spacesd`.
+- **The daemon.** `cua daemon start` listens on a Unix socket (default
+  `~/.cua/cua.sock`) and on a loopback TCP port with a bearer token
+  ([CLI reference](https://github.com/trycua/cua/blob/8fbdf83c1e05bf0a8b84a6199fe697cc58f0e24f/docs/content/docs/cua-cli/reference/cli/account-and-setup.mdx)).
+  The daemon sets the socket to mode `0600` and asks no token on it; it
+  serves native gRPC (h2c) and gRPC-Web over HTTP/1.1 on the same listener,
+  and trusts the caller headers `x-cua-host-caller` and `x-cua-share-caller`
+  only on the socket
+  ([`server.rs`](https://github.com/trycua/cua/blob/8fbdf83c1e05bf0a8b84a6199fe697cc58f0e24f/libs/cua/crates/cua-daemon/src/server.rs)).
+  The socket also serves everything else the daemon does: sharing links,
+  linking clouds and setting budgets (through `CallSpaceTool`), batch runs,
+  and `DaemonService.Shutdown`.
+- **`cua.daemon.v1.SpaceService`** (33 RPCs, protocol docs version 0.9.0;
+  [reference](https://github.com/trycua/cua/blob/8fbdf83c1e05bf0a8b84a6199fe697cc58f0e24f/docs/content/docs/cua-sdk/reference/protocol/daemon-spaces.mdx),
+  [`spaces.proto`](https://github.com/trycua/cua/blob/8fbdf83c1e05bf0a8b84a6199fe697cc58f0e24f/libs/cua/proto/cua/daemon/v1/spaces.proto)).
+  The ones a driver would use: `CreateSpace` (image, `location`, `kind`,
+  `runtime`, `labels` up to 64 pairs, `network` `none` for QEMU VMs only,
+  `create_id`, `wait`), `CancelCreateSpace` (by `create_id`; idempotent, also
+  for a create a daemon restart cut off, and removes what the create made),
+  `SetSpaceLifetime` (`duration`, `on_expire` `delete`), `DeleteSpace`,
+  `ListSpaces` (each Space with `labels`, `expires_at_unix`, `cloud`,
+  `cloud_delete`, `power_state`; without `known_now` the call waits for
+  the relay and fails when it cannot be read), `ResolveSpace`,
+  `ConnectSpace`, and `GetSpaceRoute`. Errors carry a closed
+  `DaemonErrorReason`.
+- **The lifetime is the daemon's, not the cloud's.** A Space's lifetime is a
+  record on the machine where it is registered, and that machine's daemon
+  ends it when it passes
+  ([`lifetimes.rs`](https://github.com/trycua/cua/blob/8fbdf83c1e05bf0a8b84a6199fe697cc58f0e24f/libs/cua/crates/cua-spaces/src/lifetimes.rs)).
+  Setting it does not change anything in the cloud account.
+- **The person's own clouds.** A cloud machine carries Cua's tags, among
+  them `cua-expires`, set from the cloud link's time limit
+  (`cua cloud connect --ttl-hours`, default 8 hours, `0` for none). AWS and
+  Google Cloud machines shut themselves down and are deleted at that limit;
+  Modal ends a sandbox at its timeout; a Hetzner server only powers off and
+  is billed until a sweep deletes it; Azure cannot end a machine at all. A
+  running daemon sweeps expired machines every 15 minutes. AWS, Google
+  Cloud, and Azure can be linked with no stored key (Cua's OIDC issuer);
+  Hetzner and Modal tokens are sealed to the person's devices. Every cloud
+  Space joins `relay.cua.ai` as a machine of the person's Cua account
+  ([your cloud](https://github.com/trycua/cua/blob/8fbdf83c1e05bf0a8b84a6199fe697cc58f0e24f/docs/content/docs/cua-sdk/guides/your-cloud.mdx),
+  [cleanup](https://github.com/trycua/cua/blob/8fbdf83c1e05bf0a8b84a6199fe697cc58f0e24f/docs/content/docs/cua-sdk/guides/your-cloud-cleanup.mdx)).
+  A cloud Space can be deleted only through the device that created it
+  (`cloud_delete`), and with a cloud linked, Cua's elastic pool may place
+  Spaces on shared cloud hosts that stay until the end of their paid time
+  ([Spaces tools](https://github.com/trycua/cua/blob/8fbdf83c1e05bf0a8b84a6199fe697cc58f0e24f/docs/content/docs/spaces/reference/spaces.mdx)).
+- **Screen, input, and files.** `ConnectSpace` returns an env passthrough
+  (`/v1/spaces/<key>/env`) that speaks `cua.env.v1` with the Space's own
+  token attached by the daemon, so a client never holds that token. The
+  daemon serves that route on the socket as well as on loopback.
+  `cua.env.v1.ComputerService` has `Screenshot` (PNG or JPEG, with a
+  `max_dimension`), `Pointer`, and `Keyboard`; `FilesystemService` has a
+  unary upload (`BeginUpload`, `UploadChunk`, `CommitUpload`) because
+  gRPC-Web cannot carry its client stream; `ProcessService.StartProcess`
+  starts a program
+  ([protocol index](https://github.com/trycua/cua/blob/8fbdf83c1e05bf0a8b84a6199fe697cc58f0e24f/docs/content/docs/cua-sdk/reference/protocol/index.mdx)).
+  No VNC is involved.
+
+Not verified, and left to the live smoke: that a gRPC-Web call through the
+env passthrough on the socket reaches `cua-spacesd`; whether `location`
+`aws` places a Space on its own machine or on an elastic-pool host; whether
+`ListSpaces` without `known_now` answers when the person is not signed in to
+Cua; the daemon's largest message; and whether a local QEMU Space's user
+networking can reach the host's loopback.
+
+### The local-daemon port
+
+**Decision C1: a generic local-daemon
+port.** `@octant/plugin-api/desktop-provider` gains `DesktopDaemonPort`,
+"a provider's local control daemon over a Unix socket", beside
+`DesktopHttpsPort`. A driver declares in its code one socket path, relative
+to the person's home directory (`.cua/cua.sock`), and a closed list of the
+method paths it calls (`/cua.daemon.v1.SpaceService/CreateSpace`, and
+`/v1/spaces/*/env/cua.env.v1.ComputerService/Screenshot` with one `*`
+segment for a value the daemon minted). The host:
+
+- finds the socket only at the declared path under the home of the user
+  Octant runs as, and refuses an absolute path, `..`, or an environment
+  override;
+- `lstat`s every component and refuses a symlink anywhere on the path, a
+  socket not owned by Octant's user, a socket with any group or other
+  permission bit, and a parent directory another user can write;
+- connects only to that socket, never to the daemon's loopback TCP
+  listener, and reads no token file;
+- sends only declared method paths, as `POST`, with headers the host
+  writes itself (the gRPC-Web content type and a deadline) and none from
+  the driver, so a driver cannot send a credential or the headers the Cua
+  daemon trusts on its socket as a relay-verified caller
+  (`x-cua-host-caller`, `x-cua-share-caller`);
+- bounds each call at 45 seconds, 4 MiB out, and the response size the
+  driver names, capped at one uncompressed frame of the largest screen, as
+  the HTTPS port does; and answers every call as a value (`answered` with the
+  gRPC status and message bytes; `refused` with `method-not-declared`,
+  `socket-unsafe`, `request-too-large`, or `request-invalid`; `failed` with
+  `daemon-unreachable`, `timed-out`, or `response-too-large`;
+  `cancelled`).
+
+The port is as narrow as the HTTPS port: a driver names where its calls go
+in code, the host decides whether they may, and the driver holds no socket
+or network object of its own. An outside driver reaches it through the
+same strict wire protocol and brokered requests as the HTTPS port. Rejected:
+letting the driver open the socket itself (a driver with a raw socket can
+call `Shutdown`, create share links, or link a cloud); an allow-list of Cua
+service names in the host (a vendor's semantics in a generic port); and
+Cua's MCP endpoint (`/mcp`, `CallSpaceTool`), one method that reaches every
+Cua tool, so no method list could narrow it.
+
+_Why a home-relative path and owner checks are enough:_ the socket is
+`0600` and owned by the person, so any process that can connect already
+runs as them. The checks stop Octant from following a symlink to another
+user's daemon or a planted socket in a directory someone else controls.
+Node has no peer-credential query, so the file's owner and its directory's
+writability are what the host can check. A confined tool launch gets no home
+directory, so an agent's commands cannot reach the socket.
+
+**Decision C2: gRPC-Web over HTTP/1.1,
+no new dependency.** The host frames gRPC-Web itself (a five-byte prefix per
+message and a trailer frame) over `node:http` with `socketPath`; the port's own
+tests over a real socket are what show Bun's support holds. The seam adds a small protobuf wire reader and writer (varints,
+length-delimited fields, fixed widths; no descriptors, no reflection) so a
+driver, which imports only `@octant/contracts` and the seam, can encode the
+few messages it uses. The Cua driver writes its field numbers by hand from
+the published `.proto` files, as the E2B driver was written from E2B's
+OpenAPI documents; Octant vendors no `.proto` file and generates no code
+from one. Rejected: `@grpc/grpc-js` with `protobufjs` (two dependencies with
+their own network stack, larger than what a handful of unary calls need, and a
+driver would need them in its imports); `node:http2` h2c over the socket
+(no dependency, but Bun's HTTP/2 client is the less-proven path; kept as the
+fallback if the live smoke shows the passthrough does not answer gRPC-Web);
+and Cua's own SDK (`@trycua/cua`, a native module that embeds Cua's whole
+runtime in Octant's process). Server streaming is not needed: a create runs
+with `wait` off and is polled.
+
+### Placement, account, and credentials
+
+**Decision C3: placement is per
+recipe.** One Cua driver serves several placements with different
+consequences: a Space on this machine leaves nothing off it, a Space on the
+person's other machine leaves it through Cua's relay, and a Space in their
+cloud bills. `locality` and `billed` stay on every driver, and a driver may
+also declare a closed list of placements in code, each with its own `id`,
+`displayName`, `locality`, and `billed`. A recipe for such a provider names
+one placement. The host derives locality and billing from the placement,
+journals the placement id in `desktop.lease-requested@1`, applies the
+host-local cap, Full access, transfer asking, and billed confirmation from
+it, and treats a recipe whose placement changed as removed. The E2B and
+host-local drivers declare no placements and are unchanged. Rejected: one
+provider id per placement (`cua-local`, `cua-cloud`), which would put one
+vendor's account and daemon behind several providers that tear down through
+the same socket.
+
+**Decision C4: Octant stores no Cua
+credential.** The daemon holds the person's Cua sign-in and their cloud
+links; Octant reads none of them, never calls Cua's cloud-linking, budget,
+or sharing tools, and never declares those methods. In place of the
+credential reference, a daemon-backed recipe names its placement, and a
+lease's `requested` event records the provider, the placement, and the
+daemon it used (the declared socket path and the user it belongs to), never
+a token. Teardown after revocation goes through that same daemon. The
+credential broker rule holds unchanged: Octant attaches no secret, so
+nothing enters the broker's `/v1/desktop-provider-credentials/*` namespace,
+and the rule "a cloud recipe must name a credential" becomes "a cloud recipe
+must name a credential or a daemon placement". The billed confirmation
+names the provider and the placement ("Cua Spaces · your AWS account"), so
+the person confirms where it bills; Octant shows Cua's own place name
+(`cloud_place`) once the Space exists, never a cost it cannot verify.
+Rejected: reading the daemon's loopback token from `~/.cua/daemon.json`
+(a credential Octant would hold for no gain over the socket), and asking
+the person for their cloud keys (Cua holds them and would still create the
+machine).
+
+### Expiry and teardown when the daemon's host may die
+
+The daemon runs on the same machine as Octant, so the machine that dies is
+both. What ends a Space then depends on where it is:
+
+| Placement                  | If this machine stops                                                                                                                          |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| This machine               | The Space stops with it. On the next start the daemon reaps a passed lifetime, and Octant's restart reconciliation deletes any labelled Space. |
+| The person's other machine | The lifetime record is on this machine, so the Space keeps running on the other one until the person deletes it there. Nothing bills.          |
+| AWS, Google Cloud          | Runs until the cloud link's time limit (8 hours by default, none if the person set `0`), then deletes itself. Billed until then.               |
+| Modal                      | Runs until Modal's timeout (at most 24 hours). Billed until then.                                                                              |
+| Hetzner                    | Powers off at the link's time limit but is billed until a later sweep or delete.                                                               |
+| Azure                      | Runs and bills until a daemon of the person's sweeps it.                                                                                       |
+
+**Decision C5: offer Cua's billed cloud
+placements only when Cua exposes a cloud-side deadline Octant can set and
+read.** The daemon's lifetime, and `expires_at_unix` as `ListSpaces`
+reports it, is the daemon's own record: it dies with the host and moves
+nothing in the cloud. The `cua-expires` tag follows the cloud link's time
+limit, which Octant cannot read through any declared method, cannot move on
+extension, and the person can set to none. So neither satisfies
+"provider-side expiry is mandatory for a billed provider": the host's
+billed-expiry check would pass on a number that does not outlive the host. Recommended
+first delivery: this machine's placement only, with the person's other
+machines next under C6; billed placements wait until Cua's `SetSpaceLifetime`
+moves the cloud's own deadline and a listing reports it. Rejected: (a)
+counting the daemon's lifetime as provider-side expiry, which is exactly
+the guarantee a dead host loses; (b) offering AWS, Google Cloud, and Modal
+now with the link's time limit as an unverified backstop the person
+acknowledges, because Octant could not check the limit exists and the
+promise would rest on a setting it never sees (the maintainer may still choose
+this; then Hetzner and Azure stay refused, and the billed confirmation
+states the worst case in the table above).
+
+What the person is told, in every case:
+
+- **At acquisition** for a placement off this machine: where it runs, and
+  what the table says happens if this machine stops.
+- **Daemon down at lease end.** Release calls the daemon; `daemon-unreachable`
+  makes the lease `release-failed`, retried with the usual backoff. The
+  Desktop tab and Settings say "Cua's daemon is not running on this
+  machine; start it (`cua daemon start`) or delete the Space in Cua
+  Spaces", with Retry, and new Cua leases are refused until it clears.
+  Octant never starts the daemon or runs `cua daemon reap` itself.
+- **Daemon down at restart.** Reconciliation's listing fails, so every
+  unreleased Cua lease stays `release-failed` and no Cua lease is admitted
+  until a listing answers, as for any provider that cannot list.
+- **Absence** is confirmed only by a complete listing: `ListSpaces` without
+  `known_now`, which waits for the relay and fails rather than answering
+  partly, showing no Space labelled with the lease id. Octant confirms the
+  Space is gone as the person's daemon reports it; it cannot see the cloud
+  account or a pool host Cua keeps until the end of its paid time.
+
+### Screen, input, and files
+
+**Decision C6: everything through the
+daemon's socket; no declared hosts.** The driver calls `ConnectSpace`, keeps
+the passthrough key in memory (never journaled), and sends `cua.env.v1`
+calls through `/v1/spaces/<key>/env/...` on the same socket: frames are
+`ComputerService.Screenshot` as PNG at the recipe's screen size, input is
+`Pointer` and `Keyboard`, a sent file goes in through the unary upload to a
+staging name and is made read-only in `/home/user/inbox` (the path the E2B
+driver uses), and `launch` copies and starts it with
+`ProcessService.StartProcess` as an argument list, as host-local does. The
+Space's own token stays in the daemon and the driver needs no network host,
+so `hosts` stays empty for Cua. Agent control uses the shared
+`desktopScreenshotControl`; Cua's accessibility tree is a later item. For
+the person's other machines, the driver asks `GetSpaceRoute` before a view
+opens and refuses the screen when the transport is `relay_https`, where
+Cua's documentation says the relay can read the session in transit; the
+end-to-end mesh, `direct`, and `local` routes are accepted. Rejected:
+reaching `cua-spacesd` on port 3211 directly (it needs the Space's bearer
+token in Octant and declared relay hosts), and Cua's `/media` WebSocket
+(H.264 the host would have to decode and bound; per-frame screenshots
+already fit the pane's polling).
+
+### Isolation and network for a Space on this machine
+
+**Decision C7: a Space on this machine
+is a QEMU VM with network `none` until a live check proves otherwise.** The
+driver asks for `kind` `vm`, `runtime` `qemu`, `network` `none`, no
+`volumes`, `env`, `services`, `egress`, `durable`, or `reuse`, and
+`on_expire` `delete`; the host destroys the Space and fails the lease when
+`CreateSpaceResponse.network` is not `none`. QEMU's user networking can
+forward a guest to the host's loopback, which would reach the Octant
+server, so `allow` is refused for this placement as it is for host-local
+desktops until the maintainer's smoke shows a Space with network cannot
+connect to host loopback. Rejected: a gVisor or `runc` container placement,
+where Cua documents no `network` `none`.
+
+### Lifecycle mapping
+
+- **Acquire.** `CreateSpace` with the lease id as `create_id`, labels
+  `octant-lease` and `octant-host`, and `wait` off; then `SetSpaceLifetime`
+  to the lease expiry plus two minutes with `on_expire` `delete`; then
+  `ResolveSpace` polled, each call bounded, until the Space is running with
+  `cua-spacesd`. Cancellation calls `CancelCreateSpace` with the lease id,
+  which also works after a daemon restart. A Space whose labels or placement
+  do not match what was asked is deleted and the acquire fails.
+- **Extend.** `SetSpaceLifetime` again; the extension counts only when the
+  `expires_at` the daemon returns reaches the new expiry.
+- **Release and verify.** `DeleteSpace`, then the complete listing above.
+  Octant deletes only Spaces this daemon created, so the delete never has to
+  go through another device (`cloud_delete` other than `here`).
+- **List.** `ListSpaces` filtered by `octant-host`; `failed` when the answer
+  is partial, stale, or the daemon is unreachable.
+
+### Availability
+
+- Linux and macOS hosts, wherever the person installed Cua and runs its
+  daemon; Octant detects it and never installs, starts, updates, or signs
+  it in. `status` answers `not-connected` when the socket is missing or
+  fails its checks, and `refused` when `DaemonService.GetInfo` reports a
+  version below the one the driver was recorded against or no `spaces`
+  feature, or the Space's `SystemService.GetCapabilities` reports another
+  `cua.env.v1` protocol version. Windows has no Unix socket path here and
+  offers no Cua provider.
+- The driver is loaded on every Linux and macOS host for teardown, and is
+  effective only after the person chooses it in a recipe, as E2B is.
+- On macOS a Space gives a Mac without a screen its first desktop
+  provider, but [artifact transfer](#built-in-slice-3) still refuses
+  `path-unverifiable` there until a handle-path check exists for macOS. That
+  check is its own item; screen and input work without it.
+
+### Threat model additions
+
+| Risk                                                                    | Mitigation                                                                                                                                                               |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The daemon socket can link clouds, set budgets, share Spaces, shut down | Declared method list in the driver's code, pinned by a test; no MCP or tool-call method; caller headers refused; confined tool launches get no home, so never the socket |
+| A planted or redirected socket impersonates the daemon                  | Home-relative declared path, no environment override, no symlink on any component, owner and `0600` checks, parent not writable by others, version and feature checks    |
+| A Space outlives a host that died                                       | Labels and journal-before-create; restart reconciliation; billed placements not offered until a cloud-side deadline exists (C5); the person is told what happens if not  |
+| The relay reads the session                                             | Screen refused on `relay_https`; off-machine placements confirm where the Space runs                                                                                     |
+| A Space on this machine reaches the Octant server                       | QEMU VM with network `none`, verified from the create's answer (C7)                                                                                                      |
+| The daemon or Space answers with hostile or oversized data              | Port bounds on time and bytes; frames bounded before decoding; labels and names length-bounded; results taint the thread                                                 |
+| Teardown is reported but billing continues                              | Octant claims only that the person's daemon no longer lists the Space; billed placements deferred (C5)                                                                   |
+
+### Rejected alternatives
+
+- **Bundling, installing, or launching the daemon.** Octant detects tools and
+  never installs them. A daemon Octant started would hold the person's Cua
+  sign-in and cloud links under Octant's lifecycle, and would be Octant
+  operating another product's cloud client.
+- **Talking to Cua's backends or the person's cloud directly** (the relay,
+  Cua's OIDC issuer, or AWS with the person's credentials). It would put Cua
+  account tokens or cloud keys in Octant, reimplement Cua's tagging and
+  cleanup, and depend on another product's internal protocols.
+- **Running the `cua` CLI for each call through a confined launch.** The
+  capsule would need the home directory to find the socket, and parsing a
+  CLI's output is a weaker contract than the published `.proto` files.
+
+### Delivery sub-slices
+
+1. **Daemon port** (container). `DesktopDaemonPort`, the host's socket
+   checks and gRPC-Web framing, the seam's protobuf wire helper, and
+   placements in the seam and recipe contract. _Accepts when_ a test daemon
+   on a real Unix socket answers declared calls, and the port refuses a
+   symlinked path or parent, another owner's socket, group or other
+   permission bits, a writable parent, an undeclared method, caller and
+   host-owned headers, oversized requests and responses, a timed-out call,
+   and a cancelled one, each as a value. _Verify:_ focused plugin-api and
+   server tests; typecheck consuming packages.
+2. **Cua driver for this machine's placement** (container). _Accepts when_
+   the conformance suite, restart included, passes against a recorded
+   gRPC-Web transport built from Cua's published protocol through the
+   host's real daemon port over a real socket, and tests cover the labelled
+   create with `create_id`, the lifetime past the lease expiry, an extension
+   the daemon holds short, cancellation through `CancelCreateSpace`, a
+   partial listing answering `failed`, a create whose network is not `none`
+   destroyed, the driver's method list, and the import boundary. _Verify:_
+   focused tests. _Owed by the maintainer:_
+   `bun run desktop:cloud:smoke cua run`, then `… cua kill` and
+   `… cua restart`, on a Linux host with Cua's daemon running, signed in,
+   and QEMU installed; each must end `PASS`, and `cua spaces list` must then
+   show no Space labelled `octant-host`. The smoke also settles the
+   unverified items above.
+3. **The person's other machines**. _Accepts
+   when_ a recorded route of `relay_https` refuses the screen and an
+   off-machine acquire asks. _Owed by the maintainer:_ the same smoke with a
+   second machine set up with `cua host setup --provide-spaces`.
+4. **Billed cloud placements**, only after C5's condition holds or the
+   maintainer chooses its alternative (b).
+
 ## Rationale
 
 The original plan leaned on execution capsules for isolation and a cloud
@@ -916,9 +1556,13 @@ Source entry points: `apps/server/src/computerUse/desktopLeaseService.ts` and
 (the seam), `apps/server/src/computerUse/hostLocalDesktopLaunch.ts` (the
 host-local launch through `apps/server/src/process/linuxConfinement.ts`),
 `apps/server/src/computerUse/desktopArtifactRead.ts` (the transfer's read),
-`apps/server/src/plugins/hostLocalDesktop/` (the host-local driver and its
-agent control), `apps/server/src/computerUse/computerUseToolService.ts` (a
-send's binding to a lease), `apps/server/src/desktopPaneRoutes.ts`, and the
-web Desktop pane (`apps/web/src/desktop/`). Each slice above lists its
+`apps/server/src/plugins/hostLocalDesktop/` (the host-local driver),
+`packages/plugin-api/src/desktopScreenshotControl.ts` (agent control of a
+screen-only desktop), `apps/server/src/computerUse/desktopHttpsPort.ts` and
+`apps/server/src/plugins/e2bDesktop/` (the cloud port and the E2B driver),
+`apps/server/src/computerUse/computerUseToolService.ts` (a send's binding to
+a lease), `apps/server/src/desktopPaneRoutes.ts`, and the web Desktop pane
+(`apps/web/src/desktop/`). Each slice above lists its
 evidence. Lease negatives, restart reconciliation, and real-`bwrap` permission
-negatives are the load-bearing checks; a cloud smoke is maintainer-run.
+negatives are the load-bearing checks; a cloud smoke is maintainer-run
+(`cloudDesktop.smoke.ts`).

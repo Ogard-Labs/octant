@@ -209,7 +209,7 @@ export async function tcpFixture(
   return { port, seen: () => seen, connections: () => connections };
 }
 
-function proxySocket(proxy: ToolEgressProxy): Socket {
+function proxySocket(proxy: Pick<ToolEgressProxy, "endpoint">): Socket {
   const endpoint = proxy.endpoint;
   const socket =
     endpoint.kind === "loopback"
@@ -244,7 +244,7 @@ export function exchange(
  * which is the tunnel when the answer is 200.
  */
 export function openTunnel(
-  proxy: ToolEgressProxy,
+  proxy: Pick<ToolEgressProxy, "endpoint">,
   target: string,
   authorization: string | undefined,
 ): Promise<{ readonly status: number; readonly answer: string; readonly socket: Socket }> {

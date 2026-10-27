@@ -278,6 +278,7 @@ export const ExtensionComponentKind = Schema.Literal(
   "replica-store",
   "desktop-provider",
   "language-server",
+  "debug-adapter",
 );
 export type ExtensionComponentKind = typeof ExtensionComponentKind.Type;
 export const ExtensionSkillName = Schema.NonEmptyTrimmedString.pipe(
@@ -310,6 +311,149 @@ export const ExtensionLanguageServerDeclaration = Schema.Struct({
 }).annotations(strict);
 export type ExtensionLanguageServerDeclaration = typeof ExtensionLanguageServerDeclaration.Type;
 
+/**
+ * An Octant runtime label for a debug adapter, such as `node`, `python`, or
+ * `native`. It names the adapter in the configuration picker and chooses
+ * nothing. Canonical: docs/design/language-services.md § Component and package.
+ */
+export const ExtensionDebugRuntimeId = Schema.String.pipe(
+  Schema.pattern(/^[a-z][a-z0-9-]{0,31}$/),
+  Schema.brand("ExtensionDebugRuntimeId"),
+);
+export type ExtensionDebugRuntimeId = typeof ExtensionDebugRuntimeId.Type;
+
+/**
+ * The `type` of an entry in an imported repository launch file that this
+ * adapter may be proposed for. A matching label only: it starts nothing.
+ */
+export const ExtensionDebugImportType = Schema.String.pipe(
+  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/),
+  Schema.brand("ExtensionDebugImportType"),
+);
+export type ExtensionDebugImportType = typeof ExtensionDebugImportType.Type;
+
+/**
+ * The values Octant fills into a debug adapter's `launch` body, each from a
+ * configuration it has checked or a port it chose. A string in the body is
+ * either a literal or exactly one of these, whole.
+ */
+export const EXTENSION_DEBUG_LAUNCH_PLACEHOLDERS = [
+  "{{program}}",
+  "{{args}}",
+  "{{cwd}}",
+  "{{env}}",
+  "{{stopOnEntry}}",
+  "{{debugPort}}",
+] as const;
+export const MAX_EXTENSION_DEBUG_LAUNCH_ARGUMENTS_BYTES = 8 * 1024;
+const MAX_DEBUG_LAUNCH_ARGUMENTS_DEPTH = 16;
+const debugLaunchPlaceholders: ReadonlySet<string> = new Set(EXTENSION_DEBUG_LAUNCH_PLACEHOLDERS);
+
+export type ExtensionDebugLaunchValue =
+  | null
+  | boolean
+  | number
+  | string
+  | ReadonlyArray<ExtensionDebugLaunchValue>
+  | { readonly [key: string]: ExtensionDebugLaunchValue };
+type DebugLaunchObject = { readonly [key: string]: ExtensionDebugLaunchValue };
+
+/**
+ * Whether a string names a placeholder only partly: braces that are not
+ * exactly one whole placeholder. Refused so a configuration's text is never
+ * spliced into a longer value or into a key.
+ */
+function holdsPartialPlaceholder(value: string): boolean {
+  return (value.includes("{{") || value.includes("}}")) && !debugLaunchPlaceholders.has(value);
+}
+
+function isDebugLaunchValue(value: unknown, depth: number): value is ExtensionDebugLaunchValue {
+  if (value === null || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value === "string") return !holdsPartialPlaceholder(value);
+  if (typeof value !== "object" || depth > MAX_DEBUG_LAUNCH_ARGUMENTS_DEPTH) return false;
+  if (Array.isArray(value)) return value.every((entry) => isDebugLaunchValue(entry, depth + 1));
+  return isDebugLaunchObject(value, depth);
+}
+
+function isDebugLaunchObject(value: object, depth: number): value is DebugLaunchObject {
+  if (Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return false;
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  return Reflect.ownKeys(value).every((key) => {
+    // `__proto__` arrives as an own key from parsed JSON, and a decoder or a
+    // later spread would turn it into a prototype rather than a value.
+    if (
+      typeof key !== "string" ||
+      key === "__proto__" ||
+      key.includes("{{") ||
+      key.includes("}}")
+    ) {
+      return false;
+    }
+    const descriptor = descriptors[key];
+    return (
+      descriptor !== undefined &&
+      "value" in descriptor &&
+      isDebugLaunchValue(descriptor.value, depth + 1)
+    );
+  });
+}
+
+function placeholdersIn(value: ExtensionDebugLaunchValue, found: Set<string>): Set<string> {
+  if (typeof value === "string") {
+    if (debugLaunchPlaceholders.has(value)) found.add(value);
+  } else if (Array.isArray(value)) {
+    for (const entry of value) placeholdersIn(entry, found);
+  } else if (typeof value === "object" && value !== null) {
+    for (const entry of Object.values(value)) placeholdersIn(entry, found);
+  }
+  return found;
+}
+
+function isDebugLaunchArguments(input: unknown): input is DebugLaunchObject {
+  if (typeof input !== "object" || input === null || !isDebugLaunchObject(input, 0)) return false;
+  const encoded = JSON.stringify(input);
+  return new TextEncoder().encode(encoded).byteLength <= MAX_EXTENSION_DEBUG_LAUNCH_ARGUMENTS_BYTES;
+}
+
+/**
+ * The body of the Debug Adapter Protocol `launch` request this adapter needs,
+ * as a JSON object of at most 8 KiB. Octant fills only the placeholders, each
+ * as a whole value, so nothing a configuration holds reaches another key.
+ */
+export const ExtensionDebugLaunchArguments = Schema.declare(isDebugLaunchArguments);
+export type ExtensionDebugLaunchArguments = typeof ExtensionDebugLaunchArguments.Type;
+
+/**
+ * What a `debug-adapter` component needs to start a session. The adapter and
+ * the program it launches share one confined capsule, so the declaration has
+ * no field that widens confinement; `debugPorts` only asks for one loopback
+ * port to reach the program. Canonical: docs/design/language-services.md
+ * § Component and package.
+ */
+export const ExtensionDebugAdapterDeclaration = Schema.Struct({
+  runtimes: Schema.Array(ExtensionDebugRuntimeId).pipe(Schema.minItems(1), Schema.maxItems(8)),
+  launchArguments: ExtensionDebugLaunchArguments,
+  importTypes: Schema.Array(ExtensionDebugImportType).pipe(Schema.maxItems(8)),
+  debugPorts: Schema.Literal(0, 1),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((declaration) => {
+      const placeholders = placeholdersIn(declaration.launchArguments, new Set());
+      // The body must run the program the person confirmed, and a port is
+      // declared exactly when the body hands it to the adapter: an unfilled
+      // port is a grant nothing uses, and an undeclared one is never chosen.
+      return (
+        placeholders.has("{{program}}") &&
+        placeholders.has("{{debugPort}}") === (declaration.debugPorts === 1)
+      );
+    }),
+  );
+export type ExtensionDebugAdapterDeclaration = typeof ExtensionDebugAdapterDeclaration.Type;
+
 export const ExtensionComponent = Schema.Struct({
   id: ExtensionComponentId,
   kind: ExtensionComponentKind,
@@ -323,6 +467,8 @@ export const ExtensionComponent = Schema.Struct({
   parentComponentId: Schema.optional(ExtensionComponentId),
   /** Present exactly when `kind` is `language-server`. */
   languageServer: Schema.optional(ExtensionLanguageServerDeclaration),
+  /** Present exactly when `kind` is `debug-adapter`. */
+  debugAdapter: Schema.optional(ExtensionDebugAdapterDeclaration),
 }).annotations(strict);
 export type ExtensionComponent = typeof ExtensionComponent.Type;
 
@@ -337,6 +483,7 @@ const executableKinds = new Set<ExtensionComponentKind>([
   "provider-driver",
   "desktop-provider",
   "language-server",
+  "debug-adapter",
 ]);
 const mcpChildKinds = new Set<ExtensionComponentKind>(["mcp-tool", "mcp-prompt", "mcp-resource"]);
 
@@ -515,6 +662,9 @@ export const ExtensionPackageManifest = Schema.Struct({
           return false;
         }
         if ((component.kind === "language-server") !== (component.languageServer !== undefined)) {
+          return false;
+        }
+        if ((component.kind === "debug-adapter") !== (component.debugAdapter !== undefined)) {
           return false;
         }
         if (mcpChild !== (component.parentComponentId !== undefined)) return false;

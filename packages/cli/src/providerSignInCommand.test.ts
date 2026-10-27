@@ -187,6 +187,8 @@ describe("octant provider sign-in", () => {
     ["denied", "The sign-in was declined, so nothing was saved."],
     ["timeout", "The code ran out before the sign-in finished"],
     ["exchange-refused", "must allow public client flows"],
+    ["portal-refused", "single sign-on portal refused the sign-in"],
+    ["not-authorized", "does not give you the endpoint's account and role"],
   ])("says how a sign-in that ended as %s ended", async (reason, sentence) => {
     const scene = fixture((request) =>
       request.path.endsWith("/begin")

@@ -92,6 +92,45 @@ function languageServerManifest(
   };
 }
 
+function debugAdapterDeclaration(overrides: Record<string, unknown> = {}) {
+  return {
+    runtimes: ["node"],
+    launchArguments: {
+      type: "node",
+      program: "{{program}}",
+      args: "{{args}}",
+      cwd: "{{cwd}}",
+      env: "{{env}}",
+      stopOnEntry: "{{stopOnEntry}}",
+      inspector: { port: "{{debugPort}}", host: "127.0.0.1" },
+      skipFiles: ["<node_internals>/**"],
+    },
+    importTypes: ["node", "pwa-node"],
+    debugPorts: 1,
+    ...overrides,
+  };
+}
+
+function debugAdapterManifest(debugAdapter: Record<string, unknown> = debugAdapterDeclaration()) {
+  return {
+    ...manifest(),
+    slug: "node-debugger",
+    declaredCapabilities: ["filesystem", "shell", "network"],
+    primaryComponentId: "adapter",
+    compatibility: { platforms: ["macos", "linux"], modes: ["code"], providerFamilies: [] },
+    components: [
+      {
+        id: "adapter",
+        kind: "debug-adapter",
+        displayName: "Node debugger",
+        declaredCapabilities: ["filesystem", "shell", "network"],
+        entryPoint: "bin/node-debug-adapter",
+        debugAdapter,
+      },
+    ],
+  };
+}
+
 describe("extension package contracts", () => {
   it("strictly decodes a provider-neutral manifest", () => {
     const decoded = decodeExtensionPackageManifest(manifest());
@@ -399,6 +438,111 @@ describe("extension package contracts", () => {
         components: [{ ...component, kind: "debug-adapter" }],
       }),
     ).toThrow();
+  });
+
+  it("accepts an executable debug adapter whose launch body fills only whole placeholders", () => {
+    const decoded = decodeExtensionPackageManifest(debugAdapterManifest());
+    expect(decoded.components[0]).toMatchObject({
+      kind: "debug-adapter",
+      entryPoint: "bin/node-debug-adapter",
+      debugAdapter: { runtimes: ["node"], importTypes: ["node", "pwa-node"], debugPorts: 1 },
+    });
+    // An adapter that needs no port declares none and names no port.
+    expect(
+      decodeExtensionPackageManifest(
+        debugAdapterManifest(
+          debugAdapterDeclaration({
+            runtimes: ["python"],
+            launchArguments: { program: "{{program}}", args: "{{args}}", justMyCode: true },
+            importTypes: [],
+            debugPorts: 0,
+          }),
+        ),
+      ).components[0]?.debugAdapter?.debugPorts,
+    ).toBe(0);
+  });
+
+  it("refuses a debug adapter declaration with unknown fields, in-string placeholders, or an unfilled port", () => {
+    const refused: ReadonlyArray<Record<string, unknown>> = [
+      // Unknown fields are refused, never ignored.
+      debugAdapterDeclaration({ attach: true }),
+      // A placeholder spliced into a longer string could carry a configuration's
+      // text into another value.
+      debugAdapterDeclaration({
+        launchArguments: { program: "{{program}}", runtimeArgs: ["--inspect={{debugPort}}"] },
+      }),
+      debugAdapterDeclaration({
+        launchArguments: { program: "{{cwd}}/{{program}}" },
+        debugPorts: 0,
+      }),
+      debugAdapterDeclaration({ launchArguments: { program: "node {{program}}" }, debugPorts: 0 }),
+      // Only the six placeholders Octant fills exist.
+      debugAdapterDeclaration({
+        launchArguments: { program: "{{program}}", home: "{{home}}" },
+        debugPorts: 0,
+      }),
+      debugAdapterDeclaration({
+        launchArguments: { "{{program}}": "{{program}}" },
+        debugPorts: 0,
+      }),
+      // The launch body runs the program the person confirmed, so it names it.
+      debugAdapterDeclaration({ launchArguments: { args: "{{args}}" }, debugPorts: 0 }),
+      // A port the adapter never receives, or one it uses without declaring.
+      debugAdapterDeclaration({ launchArguments: { program: "{{program}}" }, debugPorts: 1 }),
+      debugAdapterDeclaration({ debugPorts: 0 }),
+      debugAdapterDeclaration({ debugPorts: 2 }),
+      // The body is a JSON object of at most 8 KiB.
+      debugAdapterDeclaration({ launchArguments: ["{{program}}"], debugPorts: 0 }),
+      debugAdapterDeclaration({
+        launchArguments: { program: "{{program}}", padding: "x".repeat(8_192) },
+        debugPorts: 0,
+      }),
+      debugAdapterDeclaration({ runtimes: [] }),
+      debugAdapterDeclaration({ runtimes: ["Node.js"] }),
+      debugAdapterDeclaration({
+        importTypes: Array.from({ length: 9 }, (_, index) => `type-${index}`),
+      }),
+    ];
+    for (const declaration of refused) {
+      expect(() => decodeExtensionPackageManifest(debugAdapterManifest(declaration))).toThrow();
+    }
+    const [component] = debugAdapterManifest().components;
+    expect(() =>
+      decodeExtensionPackageManifest({
+        ...debugAdapterManifest(),
+        components: [{ ...component, debugAdapter: undefined }],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeExtensionPackageManifest({
+        ...debugAdapterManifest(),
+        components: [{ ...component, entryPoint: undefined }],
+      }),
+    ).toThrow();
+    const [server] = languageServerManifest().components;
+    expect(() =>
+      decodeExtensionPackageManifest({
+        ...languageServerManifest(),
+        components: [{ ...server, debugAdapter: debugAdapterDeclaration() }],
+      }),
+    ).toThrow();
+  });
+
+  it("refuses a debug adapter launch body that is not plain JSON", () => {
+    const withPrototypeKey = JSON.parse(
+      '{"program":"{{program}}","__proto__":{"polluted":true}}',
+    ) as Record<string, unknown>;
+    for (const launchArguments of [
+      withPrototypeKey,
+      { program: "{{program}}", timeout: Number.POSITIVE_INFINITY },
+      { program: "{{program}}", when: new Date(0) },
+    ]) {
+      expect(() =>
+        decodeExtensionPackageManifest(
+          debugAdapterManifest(debugAdapterDeclaration({ launchArguments, debugPorts: 0 })),
+        ),
+      ).toThrow();
+    }
   });
 
   it("rejects an appearance-pack that claims an executable entry point", () => {

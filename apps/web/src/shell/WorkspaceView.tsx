@@ -43,6 +43,7 @@ import type {
 } from "@octant/contracts/projects";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
+import type { DesktopRecipe } from "@octant/contracts/desktop-lease";
 import type { PreviewClient } from "@octant/client-runtime/preview-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
@@ -421,6 +422,10 @@ export interface WorkspaceViewProps {
     brandKit: CanvasDesignBrand,
   ) => Promise<boolean>;
   readonly onWorkStatusFileChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
+  readonly onDesktopRecipeChange?: (
+    projectId: ProjectId,
+    recipe: DesktopRecipe | null,
+  ) => Promise<boolean>;
   /** The theme's ground behind the welcome and draft-thread surfaces, when one is set. */
   readonly welcomeBackdrop?: ReactNode;
   /** Session record of which tabs the person activated, opened, or created. */
@@ -2216,6 +2221,13 @@ function renderNonCodeTab(
         {...(props.onWorkStatusFileChange === undefined
           ? {}
           : { onWorkStatusFileChange: props.onWorkStatusFileChange })}
+        {...(props.onDesktopRecipeChange === undefined
+          ? {}
+          : { onDesktopRecipeChange: props.onDesktopRecipeChange })}
+        {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
+        {...(props.projectWindowCapability === undefined
+          ? {}
+          : { windowCapability: props.projectWindowCapability })}
         providerInstances={props.providerController.instances ?? []}
         onRelink={props.onRelinkProject}
         onRename={props.onRenameProject}

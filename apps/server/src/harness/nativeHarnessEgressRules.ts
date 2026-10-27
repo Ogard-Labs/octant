@@ -252,6 +252,11 @@ interface OpenLaunch {
   readonly entries: Map<string, ToolEgressDecisionEntry>;
 }
 
+/** A proxy whose open tunnels can be decided again now. */
+export interface ToolEgressRecheckable {
+  readonly recheck: () => void;
+}
+
 interface LiveLaunchState {
   readonly proxy: ToolEgressProxy;
   readonly launch: ToolEgressLaunch;
@@ -294,6 +299,12 @@ export class ToolEgressRules {
    */
   readonly #unreadableAggregates = new Set<string>();
   readonly #live = new Map<string, LiveLaunchState>();
+  /**
+   * Proxies started outside {@link startLaunch} that decide on these rules: a
+   * `repo-tooling` language server's. Without this, revoking a rule or a
+   * taint change left such a proxy's idle tunnel open until its next chunk.
+   */
+  readonly #rechecked = new Set<ToolEgressRecheckable>();
   readonly #elapsedMs: () => number;
   /** When expired rules are next swept from memory, in elapsed milliseconds. */
   #nextSweepAt = Number.NEGATIVE_INFINITY;
@@ -349,13 +360,26 @@ export class ToolEgressRules {
 
   /** Re-decides every open tunnel now, after a revocation or a taint change. */
   recheck(): void {
-    for (const live of this.#live.values()) {
+    const proxies = [...[...this.#live.values()].map((live) => live.proxy), ...this.#rechecked];
+    for (const proxy of proxies) {
       try {
-        live.proxy.recheck();
+        proxy.recheck();
       } catch {
         // A proxy that cannot recheck shuts its tunnels at their next chunk.
       }
     }
+  }
+
+  /**
+   * Puts a proxy that decides on these rules, but was not started by
+   * {@link startLaunch}, on every {@link recheck} until the returned call
+   * takes it off.
+   */
+  joinRecheck(proxy: ToolEgressRecheckable): () => void {
+    this.#rechecked.add(proxy);
+    return () => {
+      this.#rechecked.delete(proxy);
+    };
   }
 
   /** A purged thread's events are gone from the journal; so is everything held for it. */

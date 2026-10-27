@@ -1,5 +1,6 @@
 import { decodeProviderInstanceId, decodeWindowId } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
+import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { ProviderServiceError } from "./providerService";
 import { createProviderRouteHandler } from "./providerRoutes";
@@ -52,6 +53,70 @@ describe("ProviderRoutes", () => {
       }),
     );
     expect(forged?.status).toBe(400);
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a paired device adding an outside driver provider or verifying tools before the service runs", async () => {
+    const execute = vi.fn(() => ({ kind: "provider-created", instance: provider() }));
+    const route = routeFixture({ execute });
+    const pairedDeviceId = "80000000-0000-4000-8000-000000000030";
+    const commands = [
+      {
+        kind: "create-outside-harness-endpoint-provider",
+        instanceId,
+        expectedVersion: 0,
+        displayName: "Loopback chat",
+        configuration: {
+          kind: "outside-harness-endpoint",
+          driver: {
+            extensionId: "80000000-0000-4000-8000-000000000031",
+            packageId: "80000000-0000-4000-8000-000000000032",
+            componentId: "driver",
+            version: "0.1.0",
+            digest: `sha256:${"a".repeat(64)}`,
+          },
+          baseUrl: "http://127.0.0.1:8080/",
+          modelIds: ["local-model"],
+        },
+      },
+      { kind: "verify-model-tools", instanceId, modelId: "local-model" },
+    ];
+    for (const body of commands) {
+      const remote = new Request("http://127.0.0.1/api/providers/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: {
+          kind: "remote-device",
+          hostId: "local",
+          deviceId: pairedDeviceId,
+          credentialGeneration: 1,
+          origin: "https://remote.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: "80000000-0000-4000-8000-000000000033",
+        } as never,
+        scopeId: pairedDeviceId as never,
+      });
+      const denied = await route(remote);
+      expect(denied?.status).toBe(401);
+    }
+    expect(execute).not.toHaveBeenCalled();
+
+    // The same command from the local window reaches the service.
+    const local = await route(
+      new Request("http://127.0.0.1/api/providers/commands", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": capability,
+        },
+        body: JSON.stringify(commands[0]),
+      }),
+    );
+    expect(local?.status).toBe(200);
     expect(execute).toHaveBeenCalledTimes(1);
   });
 

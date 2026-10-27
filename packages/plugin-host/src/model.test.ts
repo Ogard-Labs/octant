@@ -79,6 +79,40 @@ describe("extension manifest normalization", () => {
     });
   });
 
+  it("normalizes a debug adapter's runtimes and import types without changing its launch body", () => {
+    const base = manifest();
+    const launchArguments = { program: "{{program}}", args: "{{args}}", console: "internal" };
+    const normalized = normalizeExtensionManifest(
+      decodeExtensionPackageManifest({
+        ...base,
+        compatibility: { ...base.compatibility, modes: ["code"] },
+        declaredCapabilities: ["filesystem", "shell"],
+        primaryComponentId: "adapter",
+        components: [
+          {
+            id: "adapter",
+            kind: "debug-adapter",
+            displayName: "Node debugger",
+            declaredCapabilities: ["shell", "filesystem", "shell"],
+            entryPoint: "bin/adapter",
+            debugAdapter: {
+              runtimes: ["node", "bun", "node"],
+              launchArguments,
+              importTypes: ["pwa-node", "node", "pwa-node"],
+              debugPorts: 0,
+            },
+          },
+        ],
+      }),
+    );
+    expect(normalized.components[0]?.debugAdapter).toEqual({
+      runtimes: ["bun", "node"],
+      launchArguments,
+      importTypes: ["node", "pwa-node"],
+      debugPorts: 0,
+    });
+  });
+
   it("builds stable serialization-safe source-qualified identities", () => {
     expect(componentQualifiedId(extensionId, "alpha")).toBe(`${extensionId}/alpha`);
     expect(componentQualifiedId("00000000-0000-0000-0000-000000000000", "alpha")).toBe(

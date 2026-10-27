@@ -4,6 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   ActorId,
+  CODE_DEFINITION_TOOL_NAME,
+  CODE_DIAGNOSTICS_TOOL_NAME,
+  decodeCodeFileId,
   CodeOperationEventFrame,
   CodeRuntimeWorkUpdated,
   ProductFeedbackCaptured,
@@ -93,6 +96,8 @@ import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
 import type { PrincipalRouteContext } from "../principalRouteContext";
 import { CODE_BOARD_TOOL_NAME, CODE_TERMINAL_TOOL_NAME } from "./codeAppManagedTools";
+import { createCodeLanguageAgentTools } from "./codeLanguageAgentTools";
+import type { CodeLanguageAgentReadResult } from "./codeLanguageService";
 import {
   CODE_OPERATION_EVENT_RECORDED,
   CodeOperationEventStore,
@@ -6024,6 +6029,7 @@ function runtimeFixture(options: {
   >[0]["computerUseUnattachedTools"];
   agentMessages?: Parameters<typeof createCodeOperationRuntime>[0]["agentMessages"];
   siblingThreads?: Parameters<typeof createCodeOperationRuntime>[0]["siblingThreads"];
+  contributedTools?: Parameters<typeof createCodeOperationRuntime>[0]["contributedTools"];
   canvas?: Parameters<typeof createCodeOperationRuntime>[0]["canvas"];
   carryAgentMessages?: Parameters<typeof createCodeOperationRuntime>[0]["carryAgentMessages"];
   confirmAgentMessagesDelivered?: Parameters<
@@ -6332,6 +6338,9 @@ function runtimeFixture(options: {
       : { computerUseUnattachedTools: options.computerUseUnattachedTools }),
     ...(options.agentMessages === undefined ? {} : { agentMessages: options.agentMessages }),
     ...(options.siblingThreads === undefined ? {} : { siblingThreads: options.siblingThreads }),
+    ...(options.contributedTools === undefined
+      ? {}
+      : { contributedTools: options.contributedTools }),
     ...(options.canvas === undefined ? {} : { canvas: options.canvas }),
     ...(options.carryAgentMessages === undefined
       ? {}
@@ -7252,6 +7261,112 @@ it("offers the agent message tool to a Code turn and withholds it from one in Pl
   // Plan is read-only, and sending stores a body and journals: the provider
   // is never told the tool exists.
   expect(await offered("plan", 84)).not.toContain(AGENT_MESSAGE_TOOL_NAME);
+});
+
+describe("language reads on Code turns", () => {
+  const authority = decodeToolActionAuthority({
+    hostId: "90000000-0000-4000-8000-000000000001",
+    mode: "code",
+    projectId: thread().projectId,
+    rootId: "90000000-0000-4000-8000-000000000009",
+    worktreeId: checkoutId,
+    providerInstanceId: thread().providerInstanceId,
+    extension: { kind: "core" },
+  });
+
+  async function planTurn(supportsAppManagedTools: boolean, operation: number) {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const starts: Array<ProviderSessionStart> = [];
+    const connection = providerConnection(queue, starts);
+    const readForAgent = vi.fn(
+      async (): Promise<CodeLanguageAgentReadResult> => ({
+        status: "diagnostics",
+        threadId,
+        checkoutId,
+        fileId: decodeCodeFileId("90000000-0000-4000-8000-0000000000f1"),
+        diagnostics: [],
+        truncated: false,
+      }),
+    );
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      supportsAppManagedTools,
+      contributedTools: ({ windowId: turnWindow, thread: turnThread, readThread }) =>
+        createCodeLanguageAgentTools({
+          windowId: turnWindow,
+          thread: turnThread,
+          readThread,
+          authority: () => authority,
+          externalContentIngested: () => false,
+          language: { readForAgent },
+          uuid: randomUUID,
+        }),
+    });
+    fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "plan" }));
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(operation),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    return { queue, starts, connection, readForAgent, fixture };
+  }
+
+  it("offers a Plan turn the diagnostics and definition reads and answers one from the language service", async () => {
+    const { queue, starts, connection, readForAgent, fixture } = await planTurn(true, 1301);
+    try {
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(1));
+      expect(starts[0]?.tools?.map((tool) => tool.name)).toEqual(
+        expect.arrayContaining([CODE_DIAGNOSTICS_TOOL_NAME, CODE_DEFINITION_TOOL_NAME]),
+      );
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-request",
+            requestId: "language-1",
+            toolName: CODE_DIAGNOSTICS_TOOL_NAME,
+            inputJson: JSON.stringify({ path: "src/b.ts" }),
+          }),
+        ),
+      );
+      await vi.waitFor(() => expect(connection.answerTool).toHaveBeenCalledOnce());
+      const [answer] = vi.mocked(connection.answerTool).mock.calls[0] ?? [];
+      expect(answer?.isError).toBe(false);
+      expect(JSON.parse(answer?.resultJson ?? "{}")).toEqual({
+        path: "src/b.ts",
+        diagnostics: [],
+        truncated: false,
+      });
+      expect(readForAgent).toHaveBeenCalledWith(windowId, {
+        kind: "diagnostics",
+        threadId,
+        checkoutId,
+        path: "src/b.ts",
+      });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
+  it("offers neither read to a provider that cannot carry app-managed tools", async () => {
+    const { starts, connection, fixture } = await planTurn(false, 1302);
+    try {
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(1));
+      expect(starts[0]?.tools?.map((tool) => tool.name) ?? []).not.toEqual(
+        expect.arrayContaining([CODE_DIAGNOSTICS_TOOL_NAME]),
+      );
+      expect(starts[0]?.tools?.map((tool) => tool.name) ?? []).not.toEqual(
+        expect.arrayContaining([CODE_DEFINITION_TOOL_NAME]),
+      );
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
 });
 
 describe("sibling-threads tool on Code turns", () => {

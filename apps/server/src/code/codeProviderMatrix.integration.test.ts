@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { readProviderConformanceEvidence } from "../providers/chatProviderMatrixEvidence.test-support";
 
 import "../providers/acpConformance.test";
+import "../providers/amazonBedrockConformance.test";
 import "../providers/anthropicCompatibleConformance.test";
 import "../providers/azureFoundryConformance.test";
 import "../providers/claudeConformance.test";
@@ -36,6 +37,7 @@ const CODE_OUTCOMES = {
   "openai-compatible": "downgraded",
   "anthropic-compatible": "downgraded",
   "azure-foundry": "downgraded",
+  "amazon-bedrock": "downgraded",
   "openai-image": "unavailable",
   "gemini-native-image": "unavailable",
   "bfl-image": "unavailable",
@@ -46,7 +48,7 @@ const CODE_OUTCOMES = {
 
 describe("Code provider matrix", () => {
   it("classifies every declared provider kind with conformance or explicit unavailability", () => {
-    expect(Object.keys(CODE_OUTCOMES)).toHaveLength(26);
+    expect(Object.keys(CODE_OUTCOMES)).toHaveLength(27);
     for (const [providerKind, outcome] of Object.entries(CODE_OUTCOMES) as Array<
       [ProviderDriverKind, CodeOutcome]
     >) {

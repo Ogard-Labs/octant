@@ -10,6 +10,7 @@ import {
   type LoadAgentPluginDirectoryOptions,
   type ReadPluginDirectory,
 } from "./agentPluginFilesystem";
+import { DEBUG_ADAPTER_PACKAGE_DOCUMENT_PATH } from "@octant/plugin-api/debug-adapter-package";
 import { LANGUAGE_SERVER_PACKAGE_DOCUMENT_PATH } from "@octant/plugin-api/language-server-package";
 import { OUTSIDE_PROVIDER_DRIVER_DOCUMENT_PATH } from "@octant/plugin-api/outside-provider-driver";
 import { packageSlug } from "./userAddedMcpServers";
@@ -19,10 +20,19 @@ export type PluginDirectoryFormat =
   | "codex-plugin"
   | "claude-plugin"
   | "language-server-package"
-  | "outside-provider-driver";
+  | "outside-provider-driver"
+  | "debug-adapter-package";
+
+/** Octant's own package documents; a folder holding one is read as that package alone. */
+const PACKAGE_DOCUMENT_PATHS = [
+  LANGUAGE_SERVER_PACKAGE_DOCUMENT_PATH,
+  OUTSIDE_PROVIDER_DRIVER_DOCUMENT_PATH,
+  DEBUG_ADAPTER_PACKAGE_DOCUMENT_PATH,
+] as const;
 
 export interface LoadedPluginDirectory extends ReadPluginDirectory {
-  readonly format: PluginDirectoryFormat;
+  /** A debug adapter's folder is refused before it loads, so it is never one of these. */
+  readonly format: Exclude<PluginDirectoryFormat, "debug-adapter-package">;
   /** Present for a Codex-format folder: its manifest, which the Codex adapter normalizes. */
   readonly codexManifest?: unknown;
   /** Servers or files the loader had to leave out, in plain words. */
@@ -35,17 +45,18 @@ export interface LoadedPluginDirectory extends ReadPluginDirectory {
  * or a Claude Code plugin (`.claude-plugin/plugin.json`, `.mcp.json`, or a
  * `skills/` folder). Undefined means none of them.
  *
- * A folder with a language server package's document or an outside provider
- * driver's document at its root is read as that package and as nothing else,
- * so neither ever also arrives as skills or MCP servers, and no other layout
- * is ever read as one of them. A folder holding both documents is refused by
- * the loader rather than read as either.
+ * A folder with a language server package's, an outside provider driver's,
+ * or a debug adapter package's document at its root is read as that package
+ * and as nothing else, so none ever also arrives as skills or MCP servers,
+ * and no other layout is ever read as one of them. A folder holding more than
+ * one of those documents is refused by the loader rather than read as any.
  */
 export function detectPluginDirectoryFormat(
   entries: ReadonlyArray<AgentPluginsPackageEntry>,
 ): PluginDirectoryFormat | undefined {
   if (holdsFile(entries, LANGUAGE_SERVER_PACKAGE_DOCUMENT_PATH)) return "language-server-package";
   if (holdsFile(entries, OUTSIDE_PROVIDER_DRIVER_DOCUMENT_PATH)) return "outside-provider-driver";
+  if (holdsFile(entries, DEBUG_ADAPTER_PACKAGE_DOCUMENT_PATH)) return "debug-adapter-package";
   if (looksLikeAgentPlugin(entries)) return "agent-plugins";
   if (
     entries.some((entry) => entry.path === ".codex-plugin/plugin.json" && entry.kind === "file")
@@ -78,15 +89,13 @@ export async function loadPluginDirectory(
 ): Promise<LoadedPluginDirectory> {
   const read = await readPluginDirectory(directoryPath, options);
   // Each of these packages is read as nothing else, so a folder claiming to be
-  // both is neither: reading it as either would let the other's files ride
+  // two is neither: reading it as either would let the other's files ride
   // along under rules written for a different kind of package.
-  if (
-    holdsFile(read.entries, LANGUAGE_SERVER_PACKAGE_DOCUMENT_PATH) &&
-    holdsFile(read.entries, OUTSIDE_PROVIDER_DRIVER_DOCUMENT_PATH)
-  ) {
+  const documents = PACKAGE_DOCUMENT_PATHS.filter((path) => holdsFile(read.entries, path));
+  if (documents.length > 1) {
     fail(
       "manifest-schema",
-      `Folder holds both ${LANGUAGE_SERVER_PACKAGE_DOCUMENT_PATH} and ${OUTSIDE_PROVIDER_DRIVER_DOCUMENT_PATH}; a package is a language server or a provider driver, not both.`,
+      `Folder holds ${documents.join(" and ")}; a package folder holds one package document and is read as that package, not both.`,
     );
   }
   const format = detectPluginDirectoryFormat(read.entries);
@@ -94,6 +103,15 @@ export async function loadPluginDirectory(
     fail(
       "manifest-schema",
       "Folder is not a plugin: no plugin.json, .codex-plugin/plugin.json, .claude-plugin/plugin.json, .mcp.json or skills/ found.",
+    );
+  }
+  // A debug adapter runs the person's program, and this host has no review
+  // or session for one yet, so its folder is refused rather than read as the
+  // plugin its other files might also describe.
+  if (format === "debug-adapter-package") {
+    fail(
+      "manifest-schema",
+      `Folder holds ${DEBUG_ADAPTER_PACKAGE_DOCUMENT_PATH}; this host does not install debug adapters yet.`,
     );
   }
   if (

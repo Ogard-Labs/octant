@@ -9,6 +9,7 @@ import type {
 import type { UtcTimestamp } from "@octant/contracts/events";
 import { ACP_AGENT_KINDS } from "@octant/contracts/acp-agent-profiles";
 import { isAcpAgentInstance, isNativeHarnessDriverKind } from "./providerPolicy";
+import { amazonBedrockRuntimeHost } from "./cloudIamSignIn";
 
 const evidenceSourceRank: Record<CapabilityEvidence["source"], number> = {
   "endpoint-observation": 5,
@@ -202,6 +203,8 @@ function endpointOf(instance: ProviderInstance): string | undefined {
     case "azure-foundry-openai-http":
     case "ollama-native-http":
       return instance.configuration.baseUrl;
+    case "amazon-bedrock-converse-http":
+      return amazonBedrockRuntimeHost(instance.configuration.region);
     default:
       return undefined;
   }
@@ -241,6 +244,8 @@ function evidenceProtocolOf(
 
 function authenticationOf(instance: ProviderInstance): string | undefined {
   switch (instance.configuration.kind) {
+    case "amazon-bedrock-converse-http":
+      return instance.configuration.authentication;
     case "openai-compatible-http":
       return instance.configuration.authentication;
     case "anthropic-compatible-http":

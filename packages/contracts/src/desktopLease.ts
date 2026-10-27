@@ -370,7 +370,15 @@ const paneView = { ...paneLease, viewId: DesktopViewId };
  */
 export const DesktopPaneRequest = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("overview"), ...paneThread }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("acquire"), ...paneThread }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("acquire"),
+    ...paneThread,
+    /**
+     * The billed provider the person confirmed in the tab before asking. A
+     * billed desktop starts only with it, and only on that provider.
+     */
+    confirmedBilledProvider: Schema.optional(DesktopProviderId),
+  }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("release"), ...paneLease }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("retry-release"), ...paneLease }).annotations(strict),
   Schema.Struct({
@@ -385,6 +393,8 @@ export const DesktopPaneRequest = Schema.Union(
     ...paneView,
     event: DesktopInputEvent,
   }).annotations(strict),
+  /** The providers a Project's recipe may name on this host now, for the recipe editor. */
+  Schema.Struct({ kind: Schema.Literal("recipe-providers") }).annotations(strict),
 );
 export type DesktopPaneRequest = typeof DesktopPaneRequest.Type;
 
@@ -427,6 +437,11 @@ export const DesktopPaneAnswer = Schema.Union(
   Schema.Struct({ status: Schema.Literal("delivered") }).annotations(strict),
   /** The host journaled the input, but the desktop did not take it. */
   Schema.Struct({ status: Schema.Literal("not-delivered") }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("recipe-providers"),
+    /** Providers ready for leasing on this host; a recipe naming any other is refused. */
+    providers: Schema.Array(LeasableDesktopProvider),
+  }).annotations(strict),
   DesktopPaneRefusal,
 );
 export type DesktopPaneAnswer = typeof DesktopPaneAnswer.Type;
@@ -434,7 +449,9 @@ export type DesktopPaneAnswer = typeof DesktopPaneAnswer.Type;
 export const decodeDesktopLeaseId = Schema.decodeUnknownSync(DesktopLeaseId);
 export const decodeDesktopHostTag = Schema.decodeUnknownSync(DesktopHostTag);
 export const decodeDesktopProviderId = Schema.decodeUnknownSync(DesktopProviderId);
+export const decodeDesktopCredentialRef = Schema.decodeUnknownSync(DesktopCredentialRef);
 export const decodeDesktopRecipe = Schema.decodeUnknownSync(DesktopRecipe);
+export const decodeLeasableDesktopProvider = Schema.decodeUnknownSync(LeasableDesktopProvider);
 export const decodeDesktopLease = Schema.decodeUnknownSync(DesktopLease);
 export const decodeDesktopLeaseRequested = Schema.decodeUnknownSync(DesktopLeaseRequested);
 export const decodeDesktopLeaseTransitioned = Schema.decodeUnknownSync(DesktopLeaseTransitioned);

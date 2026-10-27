@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { realpath } from "node:fs/promises";
-import { extname, join } from "node:path";
+import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import type {
   CodeCheckoutId,
@@ -13,15 +13,17 @@ import type {
   ProjectId,
   WindowId,
 } from "@octant/contracts";
-import type {
-  CodeLanguageApprovalRequest,
-  CodeLanguageApprovalResult,
-  CodeLanguageDocumentRequest,
-  CodeLanguageDocumentResult,
-  CodeLanguageReadRequest,
-  CodeLanguageReadResult,
-  CodeLanguageRefusalReason,
-  CodeLanguageUnavailableReason,
+import {
+  MAX_CODE_LANGUAGE_DOCUMENT_TEXT_LENGTH,
+  type CodeLanguageApprovalRequest,
+  type CodeLanguageApprovalResult,
+  type CodeLanguageDocumentRequest,
+  type CodeLanguageDocumentResult,
+  type CodeLanguagePosition,
+  type CodeLanguageReadRequest,
+  type CodeLanguageReadResult,
+  type CodeLanguageRefusalReason,
+  type CodeLanguageUnavailableReason,
 } from "@octant/contracts/code-language";
 import type { ExtensionLanguageServerClass } from "@octant/contracts/extensions";
 import {
@@ -29,7 +31,8 @@ import {
   type LanguageServerHostPlatform,
   type PrincipalKind,
 } from "@octant/domain";
-import { liveCodeDirectoryPort, type CodePathPort } from "./codeDirectoryPort";
+import { readConfinedCodeFile } from "./codeConfinedFileRead";
+import { liveCodeTestSourcePort, type CodeTestSourcePort } from "./codeDirectoryPort";
 import { joinCodePath, resolveContainedPath } from "./codePathConfinement";
 import type { CodeFileRootResolution } from "./codeService";
 import {
@@ -152,6 +155,11 @@ export interface CodeLanguageAuthority {
   readonly readThread: (threadId: CodeThreadId) => CodeThread | undefined;
   readonly readThreads: () => ReadonlyArray<CodeThread>;
   readonly readCheckout: (checkoutId: CodeCheckoutId) => CodeCheckoutIdentity | undefined;
+  /**
+   * The canonical real path of the folder a thread's checkout is, read on the
+   * host with no window; undefined when it cannot be told.
+   */
+  readonly readThreadFolder: (thread: CodeThread) => string | undefined;
   /** Reach: a local window's Project binding, or a paired device's Code reach. */
   readonly canAccessProject: (scopeId: WindowId, projectId: ProjectId) => boolean;
   readonly effectiveThread: (scopeId: WindowId, thread: CodeThread) => CodeThread;
@@ -183,6 +191,43 @@ export interface CodeLanguageApprovals {
   }) => "recorded" | "not-recorded";
 }
 
+/**
+ * An agent's read, for a turn on a window. It names the file by its
+ * checkout-relative path: an agent holds no editor document, so it has no file
+ * reference to name.
+ */
+export type CodeLanguageAgentRead =
+  | {
+      readonly kind: "diagnostics";
+      readonly threadId: CodeThreadId;
+      readonly checkoutId: CodeCheckoutId;
+      readonly path: CodeRelativePath;
+    }
+  | {
+      readonly kind: "definition";
+      readonly threadId: CodeThreadId;
+      readonly checkoutId: CodeCheckoutId;
+      readonly path: CodeRelativePath;
+      readonly position: CodeLanguagePosition;
+    };
+
+/**
+ * What an agent's read answers: a language read, or one of two answers only
+ * an agent gets. `too-large` is a saved file past the server's frame.
+ * `unsaved-edits` is a file an editor holds with text other than the saved
+ * file's, which the agent's read never replaces and never answers from.
+ */
+export type CodeLanguageAgentReadResult =
+  | CodeLanguageReadResult
+  | { readonly status: "too-large" }
+  | { readonly status: "unsaved-edits" };
+
+/**
+ * Marks a document hold as an agent's, beside the editor's file references
+ * (which are UUIDs), so a hold can tell whether an editor still has the text.
+ */
+const AGENT_HOLDER_PREFIX = "agent:";
+
 export interface CodeLanguageServiceOptions {
   readonly authority: CodeLanguageAuthority;
   /**
@@ -192,8 +237,8 @@ export interface CodeLanguageServiceOptions {
   readonly approvals?: CodeLanguageApprovals;
   /**
    * Whether a thread has taken in outside content. A `repo-tooling` server's
-   * Project rules are suspended while any active thread on its checkout has;
-   * absent, or a read that throws, counts as tainted.
+   * Project rules are suspended while any active thread that can write its
+   * folder has; absent, or a read that throws, counts as tainted.
    */
   readonly threadTainted?: (threadId: CodeThreadId) => boolean;
   /** The `language-server` components effective in Code right now. */
@@ -210,7 +255,8 @@ export interface CodeLanguageServiceOptions {
   readonly platform: LanguageServerHostPlatform;
   /** Parent directory of every server's private cache. */
   readonly cacheRoot: string;
-  readonly files?: CodePathPort;
+  /** Confines every path, and reads the saved file an agent's read names. */
+  readonly files?: CodeTestSourcePort;
   /** Feeds `workspace/didChangeWatchedFiles` to servers that register for it. */
   readonly watcher?: {
     readonly watch: (request: {
@@ -294,7 +340,7 @@ export class CodeLanguageService {
   readonly #processes: CodeLanguageServiceOptions["processes"];
   readonly #platform: LanguageServerHostPlatform;
   readonly #cacheRoot: string;
-  readonly #files: CodePathPort;
+  readonly #files: CodeTestSourcePort;
   readonly #watcher: CodeLanguageServiceOptions["watcher"];
   readonly #now: () => number;
   readonly #requestDeadlineMs: number;
@@ -315,7 +361,7 @@ export class CodeLanguageService {
     this.#processes = options.processes;
     this.#platform = options.platform;
     this.#cacheRoot = options.cacheRoot;
-    this.#files = options.files ?? liveCodeDirectoryPort;
+    this.#files = options.files ?? liveCodeTestSourcePort;
     this.#watcher = options.watcher;
     this.#now = options.now ?? Date.now;
     this.#requestDeadlineMs = options.limits?.requestDeadlineMs ?? LANGUAGE_REQUEST_DEADLINE_MS;
@@ -399,15 +445,123 @@ export class CodeLanguageService {
     if (record.documents.get(document.uri) !== document) {
       return { status: "refused", reason: "file-outside-thread" };
     }
+    return this.#answer(record, document, request, {
+      threadId: request.threadId,
+      checkoutId: request.checkoutId,
+      fileId: request.fileId,
+    });
+  }
+
+  /**
+   * A read for an agent's tool call, answered for the file as saved, so its
+   * lines match what the agent's own file reads show. Every authority check
+   * an editor's read passes runs first, and in the same order.
+   *
+   * It opens the saved text under the agent's own hold when no one holds the
+   * file, and brings a file only agents hold up to the saved text. It never
+   * changes the text an editor holds: when that differs from the saved file
+   * it answers `unsaved-edits`, so the person's draft is neither replaced nor
+   * read out to a provider.
+   *
+   * The launch decision is asked, on every read, as a request the person at
+   * the machine did not make, as a paired device's is: an agent can start a
+   * `static` server and never starts or reads through one that runs
+   * repository tooling, even one already running under a person's approval.
+   * It never resets the crash budget either; reopening in the editor stays
+   * the person's retry.
+   */
+  async readForAgent(
+    scopeId: WindowId,
+    request: CodeLanguageAgentRead,
+  ): Promise<CodeLanguageAgentReadResult> {
+    const caller: CodeLanguageCaller = { scopeId, principal: "remote-device" };
+    const authorized = this.#authorize(caller, request.threadId, request.checkoutId);
+    if (authorized.status === "refused") return authorized;
+    const contained = await this.#containedRoot(caller, authorized, request.path);
+    if (contained.status === "refused") return contained;
+    const { root } = contained;
+    const saved = await readConfinedCodeFile({
+      port: this.#files,
+      canonicalRoot: root.rootPath,
+      relativePath: request.path,
+      maximumBytes: LANGUAGE_SERVER_FRAME_CAP_BYTES,
+    });
+    if (saved.status === "refused") {
+      return saved.reason === "too-large"
+        ? { status: "too-large" }
+        : { status: "refused", reason: "path-outside-checkout" };
+    }
+    const text = Buffer.from(saved.bytes).toString("utf8");
+    if (text.length > MAX_CODE_LANGUAGE_DOCUMENT_TEXT_LENGTH || !fitsFrame(text)) {
+      return { status: "too-large" };
+    }
+    const served = await this.#serve(caller, authorized, request.path, "existing", root.rootPath);
+    if (served.status !== "served") return served;
+    const { record } = served;
+    const uri = pathToFileURL(join(record.rootPath, request.path)).href;
+    const holder = `${AGENT_HOLDER_PREFIX}${String(request.threadId)}`;
+    const now = this.#now();
+    record.lastActivity = now;
+    let document = record.documents.get(uri);
+    if (document === undefined) {
+      document = {
+        uri,
+        path: request.path,
+        languageId: languageOf(request.path) ?? "plaintext",
+        text,
+        version: 1,
+        holders: new Set([holder]),
+        lastTouched: now,
+      };
+      record.documents.set(uri, document);
+      record.pushed.delete(uri);
+      record.connection?.notify("textDocument/didOpen", { textDocument: documentItem(document) });
+    } else {
+      if (document.text !== text) {
+        if (editorHolds(document)) return { status: "unsaved-edits" };
+        document.text = text;
+        document.version += 1;
+        // What the server pushed was for the old text.
+        record.pushed.delete(uri);
+        record.connection?.notify("textDocument/didChange", {
+          textDocument: { uri, version: document.version },
+          contentChanges: [{ text }],
+        });
+      }
+      document.holders.add(holder);
+      document.lastTouched = now;
+    }
+    const version = document.version;
+    const answer = await this.#answer(record, document, request, {
+      threadId: request.threadId,
+      checkoutId: request.checkoutId,
+      fileId: root.fileId,
+    });
+    // An editor that changed the text while the server answered may have had
+    // the answer computed from its draft; that answer never reaches the agent.
+    if (document.version !== version && editorHolds(document)) {
+      return { status: "unsaved-edits" };
+    }
+    return answer;
+  }
+
+  /** Asks a ready server one read about a document it holds. */
+  async #answer(
+    record: ServerRecord,
+    document: OpenDocument,
+    request:
+      | { readonly kind: "diagnostics" }
+      | { readonly kind: "definition"; readonly position: CodeLanguagePosition },
+    scope: {
+      readonly threadId: CodeThreadId;
+      readonly checkoutId: CodeCheckoutId;
+      readonly fileId: CodeFileId;
+    },
+  ): Promise<CodeLanguageReadResult> {
     const connection = record.connection;
     if (connection === undefined) return { status: "unavailable", reason: "starting" };
     document.lastTouched = this.#now();
     record.lastActivity = this.#now();
-    const scope = {
-      threadId: request.threadId,
-      checkoutId: request.checkoutId,
-      fileId: request.fileId,
-    };
 
     if (request.kind === "diagnostics") {
       let items: ReadonlyArray<unknown>;
@@ -673,10 +827,10 @@ export class CodeLanguageService {
     const chosen = this.#componentFor(path);
     if (chosen.status === "refused") return chosen;
     const { component } = chosen;
-    // Decided on every request, not only at the start: a paired device or a
-    // Plan thread is refused a running `repo-tooling` server too, because
-    // what it opens is what the server then runs the repository's tooling
-    // on.
+    // Decided on every request, not only at the start: a paired device, an
+    // agent's read, or a Plan thread is refused a running `repo-tooling`
+    // server too, because what it opens is what the server then runs the
+    // repository's tooling on.
     const decision = decideLanguageServerLaunch({
       launchClass: component.launchClass,
       posture: authorized.thread.executionPolicy,
@@ -788,16 +942,38 @@ export class CodeLanguageService {
     );
   }
 
-  /** Whether any active thread on the checkout has taken in outside content. */
-  #checkoutTainted(checkoutId: CodeCheckoutId): boolean {
+  /**
+   * Whether any active thread that can write the server's folder has taken in
+   * outside content. That is every thread on the checkout, and every thread
+   * of any Project whose folder is the server's, holds it, or lies inside it:
+   * two Projects bound to one folder have different checkout ids, and a
+   * tainted thread in either may have written the tooling the server runs.
+   */
+  #checkoutTainted(record: ServerRecord): boolean {
     return this.#authority
       .readThreads()
       .some(
         (thread) =>
-          String(thread.checkoutId) === String(checkoutId) &&
           isActiveThread(thread) &&
-          this.#threadTaintedSafely(thread.id),
+          this.#threadTaintedSafely(thread.id) &&
+          this.#writesFolder(thread, record),
       );
+  }
+
+  /** A thread whose folder cannot be told counts as writing the server's. */
+  #writesFolder(thread: CodeThread, record: ServerRecord): boolean {
+    if (String(thread.checkoutId) === String(record.checkoutId)) return true;
+    let folder: string | undefined;
+    try {
+      folder = this.#authority.readThreadFolder(thread);
+    } catch {
+      return true;
+    }
+    return (
+      folder === undefined ||
+      folderHolds(record.rootPath, folder) ||
+      folderHolds(folder, record.rootPath)
+    );
   }
 
   #threadTaintedSafely(threadId: CodeThreadId): boolean {
@@ -839,7 +1015,7 @@ export class CodeLanguageService {
             egress: {
               projectId: String(record.projectId),
               threadId: String(record.watchThreadId),
-              checkoutTainted: () => this.#checkoutTainted(record.checkoutId),
+              checkoutTainted: () => this.#checkoutTainted(record),
             },
           }
         : {}),
@@ -975,6 +1151,13 @@ export class CodeLanguageService {
   #release(record: ServerRecord, document: OpenDocument, fileKey: string, at = this.#now()): void {
     document.holders.delete(fileKey);
     this.#documents.delete(fileKey);
+    // The text an editor leaves behind may be a draft the person is
+    // discarding. Kept open for an agent's hold, the server would go on
+    // reading it for the agent's reads of other files, so the document closes
+    // and an agent's next read of it reopens the saved file.
+    if (!isAgentHolder(fileKey) && [...document.holders].every(isAgentHolder)) {
+      document.holders.clear();
+    }
     if (document.holders.size > 0) return;
     record.documents.delete(document.uri);
     record.pushed.delete(document.uri);
@@ -1031,6 +1214,14 @@ export class CodeLanguageService {
   }
 }
 
+function isAgentHolder(holder: string): boolean {
+  return holder.startsWith(AGENT_HOLDER_PREFIX);
+}
+
+function editorHolds(document: OpenDocument): boolean {
+  return [...document.holders].some((holder) => !isAgentHolder(holder));
+}
+
 function isActiveThread(thread: CodeThread): boolean {
   return thread.lifecycle === "active" && thread.completedAt === undefined;
 }
@@ -1070,6 +1261,16 @@ function documentItem(document: OpenDocument) {
     version: document.version,
     text: document.text,
   };
+}
+
+/**
+ * Whether a folder is the directory or lies inside it. Only a `..` segment
+ * leaves it: a child named `..cache` is inside, and a test on the `..` prefix
+ * alone would let a tainted thread bound there keep the server's rules.
+ */
+function folderHolds(directory: string, folder: string): boolean {
+  const path = relative(resolve(directory), resolve(folder));
+  return path === "" || (!isAbsolute(path) && path !== ".." && !path.startsWith(`..${sep}`));
 }
 
 function initializeParams(rootPath: string) {

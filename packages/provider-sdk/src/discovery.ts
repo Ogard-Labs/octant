@@ -152,6 +152,16 @@ export const DISCOVERY_DESCRIPTORS: ReadonlyArray<ProviderDiscoveryDescriptor> =
       "Enter the Foundry OpenAI v1 base URL and API key in the guided endpoint flow.",
     isDirectEndpoint: true,
   },
+  {
+    driverKind: "amazon-bedrock",
+    displayName: "Amazon Bedrock",
+    executableNames: [],
+    approvedLocations: [],
+    versionProbeArgs: [],
+    onboardingGuidance:
+      "Name the region, your organization's single sign-on portal, account, and role, then run octant provider sign-in on this host.",
+    isDirectEndpoint: true,
+  },
 ];
 
 /** Returns only the discoverable (non-direct-endpoint) descriptors. */

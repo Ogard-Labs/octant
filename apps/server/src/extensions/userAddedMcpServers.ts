@@ -2,11 +2,12 @@ import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { CONNECTOR_PACKAGE_PREFIX, connectorById, connectorPackageName } from "@octant/domain";
 import type { UserAddedMcpServerRequest } from "@octant/contracts/extension-rpc";
-import type { ExtensionSource } from "@octant/contracts/extensions";
+import type { ExtensionPackageState, ExtensionSource } from "@octant/contracts/extensions";
 import {
   AGENT_PLUGINS_MCP_SCHEMA,
   AGENT_PLUGINS_NAME_PATTERN,
   AGENT_PLUGINS_PLUGIN_SCHEMA,
+  validateAgentPluginsMcpDocument,
   type AgentPluginsMcpLaunchSpec,
 } from "@octant/plugin-host/agent-plugins";
 import type { ProviderCredentialStore } from "../providers/credentialBrokerClient";
@@ -181,6 +182,50 @@ export class UserAddedMcpServerStore {
    */
   owns(sourceRef: string): boolean {
     return this.#registry.get(sourceRef) !== undefined;
+  }
+
+  /**
+   * The address a sign-in may target: the hosted server in a package this
+   * host wrote for one the person added, read from the installed package's
+   * own configuration, so a sign-in can only ever reach that server. The
+   * installed source reads `plugin-package`, not `user-added`, so the package
+   * is recognized by the source reference this store holds; checking the kind
+   * left every connector and hand-added server without a sign-in.
+   */
+  async signInAddress(
+    installed:
+      | {
+          readonly source: ExtensionSource;
+          readonly components: ReadonlyArray<
+            Pick<ExtensionPackageState["components"][number], "component">
+          >;
+        }
+      | undefined,
+    componentId: string,
+    readConfiguration: () => Promise<string>,
+  ): Promise<string | undefined> {
+    if (
+      installed === undefined ||
+      !("sourceRef" in installed.source) ||
+      !this.owns(installed.source.sourceRef)
+    ) {
+      return undefined;
+    }
+    const component = installed.components.find(
+      (candidate) => String(candidate.component.id) === componentId,
+    )?.component;
+    if (component?.kind !== "mcp-server") return undefined;
+    let raw: unknown;
+    try {
+      raw = JSON.parse(await readConfiguration());
+    } catch {
+      return undefined;
+    }
+    const document = validateAgentPluginsMcpDocument(raw, {
+      pluginSchema: AGENT_PLUGINS_PLUGIN_SCHEMA,
+    });
+    const server = document.servers.find((candidate) => candidate.name === component.displayName);
+    return server !== undefined && server.type !== "stdio" ? server.url : undefined;
   }
 
   /** Removes the generated folder and every secret its package referenced. */

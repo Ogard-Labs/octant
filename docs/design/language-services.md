@@ -20,9 +20,13 @@ server), and 3 (editor wiring) are built: the Code editor shows the host's
 diagnostics and jumps to definitions, locally and from a paired device.**
 Slice 4 (ship the binary) is built: packages carry the server, and a signed
 Apple Silicon package awaits the maintainer. Slice 5 (user-added `static`
-servers) and slice 6 (repository-tooling servers, started only after a local
-window's approval and networked under the Project's egress rules) are also
-built. Monaco editing and the explicit external-editor
+servers), slice 6 (repository-tooling servers, started only after a local
+window's approval and networked under the Project's egress rules), and slice 7
+(read-only agent tools for diagnostics and definitions, which never start or
+read through a repository-tooling server) are also built; slice 7's
+real-provider smoke awaits the maintainer. Slice 8's [Debugger addendum](#debugger-addendum) was accepted by the
+maintainer on 2026-10-27; its sub-slice 8a (seam and policy) is built, and
+nothing starts a debug session yet. Monaco editing and the explicit external-editor
 handoff stay the primary Code editing paths and are unchanged by every slice.
 
 ## Outcome
@@ -63,8 +67,15 @@ behind its own approval and confinement rules.
   supervises reviewed executable components: ready handshake, bounded output,
   crash budget (two restarts a minute), receipts, drain-then-stop. Component
   kinds live in `packages/contracts/src/extensions.ts`
-  (`ExtensionComponentKind`). Slice 1 added the `language-server` kind; there
-  is no debug-adapter kind.
+  (`ExtensionComponentKind`). Slice 1 added the `language-server` kind and
+  sub-slice 8a the `debug-adapter` kind.
+- **Debugger seam (8a).** `packages/contracts/src/extensions.ts` declares the
+  `debug-adapter` kind and its `debugAdapter` declaration;
+  `@octant/plugin-api/debug-adapter-package` is the public package document;
+  `packages/contracts/src/codeDebug.ts` holds the configuration, proposal, and
+  start refusal schemas; and `packages/domain/src/debugSessionStartPolicy.ts`
+  and `debugLaunchFileImport.ts` decide a start and map a launch file. The
+  rules are under [Debugger seam rules](#debugger-seam-rules).
 - **Language seam (slice 1).** `packages/contracts/src/extensions.ts` declares
   the `language-server` kind and its `languageServer` declaration;
   `packages/plugin-host/src/activation.ts` admits it in Code only;
@@ -99,6 +110,12 @@ behind its own approval and confinement rules.
   `languageServerEgress.ts` gives each start its own `proxied` egress proxy
   under the Project's rules, and the editor offers **Allow in this checkout**
   and **Allow in this Project** when the host answers `approval-required`.
+- **Agent read tools (slice 7).** `apps/server/src/code/codeLanguageAgentTools.ts`
+  offers `octant_code_diagnostics` and `octant_code_definition` to every Code
+  turn whose provider carries Octant's tools, and
+  `CodeLanguageService.readForAgent` answers them for the saved file through
+  the same checks and per-request launch decision as an editor's read, as a
+  start the person at the machine did not make.
 - **Network levels.** `apps/server/src/process/threadEgressPolicy.ts` resolves
   `none`, `provider-endpoints-only`, and `unrestricted`. The
   [harness tool egress rules](../architecture.md#harness-tool-egress-rules)
@@ -500,15 +517,37 @@ classes.
   no field for toolchain roots yet, so a server reads the system folders a
   terminal's launch reads and nothing under the home folder; a toolchain
   installed there is out of reach until such a field exists.
+- **Ending its children.** Stopping the server ends its process group, and
+  then its proxy closes. On Linux that ends every descendant: Bubblewrap's
+  `--unshare-all` gives the server its own PID namespace and
+  `--die-with-parent` ends the namespace with the capsule, so a child that
+  called `setsid()` dies with it. On macOS Seatbelt has no PID namespace, so
+  a child that calls `setsid()` leaves the group and outlives the stop. It
+  keeps the server's confinement (the checkout and cache writable, no home
+  folder), and its only network was the proxy, which has closed. A
+  terminal's commands share this residual, since both end a process group.
+  Not yet measured: on a Mac, a `repo-tooling` fixture server and a terminal
+  command that each start a child calling `setsid()` and sleeping, stopped by
+  the host (server stop, terminal close, host restart), then `ps` shows
+  whether the child survived each stop and whether the restart's receipt reap
+  ends it. A shared fix waits on that measurement.
 - **Network (D6).** Each start gets its own egress proxy, the one harness
   commands use, and the `proxied` OS level: loopback on macOS, a Unix socket
   and in-capsule forwarder on Linux. Its connections are decided on the Code
-  Project's rules alone. Those rules are suspended while any active thread on
-  the checkout has taken in outside content, because that thread's agent may
-  have written the tooling the server runs. A proxy whose listener or start
-  record fails means the server does not start; a host with no proxy refuses
-  the class as `confinement-unavailable`, never runs it with no network or an
-  open one.
+  Project's rules alone. Those rules are suspended while any active thread
+  that can write the server's folder has taken in outside content, because
+  that thread's agent may have written the tooling the server runs. That is
+  every thread on the checkout and every thread of any Code Project whose
+  folder is the server's, holds it, or lies inside it, compared by canonical
+  real path on the host: two Projects bound to one folder give their threads
+  different checkout ids, and a tainted thread in either can write the
+  files. A thread whose folder the host cannot tell counts as writing it. The
+  proxy joins the egress rules' active recheck, so a Project rule revoked, or
+  a thread taking in outside content, closes an idle tunnel at once rather
+  than at its next chunk. A proxy whose listener or start record fails, or
+  that cannot join the recheck, means the server does not start; a host with
+  no proxy refuses the class as `confinement-unavailable`, never runs it with
+  no network or an open one.
 - **Audit.** Each start is journaled the way a `proxied` command's launch is,
   with the same payloads and limits, under
   `code.language-server-egress-launch-started@1`,
@@ -604,6 +643,63 @@ design left a choice open.
   It takes `desktop` (the packaged app for this host) or `headless` (an
   artifact tarball).
 
+### Agent read rules
+
+Slice 7 settled these details, taking the more restrictive option where the
+design left a choice open.
+
+- **Tools.** `octant_code_diagnostics` and `octant_code_definition` are the
+  closed catalog's `code-diagnostics` and `code-definition`
+  (`packages/contracts/src/toolCatalog.ts`); their argument schemas and
+  definitions are in `@octant/contracts/code-language`. Both are Code only,
+  `filesystem`, and `project-file-reads`, so Plan keeps them, no posture asks,
+  and a marked thread is not asked afresh: they read only what the thread can
+  already read, through a server that cannot write, run other programs, or
+  reach the network. Their results mark nothing, as a file read marks
+  nothing. A profile allowlist names them by these tool names.
+- **Transport.** They travel through the provider SDK's ordinary app-managed
+  tool transport (`apps/server/src/code/codeLanguageAgentTools.ts`, added to
+  every Code turn through the runtime's contributed tools), so every runtime
+  that carries Octant's tools carries them. A provider without app-managed
+  tools is never offered them and refuses a turn that carries them as
+  `unsupported`. The SDK's chat conformance now also fails a driver that asks
+  for a tool its turn did not offer, since the host answers no other name.
+- **By path, as saved.** An agent names a file by its checkout-relative path,
+  as its other file tools do; it holds no editor document, so it has no file
+  reference. The read answers for the file as saved, and lines and columns
+  are one-based, as the agent's own reads and searches number them; the host
+  converts them. Reason: an agent reads and edits the saved file, so an answer
+  for other text, or counted from zero, points at the wrong line.
+- **Never an editor's draft.** When an editor holds the file with text other
+  than the saved file's, the read answers `unsaved-edits` and changes nothing:
+  the person's draft is neither replaced on the server nor read out to a
+  provider. A file only agents hold is brought up to the saved text on the
+  next read, and an agent's hold closes under the ten-minute idle rule. When
+  the last editor closes a file, the agents' holds on it close too, so a
+  draft the person discards is not kept on the server for the agent's reads
+  of other files; the agent's next read reopens the saved file. An answer
+  computed while an editor changed the file's text is `unsaved-edits`.
+  Residual: a diagnostic for a saved file can still name something from
+  another file's unsaved draft, since one server reads the whole checkout.
+- **Checks.** Each call is decoded against its schema, wrapped as a
+  `ToolActionRequest` under the thread's authority as it stands, and passed
+  through the tool-call choke point. The language service then runs every
+  check an editor's read passes, in the same order, on the turn's window as
+  it stands when the call runs (the standing authority other Project-scoped
+  app-managed tools use). A refused read starts nothing.
+- **Starts.** The launch decision is asked on every read as a request the
+  person at the machine did not make, as a paired device's is, so an agent can
+  start a `static` server and never starts or reads through a `repo-tooling`
+  one (`local-host-required`, in every posture), even one already running
+  under a person's approval. Reason: running repository tooling stays the person's act
+  at the machine (D4), and an agent's call is not that act. An agent's read
+  never resets the crash budget either; reopening the file in the editor stays
+  the person's retry.
+- **Answers.** Results keep the editor's bounds, and a definition outside the
+  checkout is only its label. `starting`, `crashed`, `timed-out`, `too-large`,
+  `unsaved-edits`, and each refusal come back as a tool error with one
+  sentence saying what to do next. Slice 7 adds no journal events.
+
 ### Data lifecycle and privacy
 
 - **Drafts.** Unsaved editor text goes from the renderer to the server over the
@@ -642,6 +738,476 @@ design left a choice open.
 | Cross-checkout leakage                                                                                                          | One server per checkout. Sibling cache directories are denied                                                                                                                                  | None                                                                                                 |
 | Injected text reaches an agent (slice 7)                                                                                        | Results are repository-derived data with provenance, never instructions, under the server-side tool-call policy                                                                                | The same as an agent reading the file                                                                |
 | The bundled binary is compromised                                                                                               | Pinned in the lockfile, shipped inside the signed app, changed only by an Octant update                                                                                                        | Trust in the pinned release                                                                          |
+
+## Debugger addendum
+
+**Status: accepted by the maintainer on 2026-10-27, with every decision as
+recommended.** This is slice 8's design addendum. Each **Decision** names its
+rule and the rejected alternatives; the rest follows from rules already
+accepted above (slices 5 and 6) or in the architecture.
+
+### Debugger outcome
+
+A person working in a Code thread at a local window picks a debug
+configuration, presses Start, and the program stops at their breakpoints in
+the Monaco editor. They see the call stack and variables, step, continue,
+evaluate an expression they type, and stop. The adapter and the program run in
+one confined process tree that writes only the checkout and its own state,
+reaches the network only as the thread's posture allows, and ends when the
+session, the thread's authority, or the adapter's approval ends. A
+configuration found in the repository is a proposal. It runs only after the
+person confirms it.
+
+### Component and package
+
+- **Kind.** A new executable component kind, `debug-adapter`, on the same
+  activation ladder as `language-server`. It is `mode-prohibited` in Chat and
+  Work and quarantined until reviewed.
+- **Declaration.** A `debug-adapter` component carries
+  `debugAdapter: { runtimes, launchArguments, importTypes, debugPorts }`,
+  present exactly when the kind is `debug-adapter`. Unknown fields are refused
+  on decode.
+  - `runtimes`: 1 to 8 Octant runtime identifiers
+    (`^[a-z][a-z0-9-]{0,31}$`, such as `node`, `python`, `native`). They label
+    the adapter in the configuration picker and choose nothing.
+  - `launchArguments`: a JSON object of at most 8 KiB, the body of the DAP
+    `launch` request this adapter needs. A string value is either a literal or
+    exactly one whole placeholder: `{{program}}`, `{{args}}`, `{{cwd}}`,
+    `{{env}}`, `{{stopOnEntry}}`, or `{{debugPort}}`. A placeholder inside a
+    longer string is refused. Reason: Octant fills only values it has
+    checked, and a whole-value placeholder cannot splice a configuration's text
+    into another key.
+  - `importTypes`: 0 to 8 strings matched against the `type` of an entry in an
+    imported repository file (below). They are matching labels only.
+  - `debugPorts`: `0` or `1`, whether the adapter needs one loopback port to
+    reach the program it launched (below).
+- **Package.** As a user-added language server is (slice 5): a local folder
+  with `octant-debug-adapter.json` at its root holding `{ manifest }`, imported
+  from Settings › Skills & Extensions › Marketplace with the native folder
+  picker. The host states the identity, digest, source, and review state, and
+  refuses an author who writes them. A folder holding another Octant package
+  document is refused as both. The package holds exactly one `debug-adapter`
+  component, Code only, for no provider family, with no contributions, and
+  declares at most the `filesystem`, `shell`, and `network` capabilities. Its
+  binary is its only executable file; the adapter may still run programs the
+  capsule can see, such as a runtime on the system path, because the program
+  being debugged needs them. The package store's bounds apply.
+- **Updates.** Adding the kind, changing `launchArguments`, or raising
+  `debugPorts` is a capability expansion: quarantine, trust and switches
+  cleared. Changing `runtimes` or `importTypes` is not.
+- **Review.** The inspection preview names the binary, its own SHA-256 digest,
+  the runtimes, the `launch` body with its placeholders, and whether it uses a
+  debug port, and says that the adapter runs programs from the checkout, can
+  write the checkout, reaches only the hosts the thread's network rules allow,
+  and never runs in Plan, for a paired device, or for an agent.
+- **Verified at every start.** As slice 5: the stored version verifies against
+  its digest before the binary path is resolved, and a changed binary does not
+  run.
+
+**Decision DB1: no bundled adapter
+first.** Debug adapters arrive only as user-added packages until a real one has
+passed the container and Mac smokes. Recommended because each language's
+adapter needs its own runtime, licence review, and size budget, and the seam
+can be proven with a fixture adapter. Rejected: bundling a JavaScript adapter
+now (it needs a Node runtime outside the package and adds a large dependency
+before the seam is proven); bundling a native adapter now (see DB6).
+
+### Debug configurations
+
+A debug configuration is Octant's own record of what a session runs. It is not
+another product's launch file and is never written back to the repository.
+
+- **Shape.** `{ name, adapter, program, args, cwd, env, stopOnEntry }`.
+  `name` is at most 128 characters. `adapter` names an installed
+  `debug-adapter` component. `program` and `cwd` are checkout-relative paths,
+  contained by `codePathConfinement.ts` with symlinks resolved when the
+  configuration is confirmed and again at every start; `program` must be a
+  regular file. `args` holds at most 64 strings of at most 1 KiB. `env` holds
+  at most 32 entries whose keys match `^[A-Za-z_][A-Za-z0-9_]{0,127}$` and whose
+  values are at most 1 KiB. A key starting `OCTANT_`, or naming a variable the
+  host's credential environment rules strip from children, is refused. `request`
+  is always `launch`.
+- **Where they come from.** The person writes one in the Run and debug panel,
+  or confirms one the panel proposes from a repository file. Both end in the
+  same confirmation (below).
+- **Stored on the host.** A confirmed configuration is journaled with its
+  approval (below), not kept in the checkout. Reason: a repository file can
+  change under the person after they confirmed it; the record of what they
+  approved must not.
+
+**Decision DB2: read `.vscode/launch.json`
+as proposals only.** When the person opens the Run and debug panel, the host
+reads that one file in the checkout, if present, as JSON with comments,
+bounded at 256 KiB, and maps each entry to a proposed Octant configuration. The
+host never runs, writes, or watches it, and reads no other launch, task, or
+workspace file.
+
+- An entry maps only when its `request` is `launch`, its `type` matches one
+  effective adapter's `importTypes`, and every value it uses resolves. Mapped
+  fields are `name`, `program`, `args`, `cwd`, `env`, and `stopOnEntry`.
+- Variables resolve from a closed set: `${workspaceFolder}`,
+  `${workspaceFolderBasename}`, and, from the editor's current file,
+  `${file}`, `${relativeFile}`, and `${fileDirname}`. Any other variable,
+  including `${env:…}`, `${command:…}`, `${input:…}`, and `${config:…}`, makes
+  the entry unmappable, because each reads host state or runs an editor
+  command. A path that resolves outside the checkout makes it unmappable.
+- Every other field (`preLaunchTask`, `postDebugTask`, `runtimeExecutable`,
+  `envFile`, `console`, adapter-specific options) is not used. The proposal
+  lists each by name as "Octant does not use this", so the person sees what the
+  file asked for and Octant will not do. Octant runs no tasks.
+- Originality: Octant reads this file as data the person's repository already
+  holds, as the connector import reads other tools' MCP configuration. Octant's
+  stored schema, its names, and its copy are its own, and it never writes the
+  file.
+
+Recommended because many repositories already describe how to start their
+program there, and a proposal the person confirms keeps the repository from
+choosing what runs. Rejected: reading no repository file (every person retypes
+what the repository already says); passing an entry's adapter-specific fields
+through to the adapter (the person could no longer see what they confirm, and
+fields such as a runtime executable or a pre-launch task choose what runs); an
+Octant-owned repository file (it would still only be a proposal, and adds a
+format nobody has).
+
+### Approval and starting
+
+- **Confirming is the shell-command approval.** The person at a local window
+  confirms a configuration on a card that shows the adapter, the program, its
+  arguments, its working folder, each environment entry, and, for an imported
+  one, the ignored fields. Confirming appends
+  `code.debug-configuration-approved@1` on the Project's
+  `code-debug-configuration` aggregate, in the `shell-commands` approval class,
+  scoped to one checkout or to the Project. It covers one configuration digest
+  and one adapter package state (extension, component, package digest,
+  lifecycle version), as slice 6's approval does. One that cannot be appended
+  is not in force.
+- **Starting.** Start is a person's act at a local window, every time. A start
+  succeeds only while an approval covers the configuration's current digest and
+  the adapter's current package state. Any edit of the configuration, or any
+  change to the package (update, switch, trust, uninstall), needs a new
+  confirmation. Full access does not skip it: the posture governs what an
+  agent may do unasked, and no agent starts a session.
+- **Launch decision.** A pure `decideDebugSessionStart` takes the host
+  platform, the thread's mode and posture, who caused the start, the approval,
+  and whether the configuration's paths still resolve. It returns a launch
+  shape or the first refusal in this order: `unsupported-platform`,
+  `mode-prohibited`, `plan-read-only`, `local-host-required`, `approval-required`,
+  `configuration-invalid`. The read-side checks of the companion (`no-reach`,
+  `thread-inactive`, `checkout-mismatch`, `checkout-unavailable`) run first,
+  and `confinement-unavailable` last; nothing launches until all pass.
+- **One session per thread.** A thread holds at most one debug session, and a
+  host at most four. A second Start on a thread asks to stop the first.
+
+**Decision DB3: approve per
+configuration.** Recommended because what runs is the program and its
+arguments, not only the adapter. Rejected: one approval per adapter and
+checkout, as slice 6 does for a language server (it would let any later
+configuration, repository-proposed included, run unasked); a prompt at every
+Start (the confirmation already records the same act, and a second prompt
+trains people to click through).
+
+### Session process model
+
+- **One capsule.** The server launches the adapter through
+  `ProcessConfinementPort`, and the adapter launches the program as its own
+  child inside the same capsule. Both are confined as the thread's terminal is:
+  the checkout writable, programs and child processes allowed, reads as a
+  terminal's launch reads, the adapter's stored version a read root, and a
+  per-session state folder, made fresh at every start and removed at the end,
+  as `HOME` and `TMPDIR`. The environment holds those, a minimal `PATH`, the
+  locale, and the configuration's `env`; no provider key, token, broker
+  credential, or other `OCTANT_*` value. Plan refuses before anything launches.
+- **Network.** Below; it is the only part that follows the posture beyond Plan.
+- **Receipts and stops.** The capsule's process group is recorded before the
+  adapter is used, under its own supervisor name, and the host reaps last run's
+  sessions at startup. A session ends, with `disconnect`
+  (`terminateDebuggee: true`) and then the process group stopped after five
+  seconds, when the person stops it, the program exits, the thread stops being
+  active, the thread moves to Plan, its posture changes the session's network
+  level, the checkout becomes unavailable, no approval covers the
+  configuration and package state any more, the Project is erased, or the host
+  shuts down. Committed `code-thread`, `code-checkout`, extension, and approval
+  events run that check at once.
+- **No restart on its own.** A crashed adapter is not restarted. Restarting
+  would run the program again, which only the person may cause.
+
+**Decision DB4: adapter and program share
+one capsule; DAP on stdio; no `runInTerminal`, no `attach`.** Recommended
+because debugging needs the adapter and the program in one process tree (on
+Linux a separate PID namespace hides one from the other; on macOS crossing
+sandboxes needs task-port rights Octant should not grant), and stdio needs no
+listener. Rejected: honouring `runInTerminal` to start the program in a
+second capsule (the adapter would choose the argv, environment, and folder of a
+process the host launches); an adapter reached as a TCP debug server (a
+listener another local process could reach); `attach` to a process by id or
+address (the process sits outside the session's confinement, and attaching
+reads its memory). A later slice may add `attach` to a process the session
+itself started, with its own decision.
+
+### Session network
+
+**Decision DB5: the program's network
+follows the thread's posture as its commands do.** Approval-gated and
+auto-accept-edits run on `proxied`, decided exactly as that thread's harness
+commands are (`decideToolEgress`, the thread's and the Project's rules, taint
+suspending standing rules); Full access runs on `allow`. Each session gets its
+own proxy listener and launch records on a `code-debug-egress` aggregate,
+journaled the way a `proxied` command's launch is, naming the Project, thread,
+and configuration. A refused connection becomes a proposal on the thread's
+Network access list. Nothing the program receives reaches a model, so it
+taints no thread. A host with no proxy refuses as `confinement-unavailable`
+below Full access, never runs on `allow` or `none` instead.
+
+Recommended because the program is often code the thread's agent wrote, the
+adapter is third-party code, and the thread's rules already say which hosts
+that thread's work may reach. Residual: `proxied` refuses loopback and private
+destinations, so below Full access a program that needs a local database or
+service cannot reach it; the person debugs it under Full access or from a
+terminal. Rejected: `allow` in every posture, as a person's terminal has (it
+gives third-party adapter code an open network for every session); `none`
+(most real programs fail at their first connection); the Project's rules alone,
+as a `repo-tooling` server uses (a session belongs to one thread, so that
+thread's rules and taint apply).
+
+**Decision DB6: the debug port.** On
+Linux the capsule's private network namespace keeps loopback between the
+adapter and the program inside the capsule, under every level. On macOS
+Seatbelt's `none` and `proxied` deny loopback, so an adapter that declares
+`debugPorts: 1` gets one host-chosen port, filled into `{{debugPort}}`, and the
+profile allows binding, inbound, and outbound on `localhost:<port>` only.
+Residual: on macOS another process of the same user can connect to that port
+while the session runs, as it could to a program started with a debug flag in
+a terminal; most runtime debug protocols are unauthenticated. Native debugging
+on macOS (an adapter that needs the program's task port) is refused as
+`unsupported-platform` until a Mac measurement shows which Seatbelt rights it
+needs and the maintainer approves them. Rejected: allowing all of
+`localhost` (it reaches every local service, Octant's own listener included);
+refusing port-using adapters on macOS (it rules out most interpreted-language
+adapters).
+
+### Protocol
+
+The Debug Adapter Protocol wire is JSON with a `Content-Length` header on
+stdio. Frames are capped at 4 MiB; a frame over the cap or one that is not a
+frame ends the session. Each request has a 10-second deadline and reports
+`timed-out`. The renderer never sees protocol payloads, only Octant contracts.
+
+- **What Octant sends** (closed list): `initialize`, `launch` (the adapter's
+  `launchArguments` with its placeholders filled), `configurationDone`,
+  `setBreakpoints`, `setExceptionBreakpoints` (only filters the adapter
+  advertised), `threads`, `stackTrace`, `scopes`, `variables`, `source` (by
+  source reference only), `exceptionInfo`, `continue`, `next`, `stepIn`,
+  `stepOut`, `pause`, `evaluate`, `terminate`, `disconnect`, and `cancel`.
+  `evaluate` carries only an expression the person typed or a watch they
+  added, in the `repl`, `watch`, or `hover` context. Each later request is
+  added on purpose with its own contract. Not sent: `attach`, `restart`
+  (Octant stops and starts), `setVariable`, `setExpression`, `goto`,
+  `stepBack`, `reverseContinue`, `readMemory`, `writeMemory`, `disassemble`,
+  and data or instruction breakpoints.
+- **What an adapter may ask.** `runInTerminal` and `startDebugging` get an
+  error and have no effect. Whether a real adapter needs `startDebugging` for
+  child processes is measured in slice 8b; accepting it needs its own rule.
+- **Events accepted.** `initialized`, `stopped`, `continued`, `exited`,
+  `terminated`, `thread`, `output` (`console`, `stdout`, `stderr`,
+  `important`), `breakpoint`, `capabilities`, `invalidated`, `process`, and
+  the progress events. `telemetry` output and every other event are dropped.
+- **Contracts.** A stack frame is a bounded name (256 characters) and a source
+  location that is checkout-relative or `outside-checkout` with a label, as a
+  definition is; host paths in frame names and output are rewritten as
+  diagnostic messages are. A variable is a name (256), a value truncated at
+  4 KiB with a `truncated` flag, a type (256), and an expansion reference;
+  pages hold at most 200. Stack traces hold at most 200 frames. A source
+  fetched by reference is shown read-only, at most 1 MiB. Octant opens no file
+  outside the checkout.
+
+### Debugger authority
+
+- **Local person only.** Starting, controlling (breakpoints, stepping,
+  `evaluate`), and stopping a session is the person at a local window whose
+  Project binding holds the thread, checked on every request as a terminal's
+  input is. Another local window holding the thread may control the session.
+- **No agent.** No provider, tool call, subagent, routine, or hook can start,
+  control, or read a session. Nothing a session shows enters a prompt.
+- **Code only, macOS and Linux.** As the companion.
+
+**Decision DB7: paired devices neither
+start, control, nor observe.** The debug routes have no remote action, so the
+remote gate denies them and the routes answer 403 to a device that reached them
+anyway. Recommended because stepping and `evaluate` run the program on the
+host, which D4 keeps with the person at the machine, and a stopped program's
+variables often hold secrets, which a paired device should not read through a
+new surface in the first slices. Rejected: remote observe now (a later,
+remote-approvable `code.debug.observe` read of the stopped state, without
+`evaluate`, can be proposed once the local panel ships); remote control.
+
+**Decision DB8: no agent debug tools in
+this addendum.** Recommended because an agent driving a debugger runs the
+program and reads its memory, which needs its own approval and taint design.
+Rejected: a read-only agent tool for the stopped state now.
+
+### Debugger data and privacy
+
+- **Never journaled or exported:** variable values, `evaluate` expressions and
+  results, stack frames, program output, breakpoints, and fetched sources. They
+  live in the host's memory for the session (output in a 1 MiB ring, as a
+  Project terminal's transcript is) and are gone when it ends. Diagnostics
+  exports carry session counts and end reasons only.
+- **Journaled:** the configuration approval (its configuration, because it is
+  the record of what the person allowed to run, so the confirmation card says
+  the arguments and environment values are kept in this Project's record), and
+  session lifecycle as `code.debug-session-started@1` and
+  `code.debug-session-ended@1` on a `code-debug-session` aggregate, naming the
+  Project, thread, configuration digest, and end reason. A thread purge removes
+  the session records; a Project erase removes those, the approvals, and the
+  egress records, and ends running sessions at once.
+- **Breakpoints** are the window's state for the thread, sent at each start,
+  and are not kept by the host after the session.
+- **No memory views.** Memory, disassembly, and register views are not offered.
+
+### Debugger threat model
+
+| Threat                                                                            | Mitigation                                                                                                                                                     | Residual                                                                                   |
+| --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| A repository file starts a program                                                | Repository files are only proposals. Nothing starts without a configuration the person confirmed at a local window and a Start they pressed                    | The person can confirm a hostile program; it then runs confined as a terminal command does |
+| A launch file hides what runs (tasks, runtime executables, command variables)     | Only six fields map; every other field is listed as unused; `${command:}`, `${env:}`, `${input:}`, `${config:}` make an entry unmappable; Octant runs no tasks | None beyond what the card shows                                                            |
+| A confirmed configuration changes later                                           | The approval covers one configuration digest and one adapter package state; any change asks again                                                              | None                                                                                       |
+| The program or adapter writes outside the checkout                                | One capsule confined as a terminal: checkout and session state writable only                                                                                   | It can change the checkout, as a terminal command can                                      |
+| Source or secrets leave the machine                                               | Below Full access, `proxied` under the thread's rules with taint suspending standing rules; Full access is the person's choice of `allow`                      | Allowed hosts can receive data, as for the thread's commands                               |
+| The adapter asks the host to run or open something                                | `runInTerminal` and `startDebugging` refused; no request outside the closed list is honoured                                                                   | None                                                                                       |
+| The session reads or controls a process outside its confinement                   | No `attach`; no memory requests; Linux PID namespace; native debugging on macOS refused until measured                                                         | Same-user processes on macOS stay visible to the capsule's broad read, as to a terminal    |
+| Another local process drives the program's debug port                             | Linux: the port lives in the capsule's private namespace. macOS: one host-chosen port per session, nothing else on loopback                                    | On macOS a same-user process can connect to that port during the session                   |
+| Variable values or output leak to the journal, exports, a paired device, or agent | Never journaled or exported; no remote action; no agent tool; output never enters a prompt                                                                     | Values on the local screen                                                                 |
+| Authority drifts: Plan, archive, rebound window, package change, Project erase    | Every request is checked when it runs; each of these ends the session at once                                                                                  | A step already taken stays taken                                                           |
+| Credentials reach the program                                                     | Allow-listed environment; `OCTANT_*` and stripped credential keys refused in a configuration                                                                   | A value the person typed into `env` is theirs to choose                                    |
+| Resource exhaustion                                                               | Frame cap, request deadline, bounded output, frames, variables, and sources; one session per thread and four per host; receipts reaped after a restart         | No OS memory cap on macOS; the person stops a runaway program                              |
+
+### Debugger seam rules
+
+Sub-slice 8a settled these details, taking the more restrictive option where
+the addendum left a choice open.
+
+- **Launch body.** Any `{{` or `}}` in a string that is not exactly one whole
+  placeholder is refused, an unknown `{{name}}` included, and an object key
+  holds neither. The body must contain `{{program}}`, so the program the
+  person confirmed is the one that runs. `{{debugPort}}` appears exactly when
+  `debugPorts` is `1`: a declared port the adapter never receives is a grant
+  nothing uses. The body is plain JSON (finite numbers, no `__proto__` key,
+  nested at most 16 deep), and the 8 KiB bound is its UTF-8 JSON text.
+  `importTypes` entries match `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`; plugin-host
+  normalization sorts and de-duplicates them and `runtimes`.
+- **Updates.** Two launch bodies are compared with their keys sorted, so key
+  order alone is not a change.
+- **Package.** `octant-debug-adapter.json` is read by
+  `@octant/plugin-api/debug-adapter-package`, sharing the language server
+  package's authored-manifest rules. Until 8b reads and reviews one, the host
+  refuses a folder holding it ("this host does not install debug adapters
+  yet") rather than reading its other files as a plugin, and a folder holding
+  two Octant package documents is refused.
+- **Configuration.** An absent `cwd` is the checkout's root. `env` is a list
+  of `{ key, value }` entries with unique keys, so no key can become an
+  object's prototype. Argument and value bounds are UTF-8 bytes, and a NUL is
+  refused. `OCTANT_` is refused in any letter case, and the credential names
+  the host keeps from children are the closed list
+  `HOST_CREDENTIAL_ENVIRONMENT_KEYS` in `@octant/contracts/code-debug`
+  (provider keys and tokens, and the GitHub CLI's `GH_TOKEN`, `GITHUB_TOKEN`,
+  `GH_ENTERPRISE_TOKEN`, and `GITHUB_ENTERPRISE_TOKEN`).
+- **Start decision.** `decideDebugSessionStart` refuses a thread that is not
+  a Code thread as `mode-prohibited`, after `unsupported-platform` and before
+  `plan-read-only`, because the kind is Code only. A start from anything but a
+  local window, a paired device or an agent, is `local-host-required`. The
+  policy decides coverage itself: an approval covers a start only for the
+  same configuration digest, extension, component, package digest, and
+  lifecycle version, in its checkout or its Project. The launch shape names
+  one capsule for adapter and program, `proxied-under-thread-rules` below Full
+  access and `allow` under it, and the debug port: none, inside the capsule's
+  namespace on Linux, or one host-chosen `localhost` port on macOS. The
+  contract's start refusals list the read-side checks first, then the
+  decision's reasons, then `confinement-unavailable`.
+- **Import mapping.** The host passes the parsed file, the checkout's
+  folder, the editor's current file, and the effective adapters. A file with
+  no `configurations` list is unreadable, and at most 64 entries are proposed,
+  with `truncated` set past that. An entry whose `type` more than one
+  effective adapter imports is unmappable (`adapter-ambiguous`) rather than
+  given to one. A variable outside the closed set anywhere in an entry,
+  unused fields included, makes it unmappable, because the entry asked the
+  editor to read host state or run a command. A current-file variable with no
+  file open is `needs-open-file`. A relative program or folder is taken from
+  the checkout's root, and an absolute one maps only inside the checkout;
+  these checks are lexical, and the host contains the result again with
+  symlinks resolved. Path variables in arguments and environment values
+  resolve to host paths, as the file meant. A missing or mistyped value, a
+  value out of the configuration's bounds, more than 64 unused fields, or a
+  field name over 128 characters is `invalid`.
+
+### Debugger delivery
+
+Each sub-slice is its own pull request with this addendum updated in place.
+
+- **8a. Seam and policy.** Container: yes.
+  - Add the `debug-adapter` kind and `debugAdapter` declaration to
+    `@octant/contracts/extensions`, `@octant/plugin-api` (with the
+    `debug-adapter-package` document), and `@octant/plugin-host`
+    normalization; Code only, quarantined by default.
+  - Add the pure `decideDebugSessionStart`, the configuration schema, and the
+    pure import mapping from a parsed launch file to proposals.
+  - _Accepts when:_ the refusal order holds for every platform, mode, posture,
+    starter, approval, and configuration state; unknown fields and in-string
+    placeholders are refused on decode; the mapping drops and lists unused
+    fields, refuses `${command:}`-style variables and outside-checkout paths,
+    and maps only `launch` entries; an update that changes `launchArguments`
+    or raises `debugPorts` is quarantined.
+  - _Verify:_ focused contract, domain, and plugin-host tests; typecheck
+    consumers; `style:check`.
+  - _State:_ built. The start policy's refusal order holds for every
+    platform, mode, posture, starter, approval state (none, this checkout, the
+    Project, another checkout, an edited configuration, a changed package),
+    and configuration state (`debugSessionStartPolicy.test.ts`). Unknown
+    fields, in-string and unknown placeholders, a body without the program,
+    and an unfilled or undeclared port fail to decode (`extensions.test.ts`),
+    as do configurations with host paths, escapes, or reserved environment
+    names (`codeDebug.test.ts`). The mapping maps only `launch` entries one
+    adapter imports, lists unused fields, and refuses `${command:}`-style
+    variables and outside-checkout paths (`debugLaunchFileImport.test.ts`).
+    Installed through the lifecycle service, an adapter stays untrusted and
+    disabled and is `mode-prohibited` in Chat and Work, and an update that
+    changes its launch body or raises its ports is quarantined
+    (`extensionLifecycleService.test.ts`). The rules are under
+    [Debugger seam rules](#debugger-seam-rules).
+- **8b. Session host.** Container: yes for Linux.
+  - The server reads the package, records approvals, launches the capsule with
+    its receipt and egress proxy, holds the DAP connection with its closed
+    lists, serves local-window routes, and ends sessions on every stop above.
+  - _Accepts when:_ a fixture adapter and fixture program in an
+    approval-gated thread hit a breakpoint, return a stack and variables, step,
+    continue, and exit, through the real companion under Bubblewrap; nothing
+    launches without a confirmed configuration; Plan, a paired device, an
+    agent's request, and a changed configuration or package are refused; the
+    program cannot write outside the checkout and its connection to a host no
+    rule allows is refused by the proxy and journaled; `runInTerminal`,
+    `attach`, and an oversize frame are refused or end the session; a restarted
+    host reaps receipts; no variable value appears in the journal.
+  - _Real adapter:_ one open-source adapter that speaks DAP on stdio,
+    debugging a fixture in the container, records whether it needs
+    `startDebugging` and whether `ptrace` works inside the capsule.
+  - _Verify:_ server integration and permission-negative tests. The
+    `macos-15` CI job runs the same process test for Seatbelt evidence.
+- **8c. Run and debug panel.** Container: yes.
+  - Gutter breakpoints, the configuration list with imported proposals and the
+    confirmation card, the session toolbar, call stack, variables, the debug
+    console with `evaluate`, and every refusal state; a user-guide page.
+  - _Accepts when:_ a person confirms an imported configuration, starts it,
+    stops at a breakpoint, inspects a variable, steps, and stops, in an
+    approval-gated thread; Plan and a paired browser show the refusal.
+  - _Verify:_ component tests and rendered QA at pane and dock widths, in light
+    and dark themes.
+- **8d. macOS confined-program smoke.** Container: no; a Mac (the `macos-15`
+  CI job where it can, otherwise the maintainer).
+  - _Accepts when:_ on Apple Silicon, under Seatbelt, a session's adapter and
+    program are refused a write outside the checkout and session state, a
+    connection outside the thread's rules, and loopback ports other than the
+    session's own; the session's own debug port works; quitting the host ends
+    the session's process group; the result is recorded here with the macOS
+    and Octant versions.
 
 ## Settled by existing specifications
 
@@ -868,7 +1434,12 @@ accounts or hardware.
      covered in `MonacoEditorPane.test.tsx` and
      `ExtensionsSettingsView.test.tsx`; a Project erase removes the
      approvals, from the running host too, and the egress records
-     (`threadPurge.test.ts`). The `macos-15` CI
+     (`threadPurge.test.ts`). A revoked Project rule, or a thread taking in
+     outside content, closes a server's idle tunnel at once,
+     and a proxy that cannot join that recheck does not start
+     (`nativeHarnessEgress.hostile.test.ts`), and a tainted thread in
+     another Project bound to the same folder, to one holding it, or to one
+     inside it (a child named `..cache` included) suspends the rules (`codeLanguageServiceProcess.test.ts`). The `macos-15` CI
      job runs the same process test for Seatbelt evidence; it has not yet run
      on a Mac. The rules are under [Repository tooling](#repository-tooling).
 7. **Agent read tools** (D5; after the editor slices ship). Container: yes.
@@ -880,6 +1451,25 @@ accounts or hardware.
      the tools.
    - _Verify:_ provider-sdk conformance. A real-provider smoke needs the
      maintainer's provider sign-in.
+   - _State:_ built; the real-provider smoke is the maintainer's. The provider
+     SDK's chat conformance carries both reads to a Code session in Plan and
+     answers one, proves a provider without app-managed tools refuses them
+     before sending, and fails a driver that asks for a tool the turn did not
+     offer (`chatConformance.test.ts`); every in-tree adapter's conformance
+     passes with that check. The Code runtime offers a Plan turn both reads
+     and answers one through the language service, and offers neither to a
+     provider without app-managed tools (`codeOperationRuntime.test.ts`). On
+     Linux the bundled `tsc --lsp --stdio` under Bubblewrap answered an
+     agent's diagnostics and cross-file definition for a saved file in a Plan
+     thread, and its next read saw a saved fix
+     (`codeLanguageServiceProcess.test.ts`); the same suite covers refusals
+     before any launch, a `repo-tooling` server never started or read through
+     even while a local approval covers it and the editor runs it, an editor's
+     draft left in place, a file too large, and the crash budget. Still to
+     run: one Code turn in Plan on a signed-in Claude Code and a signed-in
+     Codex provider, asking the agent to read a type error and a definition
+     through the two tools. The rules are under
+     [Agent read rules](#agent-read-rules).
 8. **Debugger.** Container: design yes, implementation yes for Linux.
    - First a design addendum in this spec, approved before any code.
    - The addendum covers a `debug-adapter` component kind using the Debug
@@ -889,6 +1479,9 @@ accounts or hardware.
      repository are proposals the person confirms, never run on their own.
    - _Verify:_ set by the addendum, including a macOS confined-debuggee smoke
      on a Mac.
+   - _State:_ the [Debugger addendum](#debugger-addendum) was accepted on
+     2026-10-27; its sub-slices 8a to 8d are the delivery plan, and 8a is
+     built.
 
 The extension host is not planned (D7). Each slice is reviewable and leaves
 the editor working when the companion is off or refused.

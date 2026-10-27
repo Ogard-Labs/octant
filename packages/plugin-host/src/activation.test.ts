@@ -1,9 +1,11 @@
+import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import type { ExtensionActivationState } from "@octant/contracts/extensions";
+import { ExtensionPackageState, type ExtensionActivationState } from "@octant/contracts/extensions";
 import {
   isExtensionComponentHostConfined,
   isExtensionComponentModeSafe,
   resolveExtensionActivation,
+  resolveOutsideDriverActivation,
 } from "./activation";
 
 const effective: ExtensionActivationState = {
@@ -57,6 +59,9 @@ describe("effective extension activation", () => {
     ["chat", "language-server", [], false],
     ["work", "language-server", [], false],
     ["code", "language-server", [], true],
+    ["chat", "debug-adapter", [], false],
+    ["work", "debug-adapter", [], false],
+    ["code", "debug-adapter", ["filesystem", "shell", "network"], true],
   ] as const)(
     "maps %s %s mode safety from component kind and capabilities",
     (mode, kind, declaredCapabilities, expected) => {
@@ -206,4 +211,113 @@ describe("effective extension activation", () => {
     }
     expect(mismatches).toEqual([]);
   }, 30_000);
+});
+
+describe("outside driver activation for a provider instance", () => {
+  const driver = {
+    extensionId: "00000000-0000-4000-8000-000000000911",
+    packageId: "00000000-0000-4000-8000-000000000912",
+    componentId: "driver",
+    version: "0.1.0",
+    digest: `sha256:${"e".repeat(64)}`,
+  } as const;
+  const packageState = (
+    activation: Partial<ExtensionActivationState> = {},
+    overrides: Record<string, unknown> = {},
+  ) =>
+    Schema.decodeUnknownSync(ExtensionPackageState)({
+      extensionId: driver.extensionId,
+      packageId: driver.packageId,
+      slug: "loopback-chat",
+      displayName: "Loopback chat",
+      stateVersion: 4,
+      version: driver.version,
+      digest: driver.digest,
+      source: { kind: "local-folder", sourceRef: "folder-1" },
+      compatibility: {
+        platforms: ["macos"],
+        modes: ["chat", "work", "code"],
+        providerFamilies: [],
+      },
+      activation: { ...effective, ...activation },
+      components: [
+        {
+          component: {
+            id: "driver",
+            kind: "provider-driver",
+            displayName: "Loopback chat",
+            declaredCapabilities: [],
+            entryPoint: "dist/driver.mjs",
+          },
+          activation: { ...effective, ...activation },
+          effectiveState: { kind: "effective" },
+        },
+      ],
+      diagnostics: [],
+      ...overrides,
+    });
+  const resolve = (
+    state: ExtensionPackageState | undefined,
+    options: { readonly platform?: string; readonly compatible?: boolean } = {},
+  ) =>
+    resolveOutsideDriverActivation({
+      platform: options.platform ?? "darwin",
+      packageState: state,
+      compatible: options.compatible ?? true,
+      driver,
+    });
+
+  it("admits the exact package a person trusted and switched on, on a host that confines it", () => {
+    expect(resolve(packageState())).toEqual({ kind: "effective" });
+  });
+
+  it("is host-prohibited off macOS before anything about the package is read", () => {
+    expect(resolve(packageState(), { platform: "linux" })).toEqual({
+      kind: "blocked",
+      reason: "host-prohibited",
+    });
+    expect(resolve(undefined, { platform: "win32" })).toEqual({
+      kind: "blocked",
+      reason: "host-prohibited",
+    });
+  });
+
+  it("is superseded when the package selects any other version or digest", () => {
+    expect(resolve(packageState({}, { digest: `sha256:${"f".repeat(64)}` }))).toEqual({
+      kind: "blocked",
+      reason: "superseded",
+    });
+    expect(resolve(packageState({}, { version: "0.2.0" }))).toEqual({
+      kind: "blocked",
+      reason: "superseded",
+    });
+  });
+
+  it("follows the ladder for quarantine, trust, switches, and compatibility", () => {
+    expect(resolve(undefined)).toEqual({ kind: "blocked", reason: "not-installed" });
+    expect(resolve(packageState({ installed: false }))).toEqual({
+      kind: "blocked",
+      reason: "not-installed",
+    });
+    expect(resolve(packageState({ quarantined: true }))).toEqual({
+      kind: "blocked",
+      reason: "quarantined",
+    });
+    expect(resolve(packageState({ trusted: false }))).toEqual({
+      kind: "blocked",
+      reason: "untrusted",
+    });
+    expect(resolve(packageState({ pluginDesired: false }))).toEqual({
+      kind: "blocked",
+      reason: "plugin-disabled",
+    });
+    expect(resolve(packageState({ componentDesired: false }))).toEqual({
+      kind: "blocked",
+      reason: "component-disabled",
+    });
+    expect(resolve(packageState(), { compatible: false })).toEqual({
+      kind: "blocked",
+      reason: "incompatible",
+    });
+  });
 });

@@ -95,18 +95,10 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "apps/server/src/persistence/sqlitePort.conformance.ts",
     "Conformance kit that sqlitePort.test.ts and sqlitePort.smoke.ts run against the SQLite port; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the port's last conformance test is retired.",
   ],
-  [
-    "apps/server/src/providers/outsideHarnessEndpointProxy.ts",
-    "Host proxy for outside provider drivers, run today over an in-memory channel by its tests and the provider service test. Nothing admits an outside driver yet: the confined driver process and the admission wiring that build it are later delivery slices of docs/design/outside-provider-drivers.md. Remove once the provider driver factory builds it for an admitted instance.",
-  ],
-  [
-    "apps/server/src/providers/outsideDriverProcess.ts",
-    "The confined process behind each outside provider driver instance (one supervised Seatbelt process per instance, its stdio as the proxy's channel, and the crash limit), run today by its own tests and the macOS escape tests. Nothing admits an outside driver yet: the admission wiring that starts one for an effective instance is a later delivery slice of docs/design/outside-provider-drivers.md. Remove once the provider driver factory starts it.",
-  ],
   // ── Reached only through another island, so an island with it ──
   [
-    "apps/server/src/providers/outsideDriverCeiling.ts",
-    "The outside driver capability ceiling, whose only consumer is outsideHarnessEndpointProxy.ts; providerFeatureMatrix.test.ts reads its block as the matrix column. Remove once the proxy is wired.",
+    "packages/contracts/src/codeDebug.ts",
+    "Debug configuration, proposal, and start refusal schemas whose only consumers today are debugSessionStartPolicy.ts and debugLaunchFileImport.ts. Remove once the server answers a debug request (docs/design/language-services.md, debugger delivery 8b).",
   ],
   [
     "packages/contracts/src/auditEvents.ts",
@@ -122,6 +114,14 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
   ],
   // ── Rule D: re-exported by a package barrel, used by nobody ──
   [
+    "packages/domain/src/debugSessionStartPolicy.ts",
+    "Debug session start policy delivered with the debugger seam before the session host that applies it (docs/design/language-services.md, debugger delivery 8b). Remove once the server starts a debug session through it.",
+  ],
+  [
+    "packages/domain/src/debugLaunchFileImport.ts",
+    "Launch-file import mapping delivered with the debugger seam before the host reads a repository's launch file (docs/design/language-services.md, debugger delivery 8b). Remove once the server proposes configurations through it.",
+  ],
+  [
     "packages/provider-sdk/src/conformance.ts",
     "Provider conformance harness that chatProviderMatrixEvidence.test-support.ts runs against drivers; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the matrix evidence is retired.",
   ],
@@ -132,6 +132,10 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
   [
     "packages/provider-sdk/src/directoryOAuthConformance.ts",
     "Directory sign-in conformance harness, with its fake directory and endpoint, that drivers declaring directory-oauth run in their tests; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the kind is retired.",
+  ],
+  [
+    "packages/provider-sdk/src/cloudIamConformance.ts",
+    "Cloud-IAM signing conformance harness, with its fake signer and endpoint, that drivers declaring cloud-iam run in their tests; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the kind is retired.",
   ],
   [
     "packages/provider-sdk/src/harnessEndpointConformance.ts",

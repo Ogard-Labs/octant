@@ -13,6 +13,11 @@
 // to Settings or any browser: the flow is the easier one to phish, so it
 // begins only where the person typed the command.
 //
+// An Amazon Bedrock instance signs in only this way: its cloud's single
+// sign-on is a device authorization at the organization's portal, so these
+// routes are the only place one begins, for the same callers and with the
+// same warning beside the code.
+//
 // Once a code is issued the server follows the attempt itself until the
 // directory answers, so a sign-in the person finishes after the command
 // stopped waiting still stores its pointer, and one whose instance was removed
@@ -21,10 +26,21 @@
 
 import type { ProviderInstance, ProviderInstanceId } from "@octant/contracts";
 import type { HostOAuthDescriptor } from "@octant/contracts/host-oauth";
-import { AZURE_FOUNDRY_DIRECTORY_SIGN_IN, azureFoundryDirectoryDescriptor } from "@octant/domain";
+import {
+  AMAZON_BEDROCK_CLOUD_IAM_SIGN_IN,
+  AZURE_FOUNDRY_DIRECTORY_SIGN_IN,
+  azureFoundryDirectoryDescriptor,
+  type CloudIamSignInDescriptor,
+} from "@octant/domain";
 import { isLoopbackHostname } from "../../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../../windowAuthorityStore";
 import { resolveInstance, secretsEqual } from "../providerCredentialRoutes";
+import {
+  beginCloudIamSignIn,
+  settleCloudIamSignIn,
+  type CloudIamSignInDependencies,
+  type CloudIamSignInView,
+} from "./providerCloudIamSignIn";
 import { dispatchDirectorySignIn } from "./providerDirectorySignIn";
 import type {
   ProviderOAuthCommand,
@@ -97,6 +113,8 @@ export interface ProviderDeviceSignInRouteOptions {
    * undefined when the server started without a credential broker.
    */
   readonly signIn: ProviderOAuthRouteDependencies | undefined;
+  /** A cloud instance's sign-in; undefined when the server started without a broker. */
+  readonly cloudIam?: CloudIamSignInDependencies | undefined;
   readonly now?: () => number;
   readonly sleep?: (ms: number) => Promise<void>;
   readonly followIntervalMs?: number;
@@ -106,8 +124,6 @@ interface FollowedAttempt {
   readonly attemptId: string;
   readonly windowId: string;
   readonly instanceId: ProviderInstanceId;
-  /** The descriptor the attempt began with, kept so it can be followed to its end. */
-  readonly descriptor: HostOAuthDescriptor;
   readonly expiresAt: number;
   view: ProviderOAuthView;
   settledAt: number | undefined;
@@ -132,8 +148,34 @@ export function createProviderDeviceSignInRouteHandler(
     }
   };
 
+  const followCloud = async (
+    attempt: FollowedAttempt,
+    descriptor: CloudIamSignInDescriptor,
+    dependencies: CloudIamSignInDependencies,
+  ): Promise<void> => {
+    while (attempt.view.kind === "awaiting-consent") {
+      await sleep(followIntervalMs);
+      if (now() > attempt.expiresAt + FOLLOW_GRACE_MS) {
+        attempt.view = { kind: "refused", reason: "timeout" };
+        break;
+      }
+      const settled = await settleCloudIamSignIn({
+        dependencies,
+        instanceId: attempt.instanceId,
+        descriptor,
+        attemptId: attempt.attemptId,
+      });
+      if (settled.kind === "waiting") continue;
+      attempt.view = cloudView(settled);
+    }
+    attempt.settledAt = now();
+  };
+
+  // Each follower keeps the descriptor its attempt began with, so it reads the
+  // broker's answer to the end even if the instance changes meanwhile.
   const follow = async (
     attempt: FollowedAttempt,
+    descriptor: HostOAuthDescriptor,
     dependencies: ProviderOAuthRouteDependencies,
   ): Promise<void> => {
     const command: ProviderOAuthCommand = {
@@ -154,7 +196,7 @@ export function createProviderDeviceSignInRouteHandler(
       const state = await dependencies.service.status({
         principalKind: "local-window",
         attemptId: attempt.attemptId,
-        descriptor: attempt.descriptor,
+        descriptor,
       });
       if (state.kind === "awaiting-consent") continue;
       try {
@@ -178,7 +220,7 @@ export function createProviderDeviceSignInRouteHandler(
         await dependencies.service
           .signOut({
             principalKind: "local-window",
-            descriptor: attempt.descriptor,
+            descriptor,
             credentialRef: state.credentialRef,
             forgetWhenNotRevoked: true,
           })
@@ -253,6 +295,53 @@ export function createProviderDeviceSignInRouteHandler(
       return answerView(attempt.view, named);
     }
 
+    if (instance.driverKind === "amazon-bedrock") {
+      const cloud = options.cloudIam;
+      if (cloud === undefined) return refuse("sign-in-unavailable");
+      const begun = await beginCloudIamSignIn({
+        dependencies: cloud,
+        instanceId: instance.id,
+        principal: "local-window",
+        actorId: windowId,
+        acknowledgeTerms: decoded.acknowledgeTerms,
+      });
+      if (begun.view.kind === "terms-required") {
+        return Response.json({
+          outcome: "terms-required",
+          ...named,
+          termsSummary: begun.view.termsSummary,
+        });
+      }
+      if (begun.descriptor === undefined) return answerView(cloudView(begun.view), named);
+      const { view } = begun;
+      const attempt: FollowedAttempt = {
+        attemptId: view.attemptId,
+        windowId,
+        instanceId: instance.id,
+        expiresAt: Date.parse(view.expiresAt),
+        view: {
+          kind: "awaiting-consent",
+          attemptId: view.attemptId,
+          flow: "device-code",
+          verificationUri: view.verificationUri,
+          userCode: view.userCode,
+          expiresAt: view.expiresAt,
+        },
+        settledAt: undefined,
+      };
+      attempts.set(attempt.attemptId, attempt);
+      void followCloud(attempt, begun.descriptor, cloud);
+      return Response.json({
+        outcome: "awaiting-code",
+        ...named,
+        attemptId: view.attemptId,
+        verificationUri: view.verificationUri,
+        userCode: view.userCode,
+        expiresAt: view.expiresAt,
+        warning: AMAZON_BEDROCK_CLOUD_IAM_SIGN_IN.deviceCodeWarning,
+      });
+    }
+
     if (
       instance.driverKind !== "azure-foundry" ||
       instance.configuration.authentication !== "directory-oauth"
@@ -313,13 +402,12 @@ export function createProviderDeviceSignInRouteHandler(
         attemptId: view.attemptId,
         windowId,
         instanceId: instance.id,
-        descriptor,
         expiresAt: Date.parse(view.expiresAt),
         view,
         settledAt: undefined,
       };
       attempts.set(attempt.attemptId, attempt);
-      void follow(attempt, dependencies);
+      void follow(attempt, descriptor, dependencies);
       return Response.json({
         outcome: "awaiting-code",
         ...named,
@@ -333,6 +421,18 @@ export function createProviderDeviceSignInRouteHandler(
       return refuse("sign-in-unavailable");
     }
   };
+}
+
+/** A cloud sign-in's outcome as the command reads every sign-in's. */
+function cloudView(view: CloudIamSignInView): ProviderOAuthView {
+  if (view.kind === "signed-in") return { kind: "signed-in", accountLabel: view.accountLabel };
+  if (view.kind === "refused") {
+    return {
+      kind: "refused",
+      reason: view.reason === "no-cloud-sign-in" ? "unsupported-driver" : view.reason,
+    };
+  }
+  return { kind: "refused", reason: "unavailable" };
 }
 
 /** The command's answer for a sign-in view; never a token, a code, or a reference. */

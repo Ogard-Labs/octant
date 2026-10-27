@@ -8,6 +8,12 @@ import {
   type CredentialStore,
 } from "./credentialStore";
 import {
+  createCloudIamRuntime,
+  handleCloudIamBrokerRoute,
+  isCloudIamGrantMaterial,
+  type CloudIamRuntime,
+} from "./cloudIam";
+import {
   createHostOAuthRuntime,
   handleHostOAuthBrokerRoute,
   isHostOAuthGrantMaterial,
@@ -43,16 +49,25 @@ const ROUTES = new Set([
   "/v1/mcp-server-credentials/resolve",
   "/v1/mcp-server-credentials/set",
   "/v1/mcp-server-credentials/delete",
+  "/v1/desktop-provider-credentials/has",
+  "/v1/desktop-provider-credentials/resolve",
+  "/v1/desktop-provider-credentials/set",
+  "/v1/desktop-provider-credentials/delete",
   "/v1/oauth/begin",
   "/v1/oauth/status",
   "/v1/oauth/refresh",
   "/v1/oauth/access",
   "/v1/oauth/revoke",
+  "/v1/cloud-iam/begin",
+  "/v1/cloud-iam/status",
+  "/v1/cloud-iam/sign",
+  "/v1/cloud-iam/revoke",
 ]);
 const REPLICA_DEVICE_KEY_PREFIX = "/v1/replica-device-keys/";
 const REPLICA_STORE_CREDENTIAL_PREFIX = "/v1/replica-store-credentials/";
 const CANVAS_PUBLIC_SHARE_SECRET_PREFIX = "/v1/canvas-public-share-secrets/";
 const MCP_SERVER_CREDENTIAL_PREFIX = "/v1/mcp-server-credentials/";
+const DESKTOP_PROVIDER_CREDENTIAL_PREFIX = "/v1/desktop-provider-credentials/";
 type NamespacedIdField = "instanceId" | "credentialRef" | "secretId";
 const MAX_CREDENTIAL_BYTES = 12 * 1_024;
 const PURGE_FAILURE_STATUS: Readonly<Record<CredentialPurgeFailure["category"], number>> = {
@@ -107,6 +122,14 @@ export async function startCredentialBroker(
    * key pair with the same UUID can reach one.
    */
   mcpServerCredentials?: CredentialStore,
+  /**
+   * The API keys a person gives a cloud desktop provider for a Project's
+   * desktop recipe, in a credential namespace of their own. They are served
+   * only on `/v1/desktop-provider-credentials/*`, keyed by the recipe's
+   * credential reference, so no model provider, device key, or other secret
+   * with the same UUID can reach one, and a desktop driver can reach no other.
+   */
+  desktopProviderCredentials?: CredentialStore,
 ): Promise<CredentialBroker> {
   const token = randomBytes(32).toString("base64url");
   const runtime = createHostOAuthRuntime({
@@ -114,6 +137,14 @@ export async function startCredentialBroker(
     ...(oauth?.fetch === undefined ? {} : { fetch: oauth.fetch }),
     ...(oauth?.now === undefined ? {} : { now: oauth.now }),
     ...(oauth?.timeoutMs === undefined ? {} : { timeoutMs: oauth.timeoutMs }),
+    ...(oauth?.sleep === undefined ? {} : { sleep: oauth.sleep }),
+  });
+  // The cloud signer shares the store, the network, and the clock with the
+  // OAuth runner: a cloud grant is one more entry the raw resolve refuses.
+  const cloudIam = createCloudIamRuntime({
+    store,
+    ...(oauth?.fetch === undefined ? {} : { fetch: oauth.fetch }),
+    ...(oauth?.now === undefined ? {} : { now: oauth.now }),
     ...(oauth?.sleep === undefined ? {} : { sleep: oauth.sleep }),
   });
   let brokerUrl: string | undefined;
@@ -125,10 +156,12 @@ export async function startCredentialBroker(
       store,
       purgeStore,
       runtime,
+      cloudIam,
       replicaDeviceKeys,
       replicaStoreCredentials,
       canvasPublicShareSecrets,
       mcpServerCredentials,
+      desktopProviderCredentials,
     ).then(
       ({ destroyIncoming, response }) => {
         const headers: Record<string, string> = {};
@@ -172,6 +205,7 @@ export async function startCredentialBroker(
     if (closing !== undefined) return closing;
     closing = (async () => {
       await runtime.close();
+      await cloudIam.close();
       await new Promise<void>((resolve, reject) => {
         if (!server.listening) {
           resolve();
@@ -196,10 +230,12 @@ export async function startCredentialBroker(
         store,
         purgeStore,
         runtime,
+        cloudIam,
         replicaDeviceKeys,
         replicaStoreCredentials,
         canvasPublicShareSecrets,
         mcpServerCredentials,
+        desktopProviderCredentials,
       ),
   });
 }
@@ -211,10 +247,12 @@ async function handleIncoming(
   store: CredentialStore,
   purgeStore: CredentialPurgeStore | undefined,
   runtime: HostOAuthRuntime,
+  cloudIam: CloudIamRuntime,
   replicaDeviceKeys: CredentialStore | undefined,
   replicaStoreCredentials: CredentialStore | undefined,
   canvasPublicShareSecrets: CredentialStore | undefined,
   mcpServerCredentials: CredentialStore | undefined,
+  desktopProviderCredentials: CredentialStore | undefined,
 ): Promise<{ destroyIncoming: boolean; response: ResponseData }> {
   if (brokerUrl === undefined) throw new Error("unavailable");
   const headers = requestHeaders(incoming.headers);
@@ -244,10 +282,12 @@ async function handleIncoming(
         store,
         purgeStore,
         runtime,
+        cloudIam,
         replicaDeviceKeys,
         replicaStoreCredentials,
         canvasPublicShareSecrets,
         mcpServerCredentials,
+        desktopProviderCredentials,
       ),
     ),
   };
@@ -260,10 +300,12 @@ async function handleBrokerRequest(
   store: CredentialStore,
   purgeStore: CredentialPurgeStore | undefined,
   runtime: HostOAuthRuntime,
+  cloudIam: CloudIamRuntime,
   replicaDeviceKeys: CredentialStore | undefined,
   replicaStoreCredentials: CredentialStore | undefined,
   canvasPublicShareSecrets: CredentialStore | undefined,
   mcpServerCredentials: CredentialStore | undefined,
+  desktopProviderCredentials: CredentialStore | undefined,
 ): Promise<Response> {
   const url = new URL(request.url);
   if (!isAuthorized(peerAddress, request.headers, token)) {
@@ -281,6 +323,10 @@ async function handleBrokerRequest(
 
   if (url.pathname.startsWith("/v1/oauth/")) {
     return handleHostOAuthBrokerRoute(url.pathname, request, runtime);
+  }
+
+  if (url.pathname.startsWith("/v1/cloud-iam/")) {
+    return handleCloudIamBrokerRoute(url.pathname, request, cloudIam);
   }
 
   if (url.pathname.startsWith(REPLICA_DEVICE_KEY_PREFIX)) {
@@ -320,6 +366,16 @@ async function handleBrokerRequest(
       "secretId",
       request,
       mcpServerCredentials,
+    );
+  }
+
+  if (url.pathname.startsWith(DESKTOP_PROVIDER_CREDENTIAL_PREFIX)) {
+    if (desktopProviderCredentials === undefined) return failure("not-found", 404);
+    return handleNamespacedRoute(
+      url.pathname.slice(DESKTOP_PROVIDER_CREDENTIAL_PREFIX.length),
+      "credentialRef",
+      request,
+      desktopProviderCredentials,
     );
   }
 
@@ -371,6 +427,9 @@ async function handleBrokerRequest(
     }
     const credential = await store.resolve(decoded.id);
     if (isHostOAuthGrantMaterial(credential)) return failure("oauth-material", 403);
+    // A cloud grant holds the portal session and the role's secret key; only
+    // the signer may read it.
+    if (isCloudIamGrantMaterial(credential)) return failure("cloud-iam-material", 403);
     return Response.json({ credential });
   } catch (error) {
     return credentialStoreFailure(error);

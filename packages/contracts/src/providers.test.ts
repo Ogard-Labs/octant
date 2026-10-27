@@ -346,6 +346,100 @@ describe("provider registry contracts", () => {
     refused({ ...configuration, authentication: "api-key" });
   });
 
+  it("binds an Amazon Bedrock instance to one commercial region, one portal, account, and role, and no address or secret", () => {
+    const base = {
+      id: "80000000-0000-4000-8000-000000000431",
+      displayName: "Contoso Bedrock",
+      driverKind: "amazon-bedrock",
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-10-27T10:00:00.000Z",
+      updatedAt: "2026-10-27T10:00:00.000Z",
+    } as const;
+    const configuration = {
+      kind: "amazon-bedrock-converse-http",
+      region: "us-west-2",
+      authentication: "cloud-iam",
+      cloudIam: {
+        startUrl: "https://contoso.awsapps.com/start",
+        ssoRegion: "us-east-1",
+        accountId: "123456789012",
+        roleName: "BedrockInvoke",
+      },
+      manualModelIds: ["anthropic.claude-sonnet-4-20250514-v1:0"],
+    } as const;
+    expect(decodeProviderInstance({ ...base, configuration })).toMatchObject({ configuration });
+    expect(
+      decodeProviderInstance({
+        ...base,
+        configuration: {
+          ...configuration,
+          cloudIam: {
+            ...configuration.cloudIam,
+            startUrl: "https://ssoins-0123456789abcdef.portal.eu-west-1.app.aws",
+          },
+        },
+      }),
+    ).toBeDefined();
+
+    const refused = (candidate: Record<string, unknown>) =>
+      expect(() => decodeProviderInstance({ ...base, configuration: candidate })).toThrow();
+    // Other partitions sign under other hosts and keys.
+    for (const region of ["us-gov-west-1", "cn-north-1", "us-iso-east-1", "eusc-de-east-1"]) {
+      refused({ ...configuration, region });
+      refused({ ...configuration, cloudIam: { ...configuration.cloudIam, ssoRegion: region } });
+    }
+    // The portal is the cloud's own host, never a look-alike.
+    for (const startUrl of [
+      "https://contoso.awsapps.com.evil.example/start",
+      "http://contoso.awsapps.com/start",
+      "https://contoso.awsapps.com/start/../evil",
+      "https://contoso.example/start",
+    ]) {
+      refused({ ...configuration, cloudIam: { ...configuration.cloudIam, startUrl } });
+    }
+    refused({ ...configuration, cloudIam: { ...configuration.cloudIam, accountId: "12345" } });
+    // The region picks the host; configuration names no address, key, or secret.
+    refused({ ...configuration, baseUrl: "https://bedrock-runtime.us-west-2.amazonaws.com" });
+    refused({
+      ...configuration,
+      cloudIam: { ...configuration.cloudIam, secretAccessKey: "secret" },
+    });
+    refused({ ...configuration, authentication: "api-key" });
+    refused({ ...configuration, manualModelIds: [] });
+    // A spawning runtime cannot name a cloud sign-in at all.
+    expect(() =>
+      decodeProviderInstance({
+        ...base,
+        driverKind: "codex",
+        configuration: {
+          kind: "codex-cli",
+          binaryPath: "/usr/bin/codex",
+          authentication: "cloud-iam",
+        },
+      }),
+    ).toThrow();
+  });
+
+  it("keeps a signing scope to the service's own host in its own region", () => {
+    const scope = {
+      partition: "aws",
+      region: "us-west-2",
+      service: "bedrock",
+      host: "bedrock-runtime.us-west-2.amazonaws.com",
+      pathPrefix: "/model/",
+      method: "POST",
+    } as const;
+    const is = Schema.is(providerContracts.CloudIamSigningScope);
+    expect(is(scope)).toBe(true);
+    expect(is({ ...scope, host: "bedrock-runtime.us-east-1.amazonaws.com" })).toBe(false);
+    expect(is({ ...scope, host: "sts.amazonaws.com" })).toBe(false);
+    expect(is({ ...scope, service: "sts" })).toBe(false);
+    expect(is({ ...scope, method: "GET" })).toBe(false);
+    expect(is({ ...scope, pathPrefix: "/" })).toBe(false);
+  });
+
   it("records an Azure AI Foundry device-code sign-in only as an organization sign-in's explicit opt-in", () => {
     const base = {
       id: "80000000-0000-4000-8000-000000000423",
@@ -1640,6 +1734,9 @@ describe("provider registry contracts", () => {
           version: "1.2.0",
           digest: `sha256:${"a".repeat(64)}`,
         },
+        baseUrl: "http://127.0.0.1:8080/",
+        key: { header: "authorization", scheme: "Bearer" },
+        modelIds: ["local-model"],
       },
       enabled: false,
       environmentPolicy: "inherit-host",
@@ -1683,17 +1780,52 @@ describe("provider registry contracts", () => {
         configuration: { kind: "ollama-native-http", baseUrl: "http://127.0.0.1:11434" },
       }),
     ).toThrow();
-    // Nothing admits an outside driver yet: no command creates or reconfigures one.
-    expect(() =>
-      decodeProviderRegistryCommand({
-        kind: "create-outside-harness-endpoint-provider",
-        instanceId: ids.instance,
-        expectedVersion: 0,
-        displayName: outside.displayName,
-        configuration: outside.configuration,
-      }),
-    ).toThrow();
+    // No command reconfigures one: its package, address, and models are fixed when it is added.
     expect(() => decodeProviderInstanceConfigurationChanged({ instance: outside })).toThrow();
+  });
+
+  it("adds an outside driver provider off, with only the models listed and a key header the person chose", () => {
+    const configuration = {
+      kind: "outside-harness-endpoint",
+      driver: {
+        extensionId: "00000000-0000-4000-8000-000000000911",
+        packageId: "00000000-0000-4000-8000-000000000912",
+        componentId: "driver",
+        version: "0.1.0",
+        digest: `sha256:${"b".repeat(64)}`,
+      },
+      baseUrl: "https://models.example.test/v1/",
+      key: { header: "x-api-key" },
+      modelIds: ["model-a", "model-b"],
+    } as const;
+    const command = {
+      kind: "create-outside-harness-endpoint-provider",
+      instanceId: ids.instance,
+      expectedVersion: 0,
+      displayName: "Team models",
+      configuration,
+    } as const;
+    expect(decodeProviderRegistryCommand(command)).toEqual(command);
+    const { key: _key, ...withoutKey } = configuration;
+    expect(decodeProviderRegistryCommand({ ...command, configuration: withoutKey })).toEqual({
+      ...command,
+      configuration: withoutKey,
+    });
+    // Created off: the command has no switch to start it on.
+    expect(() => decodeProviderRegistryCommand({ ...command, enabled: true })).toThrow();
+    for (const invalid of [
+      { ...configuration, modelIds: [] },
+      { ...configuration, modelIds: ["model-a", "model-a"] },
+      { ...configuration, key: { header: "proxy-authorization" } },
+      { ...configuration, key: { header: "cookie" } },
+      { ...configuration, key: { header: "Host" } },
+      { ...configuration, key: { header: "X-Api-Key" } },
+      { ...configuration, key: { header: "x-api-key", scheme: "Basic" } },
+      { ...configuration, key: { header: "x-api-key", value: "secret" } },
+      { ...configuration, apiKey: "secret" },
+    ]) {
+      expect(() => decodeProviderRegistryCommand({ ...command, configuration: invalid })).toThrow();
+    }
   });
 
   it("reports a driver the activation ladder does not admit as a closed refusal with no models", () => {

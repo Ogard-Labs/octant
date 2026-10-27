@@ -209,6 +209,19 @@ may then write the checkout and run programs as a terminal does, and reaches
 the network through its own `proxied` egress proxy under the Project's rules,
 audited like a harness command's launch
 ([Repository tooling](design/language-services.md#repository-tooling)).
+Agents read the same servers through two read-only app-managed tools in the
+closed catalog, `code-diagnostics` and `code-definition`, offered on every Code
+turn (Plan included) whose provider carries Octant's tools; they read the saved
+file, never an editor's draft, and never start or read through a server that
+runs repository tooling, approved or not
+([agent read rules](design/language-services.md#agent-read-rules)).
+Of the debugger, only the seam is built: the `debug-adapter` component kind
+(Code only, quarantined like any executable component), the
+`octant-debug-adapter.json` package document, which the host refuses to
+install until it can review one, the pure start policy, the configuration
+schema, and the mapping from a repository launch file to proposals. Nothing
+starts a debug session yet
+([Debugger seam rules](design/language-services.md#debugger-seam-rules)).
 
 **Host resources.** `GET /api/host/resources` is a read-only snapshot of this
 host's load: CPU use averaged over a short sample of the process's CPU times,
@@ -274,7 +287,12 @@ links, and store listing stay closed until
 an authorized post-preview track, opens with a separate maintainer action for
 submission. A build counts only after the
 device pass in the [TestFlight runbook](mobile-testflight.md), not when EAS or
-Apple finishes processing it. Android builds, push notifications, capture and
+Apple finishes processing it. Internal Android builds carry the same client
+under the same rules: the manually dispatched `Mobile (Android internal)`
+workflow builds a signed APK from `main` in its own protected
+`mobile-android-internal` environment, EAS holds the keystore, the public log
+names no install link, and testers are maintainer-chosen
+([Android runbook](mobile-android-internal.md)). Push notifications, capture and
 voice input, and store distribution extend this client under
 [Mobile maturity](design/mobile-maturity.md), which grants the phone no
 authority beyond what the host grants.
@@ -2626,9 +2644,10 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   other than `builtin:provider-driver/<kind>`, and any source other than
   `bundled`. That schema stays closed: an outside driver has its own public
   `OutsideProviderDriverEntry` schema in `@octant/plugin-api`, read from a
-  local folder and installed quarantined, with nothing yet admitting it;
-  third-party provider-driver plugins are an authorized post-preview track
-  under [Outside provider drivers](design/outside-provider-drivers.md). The catalog repeats installed and trusted from the activation context
+  local folder, installed held, and admitted at its digest when its source is
+  trusted; the catalog lists effective outside drivers in their own group from
+  the registry snapshot. Third-party provider-driver plugins are an authorized
+  post-preview track under [Outside provider drivers](design/outside-provider-drivers.md). The catalog repeats installed and trusted from the activation context
   that admits the driver; it never sets them. `resolveProviderCatalogState` in
   `@octant/domain` derives available, enabled, signed in, and ready separately.
   It reads the registry, the last observations, and the last scan, with each
@@ -2914,7 +2933,17 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   the issuer, client, the one gateway scope, and the gateway's origin, with no
   host list. A gateway signs in on the loopback redirect only; device code
   stays Azure AI Foundry's opt-in.
-  `cloud-iam` is not built.
+  Amazon Bedrock speaks `cloud-iam`: the person signs in at the organization's
+  single sign-on portal with a device code from the host-local
+  `octant provider sign-in` command, and the broker keeps that session and the
+  temporary credentials it mints for the instance's one account and role. The
+  server describes each Converse request to the broker's
+  `/v1/cloud-iam/sign` route by its fields (method, host, path, query, the
+  content type and accept headers, and the body's hash); the broker checks
+  them against the signing scope it stored at sign-in (the Bedrock runtime
+  host of one commercial region, the `/model/` path prefix, `POST`), builds
+  the canonical request itself, and answers with that one request's signature
+  headers. No route answers with a key, and the server never holds one.
   Secrets
   Octant holds for an integration use the same host credential path: the host
   keeps an opaque reference; plugins, the renderer, the journal, and diagnostics
@@ -3169,9 +3198,11 @@ Octant sent inside the prompt is counted. Per runtime:
   tokens and the model's `limit.context`) and Pi (assistant `message_end` usage;
   the occupancy is the last message's input, cache and output) report one
   figure and no categories. The ACP driver reports no usage at all, so an ACP
-  thread shows no window, and its Code context meter says the runtime reports
-  no usage (from the runtime's integration `context.usage`) rather than that
-  none has arrived yet. Lists of tools, MCP servers, skills or instruction
+  thread shows no window, and its context meter says the runtime reports no
+  usage (from the runtime's integration `context.usage`) rather than that none
+  has arrived yet. That holds in every mode: a Work or Chat thread is planned by
+  Octant, so its meter still shows Octant's own estimate, and the line stands
+  where a window's share would be. Lists of tools, MCP servers, skills or instruction
   files exist in some runtimes but carry no token weight, so they are not parts.
 
   Pi usage is accumulated from completed assistant messages, not streaming usage
@@ -3434,8 +3465,8 @@ action.
 | Code on Octant Harness (journaled transcript)            | Octant Harness           | The harness connection's `compact` summarizes the transcript turns before the tail with the same endpoint and journals a `compacted` transcript event; later requests are built from the summary and the tail.                                                                                                                                                                                                                         | `nothing-to-compact`, `no-session`                            |
 | Codex app-server, any mode                               | Codex                    | `thread/compact/start` with the thread id (codex-cli 0.159.3 and 0.162.1 app-server schemas); the run is observed as a turn carrying the `contextCompaction` item.                                                                                                                                                                                                                                                                     | `runtime-version-unsupported` when the method is not found    |
 | Claude Code, any mode                                    | Claude Code              | The runtime's own `/compact`, sent by the port as a user-role input that carries no tools and is not counted as a turn; observed as `system`/`compact_boundary` (`compact_metadata.trigger: "manual"`, `pre_tokens`) and the `status` message's `compact_result`. A resumed session sends its `compacting` status and a `rate_limit_event` before it initializes; the port holds both and delivers them after the initialized message. | `runtime-version-unsupported` when `compact` is not announced |
-| OpenCode, any mode                                       | OpenCode                 | `/api/session/:sessionID/compact` (served by OpenCode 2.0.26); observed as `session.compaction.ended`, `session.next.compaction.ended` or `session.compacted`.                                                                                                                                                                                                                                                                         | `runtime-version-unsupported` on a server without the route   |
-| Pi and Oh My Pi, any mode                                | Pi                       | Pi's RPC `compact` command (`packages/coding-agent/docs/rpc.md`); observed as `compaction_end`, which changed nothing when it carries no `result`.                                                                                                                                                                                                                                                                                     | `runtime-version-unsupported` when the command is refused     |
+| OpenCode, any mode                                       | Nobody yet               | Octant sends no compaction request, so the driver declares no `sessionCompaction`. OpenCode 2.0.26 serves `/api/session/:sessionID/compact`, but the adapter does not call it (see below). OpenCode's own compactions are observed as `session.compaction.ended`, `session.next.compaction.ended` or `session.compacted`.                                                                                                              | `runtime-cannot-compact`                                      |
+| Pi and Oh My Pi, any mode                                | Nobody yet               | Octant sends no compaction request, so the driver declares no `sessionCompaction`. Pi documents an RPC `compact` command (`packages/coding-agent/docs/rpc.md`), but the adapter does not send it (see below). Pi's own compactions are observed as `compaction_end`, which changed nothing when it carries no `result`.                                                                                                                | `runtime-cannot-compact`                                      |
 | ACP agents                                               | Nobody                   | The protocol has no compaction request; the thread says so in place of the button.                                                                                                                                                                                                                                                                                                                                                     | `runtime-cannot-compact`                                      |
 | Any other adapter                                        | Nobody, unless it claims | An adapter compacts only by reporting the capability and implementing the seam below.                                                                                                                                                                                                                                                                                                                                                  | `runtime-cannot-compact`                                      |
 
@@ -3454,12 +3485,16 @@ changed it. The Claude adapter claims compaction when the runtime announces
 `compact` among its commands (Claude Code 2.1.296 does, read through the SDK's
 initialization without a model call), and settles a compaction once both the
 boundary and a successful `compact_result` are in, on a failed one, or at the
-latest on the result that closes the command. The OpenCode and Pi rows come from those runtimes' published API
-descriptions and are not probed against a pinned release: OpenCode's route only
-admits the request and reports completion on its session events, and Pi answers
-its command with the compaction data. Each of those adapters starts by recording
-the request, the completion signal, and the refusal for the release it pins,
-and reports `sessionCompaction: "unsupported"` until that record exists.
+latest on the result that closes the command. The OpenCode route and Pi command
+named in their rows come from those runtimes' published API descriptions and
+have not been probed against a pinned release: OpenCode's route only admits the
+request and reports completion on its session events, and Pi answers its
+command with the compaction data. Neither adapter sends its request yet. Each
+starts by recording the request, the completion signal, and the refusal for
+the release it pins; until that record exists it declares no
+`sessionCompaction`, so **Compact session** on an OpenCode or Pi thread is
+refused `runtime-cannot-compact`, and only the runtime's own compactions are
+observed.
 
 Every runtime also refuses, before anything is journaled, with `turn-running`
 (a turn is in flight; compaction never runs inside one), `compaction-running`,
@@ -5039,15 +5074,26 @@ the model at another size.
      composition call site still supplies each port.
   2. **Approval attention.** A pending approval raises the same attention as
      a pending question: the thread's state, the Inbox, and the sidebar mark,
-     and it shows inline in the thread. Not yet pinned by a test.
+     and it shows inline in the thread. `workThreadBoardService.test.ts` pins
+     that a Work thread parked on the lead's approval, live or after a
+     restart, reads exactly as one parked on a question (same state, same
+     board column), differing only in naming the wait an approval;
+     `chatService.test.ts` and `codeService.test.ts` pin the Chat and Code
+     navigation rows, `leadApprovalAttention.test.ts` and
+     `pendingRequestRoutes.test.ts` the Inbox row,
+     `collectThreadAttention.test.ts` the sidebar mark, and
+     `ThreadHarnessApproval.test.tsx` the inline card.
   3. **Task list.** `todo-write` records pending, in-progress, and done
      without a plan approval. Not yet pinned at the offered-set level beyond
      item 1; the progress states are covered by `nativeHarnessTodo.test.ts`.
   4. **One session everywhere.** The same session state is visible in web,
      terminal, and phone.
   5. **Terminal focus escape.** A keyboard user can leave the terminal pane
-     with a documented chord, and the pane says so. Not yet pinned; pinned
-     when the terminal focus escape lands, in the existing xterm tests.
+     with a documented chord (Mod+Escape to the next control,
+     Mod+Shift+Escape to the previous one, rebindable), and the pane says so.
+     `XtermTerminalAdapter.test.tsx` pins the chord, that Tab and a bare
+     Escape stay with the shell, and that the pane names a way out even when
+     another action has taken the chord.
 
 Follow-up suggestions are every provider's, not the harness's
 (`apps/server/src/followUps`). Every Chat, Work, and Code turn, on any
@@ -5129,8 +5175,9 @@ Saying so is the honest boundary; routing those runtimes through the proxy
 with provider-endpoint rules is a separate follow-up. An approved
 `repo-tooling` language server also runs on `proxied`, whatever the starting
 thread's posture, with the same proxy and launch records on an aggregate of
-its own: it serves a checkout, so only its Project's rules apply, its bytes
-taint no thread, and it raises no proposals
+its own: it serves a checkout, so only its Project's rules apply, suspended
+while any thread that can write its folder is tainted, whichever Project that
+thread is in; its bytes taint no thread, and it raises no proposals
 ([Repository tooling](design/language-services.md#repository-tooling)).
 
 **Enforcement point.** A forward proxy owned by the server process, one
@@ -5264,7 +5311,10 @@ listener per confined launch:
   offer 7 days (the default) and 30 days. The proxy compares `now` against
   `expiresAt` on every new request and on every chunk relayed through an open
   tunnel, so a rule is dead at `expiresAt` whatever a timer or a sleeping
-  machine did, and its tunnels close then. Revocation closes them at once.
+  machine did, and its tunnels close then. Revocation, and a thread taking in
+  outside content, close them at once: the host decides every open tunnel
+  again, for every proxy these rules serve, a `repo-tooling` language
+  server's included, so an idle tunnel does not wait for its next chunk.
   Expiry is derived from the stored timestamp rather than journaled as its own
   event, so replay reaches the same answer with no clock-dependent record.
   The host keeps an expired rule in memory for 24 hours after it first sees
@@ -5648,7 +5698,7 @@ proofs that suite already holds:
 (`skill-instructions`, `mcp-server`, `mcp-tool`, `mcp-prompt`, `mcp-resource`,
 `hook`, `app`, `agent`, `apple-development-adapter`, `board`, `integration`,
 `ui-surface`, `appearance-pack`, `preview-viewer`, `provider-driver`, `replica-store`,
-`desktop-provider`, `language-server` (Code only)), composer addressing
+`desktop-provider`, `language-server` and `debug-adapter` (Code only)), composer addressing
 (`@plugin`, `@plugin/component`, `$skill`), and the activation ladder. The
 manifest and component schemas themselves (`ExtensionPackageManifest`,
 component kinds, declared capabilities, and renderer contribution points)
@@ -6000,9 +6050,18 @@ same. This holds in Chat, Work, and Code.
   the `desktop-provider` seam with its conformance suite, the host lease
   service, the host-local provider (a virtual X display in a dedicated
   Bubblewrap launch, Linux only), artifact transfer, a Code send's binding
-  of `octant_computer` to one of its thread's leases, and the Code dock's
-  Desktop tool are built; no recipe storage is, so every lease command
-  refuses as a value and no lease exists to bind.
+  of `octant_computer` to one of its thread's leases, the Code dock's
+  Desktop tool, a Code Project's stored desktop recipe with its settings
+  editor, and E2B, the first of the two named cloud providers (E2B and Cua
+  Spaces), are built; Cua Spaces, reached through the person's local Cua daemon, is
+  designed (accepted on 2026-10-27) but not yet built; see
+  [Disposable desktops](design/disposable-desktops.md#cua-spaces-through-the-local-daemon).
+  A cloud driver reaches its provider only through the host's
+  HTTPS port, which sends nothing outside the hosts the driver declares and
+  attaches the person's key from the credential broker's
+  `/v1/desktop-provider-credentials/*` namespace itself; a person confirms
+  every billed desktop. No host offers a cloud provider yet, so a recipe can
+  name only the host-local provider.
 
 **Canvas export.** A destination plugin contributes an export target through
 `@octant/plugin-api`. The contribution names the formats it accepts. The host
@@ -6069,7 +6128,12 @@ other destination's.
 **Connectors and user-added MCP servers.** A person connects an MCP server
 from Settings › Skills & Extensions without writing a package: Add MCP server
 takes a command Octant starts (with arguments and environment) or an address
-it connects to over Streamable HTTP (with headers). The host writes an
+it connects to over Streamable HTTP (with headers). Environment values
+belong only to a command and headers only to an address: the dialog keeps the
+two lists apart and submits only the selected transport's, and the request
+contract refuses a command carrying headers or an address carrying
+environment before anything is written, so a value meant for a local process
+never reaches a remote server. The host writes an
 ordinary Agent Plugins package for it (`plugin.json` and an `mcp.json` with
 the one server) into its own folder under the data directory and registers it
 under the `user-added` source kind, so the activation ladder, per-call
@@ -6173,7 +6237,14 @@ host. Connecting works only from the Octant window on the host, like Add
 MCP server.
 
 **Sign-in to a hosted server.** A user-added server reached over Streamable
-HTTP shows Sign in under its component in Settings. The host runs the MCP
+HTTP shows Sign in under its component in Settings. The host decides which
+components those are: the installed package's source reads `plugin-package`
+like any other, so the host recognizes its own package by the source
+reference its store of generated folders holds, and Settings asks the host's
+sign-in status for each MCP server component (`not-applicable` shows
+nothing) rather than reading a source kind. A host without the credential
+broker still answers `not-applicable` for every other component and names
+the missing broker only for a server that could sign in. The host runs the MCP
 authorization flow as the protocol lays it out: a bare request to the server
 answers 401 and names its protected resource metadata (RFC 9728, or the
 well-known path when the header names none), whose `resource` must be the
@@ -6299,8 +6370,10 @@ that harness-endpoint shape is a design accepted on 2026-10-26, in
 their inspection and quarantined install from a local folder, and the host
 proxy that runs one over the harness endpoint wire protocol (closed failures,
 a capability ceiling, and a brokered request with this instance's key to its
-configured origin only), and the confined process per instance that carries
-that protocol on macOS are built; nothing admits one yet.
+configured origin only), the confined process per instance that carries that
+protocol on macOS, and admission (trust at a digest, a provider added off from
+a local window, host-run Verify tools, and the process stopped whenever the
+driver stops being effective) are built. Only a macOS host admits one.
 
 The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a
@@ -6614,7 +6687,15 @@ mechanisms are:
   recorded in [decisions/0057-linux-confinement-bubblewrap.md](decisions/0057-linux-confinement-bubblewrap.md).
   The child runs `--unshare-all`, regains the network only when egress
   resolves to `allow`, dies with its parent, and gets a new session except for
-  interactive terminals. Every confined launch passes `--cap-drop ALL`, so the
+  interactive terminals. Its own PID namespace ends with the capsule, so a
+  descendant that called `setsid()` still ends when a terminal or a
+  `repo-tooling` language server stops. Seatbelt has no PID namespace: on
+  macOS such a descendant leaves the process group the host ends and
+  outlives the stop, still under that launch's Seatbelt profile; a
+  `repo-tooling` server's proxy closes with the server, so its descendant
+  keeps no network. Terminals and `repo-tooling` servers share this residual; the
+  Mac measurement a shared fix waits on is named under
+  [Repository tooling](design/language-services.md#repository-tooling). Every confined launch passes `--cap-drop ALL`, so the
   capsule's effective capability set is empty whether or not the server runs
   as root. Bubblewrap started by uid 0 otherwise keeps every capability:
   measured on bwrap 0.9.0, a root capsule remounted a read-only bind writable
@@ -7129,7 +7210,7 @@ mechanisms are:
   | Pi                        | `pi`                                                                                                             | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
   | ACP agents                | `kilo`, `devin`, `mistral-vibe`, `kimi-code`, `grok`, `goose`, `glm`, `gemini`, `copilot`, `cline`, `qwen`, `fx` | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
   | Ollama                    | `ollama`                                                                                                         | `yes` | `verified-models` | `verified-models` | `octant-harness` |
-  | Harness endpoints         | `openai-compatible`, `anthropic-compatible`, `azure-foundry`                                                     | `yes` | `verified-models` | `verified-models` | `octant-harness` |
+  | Harness endpoints         | `openai-compatible`, `anthropic-compatible`, `azure-foundry`, `amazon-bedrock`                                   | `yes` | `verified-models` | `verified-models` | `octant-harness` |
   | Outside harness endpoints | `outside-harness-endpoint`                                                                                       | `yes` | `verified-models` | `verified-models` | `octant-harness` |
   | Oh My Pi                  | `oh-my-pi`                                                                                                       | `no`  | `no`              | `no`              | `none`           |
 
@@ -7168,9 +7249,10 @@ mechanisms are:
     Each cell is a ceiling: the bundled Harness endpoints' declaration, held
     by the host's clamp on every probe claim (`outsideDriverCeiling.ts`), which
     an outside driver's own claims can lower but never exceed, and Octant's
-    tools reach only models the host itself verified. No outside driver package is
-    admitted yet, so an instance reports `driver-not-admitted` with no models
-    and runs no turn.
+    tools reach only models the host itself verified, through a Verify tools
+    request the host makes itself. An instance whose driver is not effective at
+    the digest it binds (on every host but macOS, always) reports
+    `driver-not-admitted` with no models and runs no turn.
   - **Oh My Pi** lists models and starts no session; its driver refuses
     `acquire`, so it never reaches a picker.
 
@@ -8018,8 +8100,28 @@ mechanisms are:
   authorization URL from its closed issuer host and refuses a verification
   page off a closed list; the server follows an issued code until the broker
   settles it, so an interrupted command never leaves a grant without a
-  pointer. [Enterprise provider identity](design/enterprise-provider-identity.md)
+  pointer. An Amazon Bedrock endpoint signs in at its organization's single
+  sign-on portal only this way, with no opt-in, since the portal's device
+  authorization is its one flow; the broker accepts a verification page only
+  on the portal region's device host or the organization's own access portal
+  host. [Enterprise provider identity](design/enterprise-provider-identity.md)
   owns the rules.
+- **Cloud request signing.** The credential broker signs cloud requests
+  itself ([`cloudIam.ts`](../packages/host-runtime/src/cloudIam.ts),
+  [`sigV4.ts`](../packages/host-runtime/src/sigV4.ts)): Signature Version 4
+  from the published algorithm with the platform's crypto, never a cloud SDK.
+  A sign request names a credential reference and the request's own fields
+  and nothing else; a digest, a date, or a scope of the caller's own is a
+  malformed request, and a request outside the scope stored at sign-in (one
+  partition, service, host, path prefix, and method from the broker's closed
+  table) is refused before any credential is renewed or signature made. The
+  portal session, its refresh token, the client registration, and the role's
+  secret key never leave the broker; the raw resolve route refuses the grant.
+  A signature answer carries the authorization, the date, and the role's
+  session token, which the cloud requires beside every signature and which
+  signs nothing without the secret key. Removing the endpoint, or changing its
+  region, portal, account, or role, ends the portal session and deletes the
+  grant before the change is journaled.
 - **Artifact replica membership.** Each replica entry carries a detached
   Ed25519 signature from the device signing key the writing host holds for its
   replica instance, in a credential namespace of its own that provider

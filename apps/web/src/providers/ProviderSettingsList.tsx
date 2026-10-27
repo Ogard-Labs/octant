@@ -714,7 +714,10 @@ function ProviderRow(props: ProviderRowProps) {
   const isBflImage = props.instance.driverKind === "bfl-image";
   const isIdeogramImage = props.instance.driverKind === "ideogram-image";
   const isImageProfile = isOpenAiImage || isGeminiImage || isBflImage || isIdeogramImage;
+  const outsideInstance =
+    props.instance.driverKind === "outside-harness-endpoint" ? props.instance : undefined;
   const usesCredential =
+    outsideInstance?.configuration.key !== undefined ||
     isHttp ||
     isAnthropicHttp ||
     isFoundry ||
@@ -1518,6 +1521,32 @@ function ProviderRow(props: ProviderRowProps) {
                         : protocolLabel(props.observed.observedProtocol)}
                     </span>
                     <span>Authentication: API key</span>
+                    <ProviderToolVerification
+                      disabled={disabled || !props.instance.enabled}
+                      instance={props.instance}
+                      observed={props.observed}
+                      onVerify={props.onVerifyModelTools}
+                    />
+                  </div>
+                )}
+                {outsideInstance === undefined ? null : (
+                  <div className="provider-card__facts provider-card__facts--http">
+                    <span>{outsideInstance.configuration.baseUrl}</span>
+                    <span>
+                      Key:{" "}
+                      {outsideInstance.configuration.key === undefined
+                        ? "None"
+                        : outsideInstance.configuration.key.scheme === "Bearer"
+                          ? `Bearer token in ${outsideInstance.configuration.key.header}`
+                          : `In the ${outsideInstance.configuration.key.header} header`}
+                    </span>
+                    <span>
+                      Driver: outside driver {String(outsideInstance.configuration.driver.version)},
+                      digest{" "}
+                      <span className="oct-meta--mono">
+                        {String(outsideInstance.configuration.driver.digest)}
+                      </span>
+                    </span>
                     <ProviderToolVerification
                       disabled={disabled || !props.instance.enabled}
                       instance={props.instance}

@@ -1,3 +1,4 @@
+import { CODE_DIAGNOSTICS_TOOL_NAME, CODE_LANGUAGE_TOOL_DEFINITIONS } from "@octant/contracts";
 import type {
   CorrelationId,
   ProviderCapabilities,
@@ -19,6 +20,8 @@ import {
   runProviderChatConformance,
   type ProviderChatConformanceFixture,
   type ProviderConnection,
+  type ProviderSessionStart,
+  type ProviderTurnInput,
 } from "./index";
 
 const instanceId = "10000000-0000-4000-8000-000000000001" as ProviderInstanceId;
@@ -189,6 +192,14 @@ function makeChatFixture(options?: {
   readonly omitResearchCompleted?: boolean;
   readonly waitForToolAnswerBeforeTerminal?: boolean;
   readonly duplicateTerminalSequence?: boolean;
+  /** A Code turn in a given posture, offering these tools, instead of the Chat turn. */
+  readonly codeTurn?: {
+    readonly executionPolicy: ProviderSessionStart["executionPolicy"];
+    readonly tools: ProviderTurnInput["tools"];
+    readonly answerJson: string;
+  };
+  /** The tool the provider asks for; the offered research tool by default. */
+  readonly toolRequest?: { readonly toolName: string; readonly inputJson: string };
 }): ProviderChatConformanceFixture {
   let acquired = false;
   let released = false;
@@ -220,8 +231,10 @@ function makeChatFixture(options?: {
       correlationId,
       occurredAt,
       requestId: toolRequestId,
-      toolName: "octant_web_research",
-      inputJson: JSON.stringify({ query: "current sources" }),
+      ...(options?.toolRequest ?? {
+        toolName: "octant_web_research",
+        inputJson: JSON.stringify({ query: "current sources" }),
+      }),
     },
     ...(options?.omitCitation
       ? []
@@ -345,15 +358,29 @@ function makeChatFixture(options?: {
         ),
     },
     probeInput: { instanceId },
-    acquireInput: { instanceId, projectRoot: "/tmp/octant-project", mode: "chat" },
-    sessionStart: { sessionId, modelId, executionPolicy: "full-access" },
-    turn: chatTurn,
+    acquireInput: {
+      instanceId,
+      projectRoot: "/tmp/octant-project",
+      mode: options?.codeTurn === undefined ? "chat" : "code",
+    },
+    sessionStart: {
+      sessionId,
+      modelId,
+      executionPolicy: options?.codeTurn?.executionPolicy ?? "full-access",
+      ...(options?.codeTurn === undefined ? {} : { tools: options.codeTurn.tools }),
+    },
+    turn:
+      options?.codeTurn === undefined
+        ? chatTurn
+        : { sessionId, prompt: "Check the file.", attachments: [], tools: options.codeTurn.tools },
     toolAnswer: {
       sessionId,
       requestId: toolRequestId,
-      resultJson: JSON.stringify({
-        sources: [{ title: "Example source", url: "https://example.com/source" }],
-      }),
+      resultJson:
+        options?.codeTurn?.answerJson ??
+        JSON.stringify({
+          sources: [{ title: "Example source", url: "https://example.com/source" }],
+        }),
       isError: false,
     },
     isReleased: () => acquired && released,
@@ -432,6 +459,62 @@ describe("runProviderChatConformance", () => {
         }),
       ),
     ).resolves.toMatchObject({ nativeAttachmentHonest: false, appManagedToolRoundTrip: true });
+  });
+
+  it("refuses a provider that asks for a tool the turn did not offer", async () => {
+    await expect(
+      runProviderChatConformance(
+        makeChatFixture({
+          toolRequest: { toolName: "octant_unoffered", inputJson: "{}" },
+        }),
+      ),
+    ).rejects.toThrow(/did not offer octant_unoffered/i);
+  });
+
+  const languageReads = {
+    executionPolicy: "plan",
+    tools: CODE_LANGUAGE_TOOL_DEFINITIONS,
+    answerJson: JSON.stringify({
+      path: "src/b.ts",
+      diagnostics: [
+        {
+          line: 2,
+          column: 14,
+          endLine: 2,
+          endColumn: 19,
+          severity: "error",
+          message: "Type 'string' is not assignable to type 'number'.",
+          source: "typescript",
+        },
+      ],
+      truncated: false,
+    }),
+  } as const;
+
+  it("carries the Code language reads to a Plan session and answers one", async () => {
+    await expect(
+      runProviderChatConformance(
+        makeChatFixture({
+          codeTurn: languageReads,
+          toolRequest: {
+            toolName: CODE_DIAGNOSTICS_TOOL_NAME,
+            inputJson: JSON.stringify({ path: "src/b.ts" }),
+          },
+        }),
+      ),
+    ).resolves.toMatchObject({ appManagedToolRoundTrip: true, released: true });
+  });
+
+  it("proves a provider without app-managed tools refuses the Code language reads before sending", async () => {
+    await expect(
+      runProviderChatConformance(
+        makeChatFixture({
+          capabilities: { appManagedTools: "unsupported" },
+          sendFailure: failure("unsupported", "App-managed tools are unsupported."),
+          codeTurn: languageReads,
+        }),
+      ),
+    ).resolves.toMatchObject({ appManagedToolRoundTrip: true, released: true });
   });
 
   it("rejects non-increasing normalized event sequences", async () => {

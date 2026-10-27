@@ -250,10 +250,34 @@ host's; a file reaches it only when the agent sends one.
   keeps trying, starts no new desktop on that provider meanwhile, and
   **Retry** tries again now.
 
+A desktop on a cloud provider such as E2B runs on your own account and bills
+it, so Octant asks you to confirm each one before it starts
+it, even under Full access; the key stays on this host. This version does not
+offer a cloud provider yet.
+
 A paired phone or browser that can open the thread can watch and use its
-desktop too. Desktop needs a desktop recipe for the Project, and this version
-of Octant has no place to set one yet, so the pane says so instead of offering
-**Start desktop**.
+desktop too.
+
+#### Setting a desktop recipe
+
+Desktop starts a desktop from the Project's **desktop recipe**. Until the
+Project has one, the pane says so instead of offering **Start desktop**. To
+set one, open the Code Project, then **Disposable desktop** → **Manage** in its
+settings:
+
+- **Provider** lists only the desktop providers this host has ready. On Linux
+  that is this host itself, offered once Bubblewrap, Xvfb, xdotool, and
+  ImageMagick are installed and Octant has restarted.
+- **Screen** sets the desktop's size.
+- **Lasts**, **Longest**, and **Idle** set how long a desktop lasts at first,
+  the most it can be extended to, and how long it may sit unused. They start
+  at 30 minutes, four hours, and 15 minutes.
+
+**Set recipe** saves it; the next desktop uses it. The desktop never has
+network access. **Remove recipe** asks first: removing it, or changing its
+provider, ends the Project's running desktops. Only a window on the host
+itself can set or remove a recipe; a paired phone or browser sees it but
+can't change it.
 
 ## Picture in Picture
 

@@ -1,5 +1,9 @@
 import { assignedClaudeAccountConfigDirectory, assignedCodexHome } from "@octant/domain";
 import {
+  decodeCloudAccountId,
+  decodeCloudIamRegion,
+  decodeCloudIamStartUrl,
+  decodeCloudRoleName,
   decodeProviderCatalogSnapshot,
   decodeProviderInstance,
   decodeProviderInstanceId,
@@ -31,6 +35,7 @@ import {
 } from "./outsideDriverFixture.test-support";
 import { makeOutsideHarnessEndpointProxy } from "./outsideHarnessEndpointProxy";
 import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
+import { bedrockConfiguration } from "./bedrockCloudIam.test-support";
 import { createProviderRouteHandler } from "./providerRoutes";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 import {
@@ -881,13 +886,14 @@ describe("ProviderService", () => {
       instanceId,
       channel: channel.host,
       baseUrl: "https://models.example.test/v1/",
+      key: { header: "authorization", scheme: "Bearer" },
       modelIds: [decodeProviderModelId("local-model")],
       runtimeRegistry: runtime,
       clock: () => now,
     });
     const fixture = serviceFixture({
       instances: [outsideProvider()],
-      isDriverPluginEffective: () => true,
+      isOutsideDriverAdmitted: () => true,
       // The service's own driver probe: the typed failure, unwrapped.
       probe: async () => {
         const exit = await Effect.runPromiseExit(Effect.scoped(proxy.probe({ instanceId })));
@@ -5061,6 +5067,7 @@ function serviceFixture(
     readonly withCatalogPersistence?: boolean;
     readonly initialCatalog?: ProviderCatalogSnapshot;
     readonly isDriverPluginEffective?: (driverKind: ProviderInstance["driverKind"]) => boolean;
+    readonly isOutsideDriverAdmitted?: (instance: ProviderInstance) => boolean;
     readonly isProviderExecutableAvailable?: (instance: ProviderInstance) => boolean;
     readonly runCliUpdate?: ProviderServiceOptions["runCliUpdate"];
   } = {},
@@ -5149,6 +5156,9 @@ function serviceFixture(
       ...(options.isDriverPluginEffective === undefined
         ? {}
         : { isDriverPluginEffective: options.isDriverPluginEffective }),
+      ...(options.isOutsideDriverAdmitted === undefined
+        ? {}
+        : { isOutsideDriverAdmitted: options.isOutsideDriverAdmitted }),
       ...(options.isProviderExecutableAvailable === undefined
         ? {}
         : { isProviderExecutableAvailable: options.isProviderExecutableAvailable }),
@@ -5188,6 +5198,8 @@ function outsideProvider(overrides: Record<string, unknown> = {}) {
         version: "1.2.0",
         digest: `sha256:${"a".repeat(64)}`,
       },
+      baseUrl: "http://127.0.0.1:8080/",
+      modelIds: ["local-model"],
     },
     enabled: true,
     environmentPolicy: "inherit-host",
@@ -5707,6 +5719,91 @@ describe("a stored provider key and the base URL it was entered for", () => {
       expectedVersion: version,
     } as never);
     expect(clearProviderCredential).toHaveBeenCalledTimes(6);
+  });
+
+  it("forgets an Amazon Bedrock cloud sign-in when its region, portal, account, or role changes, or it is removed, and keeps it for a model list change", async () => {
+    const clearProviderCredential = vi.fn(async () => undefined);
+    const fixture = serviceFixture({ clearProviderCredential });
+    await fixture.service.execute(windowId, {
+      kind: "create-amazon-bedrock-provider",
+      instanceId,
+      expectedVersion: 0,
+      displayName: "Bedrock",
+      configuration: bedrockConfiguration(),
+    });
+    expect(clearProviderCredential).not.toHaveBeenCalled();
+    let version = 1;
+    const change = async (configuration: ReturnType<typeof bedrockConfiguration>) => {
+      await fixture.service.execute(windowId, {
+        kind: "change-amazon-bedrock-configuration",
+        instanceId,
+        expectedVersion: version,
+        configuration,
+      });
+      version += 1;
+      return clearProviderCredential.mock.calls.length;
+    };
+    const base = bedrockConfiguration();
+    expect(
+      await change({
+        ...base,
+        manualModelIds: [decodeProviderModelId("amazon.nova-pro-v1:0"), ...base.manualModelIds],
+      }),
+    ).toBe(0);
+    expect(await change({ ...base, region: decodeCloudIamRegion("eu-central-1") })).toBe(1);
+    expect(
+      await change({
+        ...base,
+        cloudIam: { ...base.cloudIam, roleName: decodeCloudRoleName("Other") },
+      }),
+    ).toBe(2);
+    expect(
+      await change({
+        ...base,
+        cloudIam: { ...base.cloudIam, accountId: decodeCloudAccountId("210987654321") },
+      }),
+    ).toBe(3);
+    expect(
+      await change({
+        ...base,
+        cloudIam: {
+          ...base.cloudIam,
+          startUrl: decodeCloudIamStartUrl("https://fabrikam.awsapps.com/start"),
+        },
+      }),
+    ).toBe(4);
+    await fixture.service.execute(windowId, {
+      kind: "remove-provider",
+      instanceId,
+      expectedVersion: version,
+    });
+    expect(clearProviderCredential).toHaveBeenCalledTimes(5);
+  });
+
+  it("refuses an Amazon Bedrock configuration outside the commercial partition or without a model", async () => {
+    const fixture = serviceFixture({});
+    for (const configuration of [
+      { ...bedrockConfiguration(), region: "us-gov-west-1" },
+      { ...bedrockConfiguration(), region: "cn-north-1" },
+      {
+        ...bedrockConfiguration(),
+        cloudIam: { ...bedrockConfiguration().cloudIam, startUrl: "https://contoso.example/start" },
+      },
+      { ...bedrockConfiguration(), manualModelIds: [] },
+    ]) {
+      expect(
+        await rejected(
+          fixture.service.execute(windowId, {
+            kind: "create-amazon-bedrock-provider",
+            instanceId,
+            expectedVersion: 0,
+            displayName: "Bedrock",
+            configuration,
+          } as never),
+        ),
+      ).toMatchObject({ failure: { category: "invalid-configuration" } });
+    }
+    expect(fixture.append).not.toHaveBeenCalled();
   });
 
   it("removes a gateway's organization sign-in when its client, scope, or address changes, or it is removed, and refuses another issuer", async () => {

@@ -42,6 +42,7 @@ import {
   createOpenAiImageProvider,
   createCodexProvider,
   createOpenCodeProvider,
+  createOutsideHarnessEndpointProvider,
   effectiveProviderAuthority,
   isImageProfileDriverKind,
   removeProvider,
@@ -927,6 +928,79 @@ describe("provider instance policy", () => {
     });
     const signedIn = changeAzureFoundryConfiguration(keyed, configuration, createdAt);
     expect(signedIn.configuration).toEqual(configuration);
+  });
+
+  it("creates an Amazon Bedrock instance from its region and single sign-on, trimming what was pasted", () => {
+    const created = providerPolicy.createAmazonBedrockProvider({
+      id: ids.local,
+      displayName: "Bedrock",
+      configuration: {
+        kind: "amazon-bedrock-converse-http",
+        region: " us-west-2 ",
+        authentication: "cloud-iam",
+        cloudIam: {
+          startUrl: " https://contoso.awsapps.com/start/ ",
+          ssoRegion: "us-east-1",
+          accountId: " 123456789012",
+          roleName: "BedrockInvoke ",
+        },
+        manualModelIds: [" anthropic.claude-sonnet-4-20250514-v1:0 "],
+      },
+      existingInstances: [],
+      expectedVersion: version(0),
+      createdAt,
+    });
+    expect(created).toMatchObject({
+      driverKind: "amazon-bedrock",
+      configuration: {
+        region: "us-west-2",
+        authentication: "cloud-iam",
+        cloudIam: {
+          startUrl: "https://contoso.awsapps.com/start",
+          ssoRegion: "us-east-1",
+          accountId: "123456789012",
+          roleName: "BedrockInvoke",
+        },
+        manualModelIds: ["anthropic.claude-sonnet-4-20250514-v1:0"],
+      },
+    });
+    expect(providerPolicy.isNativeHarnessDriverKind("amazon-bedrock")).toBe(true);
+  });
+
+  it("refuses an Amazon Bedrock instance outside the commercial partition, at another portal, or without a model", () => {
+    const valid = {
+      kind: "amazon-bedrock-converse-http" as const,
+      region: "us-west-2",
+      authentication: "cloud-iam" as const,
+      cloudIam: {
+        startUrl: "https://contoso.awsapps.com/start",
+        ssoRegion: "us-east-1",
+        accountId: "123456789012",
+        roleName: "BedrockInvoke",
+      },
+      manualModelIds: ["anthropic.claude-sonnet-4-20250514-v1:0"],
+    };
+    const create = (configuration: typeof valid) => () =>
+      providerPolicy.createAmazonBedrockProvider({
+        id: ids.local,
+        displayName: "Bedrock",
+        configuration,
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      });
+    for (const configuration of [
+      { ...valid, region: "us-gov-west-1" },
+      { ...valid, region: "cn-northwest-1" },
+      { ...valid, cloudIam: { ...valid.cloudIam, ssoRegion: "us-gov-east-1" } },
+      { ...valid, cloudIam: { ...valid.cloudIam, startUrl: "https://contoso.example/start" } },
+      { ...valid, cloudIam: { ...valid.cloudIam, accountId: "1234" } },
+      { ...valid, cloudIam: { ...valid.cloudIam, roleName: "role name" } },
+      { ...valid, manualModelIds: [] },
+      { ...valid, manualModelIds: ["model id with spaces"] },
+    ]) {
+      expect(create(configuration)).toThrow(ProviderPolicyRejected);
+    }
   });
 
   it("refuses a directory sign-in without GUID tenant and client ids, or at an address off the Foundry hosts", () => {
@@ -2488,6 +2562,66 @@ describe("provider instance policy", () => {
   it("rejects removing an instance with active sessions", () => {
     expect(() => removeProvider(provider(), { activeSessionCount: 1 })).toThrow(
       "Stop active sessions before removing this provider.",
+    );
+  });
+});
+
+describe("outside driver provider policy", () => {
+  const createdAt = "2026-10-27T12:00:00.000Z" as UtcTimestamp;
+  const driver = {
+    extensionId: "00000000-0000-4000-8000-000000000911",
+    packageId: "00000000-0000-4000-8000-000000000912",
+    componentId: "driver",
+    version: "0.1.0",
+    digest: `sha256:${"c".repeat(64)}`,
+  } as const;
+  const create = (configuration: Record<string, unknown>, existingInstances = []) =>
+    createOutsideHarnessEndpointProvider({
+      id: decodeProviderInstanceId("00000000-0000-4000-8000-000000000913"),
+      displayName: " Team models ",
+      configuration: {
+        kind: "outside-harness-endpoint",
+        driver,
+        baseUrl: "https://models.example.test/v1",
+        key: { header: "authorization", scheme: "Bearer" },
+        modelIds: [decodeProviderModelId("model-a")],
+        ...configuration,
+      } as never,
+      existingInstances,
+      expectedVersion: 0 as AggregateVersion,
+      createdAt,
+    });
+
+  it("adds the provider off, bound to the exact package, with its address normalized", () => {
+    const instance = create({});
+    expect(decodeProviderInstance(instance)).toEqual(instance);
+    expect(instance).toMatchObject({
+      displayName: "Team models",
+      driverKind: "outside-harness-endpoint",
+      enabled: false,
+      version: 1,
+      configuration: {
+        driver,
+        baseUrl: "https://models.example.test/v1/",
+        key: { header: "authorization", scheme: "Bearer" },
+        modelIds: ["model-a"],
+      },
+    });
+  });
+
+  it("refuses an address that is not HTTPS or loopback HTTP, and a keyless address off loopback", () => {
+    expect(() => create({ baseUrl: "http://models.example.test/" })).toThrow(
+      ProviderPolicyRejected,
+    );
+    expect(() => create({ baseUrl: "https://user:secret@models.example.test/" })).toThrow(
+      ProviderPolicyRejected,
+    );
+    expect(() => create({ key: undefined })).toThrow(
+      "Unauthenticated providers must use a loopback endpoint.",
+    );
+    const { key: _key, ...keyless } = create({ baseUrl: "http://127.0.0.1:8080" }).configuration;
+    expect(create({ baseUrl: "http://127.0.0.1:8080", key: undefined }).configuration).toEqual(
+      keyless,
     );
   });
 });

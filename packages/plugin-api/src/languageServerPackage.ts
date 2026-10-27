@@ -1,5 +1,9 @@
 import { Schema } from "effect";
-import { ExtensionPackageManifest, ExtensionProvenance } from "@octant/contracts/extensions";
+import {
+  AuthoredPackageManifest,
+  isPackageRelativeFile,
+  writesHostAssignedField,
+} from "./authoredPackageManifest";
 
 /**
  * The public schema for a language server a person adds to Octant themselves.
@@ -66,51 +70,10 @@ export const LanguageServerPackageRefusalReason = Schema.Literal(
 );
 export type LanguageServerPackageRefusalReason = typeof LanguageServerPackageRefusalReason.Type;
 
-/**
- * Manifest facts only the host states: the identity it stores the package
- * under, where it came from, what its content hashes to, and whether anyone
- * reviewed it. An author who writes one is refused rather than overwritten,
- * so the document a person reads is the document the host used.
- */
-const HOST_ASSIGNED_MANIFEST_FIELDS = ["extensionId", "packageId", "digest", "source"] as const;
-const HOST_ASSIGNED_PROVENANCE_FIELDS = ["reviewed", "reviewedAt"] as const;
-
-const {
-  extensionId: _extensionId,
-  packageId: _packageId,
-  digest: _digest,
-  source: _source,
-  provenance: _provenance,
-  ...authoredManifestFields
-} = ExtensionPackageManifest.from.fields;
-const {
-  reviewed: _reviewed,
-  reviewedAt: _reviewedAt,
-  ...authoredProvenanceFields
-} = ExtensionProvenance.fields;
-
-/** The manifest an author writes: a package manifest without the host's facts. */
-const LanguageServerPackageManifest = Schema.Struct({
-  ...authoredManifestFields,
-  provenance: Schema.optional(Schema.Struct(authoredProvenanceFields).annotations(strict)),
-}).annotations(strict);
-
 const LanguageServerPackageDocumentShape = Schema.Struct({
-  manifest: LanguageServerPackageManifest,
+  manifest: AuthoredPackageManifest,
 }).annotations(strict);
 type LanguageServerPackageDocumentShape = typeof LanguageServerPackageDocumentShape.Type;
-
-/**
- * An entry point is a file inside the package: relative, with no scheme (so
- * no `builtin:` server and no `file:` reach), and no empty, `.`, or `..`
- * segment.
- */
-function isPackageRelativeFile(entryPoint: string): boolean {
-  if (entryPoint.includes(":") || entryPoint.includes("\\") || entryPoint.startsWith("/")) {
-    return false;
-  }
-  return entryPoint.split("/").every((segment) => segment !== "" && !/^\.+$/.test(segment));
-}
 
 function entryRefusal(
   entry: LanguageServerPackageDocumentShape,
@@ -171,24 +134,11 @@ const decodeShape = Schema.decodeUnknownEither(LanguageServerPackageDocumentShap
 export function readLanguageServerPackageDocument(
   value: unknown,
 ): LanguageServerPackageDocumentReading {
-  if (isRecord(value) && isRecord(value.manifest)) {
-    const authored = value.manifest;
-    const provenance = isRecord(authored.provenance) ? authored.provenance : {};
-    if (
-      HOST_ASSIGNED_MANIFEST_FIELDS.some((field) => Object.hasOwn(authored, field)) ||
-      HOST_ASSIGNED_PROVENANCE_FIELDS.some((field) => Object.hasOwn(provenance, field))
-    ) {
-      return { status: "refused", reason: "host-assigned-field" };
-    }
-  }
+  if (writesHostAssignedField(value)) return { status: "refused", reason: "host-assigned-field" };
   const decoded = decodeShape(value);
   if (decoded._tag === "Left") return { status: "refused", reason: "entry-invalid" };
   const reason = entryRefusal(decoded.right);
   return reason === undefined
     ? { status: "accepted", document: decoded.right }
     : { status: "refused", reason };
-}
-
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
