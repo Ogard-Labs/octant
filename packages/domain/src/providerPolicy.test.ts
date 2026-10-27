@@ -44,6 +44,7 @@ import {
   createOpenCodeProvider,
   createOutsideHarnessEndpointProvider,
   effectiveProviderAuthority,
+  rebindOutsideHarnessEndpointDriver,
   isImageProfileDriverKind,
   removeProvider,
   renameProvider,
@@ -2623,6 +2624,39 @@ describe("outside driver provider policy", () => {
     expect(create({ baseUrl: "http://127.0.0.1:8080", key: undefined }).configuration).toEqual(
       keyless,
     );
+  });
+
+  const reboundAt = "2026-10-28T09:00:00.000Z" as UtcTimestamp;
+
+  it("moves a provider to its driver's newly trusted digest and keeps everything else the person set", () => {
+    const instance = { ...create({}), enabled: true };
+    const newer = { ...driver, version: "0.2.0", digest: `sha256:${"d".repeat(64)}` };
+    const rebound = rebindOutsideHarnessEndpointDriver(instance, newer as never, reboundAt);
+    expect(decodeProviderInstance(rebound)).toEqual(rebound);
+    expect(rebound).toEqual({
+      ...instance,
+      configuration: { ...instance.configuration, driver: newer },
+      version: 2,
+      updatedAt: reboundAt,
+    });
+  });
+
+  it("refuses to move a provider to another package or another component", () => {
+    const instance = create({});
+    expect(() =>
+      rebindOutsideHarnessEndpointDriver(
+        instance,
+        { ...driver, packageId: "00000000-0000-4000-8000-000000000914" } as never,
+        reboundAt,
+      ),
+    ).toThrow(ProviderPolicyRejected);
+    expect(() =>
+      rebindOutsideHarnessEndpointDriver(
+        instance,
+        { ...driver, componentId: "other-driver" } as never,
+        reboundAt,
+      ),
+    ).toThrow(ProviderPolicyRejected);
   });
 });
 

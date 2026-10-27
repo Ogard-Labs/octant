@@ -19,7 +19,10 @@ import {
   type KeyStorageProtection,
   type MobileKeyStorageProtectionPort,
 } from "./keyStorageProtectionPort";
-import type { MobileScreenshotPrivacyPort } from "./screenshotPrivacyPort";
+import {
+  describeScreenshotProtection,
+  type MobileScreenshotPrivacyPort,
+} from "./screenshotPrivacyPort";
 
 export interface PrivacySecurityPanelProps {
   readonly hostHealth: HostSessionHealthKind;
@@ -152,7 +155,7 @@ export function PrivacySecurityPanel(props: PrivacySecurityPanelProps) {
 
       {keyStorage !== undefined ? (
         <Text style={styles.status} testID="mobile-key-storage-status">
-          {describeKeyStorageProtection(keyStorage)}
+          {describeKeyStorageProtection(keyStorage, props.keyStorage.vault)}
         </Text>
       ) : null}
 
@@ -163,6 +166,11 @@ export function PrivacySecurityPanel(props: PrivacySecurityPanelProps) {
       <Text style={styles.subtitle}>Screenshot privacy</Text>
       {props.screenshotPrivacy.available ? (
         <>
+          {props.screenshotPrivacy.coverage !== "none" && privacyDecision?.mode !== "standard" ? (
+            <Text style={styles.status} testID="mobile-screenshot-coverage">
+              {describeScreenshotProtection(props.screenshotPrivacy.coverage)}
+            </Text>
+          ) : null}
           <Text style={styles.help}>
             {privacyDecision?.summary ?? MOBILE_COPY.screenshotPrivacyHint}
           </Text>

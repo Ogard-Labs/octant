@@ -152,7 +152,7 @@ export function providerRefusalCopy(
     return {
       reason: "This provider's driver package is not admitted, so it offers no models.",
       nextStep:
-        "Octant runs this provider only once its driver package is installed, trusted, and enabled.",
+        "Octant runs this provider only once its driver package is installed, trusted, and enabled. After an update, trusting the new version moves this provider to it.",
     };
   }
   if (reason === "driver-incompatible") {
@@ -160,6 +160,13 @@ export function providerRefusalCopy(
       reason: "This provider's driver package does not speak a protocol Octant can use.",
       nextStep:
         "Octant stopped the driver. Install a version of the package built for this Octant, then check the connection again.",
+    };
+  }
+  if (reason === "runtime-unavailable" && instance.driverKind === "outside-harness-endpoint") {
+    return {
+      reason: "Octant could not start this provider's driver, or the driver stopped.",
+      nextStep:
+        "Check the connection again. If the driver keeps stopping, Octant holds this version until Octant restarts or you trust another version.",
     };
   }
   if (reason === "runtime-unavailable") {

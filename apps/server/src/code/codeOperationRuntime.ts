@@ -1896,8 +1896,10 @@ async function resolveAppleDeviceActionScope(
   options: CodeOperationRuntimeOptions,
   windowId: WindowId,
   request: AppleDeviceRequest,
+  /** The posture that decides; a live turn may run narrower than the stored thread. */
+  effectiveThread?: (thread: CodeThread) => CodeThread,
 ): Promise<Omit<AppleDeviceLeaseScope, "from"> | undefined> {
-  const resolved = await resolveDeviceApprovalScope(options, windowId, request);
+  const resolved = await resolveDeviceApprovalScope(options, windowId, request, effectiveThread);
   const device =
     request.deviceId === undefined ? undefined : options.describeAppleDevice?.(request.deviceId);
   if (resolved === undefined || device === undefined) return undefined;
@@ -2245,6 +2247,10 @@ interface ActiveTurn {
     string,
     {
       readonly origin?: string;
+      /** Settled only by a person at a window on this Mac, never by a paired device. */
+      readonly localPersonOnly?: true;
+      /** Still answerable in a Plan turn: it allows nothing Plan refuses. */
+      readonly answerableInPlan?: true;
       readonly finish: (outcome: "approved" | "denied" | "cancelled" | "expired") => void;
     }
   >;
@@ -3336,21 +3342,22 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   > {
     const store = this.#approvalStore;
     if (store === undefined) return { status: "unavailable" };
-    // The turn's posture, not the stored one: a Full-access thread running an
-    // approval-gated turn asks here too, and its stored policy alone refused it.
-    const scope = await resolveDeviceApprovalScope(
-      this.#options,
-      active.windowId,
-      effect.request,
-      (thread) => this.threadWithActiveTurnPosture(thread),
-    );
-    if (scope === undefined) return { status: "unavailable" };
-    const context = await approvalContext(this.#options, undefined, scope.thread, scope.checkout);
-    if (context === undefined) return { status: "unavailable" };
-    const prompt = approvalPrompt(effect, scope.thread, scope.checkout, undefined);
+    const asked = await this.#deviceApprovalPrompt(active, effect);
+    if (asked === undefined) return { status: "unavailable" };
+    const { context, prompt } = asked;
     const summary = boundProviderSummary(`${prompt.message}\n${prompt.detail}`);
     if (summary === undefined) return { status: "unavailable" };
-    const outcome = await this.#askToolApproval(active, summary, undefined, signal);
+    // A physical device's lease and effects are a person's at the Mac to
+    // allow: a paired device observes only (decision 4 of
+    // docs/design/apple-devices.md), so its answer settles nothing here.
+    const localPersonOnly =
+      effect.kind === "apple-device-lease" || effect.kind === "apple-device-action";
+    const outcome = await this.#askToolApproval(active, summary, undefined, signal, {
+      localPersonOnly,
+      // A lease is asked under every posture: it opens the device to the
+      // thread but changes nothing on it, so Plan still lets it be answered.
+      answerableInPlan: effect.kind === "apple-device-lease",
+    });
     if (outcome !== "approved") return { status: outcome };
     try {
       const receipt = store.issue({
@@ -3367,11 +3374,73 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     }
   }
 
+  /**
+   * The wording and binding context of one device approval. A Simulator,
+   * emulator, or device effect is asked only while the turn's posture decides
+   * effects by approval; a device lease is asked under every posture, Full
+   * access and Plan included, and names the device and the thread exactly as
+   * the desktop's lease confirmation does.
+   */
+  async #deviceApprovalPrompt(
+    active: ActiveTurn,
+    effect: CodeDeviceApprovalEffect,
+  ): Promise<
+    | {
+        readonly context: ApprovalContext;
+        readonly prompt: { readonly message: string; readonly detail: string };
+      }
+    | undefined
+  > {
+    // The turn's posture, not the stored one: a Full-access thread running an
+    // approval-gated turn asks here too, and its stored policy alone refused it.
+    const turnPosture = (thread: CodeThread) => this.threadWithActiveTurnPosture(thread);
+    if (effect.kind === "apple-device-lease") {
+      const lease = await resolveAppleDeviceLeaseScope(
+        this.#options,
+        active.windowId,
+        effect.request,
+      );
+      if (lease === undefined) return undefined;
+      const context = await approvalContext(this.#options, undefined, lease.thread, lease.checkout);
+      return context === undefined ? undefined : { context, prompt: appleDeviceLeasePrompt(lease) };
+    }
+    if (effect.kind === "apple-device-action") {
+      const action = await resolveAppleDeviceActionScope(
+        this.#options,
+        active.windowId,
+        effect.request,
+        turnPosture,
+      );
+      if (action === undefined) return undefined;
+      const context = await approvalContext(
+        this.#options,
+        undefined,
+        action.thread,
+        action.checkout,
+      );
+      return context === undefined
+        ? undefined
+        : { context, prompt: appleDeviceActionPrompt(action, effect.request) };
+    }
+    const scope = await resolveDeviceApprovalScope(
+      this.#options,
+      active.windowId,
+      effect.request,
+      turnPosture,
+    );
+    if (scope === undefined) return undefined;
+    const context = await approvalContext(this.#options, undefined, scope.thread, scope.checkout);
+    return context === undefined
+      ? undefined
+      : { context, prompt: approvalPrompt(effect, scope.thread, scope.checkout, undefined) };
+  }
+
   #askToolApproval(
     active: ActiveTurn,
     summary: string,
     origin: string | undefined,
     signal?: AbortSignal,
+    answer: { readonly localPersonOnly?: boolean; readonly answerableInPlan?: boolean } = {},
   ): Promise<"approved" | "denied" | "cancelled" | "expired"> {
     if (signal?.aborted || active.abort.signal.aborted || active.toolApprovals.size >= 4)
       return Promise.resolve("cancelled");
@@ -3393,6 +3462,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       const timer = setTimeout(() => finish("expired"), 10 * 60_000);
       active.toolApprovals.set(String(approvalId), {
         ...(origin === undefined ? {} : { origin }),
+        ...(answer.localPersonOnly === true ? { localPersonOnly: true } : {}),
+        ...(answer.answerableInPlan === true ? { answerableInPlan: true } : {}),
         finish,
       });
       signal?.addEventListener("abort", abort, { once: true });
@@ -3429,10 +3500,18 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const toolApproval = active?.toolApprovals.get(input.approvalId);
     if (active !== undefined && toolApproval !== undefined) {
       if (
-        turnPosture === "plan" ||
+        (turnPosture === "plan" && toolApproval.answerableInPlan !== true) ||
         active.thread.permissionPersistence !== input.thread.permissionPersistence
       )
         return turnState("failed");
+      // The card stays up for the person at the Mac; a paired device's
+      // answer, or one whose window nobody vouched for, settles nothing.
+      if (toolApproval.localPersonOnly === true && input.answeredBy !== "local-window") {
+        return turnState(active.state, {
+          category: "failed",
+          message: "Only a person at the Mac this thread runs on can answer this request.",
+        });
+      }
       toolApproval.finish(input.decision === "approved" ? "approved" : "denied");
       if (input.decision === "approved") return answeredTurnState(active.state);
       return this.#countDeniedApproval(active);

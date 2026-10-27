@@ -1952,6 +1952,35 @@ the id `ListHosts` reports, that a Space there reports `network` `none`, its
 a complete `ListSpaces` lists it. Until both smokes pass, the driver is
 offered on no host.
 
+### Built: Cua follow-ups
+
+The three follow-ups Cua sub-slice 3 named need the desktop-provider seam to
+say two more things, and that seam change comes first, on its own. Nothing
+in the host, a driver, or the renderer uses it yet.
+
+- **Seam.** `DesktopPlacement.choosesMachine`, `DesktopProvider.listMachines`,
+  and `DESKTOP_SESSION_READABLE` (`packages/plugin-api/src/desktopProvider.ts`).
+
+Rules this delivery resolved:
+
+- **A placement may run on a machine the person chooses.** A placement that
+  runs on one of the person's own machines declares `choosesMachine`, and its
+  provider answers `listMachines` for it with the machines it knows of, each
+  with the provider's id, a name, and whether it answers now. Listing reads
+  and creates nothing. Both are optional, so every existing driver is
+  unchanged.
+- **One driver reason is meant for the person.** A driver that refuses a
+  screen, frame, or input because its route to the desktop right now would
+  let a third party read the session, such as a relay that can read what it
+  carries, refuses with `DESKTOP_SESSION_READABLE`. It is the one reason the
+  host is to pass to a person; every other reason a driver gives stays with
+  the host.
+
+Evidence: the additions are types and one constant with no consumer yet, so
+`packages/plugin-api` and `apps/server` typecheck against them unchanged and
+the plugin-api suite passes; the follow-ups that use them carry their own
+tests.
+
 ## Rationale
 
 The original plan leaned on execution capsules for isolation and a cloud

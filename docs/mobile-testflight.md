@@ -103,11 +103,12 @@ Trust the test certificate only in that Simulator; never disable TLS verificatio
 
 The mobile Vitest suite runs in Node. It cannot validate Hermes cryptography,
 SecureStore, URLSession cookie handling, or UIKit launch behavior. The existing
-key-store and remote-client tests complement this native pass. On iOS,
-screenshot capture protection, push notifications, and device-integrity
-detection currently have unavailable native adapters and must not be recorded
-as passing checks; the Android build sets the secure-window flag, but push and
-device integrity are unavailable there too.
+key-store and remote-client tests complement this native pass. Push
+notifications and device-integrity detection currently have unavailable native
+adapters on both platforms and must not be recorded as passing checks. The
+Android build sets the secure-window flag; the iOS build covers the app in the
+app switcher and on a recorded or mirrored screen, cannot block a screenshot,
+and says so in Settings. Neither counts until its device pass below.
 The app names those limitations before interaction: unavailable capture settings
 and push enablement are not offered, while clearing a previously registered push
 token remains possible on a connected host. Device-integrity status remains
@@ -177,6 +178,16 @@ physical Android phone, plus the Android items at its end.
 - Revoke the phone from the host and verify sessions and streams stop.
 - Inspect app-switcher and screenshot behavior for prompts, paths, credentials,
   and other sensitive content.
+- iOS: with a thread open, open the app switcher and confirm Octant's preview
+  is blank; start a screen recording from Control Center and confirm Octant
+  shows only the explanation of why it is hidden, and that the recording shows
+  no thread content. Confirm Computers › Privacy & security says a screenshot
+  is not blocked. Switch to standard capture, confirm the app switcher shows
+  the thread, then relaunch and confirm the cover is back.
+- iOS: confirm Privacy & security says the keys are kept in this phone's
+  Keychain under its Secure Enclave. On a phone that had paired with an
+  earlier build, install this build over it and confirm every computer is
+  still paired without pairing again.
 - Record the EAS build ID, App Store Connect build number, device and iOS
   version, host revision, and each failed or skipped scenario.
 - Android: with a thread open, take a screenshot and start a screen recording

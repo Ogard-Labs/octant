@@ -10,6 +10,7 @@ import {
   decodeProviderInstanceCreated,
   decodeProviderInstanceBinaryChanged,
   decodeProviderInstanceConfigurationChanged,
+  decodeProviderInstanceDriverRebound,
   decodeOllamaHistoryRecorded,
   decodeProviderModel,
   decodeProviderModelOptionValues,
@@ -38,6 +39,7 @@ describe("provider registry contracts", () => {
       "provider.instance-renamed@1",
       "provider.instance-binary-changed@1",
       "provider.instance-configuration-changed@1",
+      "provider.instance-driver-rebound@1",
       "provider.instance-data-tags-changed@1",
       "provider.instance-enabled-changed@1",
       "provider.instance-removed@1",
@@ -1782,6 +1784,19 @@ describe("provider registry contracts", () => {
     ).toThrow();
     // No command reconfigures one: its package, address, and models are fixed when it is added.
     expect(() => decodeProviderInstanceConfigurationChanged({ instance: outside })).toThrow();
+    // The host's move to a newly trusted digest has its own event, for outside instances only.
+    expect(decodeProviderInstanceDriverRebound({ instance: outside })).toEqual({
+      instance: outside,
+    });
+    expect(() =>
+      decodeProviderInstanceDriverRebound({
+        instance: {
+          ...outside,
+          driverKind: "ollama",
+          configuration: { kind: "ollama-native-http", baseUrl: "http://127.0.0.1:11434" },
+        },
+      }),
+    ).toThrow();
   });
 
   it("adds an outside driver provider off, with only the models listed and a key header the person chose", () => {
