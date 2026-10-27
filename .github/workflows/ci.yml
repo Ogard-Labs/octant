@@ -150,6 +150,7 @@ jobs:
       - run: >-
           bun run --cwd apps/server test --
           src/canvas/artifactMirrorFilePort.test.ts
+          src/persistence/threadArtifactPurge.test.ts
           src/code/codeDirectoryPort.test.ts
           src/work/workFilesystemPort.test.ts
           src/work/workConfinedWrite.test.ts

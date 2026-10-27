@@ -7326,11 +7326,21 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   its bundle the same way: the bundle must resolve inside the destination root
   it was written under, and the open must land on that path, because a plain
   read followed a mirrored folder swapped for a link to a host folder. Mirror
-  writes and removals are held inside the destination root the same way.
+  writes and removals, including a thread or Project purge's removal of each
+  Canvas's mirrored files, are held inside the destination root the same way.
   Creating the folders by path and then checking where they resolved compared
   a folder with itself, so a mirrored folder swapped for such a link received
-  the bundle and its sidecars, and removing a renamed artifact's stale file
-  deleted the host file of that name. A mirror write therefore takes Work's
+  the bundle and its sidecars, and removing a renamed artifact's stale file or
+  purging a thread's mirrored files deleted the host files of those names. A
+  purge removes each path a mirror receipt names from under that receipt's
+  destination root (the folder destination's stored root, used only while it
+  still resolves to exactly that path, since such a folder can sit inside a
+  checkout where the root itself can be swapped for a link; or the Project's
+  checkout for a repository destination, whose receipt paths already begin
+  with the destination folder); a re-import's recorded bundle path is removed
+  only from under one of those roots. A refused or
+  failed removal leaves that file and the purge goes on, so a planted link
+  cannot make a thread impossible to purge. A mirror write takes Work's
   confined write: a file being replaced is opened where the open must land on
   its canonical path, and a new file and any missing folders are created
   relative to folders held open from the root down, one no-follow name at a
