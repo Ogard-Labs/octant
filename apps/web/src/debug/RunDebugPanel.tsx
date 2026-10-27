@@ -37,6 +37,7 @@ import {
   unmappableText,
   type ConfigurationDraft,
 } from "./runDebugPanelModel";
+import { useFocusWhenShown } from "./useFocusWhenShown";
 
 type Listed = Extract<CodeDebugConfigurationsResult, { readonly status: "listed" }>;
 
@@ -84,6 +85,12 @@ export function RunDebugPanel(props: RunDebugPanelProps) {
   const [listing, setListing] = useState<Listing>({ kind: "loading" });
   const [localOnly, setLocalOnly] = useState(false);
   const [editing, setEditing] = useState<Editing>({ kind: "none" });
+  /** The person came back to the list from a card or the form, so its heading takes focus. */
+  const [returnedToList, setReturnedToList] = useState(false);
+  const showList = useCallback(() => {
+    setEditing({ kind: "none" });
+    setReturnedToList(true);
+  }, []);
   /** The last answer the person should read: a refusal warns, a confirmation informs. */
   const [notice, setNotice] = useState<{
     readonly tone: "neutral" | "warning";
@@ -166,6 +173,7 @@ export function RunDebugPanel(props: RunDebugPanelProps) {
       setPending("start");
       setNotice(undefined);
       setEnded(undefined);
+      setReturnedToList(false);
       try {
         const answer = await client.start({
           threadId,
@@ -197,7 +205,7 @@ export function RunDebugPanel(props: RunDebugPanelProps) {
         if (!mounted.current) return;
         switch (answer.status) {
           case "approved":
-            setEditing({ kind: "none" });
+            showList();
             setNotice({
               tone: "neutral",
               text:
@@ -220,14 +228,14 @@ export function RunDebugPanel(props: RunDebugPanelProps) {
         if (mounted.current) setPending(undefined);
       }
     },
-    [checkoutId, client, failed, refresh, threadId],
+    [checkoutId, client, failed, refresh, showList, threadId],
   );
 
   const session = thread.session;
   return (
     <section aria-label="Run and debug" className="run-debug">
       <header className="run-debug__toolbar">
-        <Bug aria-hidden="true" size={15} />
+        <Bug aria-hidden="true" size={16} />
         <h2 className="run-debug__title">Run and debug</h2>
         {session === undefined && !localOnly ? (
           <OctantIconButton
@@ -264,16 +272,13 @@ export function RunDebugPanel(props: RunDebugPanelProps) {
         />
       ) : (
         <div className="run-debug__body">
-          {ended === undefined ? null : (
-            <p className="run-debug__line" role="status">
-              {ended}
-            </p>
-          )}
+          {ended === undefined ? null : <EndedLine text={ended} />}
           {notice === undefined ? null : (
             <OctantAlert tone={notice.tone}>{notice.text}</OctantAlert>
           )}
           {editing.kind === "none" ? (
             <Configurations
+              focusHeading={returnedToList}
               listing={listing}
               onConfirm={(configuration, unusedFields) =>
                 setEditing({ kind: "confirm", configuration, unusedFields })
@@ -287,7 +292,7 @@ export function RunDebugPanel(props: RunDebugPanelProps) {
               adapters={listing.kind === "listed" ? listing.result.adapters : []}
               draft={editing.draft}
               {...(editing.message === undefined ? {} : { message: editing.message })}
-              onCancel={() => setEditing({ kind: "none" })}
+              onCancel={showList}
               onReview={(draft) => {
                 const reading = readDraft(draft);
                 setEditing(
@@ -302,11 +307,9 @@ export function RunDebugPanel(props: RunDebugPanelProps) {
               adapters={listing.kind === "listed" ? listing.result.adapters : []}
               configuration={editing.configuration}
               onBack={() =>
-                setEditing(
-                  editing.draft === undefined
-                    ? { kind: "none" }
-                    : { kind: "draft", draft: editing.draft },
-                )
+                editing.draft === undefined
+                  ? showList()
+                  : setEditing({ kind: "draft", draft: editing.draft })
               }
               onConfirm={(scope) => void confirm(editing.configuration, scope)}
               pending={pending}
@@ -318,6 +321,16 @@ export function RunDebugPanel(props: RunDebugPanelProps) {
         </div>
       )}
     </section>
+  );
+}
+
+/** Why the last session ended; it takes focus when Stop, which it replaces, had it. */
+function EndedLine(props: { readonly text: string }) {
+  const ref = useFocusWhenShown<HTMLParagraphElement>();
+  return (
+    <p className="run-debug__line" ref={ref} role="status" tabIndex={-1}>
+      {props.text}
+    </p>
   );
 }
 
@@ -334,6 +347,7 @@ function Refusal(props: { readonly title: string; readonly text: string }) {
 }
 
 function Configurations(props: {
+  readonly focusHeading: boolean;
   readonly listing: Listing;
   readonly pending: string | undefined;
   readonly onStart: (configuration: CodeDebugConfiguration) => void;
@@ -346,6 +360,9 @@ function Configurations(props: {
   const confirmedId = useId();
   const proposedId = useId();
   const { listing } = props;
+  const heading = useFocusWhenShown<HTMLHeadingElement>(
+    props.focusHeading && listing.kind === "listed",
+  );
   switch (listing.kind) {
     case "loading":
       return <p className="run-debug__empty">Reading this thread's debug configurations…</p>;
@@ -369,7 +386,7 @@ function Configurations(props: {
     <>
       <section aria-labelledby={confirmedId} className="run-debug__section">
         <div className="run-debug__section-head">
-          <h3 className="run-debug__heading" id={confirmedId}>
+          <h3 className="run-debug__heading" id={confirmedId} ref={heading} tabIndex={-1}>
             Configurations
           </h3>
           <OctantButton
@@ -380,7 +397,7 @@ function Configurations(props: {
             type="button"
             variant="ghost"
           >
-            <Plus aria-hidden="true" size={13} />
+            <Plus aria-hidden="true" size={14} />
             New
           </OctantButton>
         </div>
@@ -404,12 +421,13 @@ function Configurations(props: {
                 <OctantButton
                   aria-label={`Start ${entry.configuration.name}`}
                   disabled={props.pending !== undefined}
+                  focusableWhenDisabled
                   onClick={() => props.onStart(entry.configuration)}
                   size="sm"
                   type="button"
                   variant="secondary"
                 >
-                  <Play aria-hidden="true" size={13} />
+                  <Play aria-hidden="true" size={14} />
                   {props.pending === "start" ? "Starting…" : "Start"}
                 </OctantButton>
               </li>
@@ -499,6 +517,7 @@ function ConfigurationForm(props: {
     stop: useId(),
     heading: useId(),
   };
+  const nameField = useFocusWhenShown<HTMLInputElement>();
   const change = (patch: Partial<ConfigurationDraft>) => setDraft({ ...draft, ...patch });
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -515,6 +534,7 @@ function ConfigurationForm(props: {
           autoComplete="off"
           id={ids.name}
           onChange={(event) => change({ name: event.currentTarget.value })}
+          ref={nameField}
           value={draft.name}
         />
       </label>
@@ -608,10 +628,11 @@ function ConfirmationCard(props: {
   readonly onBack: () => void;
 }) {
   const headingId = useId();
+  const heading = useFocusWhenShown<HTMLHeadingElement>();
   const { configuration } = props;
   return (
     <section aria-labelledby={headingId} className="run-debug__card run-debug__confirm">
-      <h3 className="run-debug__card-title" id={headingId}>
+      <h3 className="run-debug__card-title" id={headingId} ref={heading} tabIndex={-1}>
         Confirm “{configuration.name}”
       </h3>
       <p className="run-debug__card-lede">
@@ -691,6 +712,7 @@ function ConfirmationCard(props: {
         </OctantButton>
         <OctantButton
           disabled={props.pending !== undefined}
+          focusableWhenDisabled
           onClick={() => props.onConfirm("checkout")}
           size="sm"
           type="button"
@@ -700,6 +722,7 @@ function ConfirmationCard(props: {
         </OctantButton>
         <OctantButton
           disabled={props.pending !== undefined}
+          focusableWhenDisabled
           onClick={() => props.onConfirm("project")}
           size="sm"
           type="button"

@@ -259,6 +259,51 @@ describe("Run and debug panel", () => {
     expect(store.read(key).stopped).toBeUndefined();
   });
 
+  it("keeps the keyboard in the panel as the card, the list, a session, and its ending replace the control pressed", async () => {
+    const user = userEvent.setup();
+    const { client } = fakeHost();
+    render(
+      <RunDebugPanel
+        checkoutId={checkoutId}
+        client={client}
+        pollMs={fast}
+        store={new CodeDebugWindowState()}
+        threadId={threadId}
+      />,
+    );
+    // Nothing takes focus when the list first appears.
+    await screen.findByText("Not a launch entry.");
+    expect(document.body).toHaveFocus();
+
+    await user.click(screen.getByRole("button", { name: "Review Run the fixture" }));
+    expect(screen.getByRole("heading", { name: "Confirm “Run the fixture”" })).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByRole("heading", { name: "Configurations" })).toHaveFocus();
+
+    await user.click(screen.getByRole("button", { name: "New" }));
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("heading", { name: "Configurations" })).toHaveFocus();
+
+    await user.click(screen.getByRole("button", { name: "Review Run the fixture" }));
+    await user.click(screen.getByRole("button", { name: "Allow in this checkout" }));
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Configurations" })).toHaveFocus(),
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Start Run the fixture" }));
+    expect(await screen.findByText("Paused · breakpoint")).toBeVisible();
+    expect(screen.getByText("Run the fixture")).toHaveFocus();
+    // A step keeps focus on its own button while the adapter answers.
+    const stepOver = screen.getByRole("button", { name: "Step over" });
+    await user.click(stepOver);
+    expect(await screen.findByText("src/main.js:5")).toBeVisible();
+    expect(stepOver).toHaveFocus();
+
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+    expect(await screen.findByText("You stopped the session.")).toHaveFocus();
+  });
+
   it("shows the host's Plan refusal when Start is pressed in a Plan thread", async () => {
     const user = userEvent.setup();
     const { client } = fakeHost({ start: { status: "refused", reason: "plan-read-only" } });

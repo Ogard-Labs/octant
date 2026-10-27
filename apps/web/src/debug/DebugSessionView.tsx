@@ -32,6 +32,7 @@ import {
   type DebugSessionControls,
   type DebugSessionView as SessionView,
 } from "./useCodeDebugSession";
+import { useFocusWhenShown } from "./useFocusWhenShown";
 
 /** Nested values open at most this deep, so a value that holds itself stops somewhere. */
 const MAX_VARIABLE_DEPTH = 8;
@@ -79,11 +80,14 @@ export function DebugSessionView(props: DebugSessionViewProps) {
   const stopped = view.state?.status === "stopped";
   const running = view.state?.status === "running";
   const busy = view.pending !== undefined;
+  // Start, which this view replaces, had focus; a step keeps it on its own
+  // button, which stays focusable while the step is pending.
+  const sessionName = useFocusWhenShown<HTMLParagraphElement>();
 
   return (
     <div className="run-debug__session">
       <div aria-label="Debug session" className="run-debug__controls" role="toolbar">
-        <p className="run-debug__session-name" title={props.name}>
+        <p className="run-debug__session-name" ref={sessionName} tabIndex={-1} title={props.name}>
           {props.name}
         </p>
         <span className="run-debug__state" role="status">
@@ -91,46 +95,52 @@ export function DebugSessionView(props: DebugSessionViewProps) {
         </span>
         <OctantIconButton
           disabled={!stopped || busy}
+          focusableWhenDisabled
           label="Continue"
           onClick={() => controls.step("continue")}
           type="button"
         >
-          <Play aria-hidden="true" size={15} />
+          <Play aria-hidden="true" size={16} />
         </OctantIconButton>
         <OctantIconButton
           disabled={!running || busy}
+          focusableWhenDisabled
           label="Pause"
           onClick={() => controls.step("pause")}
           type="button"
         >
-          <Pause aria-hidden="true" size={15} />
+          <Pause aria-hidden="true" size={16} />
         </OctantIconButton>
         <OctantIconButton
           disabled={!stopped || busy}
+          focusableWhenDisabled
           label="Step over"
           onClick={() => controls.step("next")}
           type="button"
         >
-          <Redo2 aria-hidden="true" size={15} />
+          <Redo2 aria-hidden="true" size={16} />
         </OctantIconButton>
         <OctantIconButton
           disabled={!stopped || busy}
+          focusableWhenDisabled
           label="Step into"
           onClick={() => controls.step("step-in")}
           type="button"
         >
-          <ArrowDownToLine aria-hidden="true" size={15} />
+          <ArrowDownToLine aria-hidden="true" size={16} />
         </OctantIconButton>
         <OctantIconButton
           disabled={!stopped || busy}
+          focusableWhenDisabled
           label="Step out"
           onClick={() => controls.step("step-out")}
           type="button"
         >
-          <ArrowUpFromLine aria-hidden="true" size={15} />
+          <ArrowUpFromLine aria-hidden="true" size={16} />
         </OctantIconButton>
         <OctantIconButton
           disabled={view.pending === "stop"}
+          focusableWhenDisabled
           label="Stop"
           onClick={controls.stop}
           type="button"
@@ -336,9 +346,9 @@ function Variables(props: {
                   variant="bare"
                 >
                   {open ? (
-                    <ChevronDown aria-hidden="true" size={13} />
+                    <ChevronDown aria-hidden="true" size={14} />
                   ) : (
-                    <ChevronRight aria-hidden="true" size={13} />
+                    <ChevronRight aria-hidden="true" size={14} />
                   )}
                   <span className="run-debug__scope-name">{view.scope.name}</span>
                 </OctantButton>
@@ -410,9 +420,9 @@ function VariableRow(props: {
           variant="bare"
         >
           {open ? (
-            <ChevronDown aria-hidden="true" size={13} />
+            <ChevronDown aria-hidden="true" size={14} />
           ) : (
-            <ChevronRight aria-hidden="true" size={13} />
+            <ChevronRight aria-hidden="true" size={14} />
           )}
           {value}
         </OctantButton>

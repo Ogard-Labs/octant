@@ -7,6 +7,7 @@ import {
   type CodeDebugSessionEndReason,
   type CodeDebugStartResult,
 } from "@octant/contracts/code-debug";
+import { canonicalDebugConfigurationText } from "@octant/domain/debug-session-start-policy";
 
 /**
  * Words for every answer the host gives the Run and debug panel. The host
@@ -197,22 +198,13 @@ export function readDraft(draft: ConfigurationDraft): DraftReading {
   }
 }
 
-/** Two configurations are the same record when every field the digest covers matches. */
+/**
+ * Two configurations are the same record when the host would digest them the
+ * same, so a proposal reads as confirmed only when its approval covers it.
+ */
 export function sameConfiguration(
   left: CodeDebugConfiguration,
   right: CodeDebugConfiguration,
 ): boolean {
-  const sorted = (configuration: CodeDebugConfiguration) =>
-    JSON.stringify([
-      configuration.name,
-      String(configuration.adapter),
-      String(configuration.program),
-      configuration.args,
-      configuration.cwd === undefined ? null : String(configuration.cwd),
-      [...configuration.env]
-        .map((entry) => [String(entry.key), entry.value])
-        .sort(([left], [right]) => String(left).localeCompare(String(right))),
-      configuration.stopOnEntry,
-    ]);
-  return sorted(left) === sorted(right);
+  return canonicalDebugConfigurationText(left) === canonicalDebugConfigurationText(right);
 }
