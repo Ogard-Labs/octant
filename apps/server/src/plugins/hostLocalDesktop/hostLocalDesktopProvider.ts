@@ -16,16 +16,19 @@ import {
   type DesktopLeaseId,
   type DesktopRecipe,
 } from "@octant/contracts";
-import type {
-  DesktopFrameResult,
-  DesktopInputResult,
-  DesktopLaunchPort,
-  DesktopProvider,
-  DesktopScreen,
-  LaunchedDesktop,
+import {
+  maxDesktopFrameBytes,
+  pngDimensions,
+  ScreenshotDesktopControl,
+  x11Keysym,
+  type DesktopFrameResult,
+  type DesktopInputResult,
+  type DesktopLaunchPort,
+  type DesktopProvider,
+  type DesktopScreen,
+  type LaunchedDesktop,
 } from "@octant/plugin-api/desktop-provider";
 import { DesktopStreamChannel, type DesktopReply } from "./hostLocalDesktopChannel";
-import { HostLocalDesktopControl } from "./hostLocalDesktopControl";
 
 export const HOST_LOCAL_DESKTOP_PROVIDER_ID = decodeDesktopProviderId("host-local");
 
@@ -116,51 +119,6 @@ while read -r verb a b c d; do
 done
 `;
 
-/** DOM key names a Desktop tab sends, as the X keysyms `xdotool` takes. */
-const NAMED_KEYS: Readonly<Record<string, string>> = {
-  Enter: "Return",
-  Backspace: "BackSpace",
-  Tab: "Tab",
-  Escape: "Escape",
-  " ": "space",
-  ArrowUp: "Up",
-  ArrowDown: "Down",
-  ArrowLeft: "Left",
-  ArrowRight: "Right",
-  Delete: "Delete",
-  Insert: "Insert",
-  Home: "Home",
-  End: "End",
-  PageUp: "Prior",
-  PageDown: "Next",
-  Shift: "Shift_L",
-  Control: "Control_L",
-  Alt: "Alt_L",
-  Meta: "Super_L",
-  CapsLock: "Caps_Lock",
-  "-": "minus",
-  "=": "equal",
-  "[": "bracketleft",
-  "]": "bracketright",
-  ";": "semicolon",
-  "'": "apostrophe",
-  ",": "comma",
-  ".": "period",
-  "/": "slash",
-  "\\": "backslash",
-  "`": "grave",
-};
-
-/** The keysym for a key name, or undefined for one this desktop does not map. */
-export function hostLocalKeysym(key: string): string | undefined {
-  // An own property only: `constructor` or `toString` would otherwise name
-  // an inherited function, whose source text would reach the shell.
-  if (Object.hasOwn(NAMED_KEYS, key)) return NAMED_KEYS[key];
-  if (/^[A-Za-z0-9]$/.test(key)) return key;
-  if (/^F([1-9]|1[0-2])$/.test(key)) return key;
-  return undefined;
-}
-
 type Translated =
   | { readonly kind: "lines"; readonly lines: ReadonlyArray<string> }
   | { readonly kind: "refused"; readonly reason: string };
@@ -194,7 +152,7 @@ export function translateHostLocalInput(
       };
     }
     case "key": {
-      const keysym = hostLocalKeysym(event.key);
+      const keysym = x11Keysym(event.key);
       if (keysym === undefined) return { kind: "refused", reason: "unsupported-key" };
       return { kind: "lines", lines: [`key${event.action} ${keysym}`] };
     }
@@ -227,35 +185,11 @@ function base64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] as const;
-
-/**
- * Reads a PNG's dimensions from its header without decoding it, so a frame
- * larger than the screen is refused before anything parses its pixels.
- */
-export function pngDimensions(
-  bytes: Uint8Array,
-): { readonly width: number; readonly height: number } | undefined {
-  if (bytes.length < 24) return undefined;
-  if (!PNG_SIGNATURE.every((byte, index) => bytes[index] === byte)) return undefined;
-  if (String.fromCharCode(...bytes.subarray(12, 16)) !== "IHDR") return undefined;
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  return { width: view.getUint32(16), height: view.getUint32(20) };
-}
-
-/**
- * The most bytes one frame may carry: an uncompressed 32-bit image of the
- * whole screen with its row filter bytes, plus room for PNG's own framing.
- */
-export function maxHostLocalFrameBytes(screen: DesktopRecipe["screen"]): number {
-  return screen.width * screen.height * 4 + screen.height + 1_048_576;
-}
-
 interface Session {
   readonly screen: DesktopRecipe["screen"];
   readonly desktop: LaunchedDesktop;
   readonly channel: DesktopStreamChannel;
-  readonly control: HostLocalDesktopControl;
+  readonly control: ScreenshotDesktopControl;
   exited: boolean;
 }
 
@@ -347,7 +281,7 @@ export function createHostLocalDesktopProvider(launch: DesktopLaunchPort): Deskt
       const { desktop } = launched;
       channel = new DesktopStreamChannel({
         write: (bytes) => desktop.write(bytes),
-        maxFrameBytes: maxHostLocalFrameBytes(screen),
+        maxFrameBytes: maxDesktopFrameBytes(screen),
       });
       if (earlyBytes > MAX_EARLY_OUTPUT_BYTES) channel.close();
       for (const chunk of early.splice(0)) channel.receive(chunk);
@@ -356,9 +290,22 @@ export function createHostLocalDesktopProvider(launch: DesktopLaunchPort): Deskt
         screen,
         desktop,
         channel: opened,
-        control: new HostLocalDesktopControl({
+        control: new ScreenshotDesktopControl({
           screen,
-          request: (line) => opened.request(line, REQUEST_TIMEOUT_MS),
+          launch: async (appId) => {
+            const reply = await opened.request(`launch ${appId}`, REQUEST_TIMEOUT_MS);
+            if (reply.kind === "broken") return { status: "unreachable" };
+            const pid =
+              reply.kind === "line" && reply.words[0] === "launched" ? reply.words[1] : undefined;
+            return pid !== undefined && /^[1-9][0-9]{0,8}$/.test(pid)
+              ? { status: "launched", pid: Number(pid) }
+              : { status: "failed" };
+          },
+          alive: async (pid) => {
+            const reply = await opened.request(`alive ${pid}`, REQUEST_TIMEOUT_MS);
+            if (reply.kind === "broken") return "unreachable";
+            return reply.kind === "line" && reply.words[0] === "ok" ? "running" : "gone";
+          },
           frame: () => frameOf(session),
           input: (event) => inputTo(session, event),
         }),

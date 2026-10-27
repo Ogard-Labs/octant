@@ -20,10 +20,10 @@ import {
   decodeComputerControlCommand,
   type ComputerControlResult,
 } from "@octant/contracts/computer-use-plugin";
+import { x11Keysym } from "@octant/plugin-api/desktop-provider";
 import {
   createHostLocalDesktopProvider,
   HOST_LOCAL_DESKTOP_PROGRAMS,
-  hostLocalKeysym,
 } from "./hostLocalDesktopProvider";
 
 const recipe: DesktopRecipe = decodeDesktopRecipe({
@@ -313,8 +313,8 @@ describe("host-local desktop provider", () => {
       screen.input({ kind: "scroll", x: 1, y: 1, deltaX: 0, deltaY: Number.NaN }),
     ).resolves.toEqual({ status: "refused", reason: "invalid-scroll" });
     expect(desktop?.lines).toHaveLength(5);
-    expect(hostLocalKeysym("F12")).toBe("F12");
-    expect(hostLocalKeysym("F13")).toBeUndefined();
+    expect(x11Keysym("F12")).toBe("F12");
+    expect(x11Keysym("F13")).toBeUndefined();
   });
 
   it("returns a frame within the screen and refuses a larger one before decoding it", async () => {

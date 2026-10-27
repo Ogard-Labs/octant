@@ -46,8 +46,18 @@ describe("desktop provider conformance", () => {
     "passes an in-memory driver that keeps the seam (billed: %s)",
     async (billed) => {
       await expect(
-        runDesktopProviderConformance({ create: honest(billed), recipe, unsupportedCommand }),
-      ).resolves.toMatchObject({ stoppedWhenCancelled: true, reportedAbsenceOnlyWhenAbsent: true });
+        runDesktopProviderConformance({
+          create: honest(billed),
+          recipe,
+          unsupportedCommand,
+          // The in-memory driver keeps nothing of its own; its provider does.
+          restarted: (previous) => previous,
+        }),
+      ).resolves.toMatchObject({
+        stoppedWhenCancelled: true,
+        reportedAbsenceOnlyWhenAbsent: true,
+        foundAfterRestart: true,
+      });
     },
   );
 
@@ -100,7 +110,33 @@ describe("desktop provider conformance", () => {
     ],
   ])("refuses a driver when %s", async (message, create) => {
     await expect(
-      runDesktopProviderConformance({ create, recipe, unsupportedCommand }),
+      runDesktopProviderConformance({
+        create,
+        recipe,
+        unsupportedCommand,
+        restarted: (previous) => previous,
+      }),
     ).rejects.toThrow(message);
+  });
+
+  it("refuses a billed driver that does not show a restarted host finds what it left", async () => {
+    await expect(
+      runDesktopProviderConformance({ create: honest(true), recipe, unsupportedCommand }),
+    ).rejects.toThrow("a billed driver must show a restarted host finds what a killed host left");
+  });
+
+  it("refuses a driver that a restarted host cannot find by its tag", async () => {
+    await expect(
+      runDesktopProviderConformance({
+        create: honest(true),
+        recipe,
+        unsupportedCommand,
+        // A host that kept the desktop's identity only in memory loses it with the process.
+        restarted: (previous) => ({
+          ...previous,
+          listOwned: async () => ({ status: "listed", resources: [] }),
+        }),
+      }),
+    ).rejects.toThrow("a restarted host did not find the desktop a killed host left by its tag");
   });
 });
