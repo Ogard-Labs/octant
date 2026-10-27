@@ -14,18 +14,41 @@ import {
 } from "./fakeCloudIam.test-support";
 import { sha256Hex } from "./sigV4";
 
-function memoryStore(): CredentialStore & { readonly values: Map<string, string> } {
+function memoryStore(): CredentialStore & {
+  readonly values: Map<string, string>;
+  /** Make the next resolve read its value now and answer only when released, as a slow keychain does. */
+  readonly holdNextResolve: () => { readonly read: Promise<void>; readonly release: () => void };
+} {
   const values = new Map<string, string>();
+  let held: { readonly read: () => void; readonly released: Promise<void> } | undefined;
   return {
     values,
     set: async (id, value) => void values.set(id, value),
     has: async (id) => values.has(id),
     resolve: async (id) => {
       const value = values.get(id);
+      const hold = held;
+      held = undefined;
+      if (hold !== undefined) {
+        hold.read();
+        await hold.released;
+      }
       if (value === undefined) throw new CredentialStoreFailure("missing");
       return value;
     },
     delete: async (id) => void values.delete(id),
+    holdNextResolve: () => {
+      let read = () => {};
+      let release = () => {};
+      const readPromise = new Promise<void>((resolve) => {
+        read = resolve;
+      });
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      held = { read, released };
+      return { read: readPromise, release };
+    },
   };
 }
 
@@ -293,6 +316,11 @@ describe("cloud request signing", () => {
       modelRequest({ host: "iam.amazonaws.com" }),
       modelRequest({ path: "/guardrail/abc" }),
       modelRequest({ path: "/model/../guardrail/x" }),
+      // A URL parser reads an escaped dot segment as one, so `fetch` would
+      // send these to `/guardrail/x` and `/async-invoke`.
+      modelRequest({ path: "/model/%2E%2E/guardrail/x" }),
+      modelRequest({ path: "/model/.%2E/async-invoke" }),
+      modelRequest({ path: "/model/%2E/converse" }),
       modelRequest({ path: "/model//converse" }),
       modelRequest({ path: "/model/a%2/converse" }),
       modelRequest({ path: "/model/a b/converse" }),
@@ -381,6 +409,22 @@ describe("cloud request signing", () => {
     ]);
     for (const answer of answers) expect(answer.body).toMatchObject({ kind: "signed" });
     expect(current.cloud.count(PORTAL_HOST, "/federation/credentials")).toBe(2);
+  });
+
+  it("signs with the credentials another signature just renewed when it read the grant before them", async () => {
+    const current = await scene();
+    current.cloud.setRoleLifetimeMs(10 * 60_000);
+    const credentialRef = await signedIn(current);
+    current.clock.now += 6 * 60_000;
+    // The late signature reads the grant before the renewal stores new
+    // credentials, and resumes only after that renewal has finished.
+    const hold = current.store.holdNextResolve();
+    const late = sign(current, credentialRef);
+    await hold.read;
+    expect((await sign(current, credentialRef)).body).toMatchObject({ kind: "signed" });
+    hold.release();
+    expect((await late).body).toMatchObject({ kind: "signed" });
+    expect(current.store.values.has(credentialRef)).toBe(true);
   });
 
   it("renews the portal session when it has ended and keeps signing", async () => {

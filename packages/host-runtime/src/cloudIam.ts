@@ -418,7 +418,22 @@ export function createCloudIamRuntime(options: {
     return run;
   };
 
-  const renewOnce = async (credentialRef: string, current: StoredGrant): Promise<RenewOutcome> => {
+  const renewOnce = async (credentialRef: string, read: StoredGrant): Promise<RenewOutcome> => {
+    // The caller read the grant before this renewal began; another renewal
+    // may have stored new credentials since. Renewing from the stale copy
+    // would lose the generation check below, and could spend a refresh token
+    // the portal has already rotated, ending a grant that was just renewed.
+    const latest = await readGrant(credentialRef);
+    if (latest.kind === "missing") return { kind: "sign-in-again", reason: "expired" };
+    if (latest.kind !== "grant") return { kind: "unavailable" };
+    const current = latest.grant;
+    if (
+      current.generation !== read.generation &&
+      current.role !== undefined &&
+      current.role.expiresAt - ROLE_RENEW_SKEW_MS > now()
+    ) {
+      return { kind: "renewed", grant: current };
+    }
     let grant = current;
     let sessionRenewed = false;
     const end = async (reason: CloudIamSignInAgainReason): Promise<RenewOutcome> => {
@@ -544,6 +559,7 @@ export function createCloudIamRuntime(options: {
     }
     const role = grant.role;
     if (role === undefined) return { kind: "unavailable" };
+    if (!withinScope(input.request, grant.scope)) return { kind: "outside-scope" };
     const signed = signSigV4({
       request: {
         method: input.request.method,
@@ -619,7 +635,7 @@ function withinScope(request: CloudIamSignRequest, scope: CloudIamScope): boolea
     request.path.startsWith(scope.pathPrefix) &&
     request.path.length <= 2_048 &&
     SIGNABLE_PATH_PATTERN.test(request.path) &&
-    request.path.split("/").every((segment) => segment !== "." && segment !== "..") &&
+    request.path.split("/").every((segment) => !isDotSegment(segment)) &&
     request.query.length <= 8 &&
     request.query.every(
       ([key, value]) =>
@@ -633,6 +649,16 @@ function withinScope(request: CloudIamSignRequest, scope: CloudIamScope): boolea
       Object.keys(request.headers).length &&
     PAYLOAD_HASH_PATTERN.test(request.payloadHash)
   );
+}
+
+/**
+ * A path segment a URL parser resolves away. The WHATWG URL standard, which
+ * `fetch` follows, reads `%2E` as a dot here too: `/model/%2E%2E/async-invoke`
+ * is sent to `/async-invoke`, outside the prefix this grant signs for.
+ */
+function isDotSegment(segment: string): boolean {
+  const unescaped = segment.replaceAll("%2E", ".");
+  return unescaped === "." || unescaped === "..";
 }
 
 type MintOutcome =

@@ -474,9 +474,11 @@ conservative reading of decision 4 and the broker operations above:
   request, a date, a region, a service, a scope) is malformed and nothing is
   signed. Only `content-type` and `accept` may be signed besides the host and
   the broker's own date and session token. The path must be percent-encoded
-  once, with no empty or dot segment; the query holds at most eight visible
-  ASCII pairs; the hash is 64 hex digits. A request outside the scope is
-  `outside-scope` (read as `incompatible`) before any credential is renewed.
+  once, with no empty or dot segment (an escaped dot, `%2E`, counts as a dot,
+  since the URL parser `fetch` follows resolves it away); the query holds at
+  most eight visible ASCII pairs; the hash is 64 hex digits. A request
+  outside the scope is `outside-scope` (read as `incompatible`) before any
+  credential is renewed.
 - **What a signature is.** `authorization`, `x-amz-date`, and
   `x-amz-security-token`. The role's session token travels in the last
   because the cloud requires it beside every signature made with temporary
@@ -485,9 +487,12 @@ conservative reading of decision 4 and the broker operations above:
   naming any other header.
 - **Renewal.** Role credentials are renewed five minutes before they expire,
   and the portal session one minute before, single-flight per grant. A
-  session refresh refused as `invalid_grant` or `expired_token` is `expired`;
-  `invalid_client`, `unauthorized_client`, or `access_denied` is `revoked`;
-  both drop the grant. The portal does not tell an administrator's revocation
+  renewal starts from the grant as stored when it begins, not the copy its
+  caller read, so a signature that read the grant just before another renewal
+  stored new credentials signs with those instead of renewing from a spent
+  refresh token. A session refresh refused as `invalid_grant` or
+  `expired_token` is `expired`; `invalid_client`, `unauthorized_client`, or
+  `access_denied` is `revoked`; both drop the grant. The portal does not tell an administrator's revocation
   from a session that ran its course, so a withdrawn refresh token reads
   `expired`. A 401 from the role endpoint renews the session once; a second is
   `revoked`. A 403 or 404 there is `not-authorized` and keeps the grant, since
@@ -845,7 +850,8 @@ hosts and a descriptor outside the closed table before any request, refuses
 every request outside the scope and every sign body that brings its own
 digest, date, or scope without renewing or signing, produces a signature that
 fails for a changed method, host, path, query, signed header, or payload,
-renews credentials once for concurrent signatures, renews an ended session,
+renews credentials once for concurrent signatures, signs with credentials
+another signature renewed after it read the grant, renews an ended session,
 drops or keeps the grant for each session and role answer, refuses a raw
 resolve and a browser, tokenless, or remote caller, signs out at the portal
 even when it is down, and answers with no client secret, device code, portal
