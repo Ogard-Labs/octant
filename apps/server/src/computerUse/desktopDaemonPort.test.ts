@@ -132,9 +132,11 @@ async function callWithHome(home: string | undefined, socketPath: string): Promi
   }
   // The child's script is a constant; the module path and the call's inputs
   // travel in its environment, so no value is spliced into code.
-  const environment = {
+  const environment: NodeJS.ProcessEnv = {
     ...process.env,
-    OCTANT_TEST_DAEMON_PORT_MODULE: fileURLToPath(new URL("./desktopDaemonPort.ts", import.meta.url)),
+    OCTANT_TEST_DAEMON_PORT_MODULE: fileURLToPath(
+      new URL("./desktopDaemonPort.ts", import.meta.url),
+    ),
     OCTANT_TEST_DAEMON_DECLARATION: JSON.stringify(declaration),
     OCTANT_TEST_DAEMON_REQUEST: JSON.stringify(request),
   };
