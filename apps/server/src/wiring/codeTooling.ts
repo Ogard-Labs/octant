@@ -4,6 +4,7 @@ import { lstat, realpath } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import {
+  decodeBrowserThreadId,
   decodeCodeCheckoutId,
   decodeCodeFileId,
   decodeCodeThreadId,
@@ -19,9 +20,11 @@ import {
   resolveBundledLanguageServerActivation,
 } from "@octant/plugin-host/language-servers";
 import { createCodeRouteHandler, MAX_CODE_FILE_BODY_SIZE } from "../codeRoutes";
+import { createCodeLanguageAgentTools } from "../code/codeLanguageAgentTools";
 import { CodeLanguageService, type CodeLanguageServerComponent } from "../code/codeLanguageService";
 import { LanguageServerApprovalStore } from "../code/languageServerApprovals";
 import { createLanguageServerEgress } from "../code/languageServerEgress";
+import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { LanguageServerProcessPort } from "../code/languageServerProcess";
 import { installedLanguageServerComponents } from "../code/installedLanguageServers";
 import { isExtensionCompatibilityCompatible } from "../extensions/packageInspector";
@@ -57,6 +60,7 @@ import type { AgentRunsWiring } from "./agentRuns";
 import type { WorkspaceWiring } from "./workspace";
 import type { CodeWiring } from "./code";
 import type { CodeRuntimeWiring } from "./codeRuntime";
+import type { FoundationsWiring } from "./foundations";
 import type { IntegrationsWiring } from "./integrations";
 import type { ProvidersWiring } from "./providers";
 
@@ -68,16 +72,22 @@ export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence
     CodeWiring,
     "canAccessCodeProject" | "codeFileWatch" | "codeWorkingDirectoryProbePath" | "roots"
   > &
-  Pick<CodeRuntimeWiring, "codeOperationRuntime" | "routeCodeService" | "terminalProcessPort"> &
+  Pick<
+    CodeRuntimeWiring,
+    "codeOperationRuntime" | "contributeCodeTools" | "routeCodeService" | "terminalProcessPort"
+  > &
+  Pick<FoundationsWiring, "browserAuthority"> &
   Pick<IntegrationsWiring, "toolEgressRules"> &
   Pick<ProvidersWiring, "extensionLifecycleService" | "extensionPackageStore">;
 
 export function wireCodeTooling(deps: CodeToolingDependencies) {
   const {
+    browserAuthority,
     canAccessCodeProject,
     codeFileWatch,
     codeOperationRuntime,
     codeSessionAuthority,
+    contributeCodeTools,
     codeWorkingDirectoryProbePath,
     extensionLifecycleService,
     extensionPackageStore,
@@ -236,6 +246,22 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     });
     yield* Effect.addFinalizer(() => Effect.sync(unsubscribeLanguageServerAuthority));
     yield* Effect.addFinalizer(() => Effect.promise(() => languageService.close()));
+    // The same reads as app-managed tools on each Code turn whose provider
+    // carries them, Plan included (decision D5). Each call is checked at the
+    // tool-call choke point, then by the service on the turn's window.
+    contributeCodeTools(({ windowId, thread, readThread }) =>
+      createCodeLanguageAgentTools({
+        windowId,
+        thread,
+        readThread,
+        authority: () => browserAuthority.resolve(decodeBrowserThreadId(String(thread.id)), "code"),
+        externalContentIngested: () =>
+          readThreadExternalContentTaint(persistence.connection, String(thread.id))
+            .externalContentIngested,
+        language: languageService,
+        uuid: randomUUID,
+      }),
+    );
     const codeRoutes = createCodeRouteHandler({
       service: routeCodeService,
       ...(projectTerminals === undefined ? {} : { projectTerminals }),

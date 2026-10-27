@@ -209,6 +209,12 @@ may then write the checkout and run programs as a terminal does, and reaches
 the network through its own `proxied` egress proxy under the Project's rules,
 audited like a harness command's launch
 ([Repository tooling](design/language-services.md#repository-tooling)).
+Agents read the same servers through two read-only app-managed tools in the
+closed catalog, `code-diagnostics` and `code-definition`, offered on every Code
+turn (Plan included) whose provider carries Octant's tools; they read the saved
+file, never an editor's draft, and never start or read through a server that
+runs repository tooling, approved or not
+([agent read rules](design/language-services.md#agent-read-rules)).
 
 **Host resources.** `GET /api/host/resources` is a read-only snapshot of this
 host's load: CPU use averaged over a short sample of the process's CPU times,

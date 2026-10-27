@@ -611,6 +611,7 @@ export function startOctantServer(
       codeOperationRuntime,
       codeService,
       codeTurnDecisions,
+      contributeCodeTools,
       routeCodeService,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
@@ -698,10 +699,12 @@ export function startOctantServer(
       remoteServerGrantLocalRoutes,
       remoteServerGrants,
     } = yield* wireCodeTooling({
+      browserAuthority,
       canAccessCodeProject,
       codeFileWatch,
       codeOperationRuntime,
       codeSessionAuthority,
+      contributeCodeTools,
       codeWorkingDirectoryProbePath,
       extensionLifecycleService,
       extensionPackageStore,
