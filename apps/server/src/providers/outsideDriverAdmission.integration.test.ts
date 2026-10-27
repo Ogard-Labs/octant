@@ -533,16 +533,23 @@ describe("outside driver admission end to end", () => {
       driver: { version: updated.version, digest: updated.digest },
     });
 
-    // The journal holds the move: a rebuild reads the same binding back.
+    // The pass a host start runs finds nothing left to move and journals nothing.
+    const head = context.persistence.journal.headSequence();
+    expect(await context.providers.rebindOutsideDrivers()).toEqual([]);
+    expect(context.persistence.journal.headSequence()).toBe(head);
+
+    // The journal holds the move: a rebuild from it reads back the same
+    // provider and the same cleared catalogue.
+    const moved = context.instance();
+    const catalog = context.persistence.readProviderCatalog?.(instanceId);
     rebuildAll({
       connection: context.persistence.connection,
       journal: context.persistence.journal,
       projections: context.persistence.projections,
       clock: () => now,
     });
-    expect(context.instance()).toMatchObject({
-      configuration: { driver: { digest: updated.digest } },
-    });
+    expect(context.instance()).toEqual(moved);
+    expect(context.persistence.readProviderCatalog?.(instanceId)).toEqual(catalog);
     expect(context.admission.activation(outside(context.instance()))).toEqual({
       kind: "effective",
     });
