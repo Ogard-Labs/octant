@@ -62,25 +62,50 @@ export function parsePropertyList(xml: string): PropertyListValue | undefined {
 
 // Declarations and comments are skipped as the scan reaches them rather than
 // stripped beforehand: stripping once leaves a comment that overlapping
-// markers form (`<!-<!-- -->-`). Here such a marker, or one never closed, is a
-// stray `<` and the whole document is unreadable.
+// markers form (`<!-<!-- -->-`). Here such a marker, a marker never closed, or
+// a comment holding `--` (which XML forbids) makes the whole document
+// unreadable.
+function skippedMarkupEnd(xml: string, at: number): number | undefined {
+  if (xml.startsWith("<?", at)) {
+    const end = xml.indexOf("?>", at + 2);
+    return end < 0 ? undefined : end + 2;
+  }
+  if (xml.startsWith("<!--", at)) {
+    const end = xml.indexOf("--", at + 4);
+    return end < 0 || !xml.startsWith("-->", end) ? undefined : end + 3;
+  }
+  if (xml.startsWith("<!DOCTYPE", at)) {
+    const end = xml.indexOf(">", at);
+    return end < 0 ? undefined : end + 1;
+  }
+  return xml.startsWith("<!", at) ? undefined : at;
+}
+
 function tokenize(xml: string): ReadonlyArray<Token> | undefined {
   const tokens: Token[] = [];
-  const pattern =
-    /(<\?[\s\S]*?\?>|<!--[\s\S]*?-->|<!DOCTYPE[^>]*>)|<(\/?)([A-Za-z]+)(?:\s[^<>]*?)?\s*(\/?)>|([^<]+)|(<)/g;
-  for (const match of xml.matchAll(pattern)) {
-    if (tokens.length >= MAX_PROPERTY_LIST_TOKENS || match[6] !== undefined) return undefined;
-    if (match[1] !== undefined) continue;
-    const text = match[5];
+  const pattern = /<(\/?)([A-Za-z]+)(?:\s[^<>]*?)?\s*(\/?)>|([^<]+)/y;
+  let at = 0;
+  while (at < xml.length) {
+    const next = skippedMarkupEnd(xml, at);
+    if (next === undefined) return undefined;
+    if (next !== at) {
+      at = next;
+      continue;
+    }
+    pattern.lastIndex = at;
+    const match = pattern.exec(xml);
+    if (match === null || tokens.length >= MAX_PROPERTY_LIST_TOKENS) return undefined;
+    at = pattern.lastIndex;
+    const text = match[4];
     if (text !== undefined) {
       tokens.push({ kind: "text", value: text });
       continue;
     }
-    const name = match[3] ?? "";
+    const name = match[2] ?? "";
     tokens.push(
-      match[2] === "/"
+      match[1] === "/"
         ? { kind: "close", name }
-        : match[4] === "/"
+        : match[3] === "/"
           ? { kind: "empty", name }
           : { kind: "open", name },
     );
