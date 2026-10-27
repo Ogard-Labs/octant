@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sha256Hex, sigV4Date, sigV4SigningKey, signSigV4 } from "./sigV4";
+import { sha256Hex, sigV4Date, sigV4SigningKey, signSigV4, type SigV4Request } from "./sigV4";
 
 // The cloud's own published examples: the signature test suite's credentials
 // and the documented signing-key derivation.
@@ -61,6 +61,80 @@ describe("Signature Version 4", () => {
       "5d672d79c15b13162d9279b0855cfba6789a8edb4c82c400e06b5924a6f2b5d7",
     );
   });
+
+  // More of the published test suite (aws4_testsuite, as botocore ships it):
+  // query order and encoding, a UTF-8 path, header whitespace, the unreserved
+  // set, a signed session token, and a form body.
+  const SUITE_DEFAULTS: SigV4Request = {
+    method: "GET",
+    host: "example.amazonaws.com",
+    path: "/",
+    query: [],
+    headers: {},
+    payloadHash: EMPTY_PAYLOAD,
+  };
+  it.each([
+    {
+      name: "get-vanilla-query-order-key-case",
+      request: {
+        query: [
+          ["Param2", "value2"],
+          ["Param1", "value1"],
+        ] as const,
+      },
+      signature: "b97d918cfa904a5beff61c982a1b6f458b799221646efd99d3219ec94cdf2500",
+    },
+    {
+      name: "get-vanilla-utf8-query",
+      request: { query: [["\u1234", "bar"]] as const },
+      signature: "2cdec8eed098649ff3a119c94853b13c643bcf08f8b0a1d91e12c9027818dd04",
+    },
+    {
+      name: "get-utf8",
+      request: { path: "/\u1234" },
+      signature: "8318018e0b0f223aa2bbf98705b62bb787dc9c0e678f255a891fd03141be5d85",
+    },
+    {
+      name: "get-header-value-trim",
+      request: { headers: { "my-header1": " value1", "my-header2": ' "a   b   c"' } },
+      signature: "acc3ed3afb60bb290fc8d2dd0098b9911fcaa05412b367055dee359757a9c736",
+    },
+    {
+      name: "get-unreserved",
+      request: { path: "/-._~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz" },
+      signature: "07ef7494c76fa4850883e2b006601f940f8a34d404d0cfa977f52a65bbf5f24f",
+    },
+    {
+      name: "get-vanilla-with-session-token",
+      request: {},
+      sessionToken: "6e86291e8372ff2a2260956d9b8aae1d763fbf315fa00fa31553b73ebf194267",
+      signature: "07ec1639c89043aa0e3e2de82b96708f198cceab042d4a97044c66dd9f74e7f8",
+    },
+    {
+      name: "post-x-www-form-urlencoded",
+      request: {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        payloadHash: sha256Hex("Param1=value1"),
+      },
+      signature: "ff11897932ad3f4e8b18135d722051e5ac45fc38421b1da7b9d196a0fe09473a",
+    },
+  ])(
+    "signs the test suite's $name exactly as published",
+    ({ request, sessionToken, signature }) => {
+      const signed = signSigV4({
+        request: { ...SUITE_DEFAULTS, ...request },
+        credentials:
+          sessionToken === undefined
+            ? EXAMPLE_CREDENTIALS
+            : { ...EXAMPLE_CREDENTIALS, sessionToken },
+        region: "us-east-1",
+        service: "service",
+        amzDate: "20150830T123600Z",
+      });
+      expect(signed.signature).toBe(signature);
+    },
+  );
 
   it("signs a session token as a header of its own and encodes a path segment twice", () => {
     const base = {

@@ -841,7 +841,9 @@ request fields; the server process never holds a key. Linux container capable
 against fakes; a real smoke needs an AWS organization and billed Bedrock
 access. _Verification:_ contracts, domain, provider-sdk, host-runtime, server,
 and CLI tests. _Evidence:_ Signature Version 4 reproduces the cloud's
-published signing-key and signature examples; against an in-memory portal
+published signing-key and signature examples, including its test suite's
+query-order, UTF-8, header-trim, unreserved-path, session-token, and form-body
+cases; against an in-memory portal
 and a Bedrock endpoint that rebuilds each signature from the request it
 received, the broker signs in with a device code at the portal's own page,
 mints the role before storing anything, stores nothing for a declined or
