@@ -6076,14 +6076,18 @@ same. This holds in Chat, Work, and Code.
   Desktop tool, a Code Project's stored desktop recipe with its settings
   editor, and E2B, the first of the two named cloud providers (E2B and Cua
   Spaces), are built; Cua Spaces, reached through the person's local Cua daemon, is
-  designed (accepted on 2026-10-27), and its local-daemon port is built but
-  its driver is not yet; see
+  designed (accepted on 2026-10-27), and its local-daemon port and its driver
+  for a Space on this machine are built but offered on no host until the
+  maintainer's live smoke passes; see
   [Disposable desktops](design/disposable-desktops.md#cua-spaces-through-the-local-daemon).
   A driver whose provider runs a daemon on this machine reaches it only
   through the host's daemon port: one Unix socket under the home of Octant's
   user that the host checks for symlinks and other owners before connecting,
   only the methods the driver declares, and no header the driver supplies.
-  A cloud driver reaches its provider only through the host's
+  Octant stores no credential for such a provider: its daemon holds the
+  person's sign-in, a recipe names one of the driver's placements instead,
+  and a lease records the daemon it used so teardown goes through that same
+  daemon. A cloud driver reaches its provider only through the host's
   HTTPS port, which sends nothing outside the hosts the driver declares and
   attaches the person's key from the credential broker's
   `/v1/desktop-provider-credentials/*` namespace itself; a person confirms
