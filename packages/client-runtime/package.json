@@ -66,6 +66,7 @@
     "./list-arrangement": "./src/listArrangement.ts",
     "./thread-checkpoint-client": "./src/threadCheckpointClient.ts",
     "./code-file-listing-client": "./src/codeFileListingClient.ts",
+    "./code-debug-client": "./src/codeDebugClient.ts",
     "./local-server-client": "./src/localServerClient.ts",
     "./desktop-pane-client": "./src/desktopPaneClient.ts",
     "./machine-change-client": "./src/machineChangeClient.ts",

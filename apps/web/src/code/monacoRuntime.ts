@@ -2,6 +2,7 @@ import * as monaco from "monaco-editor";
 import type {
   MonacoAdapterRuntime,
   MonacoAdapterSession,
+  MonacoDebugDecorations,
   MonacoDefinitionLink,
   MonacoDiffRuntime,
   MonacoDiffSession,
@@ -46,9 +47,15 @@ export const mount: MonacoAdapterRuntime["mount"] = (element, options) => {
     lineHeight: typography.lineHeight,
     fontLigatures: typography.fontLigatures,
     minimap: { enabled: false },
+    glyphMargin: options.onToggleBreakpoint !== undefined,
     theme: "vs-dark",
   });
   const disposeMenu = installNativeEditorMenu(editor);
+  const debugDecorations = editor.createDecorationsCollection();
+  const disposeGutter =
+    options.onToggleBreakpoint === undefined
+      ? undefined
+      : installBreakpointGutter(editor, options.onToggleBreakpoint);
   const change = lease.model.onDidChangeContent(() => {
     if (lease.controlledUpdateDepth === 0) options.onChange(lease.model.getValue());
   });
@@ -64,6 +71,8 @@ export const mount: MonacoAdapterRuntime["mount"] = (element, options) => {
       if (disposed) return;
       disposed = true;
       disposeMenu();
+      disposeGutter?.();
+      debugDecorations.clear();
       change.dispose();
       if (bridge !== undefined) {
         editorBridges.delete(editor);
@@ -86,8 +95,66 @@ export const mount: MonacoAdapterRuntime["mount"] = (element, options) => {
       editor.setSelection(range);
       editor.revealRangeInCenterIfOutsideViewport(range);
     },
+    setDebugDecorations: (decorations) => debugDecorations.set(debugDecorationsFor(decorations)),
   } satisfies MonacoAdapterSession;
 };
+
+/**
+ * Breakpoints are toggled from the glyph gutter with the pointer, and from
+ * the keyboard with F9 on the cursor's line, so the gutter is never the only
+ * way to set one.
+ */
+function installBreakpointGutter(
+  editor: monaco.editor.IStandaloneCodeEditor,
+  toggle: (lineNumber: number) => void,
+): () => void {
+  const mouse = editor.onMouseDown((event) => {
+    if (event.target.type !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) return;
+    const lineNumber = event.target.position?.lineNumber;
+    if (lineNumber !== undefined) toggle(lineNumber);
+  });
+  const action = editor.addAction({
+    id: "octant.debug.toggle-breakpoint",
+    label: "Toggle breakpoint",
+    keybindings: [monaco.KeyCode.F9],
+    run: (target) => {
+      const lineNumber = target.getPosition()?.lineNumber;
+      if (lineNumber !== undefined) toggle(lineNumber);
+    },
+  });
+  return () => {
+    mouse.dispose();
+    action.dispose();
+  };
+}
+
+function debugDecorationsFor(
+  decorations: MonacoDebugDecorations,
+): monaco.editor.IModelDeltaDecoration[] {
+  const breakpoints = decorations.breakpoints.map((line) => ({
+    range: new monaco.Range(line, 1, line, 1),
+    options: {
+      glyphMarginClassName: "code-debug-breakpoint",
+      glyphMarginHoverMessage: { value: "Breakpoint" },
+      stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+    },
+  }));
+  const stopped = decorations.stoppedLine;
+  return stopped === undefined
+    ? breakpoints
+    : [
+        ...breakpoints,
+        {
+          range: new monaco.Range(stopped, 1, stopped, 1),
+          options: {
+            isWholeLine: true,
+            className: "code-debug-stopped-line",
+            glyphMarginClassName: "code-debug-stopped",
+            glyphMarginHoverMessage: { value: "The program is stopped here" },
+          },
+        },
+      ];
+}
 
 /** The owner of the markers the host's language server reports. */
 const LANGUAGE_MARKER_OWNER = "octant-language";

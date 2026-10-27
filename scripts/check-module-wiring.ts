@@ -659,22 +659,6 @@ export function findUnregisteredRouteModules(
  */
 export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
   [
-    "/api/code/debug/approvals",
-    "2026-10-27: confirming a debug configuration is served ahead of its caller, the Run and debug panel's confirmation card (docs/design/language-services.md, debugger delivery 8c). Remove when the panel calls it.",
-  ],
-  [
-    "/api/code/debug/configurations",
-    "2026-10-27: the adapters, confirmed configurations, and launch-file proposals are served ahead of their caller, the Run and debug panel's configuration list (docs/design/language-services.md, debugger delivery 8c). Remove when the panel calls it.",
-  ],
-  [
-    "/api/code/debug/session",
-    "2026-10-27: a running debug session's state, stepping, stack, variables, and Stop are served ahead of their caller, the Run and debug panel (docs/design/language-services.md, debugger delivery 8c). Remove when the panel calls it.",
-  ],
-  [
-    "/api/code/debug/start",
-    "2026-10-27: starting a debug session is served ahead of its caller, the Run and debug panel's Start (docs/design/language-services.md, debugger delivery 8c). Remove when the panel calls it.",
-  ],
-  [
     "/api/code/language/documents",
     "Language services' document sync, served by the host since 2026-10-26 ahead of the editor that calls it (docs/design/language-services.md, delivery plan slice 3). Remove once the Code editor syncs its open documents.",
   ],

@@ -1,4 +1,5 @@
 import {
+  Bug,
   Bot,
   CircleDashed,
   FileStack,
@@ -33,6 +34,7 @@ const ICONS: Readonly<Record<RightUtilityDockSurfaceId, LucideIcon>> = {
   "ios-simulator": Smartphone,
   "android-emulator": Tablet,
   desktop: Monitor,
+  debug: Bug,
   plan: ListChecks,
   "side-chat": MessageCircle,
   terminal: SquareTerminal,

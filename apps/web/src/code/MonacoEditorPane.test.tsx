@@ -4,8 +4,39 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { MonacoAdapterRuntime } from "./MonacoEditorAdapter";
 import { MonacoEditorPane, type CodeEditorFileProjection } from "./MonacoEditorPane";
+import { codeDebugThreadKey, codeDebugWindowState } from "../debug/codeDebugWindowState";
 
 describe("MonacoEditorPane", () => {
+  it("sets a breakpoint from the gutter for the thread's debugging and marks the line the program stopped on", async () => {
+    const fixture = runtime();
+    render(
+      <MonacoEditorPane client={client()} file={textFile()} loadRuntime={fixture.loadRuntime} />,
+    );
+    await waitFor(() => expect(fixture.options?.onToggleBreakpoint).toBeDefined());
+    const key = codeDebugThreadKey(ids.thread, ids.checkout);
+
+    act(() => fixture.options?.onToggleBreakpoint?.(3));
+    expect(codeDebugWindowState.read(key).breakpoints.get("src/index.ts" as never)).toEqual([3]);
+    await waitFor(() =>
+      expect(fixture.setDebugDecorations).toHaveBeenLastCalledWith({ breakpoints: [3] }),
+    );
+    // The panel's launch file proposals read the editor's current file.
+    expect(codeDebugWindowState.read(key).currentFile).toBe("src/index.ts");
+
+    act(() => codeDebugWindowState.setStopped(key, { path: "src/index.ts" as never, line: 3 }));
+    await waitFor(() =>
+      expect(fixture.setDebugDecorations).toHaveBeenLastCalledWith({
+        breakpoints: [3],
+        stoppedLine: 3,
+      }),
+    );
+    act(() => codeDebugWindowState.setStopped(key, undefined));
+    act(() => fixture.options?.onToggleBreakpoint?.(3));
+    await waitFor(() =>
+      expect(fixture.setDebugDecorations).toHaveBeenLastCalledWith({ breakpoints: [] }),
+    );
+  });
+
   it("offers an explicit external-editor handoff when the desktop host provides it", async () => {
     const open = vi.fn(async () => undefined);
     render(
@@ -764,6 +795,7 @@ function client(
 function runtime() {
   let options: Parameters<MonacoAdapterRuntime["mount"]>[1] | undefined;
   const setValue = vi.fn();
+  const setDebugDecorations = vi.fn();
   const loadRuntime = vi.fn(
     async (): Promise<MonacoAdapterRuntime> => ({
       mount: (_element, value) => {
@@ -773,6 +805,7 @@ function runtime() {
           focus: vi.fn(),
           setReadOnly: vi.fn(),
           setValue,
+          setDebugDecorations,
         };
       },
     }),
@@ -780,6 +813,7 @@ function runtime() {
   return {
     loadRuntime,
     setValue,
+    setDebugDecorations,
     get options() {
       return options;
     },

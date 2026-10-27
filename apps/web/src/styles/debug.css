@@ -1,0 +1,440 @@
+/* Run and debug: a Code thread's debug sessions in the dock, and the
+   breakpoints and stopped line in the editor's gutter. One toolbar, then the
+   configurations or the running session; the panel adapts to the dock's
+   width, so a narrow dock stacks every section. */
+
+.run-debug {
+  container-type: inline-size;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  background: var(--oct-bg);
+}
+
+.run-debug__toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-width: 0;
+  height: 40px;
+  padding: 0 var(--oct-space-1) 0 var(--oct-space-3);
+  border-bottom: 1px solid var(--oct-border);
+  color: var(--oct-muted);
+}
+
+.run-debug__title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-debug__body,
+.run-debug__session {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-3);
+  min-height: 0;
+  padding: var(--oct-space-3);
+  overflow: auto;
+}
+
+.run-debug__session {
+  padding: 0;
+  overflow: hidden;
+}
+
+.run-debug__line {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.run-debug__session > .run-debug__line {
+  padding: 0 var(--oct-space-3);
+}
+
+.run-debug__alert {
+  margin: 0 var(--oct-space-3);
+}
+
+/* ─── cards: refusals and the confirmation ─────────────────────────── */
+.run-debug__card {
+  padding: var(--oct-space-4);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface);
+}
+
+.run-debug__card-title {
+  margin: 0 0 var(--oct-space-1);
+  font-size: var(--oct-text-base);
+  font-weight: var(--oct-weight-strong);
+  overflow-wrap: anywhere;
+}
+
+.run-debug__card-lede {
+  margin: 0 0 var(--oct-space-3);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.run-debug__card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--oct-space-2);
+}
+
+.run-debug__facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--oct-space-1) var(--oct-space-3);
+  margin: 0 0 var(--oct-space-3);
+  font-size: var(--oct-text-xs);
+}
+
+.run-debug__facts dt {
+  color: var(--oct-meta);
+}
+
+.run-debug__facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.run-debug__facts ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.run-debug__facts code,
+.run-debug__variable,
+.run-debug__console-lines,
+.run-debug__source pre {
+  font-family: var(--oct-font-mono);
+}
+
+@container (max-width: 360px) {
+  .run-debug__facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .run-debug__facts dd {
+    margin-bottom: var(--oct-space-2);
+  }
+}
+
+.run-debug__hint,
+.run-debug__empty {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.run-debug__hint {
+  margin-bottom: var(--oct-space-3);
+}
+
+/* ─── sections and lists ───────────────────────────────────────────── */
+.run-debug__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+  min-width: 0;
+  min-height: 0;
+}
+
+.run-debug__section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+}
+
+.run-debug__heading {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+}
+
+.run-debug__list,
+.run-debug__frames,
+.run-debug__tree {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.run-debug__row {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-width: 0;
+  padding: var(--oct-space-2) 0;
+  border-bottom: 1px solid var(--oct-border-soft);
+}
+
+.run-debug__row-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.run-debug__row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-debug__row-meta {
+  overflow: hidden;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-debug__row--unmappable .run-debug__row-name {
+  color: var(--oct-muted);
+}
+
+/* ─── the form ─────────────────────────────────────────────────────── */
+.run-debug__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-3);
+}
+
+.run-debug__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-1);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.run-debug__check {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  font-size: var(--oct-text-xs);
+}
+
+/* ─── the running session ──────────────────────────────────────────── */
+.run-debug__controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--oct-space-1) var(--oct-space-1) var(--oct-space-1) var(--oct-space-3);
+  border-bottom: 1px solid var(--oct-border-soft);
+}
+
+.run-debug__session-name {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A narrow dock gives the session's name a row of its own rather than
+   squeezing it to nothing beside the toolbar (observed at 320px). */
+@container (max-width: 380px) {
+  .run-debug__controls {
+    flex-wrap: wrap;
+  }
+
+  .run-debug__session-name {
+    flex-basis: 100%;
+  }
+
+  .run-debug__state {
+    flex: 1;
+  }
+}
+
+.run-debug__state {
+  margin-right: var(--oct-space-2);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  white-space: nowrap;
+}
+
+.run-debug__panes {
+  display: grid;
+  grid-template-rows: auto auto minmax(160px, 1fr);
+  gap: var(--oct-space-4);
+  min-height: 0;
+  padding: var(--oct-space-3);
+  overflow: auto;
+}
+
+/* The button recipe centres its content; a row reads from the left. */
+.run-debug__frame {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+  width: 100%;
+  padding: var(--oct-space-1) var(--oct-space-2);
+  border-radius: var(--oct-radius-sm);
+  text-align: left;
+}
+
+.run-debug__frame-name,
+.run-debug__frame-place {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-debug__frame-place {
+  flex: none;
+  max-width: 55%;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.run-debug__toggle,
+.run-debug__leaf {
+  display: flex;
+  justify-content: flex-start;
+  align-items: baseline;
+  gap: var(--oct-space-1);
+  width: 100%;
+  min-width: 0;
+  padding: 2px var(--oct-space-1);
+  text-align: left;
+}
+
+.run-debug__leaf {
+  padding-left: var(--oct-space-5);
+}
+
+.run-debug__tree .run-debug__tree {
+  padding-left: var(--oct-space-3);
+}
+
+.run-debug__scope-name {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.run-debug__variable {
+  display: flex;
+  gap: var(--oct-space-2);
+  min-width: 0;
+  font-size: var(--oct-text-xs);
+}
+
+.run-debug__variable-name {
+  flex: none;
+  color: var(--oct-accent-fg);
+}
+
+.run-debug__variable-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-debug__source {
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+}
+
+.run-debug__source-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-1) var(--oct-space-2);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.run-debug__source pre {
+  max-height: 240px;
+  margin: 0;
+  padding: var(--oct-space-2);
+  overflow: auto;
+  font-size: var(--oct-text-xs);
+}
+
+.run-debug__console {
+  min-height: 160px;
+}
+
+.run-debug__console-lines {
+  flex: 1;
+  min-height: 80px;
+  margin: 0;
+  padding: var(--oct-space-2);
+  overflow: auto;
+  border: 1px solid var(--oct-border-soft);
+  border-radius: var(--oct-radius-sm);
+  list-style: none;
+  font-size: var(--oct-text-xs);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.run-debug__console-lines [data-kind="stderr"],
+.run-debug__console-lines [data-kind="notice"] {
+  color: var(--oct-warn-fg);
+}
+
+.run-debug__console-lines [data-kind="input"],
+.run-debug__console-lines [data-kind="console"] {
+  color: var(--oct-meta);
+}
+
+.run-debug__console-lines [data-kind="important"] {
+  font-weight: var(--oct-weight-medium);
+}
+
+/* ─── the editor's gutter ──────────────────────────────────────────── */
+.code-debug-breakpoint::before,
+.code-debug-stopped::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+}
+
+.code-debug-breakpoint::before {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-danger);
+}
+
+.code-debug-stopped::after {
+  width: 0;
+  height: 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 8px solid var(--oct-warn);
+}
+
+/* Monaco draws its dark theme in both app themes, so the band is the warning
+   colour over whatever the editor paints rather than a light-theme wash. */
+.code-debug-stopped-line {
+  background: color-mix(in oklab, var(--oct-warn) 24%, transparent);
+}
