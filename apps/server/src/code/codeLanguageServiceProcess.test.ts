@@ -38,9 +38,11 @@ import {
 import { deriveCodeFileId } from "./codeFileIdentity";
 import {
   CodeLanguageService,
+  type CodeLanguageAgentReadResult,
   type CodeLanguageServerComponent,
   type CodeLanguageServiceOptions,
 } from "./codeLanguageService";
+import type { LanguageServerEgress } from "./languageServerEgress";
 import { LanguageServerProcessPort } from "./languageServerProcess";
 
 const scopeId = "10000000-0000-4000-8000-000000000001" as WindowId;
@@ -143,6 +145,11 @@ interface Harness {
   ): Promise<CodeLanguageDocumentResult>;
   diagnostics(fileId: CodeFileId, threadId?: CodeThread["id"]): Promise<CodeLanguageReadResult>;
   definition(fileId: CodeFileId, line: number, character: number): Promise<CodeLanguageReadResult>;
+  /** An agent's read of the saved file, by path. */
+  agent(
+    path: string,
+    position?: { readonly line: number; readonly character: number },
+  ): Promise<CodeLanguageAgentReadResult>;
 }
 
 function harness(input: {
@@ -155,6 +162,8 @@ function harness(input: {
   readonly now?: () => number;
   readonly limits?: CodeLanguageServiceOptions["limits"];
   readonly watcher?: CodeLanguageServiceOptions["watcher"];
+  readonly approvals?: CodeLanguageServiceOptions["approvals"];
+  readonly egress?: LanguageServerEgress;
 }): Harness {
   const state = {
     thread: codeThread(),
@@ -168,6 +177,7 @@ function harness(input: {
   const processes = new LanguageServerProcessPort({
     confinement: input.confinement,
     ...(input.receipts === undefined ? {} : { receiptDirectory: input.receipts }),
+    ...(input.egress === undefined ? {} : { egress: input.egress }),
   });
   const service = new CodeLanguageService({
     authority: {
@@ -197,6 +207,7 @@ function harness(input: {
     ...(input.now === undefined ? {} : { now: input.now }),
     ...(input.limits === undefined ? {} : { limits: input.limits }),
     ...(input.watcher === undefined ? {} : { watcher: input.watcher }),
+    ...(input.approvals === undefined ? {} : { approvals: input.approvals }),
   });
   services.push(service);
   const scope = () => ({ threadId: state.thread.id, checkoutId: state.checkout.id });
@@ -228,6 +239,13 @@ function harness(input: {
       service.read(
         { scopeId, principal: "local-window" },
         { kind: "definition", ...scope(), fileId, position: { line, character } },
+      ),
+    agent: (path, position) =>
+      service.readForAgent(
+        scopeId,
+        position === undefined
+          ? { kind: "diagnostics", ...scope(), path: decodeCodeRelativePath(path) }
+          : { kind: "definition", ...scope(), path: decodeCodeRelativePath(path), position },
       ),
   };
 }
@@ -384,6 +402,74 @@ describe("Code language service with the bundled TypeScript server", () => {
       ]);
     },
   );
+
+  it.runIf(typeScriptBinary !== undefined && confinementRuntime)(
+    "answers an agent's reads of a saved file in a Plan thread from the confined real binary",
+    async () => {
+      const paths = workspace();
+      const binary = typeScriptBinary ?? "";
+      const prepared: ProcessConfinementPrepareInput[] = [];
+      const live = makeProcessConfinementLive();
+      const test = harness({
+        ...paths,
+        receipts: paths.receipts,
+        component: {
+          componentKey: "bundled-typescript",
+          approvalKey: "bundled-typescript",
+          languages: ["typescript", "typescriptreact", "javascript", "javascriptreact"],
+          launchClass: "static",
+          executable: async () => binary,
+          args: ["--lsp", "--stdio"],
+          installRoot: dirname(binary),
+          sourceLabel: "typescript",
+        },
+        confinement: {
+          prepare: (input) => {
+            prepared.push(input);
+            return live.prepare(input);
+          },
+        },
+      });
+      expect(test.state.thread.executionPolicy).toBe("plan");
+
+      // No editor holds the file: the agent's read opens it from disk.
+      expect(await test.agent("b.ts")).toMatchObject({
+        status: "diagnostics",
+        diagnostics: [
+          {
+            path: "b.ts",
+            severity: "error",
+            range: { start: { line: 1, character: 13 }, end: { line: 1, character: 18 } },
+            message: "Type 'string' is not assignable to type 'number'.",
+          },
+        ],
+      });
+      expect(await test.agent("b.ts", { line: 1, character: 30 })).toMatchObject({
+        status: "definition",
+        targets: [
+          {
+            kind: "checkout-location",
+            path: "a.ts",
+            range: { start: { line: 0, character: 16 }, end: { line: 0, character: 21 } },
+          },
+        ],
+      });
+
+      // A saved fix is what the next read sees.
+      writeFileSync(
+        join(paths.checkout, "b.ts"),
+        'import { greet } from "./a.js";\nexport const count: string = greet("x");\n',
+      );
+      expect(await test.agent("b.ts")).toMatchObject({ status: "diagnostics", diagnostics: [] });
+      expect(prepared).toHaveLength(1);
+      expect(prepared[0]).toMatchObject({
+        writeBoundRoot: false,
+        networkEgress: "none",
+        allowProcessExec: false,
+        allowProcessFork: false,
+      });
+    },
+  );
 });
 
 describe("Code language service authority", () => {
@@ -523,6 +609,148 @@ describe("Code language service authority", () => {
   });
 });
 
+describe("Code language service reads for an agent", () => {
+  function fake(
+    component?: Partial<CodeLanguageServerComponent>,
+    options: Pick<Parameters<typeof harness>[0], "approvals" | "egress"> = {},
+  ) {
+    const paths = workspace();
+    const log = join(paths.root, "server.log");
+    const test = harness({
+      ...paths,
+      ...options,
+      component: { ...fakeComponent("normal", log), ...component },
+      confinement: passthrough,
+    });
+    return { paths, log, test };
+  }
+  const changes = (log: string) =>
+    logged(log)
+      .filter((entry) => entry.method === "textDocument/didChange")
+      .map(
+        (entry) =>
+          (entry.params as { contentChanges: ReadonlyArray<{ text: string }> }).contentChanges[0]
+            ?.text,
+      );
+
+  it("refuses before any launch as the editor's reads are refused, and by path", async () => {
+    const { test } = fake();
+    test.state.reach = false;
+    expect(await test.agent("b.ts")).toEqual({ status: "refused", reason: "no-reach" });
+    test.state.reach = true;
+    test.state.thread = codeThread({ lifecycle: "archived" });
+    test.state.threads = [test.state.thread];
+    expect(await test.agent("b.ts")).toEqual({ status: "refused", reason: "thread-inactive" });
+    test.state.thread = codeThread();
+    test.state.threads = [test.state.thread];
+    expect(await test.agent("escape.ts")).toEqual({
+      status: "refused",
+      reason: "path-outside-checkout",
+    });
+    expect(await test.agent("missing.ts")).toEqual({
+      status: "refused",
+      reason: "path-outside-checkout",
+    });
+    expect(test.launches()).toBe(0);
+  });
+
+  it("never starts or reads through a server that runs repository tooling, even one a local approval covers", async () => {
+    const { test, log } = fake(
+      { launchClass: "repo-tooling" },
+      {
+        approvals: { holds: () => true, record: () => "recorded" },
+        egress: {
+          start: async () => ({
+            status: "listening",
+            endpoint: { kind: "loopback", port: 9 },
+            token: "language-server-egress",
+            close: async () => undefined,
+          }),
+        },
+      },
+    );
+    test.state.thread = codeThread({ executionPolicy: "full-access" });
+    test.state.threads = [test.state.thread];
+    const refused = { status: "refused", reason: "local-host-required" };
+    expect(await test.agent("b.ts")).toEqual(refused);
+    expect(test.launches()).toBe(0);
+
+    // The person at the machine opens a file, so the approved server runs;
+    // the agent is still refused it, and its read sends the server nothing.
+    const fileId = syncedFileId(await test.open("a.ts"));
+    expect(test.launches()).toBe(1);
+    expect(await test.agent("b.ts")).toEqual(refused);
+    expect(await test.agent("a.ts", { line: 0, character: 16 })).toEqual(refused);
+    // The editor's own read goes through, and answers after everything sent before it.
+    expect((await test.definition(fileId, 0, 16)).status).toBe("definition");
+    expect(test.launches()).toBe(1);
+    expect(logged(log).filter((entry) => entry.method === "textDocument/didOpen")).toHaveLength(1);
+  });
+
+  it("reads the saved file and never replaces the text an editor holds", async () => {
+    const { test, log, paths } = fake();
+    const saved = readFileSync(join(paths.checkout, "b.ts"), "utf8");
+    const fileId = syncedFileId(await test.open("b.ts", { text: `${saved}// draft\n` }));
+    expect(await test.agent("b.ts")).toEqual({ status: "unsaved-edits" });
+    expect(changes(log)).toEqual([]);
+
+    // Once the editor holds the saved text, the agent reads beside it.
+    expect(
+      (
+        await test.service.syncDocument(
+          { scopeId, principal: "local-window" },
+          {
+            kind: "change",
+            threadId: test.state.thread.id,
+            checkoutId: plainCheckout().id,
+            fileId,
+            text: saved,
+          },
+        )
+      ).status,
+    ).toBe("synced");
+    expect((await test.agent("b.ts")).status).toBe("diagnostics");
+
+    // With the editor gone, a file saved since is sent as saved.
+    await test.service.syncDocument(
+      { scopeId, principal: "local-window" },
+      { kind: "close", threadId: test.state.thread.id, checkoutId: plainCheckout().id, fileId },
+    );
+    expect((await test.agent("b.ts")).status).toBe("diagnostics");
+    writeFileSync(join(paths.checkout, "b.ts"), "export const fixed = 1;\n");
+    expect((await test.agent("b.ts")).status).toBe("diagnostics");
+    expect(changes(log).at(-1)).toBe("export const fixed = 1;\n");
+    expect(test.launches()).toBe(1);
+  });
+
+  it("closes a draft the person discards even when an agent read the file first", async () => {
+    const { test, log, paths } = fake();
+    const saved = readFileSync(join(paths.checkout, "b.ts"), "utf8");
+    expect((await test.agent("b.ts")).status).toBe("diagnostics");
+    const fileId = syncedFileId(await test.open("b.ts", { text: saved }));
+    const scope = { threadId: test.state.thread.id, checkoutId: plainCheckout().id, fileId };
+    await test.service.syncDocument(
+      { scopeId, principal: "local-window" },
+      { kind: "change", ...scope, text: `${saved}export const draftOnly = 1;\n` },
+    );
+    await test.service.syncDocument(
+      { scopeId, principal: "local-window" },
+      { kind: "close", ...scope },
+    );
+    // The server must not go on reading the discarded draft for the agent's
+    // later reads of other files.
+    await eventually(() => logged(log).some((entry) => entry.method === "textDocument/didClose"));
+    expect((await test.agent("b.ts")).status).toBe("diagnostics");
+  });
+
+  it("answers too-large for a file past the server's frame", async () => {
+    const { test, paths } = fake();
+    writeFileSync(join(paths.checkout, "huge.ts"), "x".repeat(5 * 1024 * 1024));
+    expect(await test.agent("huge.ts")).toEqual({ status: "too-large" });
+    expect(test.launches()).toBe(0);
+  });
+});
+
 describe("Code language service against a hostile server", () => {
   function fake(mode: string, limits?: CodeLanguageServiceOptions["limits"], clock?: () => number) {
     const paths = workspace();
@@ -645,6 +873,10 @@ describe("Code language service against a hostile server", () => {
     }
     await eventually(() => test.launches() === 3);
     expect(await test.diagnostics(fileId)).toEqual({ status: "unavailable", reason: "crashed" });
+    expect(test.launches()).toBe(3);
+    // An agent's read is not the person's retry: it never restarts a server
+    // past its budget, however often it asks.
+    expect(await test.agent("b.ts")).toEqual({ status: "unavailable", reason: "crashed" });
     expect(test.launches()).toBe(3);
 
     expect((await test.open("b.ts")).status).toBe("synced");

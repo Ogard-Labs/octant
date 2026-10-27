@@ -39,8 +39,9 @@ function mathBlock(value: unknown) {
 }
 
 describe("math block", () => {
-  it("draws a display formula as MathML that carries its source, under its caption", () => {
+  it("draws a display formula as MathML that carries its source, under its caption", async () => {
     const { container } = render(<CanvasView input={definition([display])} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     const region = screen.getByRole("region", { name: "Bayes' theorem" });
     expect(region).toHaveAttribute("tabindex", "0");
@@ -59,6 +60,7 @@ describe("math block", () => {
   it("offers the source as plain text under View source", async () => {
     const user = userEvent.setup();
     render(<CanvasView input={definition([display])} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     const summary = screen.getByText("View source");
     await user.click(summary);
@@ -67,8 +69,9 @@ describe("math block", () => {
     expect(within(details as HTMLElement).getByText(display.source)).toBeInTheDocument();
   });
 
-  it("draws a paragraph's prose and formulas in reading order, each formula inline", () => {
+  it("draws a paragraph's prose and formulas in reading order, each formula inline", async () => {
     const { container } = render(<CanvasView input={definition([inline])} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     const paragraph = container.querySelector(".canvas-block__math-paragraph");
     expect(paragraph).not.toBeNull();

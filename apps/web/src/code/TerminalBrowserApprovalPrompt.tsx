@@ -1,8 +1,9 @@
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { BrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
-import { useEffect, useState } from "react";
-import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
+import { useCallback, useEffect, useState } from "react";
+import { useThreadActivityRevision } from "../polling/ThreadActivityRevisions";
 import { samePollingData } from "../polling/samePollingData";
+import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 import { announceShellSettingsWritten } from "../shell/shellSettingsNotifications";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
@@ -37,19 +38,19 @@ export function TerminalBrowserApprovalPrompt(props: TerminalBrowserApprovalProm
   const [ended, setEnded] = useState<string>();
   const listApprovals = props.client.listApprovals;
 
+  const revision = useThreadActivityRevision("toolApprovals");
+
+  // A different thread or client starts clean; a notice never clears the list.
   useEffect(() => {
-    if (listApprovals === undefined) {
-      setApprovals([]);
-      return;
-    }
-    const controller = new AbortController();
-    let inFlight = false;
-    const refresh = async () => {
-      if (!documentIsVisible() || inFlight) return;
-      inFlight = true;
+    setApprovals([]);
+  }, [listApprovals, props.threadId]);
+
+  const refresh = useCallback(
+    async (signal: AbortSignal) => {
+      if (listApprovals === undefined) return;
       try {
-        const listed = await listApprovals(controller.signal);
-        if (controller.signal.aborted) return;
+        const listed = await listApprovals(signal);
+        if (signal.aborted) return;
         const mine = listed.filter(
           (approval) =>
             approval.mode === "code" && String(approval.threadId) === String(props.threadId),
@@ -57,17 +58,14 @@ export function TerminalBrowserApprovalPrompt(props: TerminalBrowserApprovalProm
         setApprovals((current) => (samePollingData(current, mine) ? current : mine));
         if (mine.length > 0) setEnded(undefined);
       } catch {
-        if (!controller.signal.aborted) setApprovals([]);
-      } finally {
-        inFlight = false;
+        if (!signal.aborted) setApprovals([]);
       }
-    };
-    const stop = scheduleVisibleInterval(() => void refresh(), POLL_MS, { runImmediately: true });
-    return () => {
-      controller.abort();
-      stop();
-    };
-  }, [listApprovals, props.threadId]);
+    },
+    [listApprovals, props.threadId],
+  );
+  // Notices stay the fast path; the short read stays as recovery because a
+  // waiting CLI gives the window no turn to tell a stalled stream from quiet.
+  useVisibleRefresh(refresh, revision, POLL_MS);
 
   const pending = approvals[0];
   if (pending === undefined || props.client.decideApproval === undefined) {

@@ -2756,6 +2756,12 @@
   margin: var(--oct-space-6);
 }
 
+.canvas-view__loading {
+  color: var(--oct-muted);
+  padding: var(--oct-space-4) var(--oct-space-5);
+  margin: var(--oct-space-6);
+}
+
 .canvas-workspace-tab {
   display: flex;
   flex-direction: column;

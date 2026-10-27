@@ -11,6 +11,10 @@ export interface MachineChangeRevisions {
   readonly projects: number;
   readonly extensions: number;
   readonly imageJobs: number;
+  readonly browserCaptures: number;
+  readonly toolApprovals: number;
+  readonly threadFollowUps: number;
+  readonly threadMessageQueue: number;
 }
 
 const INITIAL_REVISIONS: MachineChangeRevisions = {
@@ -21,6 +25,10 @@ const INITIAL_REVISIONS: MachineChangeRevisions = {
   projects: 0,
   extensions: 0,
   imageJobs: 0,
+  browserCaptures: 0,
+  toolApprovals: 0,
+  threadFollowUps: 0,
+  threadMessageQueue: 0,
 };
 
 /**
@@ -88,6 +96,10 @@ async function consumeMachineChanges(
                 "extensions",
                 "computer-use",
                 "image-jobs",
+                "browser-captures",
+                "tool-approvals",
+                "thread-follow-ups",
+                "thread-message-queue",
               ]
             : frame.topics,
         );
@@ -114,5 +126,9 @@ function advanceRevisions(
     projects: current.projects + Number(changed.has("projects")),
     extensions: current.extensions + Number(changed.has("extensions")),
     imageJobs: current.imageJobs + Number(changed.has("image-jobs")),
+    browserCaptures: current.browserCaptures + Number(changed.has("browser-captures")),
+    toolApprovals: current.toolApprovals + Number(changed.has("tool-approvals")),
+    threadFollowUps: current.threadFollowUps + Number(changed.has("thread-follow-ups")),
+    threadMessageQueue: current.threadMessageQueue + Number(changed.has("thread-message-queue")),
   };
 }

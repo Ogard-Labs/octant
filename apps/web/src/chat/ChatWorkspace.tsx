@@ -33,7 +33,7 @@ import {
   type PickerGroup,
 } from "@octant/domain";
 import { buildComposerPoolModel } from "@octant/domain/composer-pool-policy";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
 import { ThreadMessageQueue } from "../messageQueue/ThreadMessageQueue";
 import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
@@ -88,7 +88,12 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
 import { ShellState } from "../shell/ShellState";
-import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
+import {
+  THREAD_ACTIVITY_RECOVERY_MS,
+  useThreadActivityRevision,
+} from "../polling/ThreadActivityRevisions";
+import { samePollingData } from "../polling/samePollingData";
+import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import {
   ThreadConnectionLostContext,
@@ -374,41 +379,40 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       : { providerFamily: activeProvider.driverKind as ExtensionProviderFamily }),
     ...(activeThread === undefined ? {} : { thread: activeThread }),
   });
+  const browserApprovalRevision = useThreadActivityRevision("toolApprovals");
+  // A different thread starts clean; a notice never clears the list.
   useEffect(() => {
-    const client = props.browserAutomationClient;
-    const listApprovals = client?.listApprovals;
-    if (listApprovals === undefined || activeThreadId === undefined) {
-      setBrowserApprovals([]);
-      return;
-    }
-    const controller = new AbortController();
-    let inFlight = false;
-    const refresh = async () => {
-      if (!documentIsVisible() || inFlight) return;
-      inFlight = true;
+    setBrowserApprovals([]);
+  }, [activeThreadId, props.browserAutomationClient]);
+  const refreshBrowserApprovals = useCallback(
+    async (signal: AbortSignal) => {
+      const client = props.browserAutomationClient;
+      const listApprovals = client?.listApprovals;
+      if (listApprovals === undefined || activeThreadId === undefined) return;
       try {
-        const approvals = await listApprovals(controller.signal);
-        if (!controller.signal.aborted) {
-          setBrowserApprovals(
-            approvals.filter((approval) => String(approval.threadId) === String(activeThreadId)),
+        const approvals = await listApprovals.call(client, signal);
+        if (signal.aborted) return;
+        setBrowserApprovals((current) => {
+          const next = approvals.filter(
+            (approval) => String(approval.threadId) === String(activeThreadId),
           );
-        }
+          return samePollingData(current, next) ? current : next;
+        });
       } catch {
-        if (!controller.signal.aborted) setBrowserApprovals([]);
-      } finally {
-        inFlight = false;
+        if (!signal.aborted) setBrowserApprovals([]);
       }
-    };
-    const stop = scheduleVisibleInterval(
-      () => void refresh(),
-      turnActive ? ACTIVE_TOOL_APPROVAL_POLL_MS : IDLE_TOOL_APPROVAL_POLL_MS,
-      { runImmediately: true },
-    );
-    return () => {
-      controller.abort();
-      stop();
-    };
-  }, [activeThreadId, props.browserAutomationClient, turnActive]);
+    },
+    [activeThreadId, props.browserAutomationClient],
+  );
+  useVisibleRefresh(
+    refreshBrowserApprovals,
+    browserApprovalRevision,
+    turnActive
+      ? ACTIVE_TOOL_APPROVAL_POLL_MS
+      : browserApprovalRevision === undefined
+        ? IDLE_TOOL_APPROVAL_POLL_MS
+        : THREAD_ACTIVITY_RECOVERY_MS,
+  );
   const threadMentions = useThreadMentions({
     ...(props.threadMentionClient === undefined ? {} : { client: props.threadMentionClient }),
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),

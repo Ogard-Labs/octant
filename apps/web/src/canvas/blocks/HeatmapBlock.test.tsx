@@ -60,8 +60,9 @@ function plot(name: RegExp): HTMLElement {
 }
 
 describe("heatmap block", () => {
-  it("draws a cell for every coordinate and a dashed cell for a missing one", () => {
+  it("draws a cell for every coordinate and a dashed cell for a missing one", async () => {
     render(<CanvasView input={matrixDefinition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     const figure = document.querySelector(".canvas-block__heatmap");
     if (figure === null) throw new Error("Heatmap was not drawn.");
@@ -72,8 +73,9 @@ describe("heatmap block", () => {
     ).toBe(5);
   });
 
-  it("moves between cells with the arrow keys and shows the shared tooltip", () => {
+  it("moves between cells with the arrow keys and shows the shared tooltip", async () => {
     render(<CanvasView input={matrixDefinition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     fireEvent.keyDown(plot(/Heatmap with/), { key: "ArrowRight" });
     const tip = screen.getByRole("tooltip");
@@ -88,8 +90,9 @@ describe("heatmap block", () => {
     expect(screen.getByRole("tooltip")).toHaveTextContent("no reading");
   });
 
-  it("names a cell's note on hover", () => {
+  it("names a cell's note on hover", async () => {
     render(<CanvasView input={matrixDefinition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     const mark = document.querySelector("[data-row-id='mon'][data-column-id='h10']");
     if (mark === null) throw new Error("No cell to hover.");
@@ -101,6 +104,7 @@ describe("heatmap block", () => {
   it("sorts the matrix rows by their total as view state", async () => {
     const user = userEvent.setup();
     render(<CanvasView input={matrixDefinition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     await user.click(screen.getByRole("button", { name: "Sort rows by total" }));
     const sort = screen.getByRole("button", { name: /Rows: total/ });
@@ -113,8 +117,9 @@ describe("heatmap block", () => {
     expect(within(table).getAllByText("—").length).toBeGreaterThan(0);
   });
 
-  it("lays a calendar out as a week grid and moves through it the way it is drawn", () => {
+  it("lays a calendar out as a week grid and moves through it the way it is drawn", async () => {
     render(<CanvasView input={calendarDefinition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     const calendarPlot = plot(/Calendar heatmap from/);
     expect(document.querySelectorAll("[data-date]").length).toBeGreaterThanOrEqual(3);
@@ -145,6 +150,7 @@ describe("heatmap block", () => {
       rows: [{ rowId: "mon", label: longLabel }, ...matrixFixture.rows.slice(1)],
     };
     render(<CanvasView input={{ ...canvasFixture, blocks: [fixture] }} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     const axisLabels = [...document.querySelectorAll(".canvas-block__heatmap-axis")].map(
       (label) => label.textContent ?? "",
@@ -157,10 +163,11 @@ describe("heatmap block", () => {
     expect(within(table).getByRole("rowheader", { name: longLabel })).toBeVisible();
   });
 
-  it("never journals a sort or a keyboard move", () => {
+  it("never journals a sort or a keyboard move", async () => {
     const definitionInput = matrixDefinition();
     const before = JSON.stringify(definitionInput);
     render(<CanvasView input={definitionInput} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     fireEvent.keyDown(plot(/Heatmap with/), { key: "ArrowRight" });
 

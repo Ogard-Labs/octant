@@ -55,8 +55,9 @@ function columnHeaders(): ReadonlyArray<string> {
 }
 
 describe("comparison matrix block", () => {
-  it("draws options as columns and criteria as rows of a native table", () => {
+  it("draws options as columns and criteria as rows of a native table", async () => {
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     expect(columnHeaders()).toEqual(["Postgres", "SQLite", "Journal files"]);
     const rowHeaders = within(matrixTable())
@@ -73,8 +74,9 @@ describe("comparison matrix block", () => {
     expect(within(matrixTable()).getByText("Lower is better")).toBeInTheDocument();
   });
 
-  it("reads each glyph as a word and an empty cell as not assessed", () => {
+  it("reads each glyph as a word and an empty cell as not assessed", async () => {
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     const offline = within(matrixTable()).getByRole("row", { name: /Works offline/ });
     expect(within(offline).getByText("Partial")).toBeInTheDocument();
@@ -85,8 +87,9 @@ describe("comparison matrix block", () => {
     expect(within(licence).getAllByText("Not assessed")).toHaveLength(2);
   });
 
-  it("shows each option's weighted score, the highest one, and the recommended option", () => {
+  it("shows each option's weighted score, the highest one, and the recommended option", async () => {
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     const totals = within(matrixTable()).getByRole("row", { name: /Weighted score/ });
     // SQLite: crash 1.0 × 3, ops (lower) 1.0 × 2, offline 1.0 × 1 → 6 / 6 → 5 of 5.
@@ -99,8 +102,9 @@ describe("comparison matrix block", () => {
     expect(screen.getByText("No server to run.")).toBeInTheDocument();
   });
 
-  it("numbers each cell note and lists the notes under the matrix", () => {
+  it("numbers each cell note and lists the notes under the matrix", async () => {
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     const notes = screen.getByRole("list", { name: "Notes" });
     const items = within(notes).getAllByRole("listitem");
@@ -117,6 +121,7 @@ describe("comparison matrix block", () => {
     const input = definition();
     const before = JSON.stringify(input);
     render(<CanvasView input={input} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     await user.click(screen.getByRole("button", { name: "Order by score" }));
     expect(columnHeaders()).toEqual(["SQLite", "Postgres", "Journal files"]);
@@ -129,16 +134,18 @@ describe("comparison matrix block", () => {
     expect(JSON.stringify(input)).toBe(before);
   });
 
-  it("scrolls inside its own labelled region so a keyboard reaches every column", () => {
+  it("scrolls inside its own labelled region so a keyboard reaches every column", async () => {
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     const region = screen.getByRole("region", { name: /Comparison of 3 options/ });
     expect(region).toHaveAttribute("tabindex", "0");
     expect(region).toContainElement(matrixTable());
   });
 
-  it("discloses a plain reading with one row per option", () => {
+  it("discloses a plain reading with one row per option", async () => {
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     const data = screen.getByRole("table", { name: "Comparison matrix readings" });
     const sqlite = within(data).getByRole("row", { name: /SQLite/ });
@@ -149,8 +156,9 @@ describe("comparison matrix block", () => {
     ).toEqual(["5", "1", "Yes", "Public domain", "5 of 5"]);
   });
 
-  it("draws no frame, script, or markup from the definition", () => {
+  it("draws no frame, script, or markup from the definition", async () => {
     const { container } = render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
     expect(container.querySelector("iframe, script, object, embed")).toBeNull();
   });
 });

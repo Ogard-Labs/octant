@@ -1,6 +1,10 @@
 import type { FollowUpSuggestionClient } from "@octant/client-runtime/follow-up-suggestion-client";
-import { createContext, useEffect, useState, type ReactNode } from "react";
-import { scheduleVisibleInterval } from "../polling/documentVisibility";
+import { createContext, useCallback, useState, type ReactNode } from "react";
+import {
+  THREAD_ACTIVITY_RECOVERY_MS,
+  useThreadActivityRevision,
+} from "../polling/ThreadActivityRevisions";
+import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 
 const NO_LINKS: ReadonlyMap<string, string> = new Map();
 
@@ -24,30 +28,30 @@ export function FollowUpLineageProvider(props: {
 }) {
   const [parents, setParents] = useState<ReadonlyMap<string, string>>(NO_LINKS);
   const client = props.client;
-  useEffect(() => {
-    if (client === undefined) return;
-    let cancelled = false;
-    const read = () =>
-      client.lineage().then(
-        (lineage) => {
-          if (cancelled) return;
-          setParents((current) => {
-            const next = new Map(
-              lineage.links.map((link) => [String(link.threadId), String(link.parentThreadId)]),
-            );
-            return sameLinks(current, next) ? current : next;
-          });
-        },
+  const revision = useThreadActivityRevision("threadFollowUps");
+  const refresh = useCallback(
+    async (signal: AbortSignal) => {
+      if (client === undefined) return;
+      try {
+        const lineage = await client.lineage();
+        if (signal.aborted) return;
+        setParents((current) => {
+          const next = new Map(
+            lineage.links.map((link) => [String(link.threadId), String(link.parentThreadId)]),
+          );
+          return sameLinks(current, next) ? current : next;
+        });
+      } catch {
         // Nesting is presentation; a failed read keeps the last answer.
-        () => undefined,
-      );
-    void read();
-    const stop = scheduleVisibleInterval(() => void read(), REREAD_MS);
-    return () => {
-      cancelled = true;
-      stop();
-    };
-  }, [client]);
+      }
+    },
+    [client],
+  );
+  useVisibleRefresh(
+    refresh,
+    revision,
+    revision === undefined ? REREAD_MS : THREAD_ACTIVITY_RECOVERY_MS,
+  );
   return <FollowUpLineageContext value={parents}>{props.children}</FollowUpLineageContext>;
 }
 

@@ -8,6 +8,7 @@ import {
 import type { BrowserCapture, BrowserThreadId } from "@octant/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceContentViewContext } from "../shell/WorkspaceContentView";
+import { ThreadActivityRevisionsContext } from "../polling/ThreadActivityRevisions";
 import { BrowserCaptureList } from "./BrowserCaptureList";
 
 const threadId = "c1000000-0000-4000-8000-000000000001" as BrowserThreadId;
@@ -157,5 +158,71 @@ describe("BrowserCaptureList", () => {
     readCapture.mockRejectedValue(new Error("gone"));
     render(<BrowserCaptureList client={client} threadId={threadId} />);
     expect(await screen.findByRole("img", { name: "Capture is unavailable" })).toBeInTheDocument();
+  });
+
+  it("keeps asking the new thread after an old thread's read comes back refused", async () => {
+    const otherThreadId = "c1000000-0000-4000-8000-000000000099" as BrowserThreadId;
+    let rejectOld!: (error: unknown) => void;
+    const oldRead = new Promise<never>((_resolve, reject) => {
+      rejectOld = reject;
+    });
+    const listCaptures = vi
+      .fn()
+      .mockImplementationOnce(() => oldRead)
+      .mockResolvedValue({ captures: [capture(1)] });
+    const client = {
+      listCaptures,
+      readCapture: vi.fn(async () => ({ captureId: "x", dataUrl: "data:image/png;base64,AAAA" })),
+    } as unknown as BrowserAutomationClient;
+    const revisions = (browserCaptures: number) => (
+      <ThreadActivityRevisionsContext.Provider
+        value={{
+          browserCaptures,
+          toolApprovals: 0,
+          threadFollowUps: 0,
+          threadMessageQueue: 0,
+        }}
+      >
+        <BrowserCaptureList client={client} threadId={otherThreadId} />
+      </ThreadActivityRevisionsContext.Provider>
+    );
+    const view = render(
+      <ThreadActivityRevisionsContext.Provider
+        value={{
+          browserCaptures: 0,
+          toolApprovals: 0,
+          threadFollowUps: 0,
+          threadMessageQueue: 0,
+        }}
+      >
+        <BrowserCaptureList client={client} threadId={threadId} />
+      </ThreadActivityRevisionsContext.Provider>,
+    );
+    await waitFor(() => expect(listCaptures).toHaveBeenCalledTimes(1));
+
+    view.rerender(
+      <ThreadActivityRevisionsContext.Provider
+        value={{
+          browserCaptures: 0,
+          toolApprovals: 0,
+          threadFollowUps: 0,
+          threadMessageQueue: 0,
+        }}
+      >
+        <BrowserCaptureList client={client} threadId={otherThreadId} />
+      </ThreadActivityRevisionsContext.Provider>,
+    );
+    await waitFor(() => expect(listCaptures).toHaveBeenCalledTimes(2));
+    await screen.findByTestId("browser-capture-list");
+
+    // The old thread's deferred read comes back refused after its abort; the
+    // refusal is for the old thread, so the new thread still answers notices.
+    await act(async () => {
+      rejectOld(new BrowserAutomationClientFailure("unauthorized", "No."));
+      await oldRead.catch(() => undefined);
+    });
+    view.rerender(revisions(1));
+    await waitFor(() => expect(listCaptures).toHaveBeenCalledTimes(3));
+    expect(screen.getByTestId("browser-capture-list")).toBeVisible();
   });
 });

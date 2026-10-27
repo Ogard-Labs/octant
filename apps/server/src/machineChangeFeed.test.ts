@@ -1,4 +1,9 @@
 import { describe, expect, it } from "vitest";
+import {
+  NATIVE_HARNESS_SESSION_AGGREGATE_TYPE,
+  NATIVE_HARNESS_SESSION_EVENT_NAMES,
+  THREAD_RETENTION_EVENT_NAMES,
+} from "@octant/contracts";
 import { MachineChangeFeed } from "./machineChangeFeed";
 
 describe("MachineChangeFeed", () => {
@@ -250,6 +255,142 @@ describe("MachineChangeFeed", () => {
 
     await expect(stream.next()).resolves.toMatchObject({
       value: { kind: "changed", sequence: 1, topics: ["projects"] },
+    });
+    controller.abort();
+  });
+
+  it("maps each durable auxiliary aggregate to its own metadata topic", async () => {
+    const feed = new MachineChangeFeed();
+    const controller = new AbortController();
+    const stream = feed.subscribe({ afterSequence: 0, signal: controller.signal });
+
+    feed.publishCommitted({
+      events: [
+        { aggregateType: "browser-capture" },
+        { aggregateType: "thread-side-tasks" },
+        { aggregateType: "thread-follow-up-suggestions" },
+        { aggregateType: "thread-message-queue" },
+      ],
+    });
+
+    await expect(stream.next()).resolves.toMatchObject({
+      value: {
+        kind: "changed",
+        sequence: 1,
+        topics: ["browser-captures", "thread-follow-ups", "thread-message-queue"],
+      },
+    });
+    controller.abort();
+  });
+
+  it("maps a harness's suggested and activated follow-ups but not its ordinary deltas", async () => {
+    const feed = new MachineChangeFeed();
+    const controller = new AbortController();
+    const stream = feed.subscribe({ afterSequence: 0, signal: controller.signal });
+
+    feed.publishCommitted({
+      events: [
+        {
+          aggregateType: NATIVE_HARNESS_SESSION_AGGREGATE_TYPE,
+          eventName: NATIVE_HARNESS_SESSION_EVENT_NAMES.followUpsSuggested,
+        },
+        {
+          aggregateType: NATIVE_HARNESS_SESSION_AGGREGATE_TYPE,
+          eventName: NATIVE_HARNESS_SESSION_EVENT_NAMES.followUpActivated,
+        },
+        {
+          aggregateType: NATIVE_HARNESS_SESSION_AGGREGATE_TYPE,
+          eventName: "native-harness-response-delta@1",
+        },
+      ],
+    });
+    feed.publish(["projects"]);
+
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "changed", sequence: 1, topics: ["thread-follow-ups"] },
+    });
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "changed", sequence: 2, topics: ["projects"] },
+    });
+    controller.abort();
+  });
+
+  it("invalidates the durable auxiliary lists when a thread is deleted or purged", async () => {
+    const feed = new MachineChangeFeed();
+    const controller = new AbortController();
+    const stream = feed.subscribe({ afterSequence: 0, signal: controller.signal });
+
+    feed.publishCommitted({
+      events: [{ aggregateType: "chat-thread", eventName: "chat.deleted@1" }],
+    });
+    feed.publishCommitted({
+      events: [
+        {
+          aggregateType: "thread-retention",
+          eventName: THREAD_RETENTION_EVENT_NAMES.threadPurged,
+        },
+      ],
+    });
+
+    await expect(stream.next()).resolves.toMatchObject({
+      value: {
+        kind: "changed",
+        sequence: 1,
+        topics: [
+          "chat-navigation",
+          "browser-captures",
+          "thread-follow-ups",
+          "thread-message-queue",
+        ],
+      },
+    });
+    await expect(stream.next()).resolves.toMatchObject({
+      value: {
+        kind: "changed",
+        sequence: 2,
+        topics: ["browser-captures", "thread-follow-ups", "thread-message-queue"],
+      },
+    });
+    controller.abort();
+  });
+
+  it("decodes every published topic under strict framing", async () => {
+    const feed = new MachineChangeFeed();
+    const controller = new AbortController();
+    const stream = feed.subscribe({ afterSequence: 0, signal: controller.signal });
+
+    feed.publish([
+      "chat-navigation",
+      "work-navigation",
+      "code-navigation",
+      "projects",
+      "extensions",
+      "computer-use",
+      "image-jobs",
+      "browser-captures",
+      "tool-approvals",
+      "thread-follow-ups",
+      "thread-message-queue",
+    ]);
+
+    await expect(stream.next()).resolves.toMatchObject({
+      value: {
+        kind: "changed",
+        sequence: 1,
+        topics: [
+          "chat-navigation",
+          "work-navigation",
+          "code-navigation",
+          "projects",
+          "extensions",
+          "computer-use",
+          "image-jobs",
+          "browser-captures",
+          "tool-approvals",
+          "thread-follow-ups",
+          "thread-message-queue",
+        ],
+      },
     });
     controller.abort();
   });
