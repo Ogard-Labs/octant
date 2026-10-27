@@ -9821,9 +9821,7 @@ describe("ChatService streamed delta batches", () => {
     const commits = appendedCommits(append);
     expect(commits).toHaveLength(1);
     expect(
-      commits[0]?.events?.filter(
-        (event) => event.eventName === "chat.attempt-response-appended@1",
-      ),
+      commits[0]?.events?.filter((event) => event.eventName === "chat.attempt-response-appended@1"),
     ).toHaveLength(deltas.length - 1);
     // The batch journals ahead of the attempt's own event in the same commit,
     // so the projection sees each reference appended before a whole attempt
@@ -9842,8 +9840,7 @@ describe("ChatService streamed delta batches", () => {
       driver: streamedReplyDriver(deltas),
       // Any two deltas sit further apart than the window, so each pair of
       // appended deltas commits on its own instead of folding into the end.
-      clock: () =>
-        new Date(Date.parse("2026-10-27T12:00:00.000Z") + 1_000 * ticks++).toISOString(),
+      clock: () => new Date(Date.parse("2026-10-27T12:00:00.000Z") + 1_000 * ticks++).toISOString(),
     });
     const append = vi.spyOn(persistence.journal, "append");
     const created = await service.execute({
