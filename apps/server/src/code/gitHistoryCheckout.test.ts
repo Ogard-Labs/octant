@@ -14,6 +14,8 @@ import { gitHistoryMetadata } from "./gitHistoryCheckout";
 
 /** Runs just after the host first looks at a path, so a test can swap it for a link then. */
 const looked = vi.hoisted(() => ({ at: (_path: string): void => undefined }));
+/** Runs just before the host resolves a path, so a test can swap another path then. */
+const resolving = vi.hoisted(() => ({ before: (_path: string): void => undefined }));
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   return {
@@ -28,12 +30,17 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       looked.at(String(args[0]));
       return result;
     },
+    realpath: async (...args: Parameters<typeof actual.realpath>) => {
+      resolving.before(String(args[0]));
+      return await actual.realpath(...args);
+    },
   };
 });
 
 const directories: Array<string> = [];
 afterEach(() => {
   looked.at = () => undefined;
+  resolving.before = () => undefined;
   for (const directory of directories.splice(0))
     rmSync(directory, { recursive: true, force: true });
 });
@@ -91,6 +98,28 @@ describe("Git metadata a history read may reach", () => {
     const granted = await gitHistoryMetadata(own.checkout);
     expect(granted ?? []).not.toContain(host.common);
     expect(granted ?? []).not.toContain(host.gitdir);
+  });
+
+  // The agent writes the marker, so it can name another repository's
+  // linked-worktree record outright; that record's backlink names the other
+  // checkout's marker. Resolving this marker again for the reciprocity check,
+  // after it was read and then swapped for a link to that other marker, made
+  // the two sides agree.
+  it("never grants another repository's metadata when the marker names it and is swapped for a link after being read", async () => {
+    const base = scratch();
+    const own = linkedWorktree(base, "own");
+    const host = linkedWorktree(base, "host");
+    const marker = join(own.checkout, ".git");
+    writeFileSync(marker, `gitdir: ${host.gitdir}\n`);
+    let swapped = false;
+    resolving.before = (path) => {
+      if (swapped || path !== host.gitdir) return;
+      swapped = true;
+      renameSync(marker, join(own.checkout, ".git-real"));
+      symlinkSync(join(host.checkout, ".git"), marker);
+    };
+    await expect(gitHistoryMetadata(own.checkout)).resolves.toBeUndefined();
+    expect(swapped).toBe(true);
   });
 
   it("never grants another repository's .git directory when the marker is swapped for a link after the first look", async () => {

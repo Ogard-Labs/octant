@@ -23,6 +23,8 @@ import { makeProcessConfinementLive, type ProcessConfinementPort } from "./seatb
 
 /** Runs just after the host first looks at a path, so a test can swap it for a link then. */
 const looked = vi.hoisted(() => ({ at: (_path: string): void => undefined }));
+/** Runs just before the host resolves a path, so a test can swap another path then. */
+const resolving = vi.hoisted(() => ({ before: (_path: string): void => undefined }));
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
   const after =
@@ -37,10 +39,15 @@ vi.mock("node:fs", async (importOriginal) => {
     lstatSync: after(actual.lstatSync),
     openSync: after(actual.openSync),
     readFileSync: after(actual.readFileSync),
+    realpathSync: (...args: Parameters<typeof actual.realpathSync>) => {
+      resolving.before(String(args[0]));
+      return actual.realpathSync(...args);
+    },
   };
 });
 afterEach(() => {
   looked.at = () => undefined;
+  resolving.before = () => undefined;
 });
 
 /** A linked worktree record as Git writes it, with the marker and its reciprocal gitdir. */
@@ -279,6 +286,33 @@ describe("git Seatbelt launch", () => {
       expect(granted.readPaths).not.toContain(host.common);
       expect(granted.writePaths).not.toContain(host.common);
       expect(granted.writePaths).not.toContain(host.gitdir);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  // The agent writes the marker, so it can name another repository's
+  // linked-worktree record outright; that record's backlink names the other
+  // checkout's marker. Resolving this marker again for the reciprocity check,
+  // after it was read and then swapped for a link to that other marker, made
+  // the two sides agree and granted that repository writable.
+  it("never grants another repository's metadata when the marker names it and is swapped for a link after being read", () => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), "octant-git-marker-named-")));
+    try {
+      const own = linkedWorktree(base, "own");
+      const host = linkedWorktree(base, "host");
+      const marker = join(own.checkout, ".git");
+      writeFileSync(marker, `gitdir: ${host.gitdir}\n`);
+      let swapped = false;
+      resolving.before = (path) => {
+        if (swapped || path !== host.gitdir) return;
+        swapped = true;
+        renameSync(marker, join(own.checkout, ".git-real"));
+        symlinkSync(join(host.checkout, ".git"), marker);
+      };
+      const granted = gitLinkedWorktreeMetadataPaths(own.checkout, { writable: true });
+      expect(swapped).toBe(true);
+      expect(granted).toEqual({ readPaths: [], writePaths: [] });
     } finally {
       rmSync(base, { recursive: true, force: true });
     }

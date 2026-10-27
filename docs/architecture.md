@@ -7103,7 +7103,13 @@ mechanisms are:
   it was written under, and the open must land on that path, because a plain
   read followed a mirrored folder swapped for a link to a host folder. A
   checkout's `.git` marker is read through the same open; see the confined Git
-  rule for the linked-worktree pointers it leads to. A Linux listing enumerates the held directory through
+  rule for the linked-worktree pointers it leads to. The managed-worktree
+  identity check, the folder browser's repository test, and managed-clone
+  verification never read a marker themselves: Git reads it, and each acts only
+  on an answer it checks again (the gitdir's backlink and an unchanged marker
+  inode, a reported top level equal to the browsed folder, a common directory
+  inside a staging folder Octant created), so a swapped marker yields a refusal
+  rather than host bytes or a grant. A Linux listing enumerates the held directory through
   `/proc/self/fd/N`; a macOS listing resolves the path once more, so every name
   it yields is re-resolved and a name present in both the root and the
   swapped-in folder is the remaining residual there. Hard links are not
