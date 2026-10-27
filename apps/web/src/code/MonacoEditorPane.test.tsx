@@ -260,6 +260,425 @@ describe("MonacoEditorPane", () => {
   });
 });
 
+describe("MonacoEditorPane language services", () => {
+  const typeError = {
+    path: "src/index.ts",
+    range: { start: { line: 0, character: 6 }, end: { line: 0, character: 12 } },
+    severity: "error",
+    message: "Type 'string' is not assignable to type 'number'.",
+    source: "typescript",
+  } as const;
+  const scope = { threadId: ids.thread, checkoutId: ids.checkout, fileId: ids.file };
+
+  function languageClient(
+    answers: {
+      readonly open?: ReadonlyArray<unknown>;
+      readonly diagnostics?: ReadonlyArray<unknown>;
+      readonly definition?: unknown;
+    } = {},
+  ) {
+    const code = client();
+    const opens = [...(answers.open ?? [{ status: "synced", ...scope }])];
+    const diagnostics = [
+      ...(answers.diagnostics ?? [
+        { status: "diagnostics", ...scope, diagnostics: [typeError], truncated: false },
+      ]),
+    ];
+    const syncLanguageDocument = vi.fn(async (request: { readonly kind: string }) =>
+      request.kind === "open"
+        ? opens.length > 1
+          ? opens.shift()
+          : opens[0]
+        : { status: "synced", ...scope },
+    );
+    const readLanguage = vi.fn(async (request: { readonly kind: string }) =>
+      request.kind === "definition"
+        ? answers.definition
+        : diagnostics.length > 1
+          ? diagnostics.shift()
+          : diagnostics[0],
+    );
+    return Object.assign(code, { syncLanguageDocument, readLanguage }) as CodeClient & {
+      readonly syncLanguageDocument: typeof syncLanguageDocument;
+      readonly readLanguage: typeof readLanguage;
+    };
+  }
+
+  function languageRuntime() {
+    const base = runtime();
+    const setLanguageMarkers = vi.fn();
+    const revealRange = vi.fn();
+    const loadRuntime = vi.fn(async (): Promise<MonacoAdapterRuntime> => {
+      const loaded = await base.loadRuntime();
+      return {
+        mount: (element, options) => ({
+          ...loaded.mount(element, options),
+          setLanguageMarkers,
+          revealRange,
+        }),
+      };
+    });
+    return {
+      loadRuntime,
+      setLanguageMarkers,
+      revealRange,
+      get options() {
+        return base.options;
+      },
+    };
+  }
+
+  const timing = { debounceMs: 10, pollMs: 10 };
+
+  it("shows the server's diagnostics as markers in place of Monaco's own, Plan included", async () => {
+    const code = languageClient();
+    const fixture = languageRuntime();
+    render(
+      <MonacoEditorPane
+        client={code}
+        file={{ ...textFile(), executionPolicy: "plan" }}
+        languageTiming={timing}
+        loadRuntime={fixture.loadRuntime}
+      />,
+    );
+
+    expect(await screen.findByText("1 problem")).toBeVisible();
+    expect(code.syncLanguageDocument).toHaveBeenCalledWith({
+      kind: "open",
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+      path: "src/index.ts",
+      text: "const answer = 42;\n",
+    });
+    await waitFor(() =>
+      expect(fixture.setLanguageMarkers).toHaveBeenLastCalledWith([
+        {
+          range: { startLineNumber: 1, startColumn: 7, endLineNumber: 1, endColumn: 13 },
+          severity: "error",
+          message: typeError.message,
+          source: "typescript",
+        },
+      ]),
+    );
+  });
+
+  it("sends a settled draft as one change and reads its diagnostics again", async () => {
+    const code = languageClient({
+      diagnostics: [
+        { status: "diagnostics", ...scope, diagnostics: [typeError], truncated: false },
+        { status: "diagnostics", ...scope, diagnostics: [], truncated: false },
+      ],
+    });
+    const fixture = languageRuntime();
+    render(
+      <MonacoEditorPane
+        client={code}
+        file={textFile()}
+        languageTiming={timing}
+        loadRuntime={fixture.loadRuntime}
+      />,
+    );
+    await screen.findByText("1 problem");
+
+    act(() => fixture.options?.onChange("const answer: number = 4"));
+    act(() => fixture.options?.onChange("const answer: number = 42;\n"));
+
+    expect(await screen.findByText("No problems found")).toBeVisible();
+    const changes = code.syncLanguageDocument.mock.calls.filter(
+      ([request]) => request.kind === "change",
+    );
+    expect(changes).toEqual([[{ kind: "change", ...scope, text: "const answer: number = 42;\n" }]]);
+    await waitFor(() => expect(fixture.setLanguageMarkers).toHaveBeenLastCalledWith([]));
+  });
+
+  it("opens a definition in another file through the file-open path at its place, and names one outside the checkout", async () => {
+    const code = languageClient({
+      definition: {
+        status: "definition",
+        ...scope,
+        targets: [
+          {
+            kind: "checkout-location",
+            path: "src/greet.ts",
+            range: { start: { line: 4, character: 16 }, end: { line: 4, character: 21 } },
+          },
+        ],
+      },
+    });
+    const fixture = languageRuntime();
+    const openFile = vi.fn();
+    const { rerender } = render(
+      <MonacoEditorPane
+        client={code}
+        file={textFile()}
+        languageTiming={timing}
+        loadRuntime={fixture.loadRuntime}
+        onOpenFile={openFile}
+      />,
+    );
+    await screen.findByText("1 problem");
+    const bridge = fixture.options?.languageBridge;
+    if (bridge === undefined) throw new Error("the editor has no language bridge");
+
+    const links = await bridge.definitions({ lineNumber: 1, column: 8 });
+    expect(code.readLanguage).toHaveBeenLastCalledWith({
+      kind: "definition",
+      ...scope,
+      position: { line: 0, character: 7 },
+    });
+    expect(links).toEqual([
+      {
+        kind: "other-file",
+        path: "src/greet.ts",
+        range: { startLineNumber: 5, startColumn: 17, endLineNumber: 5, endColumn: 22 },
+      },
+    ]);
+    const [link] = links ?? [];
+    if (link === undefined || link.kind === "this-file") throw new Error("expected a link");
+    act(() => bridge.open(link));
+    expect(openFile).toHaveBeenCalledWith("src/greet.ts");
+
+    // The tab the open created takes the place the definition named.
+    const target = languageRuntime();
+    rerender(
+      <MonacoEditorPane
+        client={languageClient()}
+        file={{ ...textFile(), path: "src/greet.ts" as never }}
+        languageTiming={timing}
+        loadRuntime={target.loadRuntime}
+      />,
+    );
+    await waitFor(() =>
+      expect(target.revealRange).toHaveBeenCalledWith({
+        startLineNumber: 5,
+        startColumn: 17,
+        endLineNumber: 5,
+        endColumn: 22,
+      }),
+    );
+
+    act(() => target.options?.languageBridge?.open({ kind: "outside", label: "bundled-library" }));
+    expect(
+      screen.getByText(
+        "The definition is in the language server's bundled library, outside this checkout.",
+      ),
+    ).toBeVisible();
+  });
+
+  it("says when language services are off, refused, or on another platform, and keeps the editor", async () => {
+    for (const [reason, text] of [
+      ["turned-off", "Language services are off. Turn them on in Settings › Code."],
+      ["unsupported-platform", "Language services are not available on this host's platform."],
+      ["checkout-unavailable", "Language services are unavailable: the checkout is unavailable."],
+    ] as const) {
+      const fixture = languageRuntime();
+      const { unmount } = render(
+        <MonacoEditorPane
+          client={languageClient({ open: [{ status: "refused", reason }] })}
+          file={textFile()}
+          languageTiming={timing}
+          loadRuntime={fixture.loadRuntime}
+        />,
+      );
+      expect(await screen.findByText(text)).toBeVisible();
+      expect(screen.getByRole("region", { name: "Editor for src/index.ts" })).toBeVisible();
+      expect(fixture.setLanguageMarkers).not.toHaveBeenCalledWith(expect.any(Array));
+      unmount();
+    }
+
+    // A file no server reads says nothing at all.
+    render(
+      <MonacoEditorPane
+        client={languageClient({ open: [{ status: "refused", reason: "no-language-server" }] })}
+        file={textFile()}
+        languageTiming={timing}
+        loadRuntime={languageRuntime().loadRuntime}
+      />,
+    );
+    await screen.findByRole("region", { name: "Editor for src/index.ts" });
+    await waitFor(() => expect(screen.queryByText(/Language services/)).toBeNull());
+  });
+
+  it("asks the person to approve a server that runs the repository's tooling, and opens the file with it once they do", async () => {
+    const code = languageClient({
+      open: [
+        { status: "refused", reason: "approval-required" },
+        { status: "synced", ...scope },
+      ],
+      diagnostics: [{ status: "diagnostics", ...scope, diagnostics: [], truncated: false }],
+    });
+    const approveLanguageServer = vi.fn(async () => ({
+      status: "approved" as const,
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+      scope: "checkout" as const,
+    }));
+    render(
+      <MonacoEditorPane
+        client={Object.assign(code, { approveLanguageServer })}
+        file={textFile()}
+        languageTiming={timing}
+        loadRuntime={languageRuntime().loadRuntime}
+      />,
+    );
+
+    expect(
+      await screen.findByText(
+        "This language server runs the repository's own tools. Allowing it lets it write this checkout, run programs, and reach the hosts your Project's network rules allow.",
+      ),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Allow in this Project" })).toBeVisible();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Allow in this checkout" }));
+
+    expect(await screen.findByText("No problems found")).toBeVisible();
+    expect(approveLanguageServer).toHaveBeenCalledWith({
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+      path: "src/index.ts",
+      scope: "checkout",
+    });
+    expect(code.syncLanguageDocument.mock.calls.map(([request]) => request.kind)).toEqual([
+      "open",
+      "open",
+    ]);
+  });
+
+  it("offers no approval from a client without the approval route, and says when one was not recorded", async () => {
+    // A client without the approval route only names the refusal.
+    const { unmount } = render(
+      <MonacoEditorPane
+        client={languageClient({ open: [{ status: "refused", reason: "approval-required" }] })}
+        file={textFile()}
+        languageTiming={timing}
+        loadRuntime={languageRuntime().loadRuntime}
+      />,
+    );
+    expect(
+      await screen.findByText(
+        "Language services are unavailable: this server needs an approval first.",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Allow in this checkout" })).toBeNull();
+    unmount();
+
+    const approveLanguageServer = vi.fn(async () => ({ status: "not-recorded" as const }));
+    render(
+      <MonacoEditorPane
+        client={Object.assign(
+          languageClient({ open: [{ status: "refused", reason: "approval-required" }] }),
+          { approveLanguageServer },
+        )}
+        file={textFile()}
+        languageTiming={timing}
+        loadRuntime={languageRuntime().loadRuntime}
+      />,
+    );
+    await userEvent
+      .setup()
+      .click(await screen.findByRole("button", { name: "Allow in this Project" }));
+    expect(
+      await screen.findByText("The approval could not be recorded, so the server did not start."),
+    ).toBeVisible();
+  });
+
+  it("shows a starting server, then a crashed one with a retry that opens the file again", async () => {
+    const code = languageClient({
+      open: [
+        { status: "synced", ...scope },
+        { status: "synced", ...scope },
+      ],
+      diagnostics: [
+        { status: "unavailable", reason: "starting" },
+        { status: "unavailable", reason: "crashed" },
+        { status: "diagnostics", ...scope, diagnostics: [], truncated: false },
+      ],
+    });
+    render(
+      <MonacoEditorPane
+        client={code}
+        file={textFile()}
+        languageTiming={{ debounceMs: 10, pollMs: 600 }}
+        loadRuntime={languageRuntime().loadRuntime}
+      />,
+    );
+
+    expect(await screen.findByText("Language services are starting…")).toBeVisible();
+    expect(await screen.findByText("The language server stopped.")).toBeVisible();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByText("No problems found")).toBeVisible();
+    expect(code.syncLanguageDocument.mock.calls.map(([request]) => request.kind)).toEqual([
+      "open",
+      "close",
+      "open",
+    ]);
+  });
+
+  it("sends text typed while the file opened even when the server is still starting", async () => {
+    const code = languageClient({
+      diagnostics: [
+        { status: "unavailable", reason: "starting" },
+        { status: "diagnostics", ...scope, diagnostics: [], truncated: false },
+      ],
+    });
+    let settleOpen: (value: unknown) => void = () => undefined;
+    code.syncLanguageDocument.mockImplementationOnce(
+      () => new Promise((resolve) => (settleOpen = resolve)),
+    );
+    const fixture = languageRuntime();
+    render(
+      <MonacoEditorPane
+        client={code}
+        file={textFile()}
+        languageTiming={timing}
+        loadRuntime={fixture.loadRuntime}
+      />,
+    );
+    await waitFor(() => expect(code.syncLanguageDocument).toHaveBeenCalledOnce());
+
+    act(() => fixture.options?.onChange("const answer: number = 42;\n"));
+    await act(async () => settleOpen({ status: "synced", ...scope }));
+
+    await waitFor(() =>
+      expect(code.syncLanguageDocument).toHaveBeenLastCalledWith({
+        kind: "change",
+        ...scope,
+        text: "const answer: number = 42;\n",
+      }),
+    );
+    expect(await screen.findByText("No problems found")).toBeVisible();
+  });
+
+  it("leaves a server that stopped on reopening to the person's Retry while they type", async () => {
+    const code = languageClient({
+      open: [
+        { status: "synced", ...scope },
+        { status: "unavailable", reason: "crashed" },
+      ],
+      diagnostics: [{ status: "refused", reason: "file-outside-thread" }],
+    });
+    const fixture = languageRuntime();
+    render(
+      <MonacoEditorPane
+        client={code}
+        file={textFile()}
+        languageTiming={timing}
+        loadRuntime={fixture.loadRuntime}
+      />,
+    );
+    expect(await screen.findByText("The language server stopped.")).toBeVisible();
+
+    // Opening is the host's retry and resets the crash budget, so an edit
+    // must not reopen a server the person has not asked to retry.
+    act(() => fixture.options?.onChange("const answer = 43;\n"));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(code.syncLanguageDocument.mock.calls.map(([request]) => request.kind)).toEqual([
+      "open",
+      "open",
+    ]);
+  });
+});
+
 const ids = {
   checkout: "10000000-0000-4000-8000-000000000001",
   content: "10000000-0000-4000-8000-000000000002",

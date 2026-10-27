@@ -180,6 +180,34 @@ describe("remote access policy", () => {
     ).toEqual({ kind: "deny", reason: "local-host-required" });
   });
 
+  it("lets a paired device watch and operate a Code thread's disposable desktop", () => {
+    // Any client that may open the thread may view and operate its desktop:
+    // the desktop holds nothing of the host's. The route re-derives the person
+    // from the authenticated device and re-checks the thread each request.
+    expect(classifyRemoteAction("code.desktop.operate")).toEqual({ kind: "remote-approvable" });
+    expect(
+      authorizePrincipalAction({ principalKind: "remote-device", action: "code.desktop.operate" }),
+    ).toEqual({ kind: "allow" });
+  });
+
+  it("lets a paired device read a Code thread's language results but not open the host's editor", () => {
+    // A language read answers from a confined server for a thread the device
+    // already reaches; handing a file to the person's editor drives the host.
+    expect(classifyRemoteAction("code.language.read")).toEqual({ kind: "remote-approvable" });
+    expect(
+      authorizePrincipalAction({ principalKind: "remote-device", action: "code.language.read" }),
+    ).toEqual({ kind: "allow" });
+    expect(
+      authorizePrincipalAction({ principalKind: "local-window", action: "code.language.read" }),
+    ).toEqual({ kind: "allow" });
+    expect(
+      authorizePrincipalAction({
+        principalKind: "remote-device",
+        action: "code.open-external-editor",
+      }),
+    ).toEqual({ kind: "deny", reason: "local-host-required" });
+  });
+
   it("lets a remote device perform ordinary Automation Center mutations", () => {
     // Design §4.3/§10: a RemoteDevicePrincipal may run the ordinary Automation
     // commands on the owning host; it never gains local-window authority.
@@ -189,6 +217,18 @@ describe("remote access policy", () => {
     ).toEqual({ kind: "allow" });
     expect(
       authorizePrincipalAction({ principalKind: "local-window", action: "automation.manage" }),
+    ).toEqual({ kind: "allow" });
+  });
+
+  it("lets a paired device dictate through the host and keeps read-aloud on the computer", () => {
+    expect(
+      authorizePrincipalAction({ principalKind: "remote-device", action: "speech.transcribe" }),
+    ).toEqual({ kind: "allow" });
+    expect(
+      authorizePrincipalAction({ principalKind: "remote-device", action: "speech.synthesize" }),
+    ).toEqual({ kind: "deny", reason: "local-host-required" });
+    expect(
+      authorizePrincipalAction({ principalKind: "local-window", action: "speech.synthesize" }),
     ).toEqual({ kind: "allow" });
   });
 

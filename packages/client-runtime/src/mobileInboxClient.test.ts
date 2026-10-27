@@ -19,12 +19,12 @@ import {
   retryMobileChatTurn,
   sendMobileChatTurn,
   subscribeMobileChatEvents,
-  uploadMobileChatAttachment,
   completeMobileChatWorkItem,
   cancelMobileChatWorkItem,
   completeMobileChatFollowUp,
   type MobileRemoteTransport,
 } from "./mobileInboxClient";
+import { uploadMobileChatAttachment } from "./mobileAttachmentClient";
 
 const hostId = "11111111-1111-4111-8111-111111111111";
 const now = "2026-08-05T10:00:00.000Z";

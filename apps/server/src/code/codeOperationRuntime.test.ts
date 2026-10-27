@@ -20,6 +20,7 @@ import {
   decodeCodeThread,
   decodeCodeTerminalId,
   decodeCodeThreadId,
+  decodeDesktopLeaseId,
   decodeProjectId,
   decodeProviderInstanceId,
   decodeProviderSessionId,
@@ -372,6 +373,78 @@ describe("CodeOperationRuntime", () => {
     };
     await expect(validate.call(fixture.runtime, windowId, approved)).resolves.toBe(true);
     await expect(validate.call(fixture.runtime, windowId, approved)).resolves.toBe(false);
+    fixture.close();
+  });
+
+  it("asks a person to let the thread use a named device under every posture, once", async () => {
+    const deviceId = "90000000-0000-4000-8000-000000000021";
+    const fixture = runtimeFixture({
+      approvalValidator: false,
+      describeAppleDevice: (id) =>
+        String(id) === deviceId
+          ? {
+              name: "Henrik's iPhone",
+              model: "iPhone 16 Pro",
+              osVersion: "26.1",
+              connection: "wired",
+            }
+          : undefined,
+    });
+    // Full access starts no lease on its own; the person is still asked.
+    fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
+    const request = {
+      actionId: operationId(840) as never,
+      correlationId: operationId(841) as never,
+      authority: {
+        hostId: "90000000-0000-4000-8000-000000000010" as never,
+        mode: "code" as const,
+        projectId: thread().projectId,
+        providerInstanceId: thread().providerInstanceId,
+        extension: { kind: "core" as const },
+      },
+      threadId,
+      checkoutId,
+      kind: "use-device" as const,
+      deviceId: deviceId as never,
+      requestedBy: { kind: "local-user" as const, actorId: operationId(842) as never },
+      timeoutMs: 30_000,
+      approval: { kind: "pending" as const },
+    };
+    const challenge = await fixture.runtime.prepareApproval(windowId, {
+      effect: { kind: "apple-device-lease", request },
+    });
+    expect(challenge?.message).toBe("Let this thread use Henrik's iPhone?");
+    expect(challenge?.detail).toContain(`Thread: ${thread().title}`);
+    expect(challenge?.detail).toContain("iPhone 16 Pro");
+    // A device the host has not seen is never put to the person.
+    await expect(
+      fixture.runtime.prepareApproval(windowId, {
+        effect: {
+          kind: "apple-device-lease",
+          request: { ...request, deviceId: "90000000-0000-4000-8000-000000000022" as never },
+        },
+      }),
+    ).resolves.toBeUndefined();
+
+    const receipt = await fixture.runtime.confirmApproval(windowId, {
+      challengeId: challenge!.challengeId,
+    });
+    const approved = {
+      ...request,
+      approval: { kind: "approved" as const, approvalId: receipt!.approvalId as never },
+    };
+    await expect(
+      fixture.runtime.validateAppleDeviceLease?.(windowId, {
+        ...approved,
+        deviceId: "90000000-0000-4000-8000-000000000022" as never,
+      }),
+    ).resolves.toBe(false);
+    await expect(fixture.runtime.validateAppleDeviceLease?.(windowId, approved)).resolves.toBe(
+      true,
+    );
+    await expect(fixture.runtime.validateAppleDeviceLease?.(windowId, approved)).resolves.toBe(
+      false,
+    );
     fixture.close();
   });
 
@@ -6000,6 +6073,7 @@ function runtimeFixture(options: {
     binary: boolean;
   }>;
   approvalValidator?: boolean | (() => boolean);
+  describeAppleDevice?: Parameters<typeof createCodeOperationRuntime>[0]["describeAppleDevice"];
   /** Where the runtime keeps its running turns, as the host passes it. */
   activeTurns?: CodeActiveTurns;
   /** Whether a window may access a Project; a function answers per Project. */
@@ -6219,6 +6293,9 @@ function runtimeFixture(options: {
     });
   const runtime = createCodeOperationRuntime({
     ...(options.activeTurns === undefined ? {} : { activeTurns: options.activeTurns }),
+    ...(options.describeAppleDevice === undefined
+      ? {}
+      : { describeAppleDevice: options.describeAppleDevice }),
     persistence: {
       journal,
       readCodeRuntimeWorkAggregateVersion: (id) =>
@@ -7593,6 +7670,86 @@ it("keeps the selected Computer tool instead of the refusal stub when @Computer 
 
   expect(unattachedCalls).toHaveLength(0);
   expect(starts[0]?.tools?.map((tool) => tool.name)).toContain("octant_computer");
+  fixture.close();
+});
+
+it("binds the Computer tool to the desktop the send named and asks its approvals in the thread", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const connection = providerConnection(queue);
+  const bindings: Array<
+    Parameters<NonNullable<Parameters<typeof createCodeOperationRuntime>[0]["computerUseTools"]>>[0]
+  > = [];
+  const fixture = runtimeFixture({
+    provider: providerDriver(connection),
+    supportsAppManagedTools: true,
+    computerUseTools: (input) => {
+      bindings.push(input);
+      return {
+        definitions: [{ name: "octant_computer", inputSchema: { type: "object" } }],
+        execute: async () => ({ result: { kind: "apps", apps: [] } }),
+      };
+    },
+  });
+  const destination = {
+    kind: "desktop-lease" as const,
+    leaseId: decodeDesktopLeaseId("95000000-0000-4000-8000-000000000001"),
+  };
+
+  // A destination names where the selected tool acts; without the selection it binds nothing.
+  await expect(
+    fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(87),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+      computerUseDestination: destination,
+    }),
+  ).resolves.toMatchObject({
+    state: "failed",
+    failure: {
+      message: "A Computer destination needs the Computer selection in the same message.",
+    },
+  });
+  expect(bindings).toEqual([]);
+
+  const startOperation = operationId(88);
+  await fixture.runtime.execute(windowId, {
+    kind: "start-provider-turn",
+    operationId: startOperation,
+    threadId,
+    checkoutId,
+    sessionId,
+    prompt: fixture.prompt,
+    computerUseSelection: computerUseSelection("selected"),
+    computerUseDestination: destination,
+  });
+  await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+  expect(bindings.map((binding) => binding.destination)).toEqual([destination, destination]);
+
+  const answer = bindings.at(-1)?.ask("Send dist/notes-app into the desktop?");
+  let approvalId: string | undefined;
+  await vi.waitFor(async () => {
+    const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 20);
+    const requested = frames.find((frame) => frame.event.kind === "approval-requested");
+    if (requested?.event.kind === "approval-requested") {
+      expect(requested.event.summary).toBe("Send dist/notes-app into the desktop?");
+      approvalId = requested.event.approvalId;
+    }
+    expect(approvalId).toBeDefined();
+  });
+  if (approvalId === undefined) throw new Error("The turn never asked.");
+  await fixture.runtime.execute(windowId, {
+    kind: "answer-provider-approval",
+    operationId: operationId(89),
+    threadId,
+    checkoutId,
+    approvalId,
+    decision: "approved",
+  });
+  await expect(answer).resolves.toBe("approved");
+  await fixture.runtime.close();
   fixture.close();
 });
 

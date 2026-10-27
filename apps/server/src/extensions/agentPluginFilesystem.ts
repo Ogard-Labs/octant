@@ -28,9 +28,18 @@ export interface LoadedAgentPluginDirectory {
   readonly archiveBytes: number;
 }
 
+/**
+ * A file or folder read from a plugin folder. `executable` is the file's own
+ * execute permission: a layout that refuses programs it did not declare reads
+ * it, and the other layouts ignore it.
+ */
+export interface PluginDirectoryEntry extends AgentPluginsPackageEntry {
+  readonly executable?: boolean;
+}
+
 export interface ReadPluginDirectory {
   readonly pluginRoot: string;
-  readonly entries: ReadonlyArray<AgentPluginsPackageEntry>;
+  readonly entries: ReadonlyArray<PluginDirectoryEntry>;
   readonly archiveBytes: number;
 }
 
@@ -68,7 +77,7 @@ export async function readPluginDirectory(
   const maximumTotalBytes = options.maximumTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
 
   const pluginRoot = await resolvePluginRoot(directoryPath);
-  const entries: AgentPluginsPackageEntry[] = [];
+  const entries: PluginDirectoryEntry[] = [];
   let totalBytes = 0;
   let entryCount = 0;
 
@@ -105,7 +114,12 @@ export async function readPluginDirectory(
     if (totalBytes > maximumTotalBytes) {
       fail("archive-oversize", "Package extracted content exceeds the allowed limit.");
     }
-    entries.push({ path: relativePath, kind: "file", content });
+    entries.push({
+      path: relativePath,
+      kind: "file",
+      content,
+      ...((stats.mode & 0o111) === 0 ? {} : { executable: true }),
+    });
   });
 
   entries.sort((left, right) => left.path.localeCompare(right.path));
@@ -131,7 +145,12 @@ export async function readVerifiedPluginFile(
 ): Promise<Uint8Array> {
   let handle: FileHandle;
   try {
-    handle = await open(absolutePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    // O_NONBLOCK keeps a FIFO swapped in after discovery from holding the open
+    // until a writer appears; the snapshot check below then refuses it.
+    handle = await open(
+      absolutePath,
+      constants.O_RDONLY | constants.O_NOFOLLOW | (constants.O_NONBLOCK ?? 0),
+    );
   } catch {
     fail("unsafe-path", `Package file changed or became a symlink: ${relativePath}`);
   }

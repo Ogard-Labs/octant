@@ -89,7 +89,11 @@ preserve its data until cleanup is explicitly authorized.
   Without it a provider reports **Incompatible**, and a task terminal says
   that bubblewrap is missing and how to install it
   (`sudo apt-get install -y bubblewrap`); Octant never runs an unconfined
-  shell instead.
+  shell instead. Bubblewrap 0.2.0 or later is needed; an older one refuses
+  the launch. A confined command has no root privileges even when Octant
+  runs as root: it cannot write a file only root's privileges would let it
+  write, such as another user's file in the Project. A Full access thread
+  keeps root's privileges.
 - **`lsof`.** Running services and Local servers use it to find the servers
   your projects started. A stock Ubuntu install lacks it; without it the card
   says Octant could not check this computer for local servers.
@@ -102,7 +106,9 @@ preserve its data until cleanup is explicitly authorized.
   `~/.local/bin` and point the provider at that absolute path), or an endpoint
   that needs no key, such as a model server on the same machine. An endpoint
   that needs an API key or bearer token takes it from
-  [`octant provider key set`](#save-an-api-key-for-an-endpoint).
+  [`octant provider key set`](#save-an-api-key-for-an-endpoint); an Azure AI
+  Foundry endpoint that uses your organization account signs in with
+  [`octant provider sign-in`](#sign-in-an-organization-endpoint-with-a-code).
 
 `scripts/ade/install-linux-host-deps.sh` installs Bubblewrap, `lsof`,
 `secret-tool`, the GNOME keyring, and a recent Git with `sudo`. For a packaged
@@ -207,6 +213,39 @@ unlock the keyring (see
 [Installation](./installation#headless-linux-for-ade-testing)), then run
 `octant server restart` and try again. Octant never falls back to a file or
 an environment variable.
+
+## Sign in an organization endpoint with a code
+
+An Azure AI Foundry endpoint that uses
+[your organization account](../advanced/providers#azure-ai-foundry-with-your-organization-account)
+normally signs in through a browser on the same computer as Octant, which a
+headless host does not have. Sign it in with a code instead:
+
+1. In Settings, open the endpoint, turn on **Allow sign-in with a code from
+   this host's terminal** under **Name and address**, and save. It is off
+   until you turn it on: many organizations block signing in with a code,
+   and a code is easier to misuse than a browser sign-in.
+2. In a terminal on the host (an SSH session is fine), run:
+
+   ```sh
+   octant provider sign-in "Contoso Foundry"
+   ```
+
+   The first time, the command shows what the sign-in does and asks you to
+   accept.
+
+3. On any device, open the Microsoft page the command names (such as
+   `https://microsoft.com/devicelogin`) and enter the code it shows. Enter a
+   code only because you just ran the command yourself; never enter one
+   someone sent you.
+4. The command says who is signed in. If you stop it with Ctrl-C, a sign-in
+   you finish before the code runs out (about 15 minutes) still completes.
+
+Your administrator's app registration must also set **Authentication ›
+Allow public client flows** to **Yes**; otherwise the command says your
+organization refused the sign-in. The command needs the same Secret Service
+session as `octant provider key set`. A paired device cannot run it or start
+a sign-in, and the browser's Settings never shows a code.
 
 ## Pair a laptop over Tailscale
 

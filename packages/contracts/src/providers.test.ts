@@ -7,6 +7,7 @@ import {
   decodeProviderDefaults,
   decodeProviderFailure,
   decodeProviderInstance,
+  decodeProviderInstanceCreated,
   decodeProviderInstanceBinaryChanged,
   decodeProviderInstanceConfigurationChanged,
   decodeOllamaHistoryRecorded,
@@ -280,6 +281,238 @@ describe("provider registry contracts", () => {
     ).toThrow();
     expect(decodeProviderInstanceConfigurationChanged({ instance })).toEqual({ instance });
     expect(() => decodeProviderInstanceBinaryChanged({ instance })).toThrow();
+  });
+
+  it("decodes an Azure AI Foundry directory sign-in only with the organization's own tenant and client ids", () => {
+    const base = {
+      id: "80000000-0000-4000-8000-000000000422",
+      displayName: "Azure Foundry Entra",
+      driverKind: "azure-foundry",
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-10-26T10:00:00.000Z",
+      updatedAt: "2026-10-26T10:00:00.000Z",
+    } as const;
+    const configuration = {
+      kind: "azure-foundry-openai-http",
+      baseUrl: "https://foundry.example.openai.azure.com/openai/v1/",
+      authentication: "directory-oauth",
+      protocol: "auto",
+      manualModelIds: ["deployment-fixture"],
+      directory: {
+        tenantId: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+        clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d",
+      },
+    } as const;
+
+    const instance = decodeProviderInstance({ ...base, configuration });
+    expect(instance.configuration).toEqual(configuration);
+    expect(JSON.stringify(instance)).not.toMatch(/credential|token|secret/i);
+    expect(
+      decodeProviderRegistryCommand({
+        kind: "create-azure-foundry-provider",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        displayName: "Azure Foundry Entra",
+        configuration,
+      }),
+    ).toMatchObject({ configuration });
+
+    const refused = (candidate: Record<string, unknown>) =>
+      expect(() => decodeProviderInstance({ ...base, configuration: candidate })).toThrow();
+    // A directory sign-in names its tenant and client; without them the
+    // broker would have to guess an authority.
+    const { directory: _directory, ...withoutDirectory } = configuration;
+    refused(withoutDirectory);
+    // Multi-tenant aliases and domain names would let any tenant's account
+    // answer; only one tenant's GUID binds the sign-in.
+    for (const tenantId of [
+      "common",
+      "organizations",
+      "consumers",
+      "contoso.onmicrosoft.com",
+      "6F1C2D3E-4A5B-4C6D-8E7F-9A0B1C2D3E4F",
+    ]) {
+      refused({ ...configuration, directory: { ...configuration.directory, tenantId } });
+    }
+    refused({ ...configuration, directory: { ...configuration.directory, clientId: "octant" } });
+    // Configuration holds no secret: a client secret is not a field.
+    refused({
+      ...configuration,
+      directory: { ...configuration.directory, clientSecret: "secret" },
+    });
+    // An API-key instance carries no directory binding.
+    refused({ ...configuration, authentication: "api-key" });
+  });
+
+  it("records an Azure AI Foundry device-code sign-in only as an organization sign-in's explicit opt-in", () => {
+    const base = {
+      id: "80000000-0000-4000-8000-000000000423",
+      displayName: "Azure Foundry headless",
+      driverKind: "azure-foundry",
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-10-26T10:00:00.000Z",
+      updatedAt: "2026-10-26T10:00:00.000Z",
+    } as const;
+    const configuration = {
+      kind: "azure-foundry-openai-http",
+      baseUrl: "https://foundry.example.openai.azure.com/openai/v1/",
+      authentication: "directory-oauth",
+      protocol: "auto",
+      manualModelIds: ["deployment-fixture"],
+      directory: {
+        tenantId: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+        clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d",
+      },
+      deviceCodeSignIn: true,
+    } as const;
+
+    expect(decodeProviderInstance({ ...base, configuration }).configuration).toEqual(configuration);
+    // Off is the absence of the opt-in; one spelling only.
+    expect(() =>
+      decodeProviderInstance({
+        ...base,
+        configuration: { ...configuration, deviceCodeSignIn: false },
+      }),
+    ).toThrow();
+    // An API-key endpoint has no organization sign-in to begin with a code.
+    const { directory: _directory, ...withoutDirectory } = configuration;
+    expect(() =>
+      decodeProviderInstance({
+        ...base,
+        configuration: { ...withoutDirectory, authentication: "api-key" },
+      }),
+    ).toThrow();
+  });
+
+  it("decodes a gateway's organization sign-in only with its own issuer, client, and one resource scope", () => {
+    const base = {
+      displayName: "Gateway",
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-10-26T10:00:00.000Z",
+      updatedAt: "2026-10-26T10:00:00.000Z",
+    } as const;
+    const directory = {
+      issuer: "https://login.example.test/oauth2/gateway",
+      clientId: "0oa1octantDesktop",
+      scope: "gateway.models",
+    } as const;
+    const openAi = {
+      kind: "openai-compatible-http",
+      baseUrl: "https://llm.example.test/v1/",
+      authentication: "directory-oauth",
+      protocol: "auto",
+      manualModelIds: [],
+      directory,
+    } as const;
+    const anthropic = {
+      kind: "anthropic-compatible-http",
+      baseUrl: "https://llm.example.test/anthropic/v1/",
+      authentication: "directory-oauth",
+      protocol: "auto",
+      protocolVersion: "2023-06-01",
+      manualModelIds: [],
+      directory,
+    } as const;
+    const instances = [
+      {
+        ...base,
+        id: "80000000-0000-4000-8000-000000000423",
+        driverKind: "openai-compatible",
+        configuration: openAi,
+      },
+      {
+        ...base,
+        id: "80000000-0000-4000-8000-000000000424",
+        driverKind: "anthropic-compatible",
+        configuration: anthropic,
+      },
+    ] as const;
+
+    for (const instance of instances) {
+      const decoded = decodeProviderInstance(instance);
+      expect(decoded.configuration).toEqual(instance.configuration);
+      expect(JSON.stringify(decoded)).not.toMatch(/secret|token/i);
+      const refused = (configuration: Record<string, unknown>) =>
+        expect(() => decodeProviderInstance({ ...instance, configuration })).toThrow();
+      const { directory: _directory, ...withoutDirectory } = instance.configuration;
+      refused(withoutDirectory);
+      // The issuer is where the person types their password, so it must be
+      // an https address the identity token's issuer can equal exactly.
+      for (const issuer of [
+        "http://login.example.test",
+        "https://person:secret@login.example.test",
+        "https://login.example.test/?tenant=a",
+        "https://login.example.test/#a",
+        "login.example.test",
+      ]) {
+        refused({ ...instance.configuration, directory: { ...directory, issuer } });
+      }
+      // One resource scope, never an identity scope or a list.
+      for (const scope of ["openid", "offline_access", "a b", ""]) {
+        refused({ ...instance.configuration, directory: { ...directory, scope } });
+      }
+      refused({ ...instance.configuration, directory: { ...directory, clientId: "a/b" } });
+      // Configuration holds no secret.
+      refused({
+        ...instance.configuration,
+        directory: { ...directory, clientSecret: "secret" },
+      });
+      // A bearer or keyless instance names no directory, and a directory
+      // instance is not also a catalog subscription sign-in.
+      refused({ ...instance.configuration, authentication: "bearer" });
+      refused({ ...instance.configuration, oauthDescriptorId: "openrouter" });
+      // Device-code sign-in is Azure AI Foundry's opt-in alone.
+      refused({ ...instance.configuration, deviceCodeSignIn: true });
+    }
+  });
+
+  it("records which issuer a gateway probe checked, beside a tenant probe's binding", () => {
+    const observed = {
+      instanceId: ids.instance,
+      readiness: "incompatible",
+      processState: "stopped",
+      models: [],
+      capabilities: {
+        streaming: "unavailable",
+        resume: "unsupported",
+        interruption: "unsupported",
+        approvals: "unsupported",
+        userQuestions: "unsupported",
+        reasoning: "unavailable",
+        usage: "unavailable",
+        toolActivity: "unsupported",
+        fileChanges: "unsupported",
+        diffs: "unsupported",
+        taskProgress: "unsupported",
+        nativeChildAgents: "unsupported",
+        harnessAutoReview: "unsupported",
+        nativeAttachments: "unsupported",
+        nativeWebResearch: "unsupported",
+        appManagedTools: "unsupported",
+        citations: "unsupported",
+      },
+      observedAt: "2026-10-26T10:00:00.000Z",
+    } as const;
+    const issuerBinding = {
+      issuer: "https://login.example.test/oauth2/gateway",
+      clientId: "0oa1octantDesktop",
+      endpointOrigin: "https://llm.example.test",
+    };
+    expect(
+      decodeProviderObservedState({ ...observed, directoryBinding: issuerBinding }),
+    ).toMatchObject({ directoryBinding: issuerBinding });
+    expect(() =>
+      decodeProviderObservedState({
+        ...observed,
+        directoryBinding: { ...issuerBinding, tenantId: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f" },
+      }),
+    ).toThrow();
   });
 
   it("decodes an OpenAI image profile without a base URL or secret", () => {
@@ -1393,6 +1626,112 @@ describe("provider registry contracts", () => {
     }
   });
 
+  it("decodes an outside driver instance only with the exact package it binds", () => {
+    const outside = {
+      id: ids.instance,
+      displayName: "Local chat server",
+      driverKind: "outside-harness-endpoint",
+      configuration: {
+        kind: "outside-harness-endpoint",
+        driver: {
+          extensionId: "00000000-0000-4000-8000-000000000911",
+          packageId: "00000000-0000-4000-8000-000000000912",
+          componentId: "provider-driver",
+          version: "1.2.0",
+          digest: `sha256:${"a".repeat(64)}`,
+        },
+      },
+      enabled: false,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: occurredAt,
+      updatedAt: occurredAt,
+    } as const;
+
+    expect(decodeProviderInstance(outside)).toEqual(outside);
+    expect(decodeProviderInstanceCreated({ instance: outside })).toEqual({ instance: outside });
+
+    const { digest: _digest, ...withoutDigest } = outside.configuration.driver;
+    for (const driver of [
+      withoutDigest,
+      { ...outside.configuration.driver, digest: "sha256:abc" },
+      { ...outside.configuration.driver, version: "latest" },
+      { ...outside.configuration.driver, componentId: "Provider Driver" },
+      { ...outside.configuration.driver, entryPoint: "index.js" },
+    ]) {
+      expect(() =>
+        decodeProviderInstance({
+          ...outside,
+          configuration: { ...outside.configuration, driver },
+        }),
+      ).toThrow();
+    }
+    for (const excessField of ["apiKey", "authorization", "binaryPath", "capabilities"] as const) {
+      expect(() =>
+        decodeProviderInstance({
+          ...outside,
+          configuration: { ...outside.configuration, [excessField]: "forbidden" },
+        }),
+      ).toThrow();
+    }
+    // The family cannot borrow a bundled kind, and a bundled kind cannot carry
+    // a package reference.
+    expect(() => decodeProviderInstance({ ...outside, driverKind: "ollama" })).toThrow();
+    expect(() =>
+      decodeProviderInstance({
+        ...outside,
+        configuration: { kind: "ollama-native-http", baseUrl: "http://127.0.0.1:11434" },
+      }),
+    ).toThrow();
+    // Nothing admits an outside driver yet: no command creates or reconfigures one.
+    expect(() =>
+      decodeProviderRegistryCommand({
+        kind: "create-outside-harness-endpoint-provider",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        displayName: outside.displayName,
+        configuration: outside.configuration,
+      }),
+    ).toThrow();
+    expect(() => decodeProviderInstanceConfigurationChanged({ instance: outside })).toThrow();
+  });
+
+  it("reports a driver the activation ladder does not admit as a closed refusal with no models", () => {
+    const blocked = {
+      instanceId: ids.instance,
+      readiness: "unavailable",
+      processState: "stopped",
+      models: [],
+      capabilities: Object.fromEntries(
+        [
+          "streaming",
+          "resume",
+          "interruption",
+          "approvals",
+          "userQuestions",
+          "reasoning",
+          "usage",
+          "toolActivity",
+          "fileChanges",
+          "diffs",
+          "taskProgress",
+          "nativeChildAgents",
+          "harnessAutoReview",
+          "nativeAttachments",
+          "nativeWebResearch",
+          "appManagedTools",
+          "citations",
+        ].map((capability) => [capability, "unavailable"]),
+      ),
+      reason: "driver-not-admitted",
+      observedAt: occurredAt,
+    } as const;
+    expect(decodeProviderObservedState(blocked)).toMatchObject({
+      reason: "driver-not-admitted",
+      models: [],
+    });
+  });
+
   it("decodes bounded Octant-owned Ollama history snapshots for journal replay", () => {
     const recorded = {
       snapshot: {
@@ -1433,16 +1772,29 @@ describe("provider registry contracts", () => {
     } as const;
 
     expect(decodeProviderInstance(kimi)).toEqual(kimi);
+    // Binary changes the journal recorded before Kimi Code took configuration
+    // commands still replay.
     expect(decodeProviderInstanceBinaryChanged({ instance: kimi })).toEqual({ instance: kimi });
+    expect(decodeProviderInstanceConfigurationChanged({ instance: kimi })).toEqual({
+      instance: kimi,
+    });
     expect(
       decodeProviderRegistryCommand({
         kind: "create-kimi-code-provider",
         instanceId: ids.instance,
         expectedVersion: 0,
         displayName: "Kimi Code local",
-        binaryPath: "/opt/homebrew/bin/kimi",
+        configuration: kimi.configuration,
       }),
     ).toMatchObject({ kind: "create-kimi-code-provider" });
+    expect(
+      decodeProviderRegistryCommand({
+        kind: "change-kimi-code-configuration",
+        instanceId: ids.instance,
+        expectedVersion: 1,
+        configuration: kimi.configuration,
+      }),
+    ).toMatchObject({ kind: "change-kimi-code-configuration" });
 
     expect(() =>
       decodeProviderRegistryCommand({
@@ -1450,7 +1802,17 @@ describe("provider registry contracts", () => {
         instanceId: ids.instance,
         expectedVersion: 0,
         displayName: "Kimi Code local",
-        binaryPath: "bin/kimi",
+        configuration: { ...kimi.configuration, binaryPath: "bin/kimi" },
+      }),
+    ).toThrow();
+    // The bare binary path the command once carried is refused.
+    expect(() =>
+      decodeProviderRegistryCommand({
+        kind: "create-kimi-code-provider",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        displayName: "Kimi Code local",
+        binaryPath: "/opt/homebrew/bin/kimi",
       }),
     ).toThrow();
 
@@ -1472,6 +1834,111 @@ describe("provider registry contracts", () => {
         }),
       ).toThrow();
     }
+  });
+
+  it("refuses an ACP agent instance or command whose configuration names another agent", () => {
+    const qwen = {
+      id: ids.instance,
+      displayName: "Qwen local",
+      driverKind: "qwen",
+      configuration: {
+        kind: "qwen-acp",
+        binaryPath: "/Users/example/.local/bin/qwen",
+        authentication: "provider-owned",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: occurredAt,
+      updatedAt: occurredAt,
+    } as const;
+    const fxConfiguration = {
+      kind: "fx-acp",
+      binaryPath: "/Users/example/.local/bin/fx",
+      authentication: "api-key",
+    } as const;
+
+    expect(decodeProviderInstance(qwen)).toEqual(qwen);
+    expect(() => decodeProviderInstance({ ...qwen, configuration: fxConfiguration })).toThrow();
+    expect(() =>
+      decodeProviderRegistryCommand({
+        kind: "create-qwen-provider",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        displayName: "Qwen local",
+        configuration: fxConfiguration,
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderRegistryCommand({
+        kind: "change-qwen-configuration",
+        instanceId: ids.instance,
+        expectedVersion: 1,
+        configuration: fxConfiguration,
+      }),
+    ).toThrow();
+    // Only Kimi Code ever recorded a binary change.
+    expect(() => decodeProviderInstanceBinaryChanged({ instance: qwen })).toThrow();
+  });
+
+  it("refuses a posture an ACP agent's profile does not list, and one on an agent that lists none", () => {
+    const base = {
+      id: ids.instance,
+      displayName: "Agent local",
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: occurredAt,
+      updatedAt: occurredAt,
+    } as const;
+
+    expect(() =>
+      decodeProviderInstance({
+        ...base,
+        driverKind: "fx",
+        configuration: { kind: "fx-acp", binaryPath: "/bin/fx", authentication: "provider-owned" },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderInstance({
+        ...base,
+        driverKind: "qwen",
+        configuration: { kind: "qwen-acp", binaryPath: "/bin/qwen" },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderInstance({
+        ...base,
+        driverKind: "kilo",
+        configuration: { kind: "kilo-acp", binaryPath: "/bin/kilo", authentication: "api-key" },
+      }),
+    ).toThrow();
+  });
+
+  it("refuses a driver kind that neither a profile nor a native driver names", () => {
+    expect(() => Schema.decodeUnknownSync(ProviderDriverKind)("probe-agent")).toThrow();
+    expect(() =>
+      decodeProviderInstance({
+        id: ids.instance,
+        displayName: "Probe local",
+        driverKind: "probe-agent",
+        configuration: { kind: "probe-agent-acp", binaryPath: "/bin/probe-agent" },
+        enabled: true,
+        environmentPolicy: "inherit-host",
+        version: 1,
+        createdAt: occurredAt,
+        updatedAt: occurredAt,
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderRegistryCommand({
+        kind: "create-probe-agent-provider",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        displayName: "Probe local",
+        configuration: { kind: "probe-agent-acp", binaryPath: "/bin/probe-agent" },
+      }),
+    ).toThrow();
   });
 
   it("allows only bounded provider-specific creation commands", () => {

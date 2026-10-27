@@ -6,6 +6,8 @@ and the managed streaming tools. Architecture owns the device authority rules,
 including how `octant_apple` and `octant_android` follow the thread's turn
 posture and what **Allow input** grants
 ([Architecture: device transport and evidence](../architecture.md#device-transport-and-evidence)).
+Physical Apple devices are specified in
+[Apple physical devices and distribution](apple-devices.md).
 
 ## Device pane
 

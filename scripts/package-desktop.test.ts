@@ -29,6 +29,7 @@ import {
   APPIMAGE_TOOL_URL,
   APPIMAGE_TOOL_SHA256,
   buildPackagedApps,
+  bundledLanguageServerPaths,
   createActivateAppleScript,
   createLinuxAppRunScript,
   createLinuxDesktopEntry,
@@ -58,6 +59,7 @@ import {
   validateLinuxNativePayloadAllowlist,
   validateNativePayloadAllowlist,
   waitForChildExit,
+  stageBundledLanguageServer,
   stageExternalRuntimePackages,
 } from "./package-desktop";
 
@@ -255,10 +257,16 @@ describe("desktop packaging boundary", () => {
     expect(PACKAGED_EXECUTABLE_FILES).toContain(
       "app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
     );
-    expect(PACKAGED_LINUX_EXECUTABLE_FILES).toEqual([]);
+    expect(PACKAGED_EXECUTABLE_FILES).toContain(
+      "app/apps/server/node_modules/@typescript/typescript-darwin-arm64/lib/tsc",
+    );
+    expect(PACKAGED_LINUX_EXECUTABLE_FILES).toEqual([
+      "app/apps/server/node_modules/@typescript/typescript-linux-x64/lib/tsc",
+    ]);
     expect(PACKAGED_LINUX_NATIVE_FILES).toEqual([
       "app/apps/server/node_modules/node-pty/build/Release/pty.node",
       "app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
+      "app/apps/server/node_modules/@typescript/typescript-linux-x64/lib/tsc",
     ]);
     expect(PACKAGED_ARM64_FILES).toEqual([
       "native/octant-keychain-helper",
@@ -269,6 +277,7 @@ describe("desktop packaging boundary", () => {
       "app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
       "app/apps/server/node_modules/node-pty/build/Release/pty.node",
       "app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
+      "app/apps/server/node_modules/@typescript/typescript-darwin-arm64/lib/tsc",
     ]);
     expect(FORBIDDEN_PACKAGED_FILES).toContain(
       "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-keychain-helper",
@@ -309,6 +318,14 @@ describe("desktop packaging boundary", () => {
   it("does not require the macOS-only node-pty spawn-helper on Linux payloads", () => {
     const linuxPayload = [
       ...REQUIRED_STAGED_PACKAGED_FILES.map((path) => ({ path, content: "Octant" })),
+      ...bundledLanguageServerPaths(
+        DESKTOP_PACKAGE_TARGETS["linux-x64"],
+        "apps/server/node_modules",
+      ).map((path) => ({ path })),
+      ...bundledLanguageServerPaths(
+        DESKTOP_PACKAGE_TARGETS["darwin-arm64"],
+        "apps/server/node_modules",
+      ).map((path) => ({ path })),
       { path: "apps/web/dist/assets/MonacoEditorPane-a.js", content: "Octant" },
       { path: "apps/web/dist/assets/editor.api-b.js", content: "Octant" },
       { path: "apps/web/dist/assets/editor.worker-c.js", content: "Octant" },
@@ -319,6 +336,112 @@ describe("desktop packaging boundary", () => {
       validatePackagedPayload(linuxPayload, DESKTOP_PACKAGE_TARGETS["linux-x64"]),
     ).not.toThrow();
     expect(() => validatePackagedPayload(linuxPayload)).toThrow(/spawn-helper/);
+  });
+
+  it("refuses a package without the target's language server, its standard library, or its license notice", () => {
+    const linux = DESKTOP_PACKAGE_TARGETS["linux-x64"];
+    const payload = [
+      ...REQUIRED_STAGED_PACKAGED_FILES.map((path) => ({ path, content: "Octant" })),
+      ...bundledLanguageServerPaths(linux, "apps/server/node_modules").map((path) => ({ path })),
+      { path: "apps/web/dist/assets/MonacoEditorPane-a.js", content: "Octant" },
+      { path: "apps/web/dist/assets/editor.api-b.js", content: "Octant" },
+      { path: "apps/web/dist/assets/editor.worker-c.js", content: "Octant" },
+      { path: "apps/web/dist/assets/xtermRuntime-d.js", content: "Octant" },
+      { path: "apps/web/dist/assets/xtermRuntime-e.css", content: "Octant" },
+    ];
+    expect(() => validatePackagedPayload(payload, linux)).not.toThrow();
+    const languageServer = "apps/server/node_modules/@typescript/typescript-linux-x64";
+    for (const missing of ["lib/tsc", "lib/lib.es5.d.ts", "LICENSE", "NOTICE.txt"]) {
+      const without = payload.filter((entry) => entry.path !== `${languageServer}/${missing}`);
+      expect(() => validatePackagedPayload(without, linux), missing).toThrow(
+        `Packaged payload is missing ${languageServer}/${missing}.`,
+      );
+    }
+  });
+
+  it("stages the pinned language server package with its executable bit, license, and notices", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "octant-package-language-server-"));
+    try {
+      const native = resolve(root, "node_modules/@typescript/typescript-linux-x64");
+      await mkdir(resolve(root, "apps/server"), { recursive: true });
+      await mkdir(resolve(root, "node_modules/typescript"), { recursive: true });
+      await mkdir(resolve(native, "lib"), { recursive: true });
+      await writeFile(resolve(root, "apps/server/package.json"), "{}");
+      await writeFile(
+        resolve(root, "node_modules/typescript/package.json"),
+        JSON.stringify({
+          name: "typescript",
+          version: "7.0.2",
+          optionalDependencies: { "@typescript/typescript-linux-x64": "7.0.2" },
+        }),
+      );
+      await writeFile(
+        resolve(native, "package.json"),
+        JSON.stringify({ name: "@typescript/typescript-linux-x64", version: "7.0.2" }),
+      );
+      await writeFile(resolve(native, "LICENSE"), "Apache-2.0");
+      await writeFile(resolve(native, "NOTICE.txt"), "Third-party notices");
+      await writeFile(resolve(native, "lib/lib.d.ts"), "/// <reference lib='es5' />");
+      await writeFile(resolve(native, "lib/tsc"), "binary", { mode: 0o755 });
+
+      await stageBundledLanguageServer({
+        repositoryRoot: root,
+        destinationNodeModules: resolve(root, "stage/apps/server/node_modules"),
+        target: DESKTOP_PACKAGE_TARGETS["linux-x64"],
+      });
+
+      const staged = resolve(
+        root,
+        "stage/apps/server/node_modules/@typescript/typescript-linux-x64",
+      );
+      expect(await readFile(resolve(staged, "LICENSE"), "utf8")).toBe("Apache-2.0");
+      expect(await readFile(resolve(staged, "NOTICE.txt"), "utf8")).toBe("Third-party notices");
+      expect(await readFile(resolve(staged, "lib/lib.d.ts"), "utf8")).toContain("es5");
+      expect((await stat(resolve(staged, "lib/tsc"))).mode & 0o111).not.toBe(0);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to stage a language server whose version is not the one typescript pins", async () => {
+    // Node resolution walks up past the repository, so a checkout nested in
+    // another (a worktree) can resolve a stale copy from the outer install.
+    const root = await mkdtemp(resolve(tmpdir(), "octant-package-language-server-"));
+    try {
+      const native = resolve(root, "node_modules/@typescript/typescript-linux-x64");
+      await mkdir(resolve(root, "apps/server"), { recursive: true });
+      await mkdir(resolve(root, "node_modules/typescript"), { recursive: true });
+      await mkdir(resolve(native, "lib"), { recursive: true });
+      await writeFile(resolve(root, "apps/server/package.json"), "{}");
+      await writeFile(
+        resolve(root, "node_modules/typescript/package.json"),
+        JSON.stringify({
+          name: "typescript",
+          version: "7.0.2",
+          optionalDependencies: { "@typescript/typescript-linux-x64": "7.0.2" },
+        }),
+      );
+      await writeFile(
+        resolve(native, "package.json"),
+        JSON.stringify({ name: "@typescript/typescript-linux-x64", version: "7.0.1" }),
+      );
+      await writeFile(resolve(native, "lib/tsc"), "binary", { mode: 0o755 });
+
+      await expect(
+        stageBundledLanguageServer({
+          repositoryRoot: root,
+          destinationNodeModules: resolve(root, "stage/apps/server/node_modules"),
+          target: DESKTOP_PACKAGE_TARGETS["linux-x64"],
+        }),
+      ).rejects.toThrow(
+        "The bundled language server @typescript/typescript-linux-x64 is 7.0.1, but typescript 7.0.2 pins 7.0.2.",
+      );
+      await expect(
+        access(resolve(root, "stage/apps/server/node_modules/@typescript")),
+      ).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
   it("preserves Chromium sandboxing even when an unrelated user namespace probe would fail", async () => {
     const root = await mkdtemp(resolve(tmpdir(), "octant-linux-launch-"));
@@ -587,6 +710,10 @@ describe("desktop packaging boundary", () => {
         ...REQUIRED_PACKAGED_FILES.filter(
           (path) => !path.startsWith("Octant.app/") && !path.includes("native/octant-"),
         ).map((path) => ({ path, content: "Octant" })),
+        ...bundledLanguageServerPaths(
+          DESKTOP_PACKAGE_TARGETS["darwin-arm64"],
+          "apps/server/node_modules",
+        ).map((path) => ({ path })),
         {
           path: "apps/server/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude",
         },
@@ -784,6 +911,10 @@ describe("desktop packaging boundary", () => {
     const required = [
       ...REQUIRED_STAGED_PACKAGED_FILES,
       "apps/server/node_modules/node-pty/build/Release/spawn-helper",
+      ...bundledLanguageServerPaths(
+        DESKTOP_PACKAGE_TARGETS["darwin-arm64"],
+        "apps/server/node_modules",
+      ),
     ].map((path) => ({ path, content: "Octant" }));
     expect(() => validatePackagedPayload(required.slice(1))).toThrow(
       "missing apps/desktop/dist/entry.mjs",

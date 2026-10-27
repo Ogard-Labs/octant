@@ -5,7 +5,9 @@ import {
   type ProviderModel,
   type ProviderReadiness,
 } from "@octant/contracts";
+import { readDirectoryOAuthCredential } from "@octant/provider-sdk/directory-oauth";
 import type { ProviderCredentialLease, ProviderCredentialResolver } from "./credentialBrokerClient";
+import type { CompatibleRequestAuthorization } from "./openAiCompatibleEndpoint";
 import { CONTEXT_OVERFLOW_FAILURE_MESSAGE } from "./contextOverflowRefusal";
 import { acquireProviderCredential, reportKeyRejection } from "./providerApiKeyPool";
 import { trimTrailingSlashes } from "@octant/domain/trim-trailing";
@@ -32,6 +34,12 @@ export interface AnthropicCompatibleEndpointOptions {
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly fetch?: AnthropicCompatibleFetch;
   readonly limits?: Partial<AnthropicHttpLimits>;
+  /**
+   * A credential the caller resolves around each request in place of a
+   * stored key, such as an organization sign-in's bearer. When present it
+   * replaces the key lookup.
+   */
+  readonly requestAuthorization?: CompatibleRequestAuthorization;
 }
 
 export interface AnthropicCompatibleEndpoint {
@@ -39,6 +47,7 @@ export interface AnthropicCompatibleEndpoint {
   readonly configuration: AnthropicCompatibleProviderConfiguration;
   readonly fetch: AnthropicCompatibleFetch;
   readonly credentialResolver?: ProviderCredentialResolver;
+  readonly requestAuthorization?: CompatibleRequestAuthorization;
   readonly limits: AnthropicHttpLimits;
   readonly url: (path: "models" | "messages") => string;
 }
@@ -83,6 +92,9 @@ export function makeAnthropicCompatibleEndpoint(
     ...(options.credentialResolver === undefined
       ? {}
       : { credentialResolver: options.credentialResolver }),
+    ...(options.requestAuthorization === undefined
+      ? {}
+      : { requestAuthorization: options.requestAuthorization }),
     limits,
     url: (path: "models" | "messages") => `${baseUrl}/${path}`,
   });
@@ -225,6 +237,31 @@ async function performRequest(
   try {
     const headers = new Headers(init.headers);
     headers.set("anthropic-version", endpoint.configuration.protocolVersion);
+    const authorize = endpoint.requestAuthorization;
+    if (authorize !== undefined) {
+      // The caller may send twice, renewing its credential between: a stream
+      // body the refused send consumed could not be sent again.
+      if (init.body instanceof ReadableStream) {
+        throw fail("invalid-configuration", "The provider request could not be encoded.");
+      }
+      const authorized = authorize((authorization) => {
+        const authorizedHeaders = new Headers(headers);
+        for (const [name, value] of Object.entries(authorization)) {
+          authorizedHeaders.set(name, value);
+        }
+        return sendOnce(endpoint, url, init, authorizedHeaders, deadline, callerSignal);
+      });
+      // The deadline may win while the broker is still answering; that late
+      // rejection has nobody left to read it.
+      authorized.catch(() => undefined);
+      const response = await Promise.race([authorized, deadline.failure]);
+      return boundResponse(response, endpoint.limits, callerSignal);
+    }
+    // An organization sign-in sends only the bearer its caller resolves for
+    // each request; without one, nothing stored is sent in its place.
+    if (endpoint.configuration.authentication === "directory-oauth") {
+      throw fail("unauthenticated", "The provider credential is missing or unavailable.");
+    }
     if (endpoint.configuration.authentication !== "none") {
       let credential: string;
       try {
@@ -241,7 +278,10 @@ async function performRequest(
         if (isProviderFailure(error)) throw error;
         throw fail("unauthenticated", "The provider credential is missing or unavailable.");
       }
-      if (credential.length === 0) {
+      // An organization sign-in's pointer is a reference to a grant, not a
+      // key. One left in the store after the instance moved to a key is never
+      // sent.
+      if (credential.length === 0 || readDirectoryOAuthCredential(credential) !== undefined) {
         throw fail("unauthenticated", "The provider credential is missing or unavailable.");
       }
       if (endpoint.configuration.authentication === "api-key") {
@@ -250,45 +290,58 @@ async function performRequest(
         headers.set("authorization", `Bearer ${credential}`);
       }
     }
-    let response: Response;
-    try {
-      const fetchRequest = Promise.resolve().then(async () =>
-        endpoint.fetch(url, {
-          ...init,
-          headers: Object.fromEntries(headers),
-          redirect: "manual",
-          signal: deadline.signal,
-        }),
-      );
-      const outcome = await Promise.race([
-        fetchRequest.then(
-          (value) => ({ kind: "response", value }) as const,
-          (error: unknown) => ({ kind: "fetch-failure", error }) as const,
-        ),
-        deadline.failure.catch(
-          (failure: ProviderFailure) => ({ kind: "deadline-failure", failure }) as const,
-        ),
-      ]);
-      if (outcome.kind === "deadline-failure") {
-        safelyCancelLateResponse(fetchRequest);
-        throw outcome.failure;
-      }
-      if (outcome.kind === "fetch-failure") throw outcome.error;
-      response = outcome.value;
-    } catch (error) {
-      if (isProviderFailure(error)) throw error;
-      if (isAborted(callerSignal)) throw interrupted();
-      throw fail("unavailable", "The provider endpoint could not be reached.");
-    }
-    if (response.status >= 300 && response.status < 400) {
-      await cancelResponseBody(response);
-      throw fail("invalid-configuration", "The configured endpoint returned a redirect.");
-    }
+    const response = await sendOnce(endpoint, url, init, headers, deadline, callerSignal);
     await reportKeyRejection(attempt.lease, response);
     return boundResponse(response, endpoint.limits, callerSignal);
   } finally {
     deadline.close();
   }
+}
+
+/** One send of the request with these headers, within the request's deadline. */
+async function sendOnce(
+  endpoint: AnthropicCompatibleEndpoint,
+  url: string,
+  init: RequestInit,
+  headers: Headers,
+  deadline: RequestDeadline,
+  callerSignal: AbortSignal | null | undefined,
+): Promise<Response> {
+  let response: Response;
+  try {
+    const fetchRequest = Promise.resolve().then(async () =>
+      endpoint.fetch(url, {
+        ...init,
+        headers: Object.fromEntries(headers),
+        redirect: "manual",
+        signal: deadline.signal,
+      }),
+    );
+    const outcome = await Promise.race([
+      fetchRequest.then(
+        (value) => ({ kind: "response", value }) as const,
+        (error: unknown) => ({ kind: "fetch-failure", error }) as const,
+      ),
+      deadline.failure.catch(
+        (failure: ProviderFailure) => ({ kind: "deadline-failure", failure }) as const,
+      ),
+    ]);
+    if (outcome.kind === "deadline-failure") {
+      safelyCancelLateResponse(fetchRequest);
+      throw outcome.failure;
+    }
+    if (outcome.kind === "fetch-failure") throw outcome.error;
+    response = outcome.value;
+  } catch (error) {
+    if (isProviderFailure(error)) throw error;
+    if (isAborted(callerSignal)) throw interrupted();
+    throw fail("unavailable", "The provider endpoint could not be reached.");
+  }
+  if (response.status >= 300 && response.status < 400) {
+    await cancelResponseBody(response);
+    throw fail("invalid-configuration", "The configured endpoint returned a redirect.");
+  }
+  return response;
 }
 
 function boundResponse(

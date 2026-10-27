@@ -61,9 +61,11 @@ import { wireContext } from "./wiring/context";
 import { wireWorkFiles } from "./wiring/workFiles";
 import { wireCanvas } from "./wiring/canvas";
 import { wireAutomation } from "./wiring/automation";
+import { wireThreadNotifications } from "./wiring/notifications";
 import { wireWorkRequests } from "./wiring/workRequests";
 import { wireRoutes } from "./wiring/routes";
 import { wireRemote } from "./wiring/remote";
+import { wireSshTargets } from "./wiring/sshTargets";
 import { wireReplica } from "./wiring/replica";
 
 export { MAX_CHAT_ATTACHMENT_BYTES };
@@ -176,6 +178,7 @@ export function startOctantServer(
       agentRunParentAuthority,
       agentRunPersistence,
       androidInputGrants,
+      appleDeviceLeases,
       bindingReceiptStore,
       browserCaptureStore,
       browserCaptures,
@@ -307,15 +310,18 @@ export function startOctantServer(
       computerUseRoutes,
       computerUseRuntime,
       computerUseTools,
+      desktopPaneRoutes,
       launchSessionRoutes,
       machineChangeRoutes,
       stopComputerSettingsWatch,
+      stopDesktopLeases,
       webAssets,
     } = wireComputerUse({
       onWindowRevoked,
       browserAuthority,
       externalContentIngestionStore,
       machineChangeFeed,
+      managedWorktreeReceipts,
       options,
       persistence,
       processAuthorityNow,
@@ -376,6 +382,7 @@ export function startOctantServer(
       discoveryRoutes,
       extensionActivationService,
       extensionApiService,
+      extensionLifecycleService,
       extensionPackageStore,
       extensionRoutes,
       generatedImageStore,
@@ -420,6 +427,11 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
     });
+    const { sshTargetConnections, sshTargetStore } = wireSshTargets({
+      persistence,
+      providerDataDirectory,
+      version,
+    });
     const {
       followUpCreation,
       followUpSuggestionRoutes,
@@ -461,6 +473,7 @@ export function startOctantServer(
       providerDataDirectory,
       runningWorkTurnAccess,
       sideTasks,
+      sshTargetConnections,
       threadFollowUpSuggestions,
       toolEgressRules,
       turnMetrics,
@@ -473,6 +486,7 @@ export function startOctantServer(
       buildCodeService,
       canAccessCodeProject,
       codeAttachments,
+      codeFileWatch,
       codeProjectAccess,
       codeTestDiscovery,
       codeWorkingDirectoryProbePath,
@@ -572,11 +586,13 @@ export function startOctantServer(
     });
     const {
       androidToolchainService,
+      appleDeviceService,
       appleToolchainService,
       bindDeviceApprovals,
       recordAppleEvidence,
     } = yield* wireDevices({
       androidInputGrants,
+      appleDeviceLeases,
       codeSessionAuthority,
       persistence,
       projectService,
@@ -587,6 +603,7 @@ export function startOctantServer(
     });
     const {
       androidToolchainRoutes,
+      appleDeviceRoutes,
       appleToolchainRoutes,
       baseRouteCodeService,
       codeCompletedThreadSource,
@@ -610,6 +627,7 @@ export function startOctantServer(
       androidToolchainService,
       bindDeviceApprovals,
       buildCodeService,
+      appleDeviceService,
       appleToolchainService,
       browserAuthority,
       canAccessCodeProject,
@@ -673,14 +691,19 @@ export function startOctantServer(
       codeExternalEditorRoutes,
       codeOperationApprovalRoutes,
       codeRoutes,
+      languageServerApprovals,
       localServerRoutes,
       projectTerminals,
       remoteServerGrantLocalRoutes,
       remoteServerGrants,
     } = yield* wireCodeTooling({
       canAccessCodeProject,
+      codeFileWatch,
       codeOperationRuntime,
+      codeSessionAuthority,
       codeWorkingDirectoryProbePath,
+      extensionLifecycleService,
+      extensionPackageStore,
       managedWorktreeReceipts,
       options,
       persistence,
@@ -689,9 +712,12 @@ export function startOctantServer(
       roots,
       routeCodeService,
       terminalProcessPort,
+      toolEgressRules,
+      version,
       windowAuthorityStore,
     });
     const {
+      chatHiddenThreadIds,
       chatRoutes,
       chatService,
       codeThreadMentionDirectory,
@@ -920,6 +946,9 @@ export function startOctantServer(
       automationRoutes,
       automationScheduler,
       completedThreadArchiveSweep,
+      hasPushStanding,
+      pushComputerLabel,
+      pushDeliveryTransport,
       pushNotificationTokenStore,
     } = wireAutomation({
       capacityScheduler,
@@ -933,6 +962,15 @@ export function startOctantServer(
       workThreadService,
       workThreadServiceWithWorkflows,
       workTurnService,
+    });
+    yield* wireThreadNotifications({
+      chatHiddenThreadIds,
+      hasPushStanding,
+      persistence,
+      pushComputerLabel,
+      pushDeliveryTransport,
+      pushNotificationTokenStore,
+      workThreadProjection,
     });
     const {
       fleetActivityRoutes,
@@ -995,6 +1033,7 @@ export function startOctantServer(
       agentRunRouteDependencies,
       agentRunSettingsRoutes,
       androidToolchainRoutes,
+      appleDeviceRoutes,
       appleToolchainRoutes,
       artifactLibraryRoutes,
       artifactMirrorRoutes,
@@ -1009,6 +1048,7 @@ export function startOctantServer(
       codeProjectAccess,
       codeRoutes,
       computerUseRoutes,
+      desktopPaneRoutes,
       contextRoutes,
       diagnosticsExportRoutes,
       discoveryRoutes,
@@ -1087,6 +1127,7 @@ export function startOctantServer(
       privateListenerSetting,
       providerCredentialRoutes,
       remoteHost,
+      sshTargetAdministrationRoutes,
     } = wireRemote({
       canvasPublicShareService,
       threadExportService,
@@ -1101,6 +1142,7 @@ export function startOctantServer(
       credentialResolver,
       externalContentIngestionStore,
       generatedImageStore,
+      languageServerApprovals,
       options,
       persistence,
       providerDataDirectory,
@@ -1109,6 +1151,8 @@ export function startOctantServer(
       pushNotificationTokenStore,
       remoteServerGrants,
       serve,
+      sshTargetConnections,
+      sshTargetStore,
       startedAt,
       threadMessageQueue,
       toolEgressRules,
@@ -1183,6 +1227,7 @@ export function startOctantServer(
               }
               return (
                 (await privateListenerAdministrationRoutes(request)) ??
+                (await sshTargetAdministrationRoutes(request)) ??
                 (await providerCredentialRoutes(request)) ??
                 (await localDeviceAdministrationRoutes(request)) ??
                 (await hostControlRoutes(request)) ??
@@ -1378,6 +1423,12 @@ export function startOctantServer(
             shutdownFailure ??= error;
           }
           try {
+            // Each executor exits when its session's input closes.
+            sshTargetConnections.close();
+          } catch (error) {
+            shutdownFailure ??= error;
+          }
+          try {
             projectBrowserService?.close();
             await browserAutomationService?.close();
           } catch (error) {
@@ -1386,6 +1437,7 @@ export function startOctantServer(
           browserToolApprovalService?.close();
           try {
             stopComputerSettingsWatch();
+            stopDesktopLeases();
             if (computerUseTools !== undefined) await computerUseTools.close();
             else await computerUseRuntime.close();
           } catch (error) {

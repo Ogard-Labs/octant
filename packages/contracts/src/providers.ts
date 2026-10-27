@@ -1,6 +1,21 @@
 import { Schema } from "effect";
 import { AggregateVersion, CorrelationId, UtcTimestamp } from "./events";
+import {
+  ExtensionComponentId,
+  ExtensionContentDigest,
+  ExtensionPackageId,
+  ExtensionPackageVersion,
+  ToolExtensionId,
+} from "./extensionIdentity";
 import { OctantMode } from "./modes";
+import {
+  ACP_AGENT_KINDS,
+  AcpAgentAuthentication,
+  acpAgentConfigurationKind,
+  acpAgentKindOfConfiguration,
+  acpAgentProfile,
+  type AcpAgentKind,
+} from "./acpAgentProfiles";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -24,25 +39,18 @@ export const ThreadProviderHandoff = Schema.Struct({
 }).annotations(strict);
 export type ThreadProviderHandoff = typeof ThreadProviderHandoff.Type;
 
+/**
+ * The closed driver vocabulary. ACP agents join it through their profile row
+ * in `acpAgentProfiles.ts`; every other driver is named here.
+ */
 export const ProviderDriverKind = Schema.Literal(
   "codex",
   "claude",
   "opencode",
-  "kilo",
   "pi",
   "oh-my-pi",
-  "devin",
-  "mistral-vibe",
   "ollama",
-  "kimi-code",
-  "grok",
-  "goose",
-  "glm",
-  "gemini",
-  "copilot",
-  "cline",
-  "qwen",
-  "fx",
+  ...ACP_AGENT_KINDS,
   "openai-compatible",
   "anthropic-compatible",
   "azure-foundry",
@@ -50,6 +58,10 @@ export const ProviderDriverKind = Schema.Literal(
   "gemini-native-image",
   "bfl-image",
   "ideogram-image",
+  // The one family for every driver package that does not ship with Octant.
+  // Which driver an instance runs is package data in its configuration, never
+  // a new value here, so the exhaustive checks over this set stay closed.
+  "outside-harness-endpoint",
 );
 export type ProviderDriverKind = typeof ProviderDriverKind.Type;
 
@@ -243,104 +255,29 @@ export type OpenCodeProviderConfiguration = typeof OpenCodeProviderConfiguration
 const AbsoluteBinaryPath = Schema.NonEmptyTrimmedString.pipe(
   Schema.filter((path) => path.startsWith("/")),
 );
-export const KimiCodeProviderConfiguration = Schema.Struct({
-  kind: Schema.Literal("kimi-code-acp"),
-  binaryPath: AbsoluteBinaryPath,
-}).annotations(strict);
-export type KimiCodeProviderConfiguration = typeof KimiCodeProviderConfiguration.Type;
-
-export const KiloProviderConfiguration = Schema.Struct({
-  kind: Schema.Literal("kilo-acp"),
-  binaryPath: AbsoluteBinaryPath,
-}).annotations(strict);
-export type KiloProviderConfiguration = typeof KiloProviderConfiguration.Type;
-
-export const MistralVibeAuthentication = Schema.Literal("subscription", "api-key");
-export type MistralVibeAuthentication = typeof MistralVibeAuthentication.Type;
-export const MistralVibeProviderConfiguration = Schema.Struct({
-  kind: Schema.Literal("mistral-vibe-acp"),
-  binaryPath: AbsoluteBinaryPath,
-  authentication: MistralVibeAuthentication,
-}).annotations(strict);
-export type MistralVibeProviderConfiguration = typeof MistralVibeProviderConfiguration.Type;
-
-export const GrokAuthentication = Schema.Literal("subscription", "api-key");
-export type GrokAuthentication = typeof GrokAuthentication.Type;
-export const GrokProviderConfiguration = Schema.Struct({
-  kind: Schema.Literal("grok-acp"),
-  binaryPath: AbsoluteBinaryPath,
-  authentication: GrokAuthentication,
-}).annotations(strict);
-export type GrokProviderConfiguration = typeof GrokProviderConfiguration.Type;
-
-export const GooseProviderConfiguration = Schema.Struct({
-  kind: Schema.Literal("goose-acp"),
-  binaryPath: AbsoluteBinaryPath,
-}).annotations(strict);
-export type GooseProviderConfiguration = typeof GooseProviderConfiguration.Type;
-
-export const GlmAuthentication = Schema.Literal("provider-owned", "api-key");
-export type GlmAuthentication = typeof GlmAuthentication.Type;
-export const GlmProviderConfiguration = Schema.Struct({
-  kind: Schema.Literal("glm-acp"),
-  binaryPath: AbsoluteBinaryPath,
-  authentication: GlmAuthentication,
-}).annotations(strict);
-export type GlmProviderConfiguration = typeof GlmProviderConfiguration.Type;
-
-export const GeminiAuthentication = Schema.Literal("provider-owned", "api-key");
-export type GeminiAuthentication = typeof GeminiAuthentication.Type;
-export const GeminiProviderConfiguration = Schema.Struct({
-  kind: Schema.Literal("gemini-acp"),
-  binaryPath: AbsoluteBinaryPath,
-  authentication: GeminiAuthentication,
-}).annotations(strict);
-export type GeminiProviderConfiguration = typeof GeminiProviderConfiguration.Type;
-
-export const CopilotProviderConfiguration = Schema.Struct({
-  kind: Schema.Literal("copilot-acp"),
-  binaryPath: AbsoluteBinaryPath,
-}).annotations(strict);
-export type CopilotProviderConfiguration = typeof CopilotProviderConfiguration.Type;
-
-export const ClineAuthentication = Schema.Literal("provider-owned", "api-key");
-export type ClineAuthentication = typeof ClineAuthentication.Type;
-export const ClineProviderConfiguration = Schema.Struct({
-  kind: Schema.Literal("cline-acp"),
-  binaryPath: AbsoluteBinaryPath,
-  authentication: ClineAuthentication,
-}).annotations(strict);
-export type ClineProviderConfiguration = typeof ClineProviderConfiguration.Type;
-
-export const QwenAuthentication = Schema.Literal("provider-owned", "api-key");
-export type QwenAuthentication = typeof QwenAuthentication.Type;
-export const QwenProviderConfiguration = Schema.Struct({
-  kind: Schema.Literal("qwen-acp"),
-  binaryPath: AbsoluteBinaryPath,
-  authentication: QwenAuthentication,
-}).annotations(strict);
-export type QwenProviderConfiguration = typeof QwenProviderConfiguration.Type;
-
 /**
- * fx keeps its profile under `$HOME/.fx` and exposes no profile-path variable,
- * so Octant reaches it through an isolated managed home and authenticates it
- * with a Vercel AI Gateway key held by the host credential broker. There is no
- * provider-owned posture: the interactive `~/.fx` login is deliberately outside
- * the confined process.
+ * One configuration shape for every ACP agent: its kind, the binary it runs,
+ * and, for an agent whose profile lists postures, which one it signs in with.
+ * The posture must be one its profile lists, and an agent whose profile lists
+ * none carries no posture field.
  */
-export const FxProviderConfiguration = Schema.Struct({
-  kind: Schema.Literal("fx-acp"),
+export const AcpAgentConfiguration = Schema.Struct({
+  kind: Schema.Literal(...ACP_AGENT_KINDS.map(acpAgentConfigurationKind)),
   binaryPath: AbsoluteBinaryPath,
-  authentication: Schema.Literal("api-key"),
-}).annotations(strict);
-export type FxProviderConfiguration = typeof FxProviderConfiguration.Type;
-
-export const DevinProviderConfiguration = Schema.Struct({
-  kind: Schema.Literal("devin-acp"),
-  binaryPath: AbsoluteBinaryPath,
-  authentication: Schema.Literal("subscription"),
-}).annotations(strict);
-export type DevinProviderConfiguration = typeof DevinProviderConfiguration.Type;
+  authentication: Schema.optional(AcpAgentAuthentication),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((configuration) => {
+      const postures = acpAgentProfile(
+        acpAgentKindOfConfiguration(configuration.kind),
+      ).authentication;
+      return configuration.authentication === undefined
+        ? postures.length === 0
+        : postures.includes(configuration.authentication);
+    }),
+  );
+export type AcpAgentConfiguration = typeof AcpAgentConfiguration.Type;
 
 export const PiProviderConfiguration = Schema.Struct({
   kind: Schema.Literal("pi-rpc"),
@@ -399,43 +336,196 @@ const UniqueManualModelIds = Schema.Array(ProviderModelId).pipe(
   Schema.filter((modelIds) => new Set(modelIds).size === modelIds.length),
 );
 const OAuthDescriptorId = Schema.String.pipe(Schema.pattern(/^[a-z0-9][a-z0-9-]{0,63}$/));
-export const OpenAiCompatibleProviderConfiguration = Schema.Struct({
+/**
+ * An organization's own OpenID Connect issuer, exactly as its identity tokens
+ * name it in `iss` (a trailing slash matters). It is the address the person
+ * signs in at, so it is https with no credentials, query, or fragment.
+ */
+export const DirectoryIssuer = Schema.String.pipe(
+  Schema.filter((value) => {
+    if (value.length > 256 || !value.startsWith("https://") || /[\s?#]/.test(value)) {
+      return false;
+    }
+    try {
+      const url = new URL(value);
+      return url.protocol === "https:" && url.username === "" && url.password === "";
+    } catch {
+      return false;
+    }
+  }),
+  Schema.brand("DirectoryIssuer"),
+);
+export type DirectoryIssuer = typeof DirectoryIssuer.Type;
+/** The public client an organization registered with its own issuer. */
+export const DirectoryIssuerClientId = Schema.String.pipe(
+  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/),
+  Schema.brand("DirectoryIssuerClientId"),
+);
+export type DirectoryIssuerClientId = typeof DirectoryIssuerClientId.Type;
+/** Identity scopes the broker requests itself; none of them names a resource. */
+const DIRECTORY_IDENTITY_SCOPES: ReadonlySet<string> = new Set([
+  "openid",
+  "profile",
+  "offline_access",
+  "email",
+]);
+/**
+ * The one scope an organization's gateway requires (an RFC 6749
+ * scope-token): the resource its issuer's token is for. An identity scope
+ * names no resource, so it is refused.
+ */
+export const DirectoryResourceScope = Schema.String.pipe(
+  Schema.pattern(/^[\x21\x23-\x5B\x5D-\x7E]{1,256}$/),
+  Schema.filter((value) => !DIRECTORY_IDENTITY_SCOPES.has(value)),
+  Schema.brand("DirectoryResourceScope"),
+);
+export type DirectoryResourceScope = typeof DirectoryResourceScope.Type;
+/**
+ * An organization's own issuer, client, and gateway scope for a host-driven
+ * sign-in to its model gateway. None of it is secret: the client is a public
+ * client the organization registered with its own issuer.
+ */
+export const DirectoryIssuerBinding = Schema.Struct({
+  issuer: DirectoryIssuer,
+  clientId: DirectoryIssuerClientId,
+  scope: DirectoryResourceScope,
+}).annotations(strict);
+export type DirectoryIssuerBinding = typeof DirectoryIssuerBinding.Type;
+
+const OpenAiCompatibleConfigurationFields = {
   kind: Schema.Literal("openai-compatible-http"),
   baseUrl: Schema.NonEmptyTrimmedString,
-  authentication: Schema.Literal("bearer", "none"),
   protocol: OpenAiCompatibleProtocol,
   manualModelIds: UniqueManualModelIds,
-  /** Expected host-driven sign-in binding. Absent means no subscription sign-in. */
-  oauthDescriptorId: Schema.optional(OAuthDescriptorId),
-}).annotations(strict);
+};
+/**
+ * `directory-oauth` signs in with the organization's own issuer in place of a
+ * key and names that issuer, client, and scope. It is never also a catalog
+ * subscription sign-in.
+ */
+export const OpenAiCompatibleProviderConfiguration = Schema.Union(
+  Schema.Struct({
+    ...OpenAiCompatibleConfigurationFields,
+    authentication: Schema.Literal("bearer", "none"),
+    /** Expected host-driven sign-in binding. Absent means no subscription sign-in. */
+    oauthDescriptorId: Schema.optional(OAuthDescriptorId),
+  }).annotations(strict),
+  Schema.Struct({
+    ...OpenAiCompatibleConfigurationFields,
+    authentication: Schema.Literal("directory-oauth"),
+    directory: DirectoryIssuerBinding,
+  }).annotations(strict),
+);
 export type OpenAiCompatibleProviderConfiguration =
   typeof OpenAiCompatibleProviderConfiguration.Type;
 export const AnthropicCompatibleProtocol = Schema.Literal("auto", "messages");
 export type AnthropicCompatibleProtocol = typeof AnthropicCompatibleProtocol.Type;
-export const AnthropicCompatibleAuthentication = Schema.Literal("api-key", "bearer", "none");
+export const AnthropicCompatibleAuthentication = Schema.Literal(
+  "api-key",
+  "bearer",
+  "none",
+  "directory-oauth",
+);
 export type AnthropicCompatibleAuthentication = typeof AnthropicCompatibleAuthentication.Type;
-export const AnthropicCompatibleProviderConfiguration = Schema.Struct({
+const AnthropicCompatibleConfigurationFields = {
   kind: Schema.Literal("anthropic-compatible-http"),
   baseUrl: Schema.NonEmptyTrimmedString,
-  authentication: AnthropicCompatibleAuthentication,
   protocol: AnthropicCompatibleProtocol,
   protocolVersion: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
   manualModelIds: UniqueManualModelIds,
-  /** Expected host-driven sign-in binding. Absent means no subscription sign-in. */
-  oauthDescriptorId: Schema.optional(OAuthDescriptorId),
-}).annotations(strict);
+};
+/** As the OpenAI-compatible configuration: `directory-oauth` names the issuer binding. */
+export const AnthropicCompatibleProviderConfiguration = Schema.Union(
+  Schema.Struct({
+    ...AnthropicCompatibleConfigurationFields,
+    authentication: Schema.Literal("api-key", "bearer", "none"),
+    /** Expected host-driven sign-in binding. Absent means no subscription sign-in. */
+    oauthDescriptorId: Schema.optional(OAuthDescriptorId),
+  }).annotations(strict),
+  Schema.Struct({
+    ...AnthropicCompatibleConfigurationFields,
+    authentication: Schema.Literal("directory-oauth"),
+    directory: DirectoryIssuerBinding,
+  }).annotations(strict),
+);
 export type AnthropicCompatibleProviderConfiguration =
   typeof AnthropicCompatibleProviderConfiguration.Type;
-export const AzureFoundryAuthentication = Schema.Literal("api-key");
+/**
+ * A directory tenant or application (client) id, in the lowercase GUID form a
+ * directory issues. A multi-tenant alias (`common`, `organizations`) or a
+ * domain name is refused: it would let an account from any tenant answer the
+ * sign-in, and the binding compares these values exactly.
+ */
+const DirectoryGuid = Schema.String.pipe(
+  Schema.pattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/),
+);
+export const DirectoryTenantId = DirectoryGuid.pipe(Schema.brand("DirectoryTenantId"));
+export type DirectoryTenantId = typeof DirectoryTenantId.Type;
+export const DirectoryClientId = DirectoryGuid.pipe(Schema.brand("DirectoryClientId"));
+export type DirectoryClientId = typeof DirectoryClientId.Type;
+/**
+ * The organization's own directory binding for a host-driven sign-in. Neither
+ * value is secret: the client is a public client the organization registered
+ * in its own tenant, so no client secret exists to store.
+ */
+export const DirectoryBinding = Schema.Struct({
+  tenantId: DirectoryTenantId,
+  clientId: DirectoryClientId,
+}).annotations(strict);
+export type DirectoryBinding = typeof DirectoryBinding.Type;
+
+export const AzureFoundryAuthentication = Schema.Literal("api-key", "directory-oauth");
 export type AzureFoundryAuthentication = typeof AzureFoundryAuthentication.Type;
-export const AzureFoundryProviderConfiguration = Schema.Struct({
+const AzureFoundryConfigurationFields = {
   kind: Schema.Literal("azure-foundry-openai-http"),
   baseUrl: Schema.NonEmptyTrimmedString,
-  authentication: AzureFoundryAuthentication,
   protocol: OpenAiCompatibleProtocol,
   manualModelIds: UniqueManualModelIds,
-}).annotations(strict);
+};
+/**
+ * `directory-oauth` signs in with the organization's directory instead of a
+ * key and carries the tenant and client it binds to; an API-key instance
+ * carries no directory binding.
+ */
+export const AzureFoundryProviderConfiguration = Schema.Union(
+  Schema.Struct({
+    ...AzureFoundryConfigurationFields,
+    authentication: Schema.Literal("api-key"),
+  }).annotations(strict),
+  Schema.Struct({
+    ...AzureFoundryConfigurationFields,
+    authentication: Schema.Literal("directory-oauth"),
+    directory: DirectoryBinding,
+    /**
+     * Present only when the person opted this instance in to a device-code
+     * sign-in from the host-local `octant provider sign-in` command, for a
+     * host without the desktop app. Absent is off: many organizations block
+     * the flow, and it is the easier one to phish.
+     */
+    deviceCodeSignIn: Schema.optional(Schema.Literal(true)),
+  }).annotations(strict),
+);
 export type AzureFoundryProviderConfiguration = typeof AzureFoundryProviderConfiguration.Type;
+
+/**
+ * The exact package an outside driver instance runs. The instance binds the
+ * version and content digest it was added with: a package with any other
+ * digest is not the driver this instance names, whatever its name.
+ */
+export const OutsideProviderDriverReference = Schema.Struct({
+  extensionId: ToolExtensionId,
+  packageId: ExtensionPackageId,
+  componentId: ExtensionComponentId,
+  version: ExtensionPackageVersion,
+  digest: ExtensionContentDigest,
+}).annotations(strict);
+export type OutsideProviderDriverReference = typeof OutsideProviderDriverReference.Type;
+export const OutsideHarnessEndpointProviderConfiguration = Schema.Struct({
+  kind: Schema.Literal("outside-harness-endpoint"),
+  driver: OutsideProviderDriverReference,
+}).annotations(strict);
+export type OutsideHarnessEndpointProviderConfiguration =
+  typeof OutsideHarnessEndpointProviderConfiguration.Type;
 
 /**
  * Suggested GPT Image model IDs for Settings. Image allowlists are
@@ -663,89 +753,19 @@ export const ClaudeProviderInstance = Schema.Struct({
   configuration: ClaudeProviderConfiguration,
 }).annotations(strict);
 export type ClaudeProviderInstance = typeof ClaudeProviderInstance.Type;
-export const KimiCodeProviderInstance = Schema.Struct({
+/** An instance of any ACP agent; its configuration kind must match its driver kind. */
+export const AcpAgentProviderInstance = Schema.Struct({
   ...ProviderInstanceFields,
-  driverKind: Schema.Literal("kimi-code"),
-  configuration: KimiCodeProviderConfiguration,
-}).annotations(strict);
-export type KimiCodeProviderInstance = typeof KimiCodeProviderInstance.Type;
-
-export const KiloProviderInstance = Schema.Struct({
-  ...ProviderInstanceFields,
-  driverKind: Schema.Literal("kilo"),
-  configuration: KiloProviderConfiguration,
-}).annotations(strict);
-export type KiloProviderInstance = typeof KiloProviderInstance.Type;
-
-export const MistralVibeProviderInstance = Schema.Struct({
-  ...ProviderInstanceFields,
-  driverKind: Schema.Literal("mistral-vibe"),
-  configuration: MistralVibeProviderConfiguration,
-}).annotations(strict);
-export type MistralVibeProviderInstance = typeof MistralVibeProviderInstance.Type;
-
-export const GrokProviderInstance = Schema.Struct({
-  ...ProviderInstanceFields,
-  driverKind: Schema.Literal("grok"),
-  configuration: GrokProviderConfiguration,
-}).annotations(strict);
-export type GrokProviderInstance = typeof GrokProviderInstance.Type;
-
-export const GooseProviderInstance = Schema.Struct({
-  ...ProviderInstanceFields,
-  driverKind: Schema.Literal("goose"),
-  configuration: GooseProviderConfiguration,
-}).annotations(strict);
-export type GooseProviderInstance = typeof GooseProviderInstance.Type;
-
-export const GlmProviderInstance = Schema.Struct({
-  ...ProviderInstanceFields,
-  driverKind: Schema.Literal("glm"),
-  configuration: GlmProviderConfiguration,
-}).annotations(strict);
-export type GlmProviderInstance = typeof GlmProviderInstance.Type;
-
-export const GeminiProviderInstance = Schema.Struct({
-  ...ProviderInstanceFields,
-  driverKind: Schema.Literal("gemini"),
-  configuration: GeminiProviderConfiguration,
-}).annotations(strict);
-export type GeminiProviderInstance = typeof GeminiProviderInstance.Type;
-
-export const CopilotProviderInstance = Schema.Struct({
-  ...ProviderInstanceFields,
-  driverKind: Schema.Literal("copilot"),
-  configuration: CopilotProviderConfiguration,
-}).annotations(strict);
-export type CopilotProviderInstance = typeof CopilotProviderInstance.Type;
-
-export const ClineProviderInstance = Schema.Struct({
-  ...ProviderInstanceFields,
-  driverKind: Schema.Literal("cline"),
-  configuration: ClineProviderConfiguration,
-}).annotations(strict);
-export type ClineProviderInstance = typeof ClineProviderInstance.Type;
-
-export const QwenProviderInstance = Schema.Struct({
-  ...ProviderInstanceFields,
-  driverKind: Schema.Literal("qwen"),
-  configuration: QwenProviderConfiguration,
-}).annotations(strict);
-export type QwenProviderInstance = typeof QwenProviderInstance.Type;
-
-export const FxProviderInstance = Schema.Struct({
-  ...ProviderInstanceFields,
-  driverKind: Schema.Literal("fx"),
-  configuration: FxProviderConfiguration,
-}).annotations(strict);
-export type FxProviderInstance = typeof FxProviderInstance.Type;
-
-export const DevinProviderInstance = Schema.Struct({
-  ...ProviderInstanceFields,
-  driverKind: Schema.Literal("devin"),
-  configuration: DevinProviderConfiguration,
-}).annotations(strict);
-export type DevinProviderInstance = typeof DevinProviderInstance.Type;
+  driverKind: Schema.Literal(...ACP_AGENT_KINDS),
+  configuration: AcpAgentConfiguration,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (instance) => instance.configuration.kind === acpAgentConfigurationKind(instance.driverKind),
+    ),
+  );
+export type AcpAgentProviderInstance = typeof AcpAgentProviderInstance.Type;
 
 export const PiProviderInstance = Schema.Struct({
   ...ProviderInstanceFields,
@@ -817,22 +837,19 @@ export const IdeogramImageProviderInstance = Schema.Struct({
 }).annotations(strict);
 export type IdeogramImageProviderInstance = typeof IdeogramImageProviderInstance.Type;
 
+export const OutsideHarnessEndpointProviderInstance = Schema.Struct({
+  ...ProviderInstanceFields,
+  driverKind: Schema.Literal("outside-harness-endpoint"),
+  configuration: OutsideHarnessEndpointProviderConfiguration,
+}).annotations(strict);
+export type OutsideHarnessEndpointProviderInstance =
+  typeof OutsideHarnessEndpointProviderInstance.Type;
+
 export const ProviderInstance = Schema.Union(
   OpenCodeProviderInstance,
   CodexProviderInstance,
   ClaudeProviderInstance,
-  KimiCodeProviderInstance,
-  KiloProviderInstance,
-  MistralVibeProviderInstance,
-  GrokProviderInstance,
-  GooseProviderInstance,
-  GlmProviderInstance,
-  GeminiProviderInstance,
-  CopilotProviderInstance,
-  ClineProviderInstance,
-  QwenProviderInstance,
-  FxProviderInstance,
-  DevinProviderInstance,
+  AcpAgentProviderInstance,
   PiProviderInstance,
   OhMyPiProviderInstance,
   OllamaProviderInstance,
@@ -843,6 +860,7 @@ export const ProviderInstance = Schema.Union(
   GeminiImageProviderInstance,
   BflImageProviderInstance,
   IdeogramImageProviderInstance,
+  OutsideHarnessEndpointProviderInstance,
 );
 export type ProviderInstance = typeof ProviderInstance.Type;
 
@@ -906,8 +924,20 @@ export const ProviderInstanceRenamed = Schema.Struct({ instance: ProviderInstanc
   strict,
 );
 export type ProviderInstanceRenamed = typeof ProviderInstanceRenamed.Type;
+/**
+ * Kimi Code changed its binary through this event before ACP agents took
+ * configuration commands; the journal still holds those events, so they
+ * decode. No other ACP agent ever recorded one.
+ */
+const KimiCodeBinaryChangedInstance = AcpAgentProviderInstance.pipe(
+  Schema.filter((instance) => instance.driverKind === "kimi-code"),
+);
 export const ProviderInstanceBinaryChanged = Schema.Struct({
-  instance: Schema.Union(OpenCodeProviderInstance, CodexProviderInstance, KimiCodeProviderInstance),
+  instance: Schema.Union(
+    OpenCodeProviderInstance,
+    CodexProviderInstance,
+    KimiCodeBinaryChangedInstance,
+  ),
 }).annotations(strict);
 export type ProviderInstanceBinaryChanged = typeof ProviderInstanceBinaryChanged.Type;
 export const ProviderInstanceConfigurationChanged = Schema.Struct({
@@ -920,17 +950,7 @@ export const ProviderInstanceConfigurationChanged = Schema.Struct({
     BflImageProviderInstance,
     IdeogramImageProviderInstance,
     ClaudeProviderInstance,
-    MistralVibeProviderInstance,
-    GrokProviderInstance,
-    GooseProviderInstance,
-    GlmProviderInstance,
-    GeminiProviderInstance,
-    CopilotProviderInstance,
-    ClineProviderInstance,
-    QwenProviderInstance,
-    FxProviderInstance,
-    KiloProviderInstance,
-    DevinProviderInstance,
+    AcpAgentProviderInstance,
     PiProviderInstance,
     OhMyPiProviderInstance,
     OllamaProviderInstance,
@@ -1333,12 +1353,19 @@ export type ProviderProcessDiagnostic = typeof ProviderProcessDiagnostic.Type;
 /**
  * Octant-authored probe refusal. The client maps this closed set to copy and
  * next-step guidance. Free-form driver or provider text is not representable.
+ * `driver-not-admitted`: the instance's driver package is not effective on the
+ * activation ladder, so the instance contributes no models or capabilities.
+ * `driver-incompatible`: an outside driver agreed no protocol version with the
+ * host or wrote a message the host could not read, so the host stopped it and
+ * the instance contributes nothing.
  */
 export const ProviderRefusalReason = Schema.Literal(
   "runtime-incompatible",
   "authentication-required",
   "runtime-unavailable",
   "no-usable-model",
+  "driver-not-admitted",
+  "driver-incompatible",
 );
 export type ProviderRefusalReason = typeof ProviderRefusalReason.Type;
 
@@ -1468,6 +1495,39 @@ export const ProviderRuntimeIntegration = Schema.Struct({
 }).annotations(strict);
 export type ProviderRuntimeIntegration = typeof ProviderRuntimeIntegration.Type;
 
+/**
+ * Why a host-driven sign-in reads `unauthenticated`, so Settings can tell a
+ * sign-in that ended from one the organization wants repeated in person, or
+ * from an account with no role on the endpoint.
+ */
+export const ProviderUnauthenticatedReason = Schema.Literal(
+  "missing",
+  "expired",
+  "revoked",
+  "interaction-required",
+  "not-authorized",
+);
+export type ProviderUnauthenticatedReason = typeof ProviderUnauthenticatedReason.Type;
+
+/**
+ * The directory binding a probe checked before it asked for a token: a tenant
+ * of the closed directory, or an organization's own issuer. None of it is
+ * secret.
+ */
+export const ProviderObservedDirectoryBinding = Schema.Union(
+  Schema.Struct({
+    tenantId: DirectoryTenantId,
+    clientId: DirectoryClientId,
+    endpointOrigin: Schema.NonEmptyTrimmedString,
+  }).annotations(strict),
+  Schema.Struct({
+    issuer: DirectoryIssuer,
+    clientId: DirectoryIssuerClientId,
+    endpointOrigin: Schema.NonEmptyTrimmedString,
+  }).annotations(strict),
+);
+export type ProviderObservedDirectoryBinding = typeof ProviderObservedDirectoryBinding.Type;
+
 export const ProviderObservedState = Schema.Struct({
   instanceId: ProviderInstanceId,
   readiness: ProviderReadiness,
@@ -1475,6 +1535,10 @@ export const ProviderObservedState = Schema.Struct({
   detectedVersion: Schema.optional(Schema.NonEmptyTrimmedString),
   observedProtocol: Schema.optional(OpenAiCompatibleProtocol),
   credentialStatus: Schema.optional(ProviderCredentialStatus),
+  /** Present only with `unauthenticated` readiness, when the driver knows why. */
+  unauthenticatedReason: Schema.optional(ProviderUnauthenticatedReason),
+  /** Present only for a directory sign-in: the binding its probe checked. */
+  directoryBinding: Schema.optional(ProviderObservedDirectoryBinding),
   models: Schema.Array(ProviderModel),
   capabilities: ProviderCapabilities,
   // Models a person explicitly verified for tool support through the
@@ -1514,6 +1578,53 @@ const CreateProviderCommandFields = {
   ...ProviderInstanceCommandFields,
   enabled: Schema.optional(Schema.Boolean),
 } as const;
+
+export type AcpAgentCreateCommandKind = `create-${AcpAgentKind}-provider`;
+export type AcpAgentChangeCommandKind = `change-${AcpAgentKind}-configuration`;
+
+export function acpAgentCreateCommandKind(kind: AcpAgentKind): AcpAgentCreateCommandKind {
+  return `create-${kind}-provider`;
+}
+
+export function acpAgentChangeCommandKind(kind: AcpAgentKind): AcpAgentChangeCommandKind {
+  return `change-${kind}-configuration`;
+}
+
+/**
+ * Every ACP agent is created and reconfigured through commands named for its
+ * driver kind that carry the shared configuration shape. The configuration
+ * must name the same agent as the command.
+ */
+export const CreateAcpAgentProviderCommand = Schema.Struct({
+  kind: Schema.Literal(...ACP_AGENT_KINDS.map(acpAgentCreateCommandKind)),
+  ...CreateProviderCommandFields,
+  displayName: Schema.NonEmptyTrimmedString,
+  configuration: AcpAgentConfiguration,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (command) =>
+        command.kind ===
+        acpAgentCreateCommandKind(acpAgentKindOfConfiguration(command.configuration.kind)),
+    ),
+  );
+export type CreateAcpAgentProviderCommand = typeof CreateAcpAgentProviderCommand.Type;
+
+export const ChangeAcpAgentConfigurationCommand = Schema.Struct({
+  kind: Schema.Literal(...ACP_AGENT_KINDS.map(acpAgentChangeCommandKind)),
+  ...ProviderInstanceCommandFields,
+  configuration: AcpAgentConfiguration,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (command) =>
+        command.kind ===
+        acpAgentChangeCommandKind(acpAgentKindOfConfiguration(command.configuration.kind)),
+    ),
+  );
+export type ChangeAcpAgentConfigurationCommand = typeof ChangeAcpAgentConfigurationCommand.Type;
 
 const ProviderAuthenticationAttemptId = brandedString("ProviderAuthenticationAttemptId");
 export const ProviderAuthenticationAttempt = Schema.Struct({
@@ -1587,83 +1698,12 @@ export const ProviderRegistryCommand = Schema.Union(
     binaryPath: Schema.NonEmptyTrimmedString,
     accent: Schema.optional(ClaudeAccountAccent),
   }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("create-kimi-code-provider"),
-    ...CreateProviderCommandFields,
-    displayName: Schema.NonEmptyTrimmedString,
-    binaryPath: AbsoluteBinaryPath,
-  }).annotations(strict),
+  CreateAcpAgentProviderCommand,
   Schema.Struct({
     kind: Schema.Literal("create-claude-provider"),
     ...CreateProviderCommandFields,
     displayName: Schema.NonEmptyTrimmedString,
     configuration: ClaudeProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("create-mistral-vibe-provider"),
-    ...CreateProviderCommandFields,
-    displayName: Schema.NonEmptyTrimmedString,
-    configuration: MistralVibeProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("create-grok-provider"),
-    ...CreateProviderCommandFields,
-    displayName: Schema.NonEmptyTrimmedString,
-    configuration: GrokProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("create-goose-provider"),
-    ...CreateProviderCommandFields,
-    displayName: Schema.NonEmptyTrimmedString,
-    configuration: GooseProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("create-glm-provider"),
-    ...CreateProviderCommandFields,
-    displayName: Schema.NonEmptyTrimmedString,
-    configuration: GlmProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("create-gemini-provider"),
-    ...CreateProviderCommandFields,
-    displayName: Schema.NonEmptyTrimmedString,
-    configuration: GeminiProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("create-copilot-provider"),
-    ...CreateProviderCommandFields,
-    displayName: Schema.NonEmptyTrimmedString,
-    configuration: CopilotProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("create-cline-provider"),
-    ...CreateProviderCommandFields,
-    displayName: Schema.NonEmptyTrimmedString,
-    configuration: ClineProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("create-qwen-provider"),
-    ...CreateProviderCommandFields,
-    displayName: Schema.NonEmptyTrimmedString,
-    configuration: QwenProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("create-fx-provider"),
-    ...CreateProviderCommandFields,
-    displayName: Schema.NonEmptyTrimmedString,
-    configuration: FxProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("create-devin-provider"),
-    ...CreateProviderCommandFields,
-    displayName: Schema.NonEmptyTrimmedString,
-    configuration: DevinProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("create-kilo-provider"),
-    ...CreateProviderCommandFields,
-    displayName: Schema.NonEmptyTrimmedString,
-    configuration: KiloProviderConfiguration,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("create-pi-provider"),
@@ -1742,61 +1782,7 @@ export const ProviderRegistryCommand = Schema.Union(
     /** Replaces a leftover custom directory with Octant's assigned leaf. */
     reassignAccountDirectory: Schema.optional(Schema.Boolean),
   }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("change-mistral-vibe-configuration"),
-    ...ProviderInstanceCommandFields,
-    configuration: MistralVibeProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("change-grok-configuration"),
-    ...ProviderInstanceCommandFields,
-    configuration: GrokProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("change-goose-configuration"),
-    ...ProviderInstanceCommandFields,
-    configuration: GooseProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("change-glm-configuration"),
-    ...ProviderInstanceCommandFields,
-    configuration: GlmProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("change-gemini-configuration"),
-    ...ProviderInstanceCommandFields,
-    configuration: GeminiProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("change-copilot-configuration"),
-    ...ProviderInstanceCommandFields,
-    configuration: CopilotProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("change-cline-configuration"),
-    ...ProviderInstanceCommandFields,
-    configuration: ClineProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("change-qwen-configuration"),
-    ...ProviderInstanceCommandFields,
-    configuration: QwenProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("change-fx-configuration"),
-    ...ProviderInstanceCommandFields,
-    configuration: FxProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("change-devin-configuration"),
-    ...ProviderInstanceCommandFields,
-    configuration: DevinProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("change-kilo-configuration"),
-    ...ProviderInstanceCommandFields,
-    configuration: KiloProviderConfiguration,
-  }).annotations(strict),
+  ChangeAcpAgentConfigurationCommand,
   Schema.Struct({
     kind: Schema.Literal("change-pi-configuration"),
     ...ProviderInstanceCommandFields,
@@ -2487,6 +2473,11 @@ export type ProviderRuntimeEvent = typeof ProviderRuntimeEvent.Type;
 
 export const decodeProviderInstanceId = Schema.decodeUnknownSync(ProviderInstanceId);
 export const decodeProviderSessionId = Schema.decodeUnknownSync(ProviderSessionId);
+export const decodeDirectoryTenantId = Schema.decodeUnknownSync(DirectoryTenantId);
+export const decodeDirectoryClientId = Schema.decodeUnknownSync(DirectoryClientId);
+export const decodeDirectoryIssuer = Schema.decodeUnknownSync(DirectoryIssuer);
+export const decodeDirectoryIssuerClientId = Schema.decodeUnknownSync(DirectoryIssuerClientId);
+export const decodeDirectoryResourceScope = Schema.decodeUnknownSync(DirectoryResourceScope);
 export const decodeProviderModelId = Schema.decodeUnknownSync(ProviderModelId);
 export const decodeProviderDriverKind = Schema.decodeUnknownSync(ProviderDriverKind);
 export const decodeProviderInstance = Schema.decodeUnknownSync(ProviderInstance);

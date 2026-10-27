@@ -648,6 +648,29 @@ describe("remote route policy", () => {
     expect(accepted.status).toBe(200);
   });
 
+  it("forwards a paired device's physical device read and keeps device leases local", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const inspect = (path: string) =>
+      routePolicy.inspect(
+        request(path, {
+          method: "POST",
+          headers: {
+            origin,
+            "sec-fetch-site": "same-origin",
+            "content-type": "application/json",
+          },
+          body: "{}",
+        }),
+      );
+    expect(inspect("/api/apple/devices")).toMatchObject({
+      kind: "allow",
+      surface: "authenticated-product",
+    });
+    const lease = inspect("/api/apple/device-leases");
+    expect(lease).toMatchObject({ kind: "reject", facts: { surface: "local-only" } });
+    if (lease.kind === "reject") expect(lease.response.status).toBe(404);
+  });
+
   it("forwards a paired device's MCP tool prompt list and answer, and keeps remembered approvals local", () => {
     const routePolicy = createRemoteRoutePolicy({ origin });
     const inspect = (path: string, method: "GET" | "POST") =>
@@ -686,6 +709,53 @@ describe("remote route policy", () => {
         ],
       }),
     ).toThrow("local-only");
+  });
+
+  it("admits a paired device's dictation and voice status, and keeps read-aloud off the listener", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const inspect = (
+      path: string,
+      method: "GET" | "POST",
+      contentType = "multipart/form-data; boundary=octant",
+      body: string | Uint8Array<ArrayBuffer> = "--octant--",
+    ) =>
+      routePolicy.inspect(
+        request(path, {
+          method,
+          headers: {
+            origin,
+            "sec-fetch-site": "same-origin",
+            ...(method === "POST"
+              ? { "content-type": contentType, "content-length": String(body.length) }
+              : {}),
+          },
+          ...(method === "POST" ? { body } : {}),
+        }),
+      );
+    const status = (decision: ReturnType<typeof inspect>) =>
+      decision.kind === "reject" ? decision.response.status : decision.kind;
+
+    expect(inspect("/api/speech/status", "GET")).toMatchObject({
+      kind: "allow",
+      surface: "authenticated-product",
+    });
+    expect(inspect("/api/speech/transcriptions", "POST")).toMatchObject({
+      kind: "allow",
+      surface: "authenticated-product",
+      maxBodyBytes: 1_048_576,
+    });
+    // Only the multipart clip the desktop route already reads is accepted.
+    expect(status(inspect("/api/speech/transcriptions", "POST", "application/json", "{}"))).toBe(
+      415,
+    );
+    expect(status(inspect("/api/speech/transcriptions", "POST", "audio/mp4"))).toBe(415);
+    expect(
+      status(inspect("/api/speech/transcriptions", "POST", undefined, new Uint8Array(1_048_577))),
+    ).toBe(413);
+    expect(status(inspect("/api/speech/transcriptions", "GET"))).toBe(405);
+    // Read-aloud and every other speech path stay unforwarded.
+    expect(status(inspect("/api/speech/synthesis", "POST", "application/json", "{}"))).toBe(404);
+    expect(status(inspect("/api/speech/status/extra", "GET"))).toBe(404);
   });
 
   it("dispatches the grant route only to the proxy surface, never as a product route", async () => {
@@ -773,6 +843,53 @@ describe("remote route policy", () => {
       }),
     );
     expect(grants.status).toBe(415);
+  });
+
+  it("gives each mode's attachment upload its own body budget and only the media that mode takes", async () => {
+    const { route, authenticatedProduct } = handler();
+    const upload = async (path: string, method: string, contentType: string, body: BodyInit) => {
+      const response = await route(
+        request(path, {
+          method,
+          headers: { origin, "sec-fetch-site": "same-origin", "content-type": contentType },
+          body,
+        }),
+      );
+      // Reading the answer releases its request slot.
+      await response.arrayBuffer();
+      return response;
+    };
+    const photo = new Uint8Array(1_024);
+
+    expect((await upload("/api/chat/attachments", "POST", "image/jpeg", photo)).status).toBe(200);
+    expect((await upload("/api/chat/attachments", "POST", "application/pdf", photo)).status).toBe(
+      200,
+    );
+    expect((await upload("/api/work/attachments", "PUT", "image/png", photo)).status).toBe(200);
+    expect((await upload("/api/code/attachments", "PUT", "image/webp", photo)).status).toBe(200);
+    expect(authenticatedProduct).toHaveBeenCalledTimes(4);
+
+    // Work and Code take images only, and no other product route takes an image.
+    expect((await upload("/api/work/attachments", "PUT", "application/pdf", photo)).status).toBe(
+      415,
+    );
+    expect((await upload("/api/code/attachments", "PUT", "text/plain", photo)).status).toBe(415);
+    expect((await upload("/api/chat/commands", "POST", "image/jpeg", "{}")).status).toBe(415);
+    expect((await upload("/api/work/turns", "PUT", "image/jpeg", "{}")).status).toBe(405);
+    expect(authenticatedProduct).toHaveBeenCalledTimes(4);
+
+    const tooLarge = await route(
+      request("/api/chat/attachments", {
+        method: "POST",
+        headers: {
+          origin,
+          "sec-fetch-site": "same-origin",
+          "content-type": "image/jpeg",
+          "content-length": String(10 * 1_024 * 1_024 + 1),
+        },
+      }),
+    );
+    expect(tooLarge.status).toBe(413);
   });
 
   it("counts proxy requests apart from every other surface's", () => {

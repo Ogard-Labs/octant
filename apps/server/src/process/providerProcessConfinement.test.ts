@@ -73,7 +73,35 @@ function providerProcessModules(): ReadonlyArray<string> {
 
 function usesConfinementBuilder(fileName: string): boolean {
   const source = readFileSync(join(providersDirectory, fileName), "utf8");
-  return source.includes("../process/seatbeltProfile") && source.includes("confinement.prepare(");
+  return (
+    (source.includes("../process/seatbeltProfile") && source.includes("confinement.prepare(")) ||
+    launchesThroughOutsideDriverPort(source)
+  );
+}
+
+/**
+ * An outside provider driver spawns nothing itself: it asks the extension
+ * supervisor for a process carrying the `outside-driver` sandbox, and the
+ * extension process port builds that launch with the shared builder. Both ends
+ * are read, so a driver module that imports a spawn of its own, or a port that
+ * stops building the driver profile through the builder, fails this gate.
+ */
+function launchesThroughOutsideDriverPort(source: string): boolean {
+  if (
+    !source.includes('kind: "outside-driver"') ||
+    !source.includes(".startInteractive(") ||
+    source.includes("node:child_process")
+  ) {
+    return false;
+  }
+  const port = readFileSync(join(here, "..", "extensions", "nodeExtensionProcessPort.ts"), "utf8");
+  const driverLaunch = port.slice(port.indexOf("async function prepareOutsideDriverLaunch("));
+  return (
+    port.includes('from "../process/seatbeltProfile"') &&
+    port.includes('input.sandbox.kind === "outside-driver"') &&
+    driverLaunch.includes("makeProcessConfinementLive(") &&
+    driverLaunch.includes(").prepare(")
+  );
 }
 
 describe("provider runtime confinement", () => {

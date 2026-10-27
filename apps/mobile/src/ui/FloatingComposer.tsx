@@ -2,6 +2,8 @@ import { useMemo } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { GlassSurface, radii, space, typography, useTheme } from "../../design-system";
+import type { ComposerVoice } from "../voice/useVoiceDictation";
+import { ComposerVoiceButton } from "./ComposerVoiceButton";
 import { IconButton } from "./IconButton";
 
 export interface FloatingComposerProps {
@@ -19,6 +21,8 @@ export interface FloatingComposerProps {
   readonly testID?: string;
   readonly footerHint?: string | undefined;
   readonly busyLabel?: string;
+  /** Dictation through the host; absent while the host is not ready for it. */
+  readonly voice?: ComposerVoice | undefined;
 }
 
 export function FloatingComposer(props: FloatingComposerProps) {
@@ -150,18 +154,9 @@ export function FloatingComposer(props: FloatingComposerProps) {
             <Text style={styles.busyHint} testID="mobile-composer-busy">
               {props.busyLabel ?? "Working"}
             </Text>
-          ) : (
-            // Phone voice input is not wired; the spec keeps the affordance
-            // visible so the missing capability is stated, not hidden.
-            <IconButton
-              accessibilityLabel="Voice input unavailable"
-              disabled
-              name="mic-outline"
-              size={34}
-              testID="mobile-composer-voice-disabled"
-              variant="ghost"
-            />
-          )}
+          ) : props.voice !== undefined ? (
+            <ComposerVoiceButton size={34} voice={props.voice} />
+          ) : null}
           {props.busy === true && props.onStop !== undefined ? (
             <IconButton
               accessibilityLabel="Stop"
@@ -184,6 +179,11 @@ export function FloatingComposer(props: FloatingComposerProps) {
           ) : null}
         </View>
       </GlassSurface>
+      {props.voice?.notice !== undefined ? (
+        <Text style={styles.footerHint} testID="mobile-composer-voice-notice">
+          {props.voice.notice}
+        </Text>
+      ) : null}
       {props.footerHint !== undefined ? (
         <Text style={styles.footerHint}>{props.footerHint}</Text>
       ) : null}

@@ -10,6 +10,13 @@ import {
   waitForChildExit,
 } from "./package-desktop";
 import {
+  createCodeProject,
+  createUnusedProviderThread,
+  isRecord,
+  openCodeProject,
+  registerWindowAuthority,
+} from "./packaged-smoke-code-project";
+import {
   cleanupPackagedProcess,
   PACKAGED_SMOKE_PROCESS_PROBE_TIMEOUT_MS,
   runBoundedCommand,
@@ -273,199 +280,34 @@ async function withPackagedNodeServer<T>(
   }
 }
 
-interface SmokeWindowAuthority {
-  readonly windowId: string;
-  readonly headers: Readonly<Record<string, string>>;
-  readonly send: (path: string, body: unknown, step: string) => Promise<unknown>;
-}
-
-async function registerWindowAuthority(
-  serverUrl: string,
-  desktopBridgeSecret: string,
-): Promise<SmokeWindowAuthority> {
-  const capability = randomBytes(32).toString("base64url");
-  const rendererIdentity = randomBytes(32).toString("base64url");
-  const windowId = randomUUID();
-  const registered = await fetch(`${serverUrl}/api/desktop/window-authorities`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-octant-desktop-secret": desktopBridgeSecret,
-    },
-    body: JSON.stringify({ windowId, capability, rendererIdentity }),
-  });
-  if (registered.status !== 204) {
-    throw new Error("Packaged restart smoke could not register a window authority.");
-  }
-  const headers = {
-    origin: "file://",
-    "content-type": "application/json",
-    "x-octant-window-capability": capability,
-    "x-octant-renderer-identity": rendererIdentity,
-  };
-  return {
-    windowId,
-    headers,
-    send: async (path, body, step) => {
-      const response = await fetch(`${serverUrl}${path}`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-      });
-      if (!response.ok) {
-        throw new Error(`Packaged restart smoke could not ${step} (${response.status}).`);
-      }
-      return await response.json();
-    },
-  };
-}
-
-/** Code commands answer only for the Project the window has open. */
-async function openCodeProject(window: SmokeWindowAuthority, projectId: string): Promise<void> {
-  const shell = await window.send("/api/shell/bootstrap", undefined, "bootstrap the shell");
-  const workspace = isRecord(shell) && isRecord(shell.workspace) ? shell.workspace : undefined;
-  if (!isRecord(shell) || workspace === undefined) {
-    throw new Error("Packaged restart smoke received no workspace.");
-  }
-  await window.send(
-    "/api/shell/commands",
-    {
-      kind: "apply-workspace-operation",
-      windowId: workspace.windowId,
-      expectedVersion: shell.workspaceVersion,
-      operation: {
-        kind: "switch-project-surface",
-        mode: "code",
-        surface: { kind: "project", id: randomUUID(), projectId, mode: "code", title: "Smoke" },
-      },
-    },
-    "open the Code Project",
-  );
-}
-
-interface SeededCodeProject {
-  readonly projectId: string;
-  readonly bindingRevisionId: unknown;
-  readonly repositoryId: unknown;
-  readonly checkoutId: unknown;
-}
-
-async function createCodeProject(
-  serverUrl: string,
-  desktopBridgeSecret: string,
-  window: SmokeWindowAuthority,
-  repository: string,
-): Promise<SeededCodeProject> {
-  const receipt = await fetch(`${serverUrl}/api/desktop/project-binding-receipts`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-octant-desktop-secret": desktopBridgeSecret,
-    },
-    body: JSON.stringify({ windowId: window.windowId, projectType: "code", path: repository }),
-  });
-  const receiptBody: unknown = receipt.ok ? await receipt.json() : undefined;
-  if (!isRecord(receiptBody) || typeof receiptBody.receiptId !== "string") {
-    throw new Error(`Packaged restart smoke could not bind its repository (${receipt.status}).`);
-  }
-  const projectId = randomUUID();
-  await window.send(
-    "/api/projects/commands",
-    {
-      kind: "create-code-project",
-      projectId,
-      expectedVersion: 0,
-      name: "Packaged restart smoke",
-      receiptId: receiptBody.receiptId,
-      hostId: "local",
-    },
-    "create a Code Project",
-  );
-  await openCodeProject(window, projectId);
-  const prepared = await window.send(
-    "/api/code/commands",
-    { kind: "prepare-code-project-checkout", projectId },
-    "prepare the checkout",
-  );
-  const checkout =
-    isRecord(prepared) && isRecord(prepared.checkout) ? prepared.checkout : undefined;
-  if (!isRecord(prepared) || checkout === undefined) {
-    throw new Error("Packaged restart smoke received no prepared checkout.");
-  }
-  return {
-    projectId,
-    bindingRevisionId: prepared.bindingRevisionId,
-    repositoryId: checkout.repositoryId,
-    checkoutId: checkout.id,
-  };
-}
-
 async function seedCodeProjectsAndThread(
   serverUrl: string,
   desktopBridgeSecret: string,
   repositories: readonly [string, string],
 ): Promise<{ readonly projectId: string; readonly threadId: string }> {
   const window = await registerWindowAuthority(serverUrl, desktopBridgeSecret);
-  const send = window.send;
-  await createCodeProject(serverUrl, desktopBridgeSecret, window, repositories[1]);
+  const name = "Packaged restart smoke";
+  await createCodeProject({
+    serverUrl,
+    desktopBridgeSecret,
+    window,
+    repository: repositories[1],
+    name,
+  });
   // Created last, so it is the Project the window has open for the thread.
-  const project = await createCodeProject(serverUrl, desktopBridgeSecret, window, repositories[0]);
-  const providerInstanceId = randomUUID();
-  const modelId = "packaged-restart-smoke";
-  await send(
-    "/api/providers/commands",
-    {
-      kind: "create-openai-compatible-provider",
-      instanceId: providerInstanceId,
-      expectedVersion: 0,
-      displayName: "Packaged restart smoke",
-      configuration: {
-        kind: "openai-compatible-http",
-        // Nothing listens here; the smoke never starts a turn.
-        baseUrl: "http://127.0.0.1:9/v1",
-        authentication: "none",
-        protocol: "chat-completions",
-        manualModelIds: [modelId],
-      },
-    },
-    "create a provider",
-  );
-  const threadId = randomUUID();
-  const now = new Date().toISOString();
-  const created = await send(
-    "/api/code/commands",
-    {
-      kind: "create-code-thread",
-      thread: {
-        id: threadId,
-        projectId: project.projectId,
-        bindingRevisionId: project.bindingRevisionId,
-        repositoryId: project.repositoryId,
-        checkoutId: project.checkoutId,
-        title: "Packaged restart smoke",
-        lifecycle: "active",
-        providerInstanceId,
-        modelId,
-        executionPolicy: "approval-gated",
-        permissionPersistence: "current-session",
-        deliveryTarget: {
-          branchIntent: "main",
-          remoteName: "origin",
-          proposedBaseRepository: "local/smoke",
-          proposedBaseBranch: "main",
-          outcomeKind: "local-implementation",
-          confirmedAt: now,
-        },
-        version: 1,
-        createdAt: now,
-        updatedAt: now,
-      },
-    },
-    "create a Code thread",
-  );
-  if (!isRecord(created) || created.kind !== "thread-created") {
-    throw new Error("Packaged restart smoke did not create its Code thread.");
-  }
+  const project = await createCodeProject({
+    serverUrl,
+    desktopBridgeSecret,
+    window,
+    repository: repositories[0],
+    name,
+  });
+  const threadId = await createUnusedProviderThread({
+    window,
+    project,
+    title: name,
+    executionPolicy: "approval-gated",
+  });
   return { projectId: project.projectId, threadId };
 }
 
@@ -608,10 +450,6 @@ async function waitForDesktopBridgeSecret(
     await sleep(100);
   }
   throw new Error(`Packaged desktop bridge secret was not projected within ${timeoutMs}ms.`);
-}
-
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function waitForStorageReady(url: string, timeoutMs: number): Promise<void> {

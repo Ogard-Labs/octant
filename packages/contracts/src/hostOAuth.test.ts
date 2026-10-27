@@ -99,6 +99,148 @@ describe("host OAuth contracts", () => {
     ).toThrow();
   });
 
+  it("carries a directory sign-in's tenant, client, audience, and endpoint, and no URL or scope", () => {
+    const directory = {
+      descriptorId: "azure-foundry-directory",
+      dialect: "directory-oidc",
+      flow: "authorization-code-pkce",
+      clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d",
+      tenantId: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+      audience: "https://cognitiveservices.azure.com",
+      endpointOrigin: "https://contoso.openai.azure.com",
+      scopes: [],
+      termsId: "azure-foundry-directory-1",
+    } as const;
+    expect(decodeHostOAuthDescriptor(directory)).toEqual(directory);
+
+    // The broker builds the authority from its closed issuer host, so a
+    // directory descriptor that names a URL could point a sign-in elsewhere.
+    for (const extra of [
+      { tokenEndpoint: "https://login.example/token" },
+      { authorizationEndpoint: "https://login.example/authorize" },
+      { scopes: ["https://other.example/.default"] },
+      { tenantId: "common" },
+      { clientId: "octant" },
+      { endpointOrigin: "https://contoso.openai.azure.com/openai/v1/" },
+    ]) {
+      expect(() => decodeHostOAuthDescriptor({ ...directory, ...extra })).toThrow();
+    }
+    // Every other flow still names its token endpoint and no directory field.
+    expect(() =>
+      decodeHostOAuthDescriptor({
+        descriptorId: "openrouter",
+        dialect: "openrouter-pkce",
+        flow: "authorization-code-pkce",
+        authorizationEndpoint: "https://openrouter.ai/auth",
+        scopes: [],
+        termsId: "openrouter-terms-1",
+      }),
+    ).toThrow();
+  });
+
+  it("lets only the directory dialect pair with a device-code sign-in, still naming no URL", () => {
+    const directory = {
+      descriptorId: "azure-foundry-directory",
+      dialect: "directory-oidc",
+      flow: "device-code",
+      clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d",
+      tenantId: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+      audience: "https://cognitiveservices.azure.com",
+      endpointOrigin: "https://contoso.openai.azure.com",
+      scopes: [],
+      termsId: "azure-foundry-directory-1",
+    } as const;
+    expect(decodeHostOAuthDescriptor(directory)).toEqual(directory);
+    // The broker builds the tenant's device authorization URL itself.
+    expect(() =>
+      decodeHostOAuthDescriptor({
+        ...directory,
+        deviceAuthorizationEndpoint: "https://login.example/devicecode",
+      }),
+    ).toThrow();
+    // Every other dialect's wire shape is not OAuth's, so none pairs with a device code.
+    expect(() =>
+      decodeHostOAuthDescriptor({
+        descriptorId: "mcp-server",
+        dialect: "mcp-authorization",
+        flow: "device-code",
+        clientId: "public-client",
+        tokenEndpoint: "https://idp.example/token",
+        deviceAuthorizationEndpoint: "https://idp.example/device",
+        resource: "https://mcp.example/",
+        scopes: [],
+        termsId: "mcp-terms-1",
+      }),
+    ).toThrow();
+  });
+
+  it("carries a gateway sign-in's own issuer, client, one scope, and endpoint, and no URL", () => {
+    const gateway = {
+      descriptorId: "gateway-directory",
+      dialect: "issuer-oidc",
+      flow: "authorization-code-pkce",
+      clientId: "0oa1octantDesktop",
+      issuer: "https://login.example.test/oauth2/gateway",
+      endpointOrigin: "https://llm.example.test",
+      scopes: ["gateway.models"],
+      termsId: "gateway-directory-1",
+    } as const;
+    expect(decodeHostOAuthDescriptor(gateway)).toEqual(gateway);
+
+    // The broker discovers the issuer's own endpoints, so a descriptor that
+    // names a URL, a tenant, an audience, or more than the one resource scope
+    // could steer the sign-in somewhere the configuration never named.
+    for (const extra of [
+      { tokenEndpoint: "https://login.example/token" },
+      { authorizationEndpoint: "https://login.example/authorize" },
+      { tenantId: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f" },
+      { audience: "https://cognitiveservices.azure.com" },
+      { scopes: [] },
+      { scopes: ["gateway.models", "gateway.admin"] },
+      { scopes: ["openid"] },
+      { issuer: "http://login.example.test" },
+      { issuer: "https://login.example.test/?x=1" },
+      { clientId: "a/b" },
+      { endpointOrigin: "https://llm.example.test/v1/" },
+    ]) {
+      expect(() => decodeHostOAuthDescriptor({ ...gateway, ...extra })).toThrow();
+    }
+    // No other dialect names an issuer.
+    expect(() =>
+      decodeHostOAuthDescriptor({
+        descriptorId: "azure-foundry-directory",
+        dialect: "directory-oidc",
+        flow: "authorization-code-pkce",
+        clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d",
+        tenantId: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+        audience: "https://cognitiveservices.azure.com",
+        endpointOrigin: "https://contoso.openai.azure.com",
+        issuer: "https://login.example.test/oauth2/gateway",
+        scopes: [],
+        termsId: "azure-foundry-directory-1",
+      }),
+    ).toThrow();
+  });
+
+  it("names a directory account on a finished sign-in and a sign-in the organization wants repeated in person", () => {
+    expect(
+      decodeHostOAuthSignInState({
+        kind: "signed-in",
+        attemptId: "80000000-0000-4000-8000-000000000001",
+        descriptorId: "azure-foundry-directory",
+        credentialRef: "80000000-0000-4000-8000-000000000002",
+        accountLabel: "person@contoso.example",
+      }),
+    ).toMatchObject({ accountLabel: "person@contoso.example" });
+    expect(
+      decodeHostOAuthSignInState({
+        kind: "sign-in-again",
+        credentialRef: "80000000-0000-4000-8000-000000000002",
+        reason: "interaction-required",
+      }),
+    ).toMatchObject({ reason: "interaction-required" });
+  });
+
   it("requires an allowed endpoint on every catalog offer", () => {
     const offer = decodeSubscriptionOAuthOffer({
       descriptor: {

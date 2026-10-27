@@ -95,7 +95,19 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "apps/server/src/persistence/sqlitePort.conformance.ts",
     "Conformance kit that sqlitePort.test.ts and sqlitePort.smoke.ts run against the SQLite port; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the port's last conformance test is retired.",
   ],
+  [
+    "apps/server/src/providers/outsideHarnessEndpointProxy.ts",
+    "Host proxy for outside provider drivers, run today over an in-memory channel by its tests and the provider service test. Nothing admits an outside driver yet: the confined driver process and the admission wiring that build it are later delivery slices of docs/design/outside-provider-drivers.md. Remove once the provider driver factory builds it for an admitted instance.",
+  ],
+  [
+    "apps/server/src/providers/outsideDriverProcess.ts",
+    "The confined process behind each outside provider driver instance (one supervised Seatbelt process per instance, its stdio as the proxy's channel, and the crash limit), run today by its own tests and the macOS escape tests. Nothing admits an outside driver yet: the admission wiring that starts one for an effective instance is a later delivery slice of docs/design/outside-provider-drivers.md. Remove once the provider driver factory starts it.",
+  ],
   // ── Reached only through another island, so an island with it ──
+  [
+    "apps/server/src/providers/outsideDriverCeiling.ts",
+    "The outside driver capability ceiling, whose only consumer is outsideHarnessEndpointProxy.ts; providerFeatureMatrix.test.ts reads its block as the matrix column. Remove once the proxy is wired.",
+  ],
   [
     "packages/contracts/src/auditEvents.ts",
     "Audit event schemas whose only consumer is evaluateEscapeSuite.ts. Remove once a product runner reaches the escape suite or the suite is retired.",
@@ -118,12 +130,24 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "Conformance evidence a driver test runs against contextFacts; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the last driver test that uses the kit is retired.",
   ],
   [
+    "packages/provider-sdk/src/directoryOAuthConformance.ts",
+    "Directory sign-in conformance harness, with its fake directory and endpoint, that drivers declaring directory-oauth run in their tests; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the kind is retired.",
+  ],
+  [
     "packages/provider-sdk/src/harnessEndpointConformance.ts",
     "Harness-endpoint-port conformance harness that direct-endpoint driver tests run; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the port is retired.",
   ],
   [
     "packages/provider-sdk/src/imageGenerationConformance.ts",
     "Image-seam conformance harness that image driver tests run; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the image seam is retired.",
+  ],
+  [
+    "packages/provider-sdk/src/processPlacementConformance.ts",
+    "Remote placement conformance harness that driver tests run against a stand-in target; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the placement seam is retired.",
+  ],
+  [
+    "packages/plugin-api/src/desktopProviderConformance.ts",
+    "Desktop-provider seam conformance harness that desktop driver tests run; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the desktop-provider seam is retired.",
   ],
 ]);
 
@@ -642,6 +666,22 @@ export function findUnregisteredRouteModules(
  * served endpoint has a caller (or is a routing prefix).
  */
 export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
+  [
+    "/api/apple/devices",
+    "2026-10-26: physical Apple device discovery and status are served ahead of their caller, the device pane of docs/design/apple-devices.md (delivery slice 4). Remove when the workbench's device picker calls it.",
+  ],
+  [
+    "/api/apple/device-leases",
+    "2026-10-26: starting and releasing a physical device's lease is served ahead of its caller, the device pane's lease confirmation of docs/design/apple-devices.md (delivery slice 4). Remove when the pane calls it.",
+  ],
+  [
+    "/api/code/language/documents",
+    "Language services' document sync, served by the host since 2026-10-26 ahead of the editor that calls it (docs/design/language-services.md, delivery plan slice 3). Remove once the Code editor syncs its open documents.",
+  ],
+  [
+    "/api/code/language/read",
+    "Language services' diagnostics and definition reads, served by the host since 2026-10-26 ahead of the editor that calls them (docs/design/language-services.md, delivery plan slice 3). Remove once the Code editor shows diagnostics and jumps to definitions.",
+  ],
   [
     "/api/v1/shares",
     "Served by the public Canvas share service (the octant-webapp repository) and called by the host's share-service port in apps/server, which builds the address from the configured service URL; no window or device calls it. Remove when the checker counts apps/server as a caller of an external service's routes.",

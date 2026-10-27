@@ -280,6 +280,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
           client={props.client}
           draftStore={props.controller.editorDrafts}
           file={props.projections.file}
+          {...(props.onOpenFile === undefined ? {} : { onOpenFile: props.onOpenFile })}
           {...(props.onRequestFileRefresh === undefined
             ? {}
             : { onRequestRefresh: props.onRequestFileRefresh })}

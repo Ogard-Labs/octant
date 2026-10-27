@@ -9,6 +9,10 @@ import {
   type ProjectId,
   type ThreadRetentionThreadId,
 } from "@octant/contracts";
+import {
+  CODE_LANGUAGE_SERVER_APPROVAL_AGGREGATE,
+  CODE_LANGUAGE_SERVER_EGRESS_AGGREGATE,
+} from "@octant/contracts/code-language";
 import { purgeAgentRunSubjectContent } from "./agentRunContentStore";
 import { purgeThreadContent } from "./chatProjection";
 import { purgeContextCompactions, purgeContextSubjectContent } from "./contextProjection";
@@ -339,7 +343,17 @@ export function erasePurgedProjectData(input: {
       `${TOOL_EGRESS_PROJECT_AGGREGATE}:${projectId}`,
       { aggregateType: TOOL_EGRESS_PROJECT_AGGREGATE, aggregateId: projectId },
     ],
+    [
+      `${CODE_LANGUAGE_SERVER_APPROVAL_AGGREGATE}:${projectId}`,
+      { aggregateType: CODE_LANGUAGE_SERVER_APPROVAL_AGGREGATE, aggregateId: projectId },
+    ],
   ]);
+  // A language server's egress records are the Project's, one aggregate per
+  // launch: they name the thread whose read started the server only inside
+  // the launch, so a thread purge leaves them and a Project erase takes them.
+  for (const aggregate of languageServerEgressAggregates(connection, projectId)) {
+    aggregates.set(`${aggregate.aggregateType}:${aggregate.aggregateId}`, aggregate);
+  }
   for (const canvasId of input.canvasIds) {
     for (const aggregate of collectCanvasFamilyAggregates(connection, canvasId)) {
       aggregates.set(`${aggregate.aggregateType}:${aggregate.aggregateId}`, aggregate);
@@ -431,6 +445,24 @@ function idsOf(keys: Map<string, AggregateKey>, aggregateType: string): string[]
     if (key.aggregateType === aggregateType) ids.push(key.aggregateId);
   }
   return ids;
+}
+
+function languageServerEgressAggregates(
+  connection: SqliteConnection,
+  projectId: string,
+): ReadonlyArray<AggregateKey> {
+  const rows = connection
+    .prepare(
+      `SELECT DISTINCT aggregate_id FROM event_journal
+       WHERE aggregate_type = ? AND json_extract(payload_json, '$.launch.projectId') = ?`,
+    )
+    .all(CODE_LANGUAGE_SERVER_EGRESS_AGGREGATE, projectId) as ReadonlyArray<{
+    readonly aggregate_id: string;
+  }>;
+  return rows.map((row) => ({
+    aggregateType: CODE_LANGUAGE_SERVER_EGRESS_AGGREGATE,
+    aggregateId: row.aggregate_id,
+  }));
 }
 
 function aggregatesMatching(

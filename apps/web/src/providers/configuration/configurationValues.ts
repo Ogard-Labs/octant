@@ -1,9 +1,14 @@
 import {
-  type AnthropicCompatibleAuthentication,
+  DirectoryIssuer,
+  DirectoryIssuerClientId,
+  DirectoryResourceScope,
   type AnthropicCompatibleProtocol,
   type AnthropicCompatibleProviderConfiguration,
   type AzureFoundryProviderConfiguration,
   type BflImageProviderConfiguration,
+  type DirectoryClientId,
+  type DirectoryIssuerBinding,
+  type DirectoryTenantId,
   type GeminiImageAspectRatio,
   type GeminiImageProviderConfiguration,
   type GeminiImageResolution,
@@ -14,40 +19,111 @@ import {
   type OpenAiImageQuality,
   type OpenAiImageSize,
 } from "@octant/contracts";
+import { Schema } from "effect";
 
+/**
+ * An OpenAI-compatible configuration from its form. A gateway that signs in
+ * with its organization carries the issuer, client, and scope the form holds.
+ */
 export function configurationFrom(data: FormData): OpenAiCompatibleProviderConfiguration {
-  return {
+  const shared = {
     kind: "openai-compatible-http",
     baseUrl: String(data.get("baseUrl") ?? ""),
-    authentication: String(data.get("authentication") ?? "bearer") as "bearer" | "none",
     protocol: String(data.get("protocol") ?? "auto") as OpenAiCompatibleProtocol,
     manualModelIds: parseManualModelIds(String(data.get("manualModelIds") ?? "")),
+  } as const;
+  if (data.get("authentication") === "directory-oauth") {
+    return { ...shared, authentication: "directory-oauth", directory: gatewayDirectoryFrom(data) };
+  }
+  return {
+    ...shared,
+    authentication: data.get("authentication") === "none" ? "none" : "bearer",
   };
 }
 
+/** As `configurationFrom`, for an Anthropic-compatible endpoint. */
 export function anthropicConfigurationFrom(
   data: FormData,
 ): AnthropicCompatibleProviderConfiguration {
-  return {
+  const authentication = data.get("authentication");
+  const shared = {
     kind: "anthropic-compatible-http",
     baseUrl: String(data.get("baseUrl") ?? ""),
-    authentication: String(
-      data.get("authentication") ?? "api-key",
-    ) as AnthropicCompatibleAuthentication,
     protocol: String(data.get("protocol") ?? "auto") as AnthropicCompatibleProtocol,
     protocolVersion: String(data.get("protocolVersion") ?? "2023-06-01"),
     manualModelIds: parseManualModelIds(String(data.get("manualModelIds") ?? "")),
+  } as const;
+  if (authentication === "directory-oauth") {
+    return { ...shared, authentication: "directory-oauth", directory: gatewayDirectoryFrom(data) };
+  }
+  return {
+    ...shared,
+    authentication:
+      authentication === "bearer" || authentication === "none" ? authentication : "api-key",
   };
 }
 
-export function foundryConfigurationFrom(data: FormData): AzureFoundryProviderConfiguration {
+/**
+ * A gateway's organization sign-in as the form holds it, trimmed. The host
+ * compares the issuer exactly with what its tokens name, so it is not
+ * otherwise rewritten; the host refuses a value that is not one.
+ */
+export function gatewayDirectoryFrom(data: FormData): DirectoryIssuerBinding {
+  const text = (name: string) => String(data.get(name) ?? "").trim();
   return {
+    issuer: text("issuer") as DirectoryIssuerBinding["issuer"],
+    clientId: text("clientId") as DirectoryIssuerBinding["clientId"],
+    scope: text("scope") as DirectoryIssuerBinding["scope"],
+  };
+}
+
+/** Whether a gateway's issuer, client, and scope are each one the host accepts. */
+export function isGatewayDirectory(directory: DirectoryIssuerBinding): boolean {
+  return (
+    Schema.is(DirectoryIssuer)(directory.issuer) &&
+    Schema.is(DirectoryIssuerClientId)(directory.clientId) &&
+    Schema.is(DirectoryResourceScope)(directory.scope)
+  );
+}
+
+/**
+ * An Azure AI Foundry configuration from its form. The form names how it signs
+ * in; one without the field (an older form) keeps the API key. An organization
+ * sign-in carries the tenant and client the person pasted, lowercased, since
+ * the host compares them exactly and refuses anything but a GUID.
+ */
+export function foundryConfigurationFrom(data: FormData): AzureFoundryProviderConfiguration {
+  const shared = {
     kind: "azure-foundry-openai-http",
     baseUrl: String(data.get("baseUrl") ?? ""),
-    authentication: "api-key",
     protocol: String(data.get("protocol") ?? "auto") as OpenAiCompatibleProtocol,
     manualModelIds: parseManualModelIds(String(data.get("manualModelIds") ?? "")),
+  } as const;
+  if (data.get("authentication") !== "directory-oauth") {
+    return { ...shared, authentication: "api-key" };
+  }
+  return {
+    ...shared,
+    authentication: "directory-oauth",
+    directory: {
+      tenantId: directoryGuid(data.get("tenantId")) as DirectoryTenantId,
+      clientId: directoryGuid(data.get("clientId")) as DirectoryClientId,
+    },
+    // Off is the absence of the opt-in; the host stores no `false`.
+    ...(data.get("deviceCodeSignIn") === null ? {} : { deviceCodeSignIn: true }),
   };
+}
+
+/** A pasted directory id as the host compares it: trimmed and lowercase. */
+export function directoryGuid(value: FormDataEntryValue | string | null): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+const DIRECTORY_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** Whether a pasted tenant or client id is a GUID once lowercased. */
+export function isDirectoryGuid(value: string): boolean {
+  return DIRECTORY_GUID.test(directoryGuid(value));
 }
 
 export function parseManualModelIds(

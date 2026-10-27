@@ -19,11 +19,22 @@ import { resolveProjectCliCommand, runProjectCliCommand } from "./projectCommand
 import { resolveAgentCliCommand, runAgentCliCommand } from "./agentCommand";
 import { runMcpCliCommand } from "./mcpCommand";
 import {
+  executorStartCommand,
+  isExecutorStdioInvocation,
+  runExecutorCommand,
+} from "./executorCommand";
+import { resolveSshTargetCliCommand, runSshTargetCliCommand } from "./sshTargetCommand";
+import {
   readAllStdin,
   readHiddenLineFromTerminal,
   resolveProviderKeyCliCommand,
   runProviderKeyCliCommand,
 } from "./providerKeyCommand";
+import {
+  resolveProviderSignInCliCommand,
+  runProviderSignInCliCommand,
+  type ProviderSignInCliCommand,
+} from "./providerSignInCommand";
 import {
   resolveAuthCliCommand,
   resolveListenerCliCommand,
@@ -70,6 +81,15 @@ async function main(): Promise<number> {
   if (args === undefined) {
     printUsage();
     return 1;
+  }
+  if (args.command === "executor") {
+    // Standard output is the SSH session's protocol from the first byte, so
+    // a wrong invocation is reported on standard error only.
+    if (!isExecutorStdioInvocation(process.argv.slice(3))) {
+      process.stderr.write("Usage: octant executor --stdio\n");
+      return 1;
+    }
+    return await runExecutorCommand(executorStartCommand(import.meta.url, process.execPath));
   }
   if (args.command === "mcp") {
     // Before anything that resolves a data directory or opens a host session:
@@ -259,6 +279,14 @@ async function main(): Promise<number> {
       }),
     );
   }
+  if (args.command === "provider" && args.positional[0] === "sign-in") {
+    const command = resolveProviderSignInCliCommand(args.positional, args.flags);
+    if (command === undefined) {
+      printUsage();
+      return 1;
+    }
+    return await runProviderSignInFlow(command);
+  }
   if (args.command === "provider") {
     const command = resolveProviderKeyCliCommand(args.positional, args.flags);
     if (command === undefined) {
@@ -279,6 +307,30 @@ async function main(): Promise<number> {
         stderr: process.stderr,
       }),
     );
+  }
+  if (args.command === "ssh-target") {
+    const command = resolveSshTargetCliCommand(args.positional, args.flags);
+    if (command === undefined) {
+      printUsage();
+      return 1;
+    }
+    const prompt =
+      process.stdin.isTTY === true
+        ? createInterface({ input: process.stdin, output: process.stdout })
+        : undefined;
+    try {
+      return await withLocalControlSession((session) =>
+        runSshTargetCliCommand({
+          command,
+          session,
+          stdout: process.stdout,
+          stderr: process.stderr,
+          ask: prompt === undefined ? undefined : (question) => prompt.question(question),
+        }),
+      );
+    } finally {
+      prompt?.close();
+    }
   }
   if (args.command === "pair" || args.command === "auth" || args.command === "listener") {
     const command: RemoteAccessCliCommand | undefined =
@@ -407,6 +459,34 @@ async function runPairFlow(options: ServerPairingOptions): Promise<number> {
   }
 }
 
+/** `octant provider sign-in`: the terms question needs a terminal; the code does not. */
+async function runProviderSignInFlow(command: ProviderSignInCliCommand): Promise<number> {
+  const interactive = process.stdin.isTTY === true;
+  const prompt = interactive
+    ? createInterface({ input: process.stdin, output: process.stdout })
+    : undefined;
+  const closed =
+    prompt === undefined
+      ? undefined
+      : new Promise<undefined>((resolve) => prompt.once("close", () => resolve(undefined)));
+  try {
+    return await withLocalControlSession((session) =>
+      runProviderSignInCliCommand({
+        command,
+        session,
+        ask:
+          prompt === undefined || closed === undefined
+            ? undefined
+            : (question) => Promise.race([prompt.question(question), closed]),
+        stdout: process.stdout,
+        stderr: process.stderr,
+      }),
+    );
+  } finally {
+    prompt?.close();
+  }
+}
+
 function resolveCliHostRuntimePaths() {
   return resolveHostRuntimePaths({
     env: process.env,
@@ -443,9 +523,21 @@ function printUsage(): void {
       "  octant provider key set <instance> [--replace] [--stdin]",
       "  octant provider key status|remove <instance>",
       "  octant provider remove <instance>",
+      "  octant provider sign-in <instance>",
       "  octant listener [status]",
       "  octant listener enable --hostname <lan-or-tailscale-address> --port <port> --cert <path> --key <path>",
       "  octant listener disable",
+      "  octant ssh-target [list]",
+      "  octant ssh-target add <destination> --executor <path-of-octant-on-target> [--fingerprint <SHA256:...>]",
+      "  octant ssh-target repin <target-id> [--fingerprint <SHA256:...>]",
+      "  octant ssh-target connect|remove <target-id>",
+      "  octant ssh-target bind <target-id> <remote-root> --name <name>",
+      "  octant ssh-target projects",
+      "  octant ssh-target files <project-id> [directory]",
+      "  octant ssh-target read <project-id> <path>",
+      "  octant ssh-target status <project-id>",
+      "  octant ssh-target diff <project-id> [path]",
+      "  octant executor --stdio",
       "  octant pair [--source loopback|lan-private|tailscale]",
       "  octant pair requests",
       "  octant pair approve|deny <ticket-id>",

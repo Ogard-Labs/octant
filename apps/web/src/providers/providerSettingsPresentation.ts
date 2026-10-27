@@ -1,10 +1,12 @@
-import type {
-  AnthropicCompatibleProtocol,
-  DiscoverySnapshot,
-  OpenAiCompatibleProtocol,
-  ProviderInstance,
-  ProviderObservedState,
-  ProviderRefusalReason,
+import {
+  acpAgentProfile,
+  isAcpAgentKind,
+  type AnthropicCompatibleProtocol,
+  type DiscoverySnapshot,
+  type OpenAiCompatibleProtocol,
+  type ProviderInstance,
+  type ProviderObservedState,
+  type ProviderRefusalReason,
 } from "@octant/contracts";
 
 export const capabilityLabels: ReadonlyArray<
@@ -96,58 +98,22 @@ export function isModelEndpointDriverKind(
   return MODEL_ENDPOINT_DRIVER_KINDS.some((kind) => kind === driverKind);
 }
 
-export function driverLabel(
-  driverKind: ProviderInstance["driverKind"] | "oh-my-pi",
-):
-  | "OpenCode"
-  | "Codex"
-  | "Claude"
-  | "Kimi Code"
-  | "Devin"
-  | "Kilo"
-  | "Pi"
-  | "Oh My Pi"
-  | "Ollama"
-  | "Mistral Vibe"
-  | "Grok Build"
-  | "Goose"
-  | "GLM Agent ACP"
-  | "Gemini CLI"
-  | "GitHub Copilot"
-  | "Cline"
-  | "Qwen Code"
-  | "fx"
-  | "OpenAI-compatible"
-  | "Anthropic-compatible"
-  | "Azure AI Foundry"
-  | "OpenAI Image"
-  | "Gemini Image"
-  | "Black Forest Labs Image"
-  | "Ideogram Image" {
+export function driverLabel(driverKind: ProviderInstance["driverKind"]): string {
+  if (isAcpAgentKind(driverKind)) return acpAgentProfile(driverKind).name;
   if (driverKind === "opencode") return "OpenCode";
   if (driverKind === "codex") return "Codex";
   if (driverKind === "claude") return "Claude";
-  if (driverKind === "kimi-code") return "Kimi Code";
-  if (driverKind === "devin") return "Devin";
-  if (driverKind === "kilo") return "Kilo";
   if (driverKind === "pi") return "Pi";
   if (driverKind === "oh-my-pi") return "Oh My Pi";
   if (driverKind === "ollama") return "Ollama";
-  if (driverKind === "mistral-vibe") return "Mistral Vibe";
-  if (driverKind === "grok") return "Grok Build";
-  if (driverKind === "goose") return "Goose";
-  if (driverKind === "glm") return "GLM Agent ACP";
-  if (driverKind === "gemini") return "Gemini CLI";
-  if (driverKind === "copilot") return "GitHub Copilot";
-  if (driverKind === "cline") return "Cline";
-  if (driverKind === "qwen") return "Qwen Code";
-  if (driverKind === "fx") return "fx";
   if (driverKind === "anthropic-compatible") return "Anthropic-compatible";
   if (driverKind === "azure-foundry") return "Azure AI Foundry";
   if (driverKind === "openai-image") return "OpenAI Image";
   if (driverKind === "gemini-native-image") return "Gemini Image";
   if (driverKind === "bfl-image") return "Black Forest Labs Image";
   if (driverKind === "ideogram-image") return "Ideogram Image";
+  // An outside driver package never borrows a bundled provider's name.
+  if (driverKind === "outside-harness-endpoint") return "Outside driver";
   return "OpenAI-compatible";
 }
 
@@ -172,6 +138,20 @@ export function providerRefusalCopy(
     return {
       reason: `${label} authentication is required.`,
       nextStep: `Sign in to ${label} with its provider-owned login, then check the connection again.`,
+    };
+  }
+  if (reason === "driver-not-admitted") {
+    return {
+      reason: "This provider's driver package is not admitted, so it offers no models.",
+      nextStep:
+        "Octant runs this provider only once its driver package is installed, trusted, and enabled.",
+    };
+  }
+  if (reason === "driver-incompatible") {
+    return {
+      reason: "This provider's driver package does not speak a protocol Octant can use.",
+      nextStep:
+        "Octant stopped the driver. Install a version of the package built for this Octant, then check the connection again.",
     };
   }
   if (reason === "runtime-unavailable") {
@@ -205,7 +185,9 @@ export function providerConfiguredBinaryPath(instance: ProviderInstance): string
 
 export function providerAuthenticationFact(instance: ProviderInstance): string | undefined {
   const { configuration, driverKind } = instance;
-  if (!("authentication" in configuration)) return undefined;
+  if (!("authentication" in configuration) || configuration.authentication === undefined) {
+    return undefined;
+  }
   if (driverKind === "claude") {
     return configuration.authentication === "api-key" ? "Anthropic API key" : "Claude subscription";
   }

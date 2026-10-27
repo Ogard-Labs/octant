@@ -130,6 +130,12 @@ export const AppleActionKind = Schema.Literal(
 );
 export type AppleActionKind = typeof AppleActionKind.Type;
 
+export const AppleBundleIdentifier = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(255),
+  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9.-]+$/),
+);
+export type AppleBundleIdentifier = typeof AppleBundleIdentifier.Type;
+
 /** Point in the live Simulator frame's image pixel space (origin top-left). */
 export const AppleSimulatorPoint = Schema.Struct({
   x: Schema.Number.pipe(Schema.finite()),
@@ -167,12 +173,7 @@ export const AppleSimulatorRequest = Schema.Struct({
   checkoutId: CodeCheckoutId,
   kind: AppleSimulatorActionKind,
   simulatorId: AppleSimulatorId,
-  bundleIdentifier: Schema.optional(
-    Schema.NonEmptyTrimmedString.pipe(
-      Schema.maxLength(255),
-      Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9.-]+$/),
-    ),
-  ),
+  bundleIdentifier: Schema.optional(AppleBundleIdentifier),
   /**
    * Who petitioned this Simulator action. Required for Allow input, tap,
    * type-text, and key-press so a pane click is never confused with an agent
@@ -475,6 +476,252 @@ export const AppleToolchainFailure = Schema.Union(
 ).annotations(strict);
 export type AppleToolchainFailure = typeof AppleToolchainFailure.Type;
 
+// Physical Apple devices (docs/design/apple-devices.md). The host maps each
+// AppleDeviceId to the CoreDevice identifier in its own runtime store; the
+// UDID, serial number, and ECID never cross this boundary, so the record is
+// strict and has no field to carry them.
+
+export const AppleDeviceId = brandedUuid("AppleDeviceId");
+export type AppleDeviceId = typeof AppleDeviceId.Type;
+
+/** A development team, the only thing that selects a signing identity. */
+export const AppleTeamId = Schema.String.pipe(
+  Schema.pattern(/^[A-Z0-9]{10}$/),
+  Schema.brand("AppleTeamId"),
+);
+export type AppleTeamId = typeof AppleTeamId.Type;
+
+export const AppleDeviceConnection = Schema.Literal("wired", "network");
+export type AppleDeviceConnection = typeof AppleDeviceConnection.Type;
+
+/**
+ * What the device can answer right now. Every state but `connected` is also
+ * the reason an operation that needs the device is refused.
+ */
+export const AppleDeviceState = Schema.Literal(
+  "connected",
+  "locked",
+  "developer-mode-off",
+  "untrusted",
+  "unavailable",
+);
+export type AppleDeviceState = typeof AppleDeviceState.Type;
+
+export const AppleDeviceRecord = Schema.Struct({
+  deviceId: AppleDeviceId,
+  /** The name the person gave the device, as Xcode shows it. */
+  name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  model: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  /** iPhone and iPad only; other paired hardware is not a destination. */
+  platform: Schema.Literal("ios"),
+  osVersion: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+  connection: AppleDeviceConnection,
+  state: AppleDeviceState,
+}).annotations(strict);
+export type AppleDeviceRecord = typeof AppleDeviceRecord.Type;
+
+/**
+ * Every operation in the device authority table. `provisioning-update` is
+ * listed so that asking for one is refused by name; no posture offers it.
+ * `upload`, `submit-for-review`, and `release-version` are the distribution
+ * layer's operations and target no device.
+ */
+export const AppleDeviceActionKind = Schema.Literal(
+  "discover",
+  "status",
+  "use-device",
+  "release-device",
+  "screenshot",
+  "logs",
+  "build",
+  "run",
+  "install",
+  "launch",
+  "terminate",
+  "uninstall",
+  "provisioning-update",
+  "upload",
+  "submit-for-review",
+  "release-version",
+);
+export type AppleDeviceActionKind = typeof AppleDeviceActionKind.Type;
+
+/**
+ * Device operations the selected Xcode's own tooling offers, as the host
+ * probed them. One the probe did not find is unavailable on that host and is
+ * never approximated.
+ */
+export const AppleDeviceToolingOperation = Schema.Literal(
+  "list-devices",
+  "install-app",
+  "launch-app",
+  "terminate-process",
+  "uninstall-app",
+  "screenshot",
+  "console-logs",
+);
+export type AppleDeviceToolingOperation = typeof AppleDeviceToolingOperation.Type;
+
+export const AppleDeviceRequest = Schema.Struct({
+  actionId: ToolActionId,
+  correlationId: CorrelationId,
+  authority: ToolActionAuthority,
+  threadId: CodeThreadId,
+  checkoutId: CodeCheckoutId,
+  kind: AppleDeviceActionKind,
+  /** Always named, so a pane click is never confused with an agent tool call. */
+  requestedBy: EventActor,
+  deviceId: Schema.optional(AppleDeviceId),
+  /**
+   * `use-device` only: the thread a local person is moving the lease from.
+   * The confirmation names it, and a lease that changed hands since refuses.
+   */
+  fromThreadId: Schema.optional(CodeThreadId),
+  projectPath: Schema.optional(AppleProjectPath),
+  scheme: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
+  configuration: Schema.optional(AppleBuildConfiguration),
+  teamId: Schema.optional(AppleTeamId),
+  /** `install` only: a product an Octant build held for this thread, by reference. */
+  artifact: Schema.optional(AppleEvidenceReference),
+  bundleIdentifier: Schema.optional(AppleBundleIdentifier),
+  timeoutMs: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(60 * 60 * 1000)),
+  approval: ToolActionApproval,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((request) => {
+      const targetsNoDevice =
+        request.kind === "discover" ||
+        request.kind === "upload" ||
+        request.kind === "submit-for-review" ||
+        request.kind === "release-version";
+      if (targetsNoDevice !== (request.deviceId === undefined)) return false;
+      if (request.fromThreadId !== undefined && request.kind !== "use-device") return false;
+      if (request.kind === "build" || request.kind === "run") {
+        return request.projectPath !== undefined && request.teamId !== undefined;
+      }
+      if (request.kind === "install") return request.artifact !== undefined;
+      if (
+        request.kind === "launch" ||
+        request.kind === "terminate" ||
+        request.kind === "uninstall" ||
+        request.kind === "logs"
+      ) {
+        return request.bundleIdentifier !== undefined;
+      }
+      return true;
+    }),
+  );
+export type AppleDeviceRequest = typeof AppleDeviceRequest.Type;
+
+/**
+ * One thread's use of one device, held in host memory only. A person at the
+ * Mac always granted it.
+ */
+export const AppleDeviceLease = Schema.Struct({
+  deviceId: AppleDeviceId,
+  threadId: CodeThreadId,
+  checkoutId: CodeCheckoutId,
+  grantedBy: EventActor,
+  grantedAt: UtcTimestamp,
+})
+  .annotations(strict)
+  .pipe(Schema.filter((lease) => lease.grantedBy.kind === "local-user"));
+export type AppleDeviceLease = typeof AppleDeviceLease.Type;
+
+export const AppleDeviceLeaseEndReason = Schema.Literal(
+  "released",
+  "moved",
+  "thread-archived",
+  "thread-purged",
+  "checkout-rebound",
+  "device-disconnected",
+);
+export type AppleDeviceLeaseEndReason = typeof AppleDeviceLeaseEndReason.Type;
+
+export const AppleDeviceRefusalReason = Schema.Literal(
+  "core-capability-required",
+  "code-mode-required",
+  "authority-mismatch",
+  "thread-mismatch",
+  "checkout-mismatch",
+  "toolchain-unavailable",
+  "operation-unavailable",
+  "provisioning-updates-not-offered",
+  "distribution-not-enabled",
+  "person-required",
+  "local-person-required",
+  "read-only-policy",
+  "approval-required",
+  "approval-denied",
+  "confirmation-required",
+  "invalid-destination",
+  "destination-leased",
+  "lease-required",
+  "lease-changed",
+  "locked",
+  "developer-mode-off",
+  "untrusted",
+  "unavailable",
+  "invalid-artifact",
+  "foreign-bundle",
+  "process-not-owned",
+);
+export type AppleDeviceRefusalReason = typeof AppleDeviceRefusalReason.Type;
+
+/**
+ * Whose lease a device is under, as the asking thread may know it. Another
+ * thread is never named: the holder only a local person's move confirmation
+ * shows stays on the host.
+ */
+export const AppleDeviceLeaseHolder = Schema.Literal("this-thread", "another-thread");
+export type AppleDeviceLeaseHolder = typeof AppleDeviceLeaseHolder.Type;
+
+/** What `discover` answers: the host's paired iPhones and iPads and its device tooling. */
+export const AppleDeviceDiscovery = Schema.Struct({
+  devices: Schema.Array(AppleDeviceRecord).pipe(Schema.maxItems(64)),
+  tooling: Schema.Array(AppleDeviceToolingOperation).pipe(Schema.maxItems(16)),
+  leases: Schema.Array(
+    Schema.Struct({ deviceId: AppleDeviceId, holder: AppleDeviceLeaseHolder }).annotations(strict),
+  ).pipe(Schema.maxItems(64)),
+  discoveredAt: UtcTimestamp,
+}).annotations(strict);
+export type AppleDeviceDiscovery = typeof AppleDeviceDiscovery.Type;
+
+/**
+ * The device routes' answers. A refusal carries the policy's reason and
+ * nothing else, so a request another thread's lease refused learns only that.
+ */
+export const AppleDeviceResponse = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("apple-device-discovery"),
+    discovery: AppleDeviceDiscovery,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("apple-device-status"),
+    device: AppleDeviceRecord,
+    holder: Schema.optional(AppleDeviceLeaseHolder),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("apple-device-leased"),
+    deviceId: AppleDeviceId,
+    grantedAt: UtcTimestamp,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("apple-device-released"),
+    deviceId: AppleDeviceId,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("apple-device-refused"),
+    reason: AppleDeviceRefusalReason,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("apple-device-failure"),
+    failure: AppleToolchainFailure,
+  }).annotations(strict),
+);
+export type AppleDeviceResponse = typeof AppleDeviceResponse.Type;
+
 export const decodeAppleProjectPath = Schema.decodeUnknownSync(AppleProjectPath);
 export const decodeAppleToolchainId = Schema.decodeUnknownSync(AppleToolchainId);
 export const decodeAppleSimulatorId = Schema.decodeUnknownSync(AppleSimulatorId);
@@ -501,3 +748,8 @@ export const decodeAppleBuildEvidence = Schema.decodeUnknownSync(AppleBuildEvide
 export const decodeAppleActionProgress = Schema.decodeUnknownSync(AppleActionProgress);
 export const decodeAppleRuntimeSnapshot = Schema.decodeUnknownSync(AppleRuntimeSnapshot);
 export const decodeAppleToolchainFailure = Schema.decodeUnknownSync(AppleToolchainFailure);
+export const decodeAppleDeviceId = Schema.decodeUnknownSync(AppleDeviceId);
+export const decodeAppleDeviceRecord = Schema.decodeUnknownSync(AppleDeviceRecord);
+export const decodeAppleDeviceRequest = Schema.decodeUnknownSync(AppleDeviceRequest);
+export const decodeAppleDeviceLease = Schema.decodeUnknownSync(AppleDeviceLease);
+export const decodeAppleDeviceResponse = Schema.decodeUnknownSync(AppleDeviceResponse);

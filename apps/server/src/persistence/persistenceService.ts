@@ -156,6 +156,7 @@ import type { AutomationProjection } from "../automation/automationProjection";
 import type { CanvasProjection } from "../canvas/canvasProjection";
 import type { GithubCloneProjection } from "./githubCloneProjection";
 import type { ImageJobProjection } from "../image/imageJobProjection";
+import type { DesktopLeaseProjection } from "../computerUse/desktopLeaseProjection";
 import type { ReplicaMembershipProjection } from "../replica/replicaMembershipProjection";
 import type { ReplicaArtifactProjection } from "../replica/replicaArtifactProjection";
 import { readThreadIdModes } from "./threadIdentity";
@@ -181,6 +182,7 @@ export interface PersistenceService {
   readonly automationProjection: AutomationProjection;
   readonly githubCloneProjection: GithubCloneProjection;
   readonly imageJobProjection: ImageJobProjection;
+  readonly desktopLeaseProjection: DesktopLeaseProjection;
   readonly replicaMembershipProjection: ReplicaMembershipProjection;
   readonly replicaArtifactProjection: ReplicaArtifactProjection;
   readonly readShellSettings: () => ProjectedShellSettings | undefined;
@@ -445,6 +447,7 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       automationProjection: runtime.automationProjection,
       githubCloneProjection: runtime.githubCloneProjection,
       imageJobProjection: runtime.imageJobProjection,
+      desktopLeaseProjection: runtime.desktopLeaseProjection,
       replicaMembershipProjection: runtime.replicaMembershipProjection,
       replicaArtifactProjection: runtime.replicaArtifactProjection,
       readShellSettings: () => readShellSettings(connection),

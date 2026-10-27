@@ -86,6 +86,17 @@ import {
   CodeThreadActivity,
   decodeHostAnswer,
 } from "@octant/contracts";
+import {
+  CodeLanguageApprovalResult,
+  CodeLanguageDocumentResult,
+  CodeLanguageReadResult,
+  decodeCodeLanguageApprovalRequest,
+  decodeCodeLanguageDocumentRequest,
+  decodeCodeLanguageReadRequest,
+  type CodeLanguageApprovalRequest,
+  type CodeLanguageDocumentRequest,
+  type CodeLanguageReadRequest,
+} from "@octant/contracts/code-language";
 import { bindFetchPort } from "./bindFetchPort";
 
 /** The attachment route, addressed by thread and attachment. */
@@ -250,6 +261,23 @@ export interface CodeClient {
     threadId: CodeThreadId,
     checkoutId: CodeCheckoutId,
   ): Promise<CodeRepositoryTestStatus>;
+  /**
+   * Tell the host's language server what the editor holds open: `open` names
+   * a checkout-relative path and answers with the file reference later
+   * requests use. Refusals and waits are answers, not failures.
+   *
+   * Optional like `listTests`: an editor without it shows no language state
+   * and keeps Monaco's own single-file services.
+   */
+  syncLanguageDocument?(request: CodeLanguageDocumentRequest): Promise<CodeLanguageDocumentResult>;
+  /** Diagnostics or a definition for a document this thread has open. */
+  readLanguage?(request: CodeLanguageReadRequest): Promise<CodeLanguageReadResult>;
+  /**
+   * The person at a local window approves the server that would read this
+   * file to run the repository's tooling, after the host answered
+   * `approval-required`. The host refuses it from a paired device.
+   */
+  approveLanguageServer?(request: CodeLanguageApprovalRequest): Promise<CodeLanguageApprovalResult>;
   subscribe(
     threadId: CodeThreadId,
     afterSequence: number,
@@ -872,6 +900,60 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         url.toString(),
         { method: "GET", headers },
         decodeHostAnswer(CodeRepositoryTestListing),
+      );
+    },
+    async syncLanguageDocument(input) {
+      let validated: CodeLanguageDocumentRequest;
+      try {
+        validated = decodeCodeLanguageDocumentRequest(input);
+      } catch {
+        throw invalidCommand();
+      }
+      return request(
+        fetch,
+        new URL("/api/code/language/documents", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(validated),
+        },
+        decodeHostAnswer(CodeLanguageDocumentResult),
+      );
+    },
+    async approveLanguageServer(input) {
+      let validated: CodeLanguageApprovalRequest;
+      try {
+        validated = decodeCodeLanguageApprovalRequest(input);
+      } catch {
+        throw invalidCommand();
+      }
+      return request(
+        fetch,
+        new URL("/api/code/language/approvals", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(validated),
+        },
+        decodeHostAnswer(CodeLanguageApprovalResult),
+      );
+    },
+    async readLanguage(input) {
+      let validated: CodeLanguageReadRequest;
+      try {
+        validated = decodeCodeLanguageReadRequest(input);
+      } catch {
+        throw invalidCommand();
+      }
+      return request(
+        fetch,
+        new URL("/api/code/language/read", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(validated),
+        },
+        decodeHostAnswer(CodeLanguageReadResult),
       );
     },
     readTestStatus(threadId, checkoutId) {

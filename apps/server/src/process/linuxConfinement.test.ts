@@ -8,12 +8,13 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { dirname, join } from "node:path";
+import { spawn, spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   buildLinuxAllowDefaultDenyLaunch,
@@ -24,6 +25,9 @@ import {
 import { LINUX_EGRESS_FORWARDER_PORT, LINUX_EGRESS_FORWARDER_SOURCE } from "./proxiedNetworkEgress";
 import { ProcessConfinementError } from "./seatbeltProfile";
 
+const SETPRIV_PATH = "/usr/bin/setpriv";
+const ORDINARY_UID = 65_534;
+const SETUID_BIT = 0o4000;
 const directories: string[] = [];
 
 afterEach(() => {
@@ -81,14 +85,14 @@ describe("Linux Full access extension denials", () => {
     expect(launch.command).toBe(bwrapPath);
     expect(launch.args.slice(0, 9)).toEqual([
       "--die-with-parent",
+      "--bind",
+      "/",
+      "/",
       "--dev-bind",
       "/dev",
       "/dev",
       "--proc",
       "/proc",
-      "--bind",
-      "/",
-      "/",
     ]);
     expect(launch.args).toContain("--tmpfs");
     expect(launch.args).toContain(skills);
@@ -134,7 +138,256 @@ describe("Linux Full access extension denials", () => {
       ),
     ).toThrow(/could not be overlaid/);
   });
+
+  it.runIf(process.platform === "linux" && canRunHostBwrap())(
+    "hides a linked file or folder at its target and still starts the command",
+    () => {
+      const { root, boundRoot } = fixture();
+      const shared = join(root, "shared");
+      mkdirSync(join(shared, "skills"), { recursive: true });
+      mkdirSync(join(shared, "agents"));
+      writeFileSync(join(shared, "mcp.json"), "hidden");
+      writeFileSync(join(shared, "settings.json"), "hidden");
+      writeFileSync(join(shared, "skills", "SKILL.md"), "hidden");
+      writeFileSync(join(shared, "agents", "SKILL.md"), "hidden");
+      // Absolute links refused the whole launch with "Can't mount tmpfs on
+      // /newroot/..." before the command started; relative ones are covered
+      // the same way so both forms behave alike.
+      symlinkSync(join(shared, "mcp.json"), join(boundRoot, ".mcp.json"));
+      symlinkSync(join(shared, "skills"), join(boundRoot, "skills"));
+      symlinkSync("../shared/settings.json", join(boundRoot, "settings.json"));
+      symlinkSync("../shared/agents", join(boundRoot, ".agents"));
+      const denied = [".mcp.json", "skills", "settings.json", ".agents"].map((name) =>
+        join(boundRoot, name),
+      );
+      const launch = buildLinuxAllowDefaultDenyLaunch({
+        executable: "/bin/sh",
+        args: [
+          "-c",
+          'for path in "$@"; do cat "$path" "$path/SKILL.md"; done; echo end',
+          "sh",
+          ...denied,
+        ],
+        cwd: boundRoot,
+        denyPaths: denied,
+      });
+      const result = spawnSync(launch.command, [...launch.args], { encoding: "utf8" });
+      // The command's own refusals stay on stderr; only Bubblewrap's would
+      // mean the launch never started.
+      expect(result.stderr).not.toContain("bwrap:");
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("end\n");
+    },
+  );
+
+  it.runIf(process.platform === "linux" && canRunHostBwrap())(
+    "lets the command use /dev/null and /dev/urandom while denied paths stay hidden",
+    () => {
+      const { root, boundRoot } = fixture();
+      const skills = join(boundRoot, "skills");
+      const mcp = join(boundRoot, ".mcp.json");
+      mkdirSync(skills);
+      writeFileSync(join(skills, "SKILL.md"), "hidden");
+      writeFileSync(mcp, "hidden");
+      const shared = join(root, "shared");
+      mkdirSync(shared);
+      writeFileSync(join(shared, "settings.json"), "hidden");
+      const linked = join(boundRoot, "settings.json");
+      symlinkSync(join(shared, "settings.json"), linked);
+      const launch = buildLinuxAllowDefaultDenyLaunch({
+        executable: "/bin/sh",
+        args: [
+          "-c",
+          'echo discarded > /dev/null && head -c 4 /dev/urandom | wc -c && cat "$@"; echo end',
+          "sh",
+          join(skills, "SKILL.md"),
+          mcp,
+          linked,
+        ],
+        cwd: boundRoot,
+        denyPaths: [skills, mcp, linked],
+      });
+      const result = spawnSync(launch.command, [...launch.args], { encoding: "utf8" });
+      expect(result.stderr).not.toContain("bwrap:");
+      expect(result.stderr).not.toContain("/dev/");
+      expect(result.status).toBe(0);
+      expect(result.stdout.replace(/\s+/g, " ").trim()).toBe("4 end");
+    },
+  );
+
+  it.runIf(process.platform === "linux" && canRunHostBwrap())(
+    "keeps a denied link to a missing file from being written through",
+    () => {
+      const { root, boundRoot } = fixture();
+      const shared = join(root, "shared");
+      mkdirSync(shared);
+      const absolute = join(boundRoot, ".mcp.json");
+      const relative = join(boundRoot, "settings.json");
+      symlinkSync(join(shared, "mcp.json"), absolute);
+      symlinkSync("../shared/settings.json", relative);
+      const launch = buildLinuxAllowDefaultDenyLaunch({
+        executable: "/bin/sh",
+        args: [
+          "-c",
+          'for path in "$@"; do { echo planted > "$path"; } && echo written; done; echo end',
+          "sh",
+          absolute,
+          relative,
+        ],
+        cwd: boundRoot,
+        denyPaths: [absolute, relative],
+      });
+      const result = spawnSync(launch.command, [...launch.args], { encoding: "utf8" });
+      expect(result.stderr).not.toContain("bwrap:");
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("end\n");
+    },
+  );
+
+  it.runIf(process.platform === "linux" && canRunHostBwrap())(
+    "hides a denied link into another denied folder and still starts the command",
+    () => {
+      const { boundRoot } = fixture();
+      mkdirSync(join(boundRoot, ".agents"));
+      writeFileSync(join(boundRoot, ".agents", "mcp.json"), "hidden");
+      symlinkSync(".agents/mcp.json", join(boundRoot, ".mcp.json"));
+      const launch = buildLinuxAllowDefaultDenyLaunch({
+        executable: "/bin/sh",
+        args: ["-c", "cat .mcp.json .agents/mcp.json; echo end"],
+        cwd: boundRoot,
+        denyPaths: [join(boundRoot, ".agents"), join(boundRoot, ".mcp.json")],
+      });
+      const result = spawnSync(launch.command, [...launch.args], { encoding: "utf8" });
+      expect(result.stderr).not.toContain("bwrap:");
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("end\n");
+    },
+  );
+
+  it.runIf(process.platform === "linux" && canRunHostBwrap())(
+    "starts the command when a denied link names a file this user could not create",
+    () => {
+      const { root, boundRoot } = fixture();
+      // A root host can still write the locked folder, so the file in the
+      // way is what refuses Bubblewrap there.
+      const locked = join(root, "locked");
+      mkdirSync(locked, { mode: 0o555 });
+      writeFileSync(join(root, "file"), "");
+      const unwritable = join(boundRoot, ".mcp.json");
+      const underFile = join(boundRoot, "settings.json");
+      symlinkSync(join(locked, "mcp.json"), unwritable);
+      symlinkSync("../file/settings.json", underFile);
+      const launch = buildLinuxAllowDefaultDenyLaunch({
+        executable: "/bin/sh",
+        args: [
+          "-c",
+          'for path in "$@"; do { echo planted > "$path"; } && echo written; done; echo end',
+          "sh",
+          unwritable,
+          underFile,
+        ],
+        cwd: boundRoot,
+        denyPaths: [unwritable, underFile],
+      });
+      const result = spawnSync(launch.command, [...launch.args], { encoding: "utf8" });
+      expect(result.stderr).not.toContain("bwrap:");
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("end\n");
+    },
+  );
+
+  it.runIf(
+    process.platform === "linux" &&
+      canRunHostBwrap() &&
+      (process.getuid?.() !== 0 || existsSync(SETPRIV_PATH)),
+  )(
+    "keeps an ordinary user's denied folder out of reach through the /proc root of that user's other processes",
+    async (context) => {
+      if ((statSync(DEFAULT_BWRAP_PATH).mode & SETUID_BIT) !== 0) {
+        // Measured on bwrap 0.9.0 installed setuid: the capsule stayed in the
+        // host user namespace and read the denied file through both paths.
+        context.skip("a setuid bwrap keeps the capsule in the host user namespace");
+      }
+      const probe = spawnSync(
+        ...asOrdinaryUser(DEFAULT_BWRAP_PATH, ["--bind", "/", "/", "/bin/true"]),
+        { encoding: "utf8" },
+      );
+      if (probe.status !== 0) {
+        context.skip(`bwrap cannot start as an ordinary user here: ${probe.stderr.trim()}`);
+      }
+      const { root, boundRoot } = fixture();
+      chmodSync(root, 0o755);
+      const skills = join(boundRoot, "skills");
+      mkdirSync(skills, { mode: 0o755 });
+      const secret = join(skills, "SKILL.md");
+      writeFileSync(secret, "hidden", { mode: 0o644 });
+      const outside = spawnSync(...asOrdinaryUser("/bin/cat", [secret]), { encoding: "utf8" });
+      if (outside.stdout !== "hidden") {
+        context.skip(`the ordinary user cannot read the test folder: ${outside.stderr.trim()}`);
+      }
+      // Another of the same user's processes, living in the host mount
+      // namespace where nothing covers the folder.
+      const holder = spawn(...asOrdinaryUser("/bin/sh", ["-c", "echo ready; exec sleep 60"]), {
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      try {
+        await new Promise<void>((resolve, reject) => {
+          holder.once("error", reject);
+          holder.stdout.once("data", () => resolve());
+        });
+        const launch = buildLinuxAllowDefaultDenyLaunch({
+          executable: "/bin/sh",
+          args: [
+            "-c",
+            [
+              'cat "$1" 2>/dev/null && echo "read directly"',
+              'for pid in "$PPID" "$2"; do',
+              '  cat "/proc/$pid/root$1" 2>/dev/null && echo "read through $pid"',
+              "done",
+              "echo end",
+            ].join("\n"),
+            "sh",
+            secret,
+            String(holder.pid),
+          ],
+          cwd: boundRoot,
+          denyPaths: [skills],
+        });
+        const result = spawnSync(...asOrdinaryUser(launch.command, launch.args), {
+          encoding: "utf8",
+        });
+        // An unprivileged Bubblewrap puts the capsule in a user namespace of
+        // its own. Reading another process's /proc root needs CAP_SYS_PTRACE
+        // over that process's user namespace, which a capsule never holds over
+        // the host's, so the same uid is not enough.
+        expect(result.stderr).not.toContain("bwrap:");
+        expect(result.status).toBe(0);
+        expect(result.stdout).toBe("end\n");
+      } finally {
+        holder.kill("SIGKILL");
+      }
+    },
+  );
 });
+
+/** Runs a command as an ordinary user, dropping root to `nobody` first. */
+function asOrdinaryUser(
+  command: string,
+  args: ReadonlyArray<string>,
+): [command: string, args: string[]] {
+  if (process.getuid?.() !== 0) return [command, [...args]];
+  return [
+    SETPRIV_PATH,
+    [
+      `--reuid=${String(ORDINARY_UID)}`,
+      `--regid=${String(ORDINARY_UID)}`,
+      "--clear-groups",
+      "--",
+      command,
+      ...args,
+    ],
+  ];
+}
 
 describe("Linux Bubblewrap confinement", () => {
   it("keeps a linked launcher visible through its parent without overlaying the link", () => {
@@ -211,6 +464,28 @@ describe("Linux Bubblewrap confinement", () => {
     expect(boundPairs(launch.args, "--bind")).not.toContainEqual(["/tmp", "/tmp"]);
     expect(hasFlagValue(launch.args, "--remount-ro", "/tmp")).toBe(false);
     expect(hasFlagValue(launch.args, "--remount-ro", "/")).toBe(true);
+  });
+
+  it("does not treat a sibling folder whose name extends the bound root's as inside it", () => {
+    const { boundRoot, temporaryDirectory, bwrapPath } = fixture();
+    const sibling = `${boundRoot}-b`;
+    mkdirSync(sibling);
+    const denied = join(boundRoot, ".mcp.json");
+    symlinkSync(join(sibling, "mcp.json"), denied);
+    const launch = buildBubblewrapLaunch(
+      {
+        executable: "/bin/true",
+        args: [],
+        boundRoot,
+        temporaryDirectory,
+        networkEgress: "none",
+        additionalDenyWritePaths: [denied],
+      },
+      { bwrapPath },
+    );
+    // The sibling is not bound, so the capsule cannot write the file the link
+    // names and nothing is covered there.
+    expect(launch.args.some((arg) => arg.startsWith(sibling))).toBe(false);
   });
 
   it("still binds a dedicated temporary directory after hiding host /tmp", () => {
@@ -486,6 +761,312 @@ describe("Linux Bubblewrap confinement", () => {
       expect(result.status).not.toBe(0);
     },
   );
+
+  it.runIf(process.platform === "linux" && canRunHostBwrap())(
+    "leaves a confined process no capability to remount, unmount, or write through a read-only bind",
+    () => {
+      const { boundRoot, temporaryDirectory } = fixture();
+      const sentinel = join(boundRoot, "sentinel");
+      const secret = join(boundRoot, "secret");
+      writeFileSync(sentinel, "host");
+      writeFileSync(secret, "hidden");
+      // Measured on bwrap 0.9.0 as uid 0 before capabilities were dropped: the
+      // capsule kept every capability, so the remount below made the
+      // read-only bind writable and the write reached the host file.
+      const launch = buildBubblewrapLaunch({
+        executable: "/bin/sh",
+        args: [
+          "-c",
+          [
+            "cd /",
+            'while read -r key value; do [ "$key" = CapEff: ] && echo "effective=$value"; done < /proc/self/status',
+            'mount -o remount,bind,rw "$1" 2>/dev/null && echo remounted',
+            'printf escaped 2>/dev/null > "$1/sentinel" && echo wrote',
+            'umount "$1/secret" 2>/dev/null && echo unmounted',
+            'grep -q hidden "$1/secret" 2>/dev/null && echo revealed',
+            "exit 0",
+          ].join("\n"),
+          "sh",
+          boundRoot,
+        ],
+        boundRoot,
+        temporaryDirectory,
+        networkEgress: "none",
+        writeBoundRoot: false,
+        additionalDenyReadPaths: [secret],
+      });
+      const result = spawnSync(launch.command, [...launch.args], { encoding: "utf8" });
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stdout.trim().split("\n")).toEqual(["effective=0000000000000000"]);
+      expect(readFileSync(sentinel, "utf8")).toBe("host");
+    },
+  );
+
+  it.runIf(process.platform === "linux" && canRunHostBwrap())(
+    "keeps the host kernel's settings read-only while a confined process can still read them",
+    () => {
+      const { boundRoot, temporaryDirectory } = fixture();
+      // `kernel.core_pattern` names a program the host runs as root when any
+      // process dumps core, so a writable one is a way out of the capsule.
+      const launch = buildBubblewrapLaunch({
+        executable: "/bin/sh",
+        args: [
+          "-c",
+          [
+            "for key in kernel/core_pattern vm/swappiness; do",
+            '  test -w "/proc/sys/$key" && echo "writable $key"',
+            "done",
+            "test -r /proc/sys/kernel/pid_max && echo readable",
+            "exit 0",
+          ].join("\n"),
+        ],
+        boundRoot,
+        temporaryDirectory,
+        networkEgress: "none",
+      });
+      const result = spawnSync(launch.command, [...launch.args], { encoding: "utf8" });
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stdout.trim().split("\n")).toEqual(["readable"]);
+    },
+  );
+
+  it.runIf(process.platform === "linux" && canRunHostBwrap())(
+    "hides the host's password hashes and private keys while the rest of /etc stays readable",
+    () => {
+      const { boundRoot, temporaryDirectory } = fixture();
+      const launch = buildBubblewrapLaunch({
+        executable: "/bin/sh",
+        args: [
+          "-c",
+          [
+            "for path in /etc/shadow /etc/gshadow /etc/ssh/ssh_host_*_key /etc/ssl/private/*; do",
+            '  [ -s "$path" ] && echo "exposed $path"',
+            "done",
+            "test -r /etc/passwd && echo passwd",
+            "exit 0",
+          ].join("\n"),
+        ],
+        boundRoot,
+        temporaryDirectory,
+        networkEgress: "none",
+      });
+      const result = spawnSync(launch.command, [...launch.args], { encoding: "utf8" });
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stdout.trim().split("\n")).toEqual(["passwd"]);
+    },
+  );
+
+  it.runIf(process.platform === "linux" && canRunHostBwrap())(
+    "still hides a denied file after a temp cleaner removes the empty file that covered it",
+    () => {
+      const { boundRoot, temporaryDirectory } = fixture();
+      const secret = join(boundRoot, "secret");
+      writeFileSync(secret, "hidden");
+      const launchReadingSecret = () =>
+        buildBubblewrapLaunch({
+          executable: "/bin/sh",
+          args: ["-c", 'cat "$1" 2>/dev/null; echo end', "sh", secret],
+          boundRoot,
+          temporaryDirectory,
+          networkEgress: "none",
+          additionalDenyReadPaths: [secret],
+        });
+      const first = launchReadingSecret();
+      const cover = boundPairs(first.args, "--ro-bind").find(([, target]) => target === secret);
+      if (cover === undefined) throw new Error("The denied file was not covered.");
+      // systemd-tmpfiles ages out the host /tmp while the server keeps running.
+      rmSync(dirname(cover[0]), { recursive: true, force: true });
+
+      const result = spawnSync(DEFAULT_BWRAP_PATH, [...launchReadingSecret().args], {
+        encoding: "utf8",
+      });
+      expect(result.stderr).toBe("");
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("end\n");
+    },
+  );
+
+  it.runIf(process.platform === "linux" && canRunHostBwrap())(
+    "denies a linked path at its target, and skips one whose target the capsule cannot reach",
+    () => {
+      const { root, boundRoot, temporaryDirectory } = fixture();
+      const shared = join(root, "shared");
+      const sharedSecret = join(shared, "token");
+      const unbound = join(root, "unbound");
+      mkdirSync(shared);
+      mkdirSync(unbound);
+      writeFileSync(sharedSecret, "hidden");
+      writeFileSync(join(unbound, "SKILL.md"), "hidden");
+      // Absolute links, as a person makes them: Bubblewrap followed each one
+      // from outside the new root and refused the launch with "Can't create
+      // file at" before the command started.
+      const linkedFile = join(boundRoot, "token");
+      const linkedFolder = join(boundRoot, "skills");
+      symlinkSync(sharedSecret, linkedFile);
+      symlinkSync(unbound, linkedFolder);
+      const result = spawnSync(
+        DEFAULT_BWRAP_PATH,
+        [
+          ...buildBubblewrapLaunch({
+            executable: "/bin/sh",
+            args: [
+              "-c",
+              'for path in "$@"; do cat "$path" 2>/dev/null; done; echo end',
+              "sh",
+              linkedFile,
+              sharedSecret,
+              join(linkedFolder, "SKILL.md"),
+            ],
+            boundRoot,
+            temporaryDirectory,
+            networkEgress: "none",
+            readRoots: [shared],
+            additionalDenyReadPaths: [linkedFile, linkedFolder],
+          }).args,
+        ],
+        { encoding: "utf8" },
+      );
+      expect(result.stderr).toBe("");
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("end\n");
+    },
+  );
+
+  it.runIf(process.platform === "linux" && canRunHostBwrap())(
+    "still hides a denied file under a bound root the launch names through a link",
+    () => {
+      const { root, temporaryDirectory } = fixture();
+      const project = join(root, "real-project");
+      const linkedProject = join(root, "linked-project");
+      mkdirSync(project);
+      writeFileSync(join(project, ".env"), "hidden");
+      symlinkSync(project, linkedProject);
+      // The bound root keeps the path the launch names, so the denial must
+      // land there too, not at the resolved folder the capsule never sees.
+      const secret = join(linkedProject, ".env");
+      const result = spawnSync(
+        DEFAULT_BWRAP_PATH,
+        [
+          ...buildBubblewrapLaunch({
+            executable: "/bin/sh",
+            args: ["-c", 'cat "$1" 2>/dev/null; echo end', "sh", secret],
+            boundRoot: linkedProject,
+            temporaryDirectory,
+            networkEgress: "none",
+            additionalDenyReadPaths: [secret],
+          }).args,
+        ],
+        { encoding: "utf8" },
+      );
+      expect(result.stderr).toBe("");
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("end\n");
+    },
+  );
+
+  it.runIf(process.platform === "linux" && canRunHostBwrap())(
+    "hides a relative link that climbs out of a root named through a link where the capsule follows it",
+    () => {
+      const { root, temporaryDirectory } = fixture();
+      // On the host `../shared` climbs out of the resolved project folder; in
+      // the capsule it climbs out of the root's linked name and reaches a
+      // different, bound folder.
+      const elsewhere = join(root, "elsewhere");
+      const project = join(elsewhere, "real-project");
+      mkdirSync(join(elsewhere, "shared"), { recursive: true });
+      mkdirSync(project);
+      writeFileSync(join(elsewhere, "shared", "token"), "decoy");
+      const shared = join(root, "shared");
+      mkdirSync(shared);
+      writeFileSync(join(shared, "token"), "hidden");
+      const linkedProject = join(root, "linked-project");
+      symlinkSync(project, linkedProject);
+      symlinkSync("../shared/token", join(project, "token"));
+      const denied = join(linkedProject, "token");
+      const result = spawnSync(
+        DEFAULT_BWRAP_PATH,
+        [
+          ...buildBubblewrapLaunch({
+            executable: "/bin/sh",
+            args: ["-c", 'cat "$1" 2>/dev/null; echo end', "sh", denied],
+            boundRoot: linkedProject,
+            temporaryDirectory,
+            networkEgress: "none",
+            readRoots: [shared],
+            additionalDenyReadPaths: [denied],
+          }).args,
+        ],
+        { encoding: "utf8" },
+      );
+      expect(result.stderr).toBe("");
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("end\n");
+    },
+  );
+
+  it.runIf(process.platform === "linux" && canRunHostBwrap())(
+    "keeps a write-denied link to a missing file from being written through",
+    () => {
+      const { boundRoot, temporaryDirectory } = fixture();
+      mkdirSync(join(boundRoot, "shared"));
+      const denied = join(boundRoot, ".mcp.json");
+      symlinkSync("shared/mcp.json", denied);
+      const result = spawnSync(
+        DEFAULT_BWRAP_PATH,
+        [
+          ...buildBubblewrapLaunch({
+            executable: "/bin/sh",
+            args: [
+              "-c",
+              '{ echo planted > "$1"; } 2>/dev/null && echo written; echo end',
+              "sh",
+              denied,
+            ],
+            boundRoot,
+            temporaryDirectory,
+            networkEgress: "none",
+            additionalDenyWritePaths: [denied],
+          }).args,
+        ],
+        { encoding: "utf8" },
+      );
+      expect(result.stderr).toBe("");
+      expect(result.stdout).toBe("end\n");
+    },
+  );
+
+  it("makes a new cover for a denied file when other users could change the old one", () => {
+    const { boundRoot, temporaryDirectory, bwrapPath } = fixture();
+    const secret = join(boundRoot, "secret");
+    writeFileSync(secret, "hidden");
+    const coverOf = () =>
+      boundPairs(
+        buildBubblewrapLaunch(
+          {
+            executable: "/bin/sh",
+            args: [],
+            boundRoot,
+            temporaryDirectory,
+            networkEgress: "none",
+            additionalDenyReadPaths: [secret],
+          },
+          { bwrapPath },
+        ).args,
+        "--ro-bind",
+      ).find(([, target]) => target === secret)?.[0];
+    const first = coverOf();
+    if (first === undefined) throw new Error("The denied file was not covered.");
+    // A cleaner can remove the folder, and another user can then make one of
+    // the same name, open to them, in the shared temp directory.
+    chmodSync(dirname(first), 0o777);
+
+    const second = coverOf();
+    expect(second).toBeDefined();
+    expect(second).not.toBe(first);
+  });
 
   it("keeps a proxied launch in its private network and starts it behind the forwarder", () => {
     const { root, boundRoot, temporaryDirectory, bwrapPath } = fixture();

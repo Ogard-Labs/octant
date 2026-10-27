@@ -4,9 +4,22 @@ import { HostId } from "./host";
 import { OctantMode } from "./modes";
 import { ProjectId } from "./projects";
 import { ToolExtensionId } from "./toolActions";
+import {
+  ExtensionComponentId,
+  ExtensionContentDigest,
+  ExtensionPackageId,
+  ExtensionPackageVersion,
+  extensionSemverPattern,
+} from "./extensionIdentity";
+
+export {
+  ExtensionComponentId,
+  ExtensionContentDigest,
+  ExtensionPackageId,
+  ExtensionPackageVersion,
+} from "./extensionIdentity";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
 const boundedToken = (maximumLength: number) =>
   Schema.NonEmptyTrimmedString.pipe(
     Schema.maxLength(maximumLength),
@@ -23,10 +36,6 @@ const entryPointReference = Schema.NonEmptyTrimmedString.pipe(
   Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/),
 );
 
-export const ExtensionPackageId = brandedUuid("ExtensionPackageId");
-export type ExtensionPackageId = typeof ExtensionPackageId.Type;
-export const ExtensionComponentId = boundedToken(64).pipe(Schema.brand("ExtensionComponentId"));
-export type ExtensionComponentId = typeof ExtensionComponentId.Type;
 export const ExtensionSlug = boundedToken(64).pipe(Schema.brand("ExtensionSlug"));
 export type ExtensionSlug = typeof ExtensionSlug.Type;
 export const ExtensionCatalogId = boundedToken(96).pipe(Schema.brand("ExtensionCatalogId"));
@@ -39,19 +48,6 @@ export const ExtensionSourceReference = opaqueReference.pipe(
   Schema.brand("ExtensionSourceReference"),
 );
 export type ExtensionSourceReference = typeof ExtensionSourceReference.Type;
-const semverPattern =
-  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
-export const ExtensionPackageVersion = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(64),
-  Schema.pattern(semverPattern),
-  Schema.brand("ExtensionPackageVersion"),
-);
-export type ExtensionPackageVersion = typeof ExtensionPackageVersion.Type;
-export const ExtensionContentDigest = Schema.String.pipe(
-  Schema.pattern(/^sha256:[a-f0-9]{64}$/),
-  Schema.brand("ExtensionContentDigest"),
-);
-export type ExtensionContentDigest = typeof ExtensionContentDigest.Type;
 export const ExtensionCatalogEpoch = Schema.String.pipe(
   Schema.pattern(/^sha256:[a-f0-9]{64}$/),
   Schema.brand("ExtensionCatalogEpoch"),
@@ -190,7 +186,7 @@ function compareNumericIdentifiers(left: string, right: string): number {
 
 function comparePackageVersions(left: string, right: string): number {
   const parse = (version: string) => {
-    const match = semverPattern.exec(version)!;
+    const match = extensionSemverPattern.exec(version)!;
     return {
       core: [match[1]!, match[2]!, match[3]!],
       prerelease: match[4]?.split("."),
@@ -280,6 +276,8 @@ export const ExtensionComponentKind = Schema.Literal(
   "preview-viewer",
   "provider-driver",
   "replica-store",
+  "desktop-provider",
+  "language-server",
 );
 export type ExtensionComponentKind = typeof ExtensionComponentKind.Type;
 export const ExtensionSkillName = Schema.NonEmptyTrimmedString.pipe(
@@ -287,6 +285,30 @@ export const ExtensionSkillName = Schema.NonEmptyTrimmedString.pipe(
   Schema.pattern(/^[a-z0-9][a-z0-9-]{0,63}$/),
 );
 export type ExtensionSkillName = typeof ExtensionSkillName.Type;
+
+/**
+ * How a language server is confined. `static` reads the checkout and writes
+ * only its own cache, execs nothing but its own binary, and has no network.
+ * `repo-tooling` may run the repository's own tooling, so it is approved,
+ * refused in Plan, and confined as a terminal is. The class is the whole
+ * grant: a server that declares `static` and needs more fails rather than
+ * getting more. Canonical: docs/design/language-services.md § Launch classes.
+ */
+export const ExtensionLanguageServerClass = Schema.Literal("static", "repo-tooling");
+export type ExtensionLanguageServerClass = typeof ExtensionLanguageServerClass.Type;
+
+/** A Language Server Protocol language identifier, such as `typescript`. */
+export const ExtensionLanguageId = Schema.String.pipe(
+  Schema.pattern(/^[a-z][a-z0-9-]{0,63}$/),
+  Schema.brand("ExtensionLanguageId"),
+);
+export type ExtensionLanguageId = typeof ExtensionLanguageId.Type;
+
+export const ExtensionLanguageServerDeclaration = Schema.Struct({
+  languages: Schema.Array(ExtensionLanguageId).pipe(Schema.minItems(1), Schema.maxItems(32)),
+  launchClass: ExtensionLanguageServerClass,
+}).annotations(strict);
+export type ExtensionLanguageServerDeclaration = typeof ExtensionLanguageServerDeclaration.Type;
 
 export const ExtensionComponent = Schema.Struct({
   id: ExtensionComponentId,
@@ -299,6 +321,8 @@ export const ExtensionComponent = Schema.Struct({
   contentReference: Schema.optional(opaqueReference),
   skillName: Schema.optional(ExtensionSkillName),
   parentComponentId: Schema.optional(ExtensionComponentId),
+  /** Present exactly when `kind` is `language-server`. */
+  languageServer: Schema.optional(ExtensionLanguageServerDeclaration),
 }).annotations(strict);
 export type ExtensionComponent = typeof ExtensionComponent.Type;
 
@@ -311,6 +335,8 @@ const executableKinds = new Set<ExtensionComponentKind>([
   "board",
   "integration",
   "provider-driver",
+  "desktop-provider",
+  "language-server",
 ]);
 const mcpChildKinds = new Set<ExtensionComponentKind>(["mcp-tool", "mcp-prompt", "mcp-resource"]);
 
@@ -486,6 +512,9 @@ export const ExtensionPackageManifest = Schema.Struct({
           return false;
         }
         if (component.kind !== "skill-instructions" && component.skillName !== undefined) {
+          return false;
+        }
+        if ((component.kind === "language-server") !== (component.languageServer !== undefined)) {
           return false;
         }
         if (mcpChild !== (component.parentComponentId !== undefined)) return false;

@@ -20,21 +20,32 @@ import {
 import {
   automationNotificationKindForLifecycle,
   buildRedactedAutomationPushNotification,
+  remotePushPreferenceAllows,
 } from "@octant/domain/push-notification-policy";
-import type { PushNotificationTokenStore } from "../remote/pushNotificationTokenStore";
+import { sealPushNotification } from "../remote/pushNotificationSealing";
+import type {
+  PushNotificationTokenStore,
+  PushTokenRecord,
+} from "../remote/pushNotificationTokenStore";
 import type { AutomationNotificationDeliveryStore } from "./automationNotificationDeliveryStore";
 import type { AutomationNotificationPreferencesStore } from "./automationNotificationPreferencesStore";
 import type { PushDeliveryTransport } from "./pushDeliveryTransport";
 import { deterministicAutomationUuid } from "./automationRunIdentity";
 
 export interface AutomationNotificationDeliveryServiceOptions {
-  readonly hostId: string;
   readonly preferences: Pick<AutomationNotificationPreferencesStore, "current">;
   readonly deliveries: Pick<
     AutomationNotificationDeliveryStore,
     "getByDedupeKey" | "record" | "list" | "listByRunId" | "listByAutomationId"
   >;
-  readonly tokens: Pick<PushNotificationTokenStore, "listDestinationsForHost">;
+  readonly tokens: Pick<PushNotificationTokenStore, "listDestinations" | "get" | "clear">;
+  /**
+   * Whether a registered device still stands (active, not revoked or
+   * expired). Asked when a run is observed and again right before each send.
+   */
+  readonly hasStanding: (hostId: string, deviceId: string) => boolean;
+  /** The name the paired computer shows the phone. */
+  readonly computerLabel: () => string;
   readonly transport: PushDeliveryTransport;
   readonly clock: () => UtcTimestamp;
   readonly uuid?: () => string;
@@ -67,10 +78,11 @@ const REOPENABLE_OUTCOMES = new Set(["skipped-preference", "skipped-no-destinati
  * never mutates run or ordinary-thread lifecycle.
  */
 export class AutomationNotificationDeliveryService {
-  readonly #hostId: string;
   readonly #preferences: AutomationNotificationDeliveryServiceOptions["preferences"];
   readonly #deliveries: AutomationNotificationDeliveryServiceOptions["deliveries"];
   readonly #tokens: AutomationNotificationDeliveryServiceOptions["tokens"];
+  readonly #hasStanding: AutomationNotificationDeliveryServiceOptions["hasStanding"];
+  readonly #computerLabel: () => string;
   readonly #transport: PushDeliveryTransport;
   readonly #clock: () => UtcTimestamp;
   readonly #recordRunNotificationRef:
@@ -83,10 +95,11 @@ export class AutomationNotificationDeliveryService {
   readonly #inflight = new Set<string>();
 
   constructor(options: AutomationNotificationDeliveryServiceOptions) {
-    this.#hostId = options.hostId;
     this.#preferences = options.preferences;
     this.#deliveries = options.deliveries;
     this.#tokens = options.tokens;
+    this.#hasStanding = options.hasStanding;
+    this.#computerLabel = options.computerLabel;
     this.#transport = options.transport;
     this.#clock = options.clock;
     this.#recordRunNotificationRef = options.recordRunNotificationRef;
@@ -96,7 +109,7 @@ export class AutomationNotificationDeliveryService {
   status(): AutomationNotificationDeliveryStatus {
     const preferences = this.#preferences.current();
     const providerDelivery = this.#transport.providerDelivery();
-    const registeredDestinationCount = this.#tokens.listDestinationsForHost(this.#hostId).length;
+    const registeredDestinationCount = this.#standingDestinations().length;
     return decodeAutomationNotificationDeliveryStatus({
       preferences,
       providerDelivery,
@@ -215,7 +228,9 @@ export class AutomationNotificationDeliveryService {
       return existing;
     }
 
-    const destinations = this.#tokens.listDestinationsForHost(this.#hostId);
+    const destinations = this.#standingDestinations().filter((destination) =>
+      remotePushPreferenceAllows(destination.preferences, input.kind),
+    );
     const admission = admitAutomationNotification({
       preferences: this.#preferences.current(),
       notificationKind: input.kind,
@@ -243,7 +258,6 @@ export class AutomationNotificationDeliveryService {
       });
     }
 
-    const payload = this.#buildPayload(input);
     const queued = this.#recordReceipt({
       receiptId: this.#receiptId(dedupeKey),
       automationId: input.run.automationId,
@@ -258,23 +272,32 @@ export class AutomationNotificationDeliveryService {
 
     void this.#deliver({
       run: input.run,
+      ...(input.definition === undefined ? {} : { definition: input.definition }),
+      kind: input.kind,
       dedupeKey,
-      payload,
       destinations,
       attemptCount: queued.attemptCount,
     });
     return queued;
   }
 
+  /**
+   * Every registration in this data directory is this host's, under the
+   * listener host id the phone paired with, so delivery reads them all rather
+   * than asking for the host's local id, and keeps those whose device stands.
+   */
+  #standingDestinations(): ReadonlyArray<PushTokenRecord> {
+    return this.#tokens
+      .listDestinations()
+      .filter((destination) => this.#hasStanding(destination.hostId, destination.deviceId));
+  }
+
   async #deliver(input: {
     readonly run: AutomationRun;
+    readonly definition?: AutomationDefinition;
+    readonly kind: AutomationNotificationKind;
     readonly dedupeKey: string;
-    readonly payload: AutomationNotificationPayloadV1;
-    readonly destinations: ReadonlyArray<{
-      readonly deviceId: string;
-      readonly platform: "ios" | "android";
-      readonly token: string;
-    }>;
+    readonly destinations: ReadonlyArray<PushTokenRecord>;
     readonly attemptCount: number;
   }): Promise<void> {
     if (this.#inflight.has(input.dedupeKey)) return;
@@ -283,7 +306,7 @@ export class AutomationNotificationDeliveryService {
         receiptId: this.#receiptId(input.dedupeKey),
         automationId: input.run.automationId,
         runId: input.run.id,
-        kind: input.payload.kind,
+        kind: input.kind,
         dedupeKey: input.dedupeKey,
         outcome: "cancelled",
         attemptCount: input.attemptCount,
@@ -305,7 +328,7 @@ export class AutomationNotificationDeliveryService {
             receiptId: this.#receiptId(input.dedupeKey),
             automationId: input.run.automationId,
             runId: input.run.id,
-            kind: input.payload.kind,
+            kind: input.kind,
             dedupeKey: input.dedupeKey,
             outcome: "cancelled",
             attemptCount: nextAttempt,
@@ -314,20 +337,57 @@ export class AutomationNotificationDeliveryService {
           });
           return;
         }
+        // Standing is asked again at send time: a revoke or sign-out that
+        // landed after the run was observed leaves no registration to send to.
+        const current = this.#tokens.get({
+          hostId: destination.hostId,
+          deviceId: destination.deviceId,
+        });
+        if (current === undefined || !this.#hasStanding(current.hostId, current.deviceId)) {
+          lastFailure = {
+            kind: "failed",
+            retryable: false,
+            category: "destination-without-standing",
+          };
+          continue;
+        }
+        const sealed = sealPushNotification({
+          hostId: current.hostId,
+          deviceId: current.deviceId,
+          notificationPublicKey: current.notificationPublicKey,
+          collapseKey: current.collapseKey,
+          threadId: String(input.run.threadId ?? input.run.id),
+          kind: input.kind,
+          content: this.#buildPayload({
+            run: input.run,
+            ...(input.definition === undefined ? {} : { definition: input.definition }),
+            kind: input.kind,
+            destination: current,
+          }),
+        });
+        if (sealed.status === "refused") {
+          lastFailure = { kind: "failed", retryable: false, category: `sealing-${sealed.reason}` };
+          continue;
+        }
         const result = await this.#transport.send({
           destination: {
-            deviceId: destination.deviceId,
-            platform: destination.platform,
-            token: destination.token,
+            deviceId: current.deviceId,
+            platform: current.platform,
+            token: current.token,
           },
-          payload: input.payload,
+          envelope: sealed.envelope,
         });
+        if (result.kind === "destination-gone") {
+          this.#clearGone(current);
+          lastFailure = { kind: "failed", retryable: false, category: "destination-gone" };
+          continue;
+        }
         if (result.kind === "delivered") {
           const receipt = this.#recordReceipt({
             receiptId: this.#receiptId(input.dedupeKey),
             automationId: input.run.automationId,
             runId: input.run.id,
-            kind: input.payload.kind,
+            kind: input.kind,
             dedupeKey: input.dedupeKey,
             outcome: "delivered",
             attemptCount: nextAttempt,
@@ -352,7 +412,7 @@ export class AutomationNotificationDeliveryService {
         receiptId: this.#receiptId(input.dedupeKey),
         automationId: input.run.automationId,
         runId: input.run.id,
-        kind: input.payload.kind,
+        kind: input.kind,
         dedupeKey: input.dedupeKey,
         outcome: decision.outcome,
         attemptCount: nextAttempt,
@@ -377,10 +437,29 @@ export class AutomationNotificationDeliveryService {
     }
   }
 
+  #clearGone(destination: PushTokenRecord): void {
+    try {
+      this.#tokens.clear({
+        hostId: destination.hostId,
+        deviceId: destination.deviceId,
+        reason: "destination-gone",
+        now: this.#clock(),
+      });
+    } catch {
+      // The registration file already dropped it; a failed journal append
+      // leaves the next delivery to find nothing to send to.
+    }
+  }
+
+  /**
+   * Built per destination: the phone's own host id (the one it paired with and
+   * opens the seal under) and its own title preference decide the text.
+   */
   #buildPayload(input: {
     readonly run: AutomationRun;
     readonly definition?: AutomationDefinition;
     readonly kind: AutomationNotificationKind;
+    readonly destination: PushTokenRecord;
   }): AutomationNotificationPayloadV1 {
     const mode =
       input.definition?.mode === "work" || input.definition?.mode === "code"
@@ -393,13 +472,14 @@ export class AutomationNotificationDeliveryService {
       input.definition?.displayName ?? input.run.definitionSnapshot.displayName ?? undefined;
     return buildRedactedAutomationPushNotification({
       kind: input.kind,
-      hostId: this.#hostId,
+      hostId: input.destination.hostId,
       automationId: input.run.automationId,
       automationRunId: input.run.id,
+      computerLabel: this.#computerLabel(),
+      threadTitles: input.destination.preferences.threadTitles,
       ...(mode === undefined ? {} : { mode }),
       ...(input.run.threadId === undefined ? {} : { threadId: input.run.threadId }),
       ...(displayName === undefined ? {} : { displayName }),
-      ...(input.run.failure === undefined ? {} : { rawDetail: input.run.failure.message }),
     });
   }
 

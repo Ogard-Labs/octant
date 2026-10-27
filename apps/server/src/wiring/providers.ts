@@ -57,9 +57,15 @@ import { makeProviderApiKeyPool } from "../providers/providerApiKeyPool";
 import { createHostOAuthService, extAgentHostIdFor } from "../providers/oauth/hostOAuthService";
 import { makeHostOAuthBrokerClient } from "../providers/oauth/hostOAuthBrokerClient";
 import { hostOAuthEventJournal } from "../providers/oauth/hostOAuthEventJournal";
-import { createProviderOAuthRouteHandler } from "../providers/oauth/providerOAuthRoutes";
+import { createProviderDeviceSignInRouteHandler } from "../providers/oauth/providerDeviceSignInRoutes";
+import {
+  createProviderOAuthRouteHandler,
+  type ProviderOAuthRouteDependencies,
+} from "../providers/oauth/providerOAuthRoutes";
 import { retireClaudeHelperTokens } from "../providers/claudeHelperTokenRetirement";
 import { subscriptionOAuthHostFromBroker } from "../providers/oauth/subscriptionOAuthHost";
+import { directoryOAuthHostFromBroker } from "../providers/oauth/directoryOAuthHost";
+import { readDirectoryOAuthCredential } from "@octant/provider-sdk/directory-oauth";
 import type { CompatibleFetch } from "../providers/openAiCompatibleEndpoint";
 import { type ClaudeAgentSdkPort, makeClaudeAgentSdkPort } from "../providers/claudeAgentSdkPort";
 import type { ClaudeResumeIdentityPort } from "../providers/claudeDriver";
@@ -192,6 +198,7 @@ export interface ConfiguredProviderDriverOptions {
   readonly permissionPersistence: () => PermissionPersistence;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly subscriptionOAuth?: import("@octant/provider-sdk/subscription-oauth").SubscriptionOAuthHost;
+  readonly directoryOAuth?: import("@octant/provider-sdk/directory-oauth").DirectoryOAuthHost;
   readonly fetch?: CompatibleFetch;
   /** Shared by every harness driver built from these options, so a later turn can resume an earlier one. */
   readonly nativeHarnessTranscripts?: NativeHarnessTranscriptStore;
@@ -231,6 +238,7 @@ export function makeConfiguredProviderDriver(
         ...(options.subscriptionOAuth === undefined
           ? {}
           : { subscriptionOAuth: options.subscriptionOAuth }),
+        ...(options.directoryOAuth === undefined ? {} : { directoryOAuth: options.directoryOAuth }),
         ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
       }),
       instance,
@@ -248,6 +256,7 @@ export function makeConfiguredProviderDriver(
         ...(options.subscriptionOAuth === undefined
           ? {}
           : { subscriptionOAuth: options.subscriptionOAuth }),
+        ...(options.directoryOAuth === undefined ? {} : { directoryOAuth: options.directoryOAuth }),
         ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
       }),
       instance,
@@ -262,6 +271,7 @@ export function makeConfiguredProviderDriver(
         ...(options.credentialResolver === undefined
           ? {}
           : { credentialResolver: options.credentialResolver }),
+        ...(options.directoryOAuth === undefined ? {} : { directoryOAuth: options.directoryOAuth }),
         ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
       }),
       instance,
@@ -358,6 +368,16 @@ export function pathIsProjectConfined(projectRoot: string, absolutePath: string)
   } catch {
     return false;
   }
+}
+
+/** The credential store's answer for an instance that holds no credential. */
+function isMissingCredential(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "category" in error &&
+    error.category === "unauthenticated"
+  );
 }
 
 function isPathWithin(root: string, candidate: string): boolean {
@@ -458,6 +478,10 @@ export function wireProviders(deps: ProvidersDependencies) {
     const extensionPackageStore = new ExtensionPackageStore({
       dataDirectory: providerDataDirectory,
       uuid: randomUUID,
+      // An outside driver runs on the Bun that runs this server and on nothing
+      // else. A server on another runtime (the packaged app's Electron Node)
+      // authorizes no driver launch.
+      ...(process.versions.bun === undefined ? {} : { outsideDriverRuntime: process.execPath }),
     });
     let recordExtensionRuntimeEvidence: ((event: ExtensionRuntimeEvidence) => void) | undefined;
     const extensionSupervisor =
@@ -681,12 +705,15 @@ export function wireProviders(deps: ProvidersDependencies) {
           ? { stdioSupervisor: extensionSupervisor }
           : {}),
       });
-    const persistedExtensionActivationPolicy = createPersistedExtensionActivationPolicy({
-      readProject: (projectId) => persistence.readProject(projectId),
-      readChatThread: (threadId) => persistence.readChatThread(threadId),
-      readWorkThread: (threadId) => workThreadProjection.read(threadId),
-      readCodeThread: (threadId) => persistence.readCodeThread(threadId),
-    });
+    const persistedExtensionActivationPolicy = createPersistedExtensionActivationPolicy(
+      {
+        readProject: (projectId) => persistence.readProject(projectId),
+        readChatThread: (threadId) => persistence.readChatThread(threadId),
+        readWorkThread: (threadId) => workThreadProjection.read(threadId),
+        readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+      },
+      process.platform,
+    );
     const extensionActivationService = new ExtensionActivationService({
       policy: options.extensionActivationPolicy ?? persistedExtensionActivationPolicy,
       compatibility: (packageState) =>
@@ -1059,6 +1086,27 @@ export function wireProviders(deps: ProvidersDependencies) {
     }
     const subscriptionOAuth =
       oauthBroker === undefined ? undefined : subscriptionOAuthHostFromBroker(oauthBroker);
+    const directoryOAuth =
+      oauthBroker === undefined ? undefined : directoryOAuthHostFromBroker(oauthBroker);
+    // Clearing an instance's credential also forgets an organization
+    // sign-in's grant: the pointer is the only reference to it, so deleting
+    // the pointer alone would leave a live refresh token in the broker.
+    const clearProviderCredential = async (instanceId: string): Promise<void> => {
+      if (credentialBroker === undefined || credentialResolver === undefined) return;
+      let stored: string | undefined;
+      try {
+        stored = await credentialBroker.resolve(instanceId);
+      } catch (error) {
+        // Only a missing credential means there is no pointer. A store that
+        // could not be read may still hold one, and deleting it unread would
+        // orphan its grant, so the change is refused instead.
+        if (!isMissingCredential(error)) throw error;
+        stored = undefined;
+      }
+      const pointer = stored === undefined ? undefined : readDirectoryOAuthCredential(stored);
+      if (pointer !== undefined) await oauthBroker?.forget(pointer.credentialRef);
+      await credentialResolver.delete(instanceId);
+    };
     const providerService = new ProviderService({
       persistence,
       runtimeRegistry: providerRuntimeRegistry,
@@ -1080,9 +1128,7 @@ export function wireProviders(deps: ProvidersDependencies) {
           void providerAccountPlanUsageStore.forget(instanceId).catch(() => undefined);
         }
       },
-      ...(credentialResolver === undefined
-        ? {}
-        : { clearProviderCredential: (instanceId) => credentialResolver.delete(instanceId) }),
+      ...(credentialResolver === undefined ? {} : { clearProviderCredential }),
       driver: (instance) =>
         attachWorkRequestRuntime(
           makeConfiguredProviderDriver(instance, {
@@ -1107,6 +1153,7 @@ export function wireProviders(deps: ProvidersDependencies) {
             onRuntimeEvent: recordProviderRuntimeUsage,
             ...(credentialResolver === undefined ? {} : { credentialResolver }),
             ...(subscriptionOAuth === undefined ? {} : { subscriptionOAuth }),
+            ...(directoryOAuth === undefined ? {} : { directoryOAuth }),
           }),
           () => workRequestRuntime,
         ),
@@ -1131,10 +1178,10 @@ export function wireProviders(deps: ProvidersDependencies) {
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
       packagedProviderSmokeControl: options.packagedProviderSmokeControl === true,
     });
-    const providerOAuthRoutes =
+    const providerSignInDependencies: ProviderOAuthRouteDependencies | undefined =
       hostOAuth === undefined
-        ? async () => undefined
-        : createProviderOAuthRouteHandler({
+        ? undefined
+        : {
             service: hostOAuth,
             windowAuthorityStore,
             ...(credentialResolver === undefined ? {} : { credentials: credentialResolver }),
@@ -1166,7 +1213,22 @@ export function wireProviders(deps: ProvidersDependencies) {
                 });
               }
             },
-          });
+          };
+    const browserSignInRoutes =
+      providerSignInDependencies === undefined
+        ? async () => undefined
+        : createProviderOAuthRouteHandler(providerSignInDependencies);
+    // The host-local device-code sign-in shares the organization sign-in's
+    // dependencies; it answers only the bridge-secret caller `octant provider
+    // sign-in` is, and says so even when no broker is running.
+    const deviceSignInRoutes = createProviderDeviceSignInRouteHandler({
+      desktopBridgeSecret: options.desktopBridgeSecret,
+      windowAuthorityStore,
+      readProviderInstances: () => persistence.readProviderInstances(),
+      signIn: providerSignInDependencies,
+    });
+    const providerOAuthRoutes = async (request: Request): Promise<Response | undefined> =>
+      (await deviceSignInRoutes(request)) ?? (await browserSignInRoutes(request));
     const discoveryService = makeDiscoveryService({ hostId: LOCAL_HOST_ID });
     const createProviderFromDiscovery = async (
       candidate: DiscoveryCandidate,
@@ -1230,6 +1292,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       onRuntimeEvent: recordProviderRuntimeUsage,
       ...(credentialResolver === undefined ? {} : { credentialResolver }),
       ...(subscriptionOAuth === undefined ? {} : { subscriptionOAuth }),
+      ...(directoryOAuth === undefined ? {} : { directoryOAuth }),
       localUsageHistorySourceForInstance: (instance) => {
         const claudeConfigDirectory =
           instance.driverKind === "claude"
@@ -1446,6 +1509,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       discoveryRoutes,
       extensionActivationService,
       extensionApiService,
+      extensionLifecycleService,
       extensionPackageStore,
       extensionRoutes,
       generatedImageStore,

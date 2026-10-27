@@ -38,7 +38,10 @@ export type RoutesDependencies = Pick<ServerStart, "latencyStats" | "persistence
     | "usageRoutes"
     | "validationEvidenceRoutes"
   > &
-  Pick<ComputerUseWiring, "computerUseRoutes" | "launchSessionRoutes" | "machineChangeRoutes"> &
+  Pick<
+    ComputerUseWiring,
+    "computerUseRoutes" | "desktopPaneRoutes" | "launchSessionRoutes" | "machineChangeRoutes"
+  > &
   Pick<
     WorkspaceWiring,
     | "githubCloneRoutes"
@@ -63,7 +66,7 @@ export type RoutesDependencies = Pick<ServerStart, "latencyStats" | "persistence
     | "providerUsageLimitsRoutes"
   > &
   Pick<BrowserWiring, "productFeedbackRoutes"> &
-  Pick<CodeRuntimeWiring, "androidToolchainRoutes" | "appleToolchainRoutes"> &
+  Pick<CodeRuntimeWiring, "androidToolchainRoutes" | "appleDeviceRoutes" | "appleToolchainRoutes"> &
   Pick<
     CodeToolingWiring,
     | "codeCheckoutOpenRoutes"
@@ -138,6 +141,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     agentRunRouteDependencies,
     agentRunSettingsRoutes,
     androidToolchainRoutes,
+    appleDeviceRoutes,
     appleToolchainRoutes,
     artifactLibraryRoutes,
     artifactMirrorRoutes,
@@ -152,6 +156,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     codeProjectAccess,
     codeRoutes,
     computerUseRoutes,
+    desktopPaneRoutes,
     contextRoutes,
     diagnosticsExportRoutes,
     discoveryRoutes,
@@ -261,6 +266,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await previewHandoffBridgeRoutes(request)) ??
     (await codeRoutes(request)) ??
     (await appleToolchainRoutes(request)) ??
+    (await appleDeviceRoutes(request)) ??
     (await androidToolchainRoutes(request)) ??
     (await providerRoutes(request)) ??
     (await providerOAuthRoutes(request)) ??
@@ -295,6 +301,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await zenRoutes(request)) ??
     (await navigatorAssistantRoutes(request)) ??
     (await localServerRoutes(request)) ??
+    (await desktopPaneRoutes(request)) ??
     (await remoteServerGrantLocalRoutes(request)) ??
     (await threadMentionRoutes(request)) ??
     (await fileMentionRoutes(request)) ??

@@ -1,6 +1,12 @@
 import {
+  acpAgentChangeCommandKind,
+  acpAgentCreateCommandKind,
+  acpAgentKindOfConfiguration,
+  acpAgentProfile,
   decodeProviderInstanceId,
   decodeProviderFailure,
+  type AcpAgentConfiguration,
+  type AcpAgentKind,
   type AgentEligibleModelRef,
   type HiddenProviderModelRef,
   type AnthropicCompatibleProviderConfiguration,
@@ -8,18 +14,7 @@ import {
   type BflImageProviderConfiguration,
   type ClaudeProviderConfiguration,
   type CodexProviderConfiguration,
-  type DevinProviderConfiguration,
-  type GrokProviderConfiguration,
-  type GlmProviderConfiguration,
-  type GeminiProviderConfiguration,
-  type CopilotProviderConfiguration,
-  type ClineProviderConfiguration,
-  type QwenProviderConfiguration,
-  type FxProviderConfiguration,
-  type GooseProviderConfiguration,
   type IdeogramImageProviderConfiguration,
-  type KiloProviderConfiguration,
-  type MistralVibeProviderConfiguration,
   type GeminiImageProviderConfiguration,
   type OpenAiCompatibleProviderConfiguration,
   type OpenAiImageProviderConfiguration,
@@ -46,6 +41,7 @@ import {
   ProviderClientFailure,
   type ProviderClient,
 } from "@octant/client-runtime/provider-client";
+import { isAcpAgentInstance } from "@octant/domain";
 import { parseClaudeAccountAccent } from "./configuration/claudeAccountValues";
 import { runProviderOAuthCommand } from "./providerOAuthClient";
 import type { ProviderOAuthCommand } from "./ProviderOAuthSignIn";
@@ -154,6 +150,10 @@ function usesSubscriptionAuthentication(instance: ProviderInstance): boolean {
 }
 
 const NO_PROVIDER_INSTANCES: ReadonlyArray<ProviderInstance> = [];
+
+function apiKeyLabel(kind: AcpAgentKind): string {
+  return acpAgentProfile(kind).apiKeyLabel ?? "API key";
+}
 
 export function useProviderController(options: ProviderControllerOptions) {
   const hostBridge =
@@ -394,16 +394,7 @@ export function useProviderController(options: ProviderControllerOptions) {
 
   const create = useCallback(
     (
-      driverKind:
-        | "opencode"
-        | "codex"
-        | "kimi-code"
-        | "devin"
-        | "kilo"
-        | "pi"
-        | "oh-my-pi"
-        | "goose"
-        | "copilot",
+      driverKind: "opencode" | "codex" | "pi" | "oh-my-pi",
       displayName: string,
       binaryPath: string,
       accent?: string,
@@ -411,19 +402,6 @@ export function useProviderController(options: ProviderControllerOptions) {
       execute(() => {
         const instanceId = decodeProviderInstanceId(crypto.randomUUID());
         const expectedVersion = 0 as ProviderDefaults["version"];
-        if (driverKind === "devin") {
-          return {
-            kind: "create-devin-provider",
-            instanceId,
-            expectedVersion,
-            displayName,
-            configuration: {
-              kind: "devin-acp",
-              binaryPath,
-              authentication: "subscription",
-            },
-          };
-        }
         if (driverKind === "pi") {
           return {
             kind: "create-pi-provider",
@@ -447,40 +425,8 @@ export function useProviderController(options: ProviderControllerOptions) {
             },
           };
         }
-        if (driverKind === "kilo") {
-          return {
-            kind: "create-kilo-provider",
-            instanceId,
-            expectedVersion,
-            displayName,
-            configuration: { kind: "kilo-acp", binaryPath },
-          };
-        }
-        if (driverKind === "goose") {
-          return {
-            kind: "create-goose-provider",
-            instanceId,
-            expectedVersion,
-            displayName,
-            configuration: { kind: "goose-acp", binaryPath },
-          };
-        }
-        if (driverKind === "copilot") {
-          return {
-            kind: "create-copilot-provider",
-            instanceId,
-            expectedVersion,
-            displayName,
-            configuration: { kind: "copilot-acp", binaryPath },
-          };
-        }
         return {
-          kind:
-            driverKind === "opencode"
-              ? "create-opencode-provider"
-              : driverKind === "codex"
-                ? "create-codex-provider"
-                : "create-kimi-code-provider",
+          kind: driverKind === "opencode" ? "create-opencode-provider" : "create-codex-provider",
           instanceId,
           expectedVersion,
           displayName,
@@ -491,6 +437,70 @@ export function useProviderController(options: ProviderControllerOptions) {
         };
       }),
     [execute],
+  );
+  /**
+   * Creates any ACP agent from its configuration. An API-key posture stores
+   * the key only after the instance exists, so a refused create leaves no
+   * secret behind.
+   */
+  const createAcpAgent = useCallback(
+    (
+      displayName: string,
+      configuration: AcpAgentConfiguration,
+      credential: TransientProviderCredential,
+    ) => {
+      const instanceId = decodeProviderInstanceId(crypto.randomUUID());
+      const kind = acpAgentKindOfConfiguration(configuration.kind);
+      const usesKey = configuration.authentication === "api-key";
+      return queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
+        withTransientCredential(credential, async (credentialValue) => {
+          const keyHost = usesKey ? hostBridge : undefined;
+          if (usesKey && keyHost === undefined) {
+            if (mounted.current) {
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
+            }
+            return false;
+          }
+          if (usesKey && credentialValue.length === 0) {
+            if (mounted.current) {
+              setMessage(`Enter the ${apiKeyLabel(kind)} before creating this provider.`);
+            }
+            return false;
+          }
+          const current = authoritative.current;
+          if (client === undefined || current === undefined) return false;
+          let created = false;
+          try {
+            applyResult(
+              await client.execute({
+                kind: acpAgentCreateCommandKind(kind),
+                instanceId,
+                expectedVersion: 0 as ProviderDefaults["version"],
+                displayName,
+                configuration,
+              }),
+              current,
+              install,
+            );
+            created = true;
+            if (keyHost !== undefined) {
+              await keyHost.addProviderApiKey(instanceId, credentialValue);
+            }
+            return true;
+          } catch (error) {
+            if (keyHost !== undefined && created) {
+              if (mounted.current) {
+                setMessage("The provider was created, but its credential could not be stored.");
+              }
+            } else {
+              await recoverRegistryFailure(error, "Provider configuration could not be created.");
+            }
+            return false;
+          }
+        }),
+      );
+    },
+    [client, hostBridge, install, recoverRegistryFailure],
   );
   const createOpenAiCompatible = useCallback(
     (
@@ -936,403 +946,6 @@ export function useProviderController(options: ProviderControllerOptions) {
     },
     [client, hostBridge, install, recoverRegistryFailure],
   );
-  const createMistralVibe = useCallback(
-    (
-      displayName: string,
-      configuration: MistralVibeProviderConfiguration,
-      credential: TransientProviderCredential,
-    ) => {
-      const instanceId = decodeProviderInstanceId(crypto.randomUUID());
-      return queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
-        withTransientCredential(credential, async (credentialValue) => {
-          if (configuration.authentication === "api-key" && hostBridge === undefined) {
-            if (mounted.current) {
-              setMessage(BROWSER_CANNOT_SAVE_KEYS);
-            }
-            return false;
-          }
-          if (configuration.authentication === "api-key" && credentialValue.length === 0) {
-            if (mounted.current) {
-              setMessage("Enter a Mistral API key before creating this provider.");
-            }
-            return false;
-          }
-          const current = authoritative.current;
-          if (client === undefined || current === undefined) return false;
-          let created = false;
-          try {
-            applyResult(
-              await client.execute({
-                kind: "create-mistral-vibe-provider",
-                instanceId,
-                expectedVersion: 0 as ProviderDefaults["version"],
-                displayName,
-                configuration,
-              }),
-              current,
-              install,
-            );
-            created = true;
-            if (configuration.authentication === "api-key") {
-              await hostBridge!.addProviderApiKey(instanceId, credentialValue);
-            }
-            return true;
-          } catch (error) {
-            if (configuration.authentication === "api-key" && created) {
-              if (mounted.current) {
-                setMessage("The provider was created, but its credential could not be stored.");
-              }
-            } else {
-              await recoverRegistryFailure(error, "Provider configuration could not be created.");
-            }
-            return false;
-          }
-        }),
-      );
-    },
-    [client, hostBridge, install, recoverRegistryFailure],
-  );
-  const createGrok = useCallback(
-    (
-      displayName: string,
-      configuration: GrokProviderConfiguration,
-      credential: TransientProviderCredential,
-    ) => {
-      const instanceId = decodeProviderInstanceId(crypto.randomUUID());
-      return queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
-        withTransientCredential(credential, async (credentialValue) => {
-          if (configuration.authentication === "api-key" && hostBridge === undefined) {
-            if (mounted.current) {
-              setMessage(BROWSER_CANNOT_SAVE_KEYS);
-            }
-            return false;
-          }
-          if (configuration.authentication === "api-key" && credentialValue.length === 0) {
-            if (mounted.current) {
-              setMessage("Enter an xAI API key before creating this provider.");
-            }
-            return false;
-          }
-          const current = authoritative.current;
-          if (client === undefined || current === undefined) return false;
-          let created = false;
-          try {
-            applyResult(
-              await client.execute({
-                kind: "create-grok-provider",
-                instanceId,
-                expectedVersion: 0 as ProviderDefaults["version"],
-                displayName,
-                configuration,
-              }),
-              current,
-              install,
-            );
-            created = true;
-            if (configuration.authentication === "api-key") {
-              await hostBridge!.addProviderApiKey(instanceId, credentialValue);
-            }
-            return true;
-          } catch (error) {
-            if (configuration.authentication === "api-key" && created) {
-              if (mounted.current) {
-                setMessage("The provider was created, but its credential could not be stored.");
-              }
-            } else {
-              await recoverRegistryFailure(error, "Provider configuration could not be created.");
-            }
-            return false;
-          }
-        }),
-      );
-    },
-    [client, hostBridge, install, recoverRegistryFailure],
-  );
-  const createGlm = useCallback(
-    (
-      displayName: string,
-      configuration: GlmProviderConfiguration,
-      credential: TransientProviderCredential,
-    ) => {
-      const instanceId = decodeProviderInstanceId(crypto.randomUUID());
-      return queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
-        withTransientCredential(credential, async (credentialValue) => {
-          if (configuration.authentication === "api-key" && hostBridge === undefined) {
-            if (mounted.current) {
-              setMessage(BROWSER_CANNOT_SAVE_KEYS);
-            }
-            return false;
-          }
-          if (configuration.authentication === "api-key" && credentialValue.length === 0) {
-            if (mounted.current) {
-              setMessage("Enter a Z.AI API key before creating this provider.");
-            }
-            return false;
-          }
-          const current = authoritative.current;
-          if (client === undefined || current === undefined) return false;
-          const apiKeyHost = configuration.authentication === "api-key" ? hostBridge : undefined;
-          let created = false;
-          try {
-            applyResult(
-              await client.execute({
-                kind: "create-glm-provider",
-                instanceId,
-                expectedVersion: 0 as ProviderDefaults["version"],
-                displayName,
-                configuration,
-              }),
-              current,
-              install,
-            );
-            created = true;
-            if (apiKeyHost !== undefined) {
-              await apiKeyHost.addProviderApiKey(instanceId, credentialValue);
-            }
-            return true;
-          } catch (error) {
-            if (configuration.authentication === "api-key" && created) {
-              if (mounted.current) {
-                setMessage("The provider was created, but its credential could not be stored.");
-              }
-            } else {
-              await recoverRegistryFailure(error, "Provider configuration could not be created.");
-            }
-            return false;
-          }
-        }),
-      );
-    },
-    [client, hostBridge, install, recoverRegistryFailure],
-  );
-
-  const createGemini = useCallback(
-    (
-      displayName: string,
-      configuration: GeminiProviderConfiguration,
-      credential: TransientProviderCredential,
-    ) => {
-      const instanceId = decodeProviderInstanceId(crypto.randomUUID());
-      return queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
-        withTransientCredential(credential, async (credentialValue) => {
-          if (configuration.authentication === "api-key" && hostBridge === undefined) {
-            if (mounted.current) {
-              setMessage(BROWSER_CANNOT_SAVE_KEYS);
-            }
-            return false;
-          }
-          if (configuration.authentication === "api-key" && credentialValue.length === 0) {
-            if (mounted.current) {
-              setMessage("Enter a Gemini API key before creating this provider.");
-            }
-            return false;
-          }
-          const current = authoritative.current;
-          if (client === undefined || current === undefined) return false;
-          const apiKeyHost = configuration.authentication === "api-key" ? hostBridge : undefined;
-          let created = false;
-          try {
-            applyResult(
-              await client.execute({
-                kind: "create-gemini-provider",
-                instanceId,
-                expectedVersion: 0 as ProviderDefaults["version"],
-                displayName,
-                configuration,
-              }),
-              current,
-              install,
-            );
-            created = true;
-            if (apiKeyHost !== undefined) {
-              await apiKeyHost.addProviderApiKey(instanceId, credentialValue);
-            }
-            return true;
-          } catch (error) {
-            if (configuration.authentication === "api-key" && created) {
-              if (mounted.current) {
-                setMessage("The provider was created, but its credential could not be stored.");
-              }
-            } else {
-              await recoverRegistryFailure(error, "Provider configuration could not be created.");
-            }
-            return false;
-          }
-        }),
-      );
-    },
-    [client, hostBridge, install, recoverRegistryFailure],
-  );
-  const createCline = useCallback(
-    (
-      displayName: string,
-      configuration: ClineProviderConfiguration,
-      credential: TransientProviderCredential,
-    ) => {
-      const instanceId = decodeProviderInstanceId(crypto.randomUUID());
-      return queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
-        withTransientCredential(credential, async (credentialValue) => {
-          if (configuration.authentication === "api-key" && hostBridge === undefined) {
-            if (mounted.current) {
-              setMessage(BROWSER_CANNOT_SAVE_KEYS);
-            }
-            return false;
-          }
-          if (configuration.authentication === "api-key" && credentialValue.length === 0) {
-            if (mounted.current) {
-              setMessage("Enter a Cline API key before creating this provider.");
-            }
-            return false;
-          }
-          const current = authoritative.current;
-          if (client === undefined || current === undefined) return false;
-          const apiKeyHost = configuration.authentication === "api-key" ? hostBridge : undefined;
-          let created = false;
-          try {
-            applyResult(
-              await client.execute({
-                kind: "create-cline-provider",
-                instanceId,
-                expectedVersion: 0 as ProviderDefaults["version"],
-                displayName,
-                configuration,
-              }),
-              current,
-              install,
-            );
-            created = true;
-            if (apiKeyHost !== undefined) {
-              await apiKeyHost.addProviderApiKey(instanceId, credentialValue);
-            }
-            return true;
-          } catch (error) {
-            if (configuration.authentication === "api-key" && created) {
-              if (mounted.current) {
-                setMessage("The provider was created, but its credential could not be stored.");
-              }
-            } else {
-              await recoverRegistryFailure(error, "Provider configuration could not be created.");
-            }
-            return false;
-          }
-        }),
-      );
-    },
-    [client, hostBridge, install, recoverRegistryFailure],
-  );
-  const createQwen = useCallback(
-    (
-      displayName: string,
-      configuration: QwenProviderConfiguration,
-      credential: TransientProviderCredential,
-    ) => {
-      const instanceId = decodeProviderInstanceId(crypto.randomUUID());
-      return queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
-        withTransientCredential(credential, async (credentialValue) => {
-          if (configuration.authentication === "api-key" && hostBridge === undefined) {
-            if (mounted.current) {
-              setMessage(BROWSER_CANNOT_SAVE_KEYS);
-            }
-            return false;
-          }
-          if (configuration.authentication === "api-key" && credentialValue.length === 0) {
-            if (mounted.current) {
-              setMessage("Enter an OpenAI-compatible API key before creating this provider.");
-            }
-            return false;
-          }
-          const current = authoritative.current;
-          if (client === undefined || current === undefined) return false;
-          const apiKeyHost = configuration.authentication === "api-key" ? hostBridge : undefined;
-          let created = false;
-          try {
-            applyResult(
-              await client.execute({
-                kind: "create-qwen-provider",
-                instanceId,
-                expectedVersion: 0 as ProviderDefaults["version"],
-                displayName,
-                configuration,
-              }),
-              current,
-              install,
-            );
-            created = true;
-            if (apiKeyHost !== undefined) {
-              await apiKeyHost.addProviderApiKey(instanceId, credentialValue);
-            }
-            return true;
-          } catch (error) {
-            if (configuration.authentication === "api-key" && created) {
-              if (mounted.current) {
-                setMessage("The provider was created, but its credential could not be stored.");
-              }
-            } else {
-              await recoverRegistryFailure(error, "Provider configuration could not be created.");
-            }
-            return false;
-          }
-        }),
-      );
-    },
-    [client, hostBridge, install, recoverRegistryFailure],
-  );
-
-  const createFx = useCallback(
-    (
-      displayName: string,
-      configuration: FxProviderConfiguration,
-      credential: TransientProviderCredential,
-    ) => {
-      const instanceId = decodeProviderInstanceId(crypto.randomUUID());
-      return queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
-        withTransientCredential(credential, async (credentialValue) => {
-          if (hostBridge === undefined) {
-            if (mounted.current) {
-              setMessage(BROWSER_CANNOT_SAVE_KEYS);
-            }
-            return false;
-          }
-          if (credentialValue.length === 0) {
-            if (mounted.current) {
-              setMessage("Enter a Vercel AI Gateway API key before creating this provider.");
-            }
-            return false;
-          }
-          const current = authoritative.current;
-          if (client === undefined || current === undefined) return false;
-          let created = false;
-          try {
-            applyResult(
-              await client.execute({
-                kind: "create-fx-provider",
-                instanceId,
-                expectedVersion: 0 as ProviderDefaults["version"],
-                displayName,
-                configuration,
-              }),
-              current,
-              install,
-            );
-            created = true;
-            await hostBridge.addProviderApiKey(instanceId, credentialValue);
-            return true;
-          } catch (error) {
-            if (created) {
-              if (mounted.current) {
-                setMessage("The provider was created, but its credential could not be stored.");
-              }
-            } else {
-              await recoverRegistryFailure(error, "Provider configuration could not be created.");
-            }
-            return false;
-          }
-        }),
-      );
-    },
-    [client, hostBridge, install, recoverRegistryFailure],
-  );
-
   const beginProviderAuthentication = useCallback(
     async (instanceId: ProviderInstanceId): Promise<ProviderAuthenticationAttempt | undefined> => {
       if (client === undefined) return undefined;
@@ -1602,10 +1215,15 @@ export function useProviderController(options: ProviderControllerOptions) {
       ),
     [client, hostBridge, install, recoverRegistryFailure],
   );
-  const changeMistralVibeConfiguration = useCallback(
+  /**
+   * Reconfigures any ACP agent. Only credential work needs the desktop bridge:
+   * a renderer without one can still edit a binary path or re-save an instance
+   * whose key is unchanged.
+   */
+  const changeAcpAgentConfiguration = useCallback(
     (
       instanceId: ProviderInstanceId,
-      configuration: MistralVibeProviderConfiguration,
+      configuration: AcpAgentConfiguration,
       credential: TransientProviderCredential,
     ) =>
       queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
@@ -1615,7 +1233,9 @@ export function useProviderController(options: ProviderControllerOptions) {
           if (
             client === undefined ||
             current === undefined ||
-            instance?.driverKind !== "mistral-vibe"
+            instance === undefined ||
+            !isAcpAgentInstance(instance) ||
+            instance.configuration.kind !== configuration.kind
           ) {
             return false;
           }
@@ -1623,16 +1243,18 @@ export function useProviderController(options: ProviderControllerOptions) {
           const nextAuthentication = configuration.authentication;
           if (
             nextAuthentication === "api-key" &&
-            previousAuthentication === "subscription" &&
+            previousAuthentication !== "api-key" &&
             credentialValue.length === 0
           ) {
             if (mounted.current) {
-              setMessage("Enter a Mistral API key before switching authentication modes.");
+              setMessage(
+                `Enter the ${apiKeyLabel(instance.driverKind)} before switching authentication modes.`,
+              );
             }
             return false;
           }
           const mustClear =
-            previousAuthentication === "api-key" && nextAuthentication === "subscription";
+            previousAuthentication === "api-key" && nextAuthentication !== "api-key";
           const mustSet = nextAuthentication === "api-key" && credentialValue.length > 0;
           if ((mustClear || mustSet) && hostBridge === undefined) {
             if (mounted.current) {
@@ -1640,10 +1262,6 @@ export function useProviderController(options: ProviderControllerOptions) {
             }
             return false;
           }
-          // Only credential work needs the desktop bridge. A renderer without
-          // one can still edit a binary path or re-save an instance whose key
-          // is unchanged, so the requirement stays inside the branches that
-          // actually touch the Keychain.
           const bridge = hostBridge;
           // A key is stored before the change that starts using it, but cleared
           // only after the change that stops. The server refuses this command
@@ -1665,7 +1283,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           try {
             applyResult(
               await client.execute({
-                kind: "change-mistral-vibe-configuration",
+                kind: acpAgentChangeCommandKind(instance.driverKind),
                 instanceId,
                 expectedVersion: instance.version,
                 configuration,
@@ -1683,7 +1301,9 @@ export function useProviderController(options: ProviderControllerOptions) {
             }
             return true;
           } catch (error) {
-            if (mustSet && previousAuthentication === "subscription" && bridge !== undefined) {
+            // A key stored for a posture that never took effect is removed;
+            // one an API-key instance already used was replaced in place.
+            if (mustSet && previousAuthentication !== "api-key" && bridge !== undefined) {
               try {
                 await bridge.clearProviderCredential(instanceId);
               } catch {
@@ -1701,645 +1321,6 @@ export function useProviderController(options: ProviderControllerOptions) {
         }),
       ),
     [client, hostBridge, install, recoverRegistryFailure],
-  );
-  const changeGrokConfiguration = useCallback(
-    (
-      instanceId: ProviderInstanceId,
-      configuration: GrokProviderConfiguration,
-      credential: TransientProviderCredential,
-    ) =>
-      queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
-        withTransientCredential(credential, async (credentialValue) => {
-          const current = authoritative.current;
-          const instance = current === undefined ? undefined : findProvider(current, instanceId);
-          if (client === undefined || current === undefined || instance?.driverKind !== "grok") {
-            return false;
-          }
-          const previousAuthentication = instance.configuration.authentication;
-          const nextAuthentication = configuration.authentication;
-          if (
-            nextAuthentication === "api-key" &&
-            previousAuthentication === "subscription" &&
-            credentialValue.length === 0
-          ) {
-            if (mounted.current) {
-              setMessage("Enter an xAI API key before switching authentication modes.");
-            }
-            return false;
-          }
-          const mustClear =
-            previousAuthentication === "api-key" && nextAuthentication === "subscription";
-          const mustSet = nextAuthentication === "api-key" && credentialValue.length > 0;
-          if ((mustClear || mustSet) && hostBridge === undefined) {
-            if (mounted.current) {
-              setMessage(BROWSER_CANNOT_SAVE_KEYS);
-            }
-            return false;
-          }
-          // Only credential work needs the desktop bridge. A renderer without
-          // one can still edit a binary path or re-save an instance whose key
-          // is unchanged, so the requirement stays inside the branches that
-          // actually touch the Keychain.
-          const bridge = hostBridge;
-          // A key is stored before the change that starts using it, but cleared
-          // only after the change that stops. The server refuses this command
-          // while the instance has an active session, and clearing first left
-          // the instance still configured for API-key authentication with no
-          // key to connect with and nothing able to put it back.
-          if (mustSet && bridge !== undefined) {
-            try {
-              await bridge.addProviderApiKey(instanceId, credentialValue);
-            } catch {
-              if (mounted.current) {
-                setMessage(
-                  "The provider credential could not be stored, so the configuration was unchanged.",
-                );
-              }
-              return false;
-            }
-          }
-          try {
-            applyResult(
-              await client.execute({
-                kind: "change-grok-configuration",
-                instanceId,
-                expectedVersion: instance.version,
-                configuration,
-              }),
-              current,
-              install,
-            );
-            if (mustClear && bridge !== undefined) {
-              // The instance no longer uses the key. A clear that fails here
-              // leaves a secret behind rather than an unusable provider, so it
-              // is retried by the same deferred cleanup the other paths use.
-              await bridge
-                .clearProviderCredential(instanceId)
-                .catch(() => void credentialCleanupRequired.current.add(instanceId));
-            }
-            return true;
-          } catch (error) {
-            if (mustSet && previousAuthentication === "subscription" && bridge !== undefined) {
-              try {
-                await bridge.clearProviderCredential(instanceId);
-              } catch {
-                credentialCleanupRequired.current.add(instanceId);
-              }
-            }
-            await recoverRegistryFailure(
-              error,
-              mustClear
-                ? "Provider configuration could not be updated, so its credential was left in place."
-                : "Provider configuration could not be updated.",
-            );
-            return false;
-          }
-        }),
-      ),
-    [client, hostBridge, install, recoverRegistryFailure],
-  );
-  const changeGooseConfiguration = useCallback(
-    (instanceId: ProviderInstanceId, configuration: GooseProviderConfiguration) =>
-      execute((current) => {
-        const instance = findProvider(current, instanceId);
-        if (instance?.driverKind !== "goose") return undefined;
-        return {
-          kind: "change-goose-configuration",
-          instanceId,
-          expectedVersion: instance.version,
-          configuration,
-        };
-      }),
-    [execute],
-  );
-  const changeGlmConfiguration = useCallback(
-    (
-      instanceId: ProviderInstanceId,
-      configuration: GlmProviderConfiguration,
-      credential: TransientProviderCredential,
-    ) =>
-      queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
-        withTransientCredential(credential, async (credentialValue) => {
-          const current = authoritative.current;
-          const instance = current === undefined ? undefined : findProvider(current, instanceId);
-          if (client === undefined || current === undefined || instance?.driverKind !== "glm") {
-            return false;
-          }
-          const previousAuthentication = instance.configuration.authentication;
-          const nextAuthentication = configuration.authentication;
-          if (
-            nextAuthentication === "api-key" &&
-            previousAuthentication === "provider-owned" &&
-            credentialValue.length === 0
-          ) {
-            if (mounted.current) {
-              setMessage("Enter an API key before switching authentication modes.");
-            }
-            return false;
-          }
-          const mustClear =
-            previousAuthentication === "api-key" && nextAuthentication === "provider-owned";
-          const mustSet = nextAuthentication === "api-key" && credentialValue.length > 0;
-          if ((mustClear || mustSet) && hostBridge === undefined) {
-            if (mounted.current) {
-              setMessage(BROWSER_CANNOT_SAVE_KEYS);
-            }
-            return false;
-          }
-          const priorConfiguration = instance.configuration;
-          // Validate the configuration server-side before rotating the Keychain credential so a
-          // rejected path or stale version leaves the prior key intact.
-          try {
-            applyResult(
-              await client.execute({
-                kind: "change-glm-configuration",
-                instanceId,
-                expectedVersion: instance.version,
-                configuration,
-              }),
-              current,
-              install,
-            );
-          } catch (error) {
-            await recoverRegistryFailure(error, "Provider configuration could not be updated.");
-            return false;
-          }
-          if (mustSet) {
-            try {
-              await hostBridge!.addProviderApiKey(instanceId, credentialValue);
-            } catch {
-              const rolledBackCurrent = authoritative.current;
-              const rolledBackInstance =
-                rolledBackCurrent === undefined
-                  ? undefined
-                  : findProvider(rolledBackCurrent, instanceId);
-              let rollbackConfirmed = false;
-              if (
-                rolledBackCurrent !== undefined &&
-                rolledBackInstance !== undefined &&
-                rolledBackInstance.driverKind === "glm"
-              ) {
-                try {
-                  applyResult(
-                    await client.execute({
-                      kind: "change-glm-configuration",
-                      instanceId,
-                      expectedVersion: rolledBackInstance.version,
-                      configuration: priorConfiguration,
-                    }),
-                    rolledBackCurrent,
-                    install,
-                  );
-                  rollbackConfirmed = true;
-                } catch {
-                  // Best-effort rollback failed; the saved config may still
-                  // point at the new path with the old key.
-                }
-              }
-              if (mounted.current) {
-                setMessage(
-                  rollbackConfirmed
-                    ? "The new API key could not be stored. The configuration was rolled back; the prior settings and key remain active."
-                    : "The new API key could not be stored and the automatic rollback could not be confirmed. Reload Settings to verify the saved configuration and re-enter the API key.",
-                );
-              }
-              return false;
-            }
-          }
-          if (mustClear) {
-            await hostBridge!
-              .clearProviderCredential(instanceId)
-              .catch(() => void credentialCleanupRequired.current.add(instanceId));
-          }
-          return true;
-        }),
-      ),
-    [client, hostBridge, install, recoverRegistryFailure],
-  );
-  const changeGeminiConfiguration = useCallback(
-    (
-      instanceId: ProviderInstanceId,
-      configuration: GeminiProviderConfiguration,
-      credential: TransientProviderCredential,
-    ) =>
-      queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
-        withTransientCredential(credential, async (credentialValue) => {
-          const current = authoritative.current;
-          const instance = current === undefined ? undefined : findProvider(current, instanceId);
-          if (client === undefined || current === undefined || instance?.driverKind !== "gemini") {
-            return false;
-          }
-          const previousAuthentication = instance.configuration.authentication;
-          const nextAuthentication = configuration.authentication;
-          if (
-            nextAuthentication === "api-key" &&
-            previousAuthentication === "provider-owned" &&
-            credentialValue.length === 0
-          ) {
-            if (mounted.current) {
-              setMessage("Enter an API key before switching authentication modes.");
-            }
-            return false;
-          }
-          const mustClear =
-            previousAuthentication === "api-key" && nextAuthentication === "provider-owned";
-          const mustSet = nextAuthentication === "api-key" && credentialValue.length > 0;
-          if ((mustClear || mustSet) && hostBridge === undefined) {
-            if (mounted.current) {
-              setMessage(BROWSER_CANNOT_SAVE_KEYS);
-            }
-            return false;
-          }
-          const priorConfiguration = instance.configuration;
-          // Validate the configuration server-side before rotating the Keychain credential so a
-          // rejected path or stale version leaves the prior key intact.
-          try {
-            applyResult(
-              await client.execute({
-                kind: "change-gemini-configuration",
-                instanceId,
-                expectedVersion: instance.version,
-                configuration,
-              }),
-              current,
-              install,
-            );
-          } catch (error) {
-            await recoverRegistryFailure(error, "Provider configuration could not be updated.");
-            return false;
-          }
-          if (mustSet) {
-            try {
-              await hostBridge!.addProviderApiKey(instanceId, credentialValue);
-            } catch {
-              const rolledBackCurrent = authoritative.current;
-              const rolledBackInstance =
-                rolledBackCurrent === undefined
-                  ? undefined
-                  : findProvider(rolledBackCurrent, instanceId);
-              let rollbackConfirmed = false;
-              if (
-                rolledBackCurrent !== undefined &&
-                rolledBackInstance !== undefined &&
-                rolledBackInstance.driverKind === "gemini"
-              ) {
-                try {
-                  applyResult(
-                    await client.execute({
-                      kind: "change-gemini-configuration",
-                      instanceId,
-                      expectedVersion: rolledBackInstance.version,
-                      configuration: priorConfiguration,
-                    }),
-                    rolledBackCurrent,
-                    install,
-                  );
-                  rollbackConfirmed = true;
-                } catch {
-                  // Best-effort rollback failed; the saved config may still
-                  // point at the new path with the old key.
-                }
-              }
-              if (mounted.current) {
-                setMessage(
-                  rollbackConfirmed
-                    ? "The new API key could not be stored. The configuration was rolled back; the prior settings and key remain active."
-                    : "The new API key could not be stored and the automatic rollback could not be confirmed. Reload Settings to verify the saved configuration and re-enter the API key.",
-                );
-              }
-              return false;
-            }
-          }
-          if (mustClear) {
-            await hostBridge!
-              .clearProviderCredential(instanceId)
-              .catch(() => void credentialCleanupRequired.current.add(instanceId));
-          }
-          return true;
-        }),
-      ),
-    [client, hostBridge, install, recoverRegistryFailure],
-  );
-  const changeClineConfiguration = useCallback(
-    (
-      instanceId: ProviderInstanceId,
-      configuration: ClineProviderConfiguration,
-      credential: TransientProviderCredential,
-    ) =>
-      queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
-        withTransientCredential(credential, async (credentialValue) => {
-          const current = authoritative.current;
-          const instance = current === undefined ? undefined : findProvider(current, instanceId);
-          if (client === undefined || current === undefined || instance?.driverKind !== "cline") {
-            return false;
-          }
-          const previousAuthentication = instance.configuration.authentication;
-          const nextAuthentication = configuration.authentication;
-          if (
-            nextAuthentication === "api-key" &&
-            previousAuthentication === "provider-owned" &&
-            credentialValue.length === 0
-          ) {
-            if (mounted.current) {
-              setMessage("Enter an API key before switching authentication modes.");
-            }
-            return false;
-          }
-          const mustClear =
-            previousAuthentication === "api-key" && nextAuthentication === "provider-owned";
-          const mustSet = nextAuthentication === "api-key" && credentialValue.length > 0;
-          if ((mustClear || mustSet) && hostBridge === undefined) {
-            if (mounted.current) {
-              setMessage(BROWSER_CANNOT_SAVE_KEYS);
-            }
-            return false;
-          }
-          const priorConfiguration = instance.configuration;
-          // Validate the configuration server-side before rotating the Keychain credential so a
-          // rejected path or stale version leaves the prior key intact.
-          try {
-            applyResult(
-              await client.execute({
-                kind: "change-cline-configuration",
-                instanceId,
-                expectedVersion: instance.version,
-                configuration,
-              }),
-              current,
-              install,
-            );
-          } catch (error) {
-            await recoverRegistryFailure(error, "Provider configuration could not be updated.");
-            return false;
-          }
-          if (mustSet) {
-            try {
-              await hostBridge!.addProviderApiKey(instanceId, credentialValue);
-            } catch {
-              const rolledBackCurrent = authoritative.current;
-              const rolledBackInstance =
-                rolledBackCurrent === undefined
-                  ? undefined
-                  : findProvider(rolledBackCurrent, instanceId);
-              let rollbackConfirmed = false;
-              if (
-                rolledBackCurrent !== undefined &&
-                rolledBackInstance !== undefined &&
-                rolledBackInstance.driverKind === "cline"
-              ) {
-                try {
-                  applyResult(
-                    await client.execute({
-                      kind: "change-cline-configuration",
-                      instanceId,
-                      expectedVersion: rolledBackInstance.version,
-                      configuration: priorConfiguration,
-                    }),
-                    rolledBackCurrent,
-                    install,
-                  );
-                  rollbackConfirmed = true;
-                } catch {
-                  // Best-effort rollback failed; the saved config may still
-                  // point at the new path with the old key.
-                }
-              }
-              if (mounted.current) {
-                setMessage(
-                  rollbackConfirmed
-                    ? "The new API key could not be stored. The configuration was rolled back; the prior settings and key remain active."
-                    : "The new API key could not be stored and the automatic rollback could not be confirmed. Reload Settings to verify the saved configuration and re-enter the API key.",
-                );
-              }
-              return false;
-            }
-          }
-          if (mustClear) {
-            await hostBridge!
-              .clearProviderCredential(instanceId)
-              .catch(() => void credentialCleanupRequired.current.add(instanceId));
-          }
-          return true;
-        }),
-      ),
-    [client, hostBridge, install, recoverRegistryFailure],
-  );
-  const changeQwenConfiguration = useCallback(
-    (
-      instanceId: ProviderInstanceId,
-      configuration: QwenProviderConfiguration,
-      credential: TransientProviderCredential,
-    ) =>
-      queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
-        withTransientCredential(credential, async (credentialValue) => {
-          const current = authoritative.current;
-          const instance = current === undefined ? undefined : findProvider(current, instanceId);
-          if (client === undefined || current === undefined || instance?.driverKind !== "qwen") {
-            return false;
-          }
-          const previousAuthentication = instance.configuration.authentication;
-          const nextAuthentication = configuration.authentication;
-          if (
-            nextAuthentication === "api-key" &&
-            previousAuthentication === "provider-owned" &&
-            credentialValue.length === 0
-          ) {
-            if (mounted.current) {
-              setMessage("Enter an API key before switching authentication modes.");
-            }
-            return false;
-          }
-          const mustClear =
-            previousAuthentication === "api-key" && nextAuthentication === "provider-owned";
-          const mustSet = nextAuthentication === "api-key" && credentialValue.length > 0;
-          if ((mustClear || mustSet) && hostBridge === undefined) {
-            if (mounted.current) {
-              setMessage(BROWSER_CANNOT_SAVE_KEYS);
-            }
-            return false;
-          }
-          const priorConfiguration = instance.configuration;
-          // Validate the configuration server-side before rotating the Keychain credential so a
-          // rejected path or stale version leaves the prior key intact.
-          try {
-            applyResult(
-              await client.execute({
-                kind: "change-qwen-configuration",
-                instanceId,
-                expectedVersion: instance.version,
-                configuration,
-              }),
-              current,
-              install,
-            );
-          } catch (error) {
-            await recoverRegistryFailure(error, "Provider configuration could not be updated.");
-            return false;
-          }
-          if (mustSet) {
-            try {
-              await hostBridge!.addProviderApiKey(instanceId, credentialValue);
-            } catch {
-              const rolledBackCurrent = authoritative.current;
-              const rolledBackInstance =
-                rolledBackCurrent === undefined
-                  ? undefined
-                  : findProvider(rolledBackCurrent, instanceId);
-              let rollbackConfirmed = false;
-              if (
-                rolledBackCurrent !== undefined &&
-                rolledBackInstance !== undefined &&
-                rolledBackInstance.driverKind === "qwen"
-              ) {
-                try {
-                  applyResult(
-                    await client.execute({
-                      kind: "change-qwen-configuration",
-                      instanceId,
-                      expectedVersion: rolledBackInstance.version,
-                      configuration: priorConfiguration,
-                    }),
-                    rolledBackCurrent,
-                    install,
-                  );
-                  rollbackConfirmed = true;
-                } catch {
-                  // Best-effort rollback failed; the saved config may still
-                  // point at the new path with the old key.
-                }
-              }
-              if (mounted.current) {
-                setMessage(
-                  rollbackConfirmed
-                    ? "The new API key could not be stored. The configuration was rolled back; the prior settings and key remain active."
-                    : "The new API key could not be stored and the automatic rollback could not be confirmed. Reload Settings to verify the saved configuration and re-enter the API key.",
-                );
-              }
-              return false;
-            }
-          }
-          if (mustClear) {
-            await hostBridge!
-              .clearProviderCredential(instanceId)
-              .catch(() => void credentialCleanupRequired.current.add(instanceId));
-          }
-          return true;
-        }),
-      ),
-    [client, hostBridge, install, recoverRegistryFailure],
-  );
-  const changeFxConfiguration = useCallback(
-    (
-      instanceId: ProviderInstanceId,
-      configuration: FxProviderConfiguration,
-      credential: TransientProviderCredential,
-    ) =>
-      queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
-        withTransientCredential(credential, async (credentialValue) => {
-          const current = authoritative.current;
-          const instance = current === undefined ? undefined : findProvider(current, instanceId);
-          if (client === undefined || current === undefined || instance?.driverKind !== "fx") {
-            return false;
-          }
-          const priorConfiguration = instance.configuration;
-          const mustSet = credentialValue.length > 0;
-          if (mustSet && hostBridge === undefined) {
-            if (mounted.current) {
-              setMessage(BROWSER_CANNOT_SAVE_KEYS);
-            }
-            return false;
-          }
-          // Validate the configuration server-side before rotating the Keychain credential so a
-          // rejected path or stale version leaves the prior key intact.
-          try {
-            applyResult(
-              await client.execute({
-                kind: "change-fx-configuration",
-                instanceId,
-                expectedVersion: instance.version,
-                configuration,
-              }),
-              current,
-              install,
-            );
-          } catch (error) {
-            await recoverRegistryFailure(error, "Provider configuration could not be updated.");
-            return false;
-          }
-          if (mustSet) {
-            try {
-              await hostBridge!.addProviderApiKey(instanceId, credentialValue);
-            } catch {
-              const rolledBackCurrent = authoritative.current;
-              const rolledBackInstance =
-                rolledBackCurrent === undefined
-                  ? undefined
-                  : findProvider(rolledBackCurrent, instanceId);
-              let rollbackConfirmed = false;
-              if (
-                rolledBackCurrent !== undefined &&
-                rolledBackInstance !== undefined &&
-                rolledBackInstance.driverKind === "fx"
-              ) {
-                try {
-                  applyResult(
-                    await client.execute({
-                      kind: "change-fx-configuration",
-                      instanceId,
-                      expectedVersion: rolledBackInstance.version,
-                      configuration: priorConfiguration,
-                    }),
-                    rolledBackCurrent,
-                    install,
-                  );
-                  rollbackConfirmed = true;
-                } catch {
-                  // Best-effort rollback failed; the saved config may still
-                  // point at the new path with the old key.
-                }
-              }
-              if (mounted.current) {
-                setMessage(
-                  rollbackConfirmed
-                    ? "The new API key could not be stored. The configuration was rolled back; the prior settings and key remain active."
-                    : "The new API key could not be stored and the automatic rollback could not be confirmed. Reload Settings to verify the saved configuration and re-enter the API key.",
-                );
-              }
-              return false;
-            }
-          }
-          return true;
-        }),
-      ),
-    [client, hostBridge, install, recoverRegistryFailure],
-  );
-  const changeCopilotConfiguration = useCallback(
-    (instanceId: ProviderInstanceId, configuration: CopilotProviderConfiguration) =>
-      execute((current) => {
-        const instance = findProvider(current, instanceId);
-        if (instance?.driverKind !== "copilot") return undefined;
-        return {
-          kind: "change-copilot-configuration",
-          instanceId,
-          expectedVersion: instance.version,
-          configuration,
-        };
-      }),
-    [execute],
-  );
-  const changeDevinConfiguration = useCallback(
-    (instanceId: ProviderInstanceId, configuration: DevinProviderConfiguration) =>
-      execute((current) => {
-        const instance = findProvider(current, instanceId);
-        if (instance?.driverKind !== "devin") return undefined;
-        return {
-          kind: "change-devin-configuration",
-          instanceId,
-          expectedVersion: instance.version,
-          configuration,
-        };
-      }),
-    [execute],
   );
   const changePiConfiguration = useCallback(
     (instanceId: ProviderInstanceId, configuration: PiProviderConfiguration) =>
@@ -2362,20 +1343,6 @@ export function useProviderController(options: ProviderControllerOptions) {
         if (instance?.driverKind !== "oh-my-pi") return undefined;
         return {
           kind: "change-oh-my-pi-configuration",
-          instanceId,
-          expectedVersion: instance.version,
-          configuration,
-        };
-      }),
-    [execute],
-  );
-  const changeKiloConfiguration = useCallback(
-    (instanceId: ProviderInstanceId, configuration: KiloProviderConfiguration) =>
-      execute((current) => {
-        const instance = findProvider(current, instanceId);
-        if (instance?.driverKind !== "kilo") return undefined;
-        return {
-          kind: "change-kilo-configuration",
           instanceId,
           expectedVersion: instance.version,
           configuration,
@@ -3309,14 +2276,8 @@ export function useProviderController(options: ProviderControllerOptions) {
     ...(message === undefined ? {} : { message }),
     retry: load,
     create,
+    createAcpAgent,
     createClaude,
-    createMistralVibe,
-    createGrok,
-    createGlm,
-    createGemini,
-    createCline,
-    createQwen,
-    createFx,
     createOllama,
     createOpenAiCompatible,
     createAnthropicCompatible,
@@ -3329,20 +2290,10 @@ export function useProviderController(options: ProviderControllerOptions) {
     changeBinary,
     changeCodexConfiguration,
     changeClaudeConfiguration,
-    changeDevinConfiguration,
-    changeKiloConfiguration,
+    changeAcpAgentConfiguration,
     changePiConfiguration,
     changeOhMyPiConfiguration,
     changeOllamaConfiguration,
-    changeMistralVibeConfiguration,
-    changeGrokConfiguration,
-    changeGooseConfiguration,
-    changeGlmConfiguration,
-    changeGeminiConfiguration,
-    changeCopilotConfiguration,
-    changeClineConfiguration,
-    changeQwenConfiguration,
-    changeFxConfiguration,
     changeOpenAiCompatibleConfiguration,
     changeOpenAiImageConfiguration,
     changeGeminiImageConfiguration,
@@ -3586,6 +2537,9 @@ function redactedProbeFailureMessage(error: unknown): string {
   if (failure.reason === "authentication-required") return "Provider authentication is required.";
   if (failure.reason === "runtime-unavailable") return "Provider runtime is unavailable.";
   if (failure.reason === "no-usable-model") return "No usable model is available.";
+  if (failure.reason === "driver-incompatible") {
+    return "This provider driver does not speak a protocol Octant can use.";
+  }
   if (failure.category === "unauthenticated") return "Provider authentication is required.";
   if (failure.category === "invalid-configuration") return "Provider configuration is invalid.";
   if (failure.category === "unsupported") return "Provider operation is unsupported.";

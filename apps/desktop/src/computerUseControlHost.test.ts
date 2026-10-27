@@ -284,4 +284,33 @@ describe("Thread-owned computer control", () => {
       await host.close();
     }
   });
+
+  it("refuses typing to keyboard focus, which would skip the field checks", async () => {
+    const { host, call } = fixture(true);
+    try {
+      const observed = await host.execute(
+        owner,
+        decodeComputerControlCommand({
+          operation: "observe",
+          appId: "com.example.Fixture",
+          windowId: 9,
+        }),
+      );
+      if (observed.kind !== "observation") throw new Error("Expected observation.");
+      for (const command of [
+        { operation: "type", observationId: observed.observationId, text: "never delivered" },
+        { operation: "press", observationId: observed.observationId, key: "Enter" },
+      ] as const) {
+        expect(await host.execute(owner, command)).toMatchObject({
+          kind: "refused",
+          reason: "unsupported",
+        });
+      }
+      expect(call.mock.calls.some(([name]) => name === "type_text" || name === "press_key")).toBe(
+        false,
+      );
+    } finally {
+      await host.close();
+    }
+  });
 });

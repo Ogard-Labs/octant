@@ -9,6 +9,7 @@ import {
   endpointModelCount,
   endpointStatus,
   endpointSubLine,
+  endpointTakesKey,
   type EndpointStatusInput,
   type ModelEndpointInstance,
 } from "./endpointStatus";
@@ -254,5 +255,124 @@ describe("endpoint row state", () => {
     expect(
       endpointModelCount(gateway(), many, [{ providerInstanceId: id, modelId: "other" as never }]),
     ).toBe("1 of 2 shown");
+  });
+});
+
+describe("an Azure AI Foundry endpoint that signs in with the organization", () => {
+  const foundry = gateway({
+    driverKind: "azure-foundry",
+    configuration: {
+      kind: "azure-foundry-openai-http",
+      baseUrl: "https://contoso.openai.azure.com/openai/v1/",
+      authentication: "directory-oauth",
+      protocol: "auto",
+      manualModelIds: ["gpt-main" as never],
+      directory: {
+        tenantId: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f" as never,
+        clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d" as never,
+      },
+    },
+  } as Partial<ProviderInstance>);
+  const directoryBinding = {
+    tenantId: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f" as never,
+    clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d" as never,
+    endpointOrigin: "https://contoso.openai.azure.com",
+  };
+  const refused = (patch: Partial<ProviderObservedState>) =>
+    endpointStatus({
+      instance: foundry,
+      observed: observed({ models: [], directoryBinding, ...patch }),
+      checking: false,
+    });
+
+  it("tells a sign-in the organization wants repeated in person from one that ended", () => {
+    expect(
+      refused({ readiness: "unauthenticated", unauthenticatedReason: "interaction-required" }),
+    ).toEqual({
+      tone: "needs-you",
+      label: "Sign in again",
+      sentence:
+        "Your organization asks you to sign in again in person, for example to complete multi-factor authentication.",
+      fix: { kind: "sign-in-again", label: "Sign in again" },
+    });
+    expect(
+      refused({ readiness: "unauthenticated", unauthenticatedReason: "expired" }),
+    ).toMatchObject({ label: "Signed out", fix: { kind: "sign-in-again" } });
+    expect(
+      refused({ readiness: "unauthenticated", unauthenticatedReason: "missing" }),
+    ).toMatchObject({
+      label: "Sign in to use",
+      fix: { kind: "sign-in", label: "Sign in with your organization" },
+    });
+  });
+
+  it("names the missing role, and a sign-in for another tenant, without offering a key", () => {
+    const noRole = refused({
+      readiness: "unauthenticated",
+      unauthenticatedReason: "not-authorized",
+    });
+    expect(noRole).toMatchObject({ tone: "failed", label: "No access" });
+    expect(noRole.sentence).toContain("Cognitive Services OpenAI User");
+    expect(noRole.fix).toBeUndefined();
+    expect(refused({ readiness: "incompatible" })).toMatchObject({
+      label: "Sign-in doesn't match",
+      fix: { kind: "sign-in-again" },
+    });
+    expect(endpointSubLine(foundry, undefined, undefined)).toBe(
+      "contoso.openai.azure.com · Organization sign-in",
+    );
+  });
+});
+
+describe("an organization's gateway that signs in at its own issuer", () => {
+  const signedIn = gateway({
+    driverKind: "anthropic-compatible",
+    configuration: {
+      kind: "anthropic-compatible-http",
+      baseUrl: "https://llm.example.test/anthropic/v1/",
+      authentication: "directory-oauth",
+      protocol: "auto",
+      protocolVersion: "2023-06-01",
+      manualModelIds: [],
+      directory: {
+        issuer: "https://login.example.test/oauth2/gateway" as never,
+        clientId: "0oa1octantDesktop" as never,
+        scope: "gateway.models" as never,
+      },
+    },
+  } as Partial<ProviderInstance>);
+  const directoryBinding = {
+    issuer: "https://login.example.test/oauth2/gateway" as never,
+    clientId: "0oa1octantDesktop" as never,
+    endpointOrigin: "https://llm.example.test",
+  };
+  const refused = (patch: Partial<ProviderObservedState>) =>
+    endpointStatus({
+      instance: signedIn,
+      observed: observed({ models: [], directoryBinding, ...patch }),
+      checking: false,
+    });
+
+  it("reads like any organization sign-in, sends no key, and names no Azure role", () => {
+    expect(endpointTakesKey(signedIn)).toBe(false);
+    expect(endpointSubLine(signedIn, undefined, undefined)).toBe(
+      "llm.example.test · Organization sign-in",
+    );
+    expect(
+      refused({ readiness: "unauthenticated", unauthenticatedReason: "missing" }),
+    ).toMatchObject({ label: "Sign in to use", fix: { kind: "sign-in" } });
+    expect(
+      refused({ readiness: "unauthenticated", unauthenticatedReason: "interaction-required" }),
+    ).toMatchObject({ label: "Sign in again", fix: { kind: "sign-in-again" } });
+    const noAccess = refused({
+      readiness: "unauthenticated",
+      unauthenticatedReason: "not-authorized",
+    });
+    expect(noAccess).toMatchObject({ tone: "failed", label: "No access" });
+    expect(noAccess.sentence).not.toContain("Azure");
+    expect(refused({ readiness: "incompatible" })).toMatchObject({
+      label: "Sign-in doesn't match",
+      sentence: expect.stringContaining("issuer"),
+    });
   });
 });

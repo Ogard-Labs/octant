@@ -493,4 +493,21 @@ describe("mobile Code follow-through", () => {
       sendMobileCodeTurn({ transport: port, threadId, prompt: " " }),
     ).rejects.toMatchObject({ category: "unavailable" });
   });
+
+  it("sends the photos staged for the thread with its follow-up", async () => {
+    const requests: Array<{ method: string; path: string; body?: string }> = [];
+    const port = transport(requests);
+    const photoId = "88000000-0000-4000-8000-000000000001";
+    await sendMobileCodeTurn({
+      transport: port,
+      threadId,
+      prompt: "Match this mockup",
+      attachmentIds: [photoId],
+    });
+    const command = requests.find((request) => request.path === "/api/code/commands");
+    expect(JSON.parse(command?.body ?? "{}")).toMatchObject({
+      kind: "start-provider-turn",
+      attachmentIds: [photoId],
+    });
+  });
 });

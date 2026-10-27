@@ -395,6 +395,14 @@ export const CodeSettings = Schema.Struct({
    * A store persisted before the choice existed decodes to unified.
    */
   defaultDiffLayout: Schema.optionalWith(CodeDiffLayout, { default: () => "unified" }),
+  /**
+   * Whether the TypeScript language server bundled with Octant serves Code
+   * editors (docs/design/language-services.md, decision D2). It is on by
+   * default, so a store persisted before the switch existed, which has no
+   * value, reads as on. Off, the host starts no bundled server, stops the
+   * ones running, and answers the editor's language reads `turned-off`.
+   */
+  bundledLanguageServer: Schema.optional(Schema.Boolean),
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
 }).annotations(strict);
@@ -602,6 +610,7 @@ export const CodeCommand = Schema.Union(
     requireGitRepository: Schema.optional(Schema.Boolean),
     allowDefaultFolderThreads: RetiredDefaultFolderThreadsSwitch,
     defaultDiffLayout: Schema.optional(CodeDiffLayout),
+    bundledLanguageServer: Schema.optional(Schema.Boolean),
   }).annotations(strict),
   CreateCodeThreadCommand,
   Schema.Struct({

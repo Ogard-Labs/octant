@@ -115,10 +115,11 @@ describe("CodeSettingsView", () => {
     );
 
     expect(screen.getByRole("heading", { name: "Thread defaults" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Editor" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "External editor" })).toBeVisible();
     expect(container.querySelector(".code-settings [data-slot='card']")).toBeNull();
     expect(container.querySelectorAll(".code-settings .settings-card-section--open")).toHaveLength(
-      2,
+      3,
     );
     // The four-way access choice is a select like the Agents posture; only
     // the two-way persistence choice stays segmented.
@@ -157,5 +158,34 @@ describe("CodeSettingsView", () => {
       defaultPermissionPersistence: "current-session",
       defaultDiffLayout: "side-by-side",
     });
+  });
+
+  it("shows the bundled language server on until a person turns it off, and keeps that choice", async () => {
+    const update = vi.fn(async () => true);
+    const { rerender } = render(
+      <CodeSettingsView onUpdate={update} settings={settings as never} />,
+    );
+
+    const services = screen.getByRole("switch", { name: "Language services" });
+    expect(services).toBeChecked();
+    expect(
+      screen.getByText(/cannot write, run other programs, or reach the network/),
+    ).toBeVisible();
+
+    await userEvent.setup().click(services);
+    expect(update).toHaveBeenLastCalledWith({
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+      defaultDiffLayout: "unified",
+      bundledLanguageServer: false,
+    });
+
+    rerender(
+      <CodeSettingsView
+        onUpdate={update}
+        settings={{ ...settings, version: 2, bundledLanguageServer: false } as never}
+      />,
+    );
+    expect(screen.getByRole("switch", { name: "Language services" })).not.toBeChecked();
   });
 });

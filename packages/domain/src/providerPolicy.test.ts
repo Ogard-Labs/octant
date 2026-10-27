@@ -3,6 +3,7 @@ import {
   decodeProviderInstance,
   decodeProviderInstanceId,
   decodeProviderModelId,
+  type AcpAgentProviderInstance,
   type AnthropicCompatibleProviderInstance,
   type AzureFoundryProviderInstance,
   type BflImageProviderInstance,
@@ -16,19 +17,18 @@ import {
 import { describe, expect, it } from "vitest";
 import {
   ProviderPolicyRejected,
+  changeAcpAgentConfiguration,
+  createAcpAgentProvider,
+  isAcpAgentInstance,
   changeAnthropicCompatibleConfiguration,
   changeAzureFoundryConfiguration,
   changeBflImageConfiguration,
   changeClaudeConfiguration,
-  changeClineConfiguration,
-  changeGeminiConfiguration,
   changeGeminiImageConfiguration,
-  changeGlmConfiguration,
   changeIdeogramImageConfiguration,
   changeOpenAiCompatibleConfiguration,
   changeOpenAiImageConfiguration,
   changeProviderBinary,
-  changeQwenConfiguration,
   createAnthropicCompatibleProvider,
   createAzureFoundryProvider,
   createBflImageProvider,
@@ -36,16 +36,11 @@ import {
   effectiveClaudeAccountConfigDirectory,
   createClaudeProvider,
   formatClaudeAuthLoginCommand,
-  createClineProvider,
   createGeminiImageProvider,
-  createGeminiProvider,
-  createGlmProvider,
   createIdeogramImageProvider,
   createOpenAiCompatibleProvider,
   createOpenAiImageProvider,
-  createQwenProvider,
   createCodexProvider,
-  createKimiCodeProvider,
   createOpenCodeProvider,
   effectiveProviderAuthority,
   isImageProfileDriverKind,
@@ -56,8 +51,20 @@ import {
   providerCliUpdateArgs,
   supportsProviderCliUpdate,
   updateProviderDefaults,
+  type AzureFoundryConfigurationInput,
 } from "./providerPolicy";
 import * as providerPolicy from "./providerPolicy";
+
+/** The ACP agent policy, taking the loosely typed input these tests probe it with. */
+const acpPolicy = providerPolicy as unknown as {
+  createAcpAgentProvider: (input: Record<string, unknown>) => AcpAgentProviderInstance;
+  changeAcpAgentConfiguration: (
+    provider: AcpAgentProviderInstance,
+    configuration: Record<string, unknown>,
+    updatedAt: UtcTimestamp,
+    activeSessionCount?: number,
+  ) => AcpAgentProviderInstance;
+};
 
 const ids = {
   local: decodeProviderInstanceId("00000000-0000-4000-8000-000000000901"),
@@ -292,7 +299,7 @@ function claudeProvider(): Extract<ProviderInstance, { driverKind: "claude" }> {
   return instance;
 }
 
-function kimiCodeProvider(): Extract<ProviderInstance, { driverKind: "kimi-code" }> {
+function kimiCodeProvider(): AcpAgentProviderInstance {
   const instance = decodeProviderInstance({
     id: ids.local,
     displayName: "Kimi Code local",
@@ -304,11 +311,11 @@ function kimiCodeProvider(): Extract<ProviderInstance, { driverKind: "kimi-code"
     createdAt,
     updatedAt: createdAt,
   });
-  if (instance.driverKind !== "kimi-code") throw new Error("expected Kimi Code provider fixture");
+  if (!isAcpAgentInstance(instance)) throw new Error("expected Kimi Code provider fixture");
   return instance;
 }
 
-function mistralVibeProvider(): Extract<ProviderInstance, { driverKind: "mistral-vibe" }> {
+function mistralVibeProvider(): AcpAgentProviderInstance {
   const instance = decodeProviderInstance({
     id: ids.local,
     displayName: "Mistral Vibe local",
@@ -324,13 +331,11 @@ function mistralVibeProvider(): Extract<ProviderInstance, { driverKind: "mistral
     createdAt,
     updatedAt: createdAt,
   });
-  if (instance.driverKind !== "mistral-vibe") {
-    throw new Error("expected Mistral Vibe provider fixture");
-  }
+  if (!isAcpAgentInstance(instance)) throw new Error("expected Mistral Vibe provider fixture");
   return instance;
 }
 
-function grokProvider(): Extract<ProviderInstance, { driverKind: "grok" }> {
+function grokProvider(): AcpAgentProviderInstance {
   const instance = decodeProviderInstance({
     id: ids.local,
     displayName: "Grok Build local",
@@ -346,13 +351,11 @@ function grokProvider(): Extract<ProviderInstance, { driverKind: "grok" }> {
     createdAt,
     updatedAt: createdAt,
   });
-  if (instance.driverKind !== "grok") {
-    throw new Error("expected Grok Build provider fixture");
-  }
+  if (!isAcpAgentInstance(instance)) throw new Error("expected Grok Build provider fixture");
   return instance;
 }
 
-function devinProvider(): Extract<ProviderInstance, { driverKind: "devin" }> {
+function devinProvider(): AcpAgentProviderInstance {
   const instance = decodeProviderInstance({
     id: ids.local,
     displayName: "Devin local",
@@ -368,7 +371,7 @@ function devinProvider(): Extract<ProviderInstance, { driverKind: "devin" }> {
     createdAt,
     updatedAt: createdAt,
   });
-  if (instance.driverKind !== "devin") throw new Error("expected Devin provider fixture");
+  if (!isAcpAgentInstance(instance)) throw new Error("expected Devin provider fixture");
   return instance;
 }
 
@@ -448,35 +451,14 @@ function createDualAuthCliProvider(
   binaryPath: string,
   displayName: string,
 ) {
-  const input = {
+  return createAcpAgentProvider({
     id: ids.local,
     displayName,
     existingInstances: [],
     expectedVersion: version(0),
     createdAt,
-  };
-  switch (kind) {
-    case "glm-acp":
-      return createGlmProvider({
-        ...input,
-        configuration: { kind, binaryPath, authentication },
-      });
-    case "gemini-acp":
-      return createGeminiProvider({
-        ...input,
-        configuration: { kind, binaryPath, authentication },
-      });
-    case "cline-acp":
-      return createClineProvider({
-        ...input,
-        configuration: { kind, binaryPath, authentication },
-      });
-    case "qwen-acp":
-      return createQwenProvider({
-        ...input,
-        configuration: { kind, binaryPath, authentication },
-      });
-  }
+    configuration: { kind, binaryPath, authentication },
+  });
 }
 
 function changeDualAuthCliConfiguration(
@@ -484,32 +466,11 @@ function changeDualAuthCliConfiguration(
   authentication: DualAuthCliMode,
   binaryPath: string,
 ) {
-  switch (instance.driverKind) {
-    case "glm":
-      return changeGlmConfiguration(
-        instance,
-        { kind: "glm-acp", binaryPath, authentication },
-        updatedAt,
-      );
-    case "gemini":
-      return changeGeminiConfiguration(
-        instance,
-        { kind: "gemini-acp", binaryPath, authentication },
-        updatedAt,
-      );
-    case "cline":
-      return changeClineConfiguration(
-        instance,
-        { kind: "cline-acp", binaryPath, authentication },
-        updatedAt,
-      );
-    case "qwen":
-      return changeQwenConfiguration(
-        instance,
-        { kind: "qwen-acp", binaryPath, authentication },
-        updatedAt,
-      );
-  }
+  return changeAcpAgentConfiguration(
+    instance,
+    { kind: instance.configuration.kind, binaryPath, authentication },
+    updatedAt,
+  );
 }
 
 function createDualAuthCliProviderWithInvalidAuthentication(
@@ -517,35 +478,14 @@ function createDualAuthCliProviderWithInvalidAuthentication(
   binaryPath: string,
   displayName: string,
 ) {
-  const input = {
+  return createAcpAgentProvider({
     id: ids.local,
     displayName,
     existingInstances: [],
     expectedVersion: version(0),
     createdAt,
-  };
-  switch (kind) {
-    case "glm-acp":
-      return createGlmProvider({
-        ...input,
-        configuration: { kind, binaryPath, authentication: "subscription" as never },
-      });
-    case "gemini-acp":
-      return createGeminiProvider({
-        ...input,
-        configuration: { kind, binaryPath, authentication: "subscription" as never },
-      });
-    case "cline-acp":
-      return createClineProvider({
-        ...input,
-        configuration: { kind, binaryPath, authentication: "subscription" as never },
-      });
-    case "qwen-acp":
-      return createQwenProvider({
-        ...input,
-        configuration: { kind, binaryPath, authentication: "subscription" as never },
-      });
-  }
+    configuration: { kind, binaryPath, authentication: "subscription" },
+  });
 }
 
 describe("provider CLI update policy", () => {
@@ -814,23 +754,273 @@ describe("provider instance policy", () => {
     ).toThrow("Azure AI Foundry base URL must end with the /openai/v1/ path.");
   });
 
-  it("rejects non-API-key Azure AI Foundry authentication in the technical preview", () => {
+  it("creates gateways that sign in with the organization's own issuer, and keeps that issuer for the life of the endpoint", () => {
+    const directory = {
+      issuer: "https://login.example.test/oauth2/gateway",
+      clientId: "0oa1octantDesktop",
+      scope: "gateway.models",
+    };
+    const gateway = {
+      kind: "openai-compatible-http",
+      baseUrl: "https://llm.example.test/v1",
+      authentication: "directory-oauth",
+      protocol: "auto",
+      manualModelIds: [],
+      directory,
+    } as const;
+    const anthropicGateway = {
+      kind: "anthropic-compatible-http",
+      baseUrl: "https://llm.example.test/anthropic/v1/",
+      authentication: "directory-oauth",
+      protocol: "auto",
+      protocolVersion: "2023-06-01",
+      manualModelIds: [],
+      directory,
+    } as const;
+    const openAi = createOpenAiCompatibleProvider({
+      id: ids.local,
+      displayName: "Gateway",
+      configuration: gateway,
+      existingInstances: [],
+      expectedVersion: version(0),
+      createdAt,
+    });
+    expect(openAi.configuration).toMatchObject({
+      authentication: "directory-oauth",
+      baseUrl: "https://llm.example.test/v1/",
+      directory,
+    });
+    const anthropic = createAnthropicCompatibleProvider({
+      id: ids.local,
+      displayName: "Gateway Messages",
+      configuration: anthropicGateway,
+      existingInstances: [],
+      expectedVersion: version(0),
+      createdAt,
+    });
+    expect(anthropic.configuration).toMatchObject({ authentication: "directory-oauth", directory });
+
+    // The client, scope, and address may change; the grant is then dropped
+    // by the server. The issuer is where the person types their password, so
+    // it is fixed when the endpoint is created.
+    const changed = changeOpenAiCompatibleConfiguration(
+      openAi,
+      {
+        ...gateway,
+        baseUrl: "https://llm-2.example.test/v1/",
+        directory: { ...directory, clientId: "0oa1other", scope: "gateway.chat" },
+      },
+      createdAt,
+    );
+    expect(changed.configuration).toMatchObject({
+      directory: { issuer: directory.issuer, clientId: "0oa1other", scope: "gateway.chat" },
+    });
     expect(() =>
+      changeOpenAiCompatibleConfiguration(
+        openAi,
+        { ...gateway, directory: { ...directory, issuer: "https://login.example.test" } },
+        createdAt,
+      ),
+    ).toThrow("issuer is fixed");
+    expect(() =>
+      changeAnthropicCompatibleConfiguration(
+        anthropic,
+        {
+          ...anthropicGateway,
+          directory: { ...directory, issuer: "https://other-login.example.test" },
+        },
+        createdAt,
+      ),
+    ).toThrow("issuer is fixed");
+    // Switching to or from an organization sign-in would set an issuer after
+    // creation, or leave a sign-in the endpoint no longer uses.
+    const { directory: _directory, ...withoutDirectory } = gateway;
+    expect(() =>
+      changeOpenAiCompatibleConfiguration(
+        openAi,
+        { ...withoutDirectory, authentication: "bearer" },
+        createdAt,
+      ),
+    ).toThrow("issuer is fixed");
+    const keyed = createOpenAiCompatibleProvider({
+      id: ids.local,
+      displayName: "Keyed",
+      configuration: { ...withoutDirectory, authentication: "bearer" },
+      existingInstances: [],
+      expectedVersion: version(0),
+      createdAt,
+    });
+    expect(() => changeOpenAiCompatibleConfiguration(keyed, gateway, createdAt)).toThrow(
+      "issuer is fixed",
+    );
+  });
+
+  it("refuses a gateway organization sign-in without an https issuer and address, a client, and one resource scope", () => {
+    const configuration = {
+      kind: "openai-compatible-http" as const,
+      baseUrl: "https://llm.example.test/v1/",
+      authentication: "directory-oauth" as const,
+      protocol: "auto" as const,
+      manualModelIds: [],
+      directory: {
+        issuer: "https://login.example.test/oauth2/gateway",
+        clientId: "0oa1octantDesktop",
+        scope: "gateway.models",
+      },
+    };
+    const create = (change: Record<string, unknown>) => () =>
+      createOpenAiCompatibleProvider({
+        id: ids.local,
+        displayName: "Gateway",
+        configuration: { ...configuration, ...change },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      });
+    const directory = configuration.directory;
+    expect(create({ directory: { ...directory, issuer: "http://login.example.test" } })).toThrow(
+      "issuer",
+    );
+    expect(create({ directory: { ...directory, scope: "openid" } })).toThrow("scope");
+    expect(create({ directory: { ...directory, scope: "a b" } })).toThrow("scope");
+    expect(create({ directory: { ...directory, clientId: "" } })).toThrow("client");
+    // A bearer token never travels over plain http, even to a loopback gateway.
+    expect(create({ baseUrl: "http://127.0.0.1:4000/v1/" })).toThrow("HTTPS");
+    expect(create({ directory: undefined })).toThrow("issuer");
+  });
+
+  it("creates and changes an Azure AI Foundry endpoint that signs in with the organization's directory, keeping its tenant and client", () => {
+    const directory = {
+      tenantId: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+      clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d",
+    };
+    const configuration = {
+      kind: "azure-foundry-openai-http" as const,
+      baseUrl: "https://foundry.example.openai.azure.com/openai/v1/",
+      authentication: "directory-oauth" as const,
+      protocol: "auto" as const,
+      manualModelIds: ["deployment-a"],
+      directory,
+    };
+    const created = createAzureFoundryProvider({
+      id: ids.local,
+      displayName: "Azure Foundry Work",
+      configuration,
+      existingInstances: [],
+      expectedVersion: version(0),
+      createdAt,
+    });
+    expect(created.configuration).toEqual(configuration);
+
+    const { directory: _directory, ...withoutDirectory } = configuration;
+    const keyed = changeAzureFoundryConfiguration(
+      created,
+      { ...withoutDirectory, authentication: "api-key" },
+      createdAt,
+    );
+    expect(keyed.configuration).toEqual({
+      kind: "azure-foundry-openai-http",
+      baseUrl: configuration.baseUrl,
+      authentication: "api-key",
+      protocol: "auto",
+      manualModelIds: ["deployment-a"],
+    });
+    const signedIn = changeAzureFoundryConfiguration(keyed, configuration, createdAt);
+    expect(signedIn.configuration).toEqual(configuration);
+  });
+
+  it("refuses a directory sign-in without GUID tenant and client ids, or at an address off the Foundry hosts", () => {
+    const unbound: AzureFoundryConfigurationInput = {
+      kind: "azure-foundry-openai-http",
+      baseUrl: "https://foundry.example.openai.azure.com/openai/v1/",
+      authentication: "directory-oauth",
+      protocol: "auto",
+      manualModelIds: ["deployment-a"],
+    };
+    const create = (configuration: Partial<AzureFoundryConfigurationInput>) => () =>
       createAzureFoundryProvider({
         id: ids.local,
         displayName: "Azure Foundry Work",
         configuration: {
-          kind: "azure-foundry-openai-http",
-          baseUrl: "https://foundry.example.openai.azure.com/openai/v1/",
-          authentication: "bearer" as never,
-          protocol: "auto",
-          manualModelIds: ["deployment-a"],
+          ...unbound,
+          directory: {
+            tenantId: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+            clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d",
+          },
+          ...configuration,
         },
         existingInstances: [],
         expectedVersion: version(0),
         createdAt,
+      });
+    const guids = "each a GUID";
+    expect(() =>
+      createAzureFoundryProvider({
+        id: ids.local,
+        displayName: "Azure Foundry Work",
+        configuration: unbound,
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
       }),
-    ).toThrow("Azure AI Foundry technical preview supports API-key authentication only.");
+    ).toThrow(guids);
+    expect(
+      create({
+        directory: { tenantId: "common", clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d" },
+      }),
+    ).toThrow(guids);
+    expect(
+      create({
+        directory: {
+          tenantId: "6F1C2D3E-4A5B-4C6D-8E7F-9A0B1C2D3E4F",
+          clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d",
+        },
+      }),
+    ).toThrow(guids);
+    expect(create({ baseUrl: "https://models.example.com/openai/v1/" })).toThrow(
+      "under openai.azure.com",
+    );
+    // An API-key endpoint names no tenant.
+    expect(create({ authentication: "api-key" })).toThrow("does not name a directory tenant");
+  });
+
+  it("keeps a device-code sign-in only as an organization sign-in's explicit opt-in", () => {
+    const configuration: AzureFoundryConfigurationInput = {
+      kind: "azure-foundry-openai-http",
+      baseUrl: "https://foundry.example.openai.azure.com/openai/v1/",
+      authentication: "directory-oauth",
+      protocol: "auto",
+      manualModelIds: ["deployment-a"],
+      directory: {
+        tenantId: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+        clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d",
+      },
+    };
+    const create = (input: AzureFoundryConfigurationInput) =>
+      createAzureFoundryProvider({
+        id: ids.local,
+        displayName: "Azure Foundry headless",
+        configuration: input,
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      });
+
+    const optedIn = create({ ...configuration, deviceCodeSignIn: true });
+    expect(optedIn.configuration).toMatchObject({ deviceCodeSignIn: true });
+    // Off is stored as the absence of the opt-in, never as `false`.
+    const optedOut = changeAzureFoundryConfiguration(
+      optedIn,
+      { ...configuration, deviceCodeSignIn: false },
+      createdAt,
+    );
+    expect(optedOut.configuration).not.toHaveProperty("deviceCodeSignIn");
+    expect(create(configuration).configuration).not.toHaveProperty("deviceCodeSignIn");
+    // An API-key endpoint has no organization sign-in to begin with a code.
+    const { directory: _directory, ...keyed } = configuration;
+    expect(() => create({ ...keyed, authentication: "api-key", deviceCodeSignIn: true })).toThrow(
+      "device code",
+    );
   });
 
   it("rejects an Azure AI Foundry configuration with no deployment IDs", () => {
@@ -1359,10 +1549,10 @@ describe("provider instance policy", () => {
       }).enabled,
     ).toBe(true);
     expect(
-      createKimiCodeProvider({
+      createAcpAgentProvider({
         id: ids.local,
         displayName: "Kimi Code local",
-        binaryPath: "/opt/homebrew/bin/kimi",
+        configuration: { kind: "kimi-code-acp", binaryPath: "/opt/homebrew/bin/kimi" },
         existingInstances: [],
         expectedVersion: version(0),
         createdAt,
@@ -1371,10 +1561,10 @@ describe("provider instance policy", () => {
   });
 
   it("creates and immutably updates a Kimi Code instance with an absolute binary path", () => {
-    const original = createKimiCodeProvider({
+    const original = createAcpAgentProvider({
       id: ids.local,
       displayName: "  Kimi Code local ",
-      binaryPath: " /opt/homebrew/bin/kimi ",
+      configuration: { kind: "kimi-code-acp", binaryPath: " /opt/homebrew/bin/kimi " },
       existingInstances: [],
       expectedVersion: version(0),
       createdAt,
@@ -1382,11 +1572,11 @@ describe("provider instance policy", () => {
 
     expect(original).toEqual(kimiCodeProvider());
     expect(
-      changeProviderBinary(original, {
-        binaryPath: " /usr/local/bin/kimi ",
-        activeSessionCount: 0,
+      changeAcpAgentConfiguration(
+        original,
+        { kind: "kimi-code-acp", binaryPath: " /usr/local/bin/kimi " },
         updatedAt,
-      }),
+      ),
     ).toEqual({
       ...original,
       configuration: { kind: "kimi-code-acp", binaryPath: "/usr/local/bin/kimi" },
@@ -1396,10 +1586,10 @@ describe("provider instance policy", () => {
     expect(original).toEqual(kimiCodeProvider());
 
     expect(() =>
-      createKimiCodeProvider({
+      createAcpAgentProvider({
         id: ids.local,
         displayName: "Kimi Code local",
-        binaryPath: "bin/kimi",
+        configuration: { kind: "kimi-code-acp", binaryPath: "bin/kimi" },
         existingInstances: [],
         expectedVersion: version(0),
         createdAt,
@@ -1410,13 +1600,37 @@ describe("provider instance policy", () => {
   it("rejects a Kimi Code binary change while sessions are active", () => {
     const original = kimiCodeProvider();
     expect(() =>
-      changeProviderBinary(original, {
-        binaryPath: "/usr/local/bin/kimi",
-        activeSessionCount: 1,
+      changeAcpAgentConfiguration(
+        original,
+        { kind: "kimi-code-acp", binaryPath: "/usr/local/bin/kimi" },
         updatedAt,
-      }),
+        1,
+      ),
     ).toThrow("Stop active sessions before changing this provider runtime.");
     expect(original).toEqual(kimiCodeProvider());
+  });
+
+  it("refuses to move an ACP agent instance onto another agent's configuration", () => {
+    expect(() =>
+      changeAcpAgentConfiguration(
+        kimiCodeProvider(),
+        { kind: "kilo-acp", binaryPath: "/usr/local/bin/kilo" },
+        updatedAt,
+      ),
+    ).toThrow("The configuration names a different provider runtime.");
+  });
+
+  it("refuses a posture on an ACP agent whose profile lists none", () => {
+    expect(() =>
+      acpPolicy.createAcpAgentProvider({
+        id: ids.local,
+        displayName: "Kilo local",
+        configuration: { kind: "kilo-acp", binaryPath: "/bin/kilo", authentication: "api-key" },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      }),
+    ).toThrow("Kilo takes no authentication setting.");
   });
 
   it("assigns a Claude-owned account directory under the home folder", () => {
@@ -1580,16 +1794,7 @@ describe("provider instance policy", () => {
   });
 
   it("creates and immutably updates Mistral Vibe with explicit selected authentication", () => {
-    const policy = providerPolicy as unknown as {
-      createMistralVibeProvider: (input: Record<string, unknown>) => ProviderInstance;
-      changeMistralVibeConfiguration: (
-        provider: Extract<ProviderInstance, { driverKind: "mistral-vibe" }>,
-        configuration: Record<string, unknown>,
-        updatedAt: UtcTimestamp,
-        activeSessionCount?: number,
-      ) => ProviderInstance;
-    };
-    const original = policy.createMistralVibeProvider({
+    const original = acpPolicy.createAcpAgentProvider({
       id: ids.local,
       displayName: "  Mistral Vibe local  ",
       configuration: {
@@ -1604,7 +1809,7 @@ describe("provider instance policy", () => {
 
     expect(original).toEqual(mistralVibeProvider());
     expect(
-      policy.changeMistralVibeConfiguration(
+      acpPolicy.changeAcpAgentConfiguration(
         mistralVibeProvider(),
         {
           kind: "mistral-vibe-acp",
@@ -1628,17 +1833,8 @@ describe("provider instance policy", () => {
   });
 
   it("rejects invalid Mistral Vibe authentication, relative binaries, and active updates", () => {
-    const policy = providerPolicy as unknown as {
-      createMistralVibeProvider: (input: Record<string, unknown>) => ProviderInstance;
-      changeMistralVibeConfiguration: (
-        provider: Extract<ProviderInstance, { driverKind: "mistral-vibe" }>,
-        configuration: Record<string, unknown>,
-        updatedAt: UtcTimestamp,
-        activeSessionCount?: number,
-      ) => ProviderInstance;
-    };
     expect(() =>
-      policy.createMistralVibeProvider({
+      acpPolicy.createAcpAgentProvider({
         id: ids.local,
         displayName: "Mistral Vibe local",
         configuration: {
@@ -1652,7 +1848,7 @@ describe("provider instance policy", () => {
       }),
     ).toThrow("Provider binary path must be absolute.");
     expect(() =>
-      policy.createMistralVibeProvider({
+      acpPolicy.createAcpAgentProvider({
         id: ids.local,
         displayName: "Mistral Vibe local",
         configuration: {
@@ -1666,7 +1862,7 @@ describe("provider instance policy", () => {
       }),
     ).toThrow("Mistral Vibe authentication must be subscription or api-key.");
     expect(() =>
-      policy.changeMistralVibeConfiguration(
+      acpPolicy.changeAcpAgentConfiguration(
         mistralVibeProvider(),
         mistralVibeProvider().configuration,
         updatedAt,
@@ -1676,16 +1872,7 @@ describe("provider instance policy", () => {
   });
 
   it("creates and immutably updates Grok Build with explicit selected authentication", () => {
-    const policy = providerPolicy as unknown as {
-      createGrokProvider: (input: Record<string, unknown>) => ProviderInstance;
-      changeGrokConfiguration: (
-        provider: Extract<ProviderInstance, { driverKind: "grok" }>,
-        configuration: Record<string, unknown>,
-        updatedAt: UtcTimestamp,
-        activeSessionCount?: number,
-      ) => ProviderInstance;
-    };
-    const original = policy.createGrokProvider({
+    const original = acpPolicy.createAcpAgentProvider({
       id: ids.local,
       displayName: "  Grok Build local  ",
       configuration: {
@@ -1700,7 +1887,7 @@ describe("provider instance policy", () => {
 
     expect(original).toEqual(grokProvider());
     expect(
-      policy.changeGrokConfiguration(
+      acpPolicy.changeAcpAgentConfiguration(
         grokProvider(),
         {
           kind: "grok-acp",
@@ -1724,17 +1911,8 @@ describe("provider instance policy", () => {
   });
 
   it("rejects invalid Grok Build authentication, relative binaries, and active updates", () => {
-    const policy = providerPolicy as unknown as {
-      createGrokProvider: (input: Record<string, unknown>) => ProviderInstance;
-      changeGrokConfiguration: (
-        provider: Extract<ProviderInstance, { driverKind: "grok" }>,
-        configuration: Record<string, unknown>,
-        updatedAt: UtcTimestamp,
-        activeSessionCount?: number,
-      ) => ProviderInstance;
-    };
     expect(() =>
-      policy.createGrokProvider({
+      acpPolicy.createAcpAgentProvider({
         id: ids.local,
         displayName: "Grok Build local",
         configuration: {
@@ -1748,7 +1926,7 @@ describe("provider instance policy", () => {
       }),
     ).toThrow("Provider binary path must be absolute.");
     expect(() =>
-      policy.createGrokProvider({
+      acpPolicy.createAcpAgentProvider({
         id: ids.local,
         displayName: "Grok Build local",
         configuration: {
@@ -1762,21 +1940,17 @@ describe("provider instance policy", () => {
       }),
     ).toThrow("Grok Build authentication must be subscription or api-key.");
     expect(() =>
-      policy.changeGrokConfiguration(grokProvider(), grokProvider().configuration, updatedAt, 1),
+      acpPolicy.changeAcpAgentConfiguration(
+        grokProvider(),
+        grokProvider().configuration,
+        updatedAt,
+        1,
+      ),
     ).toThrow("Stop active sessions before changing this provider runtime.");
   });
 
   it("creates and immutably updates Goose with provider-owned configuration", () => {
-    const policy = providerPolicy as unknown as {
-      createGooseProvider: (input: Record<string, unknown>) => ProviderInstance;
-      changeGooseConfiguration: (
-        provider: Extract<ProviderInstance, { driverKind: "goose" }>,
-        configuration: Record<string, unknown>,
-        updatedAt: UtcTimestamp,
-        activeSessionCount?: number,
-      ) => ProviderInstance;
-    };
-    const original = policy.createGooseProvider({
+    const original = acpPolicy.createAcpAgentProvider({
       id: ids.local,
       displayName: "  Goose local  ",
       configuration: {
@@ -1865,10 +2039,7 @@ describe("provider instance policy", () => {
   );
 
   it("creates and immutably updates GitHub Copilot with provider-owned configuration", () => {
-    const policy = providerPolicy as unknown as {
-      createCopilotProvider: (input: Record<string, unknown>) => ProviderInstance;
-    };
-    const original = policy.createCopilotProvider({
+    const original = acpPolicy.createAcpAgentProvider({
       id: ids.local,
       displayName: "  Copilot local  ",
       configuration: {
@@ -1886,16 +2057,7 @@ describe("provider instance policy", () => {
   });
 
   it("creates and immutably updates Devin with subscription authentication", () => {
-    const policy = providerPolicy as unknown as {
-      createDevinProvider: (input: Record<string, unknown>) => ProviderInstance;
-      changeDevinConfiguration: (
-        provider: Extract<ProviderInstance, { driverKind: "devin" }>,
-        configuration: Record<string, unknown>,
-        updatedAt: UtcTimestamp,
-        activeSessionCount?: number,
-      ) => ProviderInstance;
-    };
-    const original = policy.createDevinProvider({
+    const original = acpPolicy.createAcpAgentProvider({
       id: ids.local,
       displayName: "  Devin local  ",
       configuration: {
@@ -1910,7 +2072,7 @@ describe("provider instance policy", () => {
 
     expect(original).toEqual(devinProvider());
     expect(
-      policy.changeDevinConfiguration(
+      acpPolicy.changeAcpAgentConfiguration(
         devinProvider(),
         {
           kind: "devin-acp",
@@ -1934,17 +2096,8 @@ describe("provider instance policy", () => {
   });
 
   it("rejects invalid Devin authentication, relative binaries, and active updates", () => {
-    const policy = providerPolicy as unknown as {
-      createDevinProvider: (input: Record<string, unknown>) => ProviderInstance;
-      changeDevinConfiguration: (
-        provider: Extract<ProviderInstance, { driverKind: "devin" }>,
-        configuration: Record<string, unknown>,
-        updatedAt: UtcTimestamp,
-        activeSessionCount?: number,
-      ) => ProviderInstance;
-    };
     expect(() =>
-      policy.createDevinProvider({
+      acpPolicy.createAcpAgentProvider({
         id: ids.local,
         displayName: "Devin local",
         configuration: {
@@ -1958,7 +2111,7 @@ describe("provider instance policy", () => {
       }),
     ).toThrow("Provider binary path must be absolute.");
     expect(() =>
-      policy.createDevinProvider({
+      acpPolicy.createAcpAgentProvider({
         id: ids.local,
         displayName: "Devin local",
         configuration: {
@@ -1972,7 +2125,12 @@ describe("provider instance policy", () => {
       }),
     ).toThrow("Devin authentication must be subscription.");
     expect(() =>
-      policy.changeDevinConfiguration(devinProvider(), devinProvider().configuration, updatedAt, 1),
+      acpPolicy.changeAcpAgentConfiguration(
+        devinProvider(),
+        devinProvider().configuration,
+        updatedAt,
+        1,
+      ),
     ).toThrow("Stop active sessions before changing this provider runtime.");
   });
 
@@ -2025,18 +2183,7 @@ describe("provider instance policy", () => {
   });
 
   it("creates and immutably updates Kilo while rejecting relative binaries and active updates", () => {
-    const policy = providerPolicy as unknown as {
-      createKiloProvider: (
-        input: Record<string, unknown>,
-      ) => Extract<ProviderInstance, { driverKind: "kilo" }>;
-      changeKiloConfiguration: (
-        provider: Extract<ProviderInstance, { driverKind: "kilo" }>,
-        configuration: Record<string, unknown>,
-        updatedAt: UtcTimestamp,
-        activeSessionCount?: number,
-      ) => Extract<ProviderInstance, { driverKind: "kilo" }>;
-    };
-    const original = policy.createKiloProvider({
+    const original = acpPolicy.createAcpAgentProvider({
       id: ids.local,
       displayName: "  Kilo local  ",
       configuration: { kind: "kilo-acp", binaryPath: " /opt/homebrew/bin/kilo " },
@@ -2050,7 +2197,7 @@ describe("provider instance policy", () => {
       configuration: { kind: "kilo-acp", binaryPath: "/opt/homebrew/bin/kilo" },
       version: 1,
     });
-    const updated = policy.changeKiloConfiguration(
+    const updated = acpPolicy.changeAcpAgentConfiguration(
       original,
       { kind: "kilo-acp", binaryPath: "/usr/local/bin/kilo" },
       updatedAt,
@@ -2062,7 +2209,7 @@ describe("provider instance policy", () => {
     });
     expect(original.configuration.binaryPath).toBe("/opt/homebrew/bin/kilo");
     expect(() =>
-      policy.createKiloProvider({
+      acpPolicy.createAcpAgentProvider({
         id: ids.local,
         displayName: "Kilo local",
         configuration: { kind: "kilo-acp", binaryPath: "bin/kilo" },
@@ -2072,7 +2219,7 @@ describe("provider instance policy", () => {
       }),
     ).toThrow("Provider binary path must be absolute.");
     expect(() =>
-      policy.changeKiloConfiguration(original, original.configuration, updatedAt, 1),
+      acpPolicy.changeAcpAgentConfiguration(original, original.configuration, updatedAt, 1),
     ).toThrow("Stop active sessions before changing this provider runtime.");
   });
 

@@ -1,4 +1,8 @@
-import type { ProviderDriverKind, ProviderUsageLimitsUnavailableReason } from "@octant/contracts";
+import {
+  isAcpAgentKind,
+  type ProviderDriverKind,
+  type ProviderUsageLimitsUnavailableReason,
+} from "@octant/contracts";
 import type { ProviderRuntimeTurnReport } from "./providerRuntimeUsageLimitsStore";
 
 /**
@@ -24,12 +28,16 @@ export type ProviderLimitsReporting =
   | "local-runtime";
 
 export function providerLimitsReporting(kind: ProviderDriverKind): ProviderLimitsReporting {
+  // The ACP protocol has no limits channel. Devin differs only because Octant
+  // reads its plan windows from Devin's own usage endpoint.
+  if (isAcpAgentKind(kind)) {
+    return kind === "devin" ? "account-endpoint" : "runtime-does-not-report";
+  }
   switch (kind) {
     case "claude":
     case "codex":
       return "usage-windows";
     case "opencode":
-    case "devin":
       return "account-endpoint";
     case "openai-compatible":
     case "anthropic-compatible":
@@ -39,21 +47,12 @@ export function providerLimitsReporting(kind: ProviderDriverKind): ProviderLimit
       return "local-runtime";
     case "pi":
     case "oh-my-pi":
-    case "kilo":
-    case "mistral-vibe":
-    case "kimi-code":
-    case "grok":
-    case "goose":
-    case "glm":
-    case "gemini":
-    case "copilot":
-    case "cline":
-    case "qwen":
-    case "fx":
     case "openai-image":
     case "gemini-native-image":
     case "bfl-image":
     case "ideogram-image":
+    // Octant reads no quota headers on an outside driver's brokered calls.
+    case "outside-harness-endpoint":
       return "runtime-does-not-report";
   }
 }

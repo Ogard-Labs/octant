@@ -31,24 +31,18 @@ import {
 } from "@octant/contracts";
 import {
   ProviderPolicyRejected,
+  changeAcpAgentConfiguration,
+  createAcpAgentProvider,
+  isAcpAgentInstance,
+  isChangeAcpAgentConfigurationCommand,
+  isCreateAcpAgentProviderCommand,
   changeAnthropicCompatibleConfiguration,
   changeAzureFoundryConfiguration,
   changeBflImageConfiguration,
   changeIdeogramImageConfiguration,
   changeClaudeConfiguration,
   claudeChangeKeepsRuntime,
-  changeDevinConfiguration,
   changeGeminiImageConfiguration,
-  changeGrokConfiguration,
-  changeGooseConfiguration,
-  changeGlmConfiguration,
-  changeGeminiConfiguration,
-  changeCopilotConfiguration,
-  changeClineConfiguration,
-  changeQwenConfiguration,
-  changeFxConfiguration,
-  changeKiloConfiguration,
-  changeMistralVibeConfiguration,
   changeOllamaConfiguration,
   changePiConfiguration,
   changeOpenAiCompatibleConfiguration,
@@ -65,22 +59,10 @@ import {
   implicitClaudeAccountOwnerId,
   implicitCodexAccountOwnerId,
   createClaudeProvider,
-  createDevinProvider,
   createGeminiImageProvider,
-  createGrokProvider,
-  createGooseProvider,
-  createGlmProvider,
-  createGeminiProvider,
-  createCopilotProvider,
-  createClineProvider,
-  createQwenProvider,
-  createFxProvider,
-  createKiloProvider,
   createOpenAiCompatibleProvider,
   createOpenAiImageProvider,
   createCodexProvider,
-  createKimiCodeProvider,
-  createMistralVibeProvider,
   createOllamaProvider,
   createPiProvider,
   createOhMyPiProvider,
@@ -345,15 +327,7 @@ export class ProviderService implements ProviderServiceApi {
         .map((state) => {
           const instance = instanceById.get(String(state.instanceId));
           if (instance === undefined || !this.#isDriverKindAvailable(instance.driverKind)) {
-            const unavailable = decodeProviderObservedState({
-              instanceId: state.instanceId,
-              readiness: "unavailable",
-              processState: "stopped",
-              models: [],
-              capabilities: unavailableCapabilities,
-              message: "This provider driver is not available.",
-              observedAt: state.observedAt,
-            });
+            const unavailable = driverNotAdmittedObservation(state.instanceId, state.observedAt);
             return instance === undefined
               ? unavailable
               : withRuntimeIntegration(instance.driverKind, unavailable);
@@ -673,22 +647,11 @@ export class ProviderService implements ProviderServiceApi {
           if (
             command.kind === "create-opencode-provider" ||
             command.kind === "create-codex-provider" ||
-            command.kind === "create-kimi-code-provider" ||
             command.kind === "create-claude-provider" ||
-            command.kind === "create-devin-provider" ||
-            command.kind === "create-kilo-provider" ||
             command.kind === "create-pi-provider" ||
             command.kind === "create-oh-my-pi-provider" ||
             command.kind === "create-ollama-provider" ||
-            command.kind === "create-mistral-vibe-provider" ||
-            command.kind === "create-grok-provider" ||
-            command.kind === "create-goose-provider" ||
-            command.kind === "create-glm-provider" ||
-            command.kind === "create-gemini-provider" ||
-            command.kind === "create-copilot-provider" ||
-            command.kind === "create-cline-provider" ||
-            command.kind === "create-qwen-provider" ||
-            command.kind === "create-fx-provider" ||
+            isCreateAcpAgentProviderCommand(command) ||
             command.kind === "create-openai-compatible-provider" ||
             command.kind === "create-anthropic-compatible-provider" ||
             command.kind === "create-azure-foundry-provider" ||
@@ -732,9 +695,6 @@ export class ProviderService implements ProviderServiceApi {
                 if (assignedHome !== undefined) await this.#ensureCodexAccountHome(assignedHome);
                 break;
               }
-              case "create-kimi-code-provider":
-                instance = createKimiCodeProvider({ ...common, binaryPath: command.binaryPath });
-                break;
               case "create-claude-provider": {
                 // The host profile belongs to one subscription account. An
                 // API-key account never takes it, so one created first does
@@ -772,18 +732,6 @@ export class ProviderService implements ProviderServiceApi {
                 );
                 break;
               }
-              case "create-devin-provider":
-                instance = createDevinProvider({
-                  ...common,
-                  configuration: command.configuration,
-                });
-                break;
-              case "create-kilo-provider":
-                instance = createKiloProvider({
-                  ...common,
-                  configuration: command.configuration,
-                });
-                break;
               case "create-pi-provider":
                 instance = createPiProvider({
                   ...common,
@@ -798,60 +746,6 @@ export class ProviderService implements ProviderServiceApi {
                 break;
               case "create-ollama-provider":
                 instance = createOllamaProvider({
-                  ...common,
-                  configuration: command.configuration,
-                });
-                break;
-              case "create-mistral-vibe-provider":
-                instance = createMistralVibeProvider({
-                  ...common,
-                  configuration: command.configuration,
-                });
-                break;
-              case "create-grok-provider":
-                instance = createGrokProvider({
-                  ...common,
-                  configuration: command.configuration,
-                });
-                break;
-              case "create-goose-provider":
-                instance = createGooseProvider({
-                  ...common,
-                  configuration: command.configuration,
-                });
-                break;
-              case "create-glm-provider":
-                instance = createGlmProvider({
-                  ...common,
-                  configuration: command.configuration,
-                });
-                break;
-              case "create-gemini-provider":
-                instance = createGeminiProvider({
-                  ...common,
-                  configuration: command.configuration,
-                });
-                break;
-              case "create-copilot-provider":
-                instance = createCopilotProvider({
-                  ...common,
-                  configuration: command.configuration,
-                });
-                break;
-              case "create-cline-provider":
-                instance = createClineProvider({
-                  ...common,
-                  configuration: command.configuration,
-                });
-                break;
-              case "create-qwen-provider":
-                instance = createQwenProvider({
-                  ...common,
-                  configuration: command.configuration,
-                });
-                break;
-              case "create-fx-provider":
-                instance = createFxProvider({
                   ...common,
                   configuration: command.configuration,
                 });
@@ -898,6 +792,13 @@ export class ProviderService implements ProviderServiceApi {
                   configuration: command.configuration,
                 });
                 break;
+              default:
+                // Every other create command left is an ACP agent's.
+                instance = createAcpAgentProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
             }
             this.#assertDriverPluginEffective(instance);
             this.#appendInstance(command.expectedVersion, "provider.instance-created@1", instance);
@@ -919,6 +820,19 @@ export class ProviderService implements ProviderServiceApi {
               activeSessionCount: this.#runtime.activeSessionCount(current.id),
               updatedAt,
             });
+            // An organization sign-in's grant lives in the broker under a
+            // reference only this instance names; removing the instance
+            // without it would leave a live refresh token nobody can sign out.
+            // It is forgotten only once the removal is allowed, so a removal
+            // refused for active sessions keeps the sign-in.
+            if (
+              (current.driverKind === "azure-foundry" ||
+                current.driverKind === "openai-compatible" ||
+                current.driverKind === "anthropic-compatible") &&
+              current.configuration.authentication === "directory-oauth"
+            ) {
+              await this.#forgetCredentialForOldEndpoint(current.id);
+            }
             await this.#runtime.invalidateRuntime(current.id);
             this.#persistence.journal.append({
               aggregate: { aggregateType: "provider-instance", aggregateId: current.id },
@@ -1009,11 +923,7 @@ export class ProviderService implements ProviderServiceApi {
             });
             eventName = "provider.instance-renamed@1";
           } else if (command.kind === "change-provider-binary") {
-            if (
-              current.driverKind !== "opencode" &&
-              current.driverKind !== "codex" &&
-              current.driverKind !== "kimi-code"
-            ) {
+            if (current.driverKind !== "opencode" && current.driverKind !== "codex") {
               throw this.#unsupported("This provider does not use a CLI binary.");
             }
             if (this.#runtime.activeSessionCount(current.id) !== 0) {
@@ -1176,131 +1086,14 @@ export class ProviderService implements ProviderServiceApi {
               await this.#ensureCodexAccountHome(instance.configuration.codexHome);
             }
             eventName = "provider.instance-configuration-changed@1";
-          } else if (command.kind === "change-mistral-vibe-configuration") {
-            if (current.driverKind !== "mistral-vibe") {
-              throw this.#unsupported("This provider does not use Mistral Vibe configuration.");
+          } else if (isChangeAcpAgentConfigurationCommand(command)) {
+            if (
+              !isAcpAgentInstance(current) ||
+              current.configuration.kind !== command.configuration.kind
+            ) {
+              throw this.#unsupported("This provider does not use that ACP agent configuration.");
             }
-            instance = changeMistralVibeConfiguration(
-              current,
-              command.configuration,
-              updatedAt,
-              this.#runtime.activeSessionCount(current.id),
-            );
-            await this.#runtime.invalidateRuntime(current.id);
-            eventName = "provider.instance-configuration-changed@1";
-          } else if (command.kind === "change-grok-configuration") {
-            if (current.driverKind !== "grok") {
-              throw this.#unsupported("This provider does not use Grok Build configuration.");
-            }
-            instance = changeGrokConfiguration(
-              current,
-              command.configuration,
-              updatedAt,
-              this.#runtime.activeSessionCount(current.id),
-            );
-            await this.#runtime.invalidateRuntime(current.id);
-            eventName = "provider.instance-configuration-changed@1";
-          } else if (command.kind === "change-goose-configuration") {
-            if (current.driverKind !== "goose") {
-              throw this.#unsupported("This provider does not use Goose configuration.");
-            }
-            instance = changeGooseConfiguration(
-              current,
-              command.configuration,
-              updatedAt,
-              this.#runtime.activeSessionCount(current.id),
-            );
-            await this.#runtime.invalidateRuntime(current.id);
-            eventName = "provider.instance-configuration-changed@1";
-          } else if (command.kind === "change-glm-configuration") {
-            if (current.driverKind !== "glm") {
-              throw this.#unsupported("This provider does not use GLM Agent configuration.");
-            }
-            instance = changeGlmConfiguration(
-              current,
-              command.configuration,
-              updatedAt,
-              this.#runtime.activeSessionCount(current.id),
-            );
-            await this.#runtime.invalidateRuntime(current.id);
-            eventName = "provider.instance-configuration-changed@1";
-          } else if (command.kind === "change-gemini-configuration") {
-            if (current.driverKind !== "gemini") {
-              throw this.#unsupported("This provider does not use Gemini CLI configuration.");
-            }
-            instance = changeGeminiConfiguration(
-              current,
-              command.configuration,
-              updatedAt,
-              this.#runtime.activeSessionCount(current.id),
-            );
-            await this.#runtime.invalidateRuntime(current.id);
-            eventName = "provider.instance-configuration-changed@1";
-          } else if (command.kind === "change-copilot-configuration") {
-            if (current.driverKind !== "copilot") {
-              throw this.#unsupported("This provider does not use GitHub Copilot configuration.");
-            }
-            instance = changeCopilotConfiguration(
-              current,
-              command.configuration,
-              updatedAt,
-              this.#runtime.activeSessionCount(current.id),
-            );
-            await this.#runtime.invalidateRuntime(current.id);
-            eventName = "provider.instance-configuration-changed@1";
-          } else if (command.kind === "change-cline-configuration") {
-            if (current.driverKind !== "cline") {
-              throw this.#unsupported("This provider does not use Cline configuration.");
-            }
-            instance = changeClineConfiguration(
-              current,
-              command.configuration,
-              updatedAt,
-              this.#runtime.activeSessionCount(current.id),
-            );
-            await this.#runtime.invalidateRuntime(current.id);
-            eventName = "provider.instance-configuration-changed@1";
-          } else if (command.kind === "change-qwen-configuration") {
-            if (current.driverKind !== "qwen") {
-              throw this.#unsupported("This provider does not use Qwen Code configuration.");
-            }
-            instance = changeQwenConfiguration(
-              current,
-              command.configuration,
-              updatedAt,
-              this.#runtime.activeSessionCount(current.id),
-            );
-            await this.#runtime.invalidateRuntime(current.id);
-            eventName = "provider.instance-configuration-changed@1";
-          } else if (command.kind === "change-fx-configuration") {
-            if (current.driverKind !== "fx") {
-              throw this.#unsupported("This provider does not use fx configuration.");
-            }
-            instance = changeFxConfiguration(
-              current,
-              command.configuration,
-              updatedAt,
-              this.#runtime.activeSessionCount(current.id),
-            );
-            await this.#runtime.invalidateRuntime(current.id);
-            eventName = "provider.instance-configuration-changed@1";
-          } else if (command.kind === "change-devin-configuration") {
-            if (current.driverKind !== "devin") {
-              throw this.#unsupported("This provider does not use Devin configuration.");
-            }
-            instance = changeDevinConfiguration(
-              current,
-              command.configuration,
-              updatedAt,
-              this.#runtime.activeSessionCount(current.id),
-            );
-            await this.#runtime.invalidateRuntime(current.id);
-            eventName = "provider.instance-configuration-changed@1";
-          } else if (command.kind === "change-kilo-configuration") {
-            if (current.driverKind !== "kilo") {
-              throw this.#unsupported("This provider does not use Kilo configuration.");
-            }
-            instance = changeKiloConfiguration(
+            instance = changeAcpAgentConfiguration(
               current,
               command.configuration,
               updatedAt,
@@ -1360,7 +1153,7 @@ export class ProviderService implements ProviderServiceApi {
             }
             eventName = "provider.instance-enabled-changed@1";
           }
-          if (credentialEndpoint(current) !== credentialEndpoint(instance)) {
+          if (credentialBinding(current) !== credentialBinding(instance)) {
             await this.#forgetCredentialForOldEndpoint(current.id);
           }
           this.#appendInstance(command.expectedVersion, eventName, instance);
@@ -1381,14 +1174,8 @@ export class ProviderService implements ProviderServiceApi {
           if (
             !keepsRuntime &&
             (command.kind === "change-claude-configuration" ||
-              command.kind === "change-mistral-vibe-configuration" ||
-              command.kind === "change-grok-configuration" ||
-              command.kind === "change-glm-configuration" ||
-              command.kind === "change-gemini-configuration" ||
-              command.kind === "change-cline-configuration" ||
-              command.kind === "change-qwen-configuration" ||
-              command.kind === "change-fx-configuration" ||
-              command.kind === "change-devin-configuration")
+              (isChangeAcpAgentConfigurationCommand(command) &&
+                command.configuration.authentication !== undefined))
           ) {
             this.#publishSelectedAuthenticationObservation(authoritative);
           }
@@ -1465,7 +1252,10 @@ export class ProviderService implements ProviderServiceApi {
           throw this.#invalid("Enable this provider before probing it.");
         }
         if (!this.#isDriverKindAvailable(instance.driverKind)) {
-          this.#runtime.clearObservedState(instanceId);
+          // Keep the block visible rather than leaving the instance unobserved.
+          this.#runtime.setObservedState(
+            driverNotAdmittedObservation(instanceId, decodeTimestamp(this.#clock())),
+          );
           this.#clearRuntimeUsageLimits?.(instanceId);
           throw this.#unsupported("This provider driver is not available.");
         }
@@ -1664,6 +1454,12 @@ export class ProviderService implements ProviderServiceApi {
     if (isImageProfileDriverKind(instance.driverKind)) {
       this.#runtime.clearObservedState(instance.id);
       return undefined;
+    }
+    // Decided before the factory runs: a driver the activation ladder does not
+    // admit (every outside driver, until its package is admitted) is never
+    // built, so no driver code runs to describe its own block.
+    if (!this.#isDriverKindAvailable(instance.driverKind)) {
+      return driverNotAdmittedObservation(instance.id, decodeTimestamp(this.#clock()));
     }
     if (this.#claudeAccountNeedsOwnConfigDirectory(instance)) {
       return decodeProviderObservedState({
@@ -2203,27 +1999,17 @@ export class ProviderService implements ProviderServiceApi {
   }
 
   #publishSelectedAuthenticationObservation(instance: ProviderInstance): void {
-    if (
-      instance.driverKind !== "claude" &&
-      instance.driverKind !== "mistral-vibe" &&
-      instance.driverKind !== "grok" &&
-      instance.driverKind !== "glm" &&
-      instance.driverKind !== "gemini" &&
-      instance.driverKind !== "cline" &&
-      instance.driverKind !== "qwen" &&
-      instance.driverKind !== "fx" &&
-      instance.driverKind !== "devin"
-    ) {
-      return;
-    }
+    const authentication =
+      instance.driverKind === "claude" || isAcpAgentInstance(instance)
+        ? instance.configuration.authentication
+        : undefined;
+    if (authentication === undefined) return;
     this.#runtime.setObservedState(
       decodeProviderObservedState({
         instanceId: instance.id,
         readiness: "checking",
         processState: "stopped",
-        ...(instance.configuration.authentication === "api-key"
-          ? { credentialStatus: "missing" }
-          : {}),
+        ...(authentication === "api-key" ? { credentialStatus: "missing" } : {}),
         models: [],
         capabilities: unavailableCapabilities,
         observedAt: decodeTimestamp(this.#clock()),
@@ -2291,10 +2077,13 @@ export class ProviderService implements ProviderServiceApi {
   }
 
   /**
-   * A key is entered for one server. Changing the base URL kept it, so the
-   * next probe or turn sent it to the new server. It is deleted before the
-   * change is journaled: if it cannot be deleted the change is refused, and
-   * if the change then fails the person enters the key again.
+   * A key is entered for one server, and a sign-in is held for one tenant,
+   * client, and endpoint. Changing the base URL kept the key, so the next
+   * probe or turn sent it to the new server; switching between a key and an
+   * organization sign-in would read one as the other. The stored credential
+   * (and a sign-in's grant) is deleted before the change is journaled: if it
+   * cannot be deleted the change is refused, and if the change then fails the
+   * person enters the key or signs in again.
    */
   async #forgetCredentialForOldEndpoint(instanceId: ProviderInstanceId): Promise<void> {
     if (this.#clearProviderCredential === undefined) return;
@@ -2303,7 +2092,8 @@ export class ProviderService implements ProviderServiceApi {
     } catch {
       throw new ProviderServiceError({
         category: "unavailable",
-        message: "The stored key could not be removed, so the base URL was not changed. Try again.",
+        message:
+          "The stored key or sign-in could not be removed, so the change was not saved. Try again.",
       });
     }
   }
@@ -2346,15 +2136,40 @@ function sameCatalogContent(
 }
 
 /**
- * The base URL a stored key is sent to, for the endpoint profiles whose key the
- * host keeps by instance. Ollama also has a base URL but sends no key.
+ * What a stored credential is bound to, for the endpoint profiles whose
+ * credential the host keeps by instance: the base URL a key is sent to and,
+ * for Azure AI Foundry, how it signs in and the tenant and client a sign-in
+ * holds, or for a gateway, the issuer, client, and scope its sign-in holds.
+ * Ollama also has a base URL but sends no key.
  */
-function credentialEndpoint(instance: ProviderInstance): string | undefined {
+function credentialBinding(instance: ProviderInstance): string | undefined {
   switch (instance.driverKind) {
     case "openai-compatible":
-    case "anthropic-compatible":
-    case "azure-foundry":
-      return instance.configuration.baseUrl;
+    case "anthropic-compatible": {
+      // A gateway's organization sign-in is held for one issuer, client,
+      // scope, and address; a key only for its address.
+      const configuration = instance.configuration;
+      return configuration.authentication === "directory-oauth"
+        ? [
+            configuration.baseUrl,
+            "directory-oauth",
+            String(configuration.directory.issuer),
+            String(configuration.directory.clientId),
+            String(configuration.directory.scope),
+          ].join("\n")
+        : configuration.baseUrl;
+    }
+    case "azure-foundry": {
+      const configuration = instance.configuration;
+      return configuration.authentication === "directory-oauth"
+        ? [
+            configuration.baseUrl,
+            "directory-oauth",
+            String(configuration.directory.tenantId),
+            String(configuration.directory.clientId),
+          ].join("\n")
+        : [configuration.baseUrl, configuration.authentication].join("\n");
+    }
     case "bfl-image":
     case "ideogram-image":
       // Absent means the provider's own endpoint, so setting or clearing a
@@ -2809,6 +2624,26 @@ function probeFailureReadiness(
   return "degraded";
 }
 
+/**
+ * What an instance reports while its driver is not effective on the activation
+ * ladder: a closed reason, Octant's own words, and nothing it could offer.
+ */
+function driverNotAdmittedObservation(
+  instanceId: ProviderInstanceId,
+  observedAt: ProviderObservedState["observedAt"],
+): ProviderObservedState {
+  return decodeProviderObservedState({
+    instanceId,
+    readiness: "unavailable",
+    processState: "stopped",
+    models: [],
+    capabilities: unavailableCapabilities,
+    message: "This provider driver is not available.",
+    reason: "driver-not-admitted",
+    observedAt,
+  });
+}
+
 function probeFailureMessage(
   readiness: Exclude<ProviderObservedState["readiness"], "ready" | "checking">,
   reason?: ProviderObservedState["reason"],
@@ -2817,6 +2652,10 @@ function probeFailureMessage(
   if (reason === "authentication-required") return "Provider authentication is required.";
   if (reason === "runtime-unavailable") return "Provider runtime is unavailable.";
   if (reason === "no-usable-model") return "No usable model is available.";
+  if (reason === "driver-not-admitted") return "This provider driver is not available.";
+  if (reason === "driver-incompatible") {
+    return "This provider driver does not speak a protocol Octant can use.";
+  }
   if (readiness === "unauthenticated") return "Provider authentication is required.";
   if (readiness === "unavailable") return "Provider runtime is unavailable.";
   if (readiness === "incompatible") return "Provider configuration is incompatible.";

@@ -227,7 +227,8 @@ The phone app pairs from the same app pairing code.
    `octant pair` (or `octant server install --pair`).
 2. In the Octant phone app, open the pairing screen and choose **Scan QR
    code**, then point the camera at the QR code. The first time, the app asks
-   for the camera; it uses it only to scan this code. You can paste the code
+   for the camera, which it uses only to scan this code and to take a photo
+   you attach to a thread. You can paste the code
    into **Pairing code** and choose **Start pairing** instead. When the
    computer is on your local network rather than Tailscale, iPhone also asks
    once whether Octant may connect to devices on your local network; allow
@@ -246,6 +247,36 @@ same key: if it changes, the phone refuses with "This isn't the computer you
 paired with: its security key has changed." and sends nothing. Pair again
 with a new code if the key was replaced on purpose. Typing the origin and
 ticket by hand stays for a listener with a Tailscale certificate or your own.
+
+## Attaching photos and files from the phone
+
+In a thread, choose **+** in the composer, then **Take photo**, **Choose
+photo**, or **Choose file**. The phone offers only what the thread's model
+can read: Chat takes images, PDFs, and text files; Work and Code take images.
+A model that reads no images offers no camera. Each attachment is at most
+10 MB and goes to the computer as soon as you pick it; the phone deletes its
+own copy once the upload ends.
+
+The computer removes a photo's location, camera model, captions, and other
+embedded details before it keeps the image or sends it to a provider. A file
+whose contents are not the image type it claims, or a format it cannot clean,
+such as HEIC, is refused rather than kept with its details.
+
+## Dictating from the phone
+
+When the computer has a transcription endpoint in **Settings → Voice**, the
+phone's message box shows a microphone. Tap it to record (the first time, the
+phone asks for the microphone) and tap the red stop control to finish; a clip
+stops on its own after one minute. The computer transcribes the clip with its
+own Voice endpoint and the words are added to your message, which you still
+send yourself. Leaving the app while recording drops the clip unsent. The
+recording is deleted from the phone after every clip and is never stored on
+the computer.
+
+Each phone may send thirty clips an hour, one at a time; after that the
+phone says when it can dictate again. Reading replies aloud stays on the
+computer. Without a transcription endpoint, or while the computer is
+unreachable, the phone shows no microphone.
 
 ## Device management
 

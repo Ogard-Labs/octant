@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ExtensionPackageManifest } from "@octant/contracts/extensions";
+import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { rebuildProjection } from "../persistence/projection";
@@ -28,6 +29,10 @@ import {
   type ExtensionSupervisorPort,
 } from "./extensionLifecycleService";
 import type { ExtensionRuntimeEvidence } from "./extensionSupervisor";
+import {
+  ExtensionActivationService,
+  LOCAL_EXTENSION_ACTIVATION_POLICY,
+} from "./extensionActivationService";
 
 const directories: Array<string> = [];
 const extensionId = "43000000-0000-4000-8000-000000000001";
@@ -55,6 +60,14 @@ function inspection(
   version = "1.0.0",
   body = version,
   capabilities: ReadonlyArray<"mcp" | "shell"> = ["mcp"],
+  component: Record<string, unknown> = {
+    id: "server",
+    kind: "mcp-server",
+    displayName: "Server",
+    declaredCapabilities: capabilities,
+    entryPoint: "runtime/main.mjs",
+  },
+  modes: ReadonlyArray<"chat" | "work" | "code"> = ["code"],
 ) {
   const entries: ReadonlyArray<ExtensionArchiveEntry> = [
     {
@@ -79,17 +92,9 @@ function inspection(
       reviewed: false,
     },
     license: { kind: "spdx", identifier: "MIT" },
-    compatibility: { platforms: ["macos"], modes: ["code"], providerFamilies: [] },
+    compatibility: { platforms: ["macos"], modes, providerFamilies: [] },
     declaredCapabilities: capabilities,
-    components: [
-      {
-        id: "server",
-        kind: "mcp-server",
-        displayName: "Server",
-        declaredCapabilities: capabilities,
-        entryPoint: "runtime/main.mjs",
-      },
-    ],
+    components: [component],
   };
   manifest.digest = calculateExtensionPackageDigest(manifest, entries);
   return inspectExtensionPackage({
@@ -331,6 +336,110 @@ describe("journaled extension lifecycle and startup reconciliation", () => {
       clock: () => now,
     });
     expect(context.makeService().snapshot()).toEqual(componentEnabled);
+  });
+
+  it("installs a language server without trusting, enabling, or offering it outside Code", async () => {
+    const context = await setup();
+    const service = context.makeService();
+    const languageServer = inspection(
+      "1.0.0",
+      "language server",
+      [],
+      {
+        id: "server",
+        kind: "language-server",
+        displayName: "TypeScript",
+        declaredCapabilities: [],
+        entryPoint: "runtime/main.mjs",
+        languageServer: { languages: ["typescript"], launchClass: "static" },
+      },
+      ["chat", "work", "code"],
+    );
+    const installed = await service.install(languageServer);
+    expect(installed.packages[0]).toMatchObject({
+      activation: { installed: true, trusted: false, pluginDesired: false },
+      components: [
+        {
+          activation: { componentDesired: false },
+          effectiveState: { kind: "blocked", reason: "untrusted" },
+        },
+      ],
+    });
+
+    const trusted = await service.setSourceTrust({
+      extensionId: extensionId as never,
+      trusted: true,
+      expectedStateVersion: installed.packages[0]!.stateVersion,
+    });
+    const pluginEnabled = await service.setPluginDesired({
+      extensionId: extensionId as never,
+      desired: true,
+      expectedStateVersion: trusted.packages[0]!.stateVersion,
+    });
+    // Trust and the plugin switch are separate acts from the component switch.
+    expect(pluginEnabled.packages[0]?.components[0]?.effectiveState).toEqual({
+      kind: "blocked",
+      reason: "component-disabled",
+    });
+    const enabled = await service.setComponentDesired({
+      extensionId: extensionId as never,
+      componentId: "server" as never,
+      desired: true,
+      expectedStateVersion: pluginEnabled.packages[0]!.stateVersion,
+    });
+    expect(enabled.packages[0]?.components[0]?.effectiveState).toEqual({ kind: "effective" });
+
+    // Even fully enabled, and in a package that claims every mode, the kind
+    // reaches only Code.
+    const activation = new ExtensionActivationService({
+      policy: LOCAL_EXTENSION_ACTIVATION_POLICY,
+      catalogStatus: () => "available",
+    });
+    const resolved = (mode: "chat" | "work" | "code") =>
+      activation.resolve(enabled, {
+        scope: {
+          hostId: LOCAL_HOST_ID,
+          mode,
+          projectId: null,
+          threadId: null,
+          providerFamily: "openai-compatible" as never,
+        },
+      }).packages[0]?.components[0]?.effectiveState;
+    expect(resolved("chat")).toEqual({ kind: "blocked", reason: "mode-prohibited" });
+    expect(resolved("work")).toEqual({ kind: "blocked", reason: "mode-prohibited" });
+    expect(resolved("code")).toEqual({ kind: "effective" });
+  });
+
+  it("asks for review again when an update widens a language server from static to repo-tooling", async () => {
+    const languageServer = (version: string, launchClass: "static" | "repo-tooling") =>
+      inspection(version, `language server ${version}`, [], {
+        id: "server",
+        kind: "language-server",
+        displayName: "TypeScript",
+        declaredCapabilities: [],
+        entryPoint: "runtime/main.mjs",
+        languageServer: { languages: ["typescript"], launchClass },
+      });
+    const context = await setup();
+    await context.makeService().install(languageServer("1.0.0", "static"));
+    appendLifecycle(context, { kind: "source-trust-changed", trusted: true });
+    appendLifecycle(context, { kind: "plugin-desired-state-changed", desired: true });
+    appendLifecycle(context, {
+      kind: "component-desired-state-changed",
+      componentId: "server",
+      desired: true,
+    });
+
+    const unchanged = await context.makeService().update(languageServer("1.1.0", "static"));
+    expect(unchanged.packages[0]?.components[0]?.effectiveState).toEqual({ kind: "effective" });
+
+    // Same kind, same declared capabilities: the class alone widens what the
+    // server may do, so trust and enablement do not carry over.
+    const widened = await context.makeService().update(languageServer("2.0.0", "repo-tooling"));
+    expect(widened.packages[0]).toMatchObject({
+      activation: { trusted: false, pluginDesired: false, quarantined: true },
+      components: [{ activation: { componentDesired: false } }],
+    });
   });
 
   it("rejects desired state for unknown components without writing an event", async () => {

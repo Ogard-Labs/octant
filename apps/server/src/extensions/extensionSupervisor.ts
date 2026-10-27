@@ -54,7 +54,9 @@ export interface ExtensionProcessStartInput {
   readonly sandbox?: ExtensionProcessSandbox;
 }
 
-export interface ExtensionProcessSandbox {
+export type ExtensionProcessSandbox = ExtensionSeatbeltSandbox | OutsideDriverProcessSandbox;
+
+export interface ExtensionSeatbeltSandbox {
   readonly kind: "macos-seatbelt";
   readonly scope: {
     readonly hostId: string;
@@ -66,6 +68,20 @@ export interface ExtensionProcessSandbox {
   readonly allowRead: ReadonlyArray<string>;
   readonly allowWrite: ReadonlyArray<string>;
   readonly allowNetwork: boolean;
+}
+
+/**
+ * An outside provider driver's process: the driver profile (no network, no
+ * exec beyond the runtime, no fork, read-only package, one private temporary
+ * folder) and a fixed environment, both chosen by the process port rather
+ * than by the caller. It serves one provider instance, so two instances of
+ * one driver never share a process.
+ */
+export interface OutsideDriverProcessSandbox {
+  readonly kind: "outside-driver";
+  readonly instanceId: string;
+  readonly packageRoot: string;
+  readonly temporaryDirectory: string;
 }
 
 export interface ExtensionProcessReceipt {
@@ -728,6 +744,7 @@ function sameIdentity(
 
 function sandboxScopeKey(sandbox: ExtensionProcessSandbox | undefined): string {
   if (sandbox === undefined) return "global";
+  if (sandbox.kind === "outside-driver") return `outside-driver\u0000${sandbox.instanceId}`;
   const { scope } = sandbox;
   return [
     scope.hostId,

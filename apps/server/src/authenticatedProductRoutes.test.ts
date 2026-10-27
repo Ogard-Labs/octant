@@ -97,6 +97,24 @@ describe("authenticated product route dispatch", () => {
         new Request("https://octant.example/api/code/local-servers/commands", { method: "POST" }),
       ),
     ).toBe("code.local-servers.list");
+    // A person's Desktop tab, its frames included, is its own action.
+    for (const path of ["/api/code/desktops", "/api/code/desktops/frame"]) {
+      expect(
+        classifyProductAction(new Request(`https://octant.example${path}`, { method: "POST" })),
+      ).toBe("code.desktop.operate");
+    }
+    // Language reads, and the open documents they read, are their own action.
+    for (const path of ["/api/code/language/read", "/api/code/language/documents"]) {
+      expect(
+        classifyProductAction(new Request(`https://octant.example${path}`, { method: "POST" })),
+      ).toBe("code.language.read");
+    }
+    // Approving a server that runs the repository's tooling has no remote action.
+    expect(
+      classifyProductAction(
+        new Request("https://octant.example/api/code/language/approvals", { method: "POST" }),
+      ),
+    ).toBeUndefined();
     expect(
       classifyProductAction(
         new Request("https://octant.example/api/providers/commands", { method: "POST" }),
@@ -174,6 +192,24 @@ describe("authenticated product route dispatch", () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 
+  it("dispatches a paired device's dictation and voice status but refuses read-aloud before the route sees it", async () => {
+    const dispatch = vi.fn(async () => Response.json({ ok: true }));
+    const product = createAuthenticatedProductDispatch({ dispatch });
+
+    expect((await product(handoff("/api/speech/status")))?.status).toBe(200);
+    expect((await product(handoff("/api/speech/transcriptions", "POST")))?.status).toBe(200);
+    expect(dispatch).toHaveBeenCalledTimes(2);
+
+    for (const [path, method] of [
+      ["/api/speech/synthesis", "POST"],
+      ["/api/speech/transcriptions", "GET"],
+      ["/api/speech/status", "POST"],
+    ] as const) {
+      expect((await product(handoff(path, method)))?.status).toBe(403);
+    }
+    expect(dispatch).toHaveBeenCalledTimes(2);
+  });
+
   it("refuses a paired device a Project terminal before the route sees it", async () => {
     const dispatch = vi.fn(async () => Response.json({ ok: true }));
     const product = createAuthenticatedProductDispatch({ dispatch });
@@ -228,6 +264,94 @@ describe("authenticated product route dispatch", () => {
 
     expect(response?.status).toBe(200);
     expect(dispatch).toHaveBeenCalledOnce();
+  });
+
+  it("hands each mode's attachment route a paired device's photo without its location or camera", async () => {
+    const photo = Uint8Array.from([
+      0xff,
+      0xd8,
+      0xff,
+      0xe1,
+      0x00,
+      0x16,
+      ...Buffer.from("Exif\0\0GPSLatitude 59", "latin1"),
+      0xff,
+      0xda,
+      0x00,
+      0x08,
+      1,
+      1,
+      0,
+      0,
+      0x3f,
+      0,
+      0x42,
+      0xff,
+      0xd9,
+    ]);
+    for (const [path, method, action] of [
+      ["/api/chat/attachments", "POST", "chat.send-turn"],
+      ["/api/work/attachments", "PUT", "work.update-document"],
+      ["/api/code/attachments", "PUT", "code.plan-turn"],
+    ] as const) {
+      expect(classifyProductAction(new Request(`https://octant.example${path}`, { method }))).toBe(
+        action,
+      );
+      let received: Uint8Array | undefined;
+      const dispatch = vi.fn(async (request: Request) => {
+        received = new Uint8Array(await request.arrayBuffer());
+        return Response.json({ ok: true });
+      });
+      const product = createAuthenticatedProductDispatch({ dispatch });
+      const request = new Request(`https://octant.example${path}`, {
+        method,
+        headers: {
+          host: "octant.example",
+          origin: "https://octant.example",
+          "content-type": "image/jpeg",
+          "content-length": String(photo.byteLength),
+        },
+        body: photo,
+      });
+
+      const response = await product({
+        request,
+        principal,
+        requestFacts: { method, canonicalPathQuery: path, bodyDigest: "d" },
+      });
+
+      expect(response?.status).toBe(200);
+      expect(received).toBeDefined();
+      expect(Buffer.from(received ?? []).includes(Buffer.from("GPSLatitude"))).toBe(false);
+      expect([...(received?.subarray(-3) ?? [])]).toEqual([0x42, 0xff, 0xd9]);
+    }
+  });
+
+  it("refuses a paired device's image the host cannot clean before the route sees it", async () => {
+    const dispatch = vi.fn(async () => Response.json({ ok: true }));
+    const product = createAuthenticatedProductDispatch({ dispatch });
+    const request = new Request("https://octant.example/api/chat/attachments", {
+      method: "POST",
+      headers: {
+        host: "octant.example",
+        origin: "https://octant.example",
+        "content-type": "image/png",
+      },
+      body: Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]),
+    });
+
+    const response = await product({
+      request,
+      principal,
+      requestFacts: {
+        method: "POST",
+        canonicalPathQuery: "/api/chat/attachments",
+        bodyDigest: "d",
+      },
+    });
+
+    expect(response?.status).toBe(415);
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
   it("classifies a Canvas share read as a read and leaves minting and revoking denied", () => {
@@ -380,6 +504,27 @@ describe("authenticated product route dispatch", () => {
       expect(response?.status).toBe(403);
     }
     expect(dispatch).toHaveBeenCalledTimes(3);
+  });
+
+  it("dispatches a paired device's physical device read but never a device lease", async () => {
+    const dispatch = vi.fn(async () => Response.json({ ok: true }));
+    const product = createAuthenticatedProductDispatch({ dispatch });
+
+    expect(
+      classifyProductAction(
+        new Request("https://octant.example/api/apple/devices", { method: "POST" }),
+      ),
+    ).toBe("project.overview.read");
+    expect((await product(handoff("/api/apple/devices", "POST")))?.status).toBe(200);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+
+    expect(
+      classifyProductAction(
+        new Request("https://octant.example/api/apple/device-leases", { method: "POST" }),
+      ),
+    ).toBeUndefined();
+    expect((await product(handoff("/api/apple/device-leases", "POST")))?.status).toBe(403);
+    expect(dispatch).toHaveBeenCalledTimes(1);
   });
 
   it("classifies the POST-only Extension, validation, and Context reads as reads", () => {

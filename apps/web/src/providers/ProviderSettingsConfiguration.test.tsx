@@ -1,10 +1,13 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { decodeProviderInstanceId, type ProviderInstance } from "@octant/contracts";
+import {
+  decodeProviderInstanceId,
+  type AcpAgentProviderInstance,
+  type ProviderInstance,
+} from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
-  DevinConfigurationForm,
-  FxConfigurationForm,
+  AcpAgentConfigurationForm,
   HttpConfigurationForm,
   ProviderCreateForm,
   type ProviderCreateFormProps,
@@ -19,19 +22,13 @@ function props(overrides: Partial<ProviderCreateFormProps> = {}): ProviderCreate
     onCreateAnthropicCompatible: callback,
     onCreateAzureFoundry: callback,
     onCreateBflImage: callback,
+    onCreateAcpAgent: callback,
     onCreateClaude: callback,
-    onCreateGemini: callback,
     onCreateGeminiImage: callback,
-    onCreateGrok: callback,
-    onCreateGlm: callback,
-    onCreateCline: callback,
     onCreateIdeogramImage: callback,
-    onCreateMistralVibe: callback,
     onCreateOllama: callback,
     onCreateOpenAiCompatible: callback,
     onCreateOpenAiImage: callback,
-    onCreateQwen: callback,
-    onCreateFx: callback,
     ...overrides,
   };
 }
@@ -150,10 +147,10 @@ describe("ProviderCreateForm presentation limits", () => {
 
   it("keeps fx creation disabled when host credential storage is unavailable", async () => {
     const user = userEvent.setup();
-    const onCreateFx = vi.fn(async () => true);
+    const onCreateAcpAgent = vi.fn(async () => true);
     render(
       <ProviderCreateForm
-        {...props({ onCreateFx, credentialManagementAvailable: false })}
+        {...props({ onCreateAcpAgent, credentialManagementAvailable: false })}
         allowedProviderTypes={["fx"]}
         initialProviderType="fx"
       />,
@@ -167,15 +164,15 @@ describe("ProviderCreateForm presentation limits", () => {
     expect(screen.getByTestId("provider-keys-desktop-only")).toHaveTextContent(
       "fx needs an API key, and this browser cannot store one.",
     );
-    expect(onCreateFx).not.toHaveBeenCalled();
+    expect(onCreateAcpAgent).not.toHaveBeenCalled();
   });
 });
 
-describe("FxConfigurationForm", () => {
+describe("AcpAgentConfigurationForm", () => {
   it("submits the api-key posture without offering a provider-owned login", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn(async () => true);
-    const instance: Extract<ProviderInstance, { driverKind: "fx" }> = {
+    const instance: AcpAgentProviderInstance = {
       id: decodeProviderInstanceId("80000000-0000-4000-8000-0000000000f1"),
       displayName: "fx local",
       driverKind: "fx",
@@ -192,7 +189,7 @@ describe("FxConfigurationForm", () => {
     };
 
     render(
-      <FxConfigurationForm
+      <AcpAgentConfigurationForm
         credentialManagementAvailable
         disabled={false}
         instance={instance}
@@ -202,7 +199,7 @@ describe("FxConfigurationForm", () => {
 
     // fx's configuration carries exactly one authentication literal, so the
     // shared selector would submit a value the server refuses to decode.
-    expect(screen.queryByLabelText("Authentication for fx local")).toBeNull();
+    expect(screen.queryByLabelText("fx authentication for fx local")).toBeNull();
     await user.clear(screen.getByLabelText("fx binary path for fx local"));
     await user.type(screen.getByLabelText("fx binary path for fx local"), "/opt/homebrew/bin/fx");
     await user.type(
@@ -221,11 +218,9 @@ describe("FxConfigurationForm", () => {
       expect.anything(),
     );
   });
-});
 
-describe("DevinConfigurationForm", () => {
-  it("renders the binary path inside a setting row without changing its accessible name", () => {
-    const instance: Extract<ProviderInstance, { driverKind: "devin" }> = {
+  it("renders the binary path inside a setting row", () => {
+    const instance: AcpAgentProviderInstance = {
       id: decodeProviderInstanceId("80000000-0000-4000-8000-0000000000d1"),
       displayName: "Devin local",
       driverKind: "devin",
@@ -242,14 +237,23 @@ describe("DevinConfigurationForm", () => {
     };
     const onChange = vi.fn(async () => true);
 
-    render(<DevinConfigurationForm disabled={false} instance={instance} onChange={onChange} />);
+    render(
+      <AcpAgentConfigurationForm
+        credentialManagementAvailable
+        disabled={false}
+        instance={instance}
+        onChange={onChange}
+      />,
+    );
 
     const row = document.querySelector(
       `[data-setting-id="provider-${String(instance.id)}-binary-path"]`,
     );
     expect(row).not.toBeNull();
     if (row === null) throw new Error("expected the Devin binary-path setting row");
-    expect(row).toContainElement(screen.getByLabelText("Binary path for Devin local"));
+    expect(row).toContainElement(screen.getByLabelText("devin binary path for Devin local"));
+    // Devin's profile lists one posture, so there is nothing to choose.
+    expect(screen.queryByLabelText("Devin authentication for Devin local")).toBeNull();
   });
 });
 
@@ -323,7 +327,14 @@ describe("HttpConfigurationForm sign-in offer", () => {
         disabled={false}
         instance={{
           ...bound,
-          configuration: { ...bound.configuration, oauthDescriptorId: "chatgpt-plan" as never },
+          configuration: {
+            kind: "openai-compatible-http",
+            baseUrl: bound.configuration.baseUrl,
+            authentication: "bearer",
+            protocol: "responses",
+            manualModelIds: [],
+            oauthDescriptorId: "chatgpt-plan" as never,
+          },
         }}
         onChange={onChange}
         onClearCredential={vi.fn(async () => true)}

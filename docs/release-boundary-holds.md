@@ -1,10 +1,29 @@
-# Release-boundary holds: connector marketplace and full LSP
+# Release-boundary holds and the post-preview unlock
 
-This note holds the start gates for two deferrals named by the
+This note keeps the start gates for two deferrals once named by the
 [Current Release Boundary in `AGENTS.md`](../AGENTS.md#current-release-boundary),
-which is the one statement of release scope. It does not authorize
-implementation. Opening either item still needs a documented approved design,
-published seams, and an explicit maintainer request.
+which is the one statement of release scope. Both holds are lifted; the gates
+stay as the record of what each track must satisfy.
+
+## Post-preview tracks authorized on 2026-10-26
+
+The maintainer unlocked the previously parked tracks on 2026-10-26: mobile
+maturity (Android internal builds, redacted push, capture and voice, public
+store distribution), a ciphertext-only hosted relay, a full LSP / extension
+host / debugger companion, Apple physical devices and then TestFlight and App
+Store distribution of a person's own apps, enterprise directory OAuth and
+cloud-IAM provider identity, disposable Linux desktops for headless hosts,
+remote SSH development environments, third-party provider-driver plugins, and
+the EU/GDPR compliance package (pending legal review).
+
+They are authorized post-preview work, not part of the technical preview, and
+design-first: each is built only once its owning specification documents its
+authority, privacy, and release boundaries. The authorization covers design
+and implementation. Creating an account, spending money, submitting to a
+store, deploying a hosted service, or weakening any invariant each still needs
+a separate explicit maintainer action. The
+[architecture's release boundary](architecture.md#current-release-boundary)
+owns the rule.
 
 ## Connector / OAuth marketplace
 
@@ -40,11 +59,16 @@ keeps ship integrations on the same plugin seams without opening a marketplace.
 
 ## Full LSP / extension host / debugger
 
-**Hold.** A full language-server stack, IDE-style extension host, and debugger
-companion stay Later. Monaco editing and explicit external-editor handoff remain
-primary for Code.
+**Authorized post-preview on 2026-10-26; design accepted.** The maintainer
+request the third gate below asked for has been given, and the maintainer
+accepted [Language services](design/language-services.md) on 2026-10-26, which
+documents gates 1 and 2; its slices may start. Monaco editing and explicit
+external-editor handoff remain primary for Code in the technical preview.
 
-**Start gates.** Work may leave Backlog only when all of the following are true:
+**Historical hold.** A full language-server stack, IDE-style extension host,
+and debugger companion stayed Later.
+
+**Start gates.** Work could leave Backlog only when all of the following were true:
 
 1. Current specifications document the approved design for the companion process model
    (separately launched, not an in-process Monaco expansion), how LSP and debug

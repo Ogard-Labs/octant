@@ -7,6 +7,7 @@ import {
   type ProviderFailure,
   type ProviderInstanceId,
   type ProviderModelId,
+  type ProviderObservedState,
   type ProviderToolAnswer,
   type ProviderTurnInput,
   type UtcTimestamp,
@@ -33,13 +34,26 @@ import {
   honestDirectEndpointCapabilities,
   inspectDirectEndpointCredential,
 } from "./directEndpointSubscriptionOAuth";
+import { subscriptionDescriptorIdOf } from "@octant/domain";
 import { chatGptPlanModelsListing, isChatGptPlanDescriptor } from "./chatGptPlanProfile";
+import {
+  directoryRefusalOf,
+  directoryRefusalReport,
+  directoryRequestAuthorization,
+  gatewayDirectorySignIn,
+  observedDirectoryBinding,
+  readDirectoryPointer,
+  refusedFailure,
+  type DirectEndpointDirectoryOAuth,
+} from "./directEndpointDirectoryOAuth";
 import { sendChatCompletionsTurn, type ChatCompletionsTurnResult } from "./openAiChatCompletions";
 import {
   makeOpenAiCompatibleEndpoint,
   markCompatibleModelVerified,
   probeModels,
   type CompatibleFetch,
+  openAiCompatibleAuthStrategy,
+  type CompatibleRequestAuthorization,
   type OpenAiCompatibleAuthStrategy,
   type OpenAiCompatibleEndpoint,
 } from "./openAiCompatibleEndpoint";
@@ -59,12 +73,13 @@ import { capabilityEchoToolDefinition } from "./openAiToolEncoding";
 import { carryModelContextWindowFacts } from "./modelContextWindowFacts";
 import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 import type { SubscriptionOAuthHost } from "@octant/provider-sdk/subscription-oauth";
+import type { DirectoryOAuthHost } from "@octant/provider-sdk/directory-oauth";
 
 /** The request profile the resolved credential selects, when it selects one. */
 type CompatiblePlanProfile = "chatgpt-plan" | undefined;
 
 function planProfileOf(options: OpenAiCompatibleDriverOptions): CompatiblePlanProfile {
-  return isChatGptPlanDescriptor(options.configuration.oauthDescriptorId)
+  return isChatGptPlanDescriptor(subscriptionDescriptorIdOf(options.configuration))
     ? "chatgpt-plan"
     : undefined;
 }
@@ -129,6 +144,28 @@ export interface OpenAiCompatibleDriverOptions {
    * a stored pointer cannot be used; it is never sent as an API key.
    */
   readonly subscriptionOAuth?: SubscriptionOAuthHost;
+  /**
+   * A tenant kind's organization sign-in in place of a stored key, with the
+   * kind's own audience and host list (Azure AI Foundry). When present the
+   * instance sends only a directory bearer resolved per request, never a
+   * stored value.
+   */
+  readonly directorySignIn?: DirectEndpointDirectoryOAuth;
+  /**
+   * The broker as a gateway's organization sign-in reaches it. A gateway
+   * configured to sign in with its organization's own issuer sends only that
+   * bearer; without a broker it reads `unavailable`, never a stored value.
+   */
+  readonly directoryOAuth?: DirectoryOAuthHost;
+}
+
+/** The organization sign-in this instance uses, if it uses one. */
+function directorySignInOf(
+  options: OpenAiCompatibleDriverOptions,
+): DirectEndpointDirectoryOAuth | undefined {
+  return (
+    options.directorySignIn ?? gatewayDirectorySignIn(options.configuration, options.directoryOAuth)
+  );
 }
 
 type CompatibleTurnResult = ProtocolTurnResult | ChatCompletionsTurnResult;
@@ -147,8 +184,9 @@ export function makeOpenAiCompatibleDriver(
   const clock = options.clock ?? (() => new Date().toISOString());
   const profile: OpenAiCompatibleDriverProfile = options.profile ?? {
     driverKind: "openai-compatible",
-    authStrategy: options.configuration.authentication,
+    authStrategy: openAiCompatibleAuthStrategy(options.configuration),
   };
+  const directory = directorySignInOf(options);
   return {
     kind: profile.driverKind,
     harnessEndpoint: {
@@ -161,9 +199,12 @@ export function makeOpenAiCompatibleDriver(
         : Effect.tryPromise({
             try: async () => {
               const observedAt = clock() as UtcTimestamp;
+              if (directory !== undefined) {
+                return probeDirectoryEndpoint(options, directory, profile, instanceId, observedAt);
+              }
               const gate = await inspectDirectEndpointCredential({
                 authentication: profile.authStrategy,
-                expectedDescriptorId: options.configuration.oauthDescriptorId,
+                expectedDescriptorId: subscriptionDescriptorIdOf(options.configuration),
                 credentialResolver: options.credentialResolver,
                 instanceId,
                 host: options.subscriptionOAuth,
@@ -212,22 +253,7 @@ export function makeOpenAiCompatibleDriver(
               // host's verifiedToolModelIds, which outlives this probe. The
               // provider-level flag stays "unsupported" so one verified model
               // never unlocks tools for the other models of the profile.
-              const prior = options.runtimeRegistry.observedState(instanceId);
-              const probe = decodeProviderObservedState({
-                instanceId,
-                readiness: result.readiness,
-                processState: "stopped",
-                ...(profile.authStrategy !== "none" ? { credentialStatus: "stored" } : {}),
-                // What requests taught about each model's window, and a
-                // person's override, outlive the probe a Chat turn runs first.
-                models: carryModelContextWindowFacts(result.models, prior?.models),
-                capabilities: initialCapabilities,
-                ...(result.failure === undefined ? {} : { message: result.failure.message }),
-                lastSuccessfulProbeAt: observedAt,
-                observedAt,
-              });
-              options.runtimeRegistry.setObservedState(probe);
-              return probe;
+              return recordProbe(options, profile, instanceId, result, observedAt);
             },
             catch: sanitizeFailure,
           }),
@@ -236,11 +262,14 @@ export function makeOpenAiCompatibleDriver(
         ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
         : Effect.tryPromise({
             try: async () => {
-              const endpoint = endpointFor(
-                options,
-                directEndpointRequestResolver(oauthResolverInput(options, profile, clock)),
-                profile,
-              );
+              const endpoint =
+                directory === undefined
+                  ? endpointFor(
+                      options,
+                      directEndpointRequestResolver(oauthResolverInput(options, profile, clock)),
+                      profile,
+                    )
+                  : await directoryEndpointFor(options, directory, profile, clock);
               // Propagate transport failures (auth, timeout, provider error)
               // so the user sees the actual error instead of a false
               // "unsupported" result.
@@ -297,9 +326,19 @@ function openAiCompatibleTransport(
   return {
     open: async () => {
       const observedAt = clock();
+      const directory = directorySignInOf(options);
+      if (directory !== undefined) {
+        // The pointer is read once per session; the bearer is resolved for
+        // every send, since a session outlives a token.
+        const directoryEndpoint = await directoryEndpointFor(options, directory, profile, clock);
+        return sessionOver(options, directoryEndpoint, clock, {
+          profile: undefined,
+          subscriptionUsageGranted: undefined,
+        });
+      }
       const gate = await inspectDirectEndpointCredential({
         authentication: profile.authStrategy,
-        expectedDescriptorId: options.configuration.oauthDescriptorId,
+        expectedDescriptorId: subscriptionDescriptorIdOf(options.configuration),
         credentialResolver: options.credentialResolver,
         instanceId: options.instanceId,
         host: options.subscriptionOAuth,
@@ -321,51 +360,61 @@ function openAiCompatibleTransport(
           : plainCredential !== undefined && plainCredential.length > 0
             ? { has: async () => true, resolve: async () => plainCredential }
             : undefined;
-      let endpoint: OpenAiCompatibleEndpoint | undefined = endpointFor(options, resolver, profile);
       // The ChatGPT plan request profile applies when the resolved
       // credential's descriptor is the plan offer; plan usage is disabled
       // when the sign-in did not grant use of the subscription.
-      const planProfile = planProfileOf(options);
-      const subscriptionUsageGranted =
-        gate.kind === "oauth" ? gate.subscriptionUsageGranted : undefined;
-      // What each protocol's last successful call measured and billed. A
-      // responses token count must not calibrate a request automatic mode may
-      // send as chat completions.
-      const calibration: Partial<Record<CompatibleProtocol, ObservedRequestCalibration>> = {};
+      return sessionOver(options, endpointFor(options, resolver, profile), clock, {
+        profile: planProfileOf(options),
+        subscriptionUsageGranted: gate.kind === "oauth" ? gate.subscriptionUsageGranted : undefined,
+      });
+    },
+  };
+}
+
+/** One harness session over an endpoint whose credential path is already settled. */
+function sessionOver(
+  options: OpenAiCompatibleDriverOptions,
+  opened: OpenAiCompatibleEndpoint,
+  clock: () => string,
+  plan: {
+    readonly profile: CompatiblePlanProfile;
+    readonly subscriptionUsageGranted: boolean | undefined;
+  },
+): Awaited<ReturnType<HarnessEndpointTransport["open"]>> {
+  let endpoint: OpenAiCompatibleEndpoint | undefined = opened;
+  // What each protocol's last successful call measured and billed. A
+  // responses token count must not calibrate a request automatic mode may
+  // send as chat completions.
+  const calibration: Partial<Record<CompatibleProtocol, ObservedRequestCalibration>> = {};
+  return {
+    fits: (request) =>
+      endpoint !== undefined && requestFits(options, endpoint, request, calibration),
+    send: async (request, stream) => {
+      const active = endpoint;
+      if (active === undefined) throw failure("protocol", "Provider session is not active.");
+      const result = await sendCompatibleRequest(options, active, request, stream, plan);
+      recordObservedTurn(options, result, clock);
+      if (result.usage !== undefined && result.usage.inputTokens > 0) {
+        calibration[result.protocol] = {
+          measured: JSON.stringify(estimateBody(request, result.protocol)).length,
+          tokens: result.usage.inputTokens,
+        };
+      }
       return {
-        fits: (request) =>
-          endpoint !== undefined && requestFits(options, endpoint, request, calibration),
-        send: async (request, stream) => {
-          const active = endpoint;
-          if (active === undefined) throw failure("protocol", "Provider session is not active.");
-          const result = await sendCompatibleRequest(options, active, request, stream, {
-            profile: planProfile,
-            subscriptionUsageGranted,
-          });
-          recordObservedTurn(options, result, clock);
-          if (result.usage !== undefined && result.usage.inputTokens > 0) {
-            calibration[result.protocol] = {
-              measured: JSON.stringify(estimateBody(request, result.protocol)).length,
-              tokens: result.usage.inputTokens,
-            };
-          }
-          return {
-            text: result.text,
-            toolCalls: result.toolCalls,
-            ...(result.usage === undefined ? {} : { usage: result.usage }),
-            ...(result.rateLimitBuckets === undefined
-              ? {}
-              : { rateLimitBuckets: result.rateLimitBuckets }),
-            ...(result.outputStopReason === undefined
-              ? {}
-              : { outputStopReason: result.outputStopReason }),
-            ...(result.servedModelId === undefined ? {} : { servedModelId: result.servedModelId }),
-          };
-        },
-        release: () => {
-          endpoint = undefined;
-        },
+        text: result.text,
+        toolCalls: result.toolCalls,
+        ...(result.usage === undefined ? {} : { usage: result.usage }),
+        ...(result.rateLimitBuckets === undefined
+          ? {}
+          : { rateLimitBuckets: result.rateLimitBuckets }),
+        ...(result.outputStopReason === undefined
+          ? {}
+          : { outputStopReason: result.outputStopReason }),
+        ...(result.servedModelId === undefined ? {} : { servedModelId: result.servedModelId }),
       };
+    },
+    release: () => {
+      endpoint = undefined;
     },
   };
 }
@@ -542,7 +591,7 @@ function oauthResolverInput(
 ) {
   return {
     authentication: profile.authStrategy,
-    expectedDescriptorId: options.configuration.oauthDescriptorId,
+    expectedDescriptorId: subscriptionDescriptorIdOf(options.configuration),
     credentialResolver: options.credentialResolver,
     instanceId: options.instanceId,
     host: options.subscriptionOAuth,
@@ -552,21 +601,117 @@ function oauthResolverInput(
 }
 
 function authStrategyOf(options: OpenAiCompatibleDriverOptions): OpenAiCompatibleAuthStrategy {
-  return options.profile?.authStrategy ?? options.configuration.authentication;
+  return options.profile?.authStrategy ?? openAiCompatibleAuthStrategy(options.configuration);
 }
 
 function endpointFor(
   options: OpenAiCompatibleDriverOptions,
   credentialResolver: ProviderCredentialResolver | undefined,
   profile: OpenAiCompatibleDriverProfile,
+  requestAuthorization?: CompatibleRequestAuthorization,
 ): OpenAiCompatibleEndpoint {
   return makeOpenAiCompatibleEndpoint({
     instanceId: options.instanceId,
     configuration: options.configuration,
     authStrategy: profile.authStrategy,
     ...(credentialResolver === undefined ? {} : { credentialResolver }),
+    ...(requestAuthorization === undefined ? {} : { requestAuthorization }),
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
   });
+}
+
+/**
+ * The endpoint for a directory sign-in: no stored value is ever sent, and
+ * each request resolves its own bearer. A missing or unreadable pointer, or a
+ * store that cannot be reached, refuses before any request.
+ */
+async function directoryEndpointFor(
+  options: OpenAiCompatibleDriverOptions,
+  directory: DirectEndpointDirectoryOAuth,
+  profile: OpenAiCompatibleDriverProfile,
+  clock: () => string,
+): Promise<OpenAiCompatibleEndpoint> {
+  const pointer = await readDirectoryPointer(options.credentialResolver, options.instanceId);
+  if (pointer.kind === "refused") throw refusedFailure(pointer.refusal);
+  return endpointFor(
+    options,
+    undefined,
+    profile,
+    directoryRequestAuthorization({
+      credential: pointer.credential,
+      directory,
+      now: () => Date.parse(clock()),
+    }),
+  );
+}
+
+/**
+ * The authenticated probe of a directory sign-in. Every refusal, whether the
+ * pointer, the broker, or the endpoint gave it, reads as its own readiness
+ * and reason with nothing claimed; the binding it checked is recorded.
+ */
+async function probeDirectoryEndpoint(
+  options: OpenAiCompatibleDriverOptions,
+  directory: DirectEndpointDirectoryOAuth,
+  profile: OpenAiCompatibleDriverProfile,
+  instanceId: ProviderInstanceId,
+  observedAt: UtcTimestamp,
+): Promise<ProviderObservedState> {
+  const binding = observedDirectoryBinding(directory.endpoint);
+  let result: Awaited<ReturnType<typeof probeModels>>;
+  try {
+    const endpoint = await directoryEndpointFor(options, directory, profile, () => observedAt);
+    result = await probeModels(endpoint);
+  } catch (error) {
+    const refusal = directoryRefusalOf(error);
+    if (refusal === undefined) throw error;
+    const report = directoryRefusalReport(refusal);
+    const refused = decodeProviderObservedState({
+      instanceId,
+      readiness: report.readiness,
+      processState: "stopped",
+      credentialStatus: report.credentialStatus,
+      ...(report.unauthenticatedReason === undefined
+        ? {}
+        : { unauthenticatedReason: report.unauthenticatedReason }),
+      ...(binding === undefined ? {} : { directoryBinding: binding }),
+      models: [],
+      capabilities: honestDirectEndpointCapabilities,
+      message: report.message,
+      observedAt,
+    });
+    options.runtimeRegistry.setObservedState(refused);
+    return refused;
+  }
+  return recordProbe(options, profile, instanceId, result, observedAt, binding);
+}
+
+/** A probe that reached the endpoint, as readiness records it. */
+function recordProbe(
+  options: OpenAiCompatibleDriverOptions,
+  profile: OpenAiCompatibleDriverProfile,
+  instanceId: ProviderInstanceId,
+  result: Awaited<ReturnType<typeof probeModels>>,
+  observedAt: UtcTimestamp,
+  directoryBinding?: ProviderObservedState["directoryBinding"],
+): ProviderObservedState {
+  const prior = options.runtimeRegistry.observedState(instanceId);
+  const probe = decodeProviderObservedState({
+    instanceId,
+    readiness: result.readiness,
+    processState: "stopped",
+    ...(profile.authStrategy !== "none" ? { credentialStatus: "stored" } : {}),
+    ...(directoryBinding === undefined ? {} : { directoryBinding }),
+    // What requests taught about each model's window, and a
+    // person's override, outlive the probe a Chat turn runs first.
+    models: carryModelContextWindowFacts(result.models, prior?.models),
+    capabilities: initialCapabilities,
+    ...(result.failure === undefined ? {} : { message: result.failure.message }),
+    lastSuccessfulProbeAt: observedAt,
+    observedAt,
+  });
+  options.runtimeRegistry.setObservedState(probe);
+  return probe;
 }
 
 // Probe tool support by sending a minimal turn with the

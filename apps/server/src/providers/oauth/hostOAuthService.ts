@@ -422,7 +422,7 @@ function wireDescriptor(
     ...(descriptor.clientId === undefined ? {} : { clientId: descriptor.clientId }),
     ...(descriptor.dialect === undefined ? {} : { dialect: descriptor.dialect }),
     flow: descriptor.flow,
-    tokenEndpoint: descriptor.tokenEndpoint,
+    ...(descriptor.tokenEndpoint === undefined ? {} : { tokenEndpoint: descriptor.tokenEndpoint }),
     scopes: descriptor.scopes,
     termsId: descriptor.termsId,
     ...(descriptor.authorizationEndpoint === undefined
@@ -437,6 +437,12 @@ function wireDescriptor(
     ...(descriptor.agentNameHint === undefined ? {} : { agentNameHint: descriptor.agentNameHint }),
     ...(descriptor.resource === undefined ? {} : { resource: descriptor.resource }),
     ...(descriptor.redirectPort === undefined ? {} : { redirectPort: descriptor.redirectPort }),
+    ...(descriptor.tenantId === undefined ? {} : { tenantId: descriptor.tenantId }),
+    ...(descriptor.audience === undefined ? {} : { audience: descriptor.audience }),
+    ...(descriptor.endpointOrigin === undefined
+      ? {}
+      : { endpointOrigin: descriptor.endpointOrigin }),
+    ...(descriptor.issuer === undefined ? {} : { issuer: descriptor.issuer }),
   };
 }
 

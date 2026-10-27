@@ -267,6 +267,38 @@ describe("startOctantServer", () => {
     ).toThrow(/not effective/i);
   });
 
+  it("refuses to construct a driver for an outside driver instance, which nothing admits yet", () => {
+    const instance = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-000000000411",
+      displayName: "Local chat server",
+      driverKind: "outside-harness-endpoint",
+      configuration: {
+        kind: "outside-harness-endpoint",
+        driver: {
+          extensionId: "00000000-0000-4000-8000-000000000911",
+          packageId: "00000000-0000-4000-8000-000000000912",
+          componentId: "provider-driver",
+          version: "1.2.0",
+          digest: `sha256:${"a".repeat(64)}`,
+        },
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-07-15T10:00:00.000Z",
+      updatedAt: "2026-07-15T10:00:00.000Z",
+    });
+
+    expect(() =>
+      makeConfiguredProviderDriver(instance, {
+        openCodeProcess: { start: () => Effect.die("must not start OpenCode") },
+        codexProcess: { start: () => Effect.die("must not start Codex") },
+        runtimeRegistry: new ProviderRuntimeRegistry(),
+        permissionPersistence: () => "current-session",
+      }),
+    ).toThrow(/not effective/i);
+  });
+
   it.each(["openai-image", "gemini-native-image"] as const)(
     "refuses to construct a turn driver for an %s image profile",
     (driverKind) => {
@@ -1035,6 +1067,86 @@ describe("startOctantServer", () => {
           expect(response?.status).toBe(200);
           const body = yield* Effect.promise(() => Promise.resolve(response?.json()));
           expect(body).toMatchObject({ version: 1, entries: [] });
+        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
+      ),
+    );
+  });
+
+  it("registers the physical device routes and refuses a thread the window cannot reach", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-server-apple-device-routes-"));
+    directories.push(directory);
+    let routeHandler: ((request: Request) => Response | Promise<Response>) | undefined;
+    const capability = "A".repeat(43);
+    const windowId = "00000000-0000-4000-8000-000000000483";
+    const deviceRequest = (kind: "discover" | "use-device") => ({
+      actionId: "00000000-0000-4000-8000-000000000484",
+      correlationId: "00000000-0000-4000-8000-000000000485",
+      authority: {
+        hostId: "00000000-0000-4000-8000-000000000486",
+        mode: "code",
+        projectId: "00000000-0000-4000-8000-000000000487",
+        providerInstanceId: "00000000-0000-4000-8000-000000000488",
+        extension: { kind: "core" },
+      },
+      threadId: "00000000-0000-4000-8000-000000000489",
+      checkoutId: "00000000-0000-4000-8000-00000000048a",
+      kind,
+      requestedBy: { kind: "local-user", actorId: "00000000-0000-4000-8000-000000000002" },
+      ...(kind === "discover" ? {} : { deviceId: "00000000-0000-4000-8000-00000000048b" }),
+      timeoutMs: 30_000,
+      approval: { kind: "not-required" },
+    });
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* startOctantServer({
+            hostname: "127.0.0.1",
+            port: 0,
+            desktopBridgeSecret: "desktop-secret",
+            serve: (options) => {
+              routeHandler = options.fetch;
+              return { url: new URL("http://127.0.0.1:13773"), stop: () => undefined };
+            },
+          });
+          const registered = yield* Effect.promise(() =>
+            Promise.resolve(
+              routeHandler?.(
+                new Request("http://127.0.0.1:13773/api/desktop/window-authorities", {
+                  method: "POST",
+                  headers: { "x-octant-desktop-secret": "desktop-secret" },
+                  body: JSON.stringify({ windowId, capability }),
+                }),
+              ),
+            ),
+          );
+          expect(registered?.status).toBe(204);
+
+          for (const [path, kind] of [
+            ["/api/apple/devices", "discover"],
+            ["/api/apple/device-leases", "use-device"],
+          ] as const) {
+            const response = yield* Effect.promise(() =>
+              Promise.resolve(
+                routeHandler?.(
+                  new Request(`http://127.0.0.1:13773${path}`, {
+                    method: "POST",
+                    headers: {
+                      "content-type": "application/json",
+                      "x-octant-window-capability": capability,
+                    },
+                    body: JSON.stringify(deviceRequest(kind)),
+                  }),
+                ),
+              ),
+            );
+            expect(response?.status).toBe(403);
+            const body = yield* Effect.promise(() => Promise.resolve(response?.json()));
+            expect(body).toMatchObject({
+              kind: "apple-device-failure",
+              failure: { category: "unauthorized" },
+            });
+          }
         }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
       ),
     );

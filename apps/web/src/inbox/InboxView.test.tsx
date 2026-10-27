@@ -68,21 +68,12 @@ function decisionClients() {
 }
 
 describe("InboxView decisions", () => {
-  it("lists a finished turn's decision once and sends the option whose number is pressed", async () => {
+  it("lists a finished turn's decision and sends the option whose number is pressed", async () => {
     const user = userEvent.setup();
     const clients = decisionClients();
     render(
       <InboxView
-        attentionItems={[
-          {
-            signal: {
-              threadId: pendingIds.codeThread,
-              reason: "turn-finished",
-              title: "Fix the parser",
-              source: "code",
-            },
-          },
-        ]}
+        attentionItems={[]}
         decisions={decisionSource(clients, [codeDecision()], [])}
         onClose={vi.fn()}
         onOpenThread={vi.fn()}
@@ -91,7 +82,6 @@ describe("InboxView decisions", () => {
 
     const row = await screen.findByRole("group", { name: "Fix the parser asks you to decide" });
     expect(within(row).getByText("octant")).toBeInTheDocument();
-    expect(screen.queryByText("Finished a turn")).not.toBeInTheDocument();
     within(row)
       .getByRole("button", { name: /Open it/ })
       .focus();
@@ -155,31 +145,6 @@ describe("InboxView waiting subagents", () => {
     expect(source.onOpenThread).toHaveBeenCalledExactlyOnceWith(workChildApproval());
     expect(clients.workRequestClient.execute).not.toHaveBeenCalled();
   });
-
-  it("keeps a finished turn's own row beside a subagent's wait on the same thread", async () => {
-    render(
-      <InboxView
-        attentionItems={[
-          {
-            signal: {
-              threadId: pendingIds.codeThread,
-              reason: "turn-finished",
-              title: "Fix the parser",
-              source: "code",
-            },
-          },
-        ]}
-        decisions={decisionSource(decisionClients(), [codeChildQuestion()])}
-        onClose={vi.fn()}
-        onOpenThread={vi.fn()}
-      />,
-    );
-
-    expect(
-      await screen.findByRole("group", { name: "Fix the parser has a subagent waiting for you" }),
-    ).toBeVisible();
-    expect(screen.getByText("Finished a turn")).toBeVisible();
-  });
 });
 
 describe("InboxView waiting agent approvals", () => {
@@ -225,31 +190,6 @@ describe("InboxView waiting agent approvals", () => {
       await screen.findByRole("group", { name: "Quarterly report needs your approval" }),
     ).toBeVisible();
     expect(screen.queryByText("Waiting for your approval.")).not.toBeInTheDocument();
-  });
-
-  it("does not list a thread's unread finished turn beside the approval it now waits on", async () => {
-    render(
-      <InboxView
-        attentionItems={[
-          {
-            signal: {
-              threadId: pendingIds.workThread,
-              reason: "turn-finished",
-              title: "Quarterly report",
-              source: "work",
-            },
-          },
-        ]}
-        decisions={decisionSource(decisionClients(), [workLeadApproval()])}
-        onClose={vi.fn()}
-        onOpenThread={vi.fn()}
-      />,
-    );
-
-    expect(
-      await screen.findByRole("group", { name: "Quarterly report needs your approval" }),
-    ).toBeVisible();
-    expect(screen.queryByText("Finished a turn")).not.toBeInTheDocument();
   });
 
   it("keeps the thread's attention row when this window cannot read the list", () => {

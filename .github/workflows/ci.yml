@@ -133,9 +133,26 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run --cwd apps/desktop typecheck
       - run: bun run --cwd apps/desktop test
+      # Confined Code and Work opens prove where they landed with
+      # O_NOFOLLOW_ANY on macOS and /proc/self/fd on Linux. The server job
+      # runs only the Linux path, so the ancestor-swap port tests run here too.
+      - run: >-
+          bun run --cwd apps/server test --
+          src/code/codeDirectoryPort.test.ts
+          src/work/workFilesystemPort.test.ts
+          src/work/workConfinedWrite.test.ts
       # The scripts suite covers the signing pipeline: what would be run, in
       # what order, and that a declared release refuses to finish unsigned. The
       # signing itself needs the maintainer's Developer ID and notary
       # credentials, so it is not exercised here — no secret is read on a pull
       # request, and this job deliberately does not package a release.
       - run: bun run --cwd scripts test
+      # Language services: the bundled TypeScript server answers a two-file
+      # fixture under Seatbelt, and a hostile server a person added cannot run
+      # another program, reach the network, or write the checkout. The Linux
+      # server shards run the same tests under Bubblewrap; this is their macOS
+      # evidence.
+      - run: >-
+          bun run --cwd apps/server test --
+          src/code/codeLanguageServiceProcess.test.ts
+          src/code/installedLanguageServersProcess.test.ts

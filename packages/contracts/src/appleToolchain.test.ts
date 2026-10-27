@@ -659,3 +659,186 @@ describe("Apple runtime contracts", () => {
     ).toBe("capturing-screen");
   });
 });
+
+describe("Apple physical device contracts", () => {
+  const device = {
+    deviceId: "30000000-0000-4000-8000-000000000001",
+    name: "Henrik's iPhone",
+    model: "iPhone 16 Pro",
+    platform: "ios",
+    osVersion: "26.1",
+    connection: "wired",
+    state: "connected",
+  };
+  const agent = {
+    kind: "agent",
+    actorId: "30000000-0000-4000-8000-000000000010",
+    providerInstanceId: "30000000-0000-4000-8000-000000000011",
+    threadId: "30000000-0000-4000-8000-000000000007",
+  };
+  const request = {
+    actionId: "30000000-0000-4000-8000-000000000002",
+    correlationId: "30000000-0000-4000-8000-000000000003",
+    authority: {
+      hostId: "30000000-0000-4000-8000-000000000004",
+      mode: "code",
+      projectId: "30000000-0000-4000-8000-000000000005",
+      providerInstanceId: "30000000-0000-4000-8000-000000000006",
+      extension: { kind: "core" },
+    },
+    threadId: "30000000-0000-4000-8000-000000000007",
+    checkoutId: "30000000-0000-4000-8000-000000000008",
+    kind: "status",
+    deviceId: device.deviceId,
+    requestedBy: agent,
+    timeoutMs: 30_000,
+    approval: { kind: "not-required" },
+  };
+
+  it("keeps a device's hardware identifiers out of the record the agent and remotes see", () => {
+    expect(AppleContracts.decodeAppleDeviceRecord(device).name).toBe("Henrik's iPhone");
+    for (const identifier of ["udid", "serialNumber", "ecid", "coreDeviceIdentifier"]) {
+      expect(() =>
+        AppleContracts.decodeAppleDeviceRecord({ ...device, [identifier]: "00008140-000A" }),
+      ).toThrow();
+    }
+  });
+
+  it("admits only iPhone and iPad hardware as a device destination", () => {
+    expect(() =>
+      AppleContracts.decodeAppleDeviceRecord({ ...device, platform: "watchos" }),
+    ).toThrow();
+  });
+
+  it("reports every device state the policy refuses by", () => {
+    for (const state of ["connected", "locked", "developer-mode-off", "untrusted", "unavailable"]) {
+      expect(AppleContracts.decodeAppleDeviceRecord({ ...device, state }).state).toBe(state);
+    }
+  });
+
+  it("refuses a device request that does not say who asked for it", () => {
+    const { requestedBy: _requestedBy, ...anonymous } = request;
+    expect(() => AppleContracts.decodeAppleDeviceRequest(anonymous)).toThrow();
+  });
+
+  it("has no way to ask a build for provisioning updates", () => {
+    const build = {
+      ...request,
+      kind: "build",
+      projectPath: "App.xcodeproj",
+      teamId: "A1B2C3D4E5",
+      approval: { kind: "pending" },
+    };
+    expect(AppleContracts.decodeAppleDeviceRequest(build).teamId).toBe("A1B2C3D4E5");
+    expect(() =>
+      AppleContracts.decodeAppleDeviceRequest({ ...build, allowProvisioningUpdates: true }),
+    ).toThrow();
+    // Signing is selected by team; a build without one cannot be signed for a device.
+    const { teamId: _teamId, ...unsigned } = build;
+    expect(() => AppleContracts.decodeAppleDeviceRequest(unsigned)).toThrow();
+    expect(() =>
+      AppleContracts.decodeAppleDeviceRequest({ ...build, teamId: "not-a-team" }),
+    ).toThrow();
+  });
+
+  it("installs only an Octant-held product reference, never a path", () => {
+    const install = { ...request, kind: "install", artifact: "apple-product-1" };
+    expect(AppleContracts.decodeAppleDeviceRequest(install).artifact).toBe("apple-product-1");
+    expect(() =>
+      AppleContracts.decodeAppleDeviceRequest({ ...install, artifact: "/Users/me/Other.app" }),
+    ).toThrow();
+    expect(() =>
+      AppleContracts.decodeAppleDeviceRequest({ ...request, kind: "install" }),
+    ).toThrow();
+  });
+
+  it("requires the bundle a launch, terminate, uninstall, or log read acts on", () => {
+    for (const kind of ["launch", "terminate", "uninstall", "logs"]) {
+      expect(() => AppleContracts.decodeAppleDeviceRequest({ ...request, kind })).toThrow();
+      expect(
+        AppleContracts.decodeAppleDeviceRequest({
+          ...request,
+          kind,
+          bundleIdentifier: "sh.octant.Fixture",
+        }).kind,
+      ).toBe(kind);
+    }
+  });
+
+  it("names a device for every operation but discovery and distribution", () => {
+    const { deviceId: _deviceId, ...noDevice } = request;
+    for (const kind of ["discover", "upload", "submit-for-review", "release-version"] as const) {
+      expect(AppleContracts.decodeAppleDeviceRequest({ ...noDevice, kind }).kind).toBe(kind);
+      expect(() => AppleContracts.decodeAppleDeviceRequest({ ...request, kind })).toThrow();
+    }
+    expect(() =>
+      AppleContracts.decodeAppleDeviceRequest({ ...noDevice, kind: "use-device" }),
+    ).toThrow();
+  });
+
+  it("names the holding thread only on a request to move a lease", () => {
+    const fromThreadId = "30000000-0000-4000-8000-000000000020";
+    expect(
+      AppleContracts.decodeAppleDeviceRequest({ ...request, kind: "use-device", fromThreadId })
+        .fromThreadId,
+    ).toBe(fromThreadId);
+    expect(() =>
+      AppleContracts.decodeAppleDeviceRequest({ ...request, kind: "release-device", fromThreadId }),
+    ).toThrow();
+  });
+
+  it("answers a discovery that says a device is leased without naming the other thread", () => {
+    const answer = AppleContracts.decodeAppleDeviceResponse({
+      kind: "apple-device-discovery",
+      discovery: {
+        devices: [device],
+        tooling: ["list-devices", "install-app"],
+        leases: [{ deviceId: device.deviceId, holder: "another-thread" }],
+        discoveredAt: "2026-10-26T12:00:00.000Z",
+      },
+    });
+    expect(answer.kind).toBe("apple-device-discovery");
+    expect(() =>
+      AppleContracts.decodeAppleDeviceResponse({
+        kind: "apple-device-discovery",
+        discovery: {
+          devices: [device],
+          tooling: [],
+          leases: [
+            { deviceId: device.deviceId, holder: "another-thread", threadId: request.threadId },
+          ],
+          discoveredAt: "2026-10-26T12:00:00.000Z",
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      AppleContracts.decodeAppleDeviceResponse({
+        kind: "apple-device-refused",
+        reason: "destination-leased",
+        threadId: request.threadId,
+      }),
+    ).toThrow();
+  });
+
+  it("records a lease only as granted by a person at the Mac", () => {
+    const lease = {
+      deviceId: device.deviceId,
+      threadId: request.threadId,
+      checkoutId: request.checkoutId,
+      grantedBy: { kind: "local-user", actorId: "30000000-0000-4000-8000-000000000030" },
+      grantedAt: "2026-10-26T12:00:00.000Z",
+    };
+    expect(AppleContracts.decodeAppleDeviceLease(lease).grantedBy.kind).toBe("local-user");
+    expect(() => AppleContracts.decodeAppleDeviceLease({ ...lease, grantedBy: agent })).toThrow();
+    expect(() =>
+      AppleContracts.decodeAppleDeviceLease({
+        ...lease,
+        grantedBy: {
+          kind: "remote-device",
+          actorId: "30000000-0000-4000-8000-000000000030",
+          deviceId: "30000000-0000-4000-8000-000000000031",
+        },
+      }),
+    ).toThrow();
+  });
+});

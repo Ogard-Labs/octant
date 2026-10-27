@@ -11,6 +11,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative } from "node:path";
+import type { ExtensionProcessSandbox } from "./extensionSupervisor";
 import type { InspectedExtensionPackage } from "./packageInspector";
 import { calculateExtensionPackageDigest, type ExtensionArchiveEntry } from "./packageInspector";
 
@@ -69,9 +70,19 @@ export class ExtensionPackageStore {
   readonly #quarantine: string;
   readonly #metadata: string;
   readonly #pluginData: string;
+  readonly #outsideDriverRuntime: string | undefined;
 
-  constructor(options: { readonly dataDirectory: string; readonly uuid: () => string }) {
+  constructor(options: {
+    readonly dataDirectory: string;
+    readonly uuid: () => string;
+    /**
+     * The runtime an outside provider driver's entry runs on: the Bun that
+     * runs this server. Without one, no driver launch is authorized.
+     */
+    readonly outsideDriverRuntime?: string;
+  }) {
     this.#uuid = options.uuid;
+    this.#outsideDriverRuntime = options.outsideDriverRuntime;
     this.#root = join(options.dataDirectory, "extensions");
     this.#staging = join(this.#root, "staging");
     this.#versions = join(this.#root, "versions");
@@ -233,6 +244,29 @@ export class ExtensionPackageStore {
     }
   }
 
+  /**
+   * The absolute path of a component's declared executable entry point, only
+   * after the whole stored version is verified against its digest; undefined
+   * when it is not, or when the component declares no executable entry.
+   */
+  async verifiedEntryPoint(
+    target: ExtensionVersionReference,
+    componentId: string,
+  ): Promise<string | undefined> {
+    try {
+      validateTarget(target);
+      if (!(await this.verifyVersion(target))) return undefined;
+      const directory = this.#versionPath(target);
+      const receipt = await readReceipt(directory);
+      const relativeEntryPoint = receipt.entryPoints[componentId];
+      const entry = receipt.files.find((file) => file.path === relativeEntryPoint);
+      if (relativeEntryPoint === undefined || entry?.executable !== true) return undefined;
+      return safeContentPath(join(directory, "content"), relativeEntryPoint);
+    } catch {
+      return undefined;
+    }
+  }
+
   contentRoot(target: ExtensionVersionReference): string {
     validateTarget(target);
     return join(this.#versionPath(target), "content");
@@ -280,7 +314,9 @@ export class ExtensionPackageStore {
     readonly digest: string;
     readonly entryPoint: string;
     readonly command: string;
+    readonly args?: ReadonlyArray<string>;
     readonly cwd: string;
+    readonly sandbox?: ExtensionProcessSandbox | undefined;
   }): Promise<boolean> {
     const target: ExtensionVersionReference = {
       extensionId: input.extensionId,
@@ -300,6 +336,32 @@ export class ExtensionPackageStore {
       );
       const cwdAllowed =
         isContainedPath(contentRoot, input.cwd) || isContainedPath(pluginDataRoot, input.cwd);
+      const component = receipt.manifest.components.find(
+        (candidate) => candidate.id === input.componentId,
+      );
+      if (component?.kind === "provider-driver") {
+        // A stored provider driver is an outside driver: the package ships no
+        // executable, so the host's own runtime runs its one entry module, in
+        // the package root, with nothing else on the command line, and only
+        // under the driver profile bound to that root: the same entry launched
+        // with no sandbox, or the MCP server's, would run unconfined or with
+        // network, on Linux as well.
+        if (relativeEntryPoint === undefined || this.#outsideDriverRuntime === undefined) {
+          return false;
+        }
+        const entry = receipt.files.find((file) => file.path === relativeEntryPoint);
+        const expectedEntryPoint = safeContentPath(contentRoot, relativeEntryPoint);
+        return (
+          entry?.executable === false &&
+          input.entryPoint === expectedEntryPoint &&
+          input.command === this.#outsideDriverRuntime &&
+          input.args?.length === 1 &&
+          input.args[0] === expectedEntryPoint &&
+          input.cwd === contentRoot &&
+          input.sandbox?.kind === "outside-driver" &&
+          input.sandbox.packageRoot === contentRoot
+        );
+      }
       if (relativeEntryPoint !== undefined) {
         const entry = receipt.files.find((file) => file.path === relativeEntryPoint);
         if (entry?.executable !== true) return false;

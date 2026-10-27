@@ -1214,4 +1214,95 @@ describe("code client", () => {
       expect.objectContaining({ method: "GET" }),
     );
   });
+
+  it("opens an editor document and reads a definition through the host's language routes", async () => {
+    const fileId = "b0000000-0000-4000-8000-000000000001";
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          status: "synced",
+          threadId: ids.thread,
+          checkoutId: ids.checkout,
+          fileId,
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          status: "definition",
+          threadId: ids.thread,
+          checkoutId: ids.checkout,
+          fileId,
+          targets: [{ kind: "outside-checkout", label: "bundled-library" }],
+        }),
+      );
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+
+    await expect(
+      client.syncLanguageDocument?.({
+        kind: "open",
+        threadId: ids.thread as never,
+        checkoutId: ids.checkout as never,
+        path: "src/b.ts" as never,
+        text: "export const b = 1;\n",
+      }),
+    ).resolves.toMatchObject({ status: "synced", fileId });
+    await expect(
+      client.readLanguage?.({
+        kind: "definition",
+        threadId: ids.thread as never,
+        checkoutId: ids.checkout as never,
+        fileId: fileId as never,
+        position: { line: 0, character: 13 },
+      }),
+    ).resolves.toMatchObject({ status: "definition", targets: [{ label: "bundled-library" }] });
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      `${baseUrl}/api/code/language/documents`,
+      `${baseUrl}/api/code/language/read`,
+    ]);
+
+    // A read that names a path instead of a file reference never leaves the client.
+    await expect(
+      client.readLanguage?.({
+        kind: "diagnostics",
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+        path: "src/b.ts",
+      } as never),
+    ).rejects.toMatchObject({ category: "invalid" });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("approves the server for a file by path through the host's approval route", async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(
+      Response.json({
+        status: "approved",
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+        scope: "project",
+      }),
+    );
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+    const approval = {
+      threadId: ids.thread as never,
+      checkoutId: ids.checkout as never,
+      path: "cmd/main.go" as never,
+      scope: "project" as const,
+    };
+
+    await expect(client.approveLanguageServer?.(approval)).resolves.toMatchObject({
+      status: "approved",
+      scope: "project",
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/code/language/approvals`,
+      expect.objectContaining({ method: "POST", body: JSON.stringify(approval) }),
+    );
+
+    // A request that names a server rather than a file never leaves the client.
+    await expect(
+      client.approveLanguageServer?.({ ...approval, component: "any" } as never),
+    ).rejects.toMatchObject({ category: "invalid" });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
 });

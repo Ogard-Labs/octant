@@ -1,4 +1,9 @@
 import type { OctantMode } from "@octant/contracts/modes";
+import {
+  acpAgentProfile,
+  isAcpAgentKind,
+  type AcpAgentKind,
+} from "@octant/contracts/acp-agent-profiles";
 import type { ProviderDriverKind } from "@octant/contracts/providers";
 import type { HiddenProviderModelRef, ProviderInstance } from "@octant/contracts/providers";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
@@ -20,25 +25,13 @@ import {
   providerKeepsConversation,
 } from "./providerPolicy";
 
-const driverLabels: Readonly<Record<ProviderDriverKind, string>> = {
+const driverLabels: Readonly<Record<Exclude<ProviderDriverKind, AcpAgentKind>, string>> = {
   codex: "Codex CLI",
   claude: "Claude Agent SDK",
   opencode: "OpenCode CLI",
-  kilo: "Kilo ACP",
   pi: "Pi RPC",
   "oh-my-pi": "Oh My Pi",
-  devin: "Devin ACP",
-  "mistral-vibe": "Mistral Vibe ACP",
   ollama: "Ollama",
-  "kimi-code": "Kimi Code ACP",
-  grok: "Grok Build ACP",
-  goose: "Goose ACP",
-  glm: "GLM Agent ACP",
-  gemini: "Gemini CLI ACP",
-  copilot: "GitHub Copilot ACP",
-  cline: "Cline ACP",
-  qwen: "Qwen Code ACP",
-  fx: "fx ACP",
   "openai-compatible": "OpenAI-compatible HTTP",
   "anthropic-compatible": "Anthropic-compatible HTTP",
   "azure-foundry": "Azure AI Foundry",
@@ -46,10 +39,15 @@ const driverLabels: Readonly<Record<ProviderDriverKind, string>> = {
   "gemini-native-image": "Gemini Image",
   "bfl-image": "Black Forest Labs Image",
   "ideogram-image": "Ideogram Image",
+  // A bundled kind's name is never borrowed: an outside instance is labelled
+  // as what it is, beside its package's own display name.
+  "outside-harness-endpoint": "Outside driver",
 };
 
 export function driverLabel(driverKind: ProviderDriverKind): string {
-  return driverLabels[driverKind];
+  return isAcpAgentKind(driverKind)
+    ? `${acpAgentProfile(driverKind).name} ACP`
+    : driverLabels[driverKind];
 }
 
 export function endpointHostOf(instance: ProviderInstance): string | undefined {

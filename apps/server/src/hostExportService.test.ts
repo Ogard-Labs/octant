@@ -2,6 +2,7 @@ import { CANVAS_SCHEMA_VERSION } from "@octant/contracts/canvas";
 import { decodeHostId } from "@octant/contracts/host";
 import { decodeUtcTimestamp } from "@octant/contracts/events";
 import { decodeProjectId } from "@octant/contracts/projects";
+import { decodeHostExportSshTarget } from "@octant/contracts/host-export";
 import { ThreadPurgeTombstone } from "@octant/contracts/thread-retention";
 import { decodeWindowId } from "@octant/contracts";
 import { decodeProviderInstanceId, decodeProviderModelId } from "@octant/contracts/providers";
@@ -22,6 +23,16 @@ const hostId = decodeHostId("local");
 const windowId = decodeWindowId("70000000-0000-4000-8000-000000000002");
 const projectId = decodeProjectId("20000000-0000-4000-8000-000000000001");
 const SEEDED_CREDENTIAL = "seeded-credential-do-not-export";
+const SSH_TARGET = decodeHostExportSshTarget({
+  targetId: "30000000-0000-4000-8000-000000000001",
+  registeredAt: now,
+  projectIds: ["20000000-0000-4000-8000-000000000002"],
+  lastAttestation: {
+    attestedAt: now,
+    factsDigest: "a".repeat(64),
+    admission: [{ posture: "plan", decision: { status: "admitted" } }],
+  },
+});
 
 const THREADS = {
   chat: ["00000000-0000-4000-8000-000000000901", "00000000-0000-4000-8000-000000000902"],
@@ -159,6 +170,7 @@ function service(
       apiKey: SEEDED_CREDENTIAL,
       password: SEEDED_CREDENTIAL,
     }),
+    sshTargets: () => [SSH_TARGET],
     usage: {
       list: () => ({ rows: [], nextAfterSequence: undefined }),
     },
@@ -225,6 +237,7 @@ describe("host export", () => {
     // Canvas, which names no Project, is carried with its definition.
     expect(assembled.bundle.canvases).toEqual([THREAD_OWNED_CANVAS]);
     expect(assembled.bundle.retention.tombstones).toHaveLength(1);
+    expect(assembled.bundle.sshTargets).toEqual([SSH_TARGET]);
     expect(assembled.bundle.omissions.map((omission) => omission.subject)).toContain(
       "unrepresentable-record",
     );

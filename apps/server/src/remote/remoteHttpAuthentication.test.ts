@@ -25,6 +25,7 @@ import { RemoteCredentialLifecycleService } from "../remoteCredentialLifecycleSe
 import {
   createRemoteRouteHandler,
   createRemoteRoutePolicy,
+  listDefaultRemoteAuthenticatedRoutes,
   type RemoteRouteDefinition,
 } from "../remoteRoutePolicy";
 import { canonicalDeviceKeyFacts } from "./deviceKeyFacts";
@@ -703,6 +704,93 @@ describe("remote HTTP authentication boundary", () => {
       transport,
     );
     expect(refused.status).toBe(400);
+    expect(dispatched).toHaveLength(1);
+    connection.close();
+  });
+
+  it("takes an attachment upload above the default body bound and within the route's own", async () => {
+    const { auth, privateKey, dispatched, connection } = setup({ withDispatch: true });
+    const { session } = await issueSessionOverHttp(auth, privateKey);
+    const route: RemoteRouteDefinition = {
+      id: "product-api-chat-attachments",
+      match: { kind: "exact", path: "/api/chat/attachments" },
+      surface: "authenticated-product",
+      methods: ["POST"],
+      allowedContentTypes: ["image/jpeg"],
+      maxBodyBytes: 4 * 1_048_576,
+      uploadsAttachment: true,
+    };
+    const photo = await auth.handleAuthenticated(
+      productRequest(session, privateKey, {
+        target: "/api/chat/attachments",
+        body: "x".repeat(2 * 1_048_576),
+        contentType: "image/jpeg",
+        nonce: "nonce_photo_upload_12345",
+      }),
+      transport,
+      route,
+    );
+    expect(photo.status).toBe(200);
+    expect(dispatched[0]?.bodyText).toHaveLength(2 * 1_048_576);
+
+    const oversized = await auth.handleAuthenticated(
+      productRequest(session, privateKey, {
+        target: "/api/chat/attachments",
+        body: "x".repeat(4 * 1_048_576 + 1),
+        contentType: "image/jpeg",
+        nonce: "nonce_photo_oversized_12",
+      }),
+      transport,
+      route,
+    );
+    expect(oversized.status).toBe(413);
+    expect(dispatched).toHaveLength(1);
+    connection.close();
+  });
+
+  it("authenticates a paired device's multipart dictation clip only on the transcription route", async () => {
+    const { auth, privateKey, dispatched, connection } = setup({ withDispatch: true });
+    const { session } = await issueSessionOverHttp(auth, privateKey);
+    const route = listDefaultRemoteAuthenticatedRoutes().find(
+      (candidate) => candidate.id === "speech-transcriptions",
+    );
+    if (route === undefined) throw new Error("The transcription route is not forwarded.");
+    const clip =
+      "--octant-voice\r\n" +
+      'Content-Disposition: form-data; name="audio"; filename="recording"\r\n' +
+      "Content-Type: audio/mp4\r\n\r\n" +
+      "....ftypM4A \r\n--octant-voice--\r\n";
+    const response = await auth.handleAuthenticated(
+      productRequest(session, privateKey, {
+        target: "/api/speech/transcriptions",
+        body: clip,
+        contentType: "multipart/form-data; boundary=octant-voice",
+      }),
+      transport,
+      route,
+    );
+    expect(response.status).toBe(200);
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0]?.bodyText).toBe(clip);
+
+    const json = await auth.handleAuthenticated(
+      productRequest(session, privateKey, {
+        target: "/api/speech/transcriptions",
+        nonce: "nonce_voice_json_1234567",
+      }),
+      transport,
+      route,
+    );
+    expect(json.status).toBe(400);
+    const elsewhere = await auth.handleAuthenticated(
+      productRequest(session, privateKey, {
+        body: clip,
+        contentType: "multipart/form-data; boundary=octant-voice",
+        nonce: "nonce_voice_other_123456",
+      }),
+      transport,
+    );
+    expect(elsewhere.status).toBe(400);
     expect(dispatched).toHaveLength(1);
     connection.close();
   });

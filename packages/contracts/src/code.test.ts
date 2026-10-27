@@ -180,6 +180,12 @@ describe("Code aggregate contracts", () => {
     expect(decodeCodeSettings({ ...settings, requireGitRepository: false })).toMatchObject({
       requireGitRepository: false,
     });
+    // The bundled language server switch is on unless a person turned it off,
+    // so a store from before it existed carries no value and reads as on.
+    expect(decodeCodeSettings(settings)).not.toHaveProperty("bundledLanguageServer");
+    expect(decodeCodeSettings({ ...settings, bundledLanguageServer: false })).toMatchObject({
+      bundledLanguageServer: false,
+    });
     // Rows and events written while threads without a Project had their own
     // switch still decode. The Git requirement alone is the choice now, so
     // every stored pair keeps the requirement it had and the old switch is
@@ -313,6 +319,15 @@ describe("Code aggregate contracts", () => {
       allowDefaultFolderThreads: true,
     });
     expect(fromOlderWindow).toMatchObject({ requireGitRepository: false });
+    expect(
+      decodeCodeCommand({
+        kind: "update-code-settings",
+        expectedVersion: 1,
+        defaultExecutionPolicy: "approval-gated",
+        defaultPermissionPersistence: "current-session",
+        bundledLanguageServer: false,
+      }),
+    ).toMatchObject({ bundledLanguageServer: false });
     expect(fromOlderWindow).not.toHaveProperty("allowDefaultFolderThreads");
     expect(() =>
       decodeCodeCommand({

@@ -4,8 +4,18 @@ const configuredMockScenario = process.env.OCTANT_MOBILE_MOCK_SCENARIO?.trim();
 const allowMockScenario =
   process.env.NODE_ENV !== "production" && process.env.EAS_BUILD_PROFILE !== "production";
 
-const PAIRING_SCANNER_CAMERA_PERMISSION =
-  "Octant uses the camera only to scan the pairing QR code another computer shows.";
+// Both camera uses are named, because the image picker and the pairing scanner
+// each write this one reason. The app asks for no location access at all.
+const CAMERA_PERMISSION =
+  "Octant uses the camera to scan the pairing QR code another computer shows, and to take a photo you attach to a thread.";
+const PHOTO_LIBRARY_PERMISSION =
+  "Octant uses your photo library to attach a photo you choose to a thread, and to set a local app background.";
+
+// Every plugin that can declare the microphone names the same single use:
+// one of them left at `false` would remove the iOS string, or block the
+// Android permission, that dictation needs.
+const DICTATION_MICROPHONE_PERMISSION =
+  "Octant uses the microphone only while you record a message to dictate. Your paired computer turns it into text, and the recording is not kept.";
 
 const config: ExpoConfig = {
   name: "Octant",
@@ -47,23 +57,31 @@ const config: ExpoConfig = {
     "expo-local-authentication",
     "expo-font",
     "expo-system-ui",
-    // The image picker reads only the photo library, but its plugin would
-    // block the camera permission the pairing scanner needs, so both name
-    // the scanner's reason.
     [
       "expo-image-picker",
       {
-        photosPermission: "Octant uses your photo library only to set a local app background.",
-        cameraPermission: PAIRING_SCANNER_CAMERA_PERMISSION,
-        microphonePermission: false,
+        photosPermission: PHOTO_LIBRARY_PERMISSION,
+        cameraPermission: CAMERA_PERMISSION,
+        microphonePermission: DICTATION_MICROPHONE_PERMISSION,
       },
     ],
     [
       "expo-camera",
       {
-        cameraPermission: PAIRING_SCANNER_CAMERA_PERMISSION,
-        microphonePermission: false,
+        cameraPermission: CAMERA_PERMISSION,
+        microphonePermission: DICTATION_MICROPHONE_PERMISSION,
         recordAudioAndroid: false,
+      },
+    ],
+    // Dictation records in the foreground only: no background audio mode on
+    // iOS and no foreground service on Android.
+    [
+      "expo-audio",
+      {
+        microphonePermission: DICTATION_MICROPHONE_PERMISSION,
+        recordAudioAndroid: true,
+        enableBackgroundRecording: false,
+        enableBackgroundPlayback: false,
       },
     ],
   ],

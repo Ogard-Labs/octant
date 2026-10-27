@@ -15,6 +15,9 @@ import {
   type VoiceSettings,
 } from "@octant/contracts";
 import {
+  admitRemoteTranscription,
+  pairedDeviceSpeechStatusOf,
+  REMOTE_TRANSCRIPTION_MAX_AUDIO_BYTES,
   resolveSpeechEndpoint,
   speechStatusOf,
   VOICE_SYNTHESIS_TARGET,
@@ -23,7 +26,8 @@ import {
 } from "@octant/domain";
 import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
 import type { CompatibleFetch } from "../providers/openAiCompatibleEndpoint";
-import { authenticateRouteWindowId } from "../principalRouteContext";
+import type { ClientPrincipal } from "../clientPrincipal";
+import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import { makeOpenAiCompatibleSpeechAdapter, type SpeechAdapter } from "./speechAdapter";
@@ -37,7 +41,11 @@ const SYNTHESIS_PATH = "/api/speech/synthesis";
 // Multipart framing around a maximal clip: boundaries, part headers, model
 // and language fields. Anything beyond this is refused before it is buffered.
 const TRANSCRIPTION_BODY_LIMIT = SPEECH_TRANSCRIPTION_MAX_AUDIO_BYTES + 65_536;
+const PAIRED_TRANSCRIPTION_BODY_LIMIT = REMOTE_TRANSCRIPTION_MAX_AUDIO_BYTES + 65_536;
 const SYNTHESIS_BODY_LIMIT = 65_536;
+// Paired devices together may hold every transcription slot but one, so the
+// computer's own dictation never answers busy because phones are sending.
+const PAIRED_TRANSCRIPTION_SLOTS = SPEECH_HOST_CONCURRENCY - 1;
 
 export interface SpeechRouteDependencies {
   readonly readVoiceSettings: () => VoiceSettings;
@@ -62,6 +70,12 @@ export interface SpeechRouteDependencies {
  * pass through and are never journaled or stored: the caller decides what to
  * do with a transcript, and a composer that receives one still needs the
  * person to send it.
+ *
+ * A paired device reaches status and transcription only. Each device sends one
+ * clip at a time within its own budget, counted in memory from admission, and
+ * paired devices together leave one host slot for the computer's own windows,
+ * so phones cannot crowd out local dictation or run up the owner's endpoint;
+ * a device is told read-aloud is unavailable and refused it if it asks anyway.
  */
 export function createSpeechRouteHandler(dependencies: SpeechRouteDependencies) {
   const now = dependencies.now ?? Date.now;
@@ -69,6 +83,11 @@ export function createSpeechRouteHandler(dependencies: SpeechRouteDependencies) 
     transcription: new AdmissionGate(SPEECH_HOST_CONCURRENCY),
     synthesis: new AdmissionGate(SPEECH_HOST_CONCURRENCY),
   };
+  // Admission times per paired device inside the budget window, and the
+  // devices with a clip being transcribed now. Nothing here outlives the
+  // process: a restart is the owner's act and starts every budget afresh.
+  const pairedClipAdmissions = new Map<string, ReadonlyArray<number>>();
+  const pairedClipsInFlight = new Set<string>();
   const adapterFor =
     dependencies.makeAdapter ??
     ((resolution) =>
@@ -95,12 +114,13 @@ export function createSpeechRouteHandler(dependencies: SpeechRouteDependencies) 
       return new Response(null, { status: 204, headers: corsHeaders(origin) });
     }
 
+    let principal: ClientPrincipal;
     try {
-      authenticateRouteWindowId({
+      principal = authenticateRoutePrincipal({
         request,
         store: dependencies.windowAuthorityStore,
         now: now(),
-      });
+      }).principal;
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
         return refuse("Speech request is unauthorized.", "invalid", 401, origin);
@@ -108,10 +128,14 @@ export function createSpeechRouteHandler(dependencies: SpeechRouteDependencies) 
       return refuse("Speech request is invalid.", "invalid", 400, origin);
     }
 
+    const pairedDeviceId =
+      principal.kind === "remote-device" ? String(principal.deviceId) : undefined;
+
     if (url.pathname === STATUS_PATH && request.method === "GET") {
+      const statusOf = pairedDeviceId === undefined ? speechStatusOf : pairedDeviceSpeechStatusOf;
       return json(
         decodeSpeechStatusResponse(
-          speechStatusOf(dependencies.readVoiceSettings(), dependencies.listInstances()),
+          statusOf(dependencies.readVoiceSettings(), dependencies.listInstances()),
         ),
         200,
         origin,
@@ -119,27 +143,83 @@ export function createSpeechRouteHandler(dependencies: SpeechRouteDependencies) 
     }
 
     if (url.pathname === TRANSCRIPTIONS_PATH && request.method === "POST") {
-      return transcribe(request, origin);
+      return transcribe(request, origin, pairedDeviceId);
     }
 
     if (url.pathname === SYNTHESIS_PATH && request.method === "POST") {
+      if (pairedDeviceId !== undefined) {
+        return refuse(
+          "Read-aloud is available only on the computer itself.",
+          "unsupported",
+          403,
+          origin,
+        );
+      }
       return synthesize(request, origin);
     }
 
     return refuse("Speech request is invalid.", "invalid", 405, origin);
   };
 
-  async function transcribe(request: Request, origin: string | null): Promise<Response> {
+  async function transcribe(
+    request: Request,
+    origin: string | null,
+    pairedDeviceId: string | undefined,
+  ): Promise<Response> {
     const resolution = resolve(dependencies.readVoiceSettings().transcription);
     if (resolution.status !== "ready") {
       return refuseEndpoint(resolution, VOICE_TRANSCRIPTION_TARGET, origin);
     }
-    if (exceedsDeclaredLength(request, TRANSCRIPTION_BODY_LIMIT)) {
-      return refuse("The recording is larger than 10 MB.", "invalid", 413, origin);
+    const bounds =
+      pairedDeviceId === undefined
+        ? {
+            body: TRANSCRIPTION_BODY_LIMIT,
+            audio: SPEECH_TRANSCRIPTION_MAX_AUDIO_BYTES,
+            message: "The recording is larger than 10 MB.",
+          }
+        : {
+            body: PAIRED_TRANSCRIPTION_BODY_LIMIT,
+            audio: REMOTE_TRANSCRIPTION_MAX_AUDIO_BYTES,
+            message: "The recording is longer than a phone clip may be.",
+          };
+    if (exceedsDeclaredLength(request, bounds.body)) {
+      return refuse(bounds.message, "invalid", 413, origin);
+    }
+    if (pairedDeviceId !== undefined && pairedClipsInFlight.has(pairedDeviceId)) {
+      return refuse(
+        "This device is already sending a recording. Try again when it finishes.",
+        "unavailable",
+        503,
+        origin,
+      );
+    }
+    // Checked before admission so a busy refusal spends none of the budget.
+    if (pairedDeviceId !== undefined && pairedClipsInFlight.size >= PAIRED_TRANSCRIPTION_SLOTS) {
+      return busy(origin);
     }
 
     const release = gates.transcription.tryAcquire();
     if (release === null) return busy(origin);
+    if (pairedDeviceId !== undefined) {
+      const admission = admitRemoteTranscription({
+        recent: pairedClipAdmissions.get(pairedDeviceId) ?? [],
+        now: now(),
+      });
+      pairedClipAdmissions.set(pairedDeviceId, admission.recent);
+      if (admission.kind === "over-budget") {
+        release();
+        return json(
+          decodeSpeechFailureResponse({
+            error: "This device has used its voice allowance for now. Try again later.",
+            category: "rate-limited",
+            retryAfterMs: admission.retryAfterMs,
+          } satisfies SpeechFailureResponse),
+          429,
+          origin,
+        );
+      }
+      pairedClipsInFlight.add(pairedDeviceId);
+    }
     try {
       let form: FormData;
       try {
@@ -154,8 +234,8 @@ export function createSpeechRouteHandler(dependencies: SpeechRouteDependencies) 
       if (audioPart.size === 0) {
         return refuse("The recording is empty.", "invalid", 400, origin);
       }
-      if (audioPart.size > SPEECH_TRANSCRIPTION_MAX_AUDIO_BYTES) {
-        return refuse("The recording is larger than 10 MB.", "invalid", 413, origin);
+      if (audioPart.size > bounds.audio) {
+        return refuse(bounds.message, "invalid", 413, origin);
       }
       const audio = new Uint8Array(await audioPart.arrayBuffer());
       const mediaType = sniffSpeechAudioMediaType(audio);
@@ -181,9 +261,19 @@ export function createSpeechRouteHandler(dependencies: SpeechRouteDependencies) 
       if (result.status === "failed") {
         return providerFailure(result.providerFailure, origin);
       }
-      return json(decodeSpeechTranscript({ text: result.text }), 200, origin);
+      // The transcript is the person's words; no cache between here and the
+      // composer keeps a copy.
+      return new Response(JSON.stringify(decodeSpeechTranscript({ text: result.text })), {
+        status: 200,
+        headers: {
+          ...corsHeaders(origin),
+          "content-type": "application/json",
+          "cache-control": "private, max-age=0, no-store",
+        },
+      });
     } finally {
       release();
+      if (pairedDeviceId !== undefined) pairedClipsInFlight.delete(pairedDeviceId);
     }
   }
 

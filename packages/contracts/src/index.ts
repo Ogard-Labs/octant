@@ -4,6 +4,7 @@ export * from "./codePlanner";
 export * from "./codeFileListing";
 export * from "./codeSearch";
 export * from "./codeOperations";
+export * from "./codeLanguage";
 export * from "./threadBoard";
 export * from "./threadBoardPullRequests";
 export * from "./codeTestDefinitions";
@@ -92,6 +93,7 @@ export * from "./projects";
 export * from "./projectView";
 export * from "./sidebarThreadStatus";
 export * from "./settings";
+export * from "./acpAgentProfiles";
 export * from "./providers";
 export * from "./hostOAuth";
 export * from "./providerDiscovery";
@@ -160,6 +162,7 @@ export * from "./canvasShareAccessLog";
 export * from "./canvasBoard";
 
 export * from "./computerUsePlugin";
+export * from "./desktopLease";
 export * from "./simulatorDevice";
 export * from "./gitHistory";
 

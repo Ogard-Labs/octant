@@ -15,8 +15,12 @@
     "./harness-endpoint": "./src/harnessEndpoint.ts",
     "./harness-endpoint-conformance": "./src/harnessEndpointConformance.ts",
     "./subscription-oauth": "./src/subscriptionOAuth.ts",
+    "./directory-oauth": "./src/directoryOAuth.ts",
+    "./directory-oauth-conformance": "./src/directoryOAuthConformance.ts",
     "./image-generation": "./src/imageGeneration.ts",
-    "./image-generation-conformance": "./src/imageGenerationConformance.ts"
+    "./image-generation-conformance": "./src/imageGenerationConformance.ts",
+    "./process-placement": "./src/processPlacement.ts",
+    "./process-placement-conformance": "./src/processPlacementConformance.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

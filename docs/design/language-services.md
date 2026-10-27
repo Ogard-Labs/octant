@@ -1,0 +1,900 @@
+# Language services and debugging companion
+
+This topic specification owns how a Code thread's editor gets language
+services (diagnostics and go-to-definition first, more requests later) and,
+in later slices, a debugger, from separately launched processes that run under
+Code Project and thread authority. Architecture owns the boundaries it builds
+on: [process topology](../architecture.md#process-topology), the
+[sandbox and approvals](../architecture.md#security-and-authority), and the
+[extension activation ladder](../architecture.md#extensions-and-skills). The
+start gates this design answers are in
+[release-boundary holds](../release-boundary-holds.md#full-lsp--extension-host--debugger).
+
+**Scope and delivery state.** The maintainer authorized this scope as
+post-preview work on 2026-10-26, when parked backlog work was unlocked. That
+authorizes the design and the slices below; the release-boundary statement in
+`AGENTS.md` and the architecture is updated separately. The maintainer
+accepted this design and its [decisions](#maintainer-decisions) on 2026-10-26.
+**Slices 1 (seam and policy), 2 (companion and the bundled TypeScript
+server), and 3 (editor wiring) are built: the Code editor shows the host's
+diagnostics and jumps to definitions, locally and from a paired device.**
+Slice 4 (ship the binary) is built: packages carry the server, and a signed
+Apple Silicon package awaits the maintainer. Slice 5 (user-added `static`
+servers) and slice 6 (repository-tooling servers, started only after a local
+window's approval and networked under the Project's egress rules) are also
+built. Monaco editing and the explicit external-editor
+handoff stay the primary Code editing paths and are unchanged by every slice.
+
+## Outcome
+
+A person editing a TypeScript or JavaScript file in a Code thread sees the
+Project's real type errors in the editor and can jump to a definition in
+another file of the same checkout. The analysis runs in a confined child
+process the host launches for that checkout. It cannot write, run other
+programs, or reach the network, and it acts only for callers that already hold
+that thread. Later slices add other languages, servers that must run the
+repository's own tooling, an agent-facing read tool, and a debugger, each
+behind its own approval and confinement rules.
+
+## What exists today
+
+- **Editor.** `apps/web/src/code/MonacoEditorPane.tsx` and
+  `MonacoEditorAdapter.tsx` mount Monaco on `octant-code:` model URIs
+  (`monacoRuntime.ts` refuses any other scheme). The pane loads content through
+  the Code client (`content`, `save`), keeps drafts in the thread draft store,
+  and is read-only in Plan. Monaco's own language workers
+  (`monacoEnvironment.ts`: TypeScript, JSON, CSS, HTML) run in the renderer on
+  the models open there. They do not read the checkout, its `tsconfig`, or its
+  dependencies, so they cannot report Project type errors or resolve a
+  definition in an unopened file.
+- **External editor.** `apps/server/src/codeExternalEditorRoutes.ts` hands one
+  file to the person's editor after `isCodeExternalEditorTargetCurrent` checks
+  the thread, checkout and file reference. A paired device cannot do this
+  (`code.open-external-editor` is local-host only in
+  `packages/domain/src/remoteAccessPolicy.ts`).
+- **Confined children.** Terminals (`apps/server/src/code/terminalProcessPort.ts`),
+  repository tests (`repositoryTestProcessPort.ts`), Git, and provider version
+  reads launch through `ProcessConfinementPort`
+  (`apps/server/src/process/seatbeltProfile.ts`). That is Seatbelt on macOS and
+  Bubblewrap on Linux. Other platforms are refused. Terminals refuse Plan.
+  Durable process receipts (`process/nodeOwnedProcessReceipt.ts`) let a
+  restarted host reap orphans.
+- **Executable extensions.** `apps/server/src/extensions/extensionSupervisor.ts`
+  supervises reviewed executable components: ready handshake, bounded output,
+  crash budget (two restarts a minute), receipts, drain-then-stop. Component
+  kinds live in `packages/contracts/src/extensions.ts`
+  (`ExtensionComponentKind`). Slice 1 added the `language-server` kind; there
+  is no debug-adapter kind.
+- **Language seam (slice 1).** `packages/contracts/src/extensions.ts` declares
+  the `language-server` kind and its `languageServer` declaration;
+  `packages/plugin-host/src/activation.ts` admits it in Code only;
+  `packages/domain/src/languageServerLaunchPolicy.ts` decides a launch;
+  `packages/contracts/src/codeLanguage.ts` holds the read, document, and
+  refusal contracts; and `code.language.read` is remote-approvable in
+  `remoteAccessPolicy.ts`.
+- **Companion (slice 2).** `apps/server/src/code/codeLanguageService.ts`
+  authorizes each request and runs one server per checkout and component;
+  `languageServerProcess.ts` launches it confined and keeps its receipt;
+  `languageServerConnection.ts` holds the protocol; and
+  `languageServerResults.ts` turns answers into Octant contracts.
+  `packages/plugin-host/src/bundledLanguageServers.ts` declares the bundled
+  TypeScript server, and `wiring/codeTooling.ts` resolves its binary from the
+  pinned `typescript` package. `POST /api/code/language/documents` and
+  `POST /api/code/language/read` serve them.
+- **Editor wiring (slice 3).** The Code client's `syncLanguageDocument` and
+  `readLanguage` call those routes. `apps/web/src/code/useCodeLanguageServices.ts`
+  keeps the editor's file open and reads its diagnostics,
+  `codeLanguageEditor.ts` turns Octant contracts into Monaco's shapes and the
+  editor's states, `monacoRuntime.ts` shows the markers and answers
+  definitions, and `CodeSettingsView.tsx` holds the Settings › Code switch
+  (`bundledLanguageServer` in the Code settings).
+- **User-added servers (slice 5).** `@octant/plugin-api/language-server-package`
+  is the public package document; `apps/server/src/extensions/languageServerPackage.ts`
+  reads a local folder that holds one into the package store, and
+  `apps/server/src/code/installedLanguageServers.ts` offers the installed
+  servers the activation ladder makes effective in Code to the companion.
+- **Repository tooling (slice 6).** `apps/server/src/code/languageServerApprovals.ts`
+  journals a local window's approval of a `repo-tooling` server for a
+  checkout or Project, `POST /api/code/language/approvals` records it,
+  `languageServerEgress.ts` gives each start its own `proxied` egress proxy
+  under the Project's rules, and the editor offers **Allow in this checkout**
+  and **Allow in this Project** when the host answers `approval-required`.
+- **Network levels.** `apps/server/src/process/threadEgressPolicy.ts` resolves
+  `none`, `provider-endpoints-only`, and `unrestricted`. The
+  [harness tool egress rules](../architecture.md#harness-tool-egress-rules)
+  materialize `proxied` for commands.
+- **Packaging (slice 4).** `scripts/package-desktop.ts` stages the target's
+  native package beside the server's runtime packages, `sign-desktop.ts`
+  signs its binary, `package-headless.ts` vendors it into the headless
+  artifact, and `scripts/smoke-packaged-language-services.ts` serves the
+  editor's scenario from a package outside any checkout.
+- **A server already present.** The repository's pinned `typescript` 7.0.2
+  dependency ships a native binary per platform
+  (`@typescript/typescript-<platform>-<arch>`, about 24 MB) that speaks the
+  Language Server Protocol over stdio (`tsc --lsp --stdio`). On 2026-10-26 a
+  scratch smoke on Linux x64 ran it under `bwrap --unshare-all` (no network) on
+  a read-only bind of a two-file project with no writable root but a private
+  tmpfs. `textDocument/definition` resolved across files and a pulled
+  `textDocument/diagnostic` returned the expected type error. Its only
+  server-to-client request was `client/registerCapability` for
+  configuration. The seccomp no-fork filter and Seatbelt were not tried.
+
+## Design
+
+### Process model
+
+- **A companion is a confined child of the server.** The server, not the
+  renderer, the Electron main process, or a separate broker, launches each
+  language server through `ProcessConfinementPort`. Authority already lives in
+  the server, a headless host has no desktop process, and confinement is per
+  launch, so an intermediate host process would add a hop without adding a
+  boundary. Monaco only talks to the server through the Code client.
+- **One server per checkout, component, and launch class.** Threads on the
+  same checkout share it, and every request is authorized on its own. No server
+  ever spans two checkouts, so one repository's server never reads another's
+  files or cache.
+- **Lazy start, bounded life.** A server starts when an authorized caller asks
+  for a language read on a file whose language an enabled component declares.
+  It never starts at host start or because a repository file asks. It stops
+  after ten minutes without an open document, at once when its checkout becomes
+  unavailable or the last active thread on it is archived or completed, with
+  drain-then-stop when its component is disabled, and at host shutdown. The
+  supervisor's crash budget applies. After the budget the server reports
+  `crashed` until the person retries from the editor.
+- **Protocol stays at the adapter.** The Language Server Protocol wire is
+  JSON-RPC on stdio. Frames are capped at 4 MiB, a frame over the cap stops the
+  child, and each request has a 10-second deadline that returns `timed-out`.
+  The renderer never sees protocol payloads. It sees Octant contracts: a
+  diagnostic is a checkout-relative path, a range, a severity, a bounded message
+  and a source label, and a definition is a checkout-relative location or an
+  `outside-checkout` result (below). Later servers and protocol versions change
+  only the adapter.
+- **What Octant sends.** Slice 2's allow-list: `initialize`, `initialized`,
+  `shutdown`, `exit`, `textDocument/didOpen`, `didChange`, `didClose`, pulled
+  `textDocument/diagnostic` (a pushed `publishDiagnostics` is also accepted),
+  `textDocument/definition`, `workspace/didChangeWatchedFiles` fed from
+  `codeFileWatchService`, and `$/cancelRequest`. Each later request type is
+  added on purpose with its own contract.
+- **What a server may ask.** `client/registerCapability` is accepted only for
+  methods on the allow-list. `workspace/configuration` gets Octant's fixed
+  values. `window/workDoneProgress/create` is accepted. Every other request,
+  including `workspace/applyEdit`, `window/showDocument`, and
+  `workspace/executeCommand`, gets a method-not-found error and has no effect.
+  `window/logMessage` goes to a bounded in-memory log shown under Diagnostics;
+  `telemetry/event` is dropped.
+
+### Launch classes
+
+The component declares a class and confinement enforces it. A server that
+declares the narrow class and needs more fails; it does not get more.
+
+| Class          | Reads                                                        | Writes                             | Runs other programs                                                                    | Network                                                  | Code postures                                                | Approval                                                     |
+| -------------- | ------------------------------------------------------------ | ---------------------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| `static`       | Checkout (read-only), the component's own install, its cache | Its private cache only             | No: exec only its own binary; Linux loads the no-fork seccomp filter Plan already uses | `none`                                                   | All, Plan included                                           | None (see below)                                             |
+| `repo-tooling` | Checkout, toolchain roots it declares, its cache             | Checkout and cache, after approval | Yes, confined as a terminal is                                                         | `proxied` under the Project's egress rules (decision D6) | Approval-gated, auto-accept-edits, Full access; Plan refuses | Shell-command category, per checkout and component (slice 6) |
+
+A `static` server needs no approval because it falls in no approval category.
+It writes nothing in the checkout, runs nothing from it, reaches no network,
+and reads only what the thread can already read. The person's act is opening a
+file in an editor with an enabled component. That is also why it may serve a
+Plan thread, whose read-only rule it cannot breach.
+
+### Seam and launch decision
+
+Slice 1 settled these details. Where the design left a choice open, the more
+restrictive one was taken.
+
+- **Declaration.** A `language-server` component carries
+  `languageServer: { languages, launchClass }`, present exactly when the kind
+  is `language-server`. `languages` holds 1 to 32 Language Server Protocol
+  identifiers (`^[a-z][a-z0-9-]{0,63}$`), which normalization sorts and
+  de-duplicates. The kind is executable, so it needs an entry point. An
+  unknown class, an unknown field, or an unknown kind is refused when the
+  manifest is decoded. The class decides confinement, so a class the host does
+  not know is never mapped to a nearby one.
+- **Updates.** An update that moves a component to `repo-tooling` counts as a
+  capability expansion even when its kind and declared capabilities are
+  unchanged. The package is quarantined and its trust and switches are
+  cleared, as for any other expansion. Reason: the class alone lets the
+  server write the checkout, run tooling, and reach the network. Adding or
+  removing languages, or moving to `static`, is not an expansion.
+- **Launch decision.** `decideLanguageServerLaunch` takes the class, the
+  thread's posture, the host platform, who caused the start (local window or
+  paired device), and whether the shell-command approval for this checkout and
+  component is on record. It returns a launch shape or the first refusal in
+  this order: `unsupported-platform` (neither macOS nor Linux),
+  `plan-read-only`, `local-host-required`, `approval-required`. The last three
+  apply only to `repo-tooling`. A `static` server may start when a paired
+  device's authorized read asks for one, because starting it grants nothing
+  beyond that read. Starting `repo-tooling` from a paired device is refused even
+  with an approval on record, and there is no remote action for it, so the
+  remote gate rejects the request too. Reason: the approval is the person's
+  act at the machine, and D4 keeps running repository tooling there.
+- **Read contracts** (`@octant/contracts/code-language`). A read names a thread,
+  checkout, and file reference, never a path. Diagnostics and definitions use
+  zero-based lines and UTF-16 character offsets. A result is diagnostics (at
+  most 1,000, with a `truncated` flag; messages at most 2,048 characters;
+  source labels at most 64 and holding no path separator), definition
+  targets (at most 64), `unavailable`
+  (`starting`, `crashed`, `timed-out`: states to wait out or retry), or
+  `refused` with one reason. The refusal reasons are `thread-inactive`,
+  `checkout-unavailable`, `checkout-mismatch`, `file-outside-thread`,
+  `path-outside-checkout`, `no-reach`, `turned-off` (the Settings switch,
+  D2), `no-language-server`, `confinement-unavailable`, and the four launch
+  refusals unchanged. An installed component that is not effective reads as
+  `no-language-server`, so a read never shows which disabled or unreviewed
+  components exist.
+- **Host paths in message text.** Structured paths are checkout-relative by
+  schema, but a diagnostic message is the server's free text and can name a
+  host path, such as a `tsconfig` it could not read outside the checkout. The
+  adapter rewrites every absolute path or `file:` URI in a message: one inside
+  the checkout becomes checkout-relative, and any other becomes
+  `<outside checkout>`. The schema cannot enforce this, so slice 2 tests it.
+  A quoted span that starts like a path is rewritten whole, spaces included,
+  because the TypeScript server quotes the paths it names. An unquoted path
+  with a space in it is cut at the space, and the words after it stay.
+- **Read before start.** Every authority check of a read, `no-reach`
+  included, runs before the launch decision is consulted. A refused read never
+  starts a server, so a paired device can start a `static` server only for a
+  thread it already reaches (D4).
+
+### Companion rules
+
+Slice 2 settled these details, taking the more restrictive option where the
+design left a choice open.
+
+- **Open documents.** The editor opens a document with
+  `POST /api/code/language/documents` (`open`), naming a checkout-relative path
+  and its current text. The host confines the path, derives the file reference
+  the editor's other Code surfaces use, and sends `didOpen`. `change` and
+  `close` name that reference. A read names only the reference, and a
+  reference this thread has not opened on this checkout is refused as
+  `file-outside-thread`. Reason: a read must never name a path, and the host
+  cannot turn a file reference back into one. Two threads on one checkout
+  share one server document; it closes when the last of them closes it. A
+  document whose text would not fit a 4 MiB frame is answered `too-large` and
+  not sent.
+- **Which language a file is.** Octant's own table maps file extensions to
+  languages (`.ts`, `.mts`, `.cts`, `.tsx`, `.js`, `.mjs`, `.cjs`, `.jsx`).
+  Repository configuration never changes it, so it never picks a server.
+- **Refusal order.** `no-reach` comes first, and a thread that does not exist
+  reads the same, so a refusal never says which threads a host has. Then
+  `thread-inactive` (archived, waiting, interrupted, or completed: only an
+  active thread may read, as only it may save), `checkout-mismatch`,
+  `checkout-unavailable`. A change or read then needs a document this thread
+  opened (`file-outside-thread`). The path is contained again on every open
+  and read, symlinks resolved, and must be a regular file
+  (`path-outside-checkout`). Then `no-language-server`, the launch refusals,
+  and last `confinement-unavailable`. Nothing is launched until all of them
+  pass.
+- **Repository tooling.** The launch decision is asked with the approval the
+  store holds for this checkout and component; slice 6's rules are under
+  [Repository tooling](#repository-tooling). A launch class this host cannot
+  confine is refused as `confinement-unavailable`, never run as `static`.
+- **Registrations.** A server's `client/registerCapability` is accepted only
+  when every method in it is one Octant sends; otherwise the whole request is
+  refused. TypeScript's request for configuration-change notices is refused
+  this way and the server carries on. `workspace/didChangeWatchedFiles` is
+  sent only after the server registered for it, with each changed path from
+  the checkout's file watch.
+- **Answers that are not results.** A request the server answers with an error
+  is reported as `timed-out`, as one it did not answer in time is: no result
+  arrived, and retrying is the remedy. A connection that ends mid-request reads
+  as `crashed`. A server that does not offer pulled diagnostics is read from
+  what it last pushed, and reads as `starting` until it pushes something.
+- **Crash budget and retry.** Two restarts a minute, as the extension
+  supervisor allows. A restart reopens every document still held. Past the
+  budget the server stays `crashed` for reads until the editor opens a
+  document again, which is the retry. A frame over the cap or one that is not
+  a frame counts as a crash.
+- **Idle.** A document no request has touched for ten minutes is closed, so a
+  window that vanished without closing its documents cannot keep a server
+  alive. A server with no open document stops ten minutes after it was last
+  used.
+- **Lifecycle stops.** Each committed `code-thread` or `code-checkout` event
+  runs the stop check at once, and a timed check runs every minute. A server
+  stops when its checkout is unavailable, when no active thread is left on its
+  checkout, or when its component is no longer effective (drained with
+  `shutdown` and `exit` first). Host shutdown stops every server.
+- **Launch.** The checkout is the read-only bound root, the component's install
+  is a read root, and its cache is the only write root; the cache parent is
+  denied so no server reads a sibling's cache. The temporary directory inside
+  the cache is made anew at every start, because the server may write there
+  and confinement grants a launch root's resolved target: a link it left
+  would otherwise grant the next run whatever folder the link names. Network
+  is `none`. On macOS Seatbelt lets the server exec only its own binary. On
+  Linux the filter refuses fork, clone, and `execveat`, and the host's program
+  folders are hidden. Bubblewrap applies the filter before it starts the
+  server, so it cannot refuse `execve`, and the server could replace itself
+  with another file it can see. That file runs with the same confinement:
+  no fork, no network, and writes only to the cache. Seatbelt also
+  gets the broad system read every other confined launch uses, because a
+  binary cannot start without the system libraries, while the home folder and
+  the private system paths stay denied. The environment holds only `HOME` and
+  `TMPDIR` (the cache) and a minimal `PATH`.
+- **Cache bound.** A cache past 512 MB is cleared before the server's next
+  start. A cache holds nothing a server cannot rebuild, so clearing all of it
+  is the simplest eviction that keeps the bound.
+- **Receipts.** Each server's process group is recorded before the server is
+  used, under its own supervisor name. A server whose receipt cannot be
+  written does not run. The host reaps last run's servers at startup, before
+  it starts any.
+- **Remote.** `POST /api/code/language/documents` and
+  `POST /api/code/language/read` are both `code.language.read`: syncing the
+  editor's text feeds a read and writes nothing. A paired device with Code
+  reach may start a `static` server through them.
+- **Not built yet.** The bounded `window/logMessage` log and the lifecycle
+  counts under Diagnostics, and removing a cache when its checkout is removed
+  or its component uninstalled.
+
+### Editor rules
+
+Slice 3 settled these details, taking the more restrictive option where the
+design left a choice open.
+
+- **The switch.** Settings › Code › Editor › Language services is the bundled
+  component's own desired switch on the activation ladder, not a second gate.
+  It is stored as `bundledLanguageServer` in the Code settings, so changing it
+  is the existing journaled `code.settings-updated@1` event; there is no new
+  event. A store without the value reads as on (D2). Off, the component
+  contributes nothing, the host drains its running servers at once (the
+  settings event runs the stop check), and a file only it would read is
+  refused `turned-off`. A file no component declares stays
+  `no-language-server`, so the refusal names only the switch the person
+  holds. A window's update carries the switch only when it changes it; the
+  host keeps the stored value otherwise.
+- **Diagnostics.** Markers show only diagnostics for the editor's own file.
+  While the server serves a file its markers are the only ones on that model:
+  Monaco's worker reads one file without the Project, and its errors (an
+  import it cannot resolve) would contradict the server's. The worker's
+  markers are cleared each time it sets them; once the server stops serving
+  the file they come back with the worker's next check, on the next edit,
+  since Monaco offers no way to ask it for one model. A read-only editor draws them too: Monaco's default
+  hid every diagnostic in Plan.
+- **Definitions.** Monaco merges every provider's definitions, and the worker's
+  answer for an imported name (the import's own binding) turned each jump into
+  a two-entry peek beside the server's location. The worker's definition
+  provider is therefore turned off before any model exists, and Octant's
+  provider answers: from the server while it serves the file, and from the
+  worker, within that file only, while it does not. The worker's jumps into
+  its bundled library files are not offered.
+- **Opening a definition elsewhere.** A target in another checkout file opens
+  through the ordinary file-open path as a Code file tab, which then reveals
+  the target. The renderer holds that place for 30 seconds; a later, unrelated
+  open of the file does not jump. Monaco only ever sees a placeholder link for
+  the target, never a model with its text. A target outside the checkout opens
+  nothing and shows a notice naming only its label.
+- **Syncing drafts.** The editor sends the whole text 300 ms after typing
+  stops, then reads diagnostics again; text typed while the file was opening
+  is sent once the open settles. It reads diagnostics again when focus comes
+  back to the pane from elsewhere, since another file's edits may have
+  changed them. Closing the editor closes the document.
+- **States.** `starting` shows only when the first answer takes over 400 ms; a
+  server still `starting` is asked again each second, and after 30 tries is
+  shown as not answering. `crashed` and `timed-out` offer Retry, which closes
+  and reopens the document, the retry the companion already honours. Because
+  opening resets the crash budget, an edit never reopens a document on its
+  own; only a `too-large` file is opened again when its text changes. A
+  document the host no longer holds (after a restart or the idle close) is
+  reopened once on its own before it is reported. Any other refusal stands:
+  the editor sends no more text until a retry, and focus coming back to an
+  editor whose services are off reopens it, so turning the switch back on
+  needs no reload. A file no server reads shows nothing, and every state
+  leaves editing and saving untouched.
+
+### User-added servers
+
+Slice 5 settled these details, taking the more restrictive option where the
+design left a choice open.
+
+- **Package.** A person adds a server as a folder with
+  `octant-language-server.json` at its root, imported from Settings › Skills &
+  Extensions › Marketplace with the native folder picker, so the folder's path
+  stays with the desktop and the server. The document is
+  `{ manifest }`, an ordinary package manifest without the facts only the host
+  states: an author who writes `extensionId`, `packageId`, `digest`, `source`,
+  or `provenance.reviewed` is refused, not overwritten. The host derives the
+  identity from the folder and the slug, so a folder can never take the
+  bundled server's identity or another package's, and records it unreviewed.
+  A folder with the document is read as a language server and as nothing
+  else; one that also holds an outside provider driver's
+  `octant-provider-driver.json` is refused as neither. Other sources are refused until a marketplace package can carry a
+  publisher signature.
+- **What a package may hold.** Exactly one `language-server` component, Code
+  only, for no provider family, with no contributions, whose entry point is a
+  file in the package. A `static` server declares at most the `filesystem`
+  capability; a `repo-tooling` server at most `filesystem`, `shell`, and
+  `network` (slice 6), because those are what its class grants. The binary is
+  the package's only executable file; another is refused, because a `static`
+  server may run its own binary and nothing else, and a `repo-tooling` server
+  runs the repository's tooling, not programs its package brings. The slug
+  and `builtin:` entry points of the bundled server are refused. The class is
+  never narrowed to `static` for the author. The package store's bounds apply
+  (16 MiB per file, 64 MiB per package).
+- **Launch.** The server starts with no arguments: the schema has no field for
+  them, so nothing but the binary decides how it runs. It is confined exactly
+  as the bundled server is, with its stored package version as the read-only
+  install root.
+- **Review.** The inspection preview names the binary by its path in the
+  package, the binary file's own SHA-256 digest (beside the package digest,
+  so it can be checked against the author's release), the languages, the
+  class, and, for `static`, that the server reads the checkout, keeps a
+  private cache, and cannot write, run other programs, or reach the network.
+  For `repo-tooling` it says that the server runs the repository's own
+  tools, starts only after the person allows it for a checkout or a Project,
+  can then write that checkout, run programs, and reach the hosts the
+  Project's network rules allow, and never runs in Plan or for a paired
+  device. Confirm install stores it untrusted with its switches off.
+- **Effective.** The companion offers an installed server only while the
+  ladder makes it effective in Code: installed, not quarantined, trusted, the
+  plugin and component switched on, compatible with this host's platform and
+  app version. Withdrawing any of them commits an extension event, which runs
+  the stop check at once and stops a running server. Project and thread
+  policy is the read's own authority check, so it is not asked twice.
+- **Verified at every start.** The binary's path is resolved from the stored
+  version only after the whole version verifies against its digest. A binary
+  changed after review does not run; the start counts against the crash
+  budget and reads as `crashed`, and the next host start quarantines the
+  version.
+- **Identity per digest.** An installed server's key includes its package
+  digest, so an update starts a new server with its own cache rather than
+  serving from the old binary's process or files.
+- **Which server reads a file.** Octant's extension table now lists the
+  common languages by the protocol specification's identifiers (C and C++,
+  C#, CSS, Dart, Elixir, Erlang, Go, HTML, Java, JSON, Lua, Markdown,
+  Objective-C, PHP, Python, Ruby, Rust, Scala, SCSS, shell, SQL, Swift, XML,
+  YAML); `.h` reads as C. When more than one effective server declares a
+  file's language, the bundled server serves it, then installed servers by
+  package name, so install order never decides.
+
+### Repository tooling
+
+Slice 6 settled these details, taking the more restrictive option where the
+design left a choice open. The approval store is
+`apps/server/src/code/languageServerApprovals.ts`, the class's network is
+`languageServerEgress.ts`, and `languageServerProcess.ts` launches both
+classes.
+
+- **Asking.** A `repo-tooling` server with no approval on record answers
+  `approval-required`. The editor of a local window then names what allowing
+  it grants (writing this checkout, running programs, and reaching the hosts
+  the Project's network rules allow) and offers **Allow in this checkout** and
+  **Allow in this Project**. `POST /api/code/language/approvals` names the
+  thread, checkout, file path, and scope, never a server: the host confines
+  the path and picks the server from its own table, as `open` does, because a
+  server waiting for its approval never opened the document. A server that
+  is `static` answers `not-required`.
+- **Who approves.** Only the person at a local window. A paired device is
+  refused before anything is read (`local-host-required`); the route has no
+  remote action, so the remote gate denies it, and the route answers 403 to a
+  device that reached it anyway. Every check a read makes runs next, then the
+  launch decision with the approval granted, so Plan refuses
+  (`plan-read-only`) and nothing is recorded for a server the thread could
+  not start.
+- **Journal first.** An approval is `code.language-server-approval-granted@1`
+  on the Project's `code-language-server-approval` aggregate, in the
+  `shell-commands` approval class, scoped to one checkout or to the Project.
+  One that cannot be appended answers `not-recorded` and is not in force. A
+  restarted host rebuilds the approvals from the journal. The record names no
+  thread, so a thread purge leaves it, and a Project erase removes it and
+  ends it in the running host at once, since the Project lives on after an
+  erase.
+- **What an approval covers.** One server in one package state: its
+  extension, component, package digest, and the package's lifecycle version.
+  Any later change to the package (an update, a switch, trust given or
+  withdrawn, an uninstall) leaves the approval covering a state that no longer
+  exists, so a running server stops at once (the change is an extension
+  event, which runs the stop check) and the next start asks again. Reason:
+  that is the one revocation a crash between two appends cannot lose, and it
+  is how a person takes an approval back: switch the server off in Settings.
+- **Decided on every request.** A paired device and a Plan thread are refused
+  a `repo-tooling` server even while it runs for another thread, because the
+  document a caller opens is what the server then runs the repository's
+  tooling on. A running server stops when no approval covers its current
+  package state, and a restart after a crash, which no request decided, starts
+  it only while one does.
+- **Launch.** As a terminal is confined: the checkout writable, programs and
+  child processes allowed, the server's install readable, and its private
+  cache as for `static`. The environment holds only `HOME` and `TMPDIR` (the
+  cache), a minimal `PATH`, and the proxy variables below. The declaration has
+  no field for toolchain roots yet, so a server reads the system folders a
+  terminal's launch reads and nothing under the home folder; a toolchain
+  installed there is out of reach until such a field exists.
+- **Network (D6).** Each start gets its own egress proxy, the one harness
+  commands use, and the `proxied` OS level: loopback on macOS, a Unix socket
+  and in-capsule forwarder on Linux. Its connections are decided on the Code
+  Project's rules alone. Those rules are suspended while any active thread on
+  the checkout has taken in outside content, because that thread's agent may
+  have written the tooling the server runs. A proxy whose listener or start
+  record fails means the server does not start; a host with no proxy refuses
+  the class as `confinement-unavailable`, never runs it with no network or an
+  open one.
+- **Audit.** Each start is journaled the way a `proxied` command's launch is,
+  with the same payloads and limits, under
+  `code.language-server-egress-launch-started@1`,
+  `-decisions-recorded@1`, and `-launch-summarized@1` on a
+  `code-language-server-egress` aggregate of its own. The launch names the
+  Project and the thread whose read started the server. A server's bytes
+  reach no model, so they taint no thread, and nothing is proposed: a
+  proposal surfaces on a thread, and this server serves a checkout. A person
+  adds a Project rule from a thread's Network access list. A launch the host
+  stopped before its summary keeps its start and batches, and nothing is
+  reconstructed, since no taint depends on it. A thread purge leaves these
+  records and a Project erase removes them.
+
+### Authority
+
+- **Code only.** The component kind is `mode-prohibited` in Chat and Work. Work
+  has no developer environment, and Chat has no folder.
+- **Every read is checked when it runs.** The thread is an active Code thread.
+  Its checkout is available and is the one the request names. The file
+  reference belongs to that thread and checkout, and its path is contained by
+  `codePathConfinement.ts` with symlinks resolved. The caller is either a local
+  window whose Project binding holds the thread (a window-held service, judged
+  on the binding and liveness at call time like a terminal) or a paired device
+  with Code reach under a new remote-approvable `code.language.read` action.
+  Starting a `repo-tooling` server or a debug session is local-host only, like
+  `terminal.write`.
+- **The repository never picks what runs.** The executable, arguments,
+  environment, and class come only from the enabled component. Repository files
+  are data the server parses inside confinement: compiler configuration and its
+  plugin lists, editor settings folders that name a server or SDK path,
+  repository-declared server lists (the architecture already denies a
+  provider's `.github/lsp.json` servers), and recommended-extension lists. They
+  never choose an executable or widen a class.
+- **Environment is allow-listed.** `HOME` is the private cache and `PATH` is
+  minimal. No provider key, token, broker credential, or other `OCTANT_*`
+  value reaches the child, which is the managed-device-tools rule.
+- **Results outside the checkout.** A definition in the server's bundled
+  standard library or anywhere outside the checkout is returned as
+  `outside-checkout` with a label (`bundled-library` or `elsewhere`) and no path
+  or content. A dependency inside the checkout, such as `node_modules`, is an
+  ordinary location.
+- **Plugin-shaped.** Language servers are a new executable component kind,
+  `language-server` (declared languages and class), on the existing activation
+  ladder, published through `@octant/contracts/extensions` and
+  `@octant/plugin-api`. The bundled TypeScript server is an in-tree package of
+  that kind and takes no path a third-party package could not. A user-added
+  server is installed, quarantined, reviewed, and enabled like any executable
+  component. Installing it never trusts or enables it.
+- **Platforms.** macOS and Linux. Any other platform refuses with
+  `unsupported-platform`. A missing Seatbelt or Bubblewrap backend fails closed
+  and names the recovery, as confinement already does.
+
+### Packaging rules
+
+Slice 4 settled these details, taking the more restrictive option where the
+design left a choice open.
+
+- **What ships.** Each package carries the native package for its own target,
+  `@typescript/typescript-<platform>-<arch>`, resolved through the pinned
+  `typescript` package so its version is the lockfile's. It ships whole and
+  unchanged, neither stripped nor rebuilt: the binary (`lib/tsc`), the
+  standard library declarations it reads from its own folder (`lib/*.d.ts`),
+  and the package's `LICENSE` and `NOTICE.txt`, which are its license notice.
+  The desktop app holds it under the server's runtime packages
+  (`Resources/app/apps/server/node_modules`) and the headless artifact under
+  its top-level `node_modules`, where the server's existing resolution finds
+  it. A package build refuses to finish when the binary, the standard
+  library, the license, or the notices are missing, or when the copy it
+  resolved is not the version `typescript` pins (resolution walks up past the
+  repository, so a nested checkout could reach an outer install's). Reason: the server finds
+  the binary by walking up from its bundle, so a package without its own copy
+  would serve whichever copy sat above wherever the app was put, a checkout's
+  or a stranger's.
+- **Headless artifact.** The artifact's general rule drops type declarations
+  from vendored packages; the language server's are kept, since without them
+  every file reports missing global types. The binary is recorded as a
+  `native-module` component, the role that installs executable, so it is
+  verified by digest at install and at every start like the others.
+- **macOS signing.** A release build signs the binary with the Developer ID,
+  the hardened runtime, and a secure timestamp, before it seals the app, and
+  with none of Octant's entitlements. Reason: notarization refuses an
+  unsigned executable in the bundle, and the entitlements (JIT, unsigned
+  executable memory, audio input) exist for Electron and dictation; a server
+  that compiles nothing and records nothing gains only reach from them.
+- **Linux.** The binary ships unsigned, as the image does. Packaging checks
+  that it is an executable 64-bit ELF file.
+- **Evidence.** `scripts/smoke-packaged-language-services.ts` starts a
+  package's own server from a copy outside the repository, with no
+  `node_modules` above it, and serves slice 3's scenario for a Plan thread: the
+  cross-file type error, the definition in the other file, and a standard
+  library name read as `bundled-library`. It also checks that the process
+  that answered runs the package's binary and that stopping the host stops it.
+  It takes `desktop` (the packaged app for this host) or `headless` (an
+  artifact tarball).
+
+### Data lifecycle and privacy
+
+- **Drafts.** Unsaved editor text goes from the renderer to the server over the
+  existing authenticated transport, then to the child's stdin. Octant keeps it
+  in memory and writes none of it to disk for this feature. The draft store is
+  unchanged.
+- **Results** are ephemeral reads, like Git history: not journaled, not
+  projected, recomputed on demand.
+- **Cache.** Each server gets its own owner-only directory under the host data
+  directory, keyed by checkout and component, capped at 512 MB with the oldest
+  entries evicted. Other servers' cache directories are denied, as terminal
+  state directories are. The directory is removed when its checkout is removed
+  or its component is uninstalled.
+- **Journal.** Slices 1 to 5 add no journal events. Slice 6 journals each
+  `repo-tooling` approval and each such server's egress launch records
+  ([Repository tooling](#repository-tooling)); they hold identifiers, hosts,
+  ports, and counts, never paths or file content. Approvals later slices add
+  are journaled the same way. Diagnostics exports carry
+  lifecycle counts (starts, crashes, refusals by reason) and no paths or file
+  content.
+- **Network.** No telemetry and no outbound calls. `static` servers have none.
+  The bundled server changes version only with an Octant update and never
+  updates itself.
+
+### Threat model
+
+| Threat                                                                                                                          | Mitigation                                                                                                                                                                                     | Residual                                                                                             |
+| ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| A hostile repository makes the server run its code: compiler plugins, build scripts, macros, or a settings file naming a binary | The component alone picks the executable. A `static` server cannot exec or fork. A server that runs repository tooling is `repo-tooling`: approved, refused in Plan, confined as a terminal is | A bug in the server's parser runs inside the `static` sandbox: no write, no exec, no network         |
+| Source leaves the machine                                                                                                       | `static`: network `none`. `repo-tooling`: `proxied` under the Project's rules, so only hosts a person allowed                                                                                  | A `repo-tooling` server can send source to an allowed host, the same as an approved terminal command |
+| The server writes into the checkout or elsewhere                                                                                | `static` writes only its cache. `repo-tooling` writes the checkout only after approval                                                                                                         | None beyond the class                                                                                |
+| The server asks for edits, commands, or to open documents or URLs                                                               | Server-to-client requests are allow-listed. `applyEdit`, `executeCommand`, and `showDocument` get method-not-found. A person's save stays the only write path                                  | None                                                                                                 |
+| Results point outside the checkout or through a symlink                                                                         | Locations are resolved and contained. Anything outside becomes `outside-checkout` with no path or content                                                                                      | The label says a definition exists outside the checkout                                              |
+| Authority drifts: archived thread, rebound window, swapped checkout, paired device                                              | Each request is checked when it runs. The server stops when its checkout or last active thread goes. Remote reads need Code reach, and remote starts are refused                               | A request already answered stays answered                                                            |
+| Resource exhaustion                                                                                                             | Frame cap, request deadline, bounded diagnostics and logs, idle stop, crash budget, receipts reaped after a restart                                                                            | No OS memory cap on macOS. A runaway server is stopped by the person or the idle timer               |
+| Cross-checkout leakage                                                                                                          | One server per checkout. Sibling cache directories are denied                                                                                                                                  | None                                                                                                 |
+| Injected text reaches an agent (slice 7)                                                                                        | Results are repository-derived data with provenance, never instructions, under the server-side tool-call policy                                                                                | The same as an agent reading the file                                                                |
+| The bundled binary is compromised                                                                                               | Pinned in the lockfile, shipped inside the signed app, changed only by an Octant update                                                                                                        | Trust in the pinned release                                                                          |
+
+## Settled by existing specifications
+
+- Authority is checked on the server before effects, and the renderer holds
+  none ([architecture](../architecture.md#security-and-authority)).
+- One confinement port. A missing backend fails closed, and Windows Code is
+  refused until its confinement design exists
+  ([architecture](../architecture.md#current-release-boundary)).
+- Executable components are quarantined until reviewed, then supervised.
+  Installing never implies trust or enablement, and disabled components
+  contribute nothing ([activation ladder](../architecture.md#extensions-and-skills)).
+- New capabilities reach the host through published seams. A seam is widened
+  in its own change ([AGENTS.md](../../AGENTS.md#product-invariants)).
+- Plan is read-only, Code starts approval-gated, and approvals are categorized
+  and journaled ([security and authority](../architecture.md#security-and-authority)).
+- Remote clients never exceed host authority, and running commands on the host
+  stays with the person at the machine (`remoteAccessPolicy.ts`).
+- Repository-controlled configuration never activates a tool. Skills discovery
+  uses a closed allow-list, and provider runtimes are kept off repository-declared
+  servers ([extensions and skills](../architecture.md#extensions-and-skills)).
+- Ephemeral reads are not a second journal
+  ([Workspace: tool lifecycles](workspace.md#tool-lifecycles)).
+
+## Maintainer decisions
+
+The maintainer accepted these on 2026-10-26. Each states the rule; the
+alternatives considered and the reason for the choice follow it.
+
+1. **D1. Source of the first server.** Octant bundles the pinned `typescript`
+   native binary, about 24 MB per architecture. It is already a dependency, it
+   speaks LSP natively, and it runs no repository code. Rejected for now: using
+   the Project's own installed TypeScript, which runs a repository-supplied
+   binary and so would be `repo-tooling`; it could come later as a person's
+   explicit choice. Rejected: a third-party language-server dependency, which
+   adds a dependency for nothing the bundled binary lacks.
+
+2. **D2. Bundled server on by default.** The bundled server is on for Code,
+   with a Settings › Code switch to turn it off. It ships inside the signed app,
+   as Monaco does, and as a `static` server it grants nothing beyond what the
+   thread can already read. User-added servers always follow the full ladder.
+   Rejected: off until the person turns it on.
+
+3. **D3. Plan threads.** Plan threads are served by `static` servers, and
+   `repo-tooling` servers are refused there. Rejected: refusing every server in
+   Plan.
+4. **D4. Paired devices.** Paired devices may read (`code.language.read`) for
+   threads they can already reach; starting `repo-tooling` servers and debug
+   sessions stays local-host only. Rejected: local windows only.
+5. **D5. Agent access** (slice 7). Agents get read-only app-managed tools in
+   the closed catalog, available in Plan and provider-neutral, after the editor
+   slices ship. Rejected: never, with agents running checks through their own
+   tools.
+6. **D6. Network for `repo-tooling` servers.** `proxied` under the Code
+   Project's egress rules. A thread rule does not apply because the server
+   serves the checkout, not one thread. Rejected: `none`, and following the
+   starting thread's posture.
+
+7. **D7. Extension host.** Octant hosts no other editor's extension API.
+   Language-server and debug-adapter component kinds on the existing ladder
+   satisfy the "extension host" scope. Rejected: a distinct extension host. A
+   foreign extension API is a very large, fast-moving surface; emulating it
+   imports another product's API, and its install-equals-run model conflicts
+   with the activation ladder.
+
+## Delivery plan
+
+Each slice is its own pull request with this spec updated in place. "Container"
+means an agent can implement and verify the slice in a Linux container without
+accounts or hardware.
+
+1. **Seam and policy.** Container: yes.
+   - Add the `language-server` component kind (declared languages and class)
+     to `@octant/contracts/extensions`, `@octant/plugin-api`, and
+     `@octant/plugin-host` normalization. It is executable, so it is
+     quarantined by default, and it is `mode-prohibited` outside Code.
+   - Add the pure domain launch policy (class × posture × platform → a launch
+     shape or a refusal reason).
+   - Add the wire schemas for diagnostics and definition reads and their
+     refusal union, and classify `code.language.read` as a remote action.
+   - _Accepts when:_ the policy table above holds in focused tests, unknown
+     classes and kinds are refused on decode, and every consumer typechecks.
+   - _Verify:_ focused contract and domain tests, typecheck consumers,
+     `style:check`.
+   - _State:_ built. The launch table holds for every class, posture,
+     platform, starter, and approval in the domain tests. Unknown classes,
+     fields, and kinds fail to decode. Installing a language-server package
+     through the lifecycle service leaves it untrusted and disabled, and once
+     enabled it is still `mode-prohibited` in Chat and Work. An update that
+     widens it to `repo-tooling` is quarantined for review. The rules settled
+     on the way are under [Seam and launch decision](#seam-and-launch-decision).
+2. **Companion supervisor and the bundled TypeScript server.** Container: yes
+   for Linux.
+   - The server launches, frames, allow-lists, times out, idles, crash-limits,
+     and receipts the companion, and serves the two reads with every authority
+     check above.
+   - _Accepts when:_ a two-file fixture returns its type error and
+     cross-file definition through the real binary under Bubblewrap with the
+     network unshared, the no-fork filter loaded, and the checkout read-only.
+   - _Negatives:_ an archived thread, a checkout mismatch, a path escape
+     through a symlink, an outside-checkout definition, a diagnostic message
+     naming a host path outside the checkout, a server `applyEdit`,
+     an oversize frame, the crash budget, missing `bwrap`, another platform,
+     and a device without reach are each refused or contained. A restarted
+     host reaps receipts.
+   - _Verify:_ server integration tests. macOS Seatbelt evidence needs a Mac:
+     either the slice adds this test to the existing `macos-15` CI job, or a
+     maintainer runs it.
+   - _State:_ built. On Linux the bundled `tsc --lsp --stdio` 7.0.2 answers the
+     two-file fixture's type error and cross-file definition under Bubblewrap
+     with the network unshared, the no-fork filter loaded, and the
+     checkout bound read-only, in a Plan thread
+     (`codeLanguageServiceProcess.test.ts`). A hostile fake server covers
+     `applyEdit`, `executeCommand`, and `showDocument` (method-not-found, the
+     checkout unchanged), host paths in messages, outside-checkout and
+     symlinked definitions, an oversize frame, a missed deadline with its
+     `$/cancelRequest`, the crash budget and retry, idle and archive stops, and
+     a restarted host reaping receipts. Archived and completed threads, a
+     checkout mismatch or unavailable checkout, a symlink escape, a device
+     without reach, another platform, and a missing `bwrap` are refused before
+     anything launches. The `macos-15` CI job runs the same test for Seatbelt
+     evidence; it has not yet run on a Mac. The rules are under
+     [Companion rules](#companion-rules).
+3. **Editor wiring.** Container: yes.
+   - Monaco shows the companion's diagnostics as markers. Definition (F12 or
+     Cmd-click) opens an in-checkout target through the ordinary file-open
+     path and shows an outside-checkout result as a short notice.
+   - Drafts sync with debounced `didChange`.
+   - The editor shows starting, off, refused, crashed (with retry), and
+     unsupported-platform states.
+   - A model the companion serves shows only its diagnostics. Monaco's workers
+     keep colouring and single-file editing.
+   - Add the Settings › Code switch and a user-guide page.
+   - _Accepts when:_ a person sees a cross-file type error and jumps across
+     files in a Code thread, Plan included, locally and from a paired browser.
+   - _Verify:_ component tests and rendered QA at pane and dock widths, in
+     light and dark themes.
+   - _State:_ built. Component tests cover the markers (Plan included), one
+     debounced change per settled draft, a definition opened in another file at
+     its place, the outside-checkout notice, the off, refused, and
+     unsupported-platform states, and a crash with its Retry; the Settings
+     switch and the host's `turned-off` answer, with its running server
+     stopped, are tested at the view, settings, and service levels. Rendered QA
+     on Linux drove the real Monaco editor and Code client against the real
+     language service and bundled `tsc --lsp --stdio` under Bubblewrap, for a
+     Plan thread, at 900 and 420 px in light and dark: the cross-file type
+     error appeared as a marker with the server's message, F12 and Ctrl-click
+     opened the definition in the other file at its line, F12 on a standard
+     library name showed the outside-checkout notice, and the off state showed
+     with the switch off. The same run as a paired device's caller served it
+     too. The paired-device route's classification is the slice 2 route test;
+     a packaged app on a Mac is slice 4's. The rules are under
+     [Editor rules](#editor-rules).
+4. **Ship the binary.** Container: partly.
+   - Include the per-architecture binary in the packaged desktop app and the
+     headless artifact (`scripts/package-headless.ts`), signed with the app on
+     macOS, with its license notice.
+   - _Accepts when:_ a packaged app serves slice 3's scenario with no
+     development checkout present.
+   - _Verify:_ unsigned Linux packaging in the container. A signed and
+     notarized Apple Silicon package needs the maintainer's signing credentials
+     and a Mac.
+   - _State:_ built; the signed Apple Silicon run is the maintainer's. The
+     Linux x64 headless artifact, extracted outside the repository with no
+     `node_modules` above it, served the scenario through its own server and
+     its own binary under Bubblewrap, and stopping the host stopped the
+     binary; an artifact built without this slice refused the same open as
+     `no-language-server`. Packaging tests cover the staged package, the
+     refusals, the headless roles, and the signing order and arguments. The
+     Linux AppImage was not built in the container: its native rebuild
+     fetches Electron's headers from `electronjs.org`, which the container's
+     network refused. Still to run: `bun run package:desktop` with signing
+     credentials on an Apple Silicon Mac, then
+     `bun scripts/smoke-packaged-language-services.ts desktop`; the same smoke
+     covers the Linux AppImage's portable folder where its packaging can
+     reach that host. The rules are under [Packaging rules](#packaging-rules).
+5. **User-added `static` servers.** Container: yes.
+   - Install through the existing package store, untrusted and switched off.
+     The review card names the binary, digest, languages, class, and "cannot
+     write, run other programs, or reach the network". Then enable.
+   - _Accepts when:_ an unreviewed server never starts, and a server that tries
+     to exec or connect fails under confinement.
+   - _Verify:_ extension lifecycle and supervisor tests, plus a hostile fixture
+     server.
+   - _State:_ built. A package folder imported through the local folder
+     registry and installed through the extension lifecycle stays out of the
+     companion while untrusted, with only its plugin switched on, and until its
+     component is on; withdrawn trust stops it; and a binary changed in the
+     store after review never runs (`installedLanguageServersProcess.test.ts`).
+     On Linux a hostile fixture server, installed, trusted, and enabled the
+     same way and started by the real companion under Bubblewrap in a Plan
+     thread, could not start a child (`EPERM` from the no-fork filter),
+     connect to a listener on the host's loopback or to an internet address,
+     or write the checkout (`EROFS`); it wrote only its cache, and the host's
+     listener saw no connection. The `macos-15` CI job runs the same test for
+     Seatbelt evidence; it has not yet run on a Mac. The inspection preview's
+     language-server review is covered in the server test and in Settings
+     (`ExtensionsSettingsView.test.tsx`). The rules are under
+     [User-added servers](#user-added-servers).
+6. **`repo-tooling` servers.** Container: yes.
+   - Use the shell-command approval per checkout and component, rememberable
+     per Project from a local window only. Plan refuses. The class can write to
+     the checkout after approval and reaches the network through `proxied`
+     under D6.
+   - _Accepts when:_ no launch happens without approval, a remote device cannot
+     start one, and egress outside the rules is refused and journaled the way
+     `proxied` journals.
+   - _Verify:_ approval, permission-negative, and egress tests.
+   - _State:_ built. A `repo-tooling` package installs untrusted with its class
+     in review. Reviewed, trusted, and switched on, it answers
+     `approval-required` and nothing launches; a paired device can neither
+     start nor approve it, Plan cannot approve it, and nothing is journaled
+     until the person at a local window approves it. Once approved it starts,
+     still refuses a paired device and a Plan thread while it runs, survives a
+     restart through the journal, and stops and asks again after its package
+     changes, a crash restart included (`installedLanguageServersProcess.test.ts`,
+     `languageServerApprovals.test.ts`). On Linux, approved and started by the
+     real companion under Bubblewrap, a fixture server ran another program and
+     wrote the checkout, reached neither this host nor the internet directly,
+     and its proxy answered `403 no-rule` for a public host and `ip-literal`
+     for this host's listener, which saw no connection; the launch's start and
+     summary, with the refusal, are in the journal. The route answers only a
+     local window, and a paired device is refused before the service
+     (`codeRoutes.test.ts`); the editor's approval and the review copy are
+     covered in `MonacoEditorPane.test.tsx` and
+     `ExtensionsSettingsView.test.tsx`; a Project erase removes the
+     approvals, from the running host too, and the egress records
+     (`threadPurge.test.ts`). The `macos-15` CI
+     job runs the same process test for Seatbelt evidence; it has not yet run
+     on a Mac. The rules are under [Repository tooling](#repository-tooling).
+7. **Agent read tools** (D5; after the editor slices ship). Container: yes.
+   - Add read-only `code-diagnostics` and `code-definition` app-managed tools
+     to the closed catalog, through the provider SDK's tool transport, for
+     every provider that supports app-managed tools. Providers without that
+     support report it unsupported.
+   - _Accepts when:_ the conformance harness passes and Plan threads can use
+     the tools.
+   - _Verify:_ provider-sdk conformance. A real-provider smoke needs the
+     maintainer's provider sign-in.
+8. **Debugger.** Container: design yes, implementation yes for Linux.
+   - First a design addendum in this spec, approved before any code.
+   - The addendum covers a `debug-adapter` component kind using the Debug
+     Adapter Protocol. Starting a session is local-host only and needs the
+     shell-command approval. The debuggee is confined by the thread's posture,
+     as a terminal is. Plan refuses. Launch configurations found in the
+     repository are proposals the person confirms, never run on their own.
+   - _Verify:_ set by the addendum, including a macOS confined-debuggee smoke
+     on a Mac.
+
+The extension host is not planned (D7). Each slice is reviewable and leaves
+the editor working when the companion is off or refused.
+
+## Verification for this document
+
+Documentation only: formatter, path and decision checks, and `git diff
+--check`. The 2026-10-26 binary smoke above is design evidence, not
+implementation evidence. Slice 2 repeats it as a test.

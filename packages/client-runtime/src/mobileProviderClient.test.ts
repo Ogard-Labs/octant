@@ -128,6 +128,7 @@ describe("mobile provider catalog", () => {
         modelId: "model-a",
         label: "Model A",
         detail: "Alpha",
+        attachmentModalities: ["text"],
       },
       {
         id: encodeMobileModelOptionId(String(instanceA), "model-b"),
@@ -135,6 +136,7 @@ describe("mobile provider catalog", () => {
         modelId: "model-b",
         label: "Model B",
         detail: "Alpha",
+        attachmentModalities: ["text"],
       },
     ]);
     expect(JSON.stringify(options)).not.toContain("baseUrl");

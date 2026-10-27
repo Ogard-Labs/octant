@@ -571,7 +571,7 @@ export function createRemoteHttpAuthentication(
       }
 
       if (isPushTokenRoute) {
-        const response = await handlePushTokenRoute(handoff, route!, options);
+        const response = await handlePushTokenRoute(handoff, sessionId, options);
         registryRelease?.();
         registryRelease = undefined;
         return response;
@@ -832,7 +832,7 @@ async function handleOwnDeviceRoute(
 
 async function handlePushTokenRoute(
   handoff: RemoteClientPrincipalHandoff,
-  route: RemoteRouteDefinition,
+  sessionId: string,
   options: RemoteHttpAuthenticationOptions,
 ): Promise<Response> {
   const store = options.pushTokenStore;
@@ -842,16 +842,31 @@ async function handlePushTokenRoute(
   }
   const { hostId, deviceId } = handoff.principal;
   const occurredAt = new Date().toISOString();
+  // Reading the body yields, and a revoke or sign-out can commit meanwhile and
+  // clear this device's registration. The session is checked again after the
+  // read, with nothing between the check and the store, so a registration
+  // can never land after the clear.
+  const requireActiveSession = (): void => {
+    if (
+      options.sessionRevalidation !== undefined &&
+      !options.sessionRevalidation.isSessionActive(sessionId)
+    ) {
+      throw new RemoteHttpAuthFailure(401, "unauthorized", true);
+    }
+  };
   if (handoff.request.method === "PUT") {
     const body = decodeBounded(
       decodeRemotePushTokenRegistrationV1,
       await readJsonObject(handoff.request),
     );
+    requireActiveSession();
     const outcome = store.register({
       hostId,
       deviceId,
       platform: body.platform,
       token: body.token,
+      notificationPublicKey: body.notificationPublicKey,
+      preferences: body.preferences,
       now: occurredAt,
     });
     return jsonResponse(
@@ -861,13 +876,13 @@ async function handlePushTokenRoute(
   }
   if (handoff.request.method === "DELETE") {
     decodeBounded(decodeRemotePushTokenClearV1, await readJsonObject(handoff.request));
-    const outcome = store.clear({ hostId, deviceId });
+    requireActiveSession();
+    const outcome = store.clear({ hostId, deviceId, reason: "device-cleared", now: occurredAt });
     return jsonResponse(
       200,
       decodeRemotePushTokenReceiptV1({ result: outcome.result, occurredAt }),
     );
   }
-  void route;
   throw new RemoteHttpAuthFailure(400, "invalid");
 }
 
@@ -1180,11 +1195,14 @@ async function authenticateRequest(
     commandId = commandIdHeader;
   }
 
-  const body = await readBoundedBody(
-    request,
-    safe ? 0 : relay ? (route?.maxBodyBytes ?? 0) : MAX_AUTHENTICATED_BODY_BYTES,
-    safe ? 400 : 413,
-  );
+  // A relay and an attachment upload carry their own route's budget; every
+  // other product body keeps the default one.
+  const bodyBudget = relay
+    ? (route?.maxBodyBytes ?? 0)
+    : route?.uploadsAttachment === true
+      ? (route.maxBodyBytes ?? MAX_AUTHENTICATED_BODY_BYTES)
+      : MAX_AUTHENTICATED_BODY_BYTES;
+  const body = await readBoundedBody(request, safe ? 0 : bodyBudget, safe ? 400 : 413);
   if (safe && body.byteLength > 0) throw new RemoteHttpAuthFailure(400, "invalid");
   if (!safe && !relay) {
     const contentType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();

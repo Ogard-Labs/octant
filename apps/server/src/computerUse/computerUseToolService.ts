@@ -16,11 +16,16 @@ import {
   type ToolActionAuthority,
 } from "@octant/contracts";
 import { validateComputerUseSelection } from "@octant/plugin-host/computer-use";
-import { isToolAllowedByAllowlist } from "@octant/domain";
+import { decideDesktopArtifactPath, isToolAllowedByAllowlist } from "@octant/domain";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { createComputerUsePlugin } from "../plugins/computerUse/computerUsePlugin";
-import { createComputerUseRuntime, type ComputerUseEvidenceEvent } from "./computerUseRuntime";
+import {
+  createComputerUseRuntime,
+  type ComputerUseDestinationReport,
+  type ComputerUseEvidenceEvent,
+} from "./computerUseRuntime";
 import type { DesktopComputerUsePort } from "./desktopComputerUsePort";
+import type { LeasedComputerUsePort } from "./desktopLeaseService";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 
 const refused = (reason: string, message: string): ComputerControlResult => ({
@@ -28,6 +33,8 @@ const refused = (reason: string, message: string): ComputerControlResult => ({
   reason,
   message,
 });
+const NO_DESTINATION = refused("no-destination", "No computer-use destination is available.");
+const DESKTOP_LABEL = "this thread's disposable desktop";
 const ownerKey = (owner: ComputerUseOwner) =>
   JSON.stringify([
     owner.windowId,
@@ -36,10 +43,26 @@ const ownerKey = (owner: ComputerUseOwner) =>
     owner.providerInstanceId,
     owner.modelId,
     owner.executionPolicy,
+    owner.leaseId ?? null,
   ]);
 
+/** How a turn asks its person, in the thread, to allow one thing. */
+export type ComputerUseThreadAsk = (
+  summary: string,
+  signal?: AbortSignal,
+) => Promise<"approved" | "denied" | "cancelled" | "expired">;
+
 export function createComputerUseToolService(options: {
-  readonly desktop: DesktopComputerUsePort;
+  /** This Mac's driver; absent on a host with no screen of its own. */
+  readonly desktop?: DesktopComputerUsePort;
+  /** The thread's disposable desktops; absent on a host that cannot lease one. */
+  readonly leases?: LeasedComputerUsePort;
+  /**
+   * What the host reports as its destination. The service's own sessions
+   * start only once a send has bound one, so its runtime always admits them;
+   * a host whose only option is a lease still reports itself leasable.
+   */
+  readonly destination?: () => ComputerUseDestinationReport;
   readonly settings: () => ComputerUseSettings;
   readonly authority: (owner: ComputerUseOwner) => ToolActionAuthority | undefined;
   readonly ownerIsCurrent: (owner: ComputerUseOwner) => boolean;
@@ -73,7 +96,15 @@ export function createComputerUseToolService(options: {
     string,
     { readonly owner: ComputerUseOwner; readonly appId: string }
   >();
-  const grants = new Map<string, number>();
+  /** Five-minute app grants, keyed by owner, authority, and app. */
+  const grants = new Map<
+    string,
+    {
+      readonly appId: string;
+      readonly leaseId: ComputerUseOwner["leaseId"];
+      readonly expiresAt: number;
+    }
+  >();
   /**
    * Why the tool-call authority gate refuses this owner, or undefined when it
    * admits it. `approved` says a one-time approval for this very action was
@@ -123,6 +154,28 @@ export function createComputerUseToolService(options: {
   }
   const admitted = (owner: ComputerUseOwner, approved: boolean): boolean =>
     admissionRefusal(owner, approved) === undefined;
+  /** Sends one command to the destination the send bound. */
+  function dispatch(
+    owner: ComputerUseOwner,
+    command: ComputerControlCommand,
+    signal?: AbortSignal,
+  ): Promise<ComputerControlResult> {
+    if (owner.leaseId !== undefined) {
+      return options.leases === undefined
+        ? Promise.resolve(NO_DESTINATION)
+        : options.leases.control(owner, command);
+    }
+    return options.desktop === undefined
+      ? Promise.resolve(NO_DESTINATION)
+      : options.desktop.execute(owner, command, signal);
+  }
+  /**
+   * Gives this Mac's reservation back. A desktop lease is not the task's to
+   * end here: stopping a task leaves the desktop running for the person.
+   */
+  async function releaseReservation(owner: ComputerUseOwner): Promise<void> {
+    if (owner.leaseId === undefined) await options.desktop?.release(owner);
+  }
   const runtime = createComputerUseRuntime({
     destination: { status: "available", kind: "macos-host" },
     // Once the thread has ingested external content no standing grant carries
@@ -142,10 +195,13 @@ export function createComputerUseToolService(options: {
     approvalTtlMs: 5 * 60_000,
     approvalSummary: (request) => {
       const action = pending.get(String(request.actionId));
+      // A desktop app is a file the agent sent, so its name alone does not
+      // say where it runs.
+      const where = action?.owner.leaseId === undefined ? "" : ` on ${DESKTOP_LABEL}`;
       if (action !== undefined && options.externalContentIngested(action.owner)) {
-        return `Allow this one action in ${action.appId} for "${options.threadTitle(action.owner).slice(0, 100)}".`;
+        return `Allow this one action in ${action.appId}${where} for "${options.threadTitle(action.owner).slice(0, 100)}".`;
       }
-      return `Allow control of ${action?.appId ?? "this application"} for "${action === undefined ? "this task" : options.threadTitle(action.owner).slice(0, 100)}" for 5 minutes.`;
+      return `Allow control of ${action?.appId ?? "this application"}${where} for "${action === undefined ? "this task" : options.threadTitle(action.owner).slice(0, 100)}" for 5 minutes.`;
     },
     // A marked thread's one-time approval says what marked it. A mark the
     // host reads as present but whose sources it cannot name still says so,
@@ -186,7 +242,7 @@ export function createComputerUseToolService(options: {
         // person to look for a task-authority problem that did not exist.
         const refusal = admissionRefusal(action.owner, true);
         if (refusal !== undefined) return { refused: refusal };
-        action.result = await options.desktop.execute(action.owner, action.command, signal);
+        action.result = await dispatch(action.owner, action.command, signal);
         if (action.result.kind === "failed" || action.result.kind === "refused")
           return { refused: action.result.reason };
         return { reference: `computer-action-${request.actionId}` };
@@ -199,6 +255,7 @@ export function createComputerUseToolService(options: {
     owner: ComputerUseOwner,
     command: ComputerControlCommand,
     signal?: AbortSignal,
+    ask?: ComputerUseThreadAsk,
   ): Promise<ComputerControlResult> {
     if (command.operation === "stop") {
       for (const action of pending.values()) {
@@ -215,10 +272,22 @@ export function createComputerUseToolService(options: {
         if (ownerKey(observed.owner) === ownerKey(owner)) observations.delete(id);
       for (const grant of grants.keys())
         if (grant.startsWith(`${ownerKey(owner)}:`)) grants.delete(grant);
-      await options.desktop.release(owner);
+      await releaseReservation(owner);
       owners.delete(ownerKey(owner));
       return { kind: "stopped" };
     }
+    // This Mac's driver checks a typed field against its accessibility
+    // element, which keyboard-focus input would skip; only a disposable
+    // desktop, which has no elements, takes it.
+    if (
+      owner.leaseId === undefined &&
+      (command.operation === "type" || command.operation === "press") &&
+      !("elementIndex" in command)
+    )
+      return refused(
+        "unsupported",
+        "On this Mac, type and press need an observed element's elementIndex.",
+      );
     if (signal?.aborted) return refused("cancelled", "Computer use was cancelled.");
     const authority = options.authority(owner);
     if (
@@ -239,14 +308,17 @@ export function createComputerUseToolService(options: {
     ) {
       await execute(owner, { operation: "stop" });
     }
-    await options.desktop.configure(options.settings());
-    if (!(await options.desktop.reserve(owner)))
-      return refused(
-        "setup-required",
-        "Open Computer use in Settings to enable the plugin and grant Octant's macOS permissions.",
-      );
+    if (owner.leaseId === undefined) {
+      if (options.desktop === undefined) return NO_DESTINATION;
+      await options.desktop.configure(options.settings());
+      if (!(await options.desktop.reserve(owner)))
+        return refused(
+          "setup-required",
+          "Open Computer use in Settings to enable the plugin and grant Octant's macOS permissions.",
+        );
+    }
     if (signal?.aborted) {
-      await options.desktop.release(owner);
+      await releaseReservation(owner);
       return refused("cancelled", "Computer use was cancelled.");
     }
     owners.set(ownerKey(owner), {
@@ -254,7 +326,7 @@ export function createComputerUseToolService(options: {
       authority,
       expiresAt: owners.get(ownerKey(owner))?.expiresAt ?? Date.now() + 5 * 60_000,
     });
-    if (command.operation === "apps") return options.desktop.execute(owner, command, signal);
+    if (command.operation === "apps") return dispatch(owner, command, signal);
     const observed =
       "observationId" in command ? observations.get(command.observationId) : undefined;
     const appId =
@@ -284,9 +356,13 @@ export function createComputerUseToolService(options: {
     // irreversible action (untrustedContentPolicy), so the runtime asks again
     // and the person confirms this action freshly.
     const requiresApproval =
-      (grants.get(grantKey) ?? 0) <= Date.now() || options.externalContentIngested(owner);
+      (grants.get(grantKey)?.expiresAt ?? 0) <= Date.now() ||
+      options.externalContentIngested(owner);
     const action = { owner, command, appId, sessionId, authority };
     pending.set(actionId, action);
+    // A desktop's approval is also asked in the thread, where any client that
+    // may open the thread can answer it; whichever answer lands first decides.
+    let askingInThread: AbortController | undefined;
     try {
       let view = await runtime.start({
         ownerWindowId: owner.windowId,
@@ -324,8 +400,38 @@ export function createComputerUseToolService(options: {
             authority,
             sessionId,
           });
-          await options.desktop.release(owner);
+          await releaseReservation(owner);
           return refused("cancelled", "Computer use was cancelled or its task authority changed.");
+        }
+        const pendingApproval = view.pendingApproval;
+        if (
+          ask !== undefined &&
+          askingInThread === undefined &&
+          view.state === "waiting-for-approval" &&
+          pendingApproval !== undefined
+        ) {
+          const asking = new AbortController();
+          askingInThread = asking;
+          void ask(pendingApproval.summary, asking.signal).then(async (answer) => {
+            // Withdrawn because the session moved on, or answered elsewhere.
+            if (asking.signal.aborted) return;
+            const scope = {
+              ownerWindowId: owner.windowId,
+              threadId: owner.threadId,
+              authority,
+              sessionId,
+            };
+            await (
+              answer === "approved" || answer === "denied"
+                ? runtime.decide({
+                    ...scope,
+                    actionId: pendingApproval.actionId,
+                    approvalId: pendingApproval.approvalId,
+                    decision: answer,
+                  })
+                : runtime.stop(scope)
+            ).catch(() => undefined);
+          });
         }
         await new Promise<void>((resolve) => setTimeout(resolve, 100));
         const current = runtime.inspect({
@@ -339,7 +445,7 @@ export function createComputerUseToolService(options: {
       }
       const result = pending.get(actionId)?.result;
       if (view.state !== "completed" || result === undefined) {
-        await options.desktop.release(owner);
+        await releaseReservation(owner);
         const failure = view.events.findLast(
           (event) =>
             event.kind === "session-failed" ||
@@ -364,7 +470,7 @@ export function createComputerUseToolService(options: {
         const approved = view.events.find((event) => event.kind === "approval-approved");
         if (approved !== undefined) {
           const expiresAt = Date.parse(approved.occurredAt) + 5 * 60_000;
-          grants.set(grantKey, expiresAt);
+          grants.set(grantKey, { appId, leaseId: owner.leaseId, expiresAt });
           owners.set(ownerKey(owner), { owner, authority, expiresAt });
         }
       }
@@ -374,12 +480,83 @@ export function createComputerUseToolService(options: {
       }
       return result;
     } finally {
+      askingInThread?.abort();
       pending.delete(actionId);
     }
   }
 
+  /**
+   * An agent's transfer into its bound desktop. The lease service reads and
+   * hashes the file first and decides whether anyone is asked; when it asks,
+   * the question goes to this turn's thread with the path, size, hash, and
+   * where the file goes.
+   */
+  async function sendFile(
+    owner: ComputerUseOwner,
+    path: string,
+    ask: ComputerUseThreadAsk,
+    signal?: AbortSignal,
+  ): Promise<ComputerControlResult> {
+    if (signal?.aborted) return refused("cancelled", "Computer use was cancelled.");
+    if (
+      owner.leaseId === undefined ||
+      options.leases === undefined ||
+      !options.settings().enabled ||
+      !options.ownerIsCurrent(owner) ||
+      owner.executionPolicy === "plan" ||
+      options.authority(owner) === undefined ||
+      !admitted(owner, false)
+    )
+      return refused(
+        "unavailable",
+        "Computer use is unavailable for this task's current authority.",
+      );
+    const decided = decideDesktopArtifactPath(path);
+    if (decided.kind === "relative") endDesktopAppGrants(owner, decided.name);
+    try {
+      return await options.leases.sendFile(
+        owner,
+        path,
+        async (request) => {
+          const { artifact, provider } = request;
+          const offMachine =
+            request.asks === "off-machine"
+              ? ` This sends the file off this machine to ${provider.displayName}.`
+              : "";
+          const summary = `Send ${artifact.path.slice(0, 512)} (${artifact.size} bytes, SHA-256 ${artifact.sha256}) into ${DESKTOP_LABEL} on ${provider.displayName.slice(0, 128)} for "${options.threadTitle(owner).slice(0, 100)}"?${offMachine}`;
+          return (await ask(summary, signal)) === "approved" ? "approved" : "declined";
+        },
+        options.externalContentIngested(owner),
+      );
+    } finally {
+      // Again once the send settles: an approval answered while the bytes were
+      // on their way must not stand for what landed.
+      if (decided.kind === "relative") endDesktopAppGrants(owner, decided.name);
+    }
+  }
+
+  /**
+   * A desktop app is the inbox file of its name, so a file sent under that
+   * name may be a different program than the one a person allowed. Every
+   * grant for the name on that lease ends, whichever turn or window holds it,
+   * and whether or not the send is confirmed: a send cut off midway may still
+   * have replaced the file.
+   */
+  function endDesktopAppGrants(owner: ComputerUseOwner, appId: string): void {
+    for (const [key, grant] of grants)
+      if (
+        grant.leaseId !== undefined &&
+        String(grant.leaseId) === String(owner.leaseId) &&
+        grant.appId === appId
+      )
+        grants.delete(key);
+  }
+
   return {
-    runtime,
+    runtime:
+      options.destination === undefined
+        ? runtime
+        : { ...runtime, destination: options.destination },
     sweep: async () => {
       for (const action of pending.values()) {
         const current = options.authority(action.owner);
@@ -396,7 +573,7 @@ export function createComputerUseToolService(options: {
             sessionId: action.sessionId,
           });
       }
-      for (const [key, expiresAt] of grants) if (expiresAt <= Date.now()) grants.delete(key);
+      for (const [key, grant] of grants) if (grant.expiresAt <= Date.now()) grants.delete(key);
       await Promise.all(
         [...owners.values()]
           .filter(({ owner, authority, expiresAt }) => {
@@ -434,7 +611,10 @@ export function createComputerUseToolService(options: {
      */
     unattachedToolSet: (rawOwner: ComputerUseOwner): AppManagedToolSet | undefined => {
       const owner = decodeComputerUseOwner(rawOwner);
+      // Its recovery tells the agent to re-attach this Mac's Computer, which
+      // a host without a screen of its own cannot offer.
       if (
+        options.desktop === undefined ||
         !options.settings().enabled ||
         owner.executionPolicy === "plan" ||
         !isToolAllowedByAllowlist(options.toolConstraints(owner), "octant_computer")
@@ -465,16 +645,53 @@ export function createComputerUseToolService(options: {
           }),
       };
     },
+    /**
+     * The turn's `octant_computer`, bound at admission to the destination the
+     * send selected: this Mac, or the owner's `leaseId`, one of the thread's
+     * disposable desktops. A desktop binding needs `ask`, the turn's way to
+     * ask its person in the thread, and refuses a lease that is not the
+     * thread's own or not running.
+     */
     toolSet: (
       rawOwner: ComputerUseOwner,
       selection: unknown,
       imagesSupported: boolean = true,
+      ask?: ComputerUseThreadAsk,
     ): AppManagedToolSet | undefined => {
       if (!validateComputerUseSelection(selection, options.settings().enabled)) return undefined;
       const owner = decodeComputerUseOwner(rawOwner);
+      const leases = options.leases;
+      const onDesktop = owner.leaseId !== undefined;
+      if (
+        onDesktop
+          ? leases === undefined || ask === undefined || !leases.bindable(owner)
+          : options.desktop === undefined
+      )
+        return undefined;
       const boundAuthority = options.authority(owner);
+      const authorityChanged = (): boolean => {
+        const current = options.authority(owner);
+        return (
+          boundAuthority === undefined ||
+          current === undefined ||
+          !sameToolActionAuthority(boundAuthority, current)
+        );
+      };
+      // A desktop shows only a screenshot, so a model that cannot see one has
+      // nothing to act on there.
+      const needsImageModel = onDesktop && !imagesSupported;
+      const imageModelRefusal = refused(
+        "needs-image-model",
+        "This desktop has no accessibility elements, only screenshots. Select a vision-capable model to use it.",
+      );
+      const ownerChangedRefusal = refused(
+        "owner-changed",
+        "The task's computer-use authority changed.",
+      );
       const plugin = createComputerUsePlugin({
         execute: (command, signal) => {
+          if (needsImageModel && command.operation !== "stop")
+            return Promise.resolve(imageModelRefusal);
           if (!imagesSupported && command.operation === "click" && "x" in command)
             return Promise.resolve(
               refused(
@@ -482,15 +699,24 @@ export function createComputerUseToolService(options: {
                 "This model does not accept image observations. Use the observed accessibility elements or select a vision-capable model.",
               ),
             );
-          const current = options.authority(owner);
-          return boundAuthority === undefined ||
-            current === undefined ||
-            !sameToolActionAuthority(boundAuthority, current)
-            ? Promise.resolve(
-                refused("owner-changed", "The task's computer-use authority changed."),
-              )
-            : execute(owner, command, signal);
+          // Only a desktop's approvals go to the thread: this Mac's stay with
+          // the person at this Mac.
+          return authorityChanged()
+            ? Promise.resolve(ownerChangedRefusal)
+            : execute(owner, command, signal, onDesktop ? ask : undefined);
         },
+        ...(onDesktop && ask !== undefined
+          ? {
+              disposableDesktop: {
+                sendFile: (path: string, signal?: AbortSignal) => {
+                  if (needsImageModel) return Promise.resolve(imageModelRefusal);
+                  return authorityChanged()
+                    ? Promise.resolve(ownerChangedRefusal)
+                    : sendFile(owner, path, ask, signal);
+                },
+              },
+            }
+          : {}),
       });
       const lifetime = new AbortController();
       const inFlight = new Set<Promise<ComputerControlResult>>();
@@ -535,7 +761,7 @@ export function createComputerUseToolService(options: {
       grants.clear();
       observations.clear();
       await runtime.close();
-      await Promise.all([...owners.values()].map(({ owner }) => options.desktop.release(owner)));
+      await Promise.all([...owners.values()].map(({ owner }) => releaseReservation(owner)));
       owners.clear();
     },
   };

@@ -8,10 +8,30 @@ import type {
   CodeThreadId,
 } from "@octant/contracts/code";
 import type { CodeEvidenceReference } from "@octant/contracts/code-operations";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
-import { MonacoEditorAdapter, type MonacoAdapterRuntime } from "./MonacoEditorAdapter";
+import {
+  MonacoEditorAdapter,
+  type MonacoAdapterRuntime,
+  type MonacoEditorRange,
+  type MonacoLanguageBridge,
+} from "./MonacoEditorAdapter";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import {
+  codeEditorRevealKey,
+  requestCodeEditorReveal,
+  takeCodeEditorReveals,
+} from "./codeEditorReveal";
+import {
+  approvalOutcomeNotice,
+  LANGUAGE_APPROVAL_TEXT,
+  languageStatusText,
+  outsideCheckoutNotice,
+  toDefinitionLinks,
+  toEditorMarkers,
+  toLanguagePosition,
+} from "./codeLanguageEditor";
+import { useCodeLanguageServices } from "./useCodeLanguageServices";
 
 interface CodeEditorFileFields {
   readonly checkoutId: CodeCheckoutId;
@@ -38,12 +58,26 @@ export type CodeEditorFileProjection = CodeEditorFileFields &
   );
 
 export interface MonacoEditorPaneProps {
-  readonly client: Pick<CodeClient, "content" | "save">;
+  /**
+   * The language methods are optional: without them the editor keeps
+   * Monaco's own single-file services and shows no language state.
+   */
+  readonly client: Pick<
+    CodeClient,
+    "content" | "save" | "syncLanguageDocument" | "readLanguage" | "approveLanguageServer"
+  >;
   readonly draftStore?: CodeEditorDraftStore;
   readonly file: CodeEditorFileProjection;
   readonly loadRuntime?: () => Promise<MonacoAdapterRuntime>;
   readonly onRequestRefresh?: () => void;
   readonly onOpenExternalEditor?: () => Promise<void>;
+  /**
+   * Opens another file of this thread's checkout as a Code file tab: the
+   * ordinary file-open path a definition elsewhere goes through.
+   */
+  readonly onOpenFile?: (relativePath: string) => void;
+  /** Language-service timing, for tests. */
+  readonly languageTiming?: { readonly debounceMs?: number; readonly pollMs?: number };
 }
 
 export interface CodeEditorDraftStore {
@@ -209,8 +243,99 @@ function AvailableEditor(
     props.onRequestRefresh?.();
   }, [draftKey, props.draftStore, props.onRequestRefresh]);
 
+  const { checkoutId, path, threadId } = props.file;
+  const language = useCodeLanguageServices({
+    client: props.client,
+    enabled: loadState.kind === "ready",
+    threadId,
+    checkoutId,
+    path,
+    text: draft,
+    ...(props.languageTiming === undefined ? {} : { timing: props.languageTiming }),
+  });
+  const [languageNotice, setLanguageNotice] = useState<string>();
+  const [reveal, setReveal] = useState<{ readonly range: MonacoEditorRange }>();
+  const languageMarkers = useMemo(
+    () =>
+      language.diagnostics === undefined ? undefined : toEditorMarkers(language.diagnostics, path),
+    [language.diagnostics, path],
+  );
+  const { definition, refresh: refreshLanguage, retry: retryLanguage } = language;
+  const onOpenFile = props.onOpenFile;
+  const languageBridge = useMemo<MonacoLanguageBridge>(
+    () => ({
+      definitions: async (position) => {
+        setLanguageNotice(undefined);
+        const outcome = await definition(toLanguagePosition(position));
+        if (outcome.status === "unserved") return undefined;
+        return outcome.status === "targets" ? toDefinitionLinks(outcome.targets, path) : [];
+      },
+      open: (link) => {
+        if (link.kind === "outside") {
+          setLanguageNotice(outsideCheckoutNotice(link.label));
+          return;
+        }
+        if (onOpenFile === undefined) {
+          setLanguageNotice(`The definition is in ${link.path}.`);
+          return;
+        }
+        requestCodeEditorReveal(
+          codeEditorRevealKey(String(threadId), String(checkoutId), link.path),
+          link.range,
+        );
+        onOpenFile(link.path);
+      },
+    }),
+    [checkoutId, definition, onOpenFile, path, threadId],
+  );
+  // A definition that opened this file asks for its place once the text is in.
+  const ready = loadState.kind === "ready";
+  useEffect(() => {
+    if (!ready) return;
+    return takeCodeEditorReveals(
+      codeEditorRevealKey(String(threadId), String(checkoutId), path),
+      (range) => setReveal({ range }),
+    );
+  }, [checkoutId, path, ready, threadId]);
+  // Only a local window ever sees this state: the host answers a paired
+  // device and a Plan thread with their own refusals before it.
+  const { approve } = language;
+  const approvalAsked =
+    approve !== undefined &&
+    language.state.kind === "refused" &&
+    language.state.reason === "approval-required";
+  const [approving, setApproving] = useState(false);
+  const approveLanguage = useCallback(
+    (scope: "checkout" | "project") => {
+      if (approve === undefined) return;
+      setApproving(true);
+      setLanguageNotice(undefined);
+      void approve(scope).then((outcome) => {
+        setApproving(false);
+        setLanguageNotice(approvalOutcomeNotice(outcome));
+      });
+    },
+    [approve],
+  );
+  const languageStatus = approvalAsked
+    ? LANGUAGE_APPROVAL_TEXT
+    : languageStatusText(language.state);
+  const languageRetry = language.state.kind === "crashed" || language.state.kind === "timed-out";
+
   return (
-    <section aria-label={`Code editor for ${props.file.path}`} className="code-editor-pane">
+    <section
+      aria-label={`Code editor for ${props.file.path}`}
+      className="code-editor-pane"
+      onFocus={(event) => {
+        // Coming back to a file is when another file's edits may have changed
+        // its errors, or the person may have turned language services back
+        // on in Settings; focus moving within the pane is neither.
+        const from = event.relatedTarget;
+        if (from instanceof Node && event.currentTarget.contains(from)) return;
+        if (language.state.kind === "ready") refreshLanguage();
+        else if (language.state.kind === "off") retryLanguage();
+      }}
+    >
       <header className="code-editor-pane__toolbar">
         <div>
           <span>Code file</span>
@@ -268,6 +393,40 @@ function AvailableEditor(
         <p role="status">Unsaved changes</p>
       ) : null}
 
+      {languageStatus === undefined && languageNotice === undefined ? null : (
+        <div className="code-editor-pane__language" data-state={language.state.kind}>
+          {languageStatus === undefined ? null : <p role="status">{languageStatus}</p>}
+          {languageRetry ? (
+            <OctantButton onClick={retryLanguage} size="sm" type="button" variant="secondary">
+              Retry
+            </OctantButton>
+          ) : null}
+          {approvalAsked ? (
+            <>
+              <OctantButton
+                disabled={approving}
+                onClick={() => approveLanguage("checkout")}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Allow in this checkout
+              </OctantButton>
+              <OctantButton
+                disabled={approving}
+                onClick={() => approveLanguage("project")}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Allow in this Project
+              </OctantButton>
+            </>
+          ) : null}
+          {languageNotice === undefined ? null : <p role="status">{languageNotice}</p>}
+        </div>
+      )}
+
       {loadState.kind === "loading" ? <p role="status">Loading file…</p> : null}
       {loadState.kind === "unavailable" ? (
         <OctantAlert tone="warning">{loadState.message}</OctantAlert>
@@ -276,6 +435,9 @@ function AvailableEditor(
         <MonacoEditorAdapter
           ariaLabel={`Editor for ${props.file.path}`}
           language={props.file.language}
+          {...(props.client.readLanguage === undefined ? {} : { languageBridge })}
+          languageMarkers={languageMarkers}
+          reveal={reveal}
           {...(props.loadRuntime === undefined ? {} : { loadRuntime: props.loadRuntime })}
           modelUri={modelUri(props.file.checkoutId, props.file.fileId)}
           onChange={(value) => {

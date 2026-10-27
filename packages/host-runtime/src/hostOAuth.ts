@@ -16,6 +16,81 @@ const CALLBACK_PATH = "/oauth/callback";
 const OPENROUTER_DIALECT = "openrouter-pkce";
 const CHATGPT_PLAN_DIALECT = "chatgpt-plan-siwc";
 const MCP_DIALECT = "mcp-authorization";
+const DIRECTORY_DIALECT = "directory-oidc";
+// The one directory authority the directory dialect signs in against. The
+// broker builds every authority URL from this host and the tenant GUID, so no
+// descriptor, configuration, or discovery document can name another identity
+// provider or a look-alike sign-in page.
+const DIRECTORY_ISSUER = "https://login.microsoftonline.com";
+// Resources a directory grant may be issued for. A driver kind names the one
+// its endpoint accepts; anything else is refused before a listener opens.
+const DIRECTORY_AUDIENCES: ReadonlySet<string> = new Set(["https://cognitiveservices.azure.com"]);
+// The issuer dialect signs in to an organization's own OpenID Connect issuer
+// for its own model gateway. The configuration names the issuer, fixed when
+// the instance is created; the broker reads the issuer's endpoints from its
+// discovery document and accepts only endpoints on the issuer's own origin,
+// so the document cannot send the person, the code, or the refresh token to
+// another host.
+const ISSUER_DIALECT = "issuer-oidc";
+const DISCOVERY_PATH = "/.well-known/openid-configuration";
+// A discovery document lists every capability the issuer has; some run to
+// several kilobytes.
+const MAX_DISCOVERY_CHARS = 64 * 1_024;
+const ISSUER_CLIENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/;
+// Refresh refusals an issuer reports, in OpenID Connect's own words, when the
+// person must be present again. The grant stays, as the directory dialect's
+// does; every other refusal of the grant or client ends it.
+const ISSUER_INTERACTION_ERRORS: ReadonlySet<string> = new Set([
+  "interaction_required",
+  "login_required",
+  "consent_required",
+]);
+// Identity scopes requested beside the audience's `.default`. The directory
+// may leave them out of the echoed scope, so they never count as the token's
+// resource.
+const DIRECTORY_IDENTITY_SCOPES: ReadonlySet<string> = new Set([
+  "openid",
+  "profile",
+  "offline_access",
+  "email",
+]);
+// Refresh refusals the directory reports with a code that means the person
+// must be present again (multi-factor, a password change prompt, consent).
+// The grant stays: signing in again in person renews it.
+const DIRECTORY_INTERACTION_ERRORS: ReadonlySet<string> = new Set([
+  "interaction_required",
+  "login_required",
+  "consent_required",
+]);
+const DIRECTORY_INTERACTION_SUBERRORS: ReadonlySet<string> = new Set([
+  "basic_action",
+  "additional_action",
+  "message_only",
+  "user_password_expired",
+  "consent_required",
+]);
+// AADSTS50076 and 50079 (multi-factor required or not yet registered), 50158
+// (an external security challenge), 65001 (consent not granted).
+const DIRECTORY_INTERACTION_CODES: ReadonlySet<number> = new Set([50076, 50079, 50158, 65001]);
+// AADSTS70008 and 700082 (refresh token expired from inactivity), 70043
+// (expired by a sign-in frequency policy). Every other `invalid_grant`,
+// including 50173 (a password change or an administrator's revocation), is
+// read as revoked.
+const DIRECTORY_EXPIRED_CODES: ReadonlySet<number> = new Set([70008, 700082, 70043]);
+// The pages the directory sends a person to with a device code. A code shown
+// beside any other address would teach the person to type it into a page
+// Octant did not name, which is how device-code phishing works, so the
+// broker refuses the attempt instead of printing it.
+const DIRECTORY_VERIFICATION_HOSTS: ReadonlySet<string> = new Set([
+  "microsoft.com",
+  "login.microsoft.com",
+  "login.microsoftonline.com",
+]);
+// The directory keeps a device code for fifteen minutes; an answer claiming
+// longer would keep the broker polling for a code nobody can still enter.
+const DIRECTORY_DEVICE_MAX_SECONDS = 15 * 60;
+const VISIBLE_ASCII_PATTERN = /^[\x21-\x7e]{1,2048}$/;
+const ACCOUNT_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 .@_'-]{0,127}$/;
 // RFC 6749 §3.3 scope-token: printable ASCII without space, quote, or
 // backslash. A resource may advertise a URL-shaped scope; the authorize URL
 // and the token form encode it, so the wider grammar leaks nowhere.
@@ -48,6 +123,10 @@ const MAX_TOKEN_CHARS = 4_096;
 const MAX_RESPONSE_CHARS = 16 * 1_024;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const CODE_PATTERN = /^[A-Za-z0-9._~-]{1,512}$/;
+// The directory's authorization codes are opaque and run past a thousand
+// characters (an Entra ID code of 1,350 characters has been reported), so the
+// directory callback takes any code the 4,096-character query cap admits.
+const DIRECTORY_CODE_PATTERN = /^[A-Za-z0-9._~-]{1,4096}$/;
 const ERROR_PATTERN = /^[a-z_]{1,64}$/;
 const USER_CODE_PATTERN = /^[A-Za-z0-9-]{1,64}$/;
 const ISSUED_CLIENT_ID_PATTERN = /^oaiapp_[A-Za-z0-9_-]{1,128}$/;
@@ -58,7 +137,12 @@ const JWKS_CACHE_MS = 10 * 60 * 1_000;
 export type HostOAuthFlow = "authorization-code-pkce" | "device-code";
 
 /** Vendor wire dialects the host OAuth runner can speak. */
-export type HostOAuthDialect = "openrouter-pkce" | "chatgpt-plan-siwc" | "mcp-authorization";
+export type HostOAuthDialect =
+  | "openrouter-pkce"
+  | "chatgpt-plan-siwc"
+  | "mcp-authorization"
+  | "directory-oidc"
+  | "issuer-oidc";
 
 export interface HostOAuthDescriptor {
   readonly descriptorId: string;
@@ -68,7 +152,11 @@ export interface HostOAuthDescriptor {
   readonly dialect?: HostOAuthDialect;
   readonly flow: HostOAuthFlow;
   readonly authorizationEndpoint?: string;
-  readonly tokenEndpoint: string;
+  /**
+   * Absent only for the directory dialect, whose authority URLs the broker
+   * builds itself from the closed issuer host and the tenant.
+   */
+  readonly tokenEndpoint?: string;
   readonly deviceAuthorizationEndpoint?: string;
   readonly scopes: readonly string[];
   readonly termsId: string;
@@ -91,9 +179,60 @@ export interface HostOAuthDescriptor {
    * flow could begin, so the caller chooses the port and the runner binds it.
    */
   readonly redirectPort?: number;
+  /**
+   * Directory dialect only: the organization's tenant, as a lowercase GUID.
+   * A multi-tenant alias would let an account from any tenant answer.
+   */
+  readonly tenantId?: string;
+  /** Directory dialect only: the resource the access token is for, from a closed list. */
+  readonly audience?: string;
+  /**
+   * Directory and issuer dialects: the https origin of the endpoint the grant
+   * is signed in for.
+   */
+  readonly endpointOrigin?: string;
+  /**
+   * Issuer dialect only: the organization's own OpenID Connect issuer, as its
+   * identity tokens name it. The descriptor's one scope is the gateway's.
+   */
+  readonly issuer?: string;
 }
 
-export type HostOAuthSignInAgainReason = "revoked" | "expired" | "refresh-reused";
+/**
+ * What a directory or issuer grant was signed in for. `access` releases such
+ * a grant's token only to a caller naming exactly this binding, of the same
+ * kind.
+ */
+export type HostOAuthDirectoryBinding = HostOAuthTenantBinding | HostOAuthIssuerBinding;
+
+/** A tenant of the closed directory, for one driver kind's audience. */
+export interface HostOAuthTenantBinding {
+  readonly tenantId: string;
+  readonly clientId: string;
+  readonly audience: string;
+  readonly endpointOrigin: string;
+}
+
+/** An organization's own issuer, for the one scope its gateway requires. */
+export interface HostOAuthIssuerBinding {
+  readonly issuer: string;
+  readonly clientId: string;
+  readonly scope: string;
+  readonly endpointOrigin: string;
+}
+
+/**
+ * `interaction-required` (directory dialect): the directory wants the person
+ * present again, for multi-factor or a consent prompt. Unlike the others it
+ * keeps the grant, because a later refresh can pass once the person has met
+ * the prompt elsewhere. A new sign-in does not renew that grant: it creates
+ * another, and the server forgets the kept one when it stores the new pointer.
+ */
+export type HostOAuthSignInAgainReason =
+  | "revoked"
+  | "expired"
+  | "refresh-reused"
+  | "interaction-required";
 
 export type HostOAuthRefusalReason =
   | "state-mismatch"
@@ -128,6 +267,11 @@ export type HostOAuthPublicState =
       readonly attemptId: string;
       readonly descriptorId: string;
       readonly credentialRef: string;
+      /**
+       * Directory dialect only: the account the validated identity token
+       * named, when it named one in plain text. A label, never a claim set.
+       */
+      readonly accountLabel?: string;
     }
   | {
       readonly kind: "refused";
@@ -163,6 +307,11 @@ export type HostOAuthAccessResult =
       readonly subscriptionUsageGranted?: boolean;
     }
   | { readonly kind: "sign-in-again"; readonly reason: HostOAuthSignInAgainReason }
+  /**
+   * The caller named a binding the grant was not signed in for, named none
+   * for a directory grant, or named one for a grant of another kind.
+   */
+  | { readonly kind: "binding-mismatch" }
   | { readonly kind: "unavailable" };
 
 export interface HostOAuthRuntime {
@@ -180,11 +329,20 @@ export interface HostOAuthRuntime {
   }) => Promise<HostOAuthBeginResult>;
   readonly status: (attemptId: string) => HostOAuthPublicState;
   readonly refresh: (credentialRef: string) => Promise<HostOAuthRefreshResult>;
-  readonly access: (credentialRef: string) => Promise<HostOAuthAccessResult>;
+  /**
+   * A directory grant requires `binding` and releases its token only when the
+   * binding equals the one it was signed in for; a grant of any other kind
+   * refuses a binding.
+   */
+  readonly access: (
+    credentialRef: string,
+    binding?: HostOAuthDirectoryBinding,
+  ) => Promise<HostOAuthAccessResult>;
   /**
    * ChatGPT plan dialect only: revoke the refresh token at the issuer's
    * revocation endpoint, then drop the stored grant. Other dialects have no
-   * revocation endpoint and simply drop the grant.
+   * revocation endpoint and simply drop the grant; the directory offers no
+   * client-side refresh-token revocation, so its sign-out is local.
    */
   readonly revoke: (credentialRef: string) => Promise<HostOAuthRevokeResult>;
   readonly close: () => Promise<void>;
@@ -242,6 +400,51 @@ interface StoredGrant {
    * usage is disabled until a reauthorization grants the scope.
    */
   readonly planUsageEnabled?: boolean;
+  /**
+   * Directory dialect only: the binding the identity token proved at sign-in.
+   * `access` compares a caller's binding with these and `clientId`. The
+   * identity token itself is not kept: nothing later needs it.
+   */
+  readonly tenantId?: string;
+  readonly audience?: string;
+  readonly endpointOrigin?: string;
+  /**
+   * Directory and issuer dialects: a display name from the identity token,
+   * when it is plain text.
+   */
+  readonly accountLabel?: string;
+  /**
+   * Issuer dialect only: the issuer, the gateway scope, and the key set the
+   * discovery document named at sign-in. A refresh uses these and the stored
+   * token endpoint; it does not discover again.
+   */
+  readonly issuer?: string;
+  readonly resourceScope?: string;
+  readonly jwksUrl?: string;
+}
+
+/** A directory or issuer sign-in or refresh: its binding, authority, and key cache. */
+interface DirectoryContext {
+  readonly binding: HostOAuthDirectoryBinding;
+  readonly authority: DirectoryAuthority;
+  readonly jwks: { current: JwksCache | undefined };
+}
+
+/** What a refresh needs of an authority; a sign-in also needs its authorize endpoint. */
+interface DirectoryAuthority {
+  /** The `iss` every identity token from this tenant or issuer carries. */
+  readonly issuer: string;
+  readonly tokenEndpoint: string;
+  readonly jwksUrl: string;
+}
+
+interface SignInAuthority extends DirectoryAuthority {
+  readonly authorizationEndpoint: string;
+}
+
+/** A tenant of the closed directory also serves device authorization. */
+interface TenantAuthority extends SignInAuthority {
+  readonly deviceAuthorizationEndpoint: string;
 }
 
 interface Attempt {
@@ -294,9 +497,11 @@ export async function exchangeAuthorizationCode(input: {
   /** ChatGPT plan dialect: the stable host id stored on the grant. */
   readonly extAgentHostId?: string;
   /** ChatGPT plan dialect: the runtime's memoized JWKS cache. */
-  readonly jwks?: { current: SiwcJwksCache | undefined };
+  readonly jwks?: { current: JwksCache | undefined };
   /** ChatGPT plan dialect: the identity issuer (JWKS + revocation). */
   readonly issuer?: string;
+  /** Directory dialect: the binding and authority the attempt began with. */
+  readonly directory?: DirectoryContext;
 }): Promise<
   | { readonly kind: "tokens"; readonly grant: StoredGrant }
   | {
@@ -345,6 +550,22 @@ export async function exchangeAuthorizationCode(input: {
     if (exchanged.kind === "transient") return exchanged;
     if (exchanged.reason === "unavailable") return { kind: "refused", reason: "unavailable" };
     return { kind: "refused", reason: "exchange-refused" };
+  }
+  if (input.dialect === DIRECTORY_DIALECT || input.dialect === ISSUER_DIALECT) {
+    const directory = input.directory;
+    const nonce = input.nonce;
+    if (directory === undefined || nonce === undefined) {
+      return { kind: "refused", reason: "exchange-refused" };
+    }
+    return exchangeDirectoryCode({
+      fetch: input.fetch,
+      now: input.now,
+      directory,
+      nonce,
+      code: input.code,
+      redirectUri: input.redirectUri,
+      verifier: input.verifier,
+    });
   }
   const exchanged = await requestTokens({
     fetch: input.fetch,
@@ -505,7 +726,7 @@ interface SiwcExchangeContext {
    * sent.
    */
   readonly nonce?: string;
-  readonly jwks: { current: SiwcJwksCache | undefined };
+  readonly jwks: { current: JwksCache | undefined };
   readonly issuer: string;
 }
 
@@ -698,6 +919,651 @@ function parseScopeList(scope: string): readonly string[] {
   return scope.split(/\s+/).filter((entry) => entry.length > 0);
 }
 
+/**
+ * The directory dialect (an organization's Microsoft Entra ID tenant). The
+ * broker builds every authority URL from the closed issuer host and the
+ * tenant GUID; the descriptor names only the tenant, the organization's own
+ * public client, an audience from a closed list, and the endpoint origin.
+ * The identity token is validated against the tenant's published keys
+ * (signature, issuer, audience, `tid`, expiry, nonce) before the grant is
+ * stored. The access token is never parsed: the directory treats it as
+ * opaque to clients, so the tenant-specific authority and the echoed scope
+ * bind it instead.
+ */
+function directoryAuthority(issuerOrigin: string, tenantId: string): TenantAuthority {
+  const tenant = `${issuerOrigin}/${tenantId}`;
+  return {
+    issuer: `${tenant}/v2.0`,
+    authorizationEndpoint: `${tenant}/oauth2/v2.0/authorize`,
+    deviceAuthorizationEndpoint: `${tenant}/oauth2/v2.0/devicecode`,
+    tokenEndpoint: `${tenant}/oauth2/v2.0/token`,
+    jwksUrl: `${tenant}/discovery/v2.0/keys`,
+  };
+}
+
+/**
+ * The issuer dialect's authority, read from the issuer's own discovery
+ * document. The document must name the configured issuer exactly, put its
+ * authorize, token, and key-set endpoints on the issuer's own https origin
+ * with no query, and offer PKCE with S256 when it lists challenge methods.
+ * Anything else is `invalid`: a look-alike document cannot move the sign-in
+ * page or the token exchange to another host. An unreachable issuer, a 429,
+ * or a 5xx is `unavailable`.
+ */
+async function discoverIssuer(
+  fetchImpl: typeof fetch,
+  issuer: string,
+): Promise<
+  | { readonly kind: "authority"; readonly authority: SignInAuthority }
+  | { readonly kind: "invalid" }
+  | { readonly kind: "unavailable" }
+> {
+  let response: Response;
+  try {
+    // A redirect is never followed, and it is an issuer answering wrongly,
+    // not an unreachable one: under `redirect: "error"` it read as
+    // `unavailable`, which tells the person to retry a sign-in that cannot work.
+    response = await fetchImpl(`${issuer.replace(/\/+$/, "")}${DISCOVERY_PATH}`, {
+      method: "GET",
+      redirect: "manual",
+      headers: { accept: "application/json" },
+    });
+  } catch {
+    return { kind: "unavailable" };
+  }
+  if (response.status === 429 || response.status >= 500) return { kind: "unavailable" };
+  if (!response.ok) {
+    void response.body?.cancel().catch(() => undefined);
+    return { kind: "invalid" };
+  }
+  const body = await readResponseJson(response, MAX_DISCOVERY_CHARS);
+  if (body === undefined || body.issuer !== issuer) return { kind: "invalid" };
+  const origin = new URL(issuer).origin;
+  const authorizationEndpoint = issuerEndpoint(body.authorization_endpoint, origin);
+  const tokenEndpoint = issuerEndpoint(body.token_endpoint, origin);
+  const jwksUrl = issuerEndpoint(body.jwks_uri, origin);
+  const methods = body.code_challenge_methods_supported;
+  if (
+    authorizationEndpoint === undefined ||
+    tokenEndpoint === undefined ||
+    jwksUrl === undefined ||
+    (methods !== undefined && !(Array.isArray(methods) && methods.includes("S256")))
+  ) {
+    return { kind: "invalid" };
+  }
+  return {
+    kind: "authority",
+    authority: { issuer, authorizationEndpoint, tokenEndpoint, jwksUrl },
+  };
+}
+
+/** An endpoint the discovery document named, only on the issuer's own origin. */
+function issuerEndpoint(value: unknown, issuerOrigin: string): string | undefined {
+  if (typeof value !== "string" || value.length > 512) return undefined;
+  try {
+    const url = new URL(value);
+    if (
+      url.protocol !== "https:" ||
+      url.origin !== issuerOrigin ||
+      url.username !== "" ||
+      url.password !== "" ||
+      url.search !== "" ||
+      url.hash !== ""
+    ) {
+      return undefined;
+    }
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+/** The only scopes a directory or issuer sign-in or refresh requests. */
+function directoryScope(binding: HostOAuthDirectoryBinding): string {
+  const resource = "tenantId" in binding ? `${binding.audience}/.default` : binding.scope;
+  return `${resource} openid profile offline_access`;
+}
+
+/**
+ * Whether the echoed scope names the binding's resource and no other. The
+ * identity scopes, which the echo may omit, are ignored. A directory grant's
+ * resource scopes must sit under its audience. An issuer grant's must each be
+ * the gateway scope or, when that scope asks for a resource's `.default`
+ * scopes, sit under that resource; an echo without one is refused, since the
+ * token's resource could then not be told.
+ */
+function scopeBoundToResource(scope: string, binding: HostOAuthDirectoryBinding): boolean {
+  const resourceScopes = parseScopeList(scope).filter(
+    (entry) => !DIRECTORY_IDENTITY_SCOPES.has(entry),
+  );
+  if (resourceScopes.length === 0) return false;
+  if ("tenantId" in binding) {
+    return resourceScopes.every((entry) => entry.startsWith(`${binding.audience}/`));
+  }
+  const defaultOf = binding.scope.endsWith("/.default")
+    ? binding.scope.slice(0, -".default".length)
+    : undefined;
+  return resourceScopes.every(
+    (entry) => entry === binding.scope || (defaultOf !== undefined && entry.startsWith(defaultOf)),
+  );
+}
+
+/** A display name for the account, only when it is plain text a label can carry. */
+function directoryAccountLabel(claims: Readonly<Record<string, unknown>>): string | undefined {
+  for (const claim of [claims.preferred_username, claims.name]) {
+    if (typeof claim === "string" && ACCOUNT_LABEL_PATTERN.test(claim)) return claim;
+  }
+  return undefined;
+}
+
+async function validateDirectoryIdToken(input: {
+  readonly fetch: typeof fetch;
+  readonly now: () => number;
+  readonly idToken: string;
+  readonly directory: DirectoryContext;
+  readonly expectedNonce?: string;
+  readonly expectedSubject?: string;
+}): Promise<
+  | { readonly kind: "valid"; readonly subject: string; readonly accountLabel?: string }
+  | { readonly kind: "invalid" }
+  | { readonly kind: "unavailable" }
+> {
+  const { binding } = input.directory;
+  const identity = await validateIdToken({
+    fetch: input.fetch,
+    now: input.now,
+    idToken: input.idToken,
+    expectedAudience: binding.clientId,
+    ...(input.expectedNonce === undefined ? {} : { expectedNonce: input.expectedNonce }),
+    ...(input.expectedSubject === undefined ? {} : { expectedSubject: input.expectedSubject }),
+    jwks: input.directory.jwks,
+    issuer: input.directory.authority.issuer,
+    jwksUrl: input.directory.authority.jwksUrl,
+  });
+  if (identity.kind !== "valid") return identity;
+  // The issuer already names the tenant; `tid` is checked as well because it
+  // is the claim the directory documents as the tenant the person signed in
+  // to. An organization's own issuer is itself the whole binding.
+  if ("tenantId" in binding && identity.claims.tid !== binding.tenantId) {
+    return { kind: "invalid" };
+  }
+  const accountLabel = directoryAccountLabel(identity.claims);
+  return {
+    kind: "valid",
+    subject: identity.subject,
+    ...(accountLabel === undefined ? {} : { accountLabel }),
+  };
+}
+
+/** The fields a directory or issuer grant keeps so `access` and refresh can check it. */
+function grantBindingFields(context: DirectoryContext) {
+  const { binding, authority } = context;
+  return "tenantId" in binding
+    ? {
+        dialect: DIRECTORY_DIALECT,
+        tenantId: binding.tenantId,
+        audience: binding.audience,
+        endpointOrigin: binding.endpointOrigin,
+      }
+    : {
+        dialect: ISSUER_DIALECT,
+        issuer: binding.issuer,
+        resourceScope: binding.scope,
+        endpointOrigin: binding.endpointOrigin,
+        jwksUrl: authority.jwksUrl,
+      };
+}
+
+/**
+ * Exchange a directory or issuer authorization code. The form carries the
+ * public client id, the code, the PKCE verifier, the same redirect URI, and
+ * the scope; a public client has no secret or client assertion to send.
+ */
+async function exchangeDirectoryCode(input: {
+  readonly fetch: typeof fetch;
+  readonly now: () => number;
+  readonly directory: DirectoryContext;
+  readonly nonce: string;
+  readonly code: string;
+  readonly redirectUri: string;
+  readonly verifier: string;
+}): Promise<
+  | { readonly kind: "tokens"; readonly grant: StoredGrant }
+  | { readonly kind: "refused"; readonly reason: "exchange-refused" | "unavailable" }
+  | { readonly kind: "transient" }
+> {
+  const { binding, authority } = input.directory;
+  const exchanged = await requestTokens({
+    fetch: input.fetch,
+    now: input.now,
+    endpoint: authority.tokenEndpoint,
+    form: {
+      grant_type: "authorization_code",
+      code: input.code,
+      redirect_uri: input.redirectUri,
+      client_id: binding.clientId,
+      code_verifier: input.verifier,
+      scope: directoryScope(binding),
+    },
+    clientId: binding.clientId,
+    tokenEndpoint: authority.tokenEndpoint,
+    previousRefresh: undefined,
+    generation: 0,
+    codeExchange: true,
+  });
+  if (exchanged.kind === "transient") return exchanged;
+  if (exchanged.kind === "pending") return { kind: "refused", reason: "exchange-refused" };
+  if (exchanged.kind !== "tokens") {
+    if (exchanged.reason === "unavailable") return { kind: "refused", reason: "unavailable" };
+    return { kind: "refused", reason: "exchange-refused" };
+  }
+  return directorySignedInGrant({
+    fetch: input.fetch,
+    now: input.now,
+    directory: input.directory,
+    grant: exchanged.grant,
+    nonce: input.nonce,
+  });
+}
+
+/**
+ * The grant a finished directory sign-in stores, once the echoed scope sits
+ * under the audience and the identity token proves the tenant. A loopback
+ * sign-in's token must echo the attempt's nonce; a device-code sign-in sends
+ * none, and its token comes straight from the tenant's token endpoint in
+ * answer to the attempt's own device code.
+ */
+async function directorySignedInGrant(input: {
+  readonly fetch: typeof fetch;
+  readonly now: () => number;
+  readonly directory: DirectoryContext;
+  readonly grant: StoredGrant;
+  readonly nonce: string | undefined;
+}): Promise<
+  | { readonly kind: "tokens"; readonly grant: StoredGrant }
+  | { readonly kind: "refused"; readonly reason: "exchange-refused" | "unavailable" }
+> {
+  const { binding } = input.directory;
+  const { idToken, ...tokens } = input.grant;
+  if (idToken === undefined || !scopeBoundToResource(tokens.scope, binding)) {
+    return { kind: "refused", reason: "exchange-refused" };
+  }
+  const identity = await validateDirectoryIdToken({
+    fetch: input.fetch,
+    now: input.now,
+    idToken,
+    directory: input.directory,
+    ...(input.nonce === undefined ? {} : { expectedNonce: input.nonce }),
+  });
+  if (identity.kind === "unavailable") return { kind: "refused", reason: "unavailable" };
+  if (identity.kind !== "valid") return { kind: "refused", reason: "exchange-refused" };
+  return {
+    kind: "tokens",
+    grant: {
+      ...tokens,
+      ...grantBindingFields(input.directory),
+      subject: identity.subject,
+      ...(identity.accountLabel === undefined ? {} : { accountLabel: identity.accountLabel }),
+    },
+  };
+}
+
+/** A device code the tenant issued, with the page and code the person is shown. */
+interface DirectoryDeviceCode {
+  readonly deviceCode: string;
+  readonly userCode: string;
+  readonly verificationUri: string;
+  readonly expiresInSeconds: number;
+  readonly intervalSeconds: number;
+}
+
+/**
+ * Ask the tenant's own authority for a device code, requesting only the
+ * audience. The directory's free-text `message` is never read: the person is
+ * shown the code and a page from the closed list, and nothing the directory
+ * wrote. A 4xx answer (an app registration that does not allow public client
+ * flows, or a tenant that refuses the client) is refused; only an unreachable
+ * directory, a 429, or a 5xx reads unavailable.
+ */
+async function requestDirectoryDeviceCode(input: {
+  readonly fetch: typeof fetch;
+  readonly binding: HostOAuthTenantBinding;
+}): Promise<
+  | { readonly kind: "issued"; readonly code: DirectoryDeviceCode }
+  | { readonly kind: "refused"; readonly reason: "exchange-refused" | "unavailable" }
+> {
+  const { binding } = input;
+  const authority = directoryAuthority(DIRECTORY_ISSUER, binding.tenantId);
+  let response: Response;
+  try {
+    response = await input.fetch(authority.deviceAuthorizationEndpoint, {
+      method: "POST",
+      redirect: "error",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: binding.clientId,
+        scope: directoryScope(binding),
+      }).toString(),
+    });
+  } catch {
+    return { kind: "refused", reason: "unavailable" };
+  }
+  if (response.status === 429 || response.status >= 500) {
+    return { kind: "refused", reason: "unavailable" };
+  }
+  const body = await readResponseJson(response);
+  if (!response.ok || body === undefined) return { kind: "refused", reason: "exchange-refused" };
+  const deviceCode = stringField(body, "device_code");
+  const userCode = stringField(body, "user_code");
+  const verificationUri = stringField(body, "verification_uri");
+  const expiresIn = numberField(body, "expires_in");
+  const interval = numberField(body, "interval") ?? DEFAULT_DEVICE_INTERVAL_MS / 1_000;
+  if (
+    deviceCode === undefined ||
+    deviceCode.length > MAX_TOKEN_CHARS ||
+    userCode === undefined ||
+    !USER_CODE_PATTERN.test(userCode) ||
+    verificationUri === undefined ||
+    !isDirectoryVerificationPage(verificationUri) ||
+    expiresIn === undefined ||
+    expiresIn <= 0
+  ) {
+    return { kind: "refused", reason: "exchange-refused" };
+  }
+  return {
+    kind: "issued",
+    code: {
+      deviceCode,
+      userCode,
+      verificationUri,
+      expiresInSeconds: Math.min(expiresIn, DIRECTORY_DEVICE_MAX_SECONDS),
+      intervalSeconds: Math.min(Math.max(1, interval), 60),
+    },
+  };
+}
+
+/**
+ * Whether a verification page is one the directory itself serves, over https.
+ * The command prints the page as the directory wrote it, and the URL parser
+ * drops line breaks and percent-encodes an escape character before it names
+ * the host, so the text itself must be visible ASCII as well.
+ */
+function isDirectoryVerificationPage(value: string): boolean {
+  if (!VISIBLE_ASCII_PATTERN.test(value)) return false;
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "https:" &&
+      url.username === "" &&
+      url.password === "" &&
+      url.port === "" &&
+      DIRECTORY_VERIFICATION_HOSTS.has(url.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+type DevicePoll =
+  | { readonly kind: "tokens"; readonly grant: StoredGrant }
+  | { readonly kind: "pending"; readonly slowDown: boolean }
+  | { readonly kind: "refused"; readonly reason: HostOAuthRefusalReason };
+
+/**
+ * One poll of a directory device-code sign-in. The directory says a person
+ * declined with `authorization_declined`, a code ran out with
+ * `expired_token`, and anything else it refuses ends the attempt; a finished
+ * sign-in is held to the same scope and identity-token checks as a loopback
+ * one, without a nonce.
+ */
+async function pollDirectoryDevice(input: {
+  readonly fetch: typeof fetch;
+  readonly now: () => number;
+  readonly directory: DirectoryContext;
+  readonly deviceCode: string;
+}): Promise<DevicePoll> {
+  const { binding, authority } = input.directory;
+  const polled = await requestTokens({
+    fetch: input.fetch,
+    now: input.now,
+    endpoint: authority.tokenEndpoint,
+    form: {
+      grant_type: DEVICE_GRANT,
+      client_id: binding.clientId,
+      device_code: input.deviceCode,
+    },
+    clientId: binding.clientId,
+    tokenEndpoint: authority.tokenEndpoint,
+    previousRefresh: undefined,
+    generation: 0,
+    codeExchange: true,
+  });
+  if (polled.kind === "pending") return polled;
+  if (polled.kind === "transient") return { kind: "refused", reason: "unavailable" };
+  if (polled.kind === "refused") {
+    if (polled.reason === "denied" || polled.error === "authorization_declined") {
+      return { kind: "refused", reason: "denied" };
+    }
+    if (polled.reason === "timeout" || polled.reason === "unavailable") {
+      return { kind: "refused", reason: polled.reason };
+    }
+    return { kind: "refused", reason: "exchange-refused" };
+  }
+  return directorySignedInGrant({
+    fetch: input.fetch,
+    now: input.now,
+    directory: input.directory,
+    grant: polled.grant,
+    nonce: undefined,
+  });
+}
+
+/**
+ * Refresh a directory or issuer grant, storing the rotated refresh token. A
+ * response whose echoed scope leaves the resource ends the grant. A new
+ * identity token must keep the tenant (for a directory grant) and subject;
+ * one that cannot be checked because the key set is unreachable keeps the
+ * rotated tokens and the prior identity, as the ChatGPT plan dialect does,
+ * since the issuer may already have retired the previous refresh token.
+ */
+async function refreshDirectoryGrant(input: {
+  readonly fetch: typeof fetch;
+  readonly now: () => number;
+  readonly directory: DirectoryContext;
+  readonly refreshToken: string;
+  readonly generation: number;
+  readonly subject: string;
+  readonly accountLabel: string | undefined;
+}): Promise<TokenRequestResult> {
+  const { binding, authority } = input.directory;
+  const exchanged = await requestTokens({
+    fetch: input.fetch,
+    now: input.now,
+    endpoint: authority.tokenEndpoint,
+    form: {
+      grant_type: "refresh_token",
+      refresh_token: input.refreshToken,
+      client_id: binding.clientId,
+      scope: directoryScope(binding),
+    },
+    clientId: binding.clientId,
+    tokenEndpoint: authority.tokenEndpoint,
+    previousRefresh: input.refreshToken,
+    generation: input.generation,
+    codeExchange: false,
+    refreshErrors: "tenantId" in binding ? mapDirectoryRefreshError : mapIssuerRefreshError,
+  });
+  if (exchanged.kind !== "tokens") return exchanged;
+  const { idToken, ...tokens } = exchanged.grant;
+  if (!scopeBoundToResource(tokens.scope, binding)) {
+    return { kind: "refused", reason: "exchange-refused", error: "scope_unbound" };
+  }
+  let subject = input.subject;
+  let accountLabel = input.accountLabel;
+  if (idToken !== undefined) {
+    const identity = await validateDirectoryIdToken({
+      fetch: input.fetch,
+      now: input.now,
+      idToken,
+      directory: input.directory,
+      expectedSubject: input.subject,
+    });
+    if (identity.kind === "invalid") {
+      return { kind: "refused", reason: "exchange-refused", error: "id_token_invalid" };
+    }
+    if (identity.kind === "valid") {
+      subject = identity.subject;
+      accountLabel = identity.accountLabel ?? accountLabel;
+    }
+  }
+  return {
+    kind: "tokens",
+    grant: {
+      ...tokens,
+      ...grantBindingFields(input.directory),
+      subject,
+      ...(accountLabel === undefined ? {} : { accountLabel }),
+    },
+  };
+}
+
+/**
+ * Map a directory refresh refusal. The directory reports most dead grants as
+ * `invalid_grant` and tells them apart with `suberror` and numeric
+ * `error_codes`; its free-text description is never read, so no directory
+ * text reaches a result.
+ */
+function mapDirectoryRefreshError(
+  error: string,
+  body: Readonly<Record<string, unknown>>,
+): TokenRequestResult {
+  const suberror = stringField(body, "suberror");
+  const codes = Array.isArray(body.error_codes)
+    ? body.error_codes.filter((code): code is number => typeof code === "number")
+    : [];
+  const refused = (signInAgain: HostOAuthSignInAgainReason): TokenRequestResult => ({
+    kind: "refused",
+    reason: "exchange-refused",
+    error,
+    signInAgain,
+  });
+  if (
+    DIRECTORY_INTERACTION_ERRORS.has(error) ||
+    (suberror !== undefined && DIRECTORY_INTERACTION_SUBERRORS.has(suberror)) ||
+    codes.some((code) => DIRECTORY_INTERACTION_CODES.has(code))
+  ) {
+    return refused("interaction-required");
+  }
+  if (error === "invalid_grant") {
+    if (suberror === "token_expired" || codes.some((code) => DIRECTORY_EXPIRED_CODES.has(code))) {
+      return refused("expired");
+    }
+    return refused("revoked");
+  }
+  // The app registration was removed or no longer allows this client:
+  // retrying can never succeed.
+  if (error === "invalid_client" || error === "unauthorized_client") return refused("revoked");
+  return { kind: "transient" };
+}
+
+/**
+ * Map an organization issuer's refresh refusal from the standard error code
+ * alone. OpenID Connect's interaction errors keep the grant; a refused grant
+ * or client ends it as `revoked`, since a generic issuer does not say whether
+ * the grant expired or was withdrawn; everything else is transient. The
+ * description is never read.
+ */
+function mapIssuerRefreshError(error: string): TokenRequestResult {
+  const refused = (signInAgain: HostOAuthSignInAgainReason): TokenRequestResult => ({
+    kind: "refused",
+    reason: "exchange-refused",
+    error,
+    signInAgain,
+  });
+  if (ISSUER_INTERACTION_ERRORS.has(error)) return refused("interaction-required");
+  if (error === "invalid_grant" || error === "invalid_client" || error === "unauthorized_client") {
+    return refused("revoked");
+  }
+  return { kind: "transient" };
+}
+
+/** Whether a grant is bound at `access`: a directory or an issuer grant. */
+function isBoundGrant(grant: StoredGrant): boolean {
+  return grant.dialect === DIRECTORY_DIALECT || grant.dialect === ISSUER_DIALECT;
+}
+
+/**
+ * A directory or issuer grant releases its token only to a caller naming the
+ * binding it was signed in for, of the same kind; a grant of any other kind
+ * refuses a binding, so a caller that believes it holds a bound grant never
+ * receives another kind's bearer.
+ */
+function grantAdmitsBinding(
+  grant: StoredGrant,
+  binding: HostOAuthDirectoryBinding | undefined,
+): boolean {
+  if (!isBoundGrant(grant)) return binding === undefined;
+  const signedInFor = grantDirectoryBinding(grant);
+  if (signedInFor === undefined || binding === undefined) return false;
+  if (
+    signedInFor.clientId !== binding.clientId ||
+    signedInFor.endpointOrigin !== binding.endpointOrigin
+  ) {
+    return false;
+  }
+  if ("tenantId" in signedInFor) {
+    return (
+      "tenantId" in binding &&
+      signedInFor.tenantId === binding.tenantId &&
+      signedInFor.audience === binding.audience
+    );
+  }
+  return (
+    "issuer" in binding &&
+    signedInFor.issuer === binding.issuer &&
+    signedInFor.scope === binding.scope
+  );
+}
+
+function grantDirectoryBinding(grant: StoredGrant): HostOAuthDirectoryBinding | undefined {
+  const { tenantId, audience, issuer, resourceScope, endpointOrigin, clientId } = grant;
+  if (endpointOrigin === undefined) return undefined;
+  if (grant.dialect === DIRECTORY_DIALECT && tenantId !== undefined && audience !== undefined) {
+    return { tenantId, clientId, audience, endpointOrigin };
+  }
+  if (grant.dialect === ISSUER_DIALECT && issuer !== undefined && resourceScope !== undefined) {
+    return { issuer, clientId, scope: resourceScope, endpointOrigin };
+  }
+  return undefined;
+}
+
+/** A validated directory or issuer descriptor's binding; undefined for every other dialect. */
+function descriptorDirectoryBinding(
+  descriptor: HostOAuthDescriptor,
+): HostOAuthDirectoryBinding | undefined {
+  const { dialect, tenantId, clientId, audience, endpointOrigin, issuer } = descriptor;
+  if (clientId === undefined || endpointOrigin === undefined) return undefined;
+  if (dialect === DIRECTORY_DIALECT && tenantId !== undefined && audience !== undefined) {
+    return { tenantId, clientId, audience, endpointOrigin };
+  }
+  const [scope] = descriptor.scopes;
+  if (dialect === ISSUER_DIALECT && issuer !== undefined && scope !== undefined) {
+    return { issuer, clientId, scope, endpointOrigin };
+  }
+  return undefined;
+}
+
+/** The https origin of a URL with no embedded credentials, or undefined. */
+function canonicalHttpsOrigin(value: string): string | undefined {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.username !== "" || url.password !== "") return undefined;
+    return url.origin;
+  } catch {
+    return undefined;
+  }
+}
+
 type SiwcIdTokenValidation =
   | { readonly kind: "valid"; readonly subject: string; readonly email?: string }
   | { readonly kind: "invalid" }
@@ -718,9 +1584,48 @@ async function validateSiwcIdToken(input: {
   readonly expectedAudience: string;
   readonly expectedNonce?: string;
   readonly expectedSubject?: string;
-  readonly jwks: { current: SiwcJwksCache | undefined };
+  readonly jwks: { current: JwksCache | undefined };
   readonly issuer: string;
 }): Promise<SiwcIdTokenValidation> {
+  const identity = await validateIdToken({
+    ...input,
+    jwksUrl: `${input.issuer}${SIWC_JWKS_PATH}`,
+  });
+  if (identity.kind !== "valid") return identity;
+  const email = identity.claims.email;
+  return {
+    kind: "valid",
+    subject: identity.subject,
+    ...(typeof email === "string" && email.length > 0 ? { email } : {}),
+  };
+}
+
+type IdTokenValidation =
+  | {
+      readonly kind: "valid";
+      readonly subject: string;
+      readonly claims: Readonly<Record<string, unknown>>;
+    }
+  | { readonly kind: "invalid" }
+  | { readonly kind: "unavailable" };
+
+/**
+ * Validate an OIDC identity token: RS256 signature against the key set at
+ * `jwksUrl`, issuer, audience, expiry, a non-empty subject, and, when given,
+ * the nonce and the subject a refresh must keep. A dialect checks its own
+ * further claims on the returned set.
+ */
+async function validateIdToken(input: {
+  readonly fetch: typeof fetch;
+  readonly now: () => number;
+  readonly idToken: string;
+  readonly expectedAudience: string;
+  readonly expectedNonce?: string;
+  readonly expectedSubject?: string;
+  readonly jwks: { current: JwksCache | undefined };
+  readonly issuer: string;
+  readonly jwksUrl: string;
+}): Promise<IdTokenValidation> {
   const segments = input.idToken.split(".");
   if (segments.length !== 3) return { kind: "invalid" };
   const [encodedHeader, encodedPayload, encodedSignature] = segments;
@@ -743,7 +1648,7 @@ async function validateSiwcIdToken(input: {
   }
   if (!isRecord(header) || !isRecord(payload)) return { kind: "invalid" };
   if (header.alg !== "RS256" || typeof header.kid !== "string") return { kind: "invalid" };
-  const keys = await fetchSiwcJwks(input.fetch, input.issuer, input.jwks, input.now, {
+  const keys = await fetchJwks(input.fetch, input.jwksUrl, input.jwks, input.now, {
     kid: header.kid,
   });
   if (keys.kind === "unavailable") return { kind: "unavailable" };
@@ -773,15 +1678,10 @@ async function validateSiwcIdToken(input: {
   if (input.expectedSubject !== undefined && payload.sub !== input.expectedSubject) {
     return { kind: "invalid" };
   }
-  const email = payload.email;
-  return {
-    kind: "valid",
-    subject: payload.sub,
-    ...(typeof email === "string" && email.length > 0 ? { email } : {}),
-  };
+  return { kind: "valid", subject: payload.sub, claims: payload };
 }
 
-interface SiwcJwksCache {
+interface JwksCache {
   readonly keys: ReadonlyMap<string, KeyObject>;
   readonly fetchedAt: number;
   /**
@@ -797,7 +1697,7 @@ interface SiwcJwksCache {
  * unreachable JWKS must not read as an invalid token, or a brief outage
  * would delete the stored grant.
  */
-type SiwcJwksResult =
+type JwksResult =
   | { readonly kind: "fetched"; readonly keys: ReadonlyMap<string, KeyObject> }
   | { readonly kind: "unavailable" };
 
@@ -856,7 +1756,11 @@ async function revokeSiwcRefreshToken(input: {
 // token's key. Each validation may force one refetch of a still-fresh key
 // set, but never more often than this floor, so a burst of validations
 // cannot turn into a request flood against the issuer.
-const SIWC_JWKS_REFETCH_MS = 30_000;
+const JWKS_REFETCH_MS = 30_000;
+
+// A directory key set publishes each key with its certificate chain, several
+// keys at a time, so it runs past the token-response limit.
+const MAX_JWKS_CHARS = 64 * 1_024;
 
 /**
  * Fetch (and memoize per runtime) the issuer's JWKS. The cache lives on the
@@ -867,13 +1771,13 @@ const SIWC_JWKS_REFETCH_MS = 30_000;
  * `unavailable` rather than an empty key set, so a caller can keep the
  * grant instead of reading it as an invalid token.
  */
-async function fetchSiwcJwks(
+async function fetchJwks(
   fetchImpl: typeof fetch,
-  issuer: string,
-  cache: { current: SiwcJwksCache | undefined },
+  jwksUrl: string,
+  cache: { current: JwksCache | undefined },
   now: () => number,
   wanted: { readonly kid: string } = { kid: "" },
-): Promise<SiwcJwksResult> {
+): Promise<JwksResult> {
   const cached = cache.current;
   const fresh = cached !== undefined && now() - cached.fetchedAt < JWKS_CACHE_MS;
   if (fresh && cached !== undefined) {
@@ -886,11 +1790,11 @@ async function fetchSiwcJwks(
     // grant whose refresh token the issuer had already rotated.
     const lastForced = cached.refetchedAt ?? 0;
     if (cached.keys.has(wanted.kid)) return { kind: "fetched", keys: cached.keys };
-    if (now() - lastForced < SIWC_JWKS_REFETCH_MS) return { kind: "unavailable" };
+    if (now() - lastForced < JWKS_REFETCH_MS) return { kind: "unavailable" };
   }
   let response: Response;
   try {
-    response = await fetchImpl(`${issuer}${SIWC_JWKS_PATH}`, {
+    response = await fetchImpl(jwksUrl, {
       method: "GET",
       redirect: "error",
       headers: { accept: "application/json" },
@@ -899,7 +1803,7 @@ async function fetchSiwcJwks(
     return { kind: "unavailable" };
   }
   if (!response.ok) return { kind: "unavailable" };
-  const body = await readResponseJson(response);
+  const body = await readResponseJson(response, MAX_JWKS_CHARS);
   const keys = body === undefined ? undefined : body.keys;
   if (!Array.isArray(keys)) return { kind: "unavailable" };
   const parsed = new Map<string, KeyObject>();
@@ -960,8 +1864,44 @@ export function createHostOAuthRuntime(options: {
   const inflightRefresh = new Map<string, Promise<HostOAuthRefreshResult>>();
   // The ChatGPT plan dialect memoizes the issuer's JWKS here so a refresh
   // does not re-fetch keys the issuer already published.
-  const siwcJwks: { current: SiwcJwksCache | undefined } = { current: undefined };
+  const siwcJwks: { current: JwksCache | undefined } = { current: undefined };
+  // The directory dialect publishes one key set per tenant, and an
+  // organization's issuer one per key-set address.
+  const directoryJwks = new Map<string, { current: JwksCache | undefined }>();
   let closed = false;
+
+  const jwksFor = (key: string): { current: JwksCache | undefined } => {
+    let jwks = directoryJwks.get(key);
+    if (jwks === undefined) {
+      jwks = { current: undefined };
+      directoryJwks.set(key, jwks);
+    }
+    return jwks;
+  };
+
+  /**
+   * A directory grant's authority is built from the closed host and its
+   * tenant; an issuer grant's is the one its discovery document named at
+   * sign-in, which the grant keeps.
+   */
+  const directoryContext = (
+    binding: HostOAuthDirectoryBinding,
+    issuerAuthority?: DirectoryAuthority,
+  ): DirectoryContext | undefined => {
+    if ("tenantId" in binding) {
+      return {
+        binding,
+        authority: directoryAuthority(DIRECTORY_ISSUER, binding.tenantId),
+        jwks: jwksFor(`tenant:${binding.tenantId}`),
+      };
+    }
+    if (issuerAuthority === undefined) return undefined;
+    return {
+      binding,
+      authority: issuerAuthority,
+      jwks: jwksFor(`issuer:${issuerAuthority.jwksUrl}`),
+    };
+  };
 
   const publish = (attemptId: string, status: HostOAuthPublicState) => {
     const attempt = attempts.get(attemptId);
@@ -1000,8 +1940,29 @@ export function createHostOAuthRuntime(options: {
     descriptor: HostOAuthDescriptor,
     credentialRef: string | undefined,
   ): Promise<HostOAuthBeginResult> => {
-    const authorizationEndpoint = descriptor.authorizationEndpoint;
-    if (authorizationEndpoint === undefined) return { kind: "refused", reason: "invalid" };
+    // The directory dialect's descriptor names no URL: the broker builds the
+    // tenant's authority from the closed issuer host. The issuer dialect's
+    // names none either: the broker reads them from the issuer's discovery
+    // document before any listener opens.
+    const directoryBinding = descriptorDirectoryBinding(descriptor);
+    let signInAuthority: SignInAuthority | undefined;
+    if (directoryBinding !== undefined && "issuer" in directoryBinding) {
+      const discovered = await discoverIssuer(fetchImpl, directoryBinding.issuer);
+      if (discovered.kind !== "authority") return { kind: "refused", reason: discovered.kind };
+      signInAuthority = discovered.authority;
+    } else if (directoryBinding !== undefined) {
+      signInAuthority = directoryAuthority(DIRECTORY_ISSUER, directoryBinding.tenantId);
+    }
+    const directory =
+      directoryBinding === undefined
+        ? undefined
+        : directoryContext(directoryBinding, signInAuthority);
+    const authorizationEndpoint =
+      signInAuthority?.authorizationEndpoint ?? descriptor.authorizationEndpoint;
+    const tokenEndpoint = directory?.authority.tokenEndpoint ?? descriptor.tokenEndpoint;
+    if (authorizationEndpoint === undefined || tokenEndpoint === undefined) {
+      return { kind: "refused", reason: "invalid" };
+    }
     // Resolve a named grant before opening the loopback listener, so a store
     // failure does not leave a listener behind and a missing grant falls
     // through to first sign-in.
@@ -1015,8 +1976,8 @@ export function createHostOAuthRuntime(options: {
     const verifier = randomBytes(32).toString("base64url");
     const challenge = createHash("sha256").update(verifier).digest("base64url");
     const state = randomBytes(24).toString("base64url");
-    // The ChatGPT plan dialect binds the identity token to this attempt with
-    // an OIDC nonce; the standard and OpenRouter paths send none.
+    // The ChatGPT plan and directory dialects bind the identity token to this
+    // attempt with an OIDC nonce; the standard and OpenRouter paths send none.
     const nonce = randomBytes(24).toString("base64url");
     const expiresAt = now() + timeoutMs;
     const attempt: Attempt = {
@@ -1042,6 +2003,8 @@ export function createHostOAuthRuntime(options: {
           attempt,
           attemptId,
           descriptor,
+          tokenEndpoint,
+          ...(directory === undefined ? {} : { directory }),
           state,
           verifier,
           challenge,
@@ -1078,6 +2041,15 @@ export function createHostOAuthRuntime(options: {
           agentNameHint: issuedGrant === undefined ? descriptor.agentNameHint : undefined,
           issuedClientId: issuedGrant?.clientId,
           idTokenHint: issuedGrant?.idToken,
+        });
+      } else if (directory !== undefined) {
+        authorizationUrl = authorizationRequest(authorizationEndpoint, {
+          clientId: directory.binding.clientId,
+          redirectUri,
+          scope: directoryScope(directory.binding),
+          state,
+          challenge,
+          nonce,
         });
       } else {
         authorizationUrl = authorizationRequest(authorizationEndpoint, {
@@ -1149,6 +2121,8 @@ export function createHostOAuthRuntime(options: {
       readonly attempt: Attempt;
       readonly attemptId: string;
       readonly descriptor: HostOAuthDescriptor;
+      readonly tokenEndpoint: string;
+      readonly directory?: DirectoryContext;
       readonly state: string;
       readonly verifier: string;
       readonly challenge: string;
@@ -1200,7 +2174,8 @@ export function createHostOAuthRuntime(options: {
       return;
     }
     const code = params.get("code") ?? "";
-    if (!CODE_PATTERN.test(code)) {
+    const codePattern = session.directory === undefined ? CODE_PATTERN : DIRECTORY_CODE_PATTERN;
+    if (!codePattern.test(code)) {
       publish(
         session.attemptId,
         refused(session.attemptId, session.descriptor.descriptorId, "exchange-refused"),
@@ -1251,7 +2226,7 @@ export function createHostOAuthRuntime(options: {
       }
     }
     const exchanged = await exchangeAuthorizationCode({
-      tokenEndpoint: session.descriptor.tokenEndpoint,
+      tokenEndpoint: session.tokenEndpoint,
       clientId: issuedClientId ?? session.descriptor.clientId ?? "",
       code,
       redirectUri: session.redirectUri,
@@ -1270,6 +2245,7 @@ export function createHostOAuthRuntime(options: {
         : { extAgentHostId: session.descriptor.extAgentHostId }),
       jwks: siwcJwks,
       issuer: siwcIssuer,
+      ...(session.directory === undefined ? {} : { directory: session.directory }),
     });
     if (exchanged.kind === "tokens") {
       const credentialRef = randomUUID();
@@ -1280,6 +2256,11 @@ export function createHostOAuthRuntime(options: {
           attemptId: session.attemptId,
           descriptorId: session.descriptor.descriptorId,
           credentialRef,
+          // Settings shows who signed in; only a directory or issuer grant
+          // keeps a label, taken from the identity token it validated.
+          ...(isBoundGrant(exchanged.grant) && exchanged.grant.accountLabel !== undefined
+            ? { accountLabel: exchanged.grant.accountLabel }
+            : {}),
         });
         replyCallback(response, 200);
       } catch {
@@ -1306,8 +2287,21 @@ export function createHostOAuthRuntime(options: {
   };
 
   const beginDevice = async (descriptor: HostOAuthDescriptor): Promise<HostOAuthBeginResult> => {
+    const directoryBinding = descriptorDirectoryBinding(descriptor);
+    if (directoryBinding !== undefined) {
+      // Only a tenant of the closed directory signs in with a device code; an
+      // organization's own issuer signs in on the loopback redirect alone.
+      const directory = directoryContext(directoryBinding);
+      if (!("tenantId" in directoryBinding) || directory === undefined) {
+        return { kind: "refused", reason: "invalid" };
+      }
+      return beginDirectoryDevice(descriptor, directory, directoryBinding);
+    }
     const deviceEndpoint = descriptor.deviceAuthorizationEndpoint;
-    if (deviceEndpoint === undefined) return { kind: "refused", reason: "invalid" };
+    const tokenEndpoint = descriptor.tokenEndpoint;
+    if (deviceEndpoint === undefined || tokenEndpoint === undefined) {
+      return { kind: "refused", reason: "invalid" };
+    }
     const issued = await postForm(fetchImpl, deviceEndpoint, {
       client_id: descriptor.clientId ?? "",
       scope: descriptor.scopes.join(" "),
@@ -1350,6 +2344,7 @@ export function createHostOAuthRuntime(options: {
       attempt,
       attemptId,
       descriptor,
+      tokenEndpoint,
       deviceCode,
       expiresAt,
       intervalMs: Math.max(1, interval) * 1_000,
@@ -1357,13 +2352,89 @@ export function createHostOAuthRuntime(options: {
     return awaiting;
   };
 
+  /**
+   * A directory device-code sign-in, for a host without the desktop app. No
+   * listener opens: the person enters the code on another device, at a page
+   * from the closed list, and the broker polls the tenant's token endpoint.
+   */
+  const beginDirectoryDevice = async (
+    descriptor: HostOAuthDescriptor,
+    directory: DirectoryContext,
+    binding: HostOAuthTenantBinding,
+  ): Promise<HostOAuthBeginResult> => {
+    const issued = await requestDirectoryDeviceCode({ fetch: fetchImpl, binding });
+    if (issued.kind === "refused") return issued;
+    const { code } = issued;
+    const attemptId = randomUUID();
+    const expiresAt = now() + code.expiresInSeconds * 1_000;
+    const awaiting: Extract<HostOAuthPublicState, { readonly kind: "awaiting-consent" }> = {
+      kind: "awaiting-consent",
+      attemptId,
+      descriptorId: descriptor.descriptorId,
+      flow: "device-code",
+      verificationUri: code.verificationUri,
+      userCode: code.userCode,
+      expiresAt: new Date(expiresAt).toISOString(),
+    };
+    const attempt: Attempt = {
+      descriptorId: descriptor.descriptorId,
+      closed: false,
+      listener: undefined,
+      timer: undefined,
+      status: awaiting,
+    };
+    attempts.set(attemptId, attempt);
+    void pollDevice({
+      attempt,
+      attemptId,
+      descriptor,
+      tokenEndpoint: directory.authority.tokenEndpoint,
+      deviceCode: code.deviceCode,
+      expiresAt,
+      intervalMs: code.intervalSeconds * 1_000,
+      directory,
+    });
+    return awaiting;
+  };
+
+  /** One poll of a standard device-code sign-in, read the way RFC 8628 words it. */
+  const pollStandardDevice = async (session: {
+    readonly descriptor: HostOAuthDescriptor;
+    readonly tokenEndpoint: string;
+    readonly deviceCode: string;
+  }): Promise<DevicePoll> => {
+    const polled = await requestTokens({
+      fetch: fetchImpl,
+      now,
+      endpoint: session.tokenEndpoint,
+      form: {
+        grant_type: DEVICE_GRANT,
+        device_code: session.deviceCode,
+        client_id: session.descriptor.clientId ?? "",
+      },
+      clientId: session.descriptor.clientId ?? "",
+      tokenEndpoint: session.tokenEndpoint,
+      previousRefresh: undefined,
+      generation: 0,
+      codeExchange: true,
+    });
+    if (polled.kind === "pending" || polled.kind === "tokens") return polled;
+    if (polled.kind === "transient") return { kind: "refused", reason: "unavailable" };
+    return {
+      kind: "refused",
+      reason: polled.reason === "verifier-mismatch" ? "timeout" : polled.reason,
+    };
+  };
+
   const pollDevice = async (session: {
     readonly attempt: Attempt;
     readonly attemptId: string;
     readonly descriptor: HostOAuthDescriptor;
+    readonly tokenEndpoint: string;
     readonly deviceCode: string;
     readonly expiresAt: number;
     intervalMs: number;
+    readonly directory?: DirectoryContext;
   }) => {
     while (!closed && !session.attempt.closed) {
       if (now() >= session.expiresAt) {
@@ -1385,21 +2456,15 @@ export function createHostOAuthRuntime(options: {
         }
         return;
       }
-      const polled = await requestTokens({
-        fetch: fetchImpl,
-        now,
-        endpoint: session.descriptor.tokenEndpoint,
-        form: {
-          grant_type: DEVICE_GRANT,
-          device_code: session.deviceCode,
-          client_id: session.descriptor.clientId ?? "",
-        },
-        clientId: session.descriptor.clientId ?? "",
-        tokenEndpoint: session.descriptor.tokenEndpoint,
-        previousRefresh: undefined,
-        generation: 0,
-        codeExchange: true,
-      });
+      const polled =
+        session.directory === undefined
+          ? await pollStandardDevice(session)
+          : await pollDirectoryDevice({
+              fetch: fetchImpl,
+              now,
+              directory: session.directory,
+              deviceCode: session.deviceCode,
+            });
       if (polled.kind === "pending") {
         if (polled.slowDown) session.intervalMs += SLOW_DOWN_MS;
         continue;
@@ -1414,6 +2479,12 @@ export function createHostOAuthRuntime(options: {
             attemptId: session.attemptId,
             descriptorId: session.descriptor.descriptorId,
             credentialRef,
+            // Only the directory dialect's grant keeps a label, from the
+            // identity token it validated.
+            ...(polled.grant.dialect === DIRECTORY_DIALECT &&
+            polled.grant.accountLabel !== undefined
+              ? { accountLabel: polled.grant.accountLabel }
+              : {}),
           });
         } catch {
           publish(
@@ -1423,15 +2494,9 @@ export function createHostOAuthRuntime(options: {
         }
         return;
       }
-      const reason =
-        polled.kind === "refused"
-          ? polled.reason === "verifier-mismatch"
-            ? "timeout"
-            : polled.reason
-          : "unavailable";
       publish(
         session.attemptId,
-        refused(session.attemptId, session.descriptor.descriptorId, reason),
+        refused(session.attemptId, session.descriptor.descriptorId, polled.reason),
       );
       return;
     }
@@ -1465,6 +2530,56 @@ export function createHostOAuthRuntime(options: {
       return { kind: "sign-in-again", reason: "expired" };
     }
     const refreshToken = current.refreshToken;
+    if (isBoundGrant(current)) {
+      const binding = grantDirectoryBinding(current);
+      const directory =
+        binding === undefined
+          ? undefined
+          : directoryContext(
+              binding,
+              current.issuer === undefined || current.jwksUrl === undefined
+                ? undefined
+                : {
+                    issuer: current.issuer,
+                    tokenEndpoint: current.tokenEndpoint,
+                    jwksUrl: current.jwksUrl,
+                  },
+            );
+      if (directory === undefined || current.subject === undefined) return { kind: "unavailable" };
+      const exchanged = await refreshDirectoryGrant({
+        fetch: fetchImpl,
+        now,
+        directory,
+        refreshToken,
+        generation,
+        subject: current.subject,
+        accountLabel: current.accountLabel,
+      });
+      if (exchanged.kind === "transient" || exchanged.kind === "pending") {
+        return { kind: "transient" };
+      }
+      if (exchanged.kind === "refused") {
+        const reason = exchanged.signInAgain ?? refreshRefusal(exchanged.reason, exchanged.error);
+        // The grant is kept, not dropped: a later refresh can pass once the
+        // person has met the directory's prompt elsewhere. Signing in again
+        // creates a new grant, and the server forgets this one then.
+        if (reason === "interaction-required") return { kind: "sign-in-again", reason };
+        try {
+          await options.store.delete(credentialRef);
+        } catch {
+          return { kind: "unavailable" };
+        }
+        return { kind: "sign-in-again", reason };
+      }
+      try {
+        const latest = decodeGrant(await options.store.resolve(credentialRef));
+        if (latest.generation !== generation) return { kind: "refreshed" };
+        await options.store.set(credentialRef, JSON.stringify(exchanged.grant));
+        return { kind: "refreshed" };
+      } catch {
+        return { kind: "unavailable" };
+      }
+    }
     // The ChatGPT plan dialect refreshes with the issued client id and the
     // resource, and stores the rotating replacement refresh token. A new
     // identity token is checked without a nonce: refresh does not send one,
@@ -1560,10 +2675,14 @@ export function createHostOAuthRuntime(options: {
       inflightRefresh.set(credentialRef, run);
       return run;
     },
-    access: async (credentialRef: string): Promise<HostOAuthAccessResult> => {
+    access: async (
+      credentialRef: string,
+      binding?: HostOAuthDirectoryBinding,
+    ): Promise<HostOAuthAccessResult> => {
       if (!UUID_PATTERN.test(credentialRef)) return { kind: "unavailable" };
       try {
         const grant = decodeGrant(await options.store.resolve(credentialRef));
+        if (!grantAdmitsBinding(grant, binding)) return { kind: "binding-mismatch" };
         return {
           kind: "granted",
           accessToken: grant.accessToken,
@@ -1698,7 +2817,11 @@ async function accessRoute(
   if (typeof credentialRef !== "string" || !UUID_PATTERN.test(credentialRef)) {
     return Response.json({ error: "invalid-request" }, { status: 400 });
   }
-  const granted = await runtime.access(credentialRef);
+  const binding = value.binding === undefined ? undefined : bindingFromRecord(value.binding);
+  if (value.binding !== undefined && binding === undefined) {
+    return Response.json({ error: "invalid-request" }, { status: 400 });
+  }
+  const granted = await runtime.access(credentialRef, binding);
   if (granted.kind !== "granted") {
     return Response.json(granted, { headers: { "cache-control": "no-store" } });
   }
@@ -1714,6 +2837,46 @@ async function accessRoute(
     },
     { headers: { "cache-control": "no-store" } },
   );
+}
+
+const TENANT_BINDING_KEYS: ReadonlySet<string> = new Set([
+  "tenantId",
+  "clientId",
+  "audience",
+  "endpointOrigin",
+]);
+const ISSUER_BINDING_KEYS: ReadonlySet<string> = new Set([
+  "issuer",
+  "clientId",
+  "scope",
+  "endpointOrigin",
+]);
+
+/**
+ * Exactly one kind's four binding fields, each a bounded string; anything
+ * else, including a mix of a tenant's and an issuer's, is malformed.
+ */
+function bindingFromRecord(value: unknown): HostOAuthDirectoryBinding | undefined {
+  if (!isRecord(value)) return undefined;
+  const keys = Object.keys(value);
+  const fields = Object.values(value);
+  if (
+    keys.length !== 4 ||
+    !fields.every((field): field is string => typeof field === "string" && field.length <= 256)
+  ) {
+    return undefined;
+  }
+  const { tenantId, issuer, clientId, audience, scope, endpointOrigin } = value;
+  if (typeof clientId !== "string" || typeof endpointOrigin !== "string") return undefined;
+  if (keys.every((key) => TENANT_BINDING_KEYS.has(key))) {
+    if (typeof tenantId !== "string" || typeof audience !== "string") return undefined;
+    return { tenantId, clientId, audience, endpointOrigin };
+  }
+  if (keys.every((key) => ISSUER_BINDING_KEYS.has(key))) {
+    if (typeof issuer !== "string" || typeof scope !== "string") return undefined;
+    return { issuer, clientId, scope, endpointOrigin };
+  }
+  return undefined;
 }
 
 async function revokeRoute(
@@ -1750,6 +2913,7 @@ function publicStatus(status: HostOAuthPublicState): HostOAuthPublicState {
       attemptId: status.attemptId,
       descriptorId: status.descriptorId,
       credentialRef: status.credentialRef,
+      ...(status.accountLabel === undefined ? {} : { accountLabel: status.accountLabel }),
     };
   }
   if (status.flow === "device-code") {
@@ -1784,6 +2948,8 @@ type TokenRequestResult =
         | "denied"
         | "timeout";
       readonly error?: string;
+      /** Directory dialect: the sign-in-again reason its own error codes name. */
+      readonly signInAgain?: HostOAuthSignInAgainReason;
     }
   | { readonly kind: "transient" }
   | { readonly kind: "pending"; readonly slowDown: boolean };
@@ -1802,6 +2968,14 @@ async function requestTokens(input: {
   readonly resource?: string;
   /** MCP authorization dialect: an issuer may grant an access token alone. */
   readonly refreshTokenOptional?: boolean;
+  /**
+   * Directory and issuer refresh: read the refusal's error code the way that
+   * dialect documents it, never its description.
+   */
+  readonly refreshErrors?: (
+    error: string,
+    body: Readonly<Record<string, unknown>>,
+  ) => TokenRequestResult;
 }): Promise<TokenRequestResult> {
   let response: Response;
   try {
@@ -1822,7 +2996,12 @@ async function requestTokens(input: {
       : { kind: "transient" };
   }
   const error = stringField(body, "error");
-  if (error !== undefined) return mapTokenError(error, input.codeExchange);
+  if (error !== undefined) {
+    if (input.refreshErrors !== undefined && ERROR_PATTERN.test(error)) {
+      return input.refreshErrors(error, body);
+    }
+    return mapTokenError(error, input.codeExchange);
+  }
   if (!response.ok) {
     return input.codeExchange
       ? { kind: "refused", reason: "exchange-refused" }
@@ -1929,7 +3108,43 @@ function decodeGrant(raw: string): StoredGrant {
   const email = parsed.email;
   const planUsageEnabled = parsed.planUsageEnabled;
   const resource = parsed.resource;
+  const tenantId = parsed.tenantId;
+  const audience = parsed.audience;
+  const endpointOrigin = parsed.endpointOrigin;
+  const accountLabel = parsed.accountLabel;
+  const issuer = parsed.issuer;
+  const resourceScope = parsed.resourceScope;
+  const jwksUrl = parsed.jwksUrl;
+  // A directory or issuer grant without its whole binding and subject cannot
+  // be checked at `access` or kept on refresh, so it is unreadable rather
+  // than unbound.
   if (
+    dialect === DIRECTORY_DIALECT &&
+    (typeof tenantId !== "string" ||
+      typeof audience !== "string" ||
+      typeof endpointOrigin !== "string" ||
+      typeof subject !== "string")
+  ) {
+    throw new CredentialStoreFailure("invalid");
+  }
+  if (
+    dialect === ISSUER_DIALECT &&
+    (typeof issuer !== "string" ||
+      typeof resourceScope !== "string" ||
+      typeof jwksUrl !== "string" ||
+      typeof endpointOrigin !== "string" ||
+      typeof subject !== "string")
+  ) {
+    throw new CredentialStoreFailure("invalid");
+  }
+  if (
+    (issuer !== undefined && typeof issuer !== "string") ||
+    (resourceScope !== undefined && typeof resourceScope !== "string") ||
+    (jwksUrl !== undefined && typeof jwksUrl !== "string") ||
+    (tenantId !== undefined && typeof tenantId !== "string") ||
+    (audience !== undefined && typeof audience !== "string") ||
+    (endpointOrigin !== undefined && typeof endpointOrigin !== "string") ||
+    (accountLabel !== undefined && typeof accountLabel !== "string") ||
     (resource !== undefined && typeof resource !== "string") ||
     typeof accessToken !== "string" ||
     (refreshToken !== undefined && typeof refreshToken !== "string") ||
@@ -1966,6 +3181,13 @@ function decodeGrant(raw: string): StoredGrant {
     ...(subject === undefined ? {} : { subject }),
     ...(email === undefined ? {} : { email }),
     ...(planUsageEnabled === undefined ? {} : { planUsageEnabled }),
+    ...(tenantId === undefined ? {} : { tenantId }),
+    ...(audience === undefined ? {} : { audience }),
+    ...(endpointOrigin === undefined ? {} : { endpointOrigin }),
+    ...(accountLabel === undefined ? {} : { accountLabel }),
+    ...(issuer === undefined ? {} : { issuer }),
+    ...(resourceScope === undefined ? {} : { resourceScope }),
+    ...(jwksUrl === undefined ? {} : { jwksUrl }),
   };
 }
 
@@ -1976,7 +3198,19 @@ function validateDescriptor(descriptor: HostOAuthDescriptor): HostOAuthDescripto
     dialect !== undefined &&
     dialect !== OPENROUTER_DIALECT &&
     dialect !== CHATGPT_PLAN_DIALECT &&
-    dialect !== MCP_DIALECT
+    dialect !== MCP_DIALECT &&
+    dialect !== DIRECTORY_DIALECT &&
+    dialect !== ISSUER_DIALECT
+  ) {
+    return undefined;
+  }
+  if (dialect === DIRECTORY_DIALECT) return validateDirectoryDescriptor(descriptor);
+  if (dialect === ISSUER_DIALECT) return validateIssuerDescriptor(descriptor);
+  if (
+    descriptor.tenantId !== undefined ||
+    descriptor.audience !== undefined ||
+    descriptor.endpointOrigin !== undefined ||
+    descriptor.issuer !== undefined
   ) {
     return undefined;
   }
@@ -2035,7 +3269,9 @@ function validateDescriptor(descriptor: HostOAuthDescriptor): HostOAuthDescripto
   // A dialect exists precisely because its wire shape is not OAuth; a
   // device-code grant cannot pair with one.
   if (dialect !== undefined && descriptor.flow !== "authorization-code-pkce") return undefined;
-  if (!allowedEndpoint(descriptor.tokenEndpoint)) return undefined;
+  if (descriptor.tokenEndpoint === undefined || !allowedEndpoint(descriptor.tokenEndpoint)) {
+    return undefined;
+  }
   if (descriptor.scopes.length > 16) return undefined;
   if (!descriptor.scopes.every((scope) => SCOPE_TOKEN_PATTERN.test(scope))) return undefined;
   if (descriptor.flow === "authorization-code-pkce") {
@@ -2057,6 +3293,93 @@ function validateDescriptor(descriptor: HostOAuthDescriptor): HostOAuthDescripto
   return descriptor;
 }
 
+/**
+ * A directory descriptor names its tenant, the organization's own public
+ * client, an audience from the closed list, and the endpoint origin, and
+ * nothing else: no URL (the broker builds the authority, device authorization
+ * included) and no scope (the broker requests only the audience). The flow is
+ * the loopback PKCE redirect or, for a host without the desktop app, a device
+ * code; the server decides which an instance may begin.
+ */
+function validateDirectoryDescriptor(
+  descriptor: HostOAuthDescriptor,
+): HostOAuthDescriptor | undefined {
+  const { tenantId, clientId, audience, endpointOrigin } = descriptor;
+  if (
+    (descriptor.flow !== "authorization-code-pkce" && descriptor.flow !== "device-code") ||
+    tenantId === undefined ||
+    !UUID_PATTERN.test(tenantId) ||
+    clientId === undefined ||
+    !UUID_PATTERN.test(clientId) ||
+    audience === undefined ||
+    !DIRECTORY_AUDIENCES.has(audience) ||
+    endpointOrigin === undefined ||
+    canonicalHttpsOrigin(endpointOrigin) !== endpointOrigin ||
+    descriptor.scopes.length !== 0 ||
+    descriptor.authorizationEndpoint !== undefined ||
+    descriptor.tokenEndpoint !== undefined ||
+    descriptor.deviceAuthorizationEndpoint !== undefined ||
+    descriptor.resource !== undefined ||
+    descriptor.redirectPort !== undefined ||
+    descriptor.extAgentHostId !== undefined ||
+    descriptor.agentNameHint !== undefined ||
+    descriptor.issuer !== undefined
+  ) {
+    return undefined;
+  }
+  return descriptor;
+}
+
+/**
+ * An issuer descriptor names the organization's own issuer, its public
+ * client, the one scope its gateway requires, and the endpoint origin, and
+ * nothing else: no URL (the broker discovers the issuer's own) and only the
+ * loopback PKCE flow. An identity scope names no resource, so it cannot be
+ * the gateway's.
+ */
+function validateIssuerDescriptor(
+  descriptor: HostOAuthDescriptor,
+): HostOAuthDescriptor | undefined {
+  const { issuer, clientId, endpointOrigin } = descriptor;
+  const [scope, ...more] = descriptor.scopes;
+  if (
+    descriptor.flow !== "authorization-code-pkce" ||
+    issuer === undefined ||
+    !isIssuer(issuer) ||
+    clientId === undefined ||
+    !ISSUER_CLIENT_ID_PATTERN.test(clientId) ||
+    scope === undefined ||
+    more.length !== 0 ||
+    !SCOPE_TOKEN_PATTERN.test(scope) ||
+    DIRECTORY_IDENTITY_SCOPES.has(scope) ||
+    endpointOrigin === undefined ||
+    canonicalHttpsOrigin(endpointOrigin) !== endpointOrigin ||
+    descriptor.tenantId !== undefined ||
+    descriptor.audience !== undefined ||
+    descriptor.authorizationEndpoint !== undefined ||
+    descriptor.tokenEndpoint !== undefined ||
+    descriptor.deviceAuthorizationEndpoint !== undefined ||
+    descriptor.resource !== undefined ||
+    descriptor.redirectPort !== undefined ||
+    descriptor.extAgentHostId !== undefined ||
+    descriptor.agentNameHint !== undefined
+  ) {
+    return undefined;
+  }
+  return descriptor;
+}
+
+/** An https issuer with no credentials, query, fragment, or space, as tokens name it. */
+function isIssuer(value: string): boolean {
+  if (value.length > 256 || !value.startsWith("https://") || /[\s?#]/.test(value)) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.username === "" && url.password === "";
+  } catch {
+    return false;
+  }
+}
+
 function descriptorFromRecord(value: Record<string, unknown>): HostOAuthDescriptor | undefined {
   const flow = value.flow;
   const descriptorId = value.descriptorId;
@@ -2068,7 +3391,7 @@ function descriptorFromRecord(value: Record<string, unknown>): HostOAuthDescript
     (flow !== "authorization-code-pkce" && flow !== "device-code") ||
     typeof descriptorId !== "string" ||
     (clientId !== undefined && typeof clientId !== "string") ||
-    typeof tokenEndpoint !== "string" ||
+    (tokenEndpoint !== undefined && typeof tokenEndpoint !== "string") ||
     typeof termsId !== "string" ||
     !Array.isArray(scopes) ||
     !scopes.every((scope): scope is string => typeof scope === "string")
@@ -2082,7 +3405,9 @@ function descriptorFromRecord(value: Record<string, unknown>): HostOAuthDescript
     dialect !== undefined &&
     dialect !== OPENROUTER_DIALECT &&
     dialect !== CHATGPT_PLAN_DIALECT &&
-    dialect !== MCP_DIALECT
+    dialect !== MCP_DIALECT &&
+    dialect !== DIRECTORY_DIALECT &&
+    dialect !== ISSUER_DIALECT
   ) {
     return undefined;
   }
@@ -2090,7 +3415,15 @@ function descriptorFromRecord(value: Record<string, unknown>): HostOAuthDescript
   const agentNameHint = value.agentNameHint;
   const resource = value.resource;
   const redirectPort = value.redirectPort;
+  const tenantId = value.tenantId;
+  const audience = value.audience;
+  const endpointOrigin = value.endpointOrigin;
+  const issuer = value.issuer;
   if (
+    (issuer !== undefined && typeof issuer !== "string") ||
+    (tenantId !== undefined && typeof tenantId !== "string") ||
+    (audience !== undefined && typeof audience !== "string") ||
+    (endpointOrigin !== undefined && typeof endpointOrigin !== "string") ||
     (extAgentHostId !== undefined && typeof extAgentHostId !== "string") ||
     (agentNameHint !== undefined && typeof agentNameHint !== "string") ||
     (resource !== undefined && typeof resource !== "string") ||
@@ -2103,7 +3436,7 @@ function descriptorFromRecord(value: Record<string, unknown>): HostOAuthDescript
     ...(typeof clientId === "string" ? { clientId } : {}),
     ...(dialect === undefined ? {} : { dialect }),
     flow,
-    tokenEndpoint,
+    ...(typeof tokenEndpoint === "string" ? { tokenEndpoint } : {}),
     termsId,
     scopes,
     ...(typeof authorizationEndpoint === "string" ? { authorizationEndpoint } : {}),
@@ -2112,6 +3445,10 @@ function descriptorFromRecord(value: Record<string, unknown>): HostOAuthDescript
     ...(typeof agentNameHint === "string" ? { agentNameHint } : {}),
     ...(typeof resource === "string" ? { resource } : {}),
     ...(typeof redirectPort === "number" ? { redirectPort } : {}),
+    ...(typeof tenantId === "string" ? { tenantId } : {}),
+    ...(typeof audience === "string" ? { audience } : {}),
+    ...(typeof endpointOrigin === "string" ? { endpointOrigin } : {}),
+    ...(typeof issuer === "string" ? { issuer } : {}),
   });
 }
 
@@ -2125,6 +3462,8 @@ function authorizationRequest(
     readonly challenge: string;
     /** RFC 8707: the server the token is for; the MCP dialect always names it. */
     readonly resource?: string;
+    /** OIDC nonce the identity token must echo; the directory dialect sends one. */
+    readonly nonce?: string;
   },
 ): string {
   const url = new URL(endpoint);
@@ -2138,6 +3477,7 @@ function authorizationRequest(
   url.searchParams.set("code_challenge", input.challenge);
   url.searchParams.set("code_challenge_method", "S256");
   if (input.resource !== undefined) url.searchParams.set("resource", input.resource);
+  if (input.nonce !== undefined) url.searchParams.set("nonce", input.nonce);
   return url.toString();
 }
 
@@ -2241,12 +3581,14 @@ async function postForm(
   }
 }
 
-async function readResponseJson(response: Response): Promise<Record<string, unknown> | undefined> {
+async function readResponseJson(
+  response: Response,
+  limit = MAX_RESPONSE_CHARS,
+): Promise<Record<string, unknown> | undefined> {
   const declared = response.headers.get("content-length");
-  if (declared !== null && /^\d+$/.test(declared) && Number(declared) > MAX_RESPONSE_CHARS)
-    return undefined;
+  if (declared !== null && /^\d+$/.test(declared) && Number(declared) > limit) return undefined;
   const text = await response.text();
-  if (text.length > MAX_RESPONSE_CHARS) return undefined;
+  if (text.length > limit) return undefined;
   try {
     const value: unknown = JSON.parse(text);
     return isRecord(value) ? value : undefined;

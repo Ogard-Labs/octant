@@ -6,6 +6,7 @@ import {
   type ProviderFailure,
   type ProviderInstanceId,
   type ProviderModelId,
+  type ProviderObservedState,
   type ProviderTurnInput,
   type UtcTimestamp,
 } from "@octant/contracts";
@@ -31,6 +32,18 @@ import {
   honestDirectEndpointCapabilities,
   inspectDirectEndpointCredential,
 } from "./directEndpointSubscriptionOAuth";
+import { subscriptionDescriptorIdOf } from "@octant/domain";
+import {
+  directoryRefusalOf,
+  directoryRefusalReport,
+  directoryRequestAuthorization,
+  gatewayDirectorySignIn,
+  observedDirectoryBinding,
+  readDirectoryPointer,
+  refusedFailure,
+  type DirectEndpointDirectoryOAuth,
+} from "./directEndpointDirectoryOAuth";
+import type { CompatibleRequestAuthorization } from "./openAiCompatibleEndpoint";
 import {
   makeAnthropicCompatibleEndpoint,
   markAnthropicModelVerified,
@@ -47,6 +60,7 @@ import {
 import { carryModelContextWindowFacts } from "./modelContextWindowFacts";
 import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 import type { SubscriptionOAuthHost } from "@octant/provider-sdk/subscription-oauth";
+import type { DirectoryOAuthHost } from "@octant/provider-sdk/directory-oauth";
 
 const initialCapabilities: ProviderCapabilities = {
   streaming: "unavailable",
@@ -83,6 +97,12 @@ export interface AnthropicCompatibleDriverOptions {
   readonly clock?: () => string;
   /** Host refresh and access for a subscription-oauth credential. */
   readonly subscriptionOAuth?: SubscriptionOAuthHost;
+  /**
+   * The broker as a gateway's organization sign-in reaches it. A gateway
+   * configured to sign in with its organization's own issuer sends only that
+   * bearer; without a broker it reads `unavailable`, never a stored value.
+   */
+  readonly directoryOAuth?: DirectoryOAuthHost;
 }
 
 /**
@@ -96,6 +116,7 @@ export function makeAnthropicCompatibleDriver(
   options: AnthropicCompatibleDriverOptions,
 ): HarnessEndpointDriver {
   const clock = options.clock ?? (() => new Date().toISOString());
+  const directory = gatewayDirectorySignIn(options.configuration, options.directoryOAuth);
   return {
     kind: "anthropic-compatible",
     harnessEndpoint: {
@@ -108,9 +129,12 @@ export function makeAnthropicCompatibleDriver(
         : Effect.tryPromise({
             try: async () => {
               const observedAt = clock() as UtcTimestamp;
+              if (directory !== undefined) {
+                return probeDirectoryEndpoint(options, directory, instanceId, observedAt);
+              }
               const gate = await inspectDirectEndpointCredential({
-                authentication: options.configuration.authentication,
-                expectedDescriptorId: options.configuration.oauthDescriptorId,
+                authentication: keyAuthenticationOf(options),
+                expectedDescriptorId: subscriptionDescriptorIdOf(options.configuration),
                 credentialResolver: options.credentialResolver,
                 instanceId,
                 host: options.subscriptionOAuth,
@@ -139,24 +163,7 @@ export function makeAnthropicCompatibleDriver(
                 gate.kind === "oauth",
               );
               const result = await probeAnthropicModels(endpoint);
-              const prior = options.runtimeRegistry.observedState(instanceId);
-              const probe = decodeProviderObservedState({
-                instanceId,
-                readiness: result.readiness,
-                processState: "stopped",
-                ...(options.configuration.authentication !== "none"
-                  ? { credentialStatus: "stored" }
-                  : {}),
-                // What requests taught about each model's window, and a
-                // person's override, outlive the probe a Chat turn runs first.
-                models: carryModelContextWindowFacts(result.models, prior?.models),
-                capabilities: initialCapabilities,
-                ...(result.failure === undefined ? {} : { message: result.failure.message }),
-                lastSuccessfulProbeAt: observedAt,
-                observedAt,
-              });
-              options.runtimeRegistry.setObservedState(probe);
-              return probe;
+              return recordProbe(options, instanceId, result, observedAt);
             },
             catch: sanitizeFailure,
           }),
@@ -165,24 +172,10 @@ export function makeAnthropicCompatibleDriver(
         ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
         : Effect.tryPromise({
             try: async () => {
-              const observedAt = clock();
-              const gate = await inspectDirectEndpointCredential({
-                authentication: options.configuration.authentication,
-                expectedDescriptorId: options.configuration.oauthDescriptorId,
-                credentialResolver: options.credentialResolver,
-                instanceId,
-                host: options.subscriptionOAuth,
-                now: () => Date.parse(observedAt),
-                baseUrl: options.configuration.baseUrl,
-              });
-              if (gate.kind === "report") throw failure(gate.readiness, gate.message);
-              const endpoint = endpointFor(
-                options,
-                gate.kind === "oauth"
-                  ? directEndpointRequestResolver(anthropicOAuthInput(options, clock))
-                  : options.credentialResolver,
-                gate.kind === "oauth",
-              );
+              const endpoint =
+                directory === undefined
+                  ? await keyedEndpointFor(options, clock)
+                  : await directoryEndpointFor(options, directory, clock);
               // One forced tool call proves the model answers with a tool use.
               // Transport failures (auth, timeout, provider error) propagate so
               // the person sees the real error instead of a false "unsupported".
@@ -249,9 +242,15 @@ function anthropicCompatibleTransport(
   return {
     open: async () => {
       const observedAt = clock();
+      const directory = gatewayDirectorySignIn(options.configuration, options.directoryOAuth);
+      if (directory !== undefined) {
+        // The pointer is read once per session; the bearer is resolved for
+        // every send, since a session outlives a token.
+        return sessionOver(options, await directoryEndpointFor(options, directory, clock), clock);
+      }
       const gate = await inspectDirectEndpointCredential({
-        authentication: options.configuration.authentication,
-        expectedDescriptorId: options.configuration.oauthDescriptorId,
+        authentication: keyAuthenticationOf(options),
+        expectedDescriptorId: subscriptionDescriptorIdOf(options.configuration),
         credentialResolver: options.credentialResolver,
         instanceId: options.instanceId,
         host: options.subscriptionOAuth,
@@ -273,61 +272,66 @@ function anthropicCompatibleTransport(
           : plainCredential !== undefined && plainCredential.length > 0
             ? { has: async () => true, resolve: async () => plainCredential }
             : undefined;
-      let endpoint: AnthropicCompatibleEndpoint | undefined = endpointFor(
-        options,
-        resolver,
-        gate.kind === "oauth",
-      );
+      return sessionOver(options, endpointFor(options, resolver, gate.kind === "oauth"), clock);
+    },
+  };
+}
+
+/** One harness session over an endpoint whose credential path is already settled. */
+function sessionOver(
+  options: AnthropicCompatibleDriverOptions,
+  opened: AnthropicCompatibleEndpoint,
+  clock: () => string,
+): Awaited<ReturnType<HarnessEndpointTransport["open"]>> {
+  let endpoint: AnthropicCompatibleEndpoint | undefined = opened;
+  return {
+    fits: (request) => endpoint !== undefined && requestFits(options, endpoint, request),
+    send: async (request, stream) => {
+      const active = endpoint;
+      if (active === undefined) throw failure("protocol", "Provider session is not active.");
+      let result: AnthropicTurnResult;
+      try {
+        result = await runProviderEffect(
+          sendAnthropicMessagesTurn({
+            endpoint: active,
+            modelId: request.modelId,
+            history: request.history,
+            prompt: "",
+            ...(request.system === undefined ? {} : { system: request.system }),
+            tools: request.tools,
+            toolAnswers: [],
+            signal: stream.signal,
+            onEvent: (event: AnthropicTurnEvent) => {
+              if (event.kind === "usage") {
+                const { sequence: _sequence, ...usage } = event;
+                stream.onEvent(usage);
+                return;
+              }
+              stream.onEvent({ kind: event.kind, text: event.text });
+            },
+          }),
+        );
+      } catch (error) {
+        if (stream.signal.aborted) {
+          throw failure("interrupted", "The provider request was cancelled.");
+        }
+        throw error;
+      }
+      recordObservedTurn(options, result, clock);
       return {
-        fits: (request) => endpoint !== undefined && requestFits(options, endpoint, request),
-        send: async (request, stream) => {
-          const active = endpoint;
-          if (active === undefined) throw failure("protocol", "Provider session is not active.");
-          let result: AnthropicTurnResult;
-          try {
-            result = await runProviderEffect(
-              sendAnthropicMessagesTurn({
-                endpoint: active,
-                modelId: request.modelId,
-                history: request.history,
-                prompt: "",
-                ...(request.system === undefined ? {} : { system: request.system }),
-                tools: request.tools,
-                toolAnswers: [],
-                signal: stream.signal,
-                onEvent: (event: AnthropicTurnEvent) => {
-                  if (event.kind === "usage") {
-                    const { sequence: _sequence, ...usage } = event;
-                    stream.onEvent(usage);
-                    return;
-                  }
-                  stream.onEvent({ kind: event.kind, text: event.text });
-                },
-              }),
-            );
-          } catch (error) {
-            if (stream.signal.aborted) {
-              throw failure("interrupted", "The provider request was cancelled.");
-            }
-            throw error;
-          }
-          recordObservedTurn(options, result, clock);
-          return {
-            text: result.text,
-            toolCalls: result.toolCalls,
-            ...(result.usage === undefined ? {} : { usage: result.usage }),
-            ...(result.rateLimitBuckets === undefined
-              ? {}
-              : { rateLimitBuckets: result.rateLimitBuckets }),
-            ...(result.outputStopReason === undefined
-              ? {}
-              : { outputStopReason: result.outputStopReason }),
-          };
-        },
-        release: () => {
-          endpoint = undefined;
-        },
+        text: result.text,
+        toolCalls: result.toolCalls,
+        ...(result.usage === undefined ? {} : { usage: result.usage }),
+        ...(result.rateLimitBuckets === undefined
+          ? {}
+          : { rateLimitBuckets: result.rateLimitBuckets }),
+        ...(result.outputStopReason === undefined
+          ? {}
+          : { outputStopReason: result.outputStopReason }),
       };
+    },
+    release: () => {
+      endpoint = undefined;
     },
   };
 }
@@ -367,6 +371,7 @@ function endpointFor(
   options: AnthropicCompatibleDriverOptions,
   credentialResolver: ProviderCredentialResolver | undefined,
   bearerOverride = false,
+  requestAuthorization?: CompatibleRequestAuthorization,
 ): AnthropicCompatibleEndpoint {
   const configuration =
     bearerOverride && options.configuration.authentication === "api-key"
@@ -376,14 +381,143 @@ function endpointFor(
     instanceId: options.instanceId,
     configuration,
     ...(credentialResolver === undefined ? {} : { credentialResolver }),
+    ...(requestAuthorization === undefined ? {} : { requestAuthorization }),
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
   });
 }
 
+/**
+ * How the key path sends a stored credential. An organization sign-in never
+ * reaches the key path; were it to, it sends nothing stored.
+ */
+function keyAuthenticationOf(
+  options: AnthropicCompatibleDriverOptions,
+): "api-key" | "bearer" | "none" {
+  const authentication = options.configuration.authentication;
+  return authentication === "directory-oauth" ? "none" : authentication;
+}
+
+/** The endpoint for a stored key or a catalog sign-in, refusing before any request. */
+async function keyedEndpointFor(
+  options: AnthropicCompatibleDriverOptions,
+  clock: () => string,
+): Promise<AnthropicCompatibleEndpoint> {
+  const observedAt = clock();
+  const gate = await inspectDirectEndpointCredential({
+    authentication: keyAuthenticationOf(options),
+    expectedDescriptorId: subscriptionDescriptorIdOf(options.configuration),
+    credentialResolver: options.credentialResolver,
+    instanceId: options.instanceId,
+    host: options.subscriptionOAuth,
+    now: () => Date.parse(observedAt),
+    baseUrl: options.configuration.baseUrl,
+  });
+  if (gate.kind === "report") throw failure(gate.readiness, gate.message);
+  return endpointFor(
+    options,
+    gate.kind === "oauth"
+      ? directEndpointRequestResolver(anthropicOAuthInput(options, clock))
+      : options.credentialResolver,
+    gate.kind === "oauth",
+  );
+}
+
+/**
+ * The endpoint for a gateway's organization sign-in: no stored value is ever
+ * sent, and each request resolves its own bearer. A missing or unreadable
+ * pointer, or a store that cannot be reached, refuses before any request.
+ */
+async function directoryEndpointFor(
+  options: AnthropicCompatibleDriverOptions,
+  directory: DirectEndpointDirectoryOAuth,
+  clock: () => string,
+): Promise<AnthropicCompatibleEndpoint> {
+  const pointer = await readDirectoryPointer(options.credentialResolver, options.instanceId);
+  if (pointer.kind === "refused") throw refusedFailure(pointer.refusal);
+  return endpointFor(
+    options,
+    undefined,
+    false,
+    directoryRequestAuthorization({
+      credential: pointer.credential,
+      directory,
+      now: () => Date.parse(clock()),
+    }),
+  );
+}
+
+/**
+ * The authenticated probe of a gateway's organization sign-in. Every refusal,
+ * whether the pointer, the broker, or the gateway gave it, reads as its own
+ * readiness and reason with nothing claimed; the binding it checked is
+ * recorded.
+ */
+async function probeDirectoryEndpoint(
+  options: AnthropicCompatibleDriverOptions,
+  directory: DirectEndpointDirectoryOAuth,
+  instanceId: ProviderInstanceId,
+  observedAt: UtcTimestamp,
+): Promise<ProviderObservedState> {
+  const binding = observedDirectoryBinding(directory.endpoint);
+  let result: Awaited<ReturnType<typeof probeAnthropicModels>>;
+  try {
+    const endpoint = await directoryEndpointFor(options, directory, () => observedAt);
+    result = await probeAnthropicModels(endpoint);
+  } catch (error) {
+    const refusal = directoryRefusalOf(error);
+    if (refusal === undefined) throw error;
+    const report = directoryRefusalReport(refusal);
+    const refused = decodeProviderObservedState({
+      instanceId,
+      readiness: report.readiness,
+      processState: "stopped",
+      credentialStatus: report.credentialStatus,
+      ...(report.unauthenticatedReason === undefined
+        ? {}
+        : { unauthenticatedReason: report.unauthenticatedReason }),
+      ...(binding === undefined ? {} : { directoryBinding: binding }),
+      models: [],
+      capabilities: honestDirectEndpointCapabilities,
+      message: report.message,
+      observedAt,
+    });
+    options.runtimeRegistry.setObservedState(refused);
+    return refused;
+  }
+  return recordProbe(options, instanceId, result, observedAt, binding);
+}
+
+/** A probe that reached the endpoint, as readiness records it. */
+function recordProbe(
+  options: AnthropicCompatibleDriverOptions,
+  instanceId: ProviderInstanceId,
+  result: Awaited<ReturnType<typeof probeAnthropicModels>>,
+  observedAt: UtcTimestamp,
+  directoryBinding?: ProviderObservedState["directoryBinding"],
+): ProviderObservedState {
+  const prior = options.runtimeRegistry.observedState(instanceId);
+  const probe = decodeProviderObservedState({
+    instanceId,
+    readiness: result.readiness,
+    processState: "stopped",
+    ...(options.configuration.authentication !== "none" ? { credentialStatus: "stored" } : {}),
+    ...(directoryBinding === undefined ? {} : { directoryBinding }),
+    // What requests taught about each model's window, and a person's
+    // override, outlive the probe a Chat turn runs first.
+    models: carryModelContextWindowFacts(result.models, prior?.models),
+    capabilities: initialCapabilities,
+    ...(result.failure === undefined ? {} : { message: result.failure.message }),
+    lastSuccessfulProbeAt: observedAt,
+    observedAt,
+  });
+  options.runtimeRegistry.setObservedState(probe);
+  return probe;
+}
+
 function anthropicOAuthInput(options: AnthropicCompatibleDriverOptions, clock: () => string) {
   return {
-    authentication: options.configuration.authentication,
-    expectedDescriptorId: options.configuration.oauthDescriptorId,
+    authentication: keyAuthenticationOf(options),
+    expectedDescriptorId: subscriptionDescriptorIdOf(options.configuration),
     credentialResolver: options.credentialResolver,
     instanceId: options.instanceId,
     host: options.subscriptionOAuth,

@@ -1,5 +1,7 @@
 import type {
   AgentEligibleModelRef,
+  DirectoryClientId,
+  DirectoryTenantId,
   HiddenProviderModelRef,
   HostId,
   NativeHarnessRoutingSettings,
@@ -22,7 +24,17 @@ import {
   type RefObject,
 } from "react";
 import { ProviderGlyph } from "../../providers/ProviderGlyph";
-import { parseManualModelIds } from "../../providers/configuration/configurationValues";
+import {
+  directoryGuid,
+  gatewayDirectoryFrom,
+  isDirectoryGuid,
+  isGatewayDirectory,
+  parseManualModelIds,
+} from "../../providers/configuration/configurationValues";
+import {
+  DIRECTORY_IDS_PROBLEM,
+  GATEWAY_DIRECTORY_PROBLEM,
+} from "../../providers/configuration/HttpConfigurationForms";
 import { BedrockMantleGuide } from "../../providers/configuration/ProviderCreateForm";
 import type { ProviderSettingsViewProps } from "../../providers/ProviderSettingsView";
 import type {
@@ -359,6 +371,10 @@ function ConnectStep(props: ConnectStepProps) {
   const [protocol, setProtocol] = useState<string>(preset?.protocol ?? "auto");
   const [protocolVersion, setProtocolVersion] = useState("2023-06-01");
   const [deployments, setDeployments] = useState<ReadonlyArray<ProviderModelId>>([]);
+  // Azure AI Foundry signs in with a key or with the organization's account.
+  const [foundrySignIn, setFoundrySignIn] = useState<"api-key" | "directory-oauth">("api-key");
+  // An organization's own gateway signs in with a key or at its own issuer.
+  const [gatewaySignIn, setGatewaySignIn] = useState<"api-key" | "directory-oauth">("api-key");
   const [problem, setProblem] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
   const credentialInput = useRef<HTMLInputElement>(null);
@@ -428,7 +444,15 @@ function ConnectStep(props: ConnectStepProps) {
   }
 
   const keysHere = props.credentialManagementAvailable;
-  const takesKey = presentation.key !== "none" && !noKey;
+  const organizationSignIn = props.kind === "azure-foundry" && foundrySignIn === "directory-oauth";
+  // A preset names a public service with its own keys; only an address the
+  // person brings may be their organization's gateway.
+  const gatewayKind =
+    (props.kind === "openai-compatible" || props.kind === "anthropic-compatible") &&
+    preset === undefined;
+  const gatewayOrganization = gatewayKind && gatewaySignIn === "directory-oauth";
+  const takesKey =
+    presentation.key !== "none" && !noKey && !organizationSignIn && !gatewayOrganization;
   const azureSuggested = props.kind === "openai-compatible" && looksLikeAzureFoundry(url);
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -439,7 +463,22 @@ function ConnectStep(props: ConnectStepProps) {
     if (trimmedUrl.length === 0) return setProblem("Enter its address.");
     const credential =
       keysHere && takesKey ? credentialFrom(credentialInput.current) : EMPTY_CREDENTIAL;
-    if (props.kind === "azure-foundry" && keysHere && credential.value.length === 0) {
+    const form = event.currentTarget;
+    const tenantId = directoryGuid(new FormData(form).get("tenantId"));
+    const clientId = directoryGuid(new FormData(form).get("clientId"));
+    if (organizationSignIn && !(isDirectoryGuid(tenantId) && isDirectoryGuid(clientId))) {
+      return setProblem(DIRECTORY_IDS_PROBLEM);
+    }
+    const gatewayDirectory = gatewayDirectoryFrom(new FormData(form));
+    if (gatewayOrganization && !isGatewayDirectory(gatewayDirectory)) {
+      return setProblem(GATEWAY_DIRECTORY_PROBLEM);
+    }
+    if (
+      props.kind === "azure-foundry" &&
+      !organizationSignIn &&
+      keysHere &&
+      credential.value.length === 0
+    ) {
       return setProblem("Enter the Azure AI Foundry API key.");
     }
     // Azure lists base models, not deployments, so the host needs at least
@@ -456,42 +495,71 @@ function ConnectStep(props: ConnectStepProps) {
         baseUrl: trimmedUrl,
       });
     } else if (props.kind === "azure-foundry") {
-      operation = props.onCreateAzureFoundry(
-        trimmedName,
-        {
-          kind: "azure-foundry-openai-http",
-          baseUrl: trimmedUrl,
-          authentication: "api-key",
-          protocol: protocol as "auto" | "responses" | "chat-completions",
-          manualModelIds: deployments,
-        },
-        credential,
-      );
+      const foundry = {
+        kind: "azure-foundry-openai-http",
+        baseUrl: trimmedUrl,
+        protocol: protocol as "auto" | "responses" | "chat-completions",
+        manualModelIds: deployments,
+      } as const;
+      // The organization sign-in holds no key: it is begun from the
+      // endpoint's page once the host has added it.
+      operation = organizationSignIn
+        ? props.onCreateAzureFoundry(
+            trimmedName,
+            {
+              ...foundry,
+              authentication: "directory-oauth",
+              directory: {
+                tenantId: tenantId as DirectoryTenantId,
+                clientId: clientId as DirectoryClientId,
+              },
+            },
+            EMPTY_CREDENTIAL,
+          )
+        : props.onCreateAzureFoundry(
+            trimmedName,
+            { ...foundry, authentication: "api-key" },
+            credential,
+          );
     } else if (props.kind === "anthropic-compatible") {
-      operation = props.onCreateAnthropicCompatible(
-        trimmedName,
-        {
-          kind: "anthropic-compatible-http",
-          baseUrl: trimmedUrl,
-          authentication: noKey ? "none" : keyHeader,
-          protocol: protocol === "messages" ? "messages" : "auto",
-          protocolVersion: protocolVersion.trim() || "2023-06-01",
-          manualModelIds: [],
-        },
-        credential,
-      );
+      const anthropic = {
+        kind: "anthropic-compatible-http",
+        baseUrl: trimmedUrl,
+        protocol: protocol === "messages" ? "messages" : "auto",
+        protocolVersion: protocolVersion.trim() || "2023-06-01",
+        manualModelIds: [],
+      } as const;
+      // The organization sign-in holds no key: it is begun from the
+      // endpoint's page once the host has added it.
+      operation = gatewayOrganization
+        ? props.onCreateAnthropicCompatible(
+            trimmedName,
+            { ...anthropic, authentication: "directory-oauth", directory: gatewayDirectory },
+            EMPTY_CREDENTIAL,
+          )
+        : props.onCreateAnthropicCompatible(
+            trimmedName,
+            { ...anthropic, authentication: noKey ? "none" : keyHeader },
+            credential,
+          );
     } else {
-      operation = props.onCreateOpenAiCompatible(
-        trimmedName,
-        {
-          kind: "openai-compatible-http",
-          baseUrl: trimmedUrl,
-          authentication: noKey ? "none" : "bearer",
-          protocol: protocol as "auto" | "responses" | "chat-completions",
-          manualModelIds: [],
-        },
-        credential,
-      );
+      const openAi = {
+        kind: "openai-compatible-http",
+        baseUrl: trimmedUrl,
+        protocol: protocol as "auto" | "responses" | "chat-completions",
+        manualModelIds: [],
+      } as const;
+      operation = gatewayOrganization
+        ? props.onCreateOpenAiCompatible(
+            trimmedName,
+            { ...openAi, authentication: "directory-oauth", directory: gatewayDirectory },
+            EMPTY_CREDENTIAL,
+          )
+        : props.onCreateOpenAiCompatible(
+            trimmedName,
+            { ...openAi, authentication: noKey ? "none" : "bearer" },
+            credential,
+          );
     }
     void operation.finally(() => setSubmitting(false));
   };
@@ -544,7 +612,9 @@ function ConnectStep(props: ConnectStepProps) {
           value={url}
         />
         <span className="endpoint-flow__hint" id={`${ids}-url`}>
-          {presentation.urlHint}
+          {organizationSignIn
+            ? "Ends in /openai/v1/, on openai.azure.com, services.ai.azure.com, or cognitiveservices.azure.com."
+            : presentation.urlHint}
         </span>
       </div>
       {azureSuggested ? (
@@ -572,7 +642,128 @@ function ConnectStep(props: ConnectStepProps) {
           by name.
         </OctantAlert>
       ) : null}
-      {presentation.key === "none" || noKey ? null : keysHere ? (
+      {props.kind === "azure-foundry" ? (
+        <div className="endpoint-flow__field">
+          <span>Sign in with</span>
+          <OctantSelectField
+            aria-describedby={`${ids}-sign-in`}
+            aria-label="Sign in with"
+            className="settings-view__select"
+            onValueChange={(value) =>
+              setFoundrySignIn(value === "directory-oauth" ? "directory-oauth" : "api-key")
+            }
+            options={[
+              { id: "api-key", label: "API key" },
+              { id: "directory-oauth", label: "Organization account (Microsoft Entra ID)" },
+            ]}
+            value={foundrySignIn}
+          />
+          <span className="endpoint-flow__hint" id={`${ids}-sign-in`}>
+            {organizationSignIn
+              ? "Use the tenant ID and the client ID of the public app your organization registered for Octant. You sign in from the endpoint's page once it is added."
+              : "A key from the resource's Keys and Endpoint page."}
+          </span>
+        </div>
+      ) : null}
+      {gatewayKind ? (
+        <div className="endpoint-flow__field">
+          <span>Sign in with</span>
+          <OctantSelectField
+            aria-describedby={`${ids}-sign-in`}
+            aria-label="Sign in with"
+            className="settings-view__select"
+            onValueChange={(value) =>
+              setGatewaySignIn(value === "directory-oauth" ? "directory-oauth" : "api-key")
+            }
+            options={[
+              { id: "api-key", label: "API key" },
+              { id: "directory-oauth", label: "Organization account (your sign-in provider)" },
+            ]}
+            value={gatewaySignIn}
+          />
+          <span className="endpoint-flow__hint" id={`${ids}-sign-in`}>
+            {gatewayOrganization
+              ? "For a gateway your organization runs behind its own sign-in. You sign in from the endpoint's page once it is added."
+              : "A key the service issued you."}
+          </span>
+        </div>
+      ) : null}
+      {gatewayOrganization ? (
+        <>
+          <div className="endpoint-flow__field">
+            <label htmlFor={`${ids}-issuer-input`}>Issuer</label>
+            <OctantInput
+              aria-describedby={`${ids}-issuer`}
+              autoComplete="off"
+              className="settings-view__text-input"
+              id={`${ids}-issuer-input`}
+              inputMode="url"
+              name="issuer"
+              placeholder="https://login.example.com/oauth2/default"
+              spellCheck={false}
+            />
+            <span className="endpoint-flow__hint" id={`${ids}-issuer`}>
+              Exactly as your organization's sign-in tokens name it. It can't be changed once the
+              endpoint is added.
+            </span>
+          </div>
+          <div className="endpoint-flow__field">
+            <label htmlFor={`${ids}-gateway-client-input`}>Client ID</label>
+            <OctantInput
+              autoComplete="off"
+              className="settings-view__text-input"
+              id={`${ids}-gateway-client-input`}
+              name="clientId"
+              spellCheck={false}
+            />
+          </div>
+          <div className="endpoint-flow__field">
+            <label htmlFor={`${ids}-scope-input`}>Scope</label>
+            <OctantInput
+              aria-describedby={`${ids}-scope`}
+              autoComplete="off"
+              className="settings-view__text-input"
+              id={`${ids}-scope-input`}
+              name="scope"
+              placeholder="gateway.models"
+              spellCheck={false}
+            />
+            <span className="endpoint-flow__hint" id={`${ids}-scope`}>
+              The client ID of the public app your organization registered for Octant, and the one
+              scope the gateway requires.
+            </span>
+          </div>
+        </>
+      ) : organizationSignIn ? (
+        <>
+          <div className="endpoint-flow__field">
+            <label htmlFor={`${ids}-tenant-input`}>Directory (tenant) ID</label>
+            <OctantInput
+              autoComplete="off"
+              className="settings-view__text-input"
+              id={`${ids}-tenant-input`}
+              name="tenantId"
+              placeholder="00000000-0000-0000-0000-000000000000"
+              spellCheck={false}
+            />
+          </div>
+          <div className="endpoint-flow__field">
+            <label htmlFor={`${ids}-client-input`}>Application (client) ID</label>
+            <OctantInput
+              aria-describedby={`${ids}-client`}
+              autoComplete="off"
+              className="settings-view__text-input"
+              id={`${ids}-client-input`}
+              name="clientId"
+              placeholder="00000000-0000-0000-0000-000000000000"
+              spellCheck={false}
+            />
+            <span className="endpoint-flow__hint" id={`${ids}-client`}>
+              Both are on the app registration's overview in Microsoft Entra ID.
+            </span>
+          </div>
+        </>
+      ) : presentation.key === "none" || noKey ? null : keysHere ? (
         <div className="endpoint-flow__field">
           <label htmlFor={`${ids}-key-input`}>API key</label>
           <OctantInput

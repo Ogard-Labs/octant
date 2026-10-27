@@ -5,10 +5,33 @@ import {
   type ProviderRuntimeEvent,
   type ProviderSessionId,
 } from "@octant/contracts";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { HarnessEndpointDriver } from "@octant/provider-sdk/harness-endpoint";
 import { Cause, Effect, Exit, Fiber, Option, Stream } from "effect";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { rewriteForFork } from "../harness/nativeHarnessFork";
+import { excerptNativeHarnessJournal } from "../harness/nativeHarnessJournalLookup";
 import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
+import { JournalNativeHarnessTranscriptStore } from "../harness/nativeHarnessTranscriptStore";
+import { Persistence, makePersistenceLive } from "../persistence/persistenceService";
+import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import {
+  FOUNDRY_DEPLOYMENT,
+  FOUNDRY_POINTER,
+  FoundryGrantBroker,
+  foundryDirectoryConfiguration,
+  foundryEndpoint,
+} from "./foundryDirectory.test-support";
+import {
+  GATEWAY_MODEL,
+  GATEWAY_POINTER,
+  GatewayGrantBroker,
+  anthropicGatewayConfiguration,
+  gatewayEndpoint,
+  openAiGatewayConfiguration,
+} from "./gatewayDirectory.test-support";
 import type { AnthropicCompatibleFetch } from "./anthropicCompatibleEndpoint";
 import { makeAnthropicCompatibleDriver } from "./anthropicCompatibleDriver";
 import { makeAzureFoundryDriver } from "./azureFoundryDriver";
@@ -375,4 +398,196 @@ function anthropicStreamingFixture(modelId: ProviderModelId): AnthropicCompatibl
       { headers: { "content-type": "text/event-stream" } },
     );
   };
+}
+
+describe("Organization sign-in secret absence", () => {
+  const directories: string[] = [];
+  afterEach(() => {
+    for (const directory of directories.splice(0)) rmSync(directory, { recursive: true });
+  });
+
+  const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000861");
+  /**
+   * A signed-in driver of each organization sign-in kind. Once `refusing`
+   * says so, its endpoint echoes the bearer it was sent in its error body, as
+   * a careless gateway might; nothing Octant records may keep it.
+   */
+  const subjects: ReadonlyArray<{
+    readonly name: string;
+    readonly scene: (input: {
+      readonly refusing: () => boolean;
+      readonly runtimeRegistry: ProviderRuntimeRegistry;
+      readonly clock: () => string;
+    }) => {
+      readonly endpoint: HarnessEndpointDriver;
+      readonly modelId: typeof FOUNDRY_DEPLOYMENT;
+      readonly issued: () => ReadonlyArray<string>;
+    };
+  }> = [
+    {
+      name: "Azure AI Foundry",
+      scene: ({ refusing, runtimeRegistry, clock }) => {
+        const broker = new FoundryGrantBroker();
+        const endpoint = makeAzureFoundryDriver({
+          instanceId,
+          configuration: foundryDirectoryConfiguration(),
+          runtimeRegistry,
+          credentialResolver: { has: async () => true, resolve: async () => FOUNDRY_POINTER },
+          directoryOAuth: broker,
+          fetch: foundryEndpoint(broker, {
+            reply: "Signed-in answer.",
+            refuse: () => (refusing() ? echoedRefusal(broker.current()) : undefined),
+          }),
+          clock,
+        });
+        return { endpoint, modelId: FOUNDRY_DEPLOYMENT, issued: () => broker.issued };
+      },
+    },
+    {
+      name: "an OpenAI-compatible gateway",
+      scene: ({ refusing, runtimeRegistry, clock }) => {
+        const broker = new GatewayGrantBroker();
+        const endpoint = makeOpenAiCompatibleDriver({
+          instanceId,
+          configuration: openAiGatewayConfiguration(),
+          runtimeRegistry,
+          credentialResolver: { has: async () => true, resolve: async () => GATEWAY_POINTER },
+          directoryOAuth: broker,
+          fetch: gatewayEndpoint(broker, {
+            reply: "Signed-in answer.",
+            refuse: () => (refusing() ? echoedRefusal(broker.current()) : undefined),
+          }),
+          clock,
+        });
+        return { endpoint, modelId: GATEWAY_MODEL, issued: () => broker.issued };
+      },
+    },
+    {
+      name: "an Anthropic-compatible gateway",
+      scene: ({ refusing, runtimeRegistry, clock }) => {
+        const broker = new GatewayGrantBroker();
+        const endpoint = makeAnthropicCompatibleDriver({
+          instanceId,
+          configuration: anthropicGatewayConfiguration(),
+          runtimeRegistry,
+          credentialResolver: { has: async () => true, resolve: async () => GATEWAY_POINTER },
+          directoryOAuth: broker,
+          fetch: gatewayEndpoint(broker, {
+            reply: "Signed-in answer.",
+            refuse: () => (refusing() ? echoedRefusal(broker.current()) : undefined),
+          }),
+          clock,
+        });
+        return { endpoint, modelId: GATEWAY_MODEL, issued: () => broker.issued };
+      },
+    },
+  ];
+
+  it.each(subjects)(
+    "keeps every directory bearer out of the journal, a lookup, a fork copy, events, and failures ($name)",
+    async (subject) => {
+      const dataDirectory = mkdtempSync(join(tmpdir(), "octant-directory-secret-absence-"));
+      directories.push(dataDirectory);
+      const now = "2026-10-26T09:00:00.000Z";
+      const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000862");
+      let refusing = false;
+      let identity = 0;
+      let issuedTokens: () => ReadonlyArray<string> = () => [];
+      const recorded: unknown[] = [];
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const persistence = yield* Persistence;
+            const transcripts = new JournalNativeHarnessTranscriptStore({
+              journal: persistence.journal,
+              uuid: () => `80000000-0000-4000-8000-${String(++identity).padStart(12, "0")}`,
+              clock: () => now,
+              actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+            });
+            const runtimeRegistry = new ProviderRuntimeRegistry();
+            const { endpoint, modelId, issued } = subject.scene({
+              refusing: () => refusing,
+              runtimeRegistry,
+              clock: () => now,
+            });
+            issuedTokens = issued;
+            recorded.push(yield* endpoint.probe({ instanceId }));
+            const driver = runOnNativeHarness(endpoint, {
+              instanceId,
+              runtimeRegistry,
+              transcripts,
+            });
+            const connection = yield* driver.acquire({
+              instanceId,
+              projectRoot: "/tmp",
+              mode: "code",
+            });
+            yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+            const turn = (prompt: string) =>
+              Effect.gen(function* () {
+                const events: ProviderRuntimeEvent[] = [];
+                const collector = yield* Effect.fork(
+                  (yield* connection.subscribe).pipe(
+                    Stream.filter((event) => event.sessionId === sessionId),
+                    Stream.takeUntil(
+                      (event) =>
+                        event.kind === "completed" ||
+                        event.kind === "interrupted" ||
+                        event.kind === "failed",
+                    ),
+                    Stream.runForEach((event) => Effect.sync(() => void events.push(event))),
+                  ),
+                );
+                yield* connection.send({ sessionId, prompt, attachments: [], tools: [] });
+                yield* Fiber.join(collector);
+                return events;
+              });
+            const answered = yield* turn("First question.");
+            expect(answered.at(-1)?.kind).toBe("completed");
+            refusing = true;
+            const refused = yield* turn("Second question.");
+            expect(refused.at(-1)).toMatchObject({ kind: "failed" });
+            recorded.push(answered, refused, runtimeRegistry.observedState(instanceId));
+
+            const transcript = transcripts.load(sessionId);
+            if (transcript === undefined) throw new Error("expected a journaled transcript");
+            recorded.push(
+              transcript,
+              excerptNativeHarnessJournal(transcript, { from: 0 }, []),
+              transcript.messages.map((message) =>
+                rewriteForFork(message, { fromRoot: "/tmp", toRoot: "/tmp/fork", secrets: [] }),
+              ),
+            );
+            yield* connection.stop(sessionId);
+          }).pipe(Effect.provide(makePersistenceLive({ dataDirectory, clock: () => now }))),
+        ),
+      );
+
+      // The endpoint refused a renewed bearer too, so at least two were issued.
+      expect(issuedTokens().length).toBeGreaterThanOrEqual(2);
+      const serialized = JSON.stringify(recorded);
+      const stored = filesUnder(dataDirectory).map((path) => readFileSync(path).toString("latin1"));
+      expect(stored.length).toBeGreaterThan(0);
+      for (const token of issuedTokens()) {
+        expect(serialized, "a report, event, failure, lookup, or fork copy").not.toContain(token);
+        for (const bytes of stored)
+          expect(bytes, "the journal's stored bytes").not.toContain(token);
+      }
+    },
+  );
+});
+
+/** A refusal that echoes the bearer it was sent, as a careless gateway might. */
+function echoedRefusal(bearer: string): Response {
+  return Response.json(
+    { error: { code: "401", message: `Token ${bearer} was refused.` } },
+    { status: 401 },
+  );
+}
+
+function filesUnder(directory: string): string[] {
+  return readdirSync(directory).flatMap((name) => {
+    const path = join(directory, name);
+    return statSync(path).isDirectory() ? filesUnder(path) : [path];
+  });
 }

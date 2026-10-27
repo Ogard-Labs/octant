@@ -213,6 +213,46 @@ describe("Code operation contracts", () => {
     expect(request.effect.kind).toBe("apple-action");
   });
 
+  it("asks a person to confirm only the start or move of a device lease", () => {
+    const useDevice = {
+      actionId: "d0000000-0000-4000-8000-000000000001",
+      correlationId: "d0000000-0000-4000-8000-000000000002",
+      authority: {
+        hostId: "d0000000-0000-4000-8000-000000000003",
+        mode: "code",
+        projectId: "d0000000-0000-4000-8000-000000000004",
+        providerInstanceId: "d0000000-0000-4000-8000-000000000005",
+        extension: { kind: "core" },
+      },
+      threadId: "d0000000-0000-4000-8000-000000000006",
+      checkoutId: "d0000000-0000-4000-8000-000000000007",
+      kind: "use-device",
+      requestedBy: { kind: "local-user", actorId: "d0000000-0000-4000-8000-000000000010" },
+      deviceId: "d0000000-0000-4000-8000-000000000008",
+      timeoutMs: 30_000,
+      approval: { kind: "approved", approvalId: "d0000000-0000-4000-8000-000000000009" },
+    };
+    expect(
+      decodeCodeOperationApprovalRequest({
+        effect: { kind: "apple-device-lease", request: useDevice },
+      }).effect.kind,
+    ).toBe("apple-device-lease");
+    for (const kind of ["release-device", "status", "uninstall"]) {
+      expect(() =>
+        decodeCodeOperationApprovalRequest({
+          effect: {
+            kind: "apple-device-lease",
+            request: {
+              ...useDevice,
+              kind,
+              ...(kind === "uninstall" ? { bundleIdentifier: "app.octant.fixture" } : {}),
+            },
+          },
+        }),
+      ).toThrow();
+    }
+  });
+
   it("decodes a core Android emulator action as a bounded one-shot approval effect", () => {
     const request = decodeCodeOperationApprovalRequest({
       effect: {

@@ -31,6 +31,8 @@ import { inboxEmptyState } from "./inboxEmptyState";
 import { FloatingComposer } from "../ui/FloatingComposer";
 import { IconButton } from "../ui/IconButton";
 import { ModelPickerSheet } from "../ui/ModelPickerSheet";
+import { useVoiceDictation } from "../voice/useVoiceDictation";
+import { appendTranscript } from "../voice/voiceDictation";
 import { CodeDeliveryTargetSheet } from "./CodeDeliveryTargetSheet";
 import { createRequestGuard } from "./requestGuard";
 import { usePlacement } from "./usePlacement";
@@ -132,6 +134,16 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
   useEffect(() => {
     setCodeRetry(undefined);
   }, [placementTransport]);
+  const composerEditable = staleGate.allowProductMutations && placementTransport !== undefined;
+  const appendToDraft = useCallback((text: string) => {
+    setPrompt((draft) => appendTranscript(draft, text));
+    setCodeRetry(undefined);
+  }, []);
+  const voice = useVoiceDictation({
+    transport: placementTransport,
+    editable: composerEditable && !creating,
+    appendToDraft,
+  });
   const hostLabels = useMemo(
     () => new Map(hosts.map((host) => [host.hostId, host.label])),
     [hosts],
@@ -804,7 +816,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           ) : null}
           <FloatingComposer
             busy={creating}
-            editable={staleGate.allowProductMutations && placementTransport !== undefined}
+            editable={composerEditable}
             footerHint={footerHint}
             modelLabel={modelLabel}
             onChangeText={(value) => {
@@ -816,12 +828,13 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
             placeholder={modePresentation?.placeholder ?? MOBILE_COPY.composerHome}
             testID="mobile-home-composer"
             value={prompt}
+            voice={voice}
           />
         </>
       )}
       <HomeComposerSheet
         busy={creating}
-        editable={staleGate.allowProductMutations && placementTransport !== undefined}
+        editable={composerEditable}
         error={composerError}
         mode={composerMode}
         modelLabel={modelLabel}
@@ -843,6 +856,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
         projectLabel={composerProjectLabel}
         prompt={prompt}
         visible={composerSheetOpen}
+        voice={voice}
       />
       <HomeNavigationSheet
         activeView={props.homeMode}

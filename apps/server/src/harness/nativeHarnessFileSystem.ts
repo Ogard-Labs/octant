@@ -24,7 +24,12 @@ export type NativeHarnessFileRefusal =
   | "file-changed-since-read"
   | "old-text-not-found"
   | "old-text-ambiguous"
-  | "pattern-invalid";
+  | "pattern-invalid"
+  /**
+   * A Project on an SSH target whose session is gone, or whose target does
+   * not admit the call in the turn's posture now. Nothing reached the files.
+   */
+  | "target-unavailable";
 
 export type NativeHarnessReadResult =
   | {
@@ -82,6 +87,15 @@ export type NativeHarnessGrepResult =
 export type NativeHarnessGlobResult =
   | { readonly kind: "paths"; readonly paths: ReadonlyArray<string>; readonly truncated: boolean }
   | { readonly kind: "refused"; readonly reason: NativeHarnessFileRefusal };
+
+/**
+ * The files a harness session's tools reach: a folder on this host, or a
+ * remote root the target's executor reaches for it with this same class.
+ */
+export type NativeHarnessFileSystemPort = Pick<
+  NativeHarnessFileSystem,
+  "root" | "read" | "write" | "edit" | "glob" | "grep"
+>;
 
 export interface NativeHarnessFileSystemOptions {
   /** Absolute, already-canonical root every path is confined to. */

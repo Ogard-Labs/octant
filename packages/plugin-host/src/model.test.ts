@@ -50,6 +50,35 @@ describe("extension manifest normalization", () => {
     expect(normalized.components.map((component) => component.id)).toEqual(["alpha", "zeta"]);
   });
 
+  it("normalizes a language server's declared languages without changing its launch class", () => {
+    const base = manifest();
+    const normalized = normalizeExtensionManifest(
+      decodeExtensionPackageManifest({
+        ...base,
+        compatibility: { ...base.compatibility, modes: ["code"] },
+        declaredCapabilities: [],
+        primaryComponentId: "tsserver",
+        components: [
+          {
+            id: "tsserver",
+            kind: "language-server",
+            displayName: "TypeScript",
+            declaredCapabilities: [],
+            entryPoint: "entry-tsserver",
+            languageServer: {
+              languages: ["typescriptreact", "typescript", "javascript", "typescript"],
+              launchClass: "static",
+            },
+          },
+        ],
+      }),
+    );
+    expect(normalized.components[0]?.languageServer).toEqual({
+      languages: ["javascript", "typescript", "typescriptreact"],
+      launchClass: "static",
+    });
+  });
+
   it("builds stable serialization-safe source-qualified identities", () => {
     expect(componentQualifiedId(extensionId, "alpha")).toBe(`${extensionId}/alpha`);
     expect(componentQualifiedId("00000000-0000-0000-0000-000000000000", "alpha")).toBe(

@@ -895,6 +895,7 @@ export function wireCode(deps: CodeDependencies) {
       buildCodeService,
       canAccessCodeProject,
       codeAttachments,
+      codeFileWatch,
       codeProjectAccess,
       codeTestDiscovery,
       codeWorkingDirectoryProbePath,

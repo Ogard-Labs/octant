@@ -23,6 +23,9 @@ import {
   decodeProviderSessionId,
   type CodeCheckoutIdentity,
   type AppleActionRequest,
+  type AppleDeviceId,
+  type AppleDeviceRecord,
+  type AppleDeviceRequest,
   type AndroidEmulatorRequest,
   type CodeOperationCommand,
   type CodeOperationFailure,
@@ -46,6 +49,7 @@ import {
   type CodeRuntimeWorkId,
   type CodeOperationResult,
   type CodeThread,
+  type ComputerUseDestinationSelection,
   type CodeThreadId,
   type EventActor,
   type PendingRequest,
@@ -64,6 +68,7 @@ import type {
   ProviderDriver,
   ProviderSessionResume,
 } from "@octant/provider-sdk/driver";
+import { acquireProviderConnection } from "@octant/provider-sdk/process-placement";
 import type { Journal } from "../persistence/journal";
 import { GhPullRequestPort, createGhCommandPort, type GhDeliveryTarget } from "./ghPullRequestPort";
 import { GitMutationPort } from "./gitMutationPort";
@@ -265,10 +270,20 @@ export interface CodeOperationRuntimeOptions {
    * stream, so the change feed would otherwise never say it is gone.
    */
   readonly onPendingRequestWithdrawn?: () => void;
+  /**
+   * The turn's Computer tool, bound to the send's destination: this Mac, or
+   * one of the thread's disposable desktops. `ask` asks the turn's person in
+   * the thread, which is where a desktop's approvals are answered.
+   */
   readonly computerUseTools?: (input: {
     readonly windowId: WindowId;
     readonly thread: CodeThread;
     readonly selection: import("@octant/contracts/extensions").ExtensionSelection;
+    readonly destination?: ComputerUseDestinationSelection;
+    readonly ask: (
+      summary: string,
+      signal?: AbortSignal,
+    ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
   }) => AppManagedToolSet | undefined;
   /**
    * A refusal-only `octant_computer` for turns that carry no Computer
@@ -280,6 +295,13 @@ export interface CodeOperationRuntimeOptions {
     readonly thread: CodeThread;
   }) => AppManagedToolSet | undefined;
   readonly persistence: RuntimePersistence;
+  /**
+   * The paired device a lease confirmation names, as the host last saw it.
+   * Absent on a host with no device layer, where no lease is ever confirmed.
+   */
+  readonly describeAppleDevice?: (
+    deviceId: AppleDeviceId,
+  ) => Pick<AppleDeviceRecord, "name" | "model" | "osVersion" | "connection"> | undefined;
   readonly windowAccess: {
     readonly canAccessProject: CodeOperationAuthorityPort["canAccessProject"];
     /**
@@ -678,6 +700,8 @@ export interface CodeOperationRuntime {
   cancelApproval?(windowId: WindowId, confirmation: CodeOperationApprovalConfirmation): void;
   validateAppleApproval(windowId: WindowId, request: AppleActionRequest): Promise<boolean>;
   validateAndroidApproval(windowId: WindowId, request: AndroidEmulatorRequest): Promise<boolean>;
+  /** Whether a person at this window confirmed exactly this device lease. */
+  validateAppleDeviceLease?(windowId: WindowId, request: AppleDeviceRequest): Promise<boolean>;
   revokeApprovals(windowId: WindowId): void;
   /**
    * Shows a native-harness question on the thread's running turn so it is
@@ -1116,6 +1140,12 @@ export function createCodeOperationRuntime(
         );
         thread = resolved?.thread;
         checkout = resolved?.checkout;
+      } else if (request.effect.kind === "apple-device-lease") {
+        const lease = await resolveAppleDeviceLeaseScope(options, windowId, request.effect.request);
+        if (lease === undefined) return undefined;
+        directContext = await approvalContext(options, undefined, lease.thread, lease.checkout);
+        directThreadTitle = lease.thread.title;
+        directPrompt = appleDeviceLeasePrompt(lease);
       } else if (request.effect.kind === "create-thread-full-access") {
         thread = request.effect.thread;
         checkout = options.persistence.readCodeCheckout(thread.checkoutId);
@@ -1256,6 +1286,19 @@ export function createCodeOperationRuntime(
       return await approvalValidator.validate({
         windowId,
         effect: { kind: "apple-action", request },
+        contextDigest: approvalContextDigest(context),
+        approvalId: request.approval.approvalId,
+      });
+    },
+    validateAppleDeviceLease: async (windowId, request) => {
+      if (approvalValidator === undefined || request.approval.kind !== "approved") return false;
+      const lease = await resolveAppleDeviceLeaseScope(options, windowId, request);
+      if (lease === undefined) return false;
+      const context = await approvalContext(options, undefined, lease.thread, lease.checkout);
+      if (context === undefined) return false;
+      return await approvalValidator.validate({
+        windowId,
+        effect: { kind: "apple-device-lease", request },
         contextDigest: approvalContextDigest(context),
         approvalId: request.approval.approvalId,
       });
@@ -1727,6 +1770,74 @@ async function resolveAndroidApprovalScope(
   return resolveDeviceApprovalScope(options, windowId, request);
 }
 
+interface AppleDeviceLeaseScope {
+  readonly thread: CodeThread;
+  readonly checkout: CodeCheckoutIdentity;
+  readonly device: NonNullable<
+    ReturnType<NonNullable<CodeOperationRuntimeOptions["describeAppleDevice"]>>
+  >;
+  /** The thread a move takes the device from, which the person must be shown. */
+  readonly from?: CodeThread;
+}
+
+/**
+ * The thread, checkout, and device a lease confirmation names. Unlike an
+ * effect's approval it does not depend on the thread's posture: a lease asks
+ * a person under every posture, Full access and Plan included.
+ */
+async function resolveAppleDeviceLeaseScope(
+  options: CodeOperationRuntimeOptions,
+  windowId: WindowId,
+  request: AppleDeviceRequest,
+): Promise<AppleDeviceLeaseScope | undefined> {
+  const thread = options.persistence.readCodeThread(request.threadId);
+  const checkout = options.persistence.readCodeCheckout(request.checkoutId);
+  const device =
+    request.deviceId === undefined ? undefined : options.describeAppleDevice?.(request.deviceId);
+  const from =
+    request.fromThreadId === undefined
+      ? undefined
+      : options.persistence.readCodeThread(request.fromThreadId);
+  if (
+    request.kind !== "use-device" ||
+    device === undefined ||
+    thread === undefined ||
+    checkout === undefined ||
+    thread.checkoutId !== checkout.id ||
+    thread.repositoryId !== checkout.repositoryId ||
+    thread.projectId !== request.authority.projectId ||
+    thread.providerInstanceId !== request.authority.providerInstanceId ||
+    thread.lifecycle !== "active" ||
+    checkout.availability !== "available" ||
+    request.authority.mode !== "code" ||
+    request.authority.extension.kind !== "core" ||
+    (request.fromThreadId !== undefined && from === undefined) ||
+    !(await options.windowAccess.canAccessProject(windowId, thread.projectId))
+  ) {
+    return undefined;
+  }
+  return { thread, checkout, device, ...(from === undefined ? {} : { from }) };
+}
+
+/** Names the device and the thread, and for a move the thread that loses it. */
+function appleDeviceLeasePrompt(lease: AppleDeviceLeaseScope): {
+  readonly message: string;
+  readonly detail: string;
+} {
+  const { device, from, thread } = lease;
+  return {
+    message: `Let this thread use ${device.name}?`,
+    detail: boundApprovalDetail(
+      [
+        `Device: ${device.name} · ${device.model} · iOS ${device.osVersion} · ${device.connection === "wired" ? "connected by cable" : "on the network"}`,
+        `Thread: ${thread.title}`,
+        ...(from === undefined ? [] : [`Moves the device from: ${from.title}`]),
+        "Until the lease ends, this thread can install and run its own app on the device, take screenshots, and read that app's console output.",
+      ].join("\n"),
+    ),
+  };
+}
+
 async function resolveDeviceApprovalScope(
   options: CodeOperationRuntimeOptions,
   windowId: WindowId,
@@ -1820,6 +1931,10 @@ function approvalPrompt(
         ? [`Scheme: ${effect.request.scheme}`]
         : []),
     ].join("\n");
+  } else if (effect.kind === "apple-device-lease") {
+    // prepareApproval words a lease from the device it names, which this
+    // function is not given; reaching here is a wiring fault.
+    throw new TypeError("A device lease is prompted with the device it names.");
   } else if (effect.kind === "android-action") {
     const input =
       isAndroidEmulatorInputKind(effect.request.kind) ||
@@ -1989,6 +2104,7 @@ interface ActiveTurn {
    */
   pendingForkMerges?: ReadonlyArray<ForkContextDelivered>;
   readonly computerUseSelection?: import("@octant/contracts/extensions").ExtensionSelection;
+  readonly computerUseDestination?: ComputerUseDestinationSelection;
   /** The selected MCP servers' tools, resolved when the turn was accepted. */
   readonly extensionTools?: AppManagedToolSet;
   readonly extensionSelections?: ReadonlyArray<
@@ -2345,6 +2461,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         "This provider cannot carry Octant's Browser tool. Check the provider's connection in Settings, then retry without the Browser selection.",
       );
     }
+    if (command.computerUseDestination !== undefined && command.computerUseSelection === undefined)
+      return failStart("A Computer destination needs the Computer selection in the same message.");
     if (
       command.computerUseSelection !== undefined &&
       (this.#options.supportsAppManagedTools?.(input.thread) !== true ||
@@ -2352,10 +2470,18 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           windowId: input.windowId,
           thread: input.thread,
           selection: command.computerUseSelection,
+          ...(command.computerUseDestination === undefined
+            ? {}
+            : { destination: command.computerUseDestination }),
+          // Admission only checks that the send can bind its destination;
+          // the turn's own tool set asks in its thread.
+          ask: () => Promise.resolve("cancelled"),
         }) === undefined)
     )
       return failStart(
-        "This provider cannot carry Octant's Computer tool. Check the provider's connection in Settings, then retry without the Computer selection.",
+        command.computerUseDestination === undefined
+          ? "This provider cannot carry Octant's Computer tool. Check the provider's connection in Settings, then retry without the Computer selection."
+          : "The selected desktop is not this thread's running desktop, or this provider cannot carry Octant's Computer tool. Choose a running desktop of this thread and retry.",
       );
     const secrets: string[] = [];
     for (const credential of root.credentialReferences) {
@@ -2501,6 +2627,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       ...(command.computerUseSelection === undefined
         ? {}
         : { computerUseSelection: command.computerUseSelection }),
+      ...(command.computerUseDestination === undefined
+        ? {}
+        : { computerUseDestination: command.computerUseDestination }),
       ...(input.extensionTools === undefined ? {} : { extensionTools: input.extensionTools }),
       ...(command.extensionSelections === undefined || command.extensionSelections.length === 0
         ? {}
@@ -3365,6 +3494,15 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               windowId: active.windowId,
               thread: active.thread,
               selection: active.computerUseSelection,
+              ...(active.computerUseDestination === undefined
+                ? {}
+                : { destination: active.computerUseDestination }),
+              ask: (summary, signal) => {
+                const bounded = boundProviderSummary(summary);
+                return bounded === undefined
+                  ? Promise.resolve("cancelled")
+                  : this.#askToolApproval(active, bounded, undefined, signal);
+              },
             }),
         createCodeAppManagedTools({
           windowId: active.windowId,
@@ -3689,7 +3827,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                   category: "unauthorized",
                   message: "Provider authority mismatch.",
                 });
-              return active.driver.acquire(acquireInput).pipe(
+              return acquireProviderConnection(active.driver, acquireInput).pipe(
                 Effect.tap((connection) =>
                   Effect.sync(() => {
                     active.connection = connection;

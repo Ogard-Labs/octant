@@ -3,7 +3,7 @@ import {
   type ProviderInstance,
   type ProviderInstanceId,
 } from "@octant/contracts";
-import { subscriptionOAuthOffers } from "@octant/domain";
+import { subscriptionDescriptorIdOf, subscriptionOAuthOffers } from "@octant/domain";
 import {
   decodeHostOAuthDescriptor,
   type HostOAuthDescriptor,
@@ -21,6 +21,7 @@ import { WindowAuthorityError, type WindowAuthorityStore } from "../../windowAut
 import { readPrincipalRouteContext } from "../../principalRouteContext";
 import type { ProviderCredentialStore } from "../credentialBrokerClient";
 import type { HostOAuthService } from "./hostOAuthService";
+import { dispatchDirectorySignIn, isDirectorySignIn } from "./providerDirectorySignIn";
 
 const METHODS = "POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
@@ -84,7 +85,16 @@ export type ProviderOAuthView =
       readonly accountLabel: string;
     }
   | { readonly kind: "signed-in"; readonly accountLabel: string }
-  | { readonly kind: "expired"; readonly accountLabel: string }
+  | {
+      readonly kind: "expired";
+      readonly accountLabel: string;
+      /**
+       * Present when the organization wants the person to sign in again in
+       * person (multi-factor or a consent prompt) rather than the sign-in
+       * having ended.
+       */
+      readonly reason?: "interaction-required";
+    }
   | { readonly kind: "refused"; readonly reason: string };
 
 export function createProviderOAuthRouteHandler(dependencies: ProviderOAuthRouteDependencies) {
@@ -143,8 +153,11 @@ export function createProviderOAuthRouteHandler(dependencies: ProviderOAuthRoute
     const offer = offers.find(
       (candidate) => candidate.descriptor.descriptorId === command.descriptorId,
     );
-    if (offer === undefined) return json({ kind: "refused", reason: "invalid" }, 400, origin);
-    const descriptor = decodeHostOAuthDescriptor(offer.descriptor);
+    // An organization sign-in is not a catalog offer: its descriptor is built
+    // from the instance's own configuration when each command runs.
+    if (offer === undefined && !isDirectorySignIn(command.descriptorId)) {
+      return json({ kind: "refused", reason: "invalid" }, 400, origin);
+    }
     const key = `${windowId}\n${command.instanceId}\n${command.descriptorId}`;
     try {
       for (const [key, attempt] of pending) {
@@ -165,10 +178,18 @@ export function createProviderOAuthRouteHandler(dependencies: ProviderOAuthRoute
             return previous;
           }
         }
+        if (offer === undefined) {
+          return dispatchDirectorySignIn({
+            dependencies,
+            command: resumed,
+            principal,
+            actorId: windowId,
+          });
+        }
         return dispatch({
           dependencies,
           command: resumed,
-          descriptor,
+          descriptor: decodeHostOAuthDescriptor(offer.descriptor),
           offer,
           principal,
           actorId: windowId,
@@ -205,7 +226,7 @@ export function createProviderOAuthRouteHandler(dependencies: ProviderOAuthRoute
 
 async function dispatch(input: {
   readonly dependencies: ProviderOAuthRouteDependencies;
-  readonly command: OAuthCommand;
+  readonly command: ProviderOAuthCommand;
   readonly descriptor: HostOAuthDescriptor;
   readonly offer: SubscriptionOAuthOffer;
   readonly principal: PrincipalKind;
@@ -282,7 +303,7 @@ async function dispatch(input: {
 
 async function finish(
   dependencies: ProviderOAuthRouteDependencies,
-  command: OAuthCommand,
+  command: ProviderOAuthCommand,
   offer: SubscriptionOAuthOffer,
   state: HostOAuthSignInState,
   windowId: string,
@@ -324,7 +345,7 @@ async function finish(
 
 async function signedInOrOut(
   dependencies: ProviderOAuthRouteDependencies,
-  command: OAuthCommand,
+  command: ProviderOAuthCommand,
   offer: SubscriptionOAuthOffer,
   principal: PrincipalKind,
 ): Promise<ProviderOAuthView> {
@@ -364,6 +385,16 @@ function unmatchedInstance(
   if (!offer.driverKinds.some((kind) => kind === instance.driverKind)) {
     return { kind: "refused", reason: "unsupported-driver" };
   }
+  // An endpoint that signs in with its organization holds that sign-in's
+  // pointer; a catalog sign-in stored over it would leave the organization
+  // grant with no pointer to sign it out.
+  if (
+    (instance.driverKind === "openai-compatible" ||
+      instance.driverKind === "anthropic-compatible") &&
+    instance.configuration.authentication === "directory-oauth"
+  ) {
+    return { kind: "refused", reason: "unsupported-driver" };
+  }
   if (!endpointMatchesOffer(instance, offer)) {
     return { kind: "refused", reason: "endpoint-mismatch" };
   }
@@ -398,7 +429,7 @@ function canonicalOrigin(value: string): string | undefined {
 
 async function revokeReplacedPointer(
   dependencies: ProviderOAuthRouteDependencies,
-  command: OAuthCommand,
+  command: ProviderOAuthCommand,
   offer: SubscriptionOAuthOffer,
   nextCredentialRef: string,
   principal: PrincipalKind,
@@ -443,7 +474,7 @@ async function storePointer(
   if (
     (instance.driverKind === "openai-compatible" ||
       instance.driverKind === "anthropic-compatible") &&
-    instance.configuration.oauthDescriptorId !== offer.descriptor.descriptorId
+    subscriptionDescriptorIdOf(instance.configuration) !== offer.descriptor.descriptorId
   ) {
     await dependencies.bindDescriptor(instance, offer.descriptor.descriptorId, windowId);
   }
@@ -465,14 +496,19 @@ async function readPointer(
   }
 }
 
-interface OAuthCommand {
+export interface ProviderOAuthCommand {
   readonly kind: "status" | "acknowledge" | "begin" | "poll" | "sign-out" | "sign-out-locally";
   readonly instanceId: ProviderInstanceId;
   readonly descriptorId: string;
   readonly attemptId: string;
+  /**
+   * An organization sign-in begun with a device code. Only the host-local
+   * `octant provider sign-in` route sets it; this route's commands never do.
+   */
+  readonly flow?: "device-code";
 }
 
-function readCommand(value: unknown): OAuthCommand | undefined {
+function readCommand(value: unknown): ProviderOAuthCommand | undefined {
   if (!isRecord(value)) return undefined;
   const kind = value.kind;
   if (

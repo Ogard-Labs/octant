@@ -21,10 +21,13 @@ const LOCAL_ONLY_PROBES = [
   { path: "/api/extensions/tool-grants", method: "POST" },
   { path: "/api/desktop/window-authorities", method: "GET" },
   { path: "/api/desktop/provider-credentials/set", method: "POST" },
+  { path: "/api/desktop/provider-sign-in/begin", method: "POST" },
+  { path: "/api/desktop/provider-sign-in/poll", method: "POST" },
   { path: "/api/replica-store/commands", method: "POST" },
   { path: "/api/replica-membership/commands", method: "POST" },
   { path: "/api/replica-membership/state", method: "GET" },
   { path: "/api/thread-external-content", method: "POST" },
+  { path: "/api/speech/synthesis", method: "POST" },
 ] as const;
 
 /**
@@ -50,6 +53,10 @@ const PRODUCT_PROBES = [
   },
   { path: "/api/code/evidence", method: "PUT" },
   { path: "/api/code/local-servers/commands", method: "POST" },
+  { path: "/api/code/language/read", method: "POST" },
+  { path: "/api/code/desktops", method: "POST" },
+  { path: "/api/code/desktops/frame", method: "POST" },
+  { path: "/api/code/language/documents", method: "POST" },
   { path: "/api/providers/bootstrap", method: "GET" },
   { path: "/api/github/authentication", method: "GET" },
   { path: "/api/github/authentication/commands", method: "POST" },

@@ -50,6 +50,24 @@ describe("mobile TestFlight release configuration", () => {
     });
   });
 
+  it("names both camera uses wherever the camera reason is written, and asks for no location", () => {
+    const pluginOptions = (name: string): Record<string, unknown> => {
+      const entry = appConfig.plugins?.find(
+        (plugin) => Array.isArray(plugin) && plugin[0] === name,
+      );
+      return Array.isArray(entry) ? (entry[1] as Record<string, unknown>) : {};
+    };
+    for (const plugin of ["expo-image-picker", "expo-camera"]) {
+      const reason = String(pluginOptions(plugin).cameraPermission);
+      expect(reason).toContain("pairing QR code");
+      expect(reason).toContain("photo you attach to a thread");
+    }
+    expect(String(pluginOptions("expo-image-picker").photosPermission)).toContain(
+      "attach a photo you choose to a thread",
+    );
+    expect(JSON.stringify(appConfig)).not.toMatch(/NSLocation|LOCATION/);
+  });
+
   it("declares export compliance and uses an opaque App Store icon", () => {
     expect(appConfig.ios?.config?.usesNonExemptEncryption).toBe(false);
     expect(appConfig.ios?.icon).toBe("./assets/icon-ios.png");

@@ -26,6 +26,7 @@ const TerminalModule = lazy(() => import("../dockModules/TerminalModule"));
 const TestsModule = lazy(() => import("../dockModules/TestsModule"));
 const SimulatorModule = lazy(() => import("../dockModules/SimulatorModule"));
 const AndroidEmulatorModule = lazy(() => import("../dockModules/AndroidEmulatorModule"));
+const DesktopModule = lazy(() => import("../dockModules/DesktopModule"));
 const EnvironmentModule = lazy(() => import("../dockModules/EnvironmentModule"));
 
 /**
@@ -138,6 +139,7 @@ export const dockModuleInputs = {
     "subject",
     "windowCapability",
   ],
+  desktop: ["serverUrl", "subject", "windowCapability"],
   environment: [],
 } as const satisfies Readonly<
   Record<RightUtilityDockSurfaceId, ReadonlyArray<keyof ThreadUtilityDockContentProps>>
@@ -173,5 +175,6 @@ export const dockModules: Readonly<
     createElement(SimulatorModule, inputs(props, dockModuleInputs["ios-simulator"])),
   "android-emulator": (props) =>
     createElement(AndroidEmulatorModule, inputs(props, dockModuleInputs["android-emulator"])),
+  desktop: (props) => createElement(DesktopModule, inputs(props, dockModuleInputs.desktop)),
   environment: () => createElement(EnvironmentModule, {}),
 };

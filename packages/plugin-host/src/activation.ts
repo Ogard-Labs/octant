@@ -7,6 +7,8 @@ import type { OctantMode } from "@octant/contracts/modes";
 
 const rendererKinds = ["ui-surface", "appearance-pack", "preview-viewer"] as const;
 const providerDriverKind = ["provider-driver"] as const;
+// Chat never leases a desktop: a Chat Project has no root to send an artifact from.
+const desktopProviderKind = ["desktop-provider"] as const;
 
 const modeKinds: Readonly<Record<OctantMode, ReadonlySet<ExtensionComponent["kind"]>>> = {
   chat: new Set([
@@ -27,6 +29,7 @@ const modeKinds: Readonly<Record<OctantMode, ReadonlySet<ExtensionComponent["kin
     "app",
     ...rendererKinds,
     ...providerDriverKind,
+    ...desktopProviderKind,
   ]),
   code: new Set([
     "skill-instructions",
@@ -40,8 +43,11 @@ const modeKinds: Readonly<Record<OctantMode, ReadonlySet<ExtensionComponent["kin
     "apple-development-adapter",
     "board",
     "integration",
+    // Code only: Work has no developer environment and Chat has no folder.
+    "language-server",
     ...rendererKinds,
     ...providerDriverKind,
+    ...desktopProviderKind,
   ]),
 };
 
@@ -72,6 +78,25 @@ export function isExtensionComponentModeSafe(
       (capability) => !modeProhibitedCapabilities[mode].has(capability),
     )
   );
+}
+
+/**
+ * Whether a host may ever run a stored component's process. A stored
+ * provider-driver component is an outside driver, and only macOS confines one
+ * (deny-default Seatbelt with no network, exec, or fork). Extension processes
+ * have no Linux or Windows confinement, so there the component is
+ * `host-prohibited` rather than started unconfined.
+ */
+export function isExtensionComponentHostConfined(
+  platform: string,
+  component: ExtensionComponent,
+): boolean {
+  return component.kind !== "provider-driver" || isOutsideDriverHostConfined(platform);
+}
+
+/** Whether this platform confines an outside provider driver's process. */
+export function isOutsideDriverHostConfined(platform: string): boolean {
+  return platform === "darwin";
 }
 
 export interface ExtensionActivationContext extends ExtensionActivationState {

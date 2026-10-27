@@ -122,7 +122,19 @@ import {
   type CodeThreadView,
   type WindowId,
 } from "@octant/contracts";
+import {
+  decodeCodeLanguageApprovalRequest,
+  decodeCodeLanguageApprovalResult,
+  decodeCodeLanguageDocumentRequest,
+  decodeCodeLanguageDocumentResult,
+  decodeCodeLanguageReadRequest,
+  decodeCodeLanguageReadResult,
+  type CodeLanguageApprovalRequest,
+  type CodeLanguageDocumentRequest,
+  type CodeLanguageReadRequest,
+} from "@octant/contracts/code-language";
 import { Schema } from "effect";
+import type { CodeLanguageService } from "./code/codeLanguageService";
 import type { CodeService } from "./code/codeService";
 import type { FileIdentity } from "./code/fileOperationPort";
 import type { ProjectTerminalService } from "./code/projectTerminalService";
@@ -453,6 +465,11 @@ export interface CodeRouteDependencies {
   readonly service: CodeRouteService;
   /** Terminals a Code Project owns without a thread; absent on a host without them. */
   readonly projectTerminals?: Pick<ProjectTerminalService, "execute">;
+  /**
+   * Language reads answered by confined language servers; absent on a host
+   * without them, which then answers `unavailable` rather than 404.
+   */
+  readonly language?: Pick<CodeLanguageService, "syncDocument" | "read" | "approve">;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxJsonBodySize?: number;
   readonly maxFileBodySize?: number;
@@ -621,6 +638,100 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
                 command,
               ),
             ),
+            200,
+            origin,
+          );
+        }
+        case "language-approvals": {
+          requireMethodAndEmptyQuery(request, url, "POST");
+          requireJsonContentType(request);
+          // Approving a server that runs the repository's tooling is the
+          // person's act at the machine. The remote gate never forwards this
+          // route; a paired device that reached it anyway is refused here
+          // before its body is read, and the service refuses it again.
+          if (callerKind !== "local-window") {
+            return failureResponse(
+              {
+                category: "unauthorized",
+                message: "Only this host's own windows can approve a language server.",
+              },
+              403,
+              origin,
+            );
+          }
+          if (dependencies.language === undefined) {
+            return failureResponse(
+              { category: "unavailable", message: "Code language services are unavailable." },
+              503,
+              origin,
+            );
+          }
+          const value = parseJson(await readBoundedBytes(request, jsonLimit));
+          if (isRecord(value) && Object.prototype.hasOwnProperty.call(value, "windowId")) {
+            throw new CodeRouteRejected("Code requests cannot supply window identity.", 400);
+          }
+          let approval: CodeLanguageApprovalRequest;
+          try {
+            approval = decodeCodeLanguageApprovalRequest(value);
+          } catch {
+            throw new CodeRouteRejected("Code language approval is invalid.", 400);
+          }
+          return jsonResponse(
+            decodeCodeLanguageApprovalResult(
+              await dependencies.language.approve(
+                { scopeId: authenticatedWindowId, principal: callerKind },
+                approval,
+              ),
+            ),
+            200,
+            origin,
+          );
+        }
+        case "language-documents":
+        case "language-read": {
+          requireMethodAndEmptyQuery(request, url, "POST");
+          requireJsonContentType(request);
+          if (dependencies.language === undefined) {
+            return failureResponse(
+              { category: "unavailable", message: "Code language services are unavailable." },
+              503,
+              origin,
+            );
+          }
+          // A document carries the editor's text, which may be as large as an
+          // editable file and grows when escaped as JSON.
+          const body = await readBoundedBytes(
+            request,
+            route.kind === "language-documents" ? 2 * fileLimit + jsonLimit : jsonLimit,
+          );
+          const value = parseJson(body);
+          if (isRecord(value) && Object.prototype.hasOwnProperty.call(value, "windowId")) {
+            throw new CodeRouteRejected("Code requests cannot supply window identity.", 400);
+          }
+          const caller = { scopeId: authenticatedWindowId, principal: callerKind };
+          if (route.kind === "language-documents") {
+            let document: CodeLanguageDocumentRequest;
+            try {
+              document = decodeCodeLanguageDocumentRequest(value);
+            } catch {
+              throw new CodeRouteRejected("Code language document request is invalid.", 400);
+            }
+            return jsonResponse(
+              decodeCodeLanguageDocumentResult(
+                await dependencies.language.syncDocument(caller, document),
+              ),
+              200,
+              origin,
+            );
+          }
+          let read: CodeLanguageReadRequest;
+          try {
+            read = decodeCodeLanguageReadRequest(value);
+          } catch {
+            throw new CodeRouteRejected("Code language read is invalid.", 400);
+          }
+          return jsonResponse(
+            decodeCodeLanguageReadResult(await dependencies.language.read(caller, read)),
             200,
             origin,
           );
@@ -1527,6 +1638,9 @@ type MatchedRoute =
         | "terminal-inspection"
         | "terminal-live"
         | "project-terminals"
+        | "language-documents"
+        | "language-read"
+        | "language-approvals"
         | "file-save"
         | "file-open"
         | "git-history"
@@ -1679,6 +1793,9 @@ function matchRoute(pathname: string): MatchedRoute | undefined {
   if (pathname === "/api/code/project-pull-requests/merge") {
     return { kind: "project-pull-requests-merge" };
   }
+  if (pathname === "/api/code/language/documents") return { kind: "language-documents" };
+  if (pathname === "/api/code/language/read") return { kind: "language-read" };
+  if (pathname === "/api/code/language/approvals") return { kind: "language-approvals" };
   if (pathname === "/api/code/files/content") return { kind: "file-save" };
   if (pathname === "/api/code/files/open") return { kind: "file-open" };
   if (pathname === "/api/code/git/history") return { kind: "git-history" };

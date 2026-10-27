@@ -2,7 +2,10 @@ import { Schema } from "effect";
 import { ContentOrigin } from "./contentProvenance";
 import { CorrelationId } from "./events";
 import { ProjectId } from "./projects";
+import { ToolExtensionId } from "./extensionIdentity";
 import { ProviderInstanceId } from "./providers";
+
+export { ToolExtensionId } from "./extensionIdentity";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
@@ -33,8 +36,6 @@ export const ToolRootId = brandedUuid("ToolRootId");
 export type ToolRootId = typeof ToolRootId.Type;
 export const ToolWorktreeId = brandedUuid("ToolWorktreeId");
 export type ToolWorktreeId = typeof ToolWorktreeId.Type;
-export const ToolExtensionId = brandedUuid("ToolExtensionId");
-export type ToolExtensionId = typeof ToolExtensionId.Type;
 export const ToolApprovalId = brandedUuid("ToolApprovalId");
 export type ToolApprovalId = typeof ToolApprovalId.Type;
 export const ToolEvidenceId = brandedUuid("ToolEvidenceId");

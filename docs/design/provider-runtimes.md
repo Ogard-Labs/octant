@@ -196,12 +196,19 @@ its `AZURE_OPENAI_*` variables, so a thread holds them under either name.
 
 Every ACP agent runs on one shared stack: `acpDriver.ts`, `acpProcess.ts`,
 `acpProtocol.ts`, `acpEventMapper.ts`, and `acpManagedTools.ts` in
-`apps/server/src/providers`. A vendor is a profile in `acpProfiles.ts`: its
+`apps/server/src/providers`. A vendor is a profile in two halves. Its row in
+`ACP_AGENT_PROFILES` (`packages/contracts/src/acpAgentProfiles.ts`) says what
+the rest of Octant knows before it runs: name, executable, version probe,
+authentication postures, key label, sign-in guidance, update command, and
+bundled-plugin serial. Its runtime profile in `acpProfiles.ts` holds its
 version contract, launch argv, environment guards, managed-home layout,
 host-profile reads and denials, project-root denials, mode mapping, and
-capability quirks. A new agent is a profile, its driver-kind registration,
-and conformance evidence; it never adds a transport, process supervisor,
-protocol client, or event mapper. Claude Code (Agent SDK), Codex
+capability quirks. A new agent is those two halves, its logo, and
+conformance evidence: the driver kind, schemas, commands, discovery,
+bundled plugin, labels, and Settings forms are derived from the row, and the
+compiler asks for the runtime profile and for the agent's entries in the
+provider matrix and `acpProcess.test.ts` fixtures. It never adds a transport,
+process supervisor, protocol client, or event mapper. Claude Code (Agent SDK), Codex
 (app-server), OpenCode (native routes, ACP turns on 2.x), and Pi (RPC) keep
 their own runtimes and do not move onto this stack, although the registry
 lists ACP wrappers for them.

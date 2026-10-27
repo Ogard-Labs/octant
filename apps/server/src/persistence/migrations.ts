@@ -1624,6 +1624,42 @@ CREATE INDEX provider_instance_projection_enabled_idx
   ON provider_instance_projection(enabled);
 `;
 
+/**
+ * The projection's closed driver vocabulary had to be rebuilt for every new
+ * driver kind (eight times through version 64). The `ProviderInstance` schema
+ * already owns that vocabulary: an instance is decoded before the projection
+ * writes it, and every read decodes the row again and refuses one whose
+ * `driver_kind` disagrees with it. The column keeps only a non-empty check.
+ */
+const OPEN_PROVIDER_DRIVER_KIND_SQL = `
+DROP INDEX provider_instance_projection_driver_idx;
+DROP INDEX provider_instance_projection_enabled_idx;
+
+ALTER TABLE provider_instance_projection RENAME TO provider_instance_projection_v84;
+
+CREATE TABLE provider_instance_projection (
+  instance_id TEXT PRIMARY KEY CHECK(length(trim(instance_id)) > 0),
+  schema_version INTEGER NOT NULL CHECK(schema_version > 0),
+  driver_kind TEXT NOT NULL CHECK(length(trim(driver_kind)) > 0),
+  enabled INTEGER NOT NULL CHECK(enabled IN (0, 1)),
+  instance_json TEXT NOT NULL CHECK(json_valid(instance_json)),
+  aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0)
+) STRICT;
+
+INSERT INTO provider_instance_projection (
+  instance_id, schema_version, driver_kind, enabled, instance_json, aggregate_version
+)
+SELECT instance_id, schema_version, driver_kind, enabled, instance_json, aggregate_version
+FROM provider_instance_projection_v84;
+
+DROP TABLE provider_instance_projection_v84;
+
+CREATE INDEX provider_instance_projection_driver_idx
+  ON provider_instance_projection(driver_kind);
+CREATE INDEX provider_instance_projection_enabled_idx
+  ON provider_instance_projection(enabled);
+`;
+
 export const MIGRATIONS: ReadonlyArray<Migration> = [
   {
     version: 1,
@@ -2265,6 +2301,34 @@ CREATE INDEX validation_evidence_authority_idx
         sweep TEXT PRIMARY KEY CHECK(sweep = 'unrecorded-sessions')
       ) STRICT;
       INSERT INTO pending_session_sweep (sweep) VALUES ('unrecorded-sessions');
+    `,
+  },
+  {
+    version: 85,
+    name: "open_provider_driver_kind",
+    sql: OPEN_PROVIDER_DRIVER_KIND_SQL,
+  },
+  {
+    version: 86,
+    name: "create_ssh_target_projection",
+    sql: `
+      CREATE TABLE ssh_target_projection (
+        target_id TEXT PRIMARY KEY CHECK(length(trim(target_id)) > 0),
+        target_json TEXT NOT NULL CHECK(json_valid(target_json)),
+        registered_at TEXT NOT NULL CHECK(length(trim(registered_at)) > 0),
+        attestation_json TEXT CHECK(attestation_json IS NULL OR json_valid(attestation_json)),
+        attested_at TEXT,
+        aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0),
+        last_sequence INTEGER NOT NULL CHECK(last_sequence > 0)
+      ) STRICT;
+      CREATE TABLE ssh_remote_project_projection (
+        project_id TEXT PRIMARY KEY CHECK(length(trim(project_id)) > 0),
+        target_id TEXT NOT NULL CHECK(length(trim(target_id)) > 0),
+        project_json TEXT NOT NULL CHECK(json_valid(project_json)),
+        aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0),
+        last_sequence INTEGER NOT NULL CHECK(last_sequence > 0)
+      ) STRICT;
+      CREATE INDEX ssh_remote_project_target_idx ON ssh_remote_project_projection(target_id);
     `,
   },
 ];

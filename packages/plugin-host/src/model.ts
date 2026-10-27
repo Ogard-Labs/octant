@@ -53,6 +53,14 @@ export function normalizeExtensionManifest(
       .map((component) => ({
         ...component,
         declaredCapabilities: sortedUnique(component.declaredCapabilities),
+        ...(component.languageServer === undefined
+          ? {}
+          : {
+              languageServer: {
+                ...component.languageServer,
+                languages: sortedUnique(component.languageServer.languages),
+              },
+            }),
       }))
       .sort((left, right) => left.id.localeCompare(right.id)),
   };

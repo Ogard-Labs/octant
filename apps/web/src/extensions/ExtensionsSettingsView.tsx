@@ -19,6 +19,7 @@ import type {
 } from "@octant/contracts/extensions";
 import type {
   ExtensionPackagePreview,
+  ExtensionPackageReviewLanguageServer,
   ExtensionProjectPinListing,
 } from "@octant/contracts/extension-rpc";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
@@ -149,6 +150,49 @@ function licenseLabel(license: ExtensionPackagePreview["review"]["license"]): st
     case "unreported":
       return "Unreported";
   }
+}
+
+/**
+ * What a person reviews before a language server can run: the binary that
+ * would start, its own digest, the languages it reads, and its class, with
+ * the class's confinement in words because that is what trusting it grants.
+ */
+function LanguageServerReview(props: { readonly review: ExtensionPackageReviewLanguageServer }) {
+  const { review } = props;
+  return (
+    <div className="extensions-settings__instruction-review">
+      <dl className="extensions-settings__compatibility" aria-label="Language server review">
+        <div>
+          <dt>Binary</dt>
+          <dd>{review.binary}</dd>
+        </div>
+        <div>
+          <dt>Binary digest</dt>
+          <dd>{review.binaryDigest}</dd>
+        </div>
+        <div>
+          <dt>Languages</dt>
+          <dd>{review.languages.join(", ")}</dd>
+        </div>
+        <div>
+          <dt>Class</dt>
+          <dd>{review.launchClass}</dd>
+        </div>
+      </dl>
+      {review.launchClass === "static" ? (
+        <p className="extensions-settings__effective">
+          It reads the checkout and keeps a private cache. It cannot write, run other programs, or
+          reach the network.
+        </p>
+      ) : (
+        <p className="extensions-settings__effective">
+          It runs the repository&apos;s own tools. It starts only after you allow it for a checkout
+          or a Project, and then it can write that checkout, run programs, and reach the hosts your
+          Project&apos;s network rules allow. It never runs in Plan or for a paired device.
+        </p>
+      )}
+    </div>
+  );
 }
 
 type LoadStatus = "loading" | "ready" | "unavailable";
@@ -1239,6 +1283,9 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                                       <pre>{component.instructions}</pre>
                                     </div>
                                   )}
+                                  {component.languageServer === undefined ? null : (
+                                    <LanguageServerReview review={component.languageServer} />
+                                  )}
                                 </li>
                               ))}
                             </ul>
@@ -1328,6 +1375,9 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                               </p>
                               <pre>{component.instructions}</pre>
                             </div>
+                          )}
+                          {component.languageServer === undefined ? null : (
+                            <LanguageServerReview review={component.languageServer} />
                           )}
                         </li>
                       ))}

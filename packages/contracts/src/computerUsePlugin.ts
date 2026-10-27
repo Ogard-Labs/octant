@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import { OctantMode } from "./modes";
 import { ProviderInstanceId, ProviderModelId, ProviderExecutionPolicy } from "./providers";
 import { WindowId } from "./shell";
+import { DesktopLeaseId } from "./desktopLease";
 export { ComputerUseSettings, decodeComputerUseSettings } from "./computerUseSettings";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -19,6 +20,23 @@ const observedElement = {
   observationId: ComputerObservationId,
   elementIndex: Schema.Int.pipe(Schema.nonNegative()),
 };
+const typedText = Schema.String.pipe(Schema.maxLength(16_384));
+const pressKey = Schema.Literal(
+  "Enter",
+  "Return",
+  "Tab",
+  "Escape",
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "Backspace",
+  "Delete",
+  "Home",
+  "End",
+  "PageUp",
+  "PageDown",
+);
 export const ComputerControlCommand = Schema.Union(
   Schema.Struct({ operation: Schema.Literal("apps") }).annotations(strict),
   Schema.Struct({ operation: Schema.Literal("launch", "windows"), appId }).annotations(strict),
@@ -37,27 +55,25 @@ export const ComputerControlCommand = Schema.Union(
   Schema.Struct({
     operation: Schema.Literal("type"),
     ...observedElement,
-    text: Schema.String.pipe(Schema.maxLength(16_384)),
+    text: typedText,
   }).annotations(strict),
   Schema.Struct({
     operation: Schema.Literal("press"),
     ...observedElement,
-    key: Schema.Literal(
-      "Enter",
-      "Return",
-      "Tab",
-      "Escape",
-      "ArrowUp",
-      "ArrowDown",
-      "ArrowLeft",
-      "ArrowRight",
-      "Backspace",
-      "Delete",
-      "Home",
-      "End",
-      "PageUp",
-      "PageDown",
-    ),
+    key: pressKey,
+  }).annotations(strict),
+  // A screen without an accessibility tree has no element to address, so text
+  // and keys go to its keyboard focus, which a click on the screenshot sets.
+  // Only a disposable desktop takes these; this Mac refuses them.
+  Schema.Struct({
+    operation: Schema.Literal("type"),
+    observationId: ComputerObservationId,
+    text: typedText,
+  }).annotations(strict),
+  Schema.Struct({
+    operation: Schema.Literal("press"),
+    observationId: ComputerObservationId,
+    key: pressKey,
   }).annotations(strict),
   Schema.Struct({
     operation: Schema.Literal("scroll"),
@@ -77,8 +93,21 @@ export const ComputerUseOwner = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
   executionPolicy: ProviderExecutionPolicy,
+  /** The thread's disposable desktop the send bound; absent, the destination is this Mac. */
+  leaseId: Schema.optional(DesktopLeaseId),
 }).annotations(strict);
 export type ComputerUseOwner = typeof ComputerUseOwner.Type;
+
+/**
+ * An agent's request to send one checkout-relative file into its bound
+ * desktop's inbox. It never reaches a driver as a command: the host's lease
+ * service reads, hashes, asks, and journals the transfer first.
+ */
+export const ComputerSendFileCommand = Schema.Struct({
+  operation: Schema.Literal("send-file"),
+  path: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4_096)),
+}).annotations(strict);
+export type ComputerSendFileCommand = typeof ComputerSendFileCommand.Type;
 
 export const ComputerUseImage = Schema.Struct({
   mimeType: Schema.Literal("image/png", "image/jpeg"),
@@ -120,6 +149,13 @@ export const ComputerControlResult = Schema.Union(
     imageHeight: Schema.optional(Schema.Int.pipe(Schema.positive())),
   }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("stopped") }).annotations(strict),
+  /** A file sent into the bound desktop's inbox, as the host journaled it. */
+  Schema.Struct({
+    kind: Schema.Literal("sent"),
+    name: text(255),
+    size: Schema.Int.pipe(Schema.nonNegative()),
+    sha256: Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/)),
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("refused", "failed"),
     reason: text(128),
@@ -148,4 +184,5 @@ export type ComputerUseStatus = typeof ComputerUseStatus.Type;
 export const decodeComputerControlCommand = Schema.decodeUnknownSync(ComputerControlCommand);
 export const decodeComputerControlResult = Schema.decodeUnknownSync(ComputerControlResult);
 export const decodeComputerUseOwner = Schema.decodeUnknownSync(ComputerUseOwner);
+export const decodeComputerSendFileCommand = Schema.decodeUnknownSync(ComputerSendFileCommand);
 export const decodeComputerUseStatus = Schema.decodeUnknownSync(ComputerUseStatus);

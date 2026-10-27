@@ -40,6 +40,7 @@ const REGISTERED_PROVIDER_DRIVER_KINDS = {
   "gemini-native-image": true,
   "bfl-image": true,
   "ideogram-image": true,
+  "outside-harness-endpoint": true,
 } as const satisfies Readonly<Record<RegisteredProviderDriverKind, true>>;
 
 const registeredProviderDriverKinds = Object.keys(
@@ -74,11 +75,13 @@ const CHAT_OUTCOMES = {
   "gemini-native-image": "unavailable",
   "bfl-image": "unavailable",
   "ideogram-image": "unavailable",
+  // Nothing admits an outside driver package yet, so no outside instance runs a turn.
+  "outside-harness-endpoint": "unavailable",
 } as const satisfies Readonly<Record<RegisteredProviderDriverKind, ChatOutcome>>;
 
 describe("Chat provider matrix", () => {
   it("consumes Chat conformance evidence for every registered provider kind", () => {
-    expect(new Set(registeredProviderDriverKinds).size).toBe(25);
+    expect(new Set(registeredProviderDriverKinds).size).toBe(26);
 
     for (const driverKind of registeredProviderDriverKinds) {
       if (CHAT_OUTCOMES[driverKind] === "unavailable") continue;
