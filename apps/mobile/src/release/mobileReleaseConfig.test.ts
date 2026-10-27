@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import appConfig from "../../app.config";
 
 interface EasConfig {
@@ -14,6 +14,13 @@ interface EasConfig {
     readonly production?: {
       readonly autoIncrement?: boolean;
       readonly distribution?: string;
+    };
+    readonly "android-internal"?: {
+      readonly autoIncrement?: boolean;
+      readonly credentialsSource?: string;
+      readonly distribution?: string;
+      readonly environment?: string;
+      readonly android?: { readonly buildType?: string };
     };
   };
   readonly submit?: {
@@ -65,7 +72,8 @@ describe("mobile TestFlight release configuration", () => {
     expect(String(pluginOptions("expo-image-picker").photosPermission)).toContain(
       "attach a photo you choose to a thread",
     );
-    expect(JSON.stringify(appConfig)).not.toMatch(/NSLocation|LOCATION/);
+    const { blockedPermissions: _blocked, ...android } = appConfig.android ?? {};
+    expect(JSON.stringify({ ...appConfig, android })).not.toMatch(/NSLocation|LOCATION/);
   });
 
   it("declares export compliance and uses an opaque App Store icon", () => {
@@ -78,5 +86,88 @@ describe("mobile TestFlight release configuration", () => {
     expect(icon.readUInt32BE(20)).toBe(1024);
     expect([4, 6]).not.toContain(icon[25]);
     expect(icon.includes(Buffer.from("tRNS", "ascii"))).toBe(false);
+  });
+});
+
+const androidWorkflow = readFileSync(
+  join(mobileRoot, "..", "..", ".github", "workflows", "mobile-android-internal.yml"),
+  "utf8",
+);
+
+async function appConfigForProfile(profile: string) {
+  vi.resetModules();
+  vi.stubEnv("EAS_BUILD_PROFILE", profile);
+  vi.stubEnv("NODE_ENV", "test");
+  vi.stubEnv("OCTANT_MOBILE_MOCK_SCENARIO", "full");
+  return (await import("../../app.config")).default;
+}
+
+describe("mobile Android internal release configuration", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("builds a signed APK for internal distribution from EAS-held credentials only", () => {
+    expect(easConfig.build?.["android-internal"]).toEqual({
+      autoIncrement: true,
+      credentialsSource: "remote",
+      distribution: "internal",
+      environment: "production",
+      android: { buildType: "apk" },
+    });
+    expect(appConfig.android?.package).toBe("app.octant.mobile");
+  });
+
+  it("carries no mock scenario into a release profile, whatever the environment says", async () => {
+    expect((await appConfigForProfile("android-internal")).extra).not.toHaveProperty(
+      "mobileMockScenario",
+    );
+    expect((await appConfigForProfile("production")).extra).not.toHaveProperty(
+      "mobileMockScenario",
+    );
+    expect((await appConfigForProfile("a-profile-added-later")).extra).not.toHaveProperty(
+      "mobileMockScenario",
+    );
+    expect((await appConfigForProfile("development")).extra).toHaveProperty(
+      "mobileMockScenario",
+      "full",
+    );
+  });
+
+  it("keeps app data out of Android backups and blocks overlay and location permissions", () => {
+    expect(appConfig.android?.allowBackup).toBe(false);
+    expect(appConfig.android?.blockedPermissions).toEqual(
+      expect.arrayContaining([
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.ACCESS_MEDIA_LOCATION",
+      ]),
+    );
+  });
+
+  it("dispatches by hand only, builds only from main, and reads the Expo token from its protected environment", () => {
+    expect(androidWorkflow).toMatch(/^on:\n {2}workflow_dispatch:\n\n/m);
+    expect(androidWorkflow).not.toMatch(/pull_request|push:|schedule:|workflow_run/);
+    expect(androidWorkflow).toMatch(/^permissions:\n {2}contents: read$/m);
+    expect(androidWorkflow).toContain("if: github.ref == 'refs/heads/main'");
+    expect(androidWorkflow).toContain("environment: mobile-android-internal");
+    expect([...androidWorkflow.matchAll(/secrets\.([A-Z_]+)/g)].map((match) => match[1])).toEqual([
+      "EXPO_TOKEN",
+    ]);
+    expect(androidWorkflow).toContain(
+      "eas build --platform android --profile android-internal --non-interactive --wait --freeze-credentials --json",
+    );
+  });
+
+  it("publishes no artifact and no install link in the repository's public logs", () => {
+    expect(androidWorkflow).not.toMatch(/upload-artifact|actions\/cache/);
+    expect(androidWorkflow).toMatch(
+      />"\$RUNNER_TEMP\/eas-build\.json" 2>"\$RUNNER_TEMP\/eas-build\.log"/,
+    );
+    expect(androidWorkflow).toContain("-e 's#https?://[^[:space:]]+#<link withheld>#g'");
+    expect(androidWorkflow).toContain("{12}#<id withheld>#g'");
+    expect(androidWorkflow.match(/eas-build\.json/g)).toHaveLength(1);
   });
 });

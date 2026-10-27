@@ -48,6 +48,17 @@ jobs:
       - run: bun run style:check
       - run: bun run decisions:check
       - run: bun run typecheck --filter=!@octant/desktop --filter=!@octant/scripts
+      # Resolves the phone's Expo configuration for each release profile with
+      # every config plugin applied, so a broken plugin or manifest change
+      # fails on the PR rather than in a maintainer's EAS build. The release
+      # rules themselves are asserted by the mobile release-config test.
+      - name: Resolve the mobile release Expo configurations
+        working-directory: apps/mobile
+        run: |
+          set -euo pipefail
+          for profile in production android-internal; do
+            EAS_BUILD_PROFILE="$profile" bunx expo config --type introspect --json >/dev/null
+          done
       - run: bun run build --filter=!@octant/desktop --filter=!@octant/scripts
 
   packages:
