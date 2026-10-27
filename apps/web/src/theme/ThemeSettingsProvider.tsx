@@ -7,6 +7,11 @@ import {
 } from "@octant/theme/editor-colors";
 import { resolveEffectiveTokens } from "@octant/theme/fallback";
 import {
+  DEFAULT_TERMINAL_COLORS,
+  resolveTerminalColorProjection,
+  type TerminalColorProjection,
+} from "@octant/theme/terminal-colors";
+import {
   createContext,
   useCallback,
   useContext,
@@ -220,10 +225,19 @@ export function ThemeSettingsProvider(props: {
         : resolveEditorColorProjection(resolved, { increasedContrast }),
     [resolved, increasedContrast],
   );
+  const terminalColors = useMemo(
+    () =>
+      resolved === undefined
+        ? undefined
+        : resolveTerminalColorProjection(resolved, { increasedContrast }),
+    [resolved, increasedContrast],
+  );
   return (
     <IncreasedContrastContext.Provider value={increasedContrast}>
       <EditorColorContext.Provider value={editorColors}>
-        {props.children}
+        <TerminalColorContext.Provider value={terminalColors}>
+          {props.children}
+        </TerminalColorContext.Provider>
       </EditorColorContext.Provider>
     </IncreasedContrastContext.Provider>
   );
@@ -238,4 +252,16 @@ const EditorColorContext = createContext<EditorColorProjection | undefined>(unde
  */
 export function useEditorColorProjection(): EditorColorProjection {
   return useContext(EditorColorContext) ?? DEFAULT_EDITOR_COLORS;
+}
+
+const TerminalColorContext = createContext<TerminalColorProjection | undefined>(undefined);
+
+/**
+ * The colors a terminal draws with in the theme this window resolved, so an
+ * open terminal repaints when the theme, contrast, or system appearance
+ * changes. Without a theme the stylesheet's own dark default is what the
+ * page shows.
+ */
+export function useTerminalColorProjection(): TerminalColorProjection {
+  return useContext(TerminalColorContext) ?? DEFAULT_TERMINAL_COLORS;
 }

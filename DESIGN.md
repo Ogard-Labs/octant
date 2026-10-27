@@ -928,6 +928,18 @@ base, because the palette roles are checked only for interface contrast. A
 theme, mode, contrast, or system appearance change repaints open editors in
 place.
 
+The terminal draws from the terminal projection in
+`packages/theme/src/terminalColors.ts`: the workspace ground (the Glass plate
+under translucency), primary ink, the selection role, and the palette roles
+as its ANSI hues, with ANSI black and white kept dark and light in either
+mode and bright black as the muted ink. Because the palette roles are only
+checked as interface marks, the projection also sets a contrast floor the
+terminal engine enforces per cell against the background it is drawn on:
+4.5:1 normally and 7:1 under increased contrast, half that for dim text.
+Increased contrast also swaps in the same high-contrast ink as the rest of the
+window. A theme, mode, contrast, or system appearance change repaints an open
+terminal in place, keeping its scrollback.
+
 Status roles are paired to the surface where they render. Use the text role
 for labels and the surface role for a background; never rely on hue alone:
 

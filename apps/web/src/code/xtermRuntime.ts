@@ -2,6 +2,10 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
+import {
+  DEFAULT_TERMINAL_COLORS,
+  type TerminalColorProjection,
+} from "@octant/theme/terminal-colors";
 import type { XtermAdapterRuntime, XtermAdapterSession } from "./XtermTerminalAdapter";
 import {
   DEFAULT_TERMINAL_TYPOGRAPHY,
@@ -12,7 +16,7 @@ export const mount: XtermAdapterRuntime["mount"] = (element, options) => {
   let interactive = options.interactive;
   let output = options.output;
   const typography = options.typography ?? DEFAULT_TERMINAL_TYPOGRAPHY;
-  const theme = resolvedTerminalTheme(element);
+  const colors = options.colors ?? DEFAULT_TERMINAL_COLORS;
   const terminal = new Terminal({
     convertEol: true,
     cursorBlink: true,
@@ -21,7 +25,8 @@ export const mount: XtermAdapterRuntime["mount"] = (element, options) => {
     fontSize: typography.fontSize,
     fontWeight: typography.fontWeight,
     lineHeight: typography.lineHeight,
-    ...(theme === undefined ? {} : { theme }),
+    minimumContrastRatio: colors.minimumContrastRatio,
+    theme: terminalTheme(element, colors),
   });
   const fit = new FitAddon();
   terminal.loadAddon(fit);
@@ -73,6 +78,12 @@ export const mount: XtermAdapterRuntime["mount"] = (element, options) => {
       output = nextOutput;
     },
     setTypography: (next) => applyTerminalTypography(terminal, element, next),
+    // Assigning a new theme makes the engine repaint every cell in place, so
+    // the scrollback keeps its text and takes the new colours.
+    setColors: (next) => {
+      terminal.options.minimumContrastRatio = next.minimumContrastRatio;
+      terminal.options.theme = terminalTheme(element, next);
+    },
   } satisfies XtermAdapterSession;
 };
 
@@ -108,83 +119,14 @@ function attachGpuRenderer(terminal: Terminal): { readonly dispose: () => void }
 }
 
 /**
- * The terminal wears the resolved theme instead of xterm's stock palette,
- * which ignored the roles the app publishes and left every terminal navy-on-
- * black inside a warm-graphite workspace. Roles are read at mount, the same
- * moment the stock palette would have applied; nothing re-themes a live
- * session today (typography flows through props, colors do not), so a theme
- * switched mid-session repaints on the terminal's next mount.
+ * The terminal wears the theme's projection instead of xterm's stock palette,
+ * which left every terminal navy-on-black inside a warm-graphite workspace.
+ * The plate under the cells depends on where the terminal sits, so it is
+ * worked out here each time the colours arrive.
  */
-function resolvedTerminalTheme(element: HTMLElement): ITheme | undefined {
-  if (typeof document === "undefined") return undefined;
-  const root = document.documentElement;
-  const styles = getComputedStyle(root);
-  const role = (id: string): string | undefined => {
-    const value = styles.getPropertyValue(`--octant-${id}`).trim();
-    return value === "" ? undefined : value;
-  };
-  const ink = role("text-primary");
-  const ground = role("workspace");
-  const base = role("app-background");
-  const gray = role("text-muted");
-  const selection = role("selection");
-  const red = role("palette-red");
-  const green = role("palette-green");
-  const yellow = role("palette-yellow");
-  const blue = role("palette-blue");
-  const purple = role("palette-purple");
-  const teal = role("palette-teal");
-  // An unstyled document (runtime tests mount without the app stylesheet)
-  // resolves no roles; keep xterm's own palette rather than painting half
-  // a theme over it.
-  if (
-    ink === undefined ||
-    ground === undefined ||
-    base === undefined ||
-    gray === undefined ||
-    selection === undefined ||
-    red === undefined ||
-    green === undefined ||
-    yellow === undefined ||
-    blue === undefined ||
-    purple === undefined ||
-    teal === undefined
-  ) {
-    return undefined;
-  }
-  // Resolved roles flip with the mode, but ANSI black must stay dark and
-  // white light in either mode, so the pair maps to whichever of ink and
-  // ground is which under the resolved mode.
-  const dark = root.dataset.octantThemeMode !== "light";
-  const black = dark ? base : ink;
-  const white = dark ? ink : base;
-  const plate = glassPlate(element, ground, ink);
-  return {
-    background: plate,
-    foreground: ink,
-    cursor: ink,
-    cursorAccent: plate,
-    selectionBackground: selection,
-    black,
-    red,
-    green,
-    yellow,
-    blue,
-    magenta: purple,
-    cyan: teal,
-    white,
-    // The theme publishes one hue per family and no bright set, so the
-    // bright variants reuse the same roles; brightBlack is the muted ink
-    // so dim output stays readable instead of vanishing into the ground.
-    brightBlack: gray,
-    brightRed: red,
-    brightGreen: green,
-    brightYellow: yellow,
-    brightBlue: blue,
-    brightMagenta: purple,
-    brightCyan: teal,
-    brightWhite: white,
-  };
+function terminalTheme(element: HTMLElement, colors: TerminalColorProjection): ITheme {
+  const plate = glassPlate(element, colors.palette.background, colors.palette.foreground);
+  return { ...colors.palette, background: plate, cursorAccent: plate };
 }
 
 function applyTerminalTypography(
