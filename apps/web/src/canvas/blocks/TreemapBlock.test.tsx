@@ -59,8 +59,9 @@ function plot(): HTMLElement {
 }
 
 describe("treemap block", () => {
-  it("draws a cell for every leaf and a header for a group", () => {
+  it("draws a cell for every leaf and a header for a group", async () => {
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     const figure = document.querySelector(".canvas-block__treemap");
     if (figure === null) throw new Error("Treemap was not drawn.");
@@ -72,6 +73,7 @@ describe("treemap block", () => {
   it("switches the size and colour measures from the block header", async () => {
     const user = userEvent.setup();
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     const sizeBy = screen.getByRole("combobox", { name: "Size by" });
     expect(sizeBy).toHaveTextContent("Lines of code");
@@ -87,6 +89,7 @@ describe("treemap block", () => {
 
   it("zooms into a group on click and back out with Escape", async () => {
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     const groupFrame = document.querySelector(".canvas-block__treemap-group-frame");
     if (groupFrame === null) throw new Error("No group to zoom into.");
@@ -97,8 +100,9 @@ describe("treemap block", () => {
     expect(screen.queryByRole("navigation", { name: "Zoom path" })).toBeNull();
   });
 
-  it("moves between cells with the arrow keys and zooms in with Enter", () => {
+  it("moves between cells with the arrow keys and zooms in with Enter", async () => {
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     fireEvent.keyDown(plot(), { key: "ArrowRight" });
     const active = document.querySelector('[data-active="true"]');
@@ -109,8 +113,9 @@ describe("treemap block", () => {
     expect(screen.getByRole("navigation", { name: "Zoom path" })).toBeVisible();
   });
 
-  it("reports a keyboard-selected group's summed readings in its tooltip", () => {
+  it("reports a keyboard-selected group's summed readings in its tooltip", async () => {
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     fireEvent.keyDown(plot(), { key: "ArrowRight" });
 
@@ -123,6 +128,7 @@ describe("treemap block", () => {
     const user = userEvent.setup();
     const actionRuntime = runtime();
     render(<CanvasView input={definition()} actionRuntime={actionRuntime} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     const cell = document.querySelector("[data-node-id='web'] .canvas-block__treemap-mark");
     if (cell === null) throw new Error("The web cell was not drawn.");
@@ -141,6 +147,7 @@ describe("treemap block", () => {
     const user = userEvent.setup();
     const actionRuntime = runtime();
     render(<CanvasView input={definition()} actionRuntime={actionRuntime} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     await user.click(screen.getByRole("button", { name: "Open file" }));
 
@@ -152,6 +159,7 @@ describe("treemap block", () => {
   it("discloses a hierarchical table sortable by each measure", async () => {
     const user = userEvent.setup();
     render(<CanvasView input={definition()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     await user.click(screen.getByText("View treemap data"));
     const region = screen.getByRole("region", { name: "Treemap data" });
@@ -164,10 +172,11 @@ describe("treemap block", () => {
     expect(sort).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("never journals a zoom or a switch", () => {
+  it("never journals a zoom or a switch", async () => {
     const definitionInput = definition();
     const before = JSON.stringify(definitionInput);
     render(<CanvasView input={definitionInput} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     fireEvent.keyDown(plot(), { key: "ArrowRight" });
     fireEvent.keyDown(plot(), { key: "Enter" });

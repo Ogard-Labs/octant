@@ -813,7 +813,9 @@ development host that supplies a recipe.
   `apps/web/src/dockModules/DesktopModule.tsx`) with the states setup,
   acquiring, live, interrupted, releasing, release-failed, and ended, plus
   not-shown for a running desktop the tab is not showing
-  ([Workspace](workspace.md#tool-lifecycles)).
+  ([Workspace](workspace.md#tool-lifecycles)). Setup and ended offer Start
+  only when the overview says the thread may start one; otherwise they say
+  why, as for a thread in Plan.
 
 Rules this slice resolved:
 
@@ -859,6 +861,13 @@ Rules this slice resolved:
 - **A person's acquire.** A person starting a host-local desktop is not asked
   again (Plan still refuses). A billed lease still declines: the person's
   billed confirmation arrives with the cloud provider (slice 6).
+- **The pane offers Start only when acquire would not refuse at once.** The
+  overview's `start` carries every refusal acquire meets before it asks the
+  provider, Plan's `plan-mode` included, so a thread in Plan shows why it
+  cannot start a desktop in the setup and ended states and offers no Start.
+  Acquire still refuses on its own; the overview only spares the person a
+  button that would refuse once pressed. Whether the provider is ready is
+  still learned only by acquiring.
 - **The pane sends no file.** Transfer stays the agent's `send-file` and the
   lease service's own path; the pane offers no transfer, so it adds no route
   that could replace a file an app grant was given for.
@@ -872,13 +881,14 @@ refused to another thread, an agent, and a window that may not open the
 thread, a view kept to its window and gone after a restart that ended its
 lease, idle release held while a view is read and resumed once it lapses,
 views ended by closing and by release, the view cap, frame bounds, and the
-overview's start and refusals. `desktopPaneRoutes.test.ts` covers the actor
+overview's start and refusals, Plan's included. `desktopPaneRoutes.test.ts` covers the actor
 taken from a local window and a paired device, refusals of a request that
 names a window or actor, and a frame answered as the image.
 `hostLocalDesktopProcess.test.ts` drives a real Bubblewrap and `Xvfb` desktop
 through a person's view: a frame, then a click, text, and Enter that reach an
 `xev` window, journaled as `local-user`. `DesktopPane.test.tsx` covers the
-setup state with no recipe, Start to live with a click sent, a running desktop
+setup state with no recipe, a thread in Plan with no Start in the setup and
+ended states, Start to live with a click sent, a running desktop
 not reconnected on mount, a desktop ended by restart, Retry, and an
 interrupted view. Rendered QA ran the pane in a headless browser at a desktop
 and a narrow width in both themes, its live state against a real host-local
