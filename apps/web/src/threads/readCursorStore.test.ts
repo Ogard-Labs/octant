@@ -34,6 +34,39 @@ describe("thread read cursors", () => {
     ).toBe(5_000);
   });
 
+  it("announces a streamed cursor once per window, not once per frame", () => {
+    vi.useFakeTimers();
+    const storage = memoryStorage();
+    const store = createReadCursorStore<string>({ storageKey: "cursors", storage });
+    let announcements = 0;
+    store.subscribe(() => {
+      announcements += 1;
+    });
+
+    for (let index = 1; index <= 5_000; index += 1) store.markDeferred("thread-1", index);
+
+    // The in-memory cursor is current between beats, so a plain read never
+    // waits; only the re-render announcement coalesces.
+    expect(store.getSnapshot().get("thread-1")).toBe(5_000);
+    expect(announcements).toBe(0);
+    vi.advanceTimersByTime(250);
+    expect(announcements).toBe(1);
+  });
+
+  it("announces a person's own read and unread marks immediately", () => {
+    const storage = memoryStorage();
+    const store = createReadCursorStore<string>({ storageKey: "cursors", storage });
+    let announcements = 0;
+    store.subscribe(() => {
+      announcements += 1;
+    });
+
+    store.mark("thread-1", 3);
+    expect(announcements).toBe(1);
+    store.unmark("thread-1");
+    expect(announcements).toBe(2);
+  });
+
   it("keeps the most recently streamed thread after later marks fill the limit", () => {
     vi.useFakeTimers();
     const storage = memoryStorage();
