@@ -8,6 +8,8 @@ import {
   type CanvasId,
   type CanvasCreateRequest,
   CanvasCreateResult,
+  type CanvasHtmlImportRequest,
+  CanvasHtmlImportResult,
   type CanvasExportDecideRequest,
   CanvasExportDecideResult,
   CanvasExportOfferList,
@@ -161,6 +163,11 @@ export interface CanvasClient {
    */
   browseFolders?(request: FolderBrowseRequest): Promise<FolderBrowseResult>;
   create(request: CanvasCreateRequest): Promise<CanvasCreateResult>;
+  /**
+   * A new Canvas from an HTML page the person chose or pasted. A host without
+   * the route omits it, and no import is offered.
+   */
+  importHtml?(request: CanvasHtmlImportRequest): Promise<CanvasHtmlImportResult>;
   /**
    * The recipes a person may start a Canvas from. A host without the route
    * omits it, and the chooser then offers only a blank Canvas.
@@ -529,6 +536,18 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
           body: JSON.stringify(body),
         },
         decodeHostAnswer(CanvasCreateResult),
+      );
+    },
+    importHtml(body) {
+      return request(
+        options.fetch,
+        new URL("/api/canvas/import-html", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        decodeHostAnswer(CanvasHtmlImportResult),
       );
     },
     recipes() {

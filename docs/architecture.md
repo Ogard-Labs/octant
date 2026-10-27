@@ -613,6 +613,22 @@ document as a future version. Frames follow the
   running frame is not network-contained; that exposure is accepted, bounded
   by what the frame holds, and the Run control there says so. This tier has
   shipped.
+- **A person can bring a page.** **Import HTML…** turns one HTML page a
+  person chooses or pastes (for example, a page an AI assistant made) into a
+  new Canvas holding one `document`-size `design`. It is a create in every
+  respect authority sees: the same window context, Project, and create-policy
+  checks run on the host before the page is read, the server writes the
+  Canvas, and a paired device may not import, as it may not create. The host
+  bounds the page (256 KiB, and one frame and stylesheet after the import)
+  and answers `too-large`, `not-html`, `unparseable`, `empty`, or
+  `unsupported` before anything is journaled. The tier is the design policy's
+  own reading: a page that keeps inline script or an event handler is a
+  running design under the running tier's page, sandbox, policy, bridge, and
+  prototype host; every other page is static. Everything the page would load
+  or leave for is taken out and listed to the person; nothing is fetched. The
+  Canvas carries outside content from its first version, so every agent that
+  reads it is marked, the importing thread included. This has shipped (see
+  [Canvas](design/canvas.md#html-import)).
 - **The thread can hold the whole Canvas.** A person may expand any Canvas in
   its thread; the agent may ask for `inline` on a visualization (a chart,
   dashboard, table, math, or diagram) or a reading document, or on a

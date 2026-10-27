@@ -2,7 +2,8 @@
 
 This topic specification owns the Canvas agent tool's `describe`, `read`, and
 `preview` operations, document recipes, thread presentation, the closed block catalogue,
-diagram boards and comments, and the `design` block. Architecture owns the
+diagram boards and comments, the `design` block, and a person's HTML import.
+Architecture owns the
 Canvas boundary and authority rules
 ([Architecture: process topology](../architecture.md#process-topology)) and the
 approved direction for documents, designs, and prototypes
@@ -1096,6 +1097,86 @@ listener and asks the resolver for none of its names (`dns-prefetch` and
 `preconnect` links, STUN and TURN servers named by host name), while the same
 page in a frame of the app's own process does look them up.
 
+## HTML import
+
+A person can bring a single HTML page they already have, such as a page an AI
+assistant made for them, into a new Canvas. **Import HTML…** sits under the
+Create Canvas form wherever a person can create a Canvas (today the Chat
+thread's Canvas tools), and takes a file the person chooses or markup they
+paste. It opens a new Canvas in the same thread and Project a create there
+would, and nothing else: the page is the whole document, one `design` block.
+The feature and its copy say "HTML page"; Octant reads no assistant's own
+artifact format and copies no other product's identifiers.
+
+- **Authority.** `POST /api/canvas/import-html` carries the scope a create
+  carries (host, mode, workspace, origin thread, requested authority) and runs
+  the create route's window context and Project check, then the create
+  policy's request authorization, before the page is read. The server builds
+  the create request itself (blank intent, no sources) and writes the Canvas
+  through the same create path, so an import can reach no Project, thread, or
+  mode a create could not. The remote gateway admits neither create nor import
+  for a paired device; both stay local-window actions.
+- **Bounds and refusals.** The page is at most 256 KiB of UTF-8
+  (`CANVAS_HTML_IMPORT_MAX_BYTES`), checked on the host; a body past the
+  route's 1 MiB read is answered as too large too. What survives the import
+  must fit one design frame and one stylesheet (65,536 characters each).
+  Anything else is a discriminated refusal, never a partial Canvas:
+  `too-large`, `not-html` (no element at all, or binary content holding NUL),
+  `unparseable` (a tag, attribute value, comment, or script, style, or title
+  element that never ends), `empty` (nothing left to draw), and `unsupported`
+  (the design policy still refuses what is left, with its reason). A create
+  the window may not make is the create's own `denied` result.
+- **Shape.** The pure `importCanvasHtmlPage` (domain) makes one
+  `document`-size design with `theme: "none"`, so the page keeps its own look
+  and is as wide as the Canvas and as tall as its content. Head and body
+  `style` elements become the design's stylesheet (a `media` other than
+  `all` or `screen` is kept as an `@media` block); the body's markup is the
+  frame; inline script from the head goes first; the body's own attributes
+  move to an element wrapping the page, and a body event handler such as
+  `onload` becomes a listener on the window, which is what it listened to.
+  Comments are dropped.
+- **Tier.** The tier is read exactly as the design policy reads any design:
+  a page that still holds an inline `<script>` or an event handler declares
+  `runsScript` and is a running design, under the served page, `sandbox
+allow-scripts`, page policy, bridge, prototype host, and Run rules above;
+  every other page is a static frame. A page whose only script was a file
+  is static once the file is taken out. No import chooses a looser tier, and
+  the result is checked by `canvasDesignMarkupRefusal` and
+  `canvasDesignStylesheetRefusal` before it is written, as an agent's design
+  is.
+- **No new egress.** A frame loads nothing and leaves nothing, so the import
+  takes out what the page would fetch or where it would go, and the window
+  lists each kind with its count and up to three examples (an address, a
+  `rel`, or a setting name, shown as text): script files, stylesheets and
+  `@import`s, images, fonts, and media that are not inline `data:` images
+  (a CSS `url()` becomes `none`), links that are not a fragment (an empty,
+  bare `#`, or `javascript:` link is removed without a report), embedded
+  pages, form destinations (`action`, `formaction`, `ping`), page settings
+  (`meta` other than charset and viewport, which the host writes itself,
+  `base`, and `link` elements other than stylesheets), and SVG `set` and
+  `animate`. Nothing is fetched on the page's behalf.
+- **Outside content.** The page came from outside Octant. The Canvas's first
+  version commits together with a `canvas.outside-content-carried@1` record
+  naming the writer `imported-page:<versionId>`, which is never a thread, so
+  every agent that later reads or previews the Canvas is marked under the
+  harness's taint rules, the thread it was imported into included, and a
+  person's Clear on that thread does not exempt it. A record that cannot be
+  written refuses the import. The Canvas title is what the person typed or
+  the file's name, never the page's `<title>`: the agent tool's `list` hands
+  titles to an agent without reading the Canvas, so outside text stays in the
+  design, whose title is the page's own.
+- **Window.** The renderer reads the chosen file as text (and refuses one
+  past the bound without sending it, as the host would), then shows the new
+  Canvas's name, its tier (a running page says it starts on open in the
+  sidebar or on **Run** in the thread), and what was taken out. The panel
+  stays open on that summary; the thread lists the Canvas meanwhile.
+
+Rationale: a separate "imported" tier, or a looser policy for a page the
+person chose, was rejected because it would give outside markup more than an
+agent's design gets; fetching the page's stylesheets or images at import was
+rejected as new egress from the host on a page's behalf. The Canvas title rule
+keeps an import from adding an unmarked channel to an agent's context.
+
 ## Verification
 
 - Block policies and layouts: `packages/domain/src/canvas*.ts` and their tests
@@ -1111,6 +1192,13 @@ page in a frame of the app's own process does look them up.
   `apps/server/src/shellService.test.ts`.
 - Preview: `apps/server/src/canvas/canvasPreviewService.test.ts`,
   `canvasPreviewWarnings.test.ts`, and `canvasPreviewBrowser.smoke.ts`.
+- HTML import: the tier, what is taken out, and each refusal in
+  `packages/domain/src/canvasHtmlImport.test.ts`; the route, its refusals,
+  the create scope check, and a script-bearing page served only under the
+  running page's sandbox in `apps/server/src/canvasRoutes.test.ts`; the
+  outside-content record in `canvasOutsideContentMark.test.ts`; the paired
+  device refusal in `apps/server/src/authenticatedProductRoutes.test.ts`; and
+  the panel in `apps/web/src/canvas/CanvasCards.test.tsx`.
 
 ## Renderer loading
 

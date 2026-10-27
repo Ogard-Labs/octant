@@ -307,6 +307,52 @@ describe("a version adopted before it recorded its own author", () => {
   });
 });
 
+describe("a page a person imported into a new Canvas", () => {
+  it("marks every agent that reads it, the thread it was imported into included, through a Clear and a restart", () => {
+    const connection = openDatabase();
+    const first = host(connection);
+    const imported = canvasVersion(1);
+    first.canvases.appendCreate({
+      canvasId,
+      version: imported,
+      occurredAt: now as never,
+      importedPage: true,
+    });
+
+    expect(first.writers()).toEqual([`imported-page:${String(imported.versionId)}`]);
+    expect(first.read(writerThreadId)).toEqual({ status: "marked" });
+    expect(first.readerMarks(writerThreadId)).toEqual([
+      {
+        threadId: writerThreadId,
+        correlationId: expect.any(String),
+        provenance: { origin: "external-content", sourceLabel: "canvas" },
+        contentReference: `canvas-${String(canvasId)}`,
+      },
+    ]);
+
+    // The person cleared their thread; the page is still from outside, so the
+    // next read marks the thread again, as it marks any other reader.
+    expect(first.clearThread(writerThreadId).kind).toBe("cleared");
+    const restarted = host(connection);
+    expect(restarted.read(writerThreadId)).toEqual({ status: "marked" });
+    expect(restarted.read(readerThreadId)).toEqual({ status: "marked" });
+  });
+
+  it("writes nothing when the Canvas cannot record that it holds outside content", () => {
+    const unreadable = host(openDatabase(), { marksUnreadable: true });
+
+    expect(() =>
+      unreadable.canvases.appendCreate({
+        canvasId,
+        version: canvasVersion(1),
+        occurredAt: now as never,
+        importedPage: true,
+      }),
+    ).toThrow(expect.objectContaining({ category: "unreadable-mark" }));
+    expect(unreadable.writers()).toEqual([]);
+  });
+});
+
 /** The author a synced version records: the version's own id, which no thread shares. */
 function replicaAuthor(sequence: number): string {
   return `00000000-0000-4000-8000-${sequence.toString(16).padStart(12, "0")}`;
