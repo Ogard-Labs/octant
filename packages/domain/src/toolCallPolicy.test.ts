@@ -476,6 +476,66 @@ describe("resolveToolCall fail-closed order", () => {
   });
 });
 
+describe("Code language reads", () => {
+  const diagnostics = (overrides: Partial<ToolCallPolicyInput> = {}) =>
+    resolveToolCall(
+      baseInput({
+        capability: decodeToolActionCapability({ id: "code-diagnostics", version: 1 }),
+        arguments: { path: "src/a.ts" },
+        ...overrides,
+      }),
+    );
+  const thread = (overrides: Partial<ToolCallPolicyInput["thread"]>) => ({
+    executionPolicy: "approval-gated" as const,
+    approvalSatisfied: false,
+    externalContentIngested: false,
+    ...overrides,
+  });
+
+  it("lets a Code thread read under every posture, Plan and a marked thread included, without asking", () => {
+    for (const executionPolicy of [
+      "plan",
+      "approval-gated",
+      "auto-accept-edits",
+      "full-access",
+    ] as const) {
+      expect(diagnostics({ thread: thread({ executionPolicy }) })).toMatchObject({
+        kind: "allow",
+      });
+    }
+    expect(
+      diagnostics({ thread: thread({ executionPolicy: "plan", externalContentIngested: true }) }),
+    ).toMatchObject({ kind: "allow" });
+    expect(
+      resolveToolCall(
+        baseInput({
+          capability: decodeToolActionCapability({ id: "code-definition", version: 1 }),
+          arguments: { path: "src/a.ts", line: 3, column: 7 },
+          thread: thread({ executionPolicy: "plan" }),
+        }),
+      ),
+    ).toMatchObject({ kind: "allow" });
+  });
+
+  it("refuses Chat and Work, and a provider without app-managed tools", () => {
+    expect(diagnostics({ mode: "chat" })).toMatchObject({ kind: "deny", step: "mode-policy" });
+    expect(diagnostics({ mode: "work" })).toMatchObject({ kind: "deny", step: "mode-policy" });
+    expect(diagnostics({ providerAppManagedTools: "unsupported" })).toMatchObject({
+      kind: "deny",
+      step: "provider-capability",
+    });
+  });
+
+  it("follows a profile allowlist by the tool names the agent sees", () => {
+    expect(
+      diagnostics({ thread: thread({ toolConstraints: ["octant_code_diagnostics"] }) }),
+    ).toMatchObject({ kind: "allow" });
+    expect(
+      diagnostics({ thread: thread({ toolConstraints: ["octant_code_definition"] }) }),
+    ).toMatchObject({ kind: "deny", step: "profile-constraints" });
+  });
+});
+
 describe("resolveNetworkEgressPolicy", () => {
   it("defaults Code approval-gated to provider-endpoints-only", () => {
     expect(resolveNetworkEgressPolicy({ mode: "code", executionPolicy: "approval-gated" })).toBe(

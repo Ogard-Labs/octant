@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  CODE_LANGUAGE_TOOL_DEFINITIONS,
+  decodeProviderToolDefinition,
   decodeToolActionCapability,
   listClosedToolCatalog,
   lookupClosedToolCatalogEntry,
@@ -13,6 +15,8 @@ describe("closed tool catalog", () => {
       .sort();
     expect(ids).toEqual([
       "browser-automation",
+      "code-definition",
+      "code-diagnostics",
       "computer-use",
       "harness-ask-user",
       "harness-bash",
@@ -112,5 +116,55 @@ describe("native harness catalog entries", () => {
       oldText: "a",
       newText: "b",
     });
+  });
+});
+
+describe("Code language read entries", () => {
+  const diagnostics = lookupClosedToolCatalogEntry(
+    decodeToolActionCapability({ id: "code-diagnostics", version: 1 }),
+  );
+  const definition = lookupClosedToolCatalogEntry(
+    decodeToolActionCapability({ id: "code-definition", version: 1 }),
+  );
+
+  it("reads inside the checkout in Code only, never asks, and never marks the thread", () => {
+    for (const entry of [diagnostics, definition]) {
+      expect(entry).toMatchObject({
+        owner: "core",
+        modes: ["code"],
+        requiredCapabilityClass: "filesystem",
+        approvalClass: "project-file-reads",
+        irreversibleUnderTaint: false,
+        resultTaintsThread: false,
+        requiresAppManagedTools: true,
+      });
+    }
+  });
+
+  it("takes a checkout-relative path and a one-based position, and nothing else", () => {
+    expect(diagnostics?.decodeArguments({ path: "src/a.ts" })).toEqual({ path: "src/a.ts" });
+    expect(definition?.decodeArguments({ path: "src/a.ts", line: 2, column: 14 })).toEqual({
+      path: "src/a.ts",
+      line: 2,
+      column: 14,
+    });
+    for (const path of ["/etc/passwd", "../outside.ts", "src/../../a.ts", "src\\a.ts", ""]) {
+      expect(() => diagnostics?.decodeArguments({ path })).toThrow();
+    }
+    expect(() => diagnostics?.decodeArguments({ path: "a.ts", fileId: "x" })).toThrow();
+    expect(() => definition?.decodeArguments({ path: "a.ts", line: 0, column: 1 })).toThrow();
+    expect(() => definition?.decodeArguments({ path: "a.ts", line: 1, column: 0 })).toThrow();
+    expect(() => definition?.decodeArguments({ path: "a.ts", line: 1.5, column: 1 })).toThrow();
+    expect(() => definition?.decodeArguments({ path: "a.ts" })).toThrow();
+  });
+
+  it("offers each read as a provider tool definition every transport can carry", () => {
+    expect(CODE_LANGUAGE_TOOL_DEFINITIONS.map((tool) => tool.name)).toEqual([
+      "octant_code_diagnostics",
+      "octant_code_definition",
+    ]);
+    for (const tool of CODE_LANGUAGE_TOOL_DEFINITIONS) {
+      expect(decodeProviderToolDefinition(tool)).toEqual(tool);
+    }
   });
 });
