@@ -253,11 +253,10 @@ design left a choice open.
   (`path-outside-checkout`). Then `no-language-server`, the launch refusals,
   and last `confinement-unavailable`. Nothing is launched until all of them
   pass.
-- **No repository tooling yet.** There is no approval store for language
-  servers until slice 6, so the launch decision is asked with no approval on
-  record and a `repo-tooling` server never starts. A launch class this host
-  cannot confine is refused as `confinement-unavailable`, never run as
-  `static`.
+- **Repository tooling.** The launch decision is asked with the approval the
+  store holds for this checkout and component; slice 6's rules are under
+  [Repository tooling](#repository-tooling). A launch class this host cannot
+  confine is refused as `confinement-unavailable`, never run as `static`.
 - **Registrations.** A server's `client/registerCapability` is accepted only
   when every method in it is one Octant sends; otherwise the whole request is
   refused. TypeScript's request for configuration-change notices is refused
@@ -386,16 +385,17 @@ design left a choice open.
   A folder with the document is read as a language server and as nothing
   else. Other sources are refused until a marketplace package can carry a
   publisher signature.
-- **What a package may hold.** Exactly one `language-server` component of the
-  `static` class, Code only, for no provider family, declaring at most the
-  `filesystem` capability, with no contributions, whose entry point is a file
-  in the package. The binary is the package's only executable file; another
-  is refused, because the server may run its own binary and nothing else. The
-  slug and `builtin:` entry points of the bundled server are refused.
-  `repo-tooling` is refused at inspection rather than installed to be refused
-  at launch, because its approval does not exist until slice 6, and the class
-  is never narrowed to `static` for the author. The package store's bounds
-  apply (16 MiB per file, 64 MiB per package).
+- **What a package may hold.** Exactly one `language-server` component, Code
+  only, for no provider family, with no contributions, whose entry point is a
+  file in the package. A `static` server declares at most the `filesystem`
+  capability; a `repo-tooling` server at most `filesystem`, `shell`, and
+  `network` (slice 6), because those are what its class grants. The binary is
+  the package's only executable file; another is refused, because a `static`
+  server may run its own binary and nothing else, and a `repo-tooling` server
+  runs the repository's tooling, not programs its package brings. The slug
+  and `builtin:` entry points of the bundled server are refused. The class is
+  never narrowed to `static` for the author. The package store's bounds apply
+  (16 MiB per file, 64 MiB per package).
 - **Launch.** The server starts with no arguments: the schema has no field for
   them, so nothing but the binary decides how it runs. It is confined exactly
   as the bundled server is, with its stored package version as the read-only
@@ -405,7 +405,11 @@ design left a choice open.
   so it can be checked against the author's release), the languages, the
   class, and, for `static`, that the server reads the checkout, keeps a
   private cache, and cannot write, run other programs, or reach the network.
-  Confirm install stores it untrusted with its switches off.
+  For `repo-tooling` it says that the server runs the repository's own
+  tools, starts only after the person allows it for a checkout or a Project,
+  can then write that checkout, run programs, and reach the hosts the
+  Project's network rules allow, and never runs in Plan or for a paired
+  device. Confirm install stores it untrusted with its switches off.
 - **Effective.** The companion offers an installed server only while the
   ladder makes it effective in Code: installed, not quarantined, trusted, the
   plugin and component switched on, compatible with this host's platform and
@@ -427,6 +431,78 @@ design left a choice open.
   YAML); `.h` reads as C. When more than one effective server declares a
   file's language, the bundled server serves it, then installed servers by
   package name, so install order never decides.
+
+### Repository tooling
+
+Slice 6 settled these details, taking the more restrictive option where the
+design left a choice open. The approval store is
+`apps/server/src/code/languageServerApprovals.ts`, the class's network is
+`languageServerEgress.ts`, and `languageServerProcess.ts` launches both
+classes.
+
+- **Asking.** A `repo-tooling` server with no approval on record answers
+  `approval-required`. The editor of a local window then names what allowing
+  it grants (writing this checkout, running programs, and reaching the hosts
+  the Project's network rules allow) and offers **Allow in this checkout** and
+  **Allow in this Project**. `POST /api/code/language/approvals` names the
+  thread, checkout, file path, and scope, never a server: the host confines
+  the path and picks the server from its own table, as `open` does, because a
+  server waiting for its approval never opened the document. A server that
+  is `static` answers `not-required`.
+- **Who approves.** Only the person at a local window. A paired device is
+  refused before anything is read (`local-host-required`); the route has no
+  remote action, so the remote gate denies it, and the route answers 403 to a
+  device that reached it anyway. Every check a read makes runs next, then the
+  launch decision with the approval granted, so Plan refuses
+  (`plan-read-only`) and nothing is recorded for a server the thread could
+  not start.
+- **Journal first.** An approval is `code.language-server-approval-granted@1`
+  on the Project's `code-language-server-approval` aggregate, in the
+  `shell-commands` approval class, scoped to one checkout or to the Project.
+  One that cannot be appended answers `not-recorded` and is not in force. A
+  restarted host rebuilds the approvals from the journal. The record names no
+  thread, so a thread purge leaves it, and a Project erase removes it.
+- **What an approval covers.** One server in one package state: its
+  extension, component, package digest, and the package's lifecycle version.
+  Any later change to the package (an update, a switch, trust given or
+  withdrawn, an uninstall) leaves the approval covering a state that no longer
+  exists, so a running server stops at once (the change is an extension
+  event, which runs the stop check) and the next start asks again. Reason:
+  that is the one revocation a crash between two appends cannot lose, and it
+  is how a person takes an approval back: switch the server off in Settings.
+- **Decided on every request.** A paired device and a Plan thread are refused
+  a `repo-tooling` server even while it runs for another thread, because the
+  document a caller opens is what the server then runs the repository's
+  tooling on. A running server stops when no approval covers its current
+  package state.
+- **Launch.** As a terminal is confined: the checkout writable, programs and
+  child processes allowed, the server's install readable, and its private
+  cache as for `static`. The environment holds only `HOME` and `TMPDIR` (the
+  cache), a minimal `PATH`, and the proxy variables below. The declaration has
+  no field for toolchain roots yet, so a server reads the system folders a
+  terminal's launch reads and nothing under the home folder; a toolchain
+  installed there is out of reach until such a field exists.
+- **Network (D6).** Each start gets its own egress proxy, the one harness
+  commands use, and the `proxied` OS level: loopback on macOS, a Unix socket
+  and in-capsule forwarder on Linux. Its connections are decided on the Code
+  Project's rules alone. Those rules are suspended while any active thread on
+  the checkout has taken in outside content, because that thread's agent may
+  have written the tooling the server runs. A proxy whose listener or start
+  record fails means the server does not start; a host with no proxy refuses
+  the class as `confinement-unavailable`, never runs it with no network or an
+  open one.
+- **Audit.** Each start is journaled the way a `proxied` command's launch is,
+  with the same payloads and limits, under
+  `code.language-server-egress-launch-started@1`,
+  `-decisions-recorded@1`, and `-launch-summarized@1` on a
+  `code-language-server-egress` aggregate of its own. The launch names the
+  Project and the thread whose read started the server. A server's bytes
+  reach no model, so they taint no thread, and nothing is proposed: a
+  proposal surfaces on a thread, and this server serves a checkout. A person
+  adds a Project rule from a thread's Network access list. A launch the host
+  stopped before its summary keeps its start and batches, and nothing is
+  reconstructed, since no taint depends on it. A thread purge leaves these
+  records and a Project erase removes them.
 
 ### Authority
 
@@ -480,8 +556,11 @@ design left a choice open.
   entries evicted. Other servers' cache directories are denied, as terminal
   state directories are. The directory is removed when its checkout is removed
   or its component is uninstalled.
-- **Journal.** Slices 1 to 5 add no journal events. Approvals added in later
-  slices are journaled like every other grant. Diagnostics exports carry
+- **Journal.** Slices 1 to 5 add no journal events. Slice 6 journals each
+  `repo-tooling` approval and each such server's egress launch records
+  ([Repository tooling](#repository-tooling)); they hold identifiers, hosts,
+  ports, and counts, never paths or file content. Approvals later slices add
+  are journaled the same way. Diagnostics exports carry
   lifecycle counts (starts, crashes, refusals by reason) and no paths or file
   content.
 - **Network.** No telemetry and no outbound calls. `static` servers have none.
@@ -695,6 +774,27 @@ accounts or hardware.
      start one, and egress outside the rules is refused and journaled the way
      `proxied` journals.
    - _Verify:_ approval, permission-negative, and egress tests.
+   - _State:_ built. A `repo-tooling` package installs untrusted with its class
+     in review. Reviewed, trusted, and switched on, it answers
+     `approval-required` and nothing launches; a paired device can neither
+     start nor approve it, Plan cannot approve it, and nothing is journaled
+     until the person at a local window approves it. Once approved it starts,
+     still refuses a paired device and a Plan thread while it runs, survives a
+     restart through the journal, and stops and asks again after its package
+     changes (`installedLanguageServersProcess.test.ts`,
+     `languageServerApprovals.test.ts`). On Linux, approved and started by the
+     real companion under Bubblewrap, a fixture server ran another program and
+     wrote the checkout, reached neither this host nor the internet directly,
+     and its proxy answered `403 no-rule` for a public host and `ip-literal`
+     for this host's listener, which saw no connection; the launch's start and
+     summary, with the refusal, are in the journal. The route answers only a
+     local window, and a paired device is refused before the service
+     (`codeRoutes.test.ts`); the editor's approval and the review copy are
+     covered in `MonacoEditorPane.test.tsx` and
+     `ExtensionsSettingsView.test.tsx`; a Project erase removes the
+     approvals and egress records (`threadPurge.test.ts`). The `macos-15` CI
+     job runs the same process test for Seatbelt evidence; it has not yet run
+     on a Mac. The rules are under [Repository tooling](#repository-tooling).
 7. **Agent read tools** (D5; after the editor slices ship). Container: yes.
    - Add read-only `code-diagnostics` and `code-definition` app-managed tools
      to the closed catalog, through the provider SDK's tool transport, for

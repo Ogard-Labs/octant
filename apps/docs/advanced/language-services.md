@@ -49,17 +49,37 @@ It never runs anything the repository names. A `tsconfig` plugin list, an
 editor settings folder, or a repository's list of servers is data the server
 reads, never a program it starts.
 
+## Servers that run the repository's tools
+
+A language server you add can be one that runs the repository's own tools
+(its `launchClass` is `repo-tooling`), for languages whose analysis needs the
+build or the package manager. Opening a file it reads shows what allowing it
+means: it may write this checkout, run programs, and reach the hosts your
+Project's network rules allow. Choose **Allow in this checkout** or **Allow in
+this Project**; until you do, it does not start.
+
+- Only you, at a window on this computer, can allow it. A paired device is
+  never offered the choice and is never served by such a server.
+- Plan threads are never served by it.
+- It reaches the network only through Octant, and only the hosts in the
+  Project's rules (add one from a Code thread's **Network access** list). Every
+  connection it asks for, allowed or refused, is recorded.
+- Your approval holds for the server exactly as you reviewed and switched it
+  on. Updating it, switching it off and on, or changing its trust asks again,
+  which is also how you take an approval back.
+
 ## States
 
-| The line under the toolbar says                  | What it means                                                                   |
-| ------------------------------------------------ | ------------------------------------------------------------------------------- |
-| Language services are starting…                  | The server is starting for this checkout. Problems appear when it is ready.     |
-| Language services are off                        | You turned them off in **Settings › Code**.                                     |
-| The language server stopped (with **Retry**)     | It stopped unexpectedly more than twice in a minute. **Retry** starts it again. |
-| The language server did not answer in time       | A request took longer than ten seconds. **Retry** opens the file with it again. |
-| Language services are unavailable: _reason_      | The host refused, for example because the checkout is unavailable.              |
-| Language services are not available on this host | The host is neither macOS nor Linux.                                            |
-| This file is too large for language services     | The file is past what the server is sent. Editing still works.                  |
+| The line under the toolbar says                       | What it means                                                                                   |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Language services are starting…                       | The server is starting for this checkout. Problems appear when it is ready.                     |
+| Language services are off                             | You turned them off in **Settings › Code**.                                                     |
+| The language server stopped (with **Retry**)          | It stopped unexpectedly more than twice in a minute. **Retry** starts it again.                 |
+| The language server did not answer in time            | A request took longer than ten seconds. **Retry** opens the file with it again.                 |
+| This language server runs the repository's own tools… | The server needs your approval; choose **Allow in this checkout** or **Allow in this Project**. |
+| Language services are unavailable: _reason_           | The host refused, for example because the checkout is unavailable.                              |
+| Language services are not available on this host      | The host is neither macOS nor Linux.                                                            |
+| This file is too large for language services          | The file is past what the server is sent. Editing still works.                                  |
 
 Files the server does not read, such as Markdown or Python, show nothing.
 

@@ -230,13 +230,20 @@ folder from **Marketplace** with the native folder picker:
 The folder holds exactly one language server, and its binary is the only
 executable file in it. Octant starts the binary with no arguments and talks to
 it over stdin and stdout. Octant sets the package's identity, source, digest,
-and review state itself, so the file must not state them. A server that runs
-the repository's own tools (`repo-tooling`) is refused for now.
+and review state itself, so the file must not state them.
+
+A server that runs the repository's own tools, such as a build or a package
+manager, declares `"launchClass": "repo-tooling"` and may add `shell` and
+`network` to its capabilities. It never starts until you allow it from the
+editor of a Code thread, for one checkout or for the whole Project (see
+[Language services](/advanced/language-services#servers-that-run-the-repositorys-tools)).
 
 **Review before installing** names the binary, its own SHA-256 digest (compare
 it with the one the server's author publishes), the languages it reads, and
 its class. A `static` server reads the checkout and keeps a private cache; it
-cannot write, run other programs, or reach the network. **Confirm install**
+cannot write, run other programs, or reach the network. A `repo-tooling`
+server can, once you allow it, write the checkout, run programs, and reach the
+hosts your Project's network rules allow. **Confirm install**
 stores it disabled. It serves nothing until you **Trust source**, **Enable
 plugin**, and **Enable component** under **Installed**, and it stops as soon
 as you take any of those back. Before each start Octant checks the stored
