@@ -7333,10 +7333,12 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   the bundle and its sidecars, and removing a renamed artifact's stale file or
   purging a thread's mirrored files deleted the host files of those names. A
   purge removes each path a mirror receipt names from under that receipt's
-  destination root (the folder destination, or the Project's checkout for a
-  repository destination, whose receipt paths already begin with the
-  destination folder), resolved again at purge time; a re-import's recorded
-  bundle path is removed only from under one of those roots. A refused or
+  destination root (the folder destination's stored root, used only while it
+  still resolves to exactly that path, since such a folder can sit inside a
+  checkout where the root itself can be swapped for a link; or the Project's
+  checkout for a repository destination, whose receipt paths already begin
+  with the destination folder); a re-import's recorded bundle path is removed
+  only from under one of those roots. A refused or
   failed removal leaves that file and the purge goes on, so a planted link
   cannot make a thread impossible to purge. A mirror write takes Work's
   confined write: a file being replaced is opened where the open must land on

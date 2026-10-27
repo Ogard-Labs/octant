@@ -8,6 +8,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -82,11 +83,14 @@ function mirroredCanvas(kind: DestinationKind) {
   const root = join(base, kind === "project-repository" ? "checkout" : "mirrors");
   const folder = kind === "project-repository" ? "docs/artifacts" : "launch-project";
   const outside = join(base, "outside");
+  const outsideRoot = join(base, "outside-root");
   const paths = names.map((name) => `${folder}/${name}`);
   mkdirSync(join(root, folder), { recursive: true });
   mkdirSync(outside);
+  mkdirSync(join(outsideRoot, folder), { recursive: true });
   for (const path of paths) writeFileSync(join(root, path), "mirrored");
   for (const name of names) writeFileSync(join(outside, name), "host file");
+  for (const path of paths) writeFileSync(join(outsideRoot, path), "host file");
 
   const connection = openSqlite(join(base, "events.sqlite3"));
   cleanups.push(() => {
@@ -123,11 +127,16 @@ function mirroredCanvas(kind: DestinationKind) {
     connection,
     /** The mirrored files still on disk. */
     remaining: () => paths.filter((path) => existsSync(join(root, path))),
-    /** Every name and byte under the host folder, to prove nothing there changed. */
-    host: () => snapshot(outside),
+    /** Every name and byte under the host folders, to prove nothing there changed. */
+    host: () => ({ ...snapshot(outside), ...snapshot(outsideRoot, "root/") }),
     toLink: () => {
       renameSync(join(root, folder), join(root, `${folder}-real`));
       symlinkSync(outside, join(root, folder));
+    },
+    /** Swaps the destination root itself for a link to a host folder with the same layout. */
+    rootToLink: () => {
+      renameSync(root, `${root}-real`);
+      symlinkSync(outsideRoot, root);
     },
   };
 }
@@ -148,10 +157,13 @@ function insertEvent(
     .run(randomUUID(), canvasId, version, eventName, randomUUID(), now, JSON.stringify(payload));
 }
 
-function snapshot(directory: string): Record<string, string> {
+function snapshot(directory: string, prefix = ""): Record<string, string> {
   const entries: Record<string, string> = {};
-  for (const name of readdirSync(directory)) {
-    entries[name] = readFileSync(join(directory, name), "utf8");
+  for (const name of readdirSync(directory, { recursive: true, encoding: "utf8" })) {
+    const path = join(directory, name);
+    entries[`${prefix}${name}`] = statSync(path).isDirectory()
+      ? "<folder>"
+      : readFileSync(path, "utf8");
   }
   return entries;
 }
@@ -186,6 +198,19 @@ describe("purging a Canvas's mirrored files", () => {
       expect(canvas.host()).toEqual(before);
     },
   );
+
+  // A folder destination can sit inside a checkout, where an agent can swap
+  // the root itself for a link. Resolving the root afresh at purge time
+  // followed that link and deleted the host files with the mirrored names.
+  it("deletes nothing in a host folder linked in place of a folder destination's root", async () => {
+    const canvas = mirroredCanvas("global-folder");
+    canvas.rootToLink();
+    const before = canvas.host();
+
+    await expect(removeMirrorFiles(canvas.connection, [canvasId])).resolves.toBeUndefined();
+
+    expect(canvas.host()).toEqual(before);
+  });
 
   it.each(["project-repository", "global-folder"] as const)(
     "deletes nothing in a host folder swapped in for the %s's mirrored folder during a removal",

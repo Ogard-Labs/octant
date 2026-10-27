@@ -105,9 +105,14 @@ export async function removeMirrorFiles(
 }
 
 /**
- * The canonical root a receipt's paths are relative to, resolved as the mirror
- * resolved it when it wrote them. A repository receipt's paths already begin
- * with its destination folder, so its root is the Project's checkout itself.
+ * The canonical root a receipt's paths are relative to. A repository
+ * receipt's paths already begin with its destination folder, so its root is
+ * the Project's checkout itself.
+ *
+ * A folder destination can sit inside a checkout, where an agent can swap the
+ * root itself for a link to a host folder; resolving it afresh followed that
+ * link and deleted the host files with the mirrored names. Its root is used
+ * only while it still resolves to exactly the path the receipt stored.
  */
 async function receiptRoot(
   connection: SqliteConnection,
@@ -117,7 +122,8 @@ async function receiptRoot(
   const destination = isRecord(receipt.destination) ? receipt.destination : undefined;
   if (destination === undefined) return undefined;
   if (destination.kind === "global-folder" && typeof destination.canonicalRoot === "string") {
-    return await resolveRoot(destination.canonicalRoot);
+    const stored = destination.canonicalRoot;
+    return (await resolveRoot(stored)) === stored ? stored : undefined;
   }
   if (destination.kind !== "project-repository") return undefined;
   const root = projectCheckoutRoot(connection, receipt.projectId);
