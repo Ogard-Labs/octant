@@ -110,7 +110,6 @@ function exportFolder(options?: { readonly chosen?: boolean }): {
       home,
       standingOutsideApproval: false,
       newTempId: randomUUID,
-      hostPlatform: "darwin",
     },
   };
 }
@@ -787,7 +786,7 @@ describe("canvas export service", () => {
       connection.close();
       return;
     }
-    expect(prepared.card.destinationLabel).toBe("A folder on this Mac");
+    expect(prepared.card.destinationLabel).toBe("A folder on this computer");
     expect(prepared.card.destinationPath).toBe(join(folder, "Launch plan.md"));
     expect(prepared.card.replacesExisting).toBe(false);
     // Preparing shows the person the payload and the place; it writes neither.

@@ -7,7 +7,7 @@ import {
   type CanvasExportRefusal,
 } from "@octant/contracts/canvas-export";
 import { isCanvasShareSafeText } from "@octant/contracts/canvas-share";
-import { canvasExportPlannedName, hostComputerName } from "@octant/domain";
+import { canvasExportPlannedName } from "@octant/domain";
 import type { CanvasExportTarget } from "@octant/plugin-api/canvas-export";
 import type { GistCreationPort } from "../github/gistCreationPort";
 
@@ -44,8 +44,6 @@ export interface GistExportTargetDependencies {
   /** Whether GitHub is connected, and as whom. Read while the offer is built. */
   readonly availability: () => GistExportAvailability;
   readonly gists: GistCreationPort;
-  /** The platform the server runs on, which names the computer a refusal is about. */
-  readonly hostPlatform: NodeJS.Platform;
 }
 
 function refused(code: CanvasExportRefusal["code"], message: string): CanvasExportDelivery {
@@ -63,12 +61,11 @@ function refused(code: CanvasExportRefusal["code"], message: string): CanvasExpo
  */
 export function gistExportAvailability(
   snapshot: GithubAuthenticationSnapshot,
-  hostPlatform: NodeJS.Platform,
 ): GistExportAvailability {
   if (snapshot.state === "insecure-storage") {
     return {
       kind: "refused",
-      reason: `GitHub is signed in with credentials stored in plain text on ${hostComputerName(hostPlatform)}.`,
+      reason: "GitHub is signed in with credentials stored in plain text on this computer.",
     };
   }
   if (
@@ -91,25 +88,20 @@ export function gistExportAvailability(
  */
 export class GistConnection {
   readonly #read: (signal: AbortSignal) => Promise<GithubAuthenticationSnapshot>;
-  readonly #hostPlatform: NodeJS.Platform;
   #snapshot: GithubAuthenticationSnapshot | undefined;
   #reading: Promise<void> | undefined;
   // Bumped by every reported change, so a read that started before the change
   // cannot overwrite the newer state when it lands.
   #generation = 0;
 
-  constructor(
-    read: (signal: AbortSignal) => Promise<GithubAuthenticationSnapshot>,
-    hostPlatform: NodeJS.Platform,
-  ) {
+  constructor(read: (signal: AbortSignal) => Promise<GithubAuthenticationSnapshot>) {
     this.#read = read;
-    this.#hostPlatform = hostPlatform;
   }
 
   availability(): GistExportAvailability {
     return this.#snapshot === undefined
       ? { kind: "not-connected" }
-      : gistExportAvailability(this.#snapshot, this.#hostPlatform);
+      : gistExportAvailability(this.#snapshot);
   }
 
   /** Reads the connection unless the kept state can already offer the gist. */
@@ -178,10 +170,7 @@ export function createGistExportTarget(
       // absolute paths and no secret-shaped values leave the host. A document
       // that still fails it is refused, never published.
       if (!isCanvasShareSafeText(output.body)) {
-        return refused(
-          "refused",
-          `The document contains text that cannot leave ${hostComputerName(dependencies.hostPlatform)}.`,
-        );
+        return refused("refused", "The document contains text that cannot leave this computer.");
       }
       const visibility = confirmed?.visibility === "public" ? "public" : "secret";
       const fileName = canvasExportPlannedName(output.title, "markdown");

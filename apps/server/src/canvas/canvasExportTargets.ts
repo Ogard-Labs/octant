@@ -37,14 +37,12 @@ export interface CanvasExportTargetRegistration {
    */
   readonly standingOutsideApproval: boolean;
   readonly newTempId: () => string;
-  /** The platform the server runs on, which names its computer in destination copy. */
-  readonly hostPlatform: NodeJS.Platform;
   /**
    * The GitHub Gist destination, absent when this host has no GitHub export at
    * all. Its availability is read per Canvas, because whether GitHub is
    * connected can change while the host runs.
    */
-  readonly gist?: Omit<GistExportTargetDependencies, "hostPlatform">;
+  readonly gist?: GistExportTargetDependencies;
   /**
    * Public links. The destination is bound only while Settings › Data &
    * privacy › Public links is on, so with it off nothing is offered and nothing is sent.
@@ -63,7 +61,6 @@ export function canvasExportTargetBindings(
       availability,
       files: registration.files,
       newTempId: registration.newTempId,
-      hostPlatform: registration.hostPlatform,
     }),
   };
   const gist = registration.gist;
@@ -73,10 +70,7 @@ export function canvasExportTargetBindings(
     ...(gist === undefined
       ? []
       : [
-          {
-            facts: gistActivationFacts(gist.availability()),
-            target: createGistExportTarget({ ...gist, hostPlatform: registration.hostPlatform }),
-          },
+          { facts: gistActivationFacts(gist.availability()), target: createGistExportTarget(gist) },
         ]),
     ...(links === undefined || !links.enabled()
       ? []

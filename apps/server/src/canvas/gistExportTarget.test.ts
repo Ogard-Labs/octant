@@ -62,16 +62,29 @@ function fakeGithub(result?: GistCreationResult) {
 function target(
   availability: GistExportAvailability = { kind: "ready", account: "octocat" },
   github = fakeGithub(),
-  hostPlatform: NodeJS.Platform = "darwin",
 ) {
   return {
     github,
-    target: createGistExportTarget({
-      availability: () => availability,
-      gists: github.gists,
-      hostPlatform,
-    }),
+    target: createGistExportTarget({ availability: () => availability, gists: github.gists }),
   };
+}
+
+/**
+ * Runs `read` as if the server ran on `platform`, then restores the real one.
+ * Copy the server writes reaches signed-in paired devices, so it must not
+ * follow the host's platform.
+ */
+async function onHostPlatform<T>(
+  platform: NodeJS.Platform,
+  read: () => T | Promise<T>,
+): Promise<T> {
+  const real = Object.getOwnPropertyDescriptor(process, "platform");
+  Object.defineProperty(process, "platform", { value: platform, configurable: true });
+  try {
+    return await read();
+  } finally {
+    if (real !== undefined) Object.defineProperty(process, "platform", real);
+  }
 }
 
 describe("the GitHub Gist export destination", () => {
@@ -130,26 +143,19 @@ describe("the GitHub Gist export destination", () => {
     expect(github.requests).toHaveLength(0);
   });
 
-  it.each([
-    { hostPlatform: "linux", computer: "this computer" },
-    { hostPlatform: "darwin", computer: "this Mac" },
-  ] as const)(
-    "says a filtered document cannot leave the $hostPlatform host's own computer",
-    async (host) => {
-      const { target: gist } = target(
-        { kind: "ready", account: "octocat" },
-        fakeGithub(),
-        host.hostPlatform,
-      );
-
-      const delivery = await gist.exportDocument(
-        document({ body: "key: ghp_abcdefghijklmnopqrstuvwxyz012345\n" }),
+  it.each(["linux", "darwin"] as const)(
+    "refuses a filtered document without disclosing the platform on a %s host",
+    async (platform) => {
+      const delivery = await onHostPlatform(platform, () =>
+        target().target.exportDocument(
+          document({ body: "key: ghp_abcdefghijklmnopqrstuvwxyz012345\n" }),
+        ),
       );
 
       expect(delivery).toEqual({
         kind: "refused",
         code: "refused",
-        message: `The document contains text that cannot leave ${host.computer}.`,
+        message: "The document contains text that cannot leave this computer.",
       });
     },
   );
@@ -167,7 +173,7 @@ describe("the GitHub Gist export destination", () => {
   it("refuses when the credential is stored insecurely, without posting anything", async () => {
     const { github, target: gist } = target({
       kind: "refused",
-      reason: "GitHub is signed in with credentials stored in plain text on this Mac.",
+      reason: "GitHub is signed in with credentials stored in plain text on this computer.",
     });
 
     const delivery = await gist.exportDocument(document({}));
@@ -244,52 +250,42 @@ describe("the gist destination's state from the GitHub connection", () => {
         state: "ready",
         account: { login: "octocat", gitProtocol: "https", scopes: ["gist"] },
       }),
-      "darwin",
     );
 
     expect(ready).toEqual({ kind: "ready", account: "octocat" });
   });
 
   it("reports refused, not not-connected, when the credential store is insecure", () => {
-    const refused = gistExportAvailability(snapshot({ state: "insecure-storage" }), "darwin");
+    const refused = gistExportAvailability(snapshot({ state: "insecure-storage" }));
 
     expect(refused.kind).toBe("refused");
   });
 
-  it.each([
-    { hostPlatform: "linux", computer: "this computer" },
-    { hostPlatform: "darwin", computer: "this Mac" },
-  ] as const)(
-    "says the plain-text credential is on the $hostPlatform host's own computer",
-    (host) => {
-      expect(
-        gistExportAvailability(snapshot({ state: "insecure-storage" }), host.hostPlatform),
-      ).toEqual({
+  it.each(["linux", "darwin"] as const)(
+    "says where the plain-text credential is without disclosing the platform on a %s host",
+    async (platform) => {
+      const refused = await onHostPlatform(platform, () =>
+        gistExportAvailability(snapshot({ state: "insecure-storage" })),
+      );
+
+      expect(refused).toEqual({
         kind: "refused",
-        reason: `GitHub is signed in with credentials stored in plain text on ${host.computer}.`,
+        reason: "GitHub is signed in with credentials stored in plain text on this computer.",
       });
     },
   );
 
   it("is not-connected when there is no usable GitHub connection", () => {
-    expect(gistExportAvailability(snapshot({ state: "unauthorized" }), "darwin").kind).toBe(
-      "not-connected",
-    );
-    expect(gistExportAvailability(snapshot({ state: "unavailable" }), "darwin").kind).toBe(
-      "not-connected",
-    );
-    expect(gistExportAvailability(snapshot({ state: "rate-limited" }), "darwin").kind).toBe(
-      "not-connected",
-    );
-    expect(gistExportAvailability(snapshot({ state: "external-token" }), "darwin").kind).toBe(
+    expect(gistExportAvailability(snapshot({ state: "unauthorized" })).kind).toBe("not-connected");
+    expect(gistExportAvailability(snapshot({ state: "unavailable" })).kind).toBe("not-connected");
+    expect(gistExportAvailability(snapshot({ state: "rate-limited" })).kind).toBe("not-connected");
+    expect(gistExportAvailability(snapshot({ state: "external-token" })).kind).toBe(
       "not-connected",
     );
   });
 
   it("is not-connected when a ready state carries no account to post as", () => {
-    expect(gistExportAvailability(snapshot({ state: "ready" }), "darwin").kind).toBe(
-      "not-connected",
-    );
+    expect(gistExportAvailability(snapshot({ state: "ready" })).kind).toBe("not-connected");
   });
 });
 
@@ -307,7 +303,7 @@ describe("reading the GitHub connection for the gist destination", () => {
       const answer = answers[reads] ?? Promise.resolve(signedOut);
       reads += 1;
       return answer;
-    }, "darwin");
+    });
     return { gist, reads: () => reads };
   }
 

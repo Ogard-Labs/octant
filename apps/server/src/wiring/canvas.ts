@@ -1055,8 +1055,6 @@ export function wireCanvas(deps: CanvasDependencies) {
     home: homedir(),
     standingOutsideApproval: false,
     newTempId: randomUUID,
-    // Destination copy names the computer this server runs on.
-    hostPlatform: process.platform,
     // The gist destination reuses the GitHub connection Octant already has:
     // the same host-managed credential `gh` resolves, and the snapshot the
     // host keeps current. It reads that credential nowhere here.
