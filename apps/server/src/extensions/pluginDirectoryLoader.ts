@@ -31,8 +31,7 @@ const PACKAGE_DOCUMENT_PATHS = [
 ] as const;
 
 export interface LoadedPluginDirectory extends ReadPluginDirectory {
-  /** A debug adapter's folder is refused before it loads, so it is never one of these. */
-  readonly format: Exclude<PluginDirectoryFormat, "debug-adapter-package">;
+  readonly format: PluginDirectoryFormat;
   /** Present for a Codex-format folder: its manifest, which the Codex adapter normalizes. */
   readonly codexManifest?: unknown;
   /** Servers or files the loader had to leave out, in plain words. */
@@ -105,19 +104,11 @@ export async function loadPluginDirectory(
       "Folder is not a plugin: no plugin.json, .codex-plugin/plugin.json, .claude-plugin/plugin.json, .mcp.json or skills/ found.",
     );
   }
-  // A debug adapter runs the person's program, and this host has no review
-  // or session for one yet, so its folder is refused rather than read as the
-  // plugin its other files might also describe.
-  if (format === "debug-adapter-package") {
-    fail(
-      "manifest-schema",
-      `Folder holds ${DEBUG_ADAPTER_PACKAGE_DOCUMENT_PATH}; this host does not install debug adapters yet.`,
-    );
-  }
   if (
     format === "agent-plugins" ||
     format === "language-server-package" ||
-    format === "outside-provider-driver"
+    format === "outside-provider-driver" ||
+    format === "debug-adapter-package"
   ) {
     return { ...read, format, notes: [] };
   }

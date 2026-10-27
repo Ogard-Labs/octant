@@ -17,7 +17,11 @@ import {
   type ProviderToolAnswer,
   type ProviderToolDefinition,
 } from "@octant/contracts";
-import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
+import type {
+  ProviderConnection,
+  ProviderDriver,
+  ProviderRemoteProcessPlacement,
+} from "@octant/provider-sdk/driver";
 import { outputStopReason } from "./outputStopReason";
 import { ACP_CLIENT_TERMINAL_TOOL_NAMES, ACP_CLIENT_TOOL_NAMES } from "@octant/provider-sdk";
 import {
@@ -26,19 +30,31 @@ import {
   textOnlyInputModalities,
   unsupportedChatCapabilities,
 } from "@octant/provider-sdk/chat-conformance";
-import { Effect, Exit, PubSub, Scope, Stream } from "effect";
+import { Effect, Either, Exit, PubSub, Scope, Stream } from "effect";
 import {
   mapAcpNotification,
   mapAcpPermissionRequest,
   type AcpEventContext,
   type AcpMappedPermission,
 } from "./acpEventMapper";
-import type { AcpConnection, AcpProcessPort, AcpSessionMode } from "./acpProcess";
+import type {
+  AcpAgentConnection,
+  AcpConnection,
+  AcpProcessPort,
+  AcpSessionMode,
+} from "./acpProcess";
+import {
+  acpRemotePlacement,
+  makeAcpPlacedProcessLive,
+  type AcpPlacedProcessPort,
+  type AcpRemotePlacement,
+} from "./acpPlacement";
 import type { AcpProviderProfile } from "./acpProfiles";
 import { createAcpManagedToolsBridge, type AcpManagedToolsBridge } from "./acpManagedTools";
 import {
   AcpFailure,
   type AcpBrowserAuthenticationAttempt,
+  type AcpClientCapabilities,
   type AcpConfigOptionsResult,
   type AcpMcpHttpServer,
   type AcpNewSessionResult,
@@ -108,7 +124,9 @@ export interface AcpDriverOptions {
   /** Instance authentication mode for profiles with delegated browser sign-in. */
   readonly authentication?: "provider-owned" | "subscription" | "api-key";
   readonly credentialResolver?: ProviderCredentialResolver;
-  readonly clientFactory?: (connection: AcpConnection) => AcpClientPort;
+  /** Starts the agent on a remote target, for a profile that can be placed there. */
+  readonly placedProcess?: AcpPlacedProcessPort;
+  readonly clientFactory?: (connection: AcpAgentConnection) => AcpClientPort;
   readonly managedToolsBridgeFactory?: typeof createAcpManagedToolsBridge;
   readonly clock?: () => string;
   readonly correlationId?: () => string;
@@ -186,7 +204,7 @@ interface AcpManagedToolsLease {
 }
 
 interface Factories {
-  readonly clientFactory: (connection: AcpConnection) => AcpClientPort;
+  readonly clientFactory: (connection: AcpAgentConnection) => AcpClientPort;
   readonly clock: () => string;
   readonly makeCorrelation: () => string;
   readonly makeRequestId: () => string;
@@ -464,7 +482,7 @@ function normalizeProbe(
   });
 }
 
-function makeClient(connection: AcpConnection): AcpClientPort {
+function makeClient(connection: AcpAgentConnection): AcpClientPort {
   return connection.acp;
 }
 
@@ -538,6 +556,7 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
     makeRequestId: options.requestId ?? (() => crypto.randomUUID()),
   };
   const resumeIdentities = new Map<string, ResumeIdentity>();
+  const remote = acpRemotePlacement(profile, options.authentication);
   const request = <A>(
     operation: () => Promise<A>,
     processContext?: Parameters<typeof providerFailure>[2],
@@ -634,6 +653,7 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
   return {
     kind: profile.kind,
     conversationOwnership: "provider",
+    ...(remote === undefined ? {} : { remotePlacement: remote.support }),
     ...(profile.authentication.kind === "delegated-browser"
       ? {
           beginAuthentication: ({ instanceId }) => {
@@ -739,7 +759,7 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
         return observed;
       });
     },
-    acquire: ({ instanceId, projectRoot, mode }) => {
+    acquire: ({ instanceId, projectRoot, mode, placement }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
           failure("invalid-configuration", "Provider instance does not match driver."),
@@ -758,9 +778,29 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
           ),
         );
       }
-      return makeConnection(options, projectRoot, mode, resumeIdentities, factories);
+      if (placement === undefined) {
+        return makeConnection(options, projectRoot, mode, resumeIdentities, factories);
+      }
+      // `acquireProviderConnection` refuses these before the driver is
+      // called; a driver handed one anyway refuses too, rather than read a
+      // root on the target as a folder here.
+      if (remote === undefined || mode !== "code") {
+        return Effect.fail(failure("unsupported", `${name} does not run on a remote target.`));
+      }
+      return makeConnection(options, projectRoot, mode, resumeIdentities, factories, {
+        placement,
+        remote,
+        process: options.placedProcess ?? makeAcpPlacedProcessLive(),
+      });
     },
   };
+}
+
+/** Where a connection's agent runs when it is placed on a remote target. */
+interface AcpPlacedRuntime {
+  readonly placement: ProviderRemoteProcessPlacement;
+  readonly remote: AcpRemotePlacement;
+  readonly process: AcpPlacedProcessPort;
 }
 
 function makeConnection(
@@ -769,6 +809,7 @@ function makeConnection(
   mode: AcpSessionMode,
   resumeIdentities: Map<string, ResumeIdentity>,
   factories: Factories,
+  placed?: AcpPlacedRuntime,
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   const { profile } = options;
   const name = profile.displayName;
@@ -1094,7 +1135,20 @@ function makeConnection(
       executionPolicy: ProviderExecutionPolicy,
       loopbackPorts: ReadonlyArray<number> = [],
       tools: ReadonlyArray<ProviderToolDefinition> = [],
-    ) => {
+    ): Promise<{
+      readonly scope: Scope.CloseableScope;
+      readonly client: AcpClientPort;
+      readonly connection: AcpAgentConnection;
+    }> => {
+      const clientCapabilities = {
+        readTextFile: tools.some((tool) => tool.name === ACP_CLIENT_TOOL_NAMES.readTextFile),
+        writeTextFile: tools.some((tool) => tool.name === ACP_CLIENT_TOOL_NAMES.writeTextFile),
+        terminal: ACP_CLIENT_TERMINAL_TOOL_NAMES.every((name) =>
+          tools.some((tool) => tool.name === name),
+        ),
+      };
+      if (placed !== undefined)
+        return startPlacedProcess(placed, executionPolicy, clientCapabilities);
       const scope = await Effect.runPromise(Scope.make());
       try {
         const apiKey = await Effect.runPromise(resolveApiKey(options));
@@ -1110,17 +1164,7 @@ function makeConnection(
               executionPolicy,
               ...(apiKey === undefined ? {} : { apiKey }),
               ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),
-              clientCapabilities: {
-                readTextFile: tools.some(
-                  (tool) => tool.name === ACP_CLIENT_TOOL_NAMES.readTextFile,
-                ),
-                writeTextFile: tools.some(
-                  (tool) => tool.name === ACP_CLIENT_TOOL_NAMES.writeTextFile,
-                ),
-                terminal: ACP_CLIENT_TERMINAL_TOOL_NAMES.every((name) =>
-                  tools.some((tool) => tool.name === name),
-                ),
-              },
+              clientCapabilities,
               onProcessStarted: async (process) => {
                 receipt = await options.runtimeRegistry.trackProcess(options.instanceId, process);
                 return receipt;
@@ -1140,6 +1184,47 @@ function makeConnection(
         await Effect.runPromise(Scope.close(scope, Exit.void));
         throw error;
       }
+    };
+
+    /**
+     * The agent on the target, started only through the placement in a
+     * posture its profile declares. Nothing of this host's launch applies:
+     * no key is resolved, no managed home is written, and no local process
+     * is tracked, because the agent lives and dies with the target's session.
+     */
+    const startPlacedProcess = async (
+      runtime: AcpPlacedRuntime,
+      executionPolicy: ProviderExecutionPolicy,
+      clientCapabilities: AcpClientCapabilities,
+    ) => {
+      if (!runtime.remote.support.postures.some((posture) => posture === executionPolicy)) {
+        throw failure("unsupported", `${name} does not run on a remote target in this posture.`);
+      }
+      const scope = await Effect.runPromise(Scope.make());
+      const started = await Effect.runPromise(
+        Effect.either(
+          runtime.process
+            .start({
+              profile,
+              placement: runtime.placement,
+              launch: runtime.remote,
+              root: runtimeRoot,
+              clientCapabilities,
+            })
+            .pipe(Effect.provideService(Scope.Scope, scope)),
+        ),
+      );
+      if (Either.isLeft(started)) {
+        await Effect.runPromise(Scope.close(scope, Exit.void));
+        // The typed failure is thrown as it is, so the turn reports why the
+        // target refused rather than an unclassified failure.
+        throw started.left;
+      }
+      return {
+        scope,
+        client: factories.clientFactory(started.right),
+        connection: started.right,
+      };
     };
 
     const prepareManagedTools = async (
@@ -1202,7 +1287,7 @@ function makeConnection(
           const compatibility = JSON.stringify([
             profile.kind,
             input.sessionId,
-            options.binaryPath,
+            placed?.placement.executable ?? options.binaryPath,
             options.managedHome,
             projectRoot,
             mode,
@@ -1226,13 +1311,18 @@ function makeConnection(
           });
           try {
             if (input.sourceSessionId !== undefined) {
-              runtime = (
-                await options.runtimeRegistry.takeNativeSessionRuntime<AcpRetainedRuntime>(
-                  options.instanceId,
-                  nativeKey(input.sourceSessionId),
-                  compatibility,
-                )
-              )?.value;
+              // A placed session never takes a kept runtime: one kept here
+              // runs on this host, whatever path it was started from.
+              runtime =
+                placed === undefined
+                  ? (
+                      await options.runtimeRegistry.takeNativeSessionRuntime<AcpRetainedRuntime>(
+                        options.instanceId,
+                        nativeKey(input.sourceSessionId),
+                        compatibility,
+                      )
+                    )?.value
+                  : undefined;
               if (runtime?.isClosed()) runtime = undefined;
               if (runtime !== undefined) {
                 runtime.activate();
@@ -1255,10 +1345,22 @@ function makeConnection(
             }
             const refusal = profile.refuses?.(mode, input.executionPolicy);
             if (refusal !== undefined) throw failure("incompatible", refusal);
+            // A placed root is a folder on the target, never one to look at
+            // here; a profile that refuses Projects by their files is never placed.
             const projectRefusal =
-              runtimeRoot === projectRoot ? profile.refusesProject?.(projectRoot) : undefined;
+              placed === undefined && runtimeRoot === projectRoot
+                ? profile.refusesProject?.(projectRoot)
+                : undefined;
             if (projectRefusal !== undefined) throw failure("incompatible", projectRefusal);
             const { bridgeTools } = partitionTools(input.tools);
+            // The bridge is a listener; on a target it would listen on the
+            // target's loopback, which admission refuses.
+            if (bridgeTools.length > 0 && placed !== undefined) {
+              throw failure(
+                "unsupported",
+                "App-managed tools that need the ACP tool bridge are unsupported on a remote target.",
+              );
+            }
             if (bridgeTools.length > 0 && process.platform !== "darwin") {
               throw failure(
                 "unsupported",
@@ -1274,11 +1376,10 @@ function makeConnection(
             );
             scope = started.scope;
             const { client, connection } = started;
-            const appManagedTools = negotiatedAppManagedTools(
-              connection.initialized,
-              profile,
-              connection.version,
-            );
+            const appManagedTools =
+              placed === undefined
+                ? negotiatedAppManagedTools(connection.initialized, profile, connection.version)
+                : "unsupported";
             if (bridgeTools.length > 0 && appManagedTools !== "supported") {
               throw failure(
                 appManagedTools,
@@ -1710,7 +1811,11 @@ function makeConnection(
                   .notify("session/cancel", { sessionId: state.sourceSessionId })
                   .catch(() => undefined);
               }
+              // A placed agent is never kept for a later acquisition: it was
+              // admitted, and its egress is recorded, for this placement's
+              // thread and posture alone.
               if (
+                placed === undefined &&
                 state.completed &&
                 profile.retainedSessionVersions?.includes(state.runtime.version) === true &&
                 state.approvals.size === 0 &&

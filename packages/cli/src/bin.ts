@@ -531,6 +531,7 @@ function printUsage(): void {
       "  octant ssh-target add <destination> --executor <path-of-octant-on-target> [--fingerprint <SHA256:...>]",
       "  octant ssh-target repin <target-id> [--fingerprint <SHA256:...>]",
       "  octant ssh-target connect|remove <target-id>",
+      "  octant ssh-target runtime <target-id> <provider-instance-id> <path-of-runtime-on-target>",
       "  octant ssh-target bind <target-id> <remote-root> --name <name>",
       "  octant ssh-target projects",
       "  octant ssh-target files <project-id> [directory]",

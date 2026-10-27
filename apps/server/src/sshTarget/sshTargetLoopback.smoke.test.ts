@@ -62,8 +62,20 @@ import type {
 import type { Journal } from "../persistence/journal";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { createRemoteCodeAcpClientTools } from "../code/codeAcpClientTools";
+import { makeAcpDriver } from "../providers/acpDriver";
+import { placeableAcpProfile } from "../providers/acpPlacement.test-support";
+import { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
+import { acquireProviderConnection } from "@octant/provider-sdk/process-placement";
+import { runRemotePlacementConformance } from "@octant/provider-sdk/process-placement-conformance";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
-import type { ProviderPlacedProcess } from "@octant/provider-sdk/driver";
+import type {
+  ProviderDriver,
+  ProviderPlacedLaunch,
+  ProviderPlacedProcess,
+  ProviderRemotePlacementPosture,
+  ProviderRemoteProcessPlacement,
+} from "@octant/provider-sdk/driver";
 import { PROVIDER_RUNTIME_EGRESS_AGGREGATE } from "@octant/contracts/ssh-target-events";
 import { createProviderRuntimeEgress, type ProviderRuntimeEgress } from "./providerRuntimeEgress";
 import { bindSshRemoteHarness, type SshRemoteHarnessOptions } from "./sshRemoteHarness";
@@ -696,26 +708,40 @@ const placedDriver = {
   },
 } as const;
 
+/**
+ * The placement of a runtime on the project's target, with `binary` set as
+ * that provider instance's runtime there first, as the person sets it.
+ */
 function placementFor(
   connections: SshTargetConnectionService,
   project: SshRemoteProject,
-  posture: "plan" | "approval-gated",
+  posture: ProviderRemotePlacementPosture,
+  binary: string,
   overrides: Partial<SshTargetPlacementInput> = {},
-) {
+): ProviderRemoteProcessPlacement {
   const session = connections.session(project.targetId);
   if (session === undefined) throw new Error("no session");
-  return connections.placement({
+  const providerInstanceId = overrides.providerInstanceId ?? runtimeInstance;
+  const set = connections.setRuntimeBinary({
+    targetId: project.targetId,
+    providerInstanceId,
+    path: remotePath(binary),
+  });
+  if (set.status !== "ok") throw new Error(set.message);
+  const placed = connections.placement({
     session,
     driver: placedDriver,
     root: project.remoteRoot,
     projectId: String(project.id),
     threadId: randomUUID(),
-    providerInstanceId: runtimeInstance,
+    providerInstanceId,
     posture,
     permissionPersistence: "current-session",
     currentPosture: () => posture,
     ...overrides,
   });
+  if (placed.status !== "placed") throw new Error(placed.failure.message);
+  return placed.placement;
 }
 
 /** This host's real runtime proxy, journaled, on a Unix socket in its own folder. */
@@ -734,9 +760,9 @@ function journaledRuntimeEgress(folder: string): ProviderRuntimeEgress {
 
 /** A launched fixture runtime, its scope, and a way to ask it one thing at a time. */
 async function launchRuntime(
-  placement: ReturnType<SshTargetConnectionService["placement"]>,
+  placement: ProviderRemoteProcessPlacement,
   launch: { readonly executable: string; readonly args?: ReadonlyArray<string> } & Pick<
-    Parameters<ReturnType<SshTargetConnectionService["placement"]>["launch"]>[0],
+    ProviderPlacedLaunch,
     "accountState"
   >,
 ) {
@@ -790,7 +816,7 @@ function currentSession(
 
 /** Why a launch through the placement failed, or undefined when it started. */
 async function launchFailure(
-  placement: ReturnType<SshTargetConnectionService["placement"]>,
+  placement: ProviderRemoteProcessPlacement,
   executable: string,
 ): Promise<string | undefined> {
   const exit = await Effect.runPromiseExit(
@@ -804,6 +830,207 @@ function reasons(status: SshTargetStatus): ReadonlyArray<string> {
   return status.admission.map((entry) =>
     entry.decision.status === "admitted" ? "admitted" : entry.decision.reason,
   );
+}
+
+/**
+ * An ACP agent as the loopback target runs it: it negotiates ACP, opens
+ * sessions in the folder it is given, and on each prompt does what the
+ * prompt names. `hello` answers with its working folder and the account
+ * state its variable points at; `write <path>`, `read <path>`, and `run
+ * <command line>` ask the client for that file or terminal, whatever the
+ * client said it offers, and report the answer.
+ */
+const FIXTURE_ACP_AGENT = String.raw`#!${process.execPath}
+"use strict";
+const readline = require("node:readline");
+const send = (message) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", ...message }) + "\n");
+let nextId = 0;
+const pending = new Map();
+const ask = (method, params) =>
+  new Promise((resolve) => {
+    nextId += 1;
+    pending.set(nextId, resolve);
+    send({ id: nextId, method, params });
+  });
+const say = (sessionId, text) =>
+  send({
+    method: "session/update",
+    params: { sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } } },
+  });
+const outcome = (answer) => (answer.error === undefined ? "ok" : "refused " + answer.error.message);
+const options = { model: "agent-k2", mode: "default" };
+const configOptions = () => [
+  { type: "select", id: "model", name: "Model", currentValue: options.model, options: [{ value: "agent-k2", name: "Agent K2" }] },
+  { type: "select", id: "mode", name: "Mode", currentValue: options.mode, options: [{ value: "plan", name: "Plan" }, { value: "default", name: "Default" }] },
+];
+let sessions = 0;
+const sessionFolders = new Map();
+async function prompt(id, params) {
+  const sessionId = params.sessionId;
+  const text = params.prompt.map((part) => part.text).join("");
+  const [verb, ...rest] = text.split(" ");
+  const argument = rest.join(" ");
+  if (verb === "write") {
+    say(sessionId, "write: " + outcome(await ask("fs/write_text_file", { sessionId, path: argument, content: "written by the agent" })));
+  } else if (verb === "read") {
+    const answer = await ask("fs/read_text_file", { sessionId, path: argument });
+    say(sessionId, answer.error === undefined ? "read: " + answer.result.content : "read: " + outcome(answer));
+  } else if (verb === "run") {
+    const created = await ask("terminal/create", { sessionId, command: argument });
+    if (created.error !== undefined) {
+      say(sessionId, "run: " + outcome(created));
+    } else {
+      const terminalId = created.result.terminalId;
+      const exit = await ask("terminal/wait_for_exit", { sessionId, terminalId });
+      const output = await ask("terminal/output", { sessionId, terminalId });
+      await ask("terminal/release", { sessionId, terminalId });
+      say(sessionId, "run: exit " + String(exit.result.exitCode) + " " + output.result.output);
+    }
+  } else {
+    say(sessionId, "hello from " + sessionFolders.get(sessionId) + " signed in with " + process.env.FIXTURE_AGENT_HOME);
+  }
+  send({ id, result: { stopReason: "end_turn" } });
+}
+const lines = readline.createInterface({ input: process.stdin });
+lines.on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === undefined) {
+    const resolve = pending.get(message.id);
+    pending.delete(message.id);
+    if (resolve !== undefined) resolve(message);
+    return;
+  }
+  const { id, method, params } = message;
+  if (method === "initialize") {
+    return send({ id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true }, agentInfo: { name: "fixture-agent", version: "0.4.2" } } });
+  }
+  if (method === "session/new") {
+    sessions += 1;
+    const sessionId = "fixture-session-" + String(sessions);
+    sessionFolders.set(sessionId, params.cwd);
+    return send({ id, result: { sessionId, configOptions: configOptions() } });
+  }
+  if (method === "session/set_config_option") {
+    options[params.configId] = params.value;
+    return send({ id, result: { configOptions: configOptions() } });
+  }
+  if (method === "session/prompt") return void prompt(id, params);
+  if (method === "session/close") return send({ id, result: {} });
+  if (id !== undefined) send({ id, error: { code: -32601, message: "Method not found" } });
+});
+lines.on("close", () => process.exit(0));
+`;
+
+const acpInstance = decodeProviderInstanceId("80000000-0000-4000-8000-000000000c01");
+const acpSession = decodeProviderSessionId("80000000-0000-4000-8000-000000000c02");
+const acpModel = "agent-k2" as ProviderModelId;
+
+/** The ACP agent as an executable in `folder`, owned by root, as an installed agent would be. */
+function acpAgentBinary(folder: string): string {
+  mkdirSync(folder, { recursive: true, mode: 0o755 });
+  const path = join(folder, "fixture-agent");
+  writeFileSync(path, FIXTURE_ACP_AGENT, { mode: 0o755 });
+  return path;
+}
+
+/** The ACP driver for the placeable fixture profile, counting every start on this host. */
+function placedAcpDriver() {
+  let localStarts = 0;
+  const registry = new ProviderRuntimeRegistry();
+  const driver = makeAcpDriver({
+    profile: placeableAcpProfile,
+    instanceId: acpInstance,
+    binaryPath: "/nonexistent/local/fixture-agent",
+    managedHome: join(root, "acp-local-home"),
+    process: {
+      start: () =>
+        Effect.sync(() => {
+          localStarts += 1;
+        }).pipe(
+          Effect.zipRight(
+            Effect.fail({ category: "unavailable" as const, message: "Not on this host." }),
+          ),
+        ),
+    },
+    runtimeRegistry: registry,
+  });
+  return {
+    driver,
+    localStarts: () => localStarts,
+    released: () => registry.activeSessionCount(acpInstance) === 0,
+  };
+}
+
+/**
+ * One ACP turn on the target as a Code turn runner drives it: the driver
+ * acquired with the placement, its session started with the client tools'
+ * definitions, each tool request executed through the tool set and
+ * answered, and the agent's reply returned.
+ */
+async function acpTurn(input: {
+  readonly driver: ProviderDriver;
+  readonly placement: ProviderRemoteProcessPlacement;
+  readonly root: string;
+  readonly posture: ProviderRemotePlacementPosture;
+  readonly tools: AppManagedToolSet;
+  readonly prompt: string;
+}): Promise<string> {
+  const events = await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const connection = yield* acquireProviderConnection(input.driver, {
+          instanceId: acpInstance,
+          projectRoot: input.root,
+          mode: "code",
+          placement: input.placement,
+        });
+        yield* connection.start({
+          sessionId: acpSession,
+          modelId: acpModel,
+          executionPolicy: input.posture,
+          tools: input.tools.definitions,
+        });
+        const stream = yield* connection.subscribe;
+        const collected = yield* Effect.fork(
+          stream.pipe(
+            Stream.takeUntil(isTerminal),
+            Stream.tap((event) =>
+              event.kind !== "tool-request"
+                ? Effect.void
+                : Effect.promise(async () => {
+                    const outcome = await input.tools.execute({
+                      name: event.toolName,
+                      inputJson: event.inputJson,
+                    });
+                    await Effect.runPromise(
+                      connection.answerTool({
+                        sessionId: acpSession,
+                        requestId: event.requestId,
+                        resultJson: JSON.stringify(outcome.result),
+                        isError: outcome.isError === true,
+                      }),
+                    );
+                  }).pipe(Effect.forkDaemon, Effect.asVoid),
+            ),
+            Stream.runCollect,
+          ),
+        );
+        yield* connection.send({
+          sessionId: acpSession,
+          prompt: input.prompt,
+          context: [],
+          attachments: [],
+          tools: input.tools.definitions,
+        });
+        const turn = Array.from(yield* Fiber.join(collected));
+        yield* connection.stop(acpSession);
+        return turn;
+      }),
+    ),
+  );
+  const last = events.at(-1);
+  if (last?.kind !== "completed") throw new Error(`the ACP turn ended ${JSON.stringify(last)}`);
+  return events.map((event) => (event.kind === "text-delta" ? event.text : "")).join("");
 }
 
 describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
@@ -1780,7 +2007,7 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
       const sshDirectory = join(root, "nobody-home", ".ssh");
 
       // Plan: the root read-only, its own home writable, the network only this host's proxy.
-      const plan = await launchRuntime(placementFor(connections, bound.value, "plan"), {
+      const plan = await launchRuntime(placementFor(connections, bound.value, "plan", binary), {
         executable: binary,
         accountState,
       });
@@ -1849,7 +2076,7 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
 
       // Approval-gated: the root writable, the network only this host's proxy.
       const writing = await launchRuntime(
-        placementFor(connections, bound.value, "approval-gated"),
+        placementFor(connections, bound.value, "approval-gated", binary),
         { executable: binary, accountState },
       );
       expect(await writing.ask({ op: "write", path: join(checkout, "agent-wrote") })).toEqual({
@@ -1947,9 +2174,12 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
         name: "Refusals",
       });
       if (bound.status !== "ok") throw new Error(`bind refused: ${bound.reason}`);
-      const plan = placementFor(connections, bound.value, "plan");
-      expect(await launchFailure(plan, inside)).toContain("runtime-binary-not-confinable");
-      expect(await launchFailure(plan, open)).toContain("runtime-binary-not-confinable");
+      expect(
+        await launchFailure(placementFor(connections, bound.value, "plan", inside), inside),
+      ).toContain("runtime-binary-not-confinable");
+      expect(
+        await launchFailure(placementFor(connections, bound.value, "plan", open), open),
+      ).toContain("runtime-binary-not-confinable");
 
       // Another instance's home, swapped for a link before it was first made.
       const linkedInstance = decodeProviderInstanceId("80000000-0000-4000-8000-000000000b02");
@@ -1963,11 +2193,14 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
       symlinkSync(join(root, "nobody-tmp"), join(homes, String(bound.value.id), linkedInstance));
       expect(
         await launchFailure(
-          placementFor(connections, bound.value, "plan", { providerInstanceId: linkedInstance }),
+          placementFor(connections, bound.value, "plan", binary, {
+            providerInstanceId: linkedInstance,
+          }),
           binary,
         ),
       ).toContain("runtime-home-not-confinable");
 
+      const plan = placementFor(connections, bound.value, "plan", binary);
       const running = [];
       for (let index = 0; index < 4; index += 1) {
         running.push(await launchRuntime(plan, { executable: binary }));
@@ -1998,7 +2231,7 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
       });
       if (bound.status !== "ok") throw new Error(`bind refused: ${bound.reason}`);
       const marker = `runtime-marker-${randomUUID()}`;
-      const placement = placementFor(connections, bound.value, "plan");
+      const placement = placementFor(connections, bound.value, "plan", binary);
       const placed = await launchRuntime(placement, { executable: binary, args: [marker] });
       expect(await placed.ask({ op: "echo", text: "alive" })).toEqual({
         ok: true,
@@ -2019,6 +2252,169 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
       await new Promise((resolve) => setTimeout(resolve, 500));
       expect(processRunning(marker)).toBe(false);
       await placed.close();
+    } finally {
+      connections.close();
+      connections.remove(status.target.id);
+    }
+  }, 240_000);
+  it("places an ACP agent through the ACP driver in every posture it declares, passing placement conformance on the target", async () => {
+    const checkout = harnessCheckout("acp-app");
+    const agent = acpAgentBinary(join(root, "acp-bin"));
+    const accountFolder = join(root, "nobody-home", ".fixture-agent");
+    mkdirSync(accountFolder, { recursive: true, mode: 0o700 });
+    chownSync(accountFolder, NOBODY, NOBODY);
+    const connections = service(developmentBuild, journaledRuntimeEgress("acp-runtime-egress"));
+    const status = await register(connections, target("acp-agents", asNobody()));
+    try {
+      const bound = await projectsOn(connections).bind({
+        targetId: status.target.id,
+        remoteRoot: remotePath(checkout),
+        name: "ACP app",
+      });
+      if (bound.status !== "ok") throw new Error(`bind refused: ${bound.reason}`);
+      const { driver, localStarts, released } = placedAcpDriver();
+      const support = driver.remotePlacement;
+      expect(support).toEqual({
+        postures: ["plan", "approval-gated", "auto-accept-edits"],
+        appToolTransport: "stdio",
+      });
+      if (support === undefined) throw new Error("the fixture profile is placeable");
+      // The host places a runtime in one posture per placement, so the claim
+      // is held one declared posture at a time against the real target.
+      for (const posture of support.postures) {
+        const evidence = await runRemotePlacementConformance({
+          driver: { ...driver, remotePlacement: { ...support, postures: [posture] } },
+          acquireInput: {
+            instanceId: acpInstance,
+            projectRoot: bound.value.remoteRoot,
+            mode: "code",
+          },
+          sessionStart: { sessionId: acpSession, modelId: acpModel, executionPolicy: posture },
+          turn: { sessionId: acpSession, prompt: "hello", attachments: [], tools: [] },
+          target: placementFor(connections, bound.value, posture, agent, {
+            providerInstanceId: acpInstance,
+            driver,
+          }),
+          localLaunches: localStarts,
+          isReleased: released,
+        });
+        expect(evidence).toEqual({
+          claim: "supported",
+          refusedBeforeAnyLaunch: false,
+          ranOnTarget: true,
+          refusedWithoutLocalFallback: true,
+          placedProcessesStopped: true,
+        });
+      }
+      // Every agent it placed stopped with its scope on the target too.
+      for (let attempt = 0; attempt < 100 && processRunning(agent); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(processRunning(agent)).toBe(false);
+      expect(localStarts()).toBe(0);
+    } finally {
+      connections.close();
+      connections.remove(status.target.id);
+    }
+  }, 240_000);
+
+  it("routes a placed ACP agent's client file and terminal requests through the executor, refusing a client write in Plan before the executor", async () => {
+    const checkout = harnessCheckout("acp-tools");
+    const agent = acpAgentBinary(join(root, "acp-bin"));
+    const accountFolder = join(root, "nobody-home", ".fixture-agent");
+    mkdirSync(accountFolder, { recursive: true, mode: 0o700 });
+    chownSync(accountFolder, NOBODY, NOBODY);
+    const connections = service(developmentBuild, journaledRuntimeEgress("acp-tools-egress"));
+    const status = await register(connections, target("acp-tools", asNobody()));
+    try {
+      const bound = await projectsOn(connections).bind({
+        targetId: status.target.id,
+        remoteRoot: remotePath(checkout),
+        name: "ACP tools",
+      });
+      if (bound.status !== "ok") throw new Error(`bind refused: ${bound.reason}`);
+      const project = bound.value;
+      const { driver, localStarts } = placedAcpDriver();
+      // Every request the agent's client tools send to the executor.
+      const executorCalls: string[] = [];
+      const counted: SshRemoteHarnessOptions["connections"] = {
+        admit: (targetId, request) => connections.admit(targetId, request),
+        session: (targetId) => connections.session(targetId),
+        harnessFile: (session, admission, request) => {
+          executorCalls.push(`harness-file ${request.operation.tool}`);
+          return connections.harnessFile(session, admission, request);
+        },
+        runCommand: (session, admission, request, options) => {
+          executorCalls.push("run-command");
+          return connections.runCommand(session, admission, request, options);
+        },
+        resolveOnTarget: (session, host) => connections.resolveOnTarget(session, host),
+        dialFromTarget: (session, destination) => connections.dialFromTarget(session, destination),
+      };
+      const turnIn = async (posture: ProviderRemotePlacementPosture, prompt: string) => {
+        const hands = bindSshRemoteHarness(
+          { connections: counted, uuid: randomUUID },
+          {
+            project,
+            scope: { threadId: randomUUID(), projectId: String(project.id) },
+            posture: () => ({ executionPolicy: posture, permissionPersistence: "current-session" }),
+            onTargetDisconnected: () => undefined,
+          },
+        );
+        if (hands.status !== "bound") throw new Error(`refused: ${hands.decision.reason}`);
+        const tools = createRemoteCodeAcpClientTools({
+          root: project.remoteRoot,
+          thread: { executionPolicy: posture },
+          readExecutionPolicy: () => posture,
+          filesystem: hands.filesystem,
+          shell: hands.shell,
+          uuid: randomUUID,
+        });
+        try {
+          return await acpTurn({
+            driver,
+            placement: placementFor(connections, project, posture, agent, {
+              providerInstanceId: acpInstance,
+              driver,
+            }),
+            root: project.remoteRoot,
+            posture,
+            tools,
+            prompt,
+          });
+        } finally {
+          await tools.close?.();
+          hands.release();
+        }
+      };
+
+      // Plan: the agent asks to write although it was offered no write; the
+      // request is refused on this host and never reaches the executor.
+      expect(await turnIn("plan", `write ${join(project.remoteRoot, "plan-wrote")}`)).toBe(
+        "write: refused Method not found",
+      );
+      expect(existsSync(join(checkout, "plan-wrote"))).toBe(false);
+      expect(executorCalls).toEqual([]);
+      // Its reads reach the target's files through the executor.
+      expect(await turnIn("plan", `read ${join(project.remoteRoot, "math.js")}`)).toBe(
+        "read: export const add = (a, b) => a - b;\n",
+      );
+      expect(executorCalls).toEqual(["harness-file read"]);
+
+      // Approval-gated: the write and the terminal run on the target, through the executor.
+      expect(
+        await turnIn("approval-gated", `write ${join(project.remoteRoot, "agent-wrote")}`),
+      ).toBe("write: ok");
+      expect(readFileSync(join(checkout, "agent-wrote"), "utf8")).toBe("written by the agent");
+      expect(await turnIn("approval-gated", "run echo from the target in $PWD")).toBe(
+        `run: exit 0 from the target in ${project.remoteRoot}\n`,
+      );
+      expect(executorCalls).toEqual(["harness-file read", "harness-file write", "run-command"]);
+      // The agent runs in the bound root, signed in with the target's own account state.
+      expect(await turnIn("approval-gated", "hello")).toBe(
+        `hello from ${project.remoteRoot} signed in with ${accountFolder}`,
+      );
+      expect(localStarts()).toBe(0);
     } finally {
       connections.close();
       connections.remove(status.target.id);

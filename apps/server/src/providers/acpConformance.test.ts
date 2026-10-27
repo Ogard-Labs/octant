@@ -11,6 +11,8 @@ import { describe, expect, it } from "vitest";
 import { makeAcpDriver, type AcpClientPort } from "./acpDriver";
 import type { AcpConnection, AcpProcessPort } from "./acpProcess";
 import { acpProviderProfiles, type AcpProviderProfile } from "./acpProfiles";
+import { acpStandInTarget, placeableAcpProfile } from "./acpPlacement.test-support";
+import type { ProviderPlacedLaunch } from "@octant/provider-sdk/driver";
 import {
   recordProviderChatConformanceEvidence,
   recordProviderConformanceEvidence,
@@ -100,6 +102,7 @@ describe.each(Object.values(acpProviderProfiles))(
         turn: { sessionId, prompt: "hello", attachments: [], tools: [] },
         target: {
           kind: "remote",
+          executable: "/opt/agent/bin/agent",
           launch: () => Effect.fail({ category: "unavailable", message: "No target." }),
         },
         localLaunches: () => fixture.active() + fixture.released(),
@@ -136,8 +139,67 @@ describe.each(Object.values(acpProviderProfiles))(
   },
 );
 
-function createFixture(profile: AcpProviderProfile) {
-  const client = new ConformanceClient(profile);
+describe("ACP placement on a remote target", () => {
+  it("places a profile whose whole launch can be stated there in every confined posture, passing placement conformance", async () => {
+    const fixture = createFixture(placeableAcpProfile, new AnsweringClient(placeableAcpProfile));
+    const launches: ProviderPlacedLaunch[] = [];
+    expect(fixture.driver.remotePlacement).toEqual({
+      postures: ["plan", "approval-gated", "auto-accept-edits"],
+      appToolTransport: "stdio",
+    });
+    const evidence = await runRemotePlacementConformance({
+      driver: fixture.driver,
+      acquireInput: { instanceId, projectRoot: "/home/build/app", mode: "code" },
+      sessionStart: { sessionId, modelId, executionPolicy: "approval-gated" },
+      turn: { sessionId, prompt: "hello", attachments: [], tools: [] },
+      target: acpStandInTarget({ launches }),
+      localLaunches: () => fixture.active() + fixture.released(),
+      isReleased: () => fixture.active() === 0,
+    });
+    expect(evidence).toEqual({
+      claim: "supported",
+      refusedBeforeAnyLaunch: false,
+      ranOnTarget: true,
+      refusedWithoutLocalFallback: true,
+      placedProcessesStopped: true,
+    });
+    // The agent ran at the person's path with the profile's own arguments,
+    // signing in with the same folder under the target user's home.
+    expect(launches.length).toBe(3);
+    for (const launch of launches) {
+      expect(launch).toEqual({
+        executable: "/opt/fixture-agent/bin/fixture-agent",
+        args: ["--acp"],
+        accountState: [
+          { path: ".fixture-agent", access: "read-write", variable: "FIXTURE_AGENT_HOME" },
+        ],
+      });
+    }
+  });
+
+  it("keeps no placed agent for a later session, even of a release whose sessions are kept here", async () => {
+    // Locally a completed session of this release is kept warm for its next
+    // turn; a placed one was admitted for one placement and stops with it.
+    const kept = { ...placeableAcpProfile, retainedSessionVersions: ["0.4.2"] };
+    const fixture = createFixture(kept, new AnsweringClient(kept));
+    await expect(
+      runRemotePlacementConformance({
+        driver: fixture.driver,
+        acquireInput: { instanceId, projectRoot: "/home/build/app", mode: "code" },
+        sessionStart: { sessionId, modelId, executionPolicy: "approval-gated" },
+        turn: { sessionId, prompt: "hello", attachments: [], tools: [] },
+        target: acpStandInTarget({ version: "0.4.2" }),
+        localLaunches: () => fixture.active() + fixture.released(),
+        isReleased: () => fixture.active() === 0,
+      }),
+    ).resolves.toMatchObject({ claim: "supported", placedProcessesStopped: true });
+  });
+});
+
+function createFixture(
+  profile: AcpProviderProfile,
+  client: AcpClientPort = new ConformanceClient(profile),
+) {
   let active = 0;
   let released = 0;
   const initialized: AcpConnection["initialized"] = {
@@ -280,15 +342,17 @@ class ConformanceClient implements AcpClientPort {
     this.#requests.add(listener);
     return () => this.#requests.delete(listener);
   }
-  prompt = async (sourceSessionId: string) => {
-    const notify = (update: Record<string, unknown>) =>
-      this.#notifications.forEach((listener) =>
-        listener({
-          kind: "notification",
-          method: "session/update",
-          params: { sessionId: sourceSessionId, update },
-        }),
-      );
+  protected announce(sourceSessionId: string, update: Record<string, unknown>): void {
+    this.#notifications.forEach((listener) =>
+      listener({
+        kind: "notification",
+        method: "session/update",
+        params: { sessionId: sourceSessionId, update },
+      }),
+    );
+  }
+  prompt = async (sourceSessionId: string): Promise<{ stopReason: string }> => {
+    const notify = (update: Record<string, unknown>) => this.announce(sourceSessionId, update);
     notify({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "hello" } });
     notify({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "think" } });
     notify({
@@ -329,5 +393,16 @@ class ConformanceClient implements AcpClientPort {
   notify = async () => {
     this.#cancel?.();
     this.#cancel = undefined;
+  };
+}
+
+/** An agent whose turn answers and ends on its own, as a placed agent's first turn would. */
+class AnsweringClient extends ConformanceClient {
+  override prompt = async (sourceSessionId: string): Promise<{ stopReason: string }> => {
+    this.announce(sourceSessionId, {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: "hello from the target" },
+    });
+    return { stopReason: "end_turn" };
   };
 }

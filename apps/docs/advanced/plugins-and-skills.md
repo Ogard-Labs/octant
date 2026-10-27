@@ -195,6 +195,23 @@ and set `"command": "${PLUGIN_ROOT}/.venv/bin/python"` with the package's script
 or `["-m", "<module>"]` as `args`. A virtual environment built from Homebrew
 Python runs under the sandbox.
 
+### Add a debug adapter
+
+A debug adapter lets Octant debug a program in a Code thread. Put the adapter
+in a folder with an `octant-debug-adapter.json` at its root, as for a language
+server below, with one component of kind `debug-adapter` whose `debugAdapter`
+names its runtimes and the body of the `launch` request it needs, and import
+the folder from **Marketplace**. The folder holds exactly one adapter, and its
+binary is the only executable file in it.
+
+**Review before installing** names the binary and its SHA-256 digest, the
+runtimes, the `launch` request with the values Octant fills in, and whether it
+takes a debug port. An adapter runs the programs you confirm from the
+checkout and can write the checkout, reaches only the hosts the thread's
+network rules allow, and never runs in Plan, for a paired device, or for an
+agent. **Confirm install** stores it disabled until you trust and enable it.
+The Run and debug panel that starts a session is not available yet.
+
 ### Add a language server
 
 A Code thread's editor can read type errors and definitions from a language

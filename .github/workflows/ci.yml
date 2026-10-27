@@ -162,10 +162,13 @@ jobs:
       - run: bun run --cwd scripts test
       # Language services: the bundled TypeScript server answers a two-file
       # fixture under Seatbelt, and a hostile server a person added cannot run
-      # another program, reach the network, or write the checkout. The Linux
-      # server shards run the same tests under Bubblewrap; this is their macOS
-      # evidence.
+      # another program, reach the network, or write the checkout. A debug
+      # session's fixture adapter and program stop, step, and exit under
+      # Seatbelt while the program cannot write outside the checkout or reach
+      # a host no rule allows. The Linux server shards run the same tests under
+      # Bubblewrap; this is their macOS evidence.
       - run: >-
           bun run --cwd apps/server test --
           src/code/codeLanguageServiceProcess.test.ts
           src/code/installedLanguageServersProcess.test.ts
+          src/code/codeDebugServiceProcess.test.ts

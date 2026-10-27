@@ -14,9 +14,9 @@
  * The rules are in docs/design/disposable-desktops.md ("The local-daemon
  * port").
  */
+import { execFile } from "node:child_process";
 import { lstat } from "node:fs/promises";
 import { request as httpRequest, type IncomingHttpHeaders } from "node:http";
-import { userInfo } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import {
   desktopDaemonMethodDeclared,
@@ -31,12 +31,8 @@ export interface DesktopDaemonPortOptions {
   /** The daemon the driver declares in its code. */
   readonly daemon: () => DesktopDaemonDeclaration;
   /**
-   * The home directory of the user Octant runs as. Defaults to the one
-   * `os.userInfo()` reports: under Node, the packaged desktop's runtime, the
-   * one the operating system records, whatever `$HOME` says. Bun, which runs
-   * the development and headless servers, reports `$HOME` there when it is
-   * set (observed on Bun 1.4.4), so an override can move where the walk
-   * starts; the owner and mode checks still hold from that directory down.
+   * The home directory of the user Octant runs as. Defaults to the one the
+   * system's user database records for `userId`, never `$HOME`.
    */
   readonly homeDirectory?: string;
   /** The user Octant runs as. Defaults to the process's own. */
@@ -59,6 +55,21 @@ const MAX_GRPC_MESSAGE_LENGTH = 1_024;
 const REQUEST_FIELDS = new Set(["method", "message", "maxResponseBytes", "stream", "signal"]);
 const SOCKET_PATH_SEGMENT = /^[A-Za-z0-9._-]{1,255}$/;
 const GRPC_WEB_CONTENT_TYPES = new Set(["application/grpc-web", "application/grpc-web+proto"]);
+/**
+ * The user-database lookup by absolute path, never `os.userInfo()`: Bun,
+ * which runs the development and headless servers, answers that with the
+ * `$HOME` it was launched with (observed on Bun 1.4.4), so an environment
+ * override would move where the walk starts. These tools ask the system's
+ * own user database (NSS on Linux; Open Directory on macOS, whose
+ * `/etc/passwd` lists no person's account) and run with an empty
+ * environment. Any other platform has no lookup and refuses.
+ */
+const USER_RECORD_LOOKUPS: Readonly<Partial<Record<NodeJS.Platform, readonly [string, string]>>> = {
+  darwin: ["/usr/bin/id", "-P"],
+  linux: ["/usr/bin/getent", "passwd"],
+};
+const USER_RECORD_TIMEOUT_MS = 5_000;
+const USER_RECORD_MAX_BYTES = 16_384;
 const DATA_FRAME = 0x00;
 const TRAILER_FRAME = 0x80;
 
@@ -71,8 +82,11 @@ export function createDesktopDaemonPort(options: DesktopDaemonPortOptions): Desk
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxRequestBytes = options.maxRequestBytes ?? DEFAULT_MAX_REQUEST_BYTES;
   const maxResponseBytes = options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
-  const homeDirectory = options.homeDirectory ?? recordedHomeDirectory();
   const userId = options.userId ?? process.getuid?.();
+  // Looked up by the first call that reaches the socket checks, and kept
+  // once found; a failed lookup is asked again by the next call.
+  let homeDirectory: Promise<string | undefined> | undefined =
+    options.homeDirectory === undefined ? undefined : Promise.resolve(options.homeDirectory);
 
   return {
     call: async (request) => {
@@ -86,8 +100,14 @@ export function createDesktopDaemonPort(options: DesktopDaemonPortOptions): Desk
         return refused("method-not-declared");
       }
       if (request.message.byteLength > maxRequestBytes) return refused("request-too-large");
-      if (homeDirectory === undefined || userId === undefined) return refused("socket-unsafe");
-      const socket = await checkDaemonSocket(homeDirectory, declaration.socketPath, userId);
+      if (userId === undefined) return refused("socket-unsafe");
+      homeDirectory ??= recordedHomeDirectory(userId);
+      const home = await homeDirectory;
+      if (home === undefined) {
+        homeDirectory = undefined;
+        return refused("socket-unsafe");
+      }
+      const socket = await checkDaemonSocket(home, declaration.socketPath, userId);
       if (socket.status === "unsafe") return refused("socket-unsafe");
       if (socket.status === "missing") return failed("daemon-unreachable");
       const limit = Math.min(Math.max(0, request.maxResponseBytes), maxResponseBytes);
@@ -104,12 +124,42 @@ export function createDesktopDaemonPort(options: DesktopDaemonPortOptions): Desk
   };
 }
 
-function recordedHomeDirectory(): string | undefined {
-  try {
-    return userInfo().homedir;
-  } catch {
-    return undefined;
-  }
+/**
+ * The absolute home directory the user database records for `userId`, or
+ * nothing when the lookup fails or its answer is not one record of that
+ * user. The record is a `passwd` line: seven fields from `getent`, ten from
+ * macOS `id -P`, the home second to last in both. macOS `id` reads its
+ * argument as a name before a uid, so the record's uid is checked too.
+ */
+function recordedHomeDirectory(userId: number): Promise<string | undefined> {
+  const lookup = USER_RECORD_LOOKUPS[process.platform];
+  if (lookup === undefined) return Promise.resolve(undefined);
+  const [program, query] = lookup;
+  return new Promise((settle) => {
+    execFile(
+      program,
+      [query, String(userId)],
+      {
+        env: {},
+        encoding: "utf8",
+        timeout: USER_RECORD_TIMEOUT_MS,
+        maxBuffer: USER_RECORD_MAX_BYTES,
+      },
+      (error, stdout) => {
+        if (error !== null) return settle(undefined);
+        const record = stdout.endsWith("\n") ? stdout.slice(0, -1) : stdout;
+        const fields = record.split(":");
+        const home = fields[fields.length - 2];
+        const wellFormed =
+          !record.includes("\n") &&
+          (fields.length === 7 || fields.length === 10) &&
+          fields[2] === String(userId) &&
+          home !== undefined &&
+          isAbsolute(home);
+        settle(wellFormed ? home : undefined);
+      },
+    );
+  });
 }
 
 function requestWellFormed(request: DesktopDaemonRequest): boolean {
