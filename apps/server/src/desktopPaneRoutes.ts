@@ -33,6 +33,7 @@ export interface DesktopPaneRouteDependencies {
     | "frame"
     | "input"
     | "destination"
+    | "recipeMachines"
   >;
   /** The actor id the journal gives a person at a local window. */
   readonly localActorId: string;
@@ -136,6 +137,15 @@ async function answer(
   if (request.kind === "recipe-providers") {
     return { status: "recipe-providers", providers: leasableProvidersOf(service.destination()) };
   }
+  // The person's machines for a placement that chooses one. Only a local
+  // window sets a recipe, so the service answers only a person there.
+  if (request.kind === "recipe-machines") {
+    return service.recipeMachines({
+      actor,
+      providerId: request.providerId,
+      placementId: request.placementId,
+    });
+  }
   const caller = callerFor(request.threadId, actor, scopeId);
   switch (request.kind) {
     case "overview":
@@ -149,6 +159,9 @@ async function answer(
         ...(request.confirmedPlacement === undefined
           ? {}
           : { confirmedPlacement: request.confirmedPlacement }),
+        ...(request.confirmedMachine === undefined
+          ? {}
+          : { confirmedMachine: request.confirmedMachine }),
       });
     case "release":
       return service.release({ ...caller, leaseId: request.leaseId });

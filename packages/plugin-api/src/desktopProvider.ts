@@ -141,8 +141,8 @@ export type DesktopListOwnedResult =
  * the provider's relay, and one in the person's cloud bills. A recipe names
  * one, and the host takes the lease's locality and billing from it.
  * `choosesMachine` marks a placement that runs on one of the person's own
- * machines: its provider lists them through `listMachines`, so a person can
- * choose the one a desktop runs on.
+ * machines: its provider lists them through `listMachines`, and a recipe
+ * names the one it runs on, which the driver receives as `recipe.machine`.
  */
 export interface DesktopPlacement {
   readonly id: DesktopPlacementId;
