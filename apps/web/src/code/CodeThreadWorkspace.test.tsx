@@ -990,6 +990,23 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.queryByRole("button", { name: "Send follow-up" })).not.toBeInTheDocument();
   });
 
+  it("leaves the model picker enabled on a turn parked by a refused resume", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          turnStatus: "waiting",
+          turnError: "Mistral Vibe resume identity does not match this Project.",
+          turnErrorCategory: "stale",
+        })}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+    // A parked turn's operation has ended, so the next model choice is the
+    // next turn's, never the dead one's.
+    expect(screen.getByRole("button", { name: "Provider and model" })).toBeEnabled();
+  });
+
   it("says why the host refused an answer while the request stays open", () => {
     render(
       <CodeThreadWorkspace
