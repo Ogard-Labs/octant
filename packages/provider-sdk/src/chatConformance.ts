@@ -466,6 +466,13 @@ export async function runProviderChatConformance(
             "app-managed tool round trip requires a successful send",
           );
           const toolRequest = yield* Deferred.await(toolRequestObserved);
+          // The host answers only the tools it offered this turn; a request
+          // for any other name would reach no executor, so a driver that
+          // invents or renames one fails here rather than in a person's turn.
+          assertConformance(
+            turn.tools.some((tool) => tool.name === toolRequest.toolName),
+            `the turn did not offer ${toolRequest.toolName}`,
+          );
           const answer = fixture.toolAnswer ?? {
             sessionId: fixture.sessionStart.sessionId,
             requestId: toolRequest.requestId,
