@@ -6111,8 +6111,8 @@ same. This holds in Chat, Work, and Code.
   editor, and E2B, the first of the two named cloud providers (E2B and Cua
   Spaces), are built; Cua Spaces, reached through the person's local Cua daemon, is
   designed (accepted on 2026-10-27), and its local-daemon port and its driver
-  for a Space on this machine are built but offered on no host until the
-  maintainer's live smoke passes; see
+  for a Space on this machine or on the person's other machine are built but
+  offered on no host until the maintainer's live smokes pass; see
   [Disposable desktops](design/disposable-desktops.md#cua-spaces-through-the-local-daemon).
   A driver whose provider runs a daemon on this machine reaches it only
   through the host's daemon port: one Unix socket under the home of Octant's
@@ -6125,7 +6125,8 @@ same. This holds in Chat, Work, and Code.
   HTTPS port, which sends nothing outside the hosts the driver declares and
   attaches the person's key from the credential broker's
   `/v1/desktop-provider-credentials/*` namespace itself; a person confirms
-  every billed desktop. No host offers a cloud provider yet, so a recipe can
+  every billed desktop and every desktop off this machine. No host offers a
+  cloud provider yet, so a recipe can
   name only the host-local provider.
 
 **Canvas export.** A destination plugin contributes an export target through

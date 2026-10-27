@@ -141,11 +141,15 @@ async function answer(
     case "overview":
       return service.overview(caller);
     case "acquire":
-      return service.acquire(
-        request.confirmedBilledProvider === undefined
-          ? caller
-          : { ...caller, confirmedBilledProvider: request.confirmedBilledProvider },
-      );
+      return service.acquire({
+        ...caller,
+        ...(request.confirmedProvider === undefined
+          ? {}
+          : { confirmedProvider: request.confirmedProvider }),
+        ...(request.confirmedPlacement === undefined
+          ? {}
+          : { confirmedPlacement: request.confirmedPlacement }),
+      });
     case "release":
       return service.release({ ...caller, leaseId: request.leaseId });
     case "retry-release":
