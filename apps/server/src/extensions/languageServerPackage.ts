@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { ExtensionSource } from "@octant/contracts/extensions";
 import {
   LANGUAGE_SERVER_PACKAGE_DOCUMENT_PATH,
-  readLanguageServerPackageEntry,
+  readLanguageServerPackageDocument,
   type LanguageServerPackageRefusalReason,
 } from "@octant/plugin-api/language-server-package";
 import {
@@ -33,19 +33,11 @@ export type LanguageServerPackageReading =
   | { readonly status: "refused"; readonly reason: LanguageServerPackageRefusalReason };
 
 /**
- * Manifest facts only the host can state: where the package came from, what
- * its content hashes to, the identity it is stored under, and whether anyone
- * reviewed it. An author who writes one is refused rather than overwritten,
- * so the document a person reads is the document the host used.
- */
-const HOST_ASSIGNED_MANIFEST_FIELDS = ["extensionId", "packageId", "digest", "source"] as const;
-const HOST_ASSIGNED_PROVENANCE_FIELDS = ["reviewed", "reviewedAt"] as const;
-
-/**
- * Reads a local folder as a language server package: its document must be a
- * valid package once the host adds the facts only it can state, its entry
- * point must be an executable file in the package, and no other file may be
- * executable, because the server may run its own binary and nothing else.
+ * Reads a local folder as a language server package: its document must be
+ * one the public schema accepts, it must be a valid package once the host adds
+ * the facts only it can state, its entry point must be an executable file in
+ * the package, and no other file may be executable, because the server may run
+ * its own binary and nothing else.
  */
 export function readLanguageServerPackage(
   input: LanguageServerPackageInput,
@@ -55,28 +47,23 @@ export function readLanguageServerPackage(
   if (input.source.kind !== "local-folder") return refused("source-unsupported");
   const document = parseJsonFile(input.entries, LANGUAGE_SERVER_PACKAGE_DOCUMENT_PATH);
   if (!isRecord(document) || !isRecord(document.manifest)) return refused("document-invalid");
+  const reading = readLanguageServerPackageDocument(document);
+  if (reading.status === "refused") return reading;
+  // The digest covers the document as the author wrote it, so the host adds
+  // its facts to the raw manifest rather than to the decoded one.
   const authored = document.manifest;
-  const authoredProvenance = isRecord(authored.provenance) ? authored.provenance : {};
-  if (
-    HOST_ASSIGNED_MANIFEST_FIELDS.some((field) => field in authored) ||
-    HOST_ASSIGNED_PROVENANCE_FIELDS.some((field) => field in authoredProvenance)
-  ) {
-    return refused("host-assigned-field");
-  }
-  const slug = typeof authored.slug === "string" ? authored.slug : "";
+  const slug = reading.document.manifest.slug;
   const manifest = {
     ...authored,
     extensionId: stableUuid(`extension:${input.source.sourceRef}:${slug}`),
     packageId: stableUuid(`package:${input.source.sourceRef}:${slug}`),
     digest: `sha256:${"0".repeat(64)}`,
     source: input.source,
-    provenance: { ...authoredProvenance, reviewed: false },
+    provenance: { ...(isRecord(authored.provenance) ? authored.provenance : {}), reviewed: false },
   };
-  const reading = readLanguageServerPackageEntry({ ...document, manifest });
-  if (reading.status === "refused") return reading;
   const filesRefusal = packageFilesRefusal(
     input.entries,
-    reading.entry.manifest.components[0]?.entryPoint,
+    reading.document.manifest.components[0]?.entryPoint,
   );
   if (filesRefusal !== undefined) return refused(filesRefusal);
   const digest = calculateExtensionPackageDigest(manifest, input.entries);
@@ -117,8 +104,6 @@ export function languageServerPackageRefusalMessage(
       return "This language server's description file is missing or is not valid JSON.";
     case "host-assigned-field":
       return "This language server states its own identity, source, digest or review; Octant sets those itself.";
-    case "bundled-source":
-      return "A language server you add cannot say it is bundled with Octant.";
     case "bundled-claim":
       return "This language server claims the name or binary of the one bundled with Octant.";
     case "not-one-language-server":

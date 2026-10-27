@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { ExtensionPackageManifest } from "@octant/contracts/extensions";
+import { ExtensionPackageManifest, ExtensionProvenance } from "@octant/contracts/extensions";
 
 /**
  * The public schema for a language server a person adds to Octant themselves.
@@ -11,10 +11,9 @@ import { ExtensionPackageManifest } from "@octant/contracts/extensions";
  * confinement, so the schema admits only the class this host can run without
  * an approval: the checkout read-only, the server's own cache the only place
  * it writes, no other program, and no network. Install, trust, enablement,
- * and the package's identity, source, and digest are facts the host
- * establishes through the activation ladder, so the document cannot carry
- * them, and any field this schema does not name is refused rather than
- * ignored.
+ * and the package's identity, source, digest, and review are facts the host
+ * establishes, so the document an author writes cannot carry them, and any
+ * field this schema does not name is refused rather than ignored.
  */
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -45,7 +44,7 @@ const STATIC_CAPABILITIES: ReadonlySet<string> = new Set(["filesystem"]);
  */
 export const LanguageServerPackageRefusalReason = Schema.Literal(
   "entry-invalid",
-  "bundled-source",
+  "host-assigned-field",
   "bundled-claim",
   "not-one-language-server",
   "launch-class-unsupported",
@@ -56,16 +55,44 @@ export const LanguageServerPackageRefusalReason = Schema.Literal(
   "entry-point-not-package-relative",
   "source-unsupported",
   "document-invalid",
-  "host-assigned-field",
   "entry-point-missing",
   "ships-other-program",
 );
 export type LanguageServerPackageRefusalReason = typeof LanguageServerPackageRefusalReason.Type;
 
-const LanguageServerPackageEntryShape = Schema.Struct({
-  manifest: ExtensionPackageManifest,
+/**
+ * Manifest facts only the host states: the identity it stores the package
+ * under, where it came from, what its content hashes to, and whether anyone
+ * reviewed it. An author who writes one is refused rather than overwritten,
+ * so the document a person reads is the document the host used.
+ */
+const HOST_ASSIGNED_MANIFEST_FIELDS = ["extensionId", "packageId", "digest", "source"] as const;
+const HOST_ASSIGNED_PROVENANCE_FIELDS = ["reviewed", "reviewedAt"] as const;
+
+const {
+  extensionId: _extensionId,
+  packageId: _packageId,
+  digest: _digest,
+  source: _source,
+  provenance: _provenance,
+  ...authoredManifestFields
+} = ExtensionPackageManifest.from.fields;
+const {
+  reviewed: _reviewed,
+  reviewedAt: _reviewedAt,
+  ...authoredProvenanceFields
+} = ExtensionProvenance.fields;
+
+/** The manifest an author writes: a package manifest without the host's facts. */
+const LanguageServerPackageManifest = Schema.Struct({
+  ...authoredManifestFields,
+  provenance: Schema.optional(Schema.Struct(authoredProvenanceFields).annotations(strict)),
 }).annotations(strict);
-type LanguageServerPackageEntryShape = typeof LanguageServerPackageEntryShape.Type;
+
+const LanguageServerPackageDocumentShape = Schema.Struct({
+  manifest: LanguageServerPackageManifest,
+}).annotations(strict);
+type LanguageServerPackageDocumentShape = typeof LanguageServerPackageDocumentShape.Type;
 
 /**
  * An entry point is a file inside the package: relative, with no scheme (so
@@ -80,10 +107,9 @@ function isPackageRelativeFile(entryPoint: string): boolean {
 }
 
 function entryRefusal(
-  entry: LanguageServerPackageEntryShape,
+  entry: LanguageServerPackageDocumentShape,
 ): LanguageServerPackageRefusalReason | undefined {
   const { manifest } = entry;
-  if (manifest.source.kind === "bundled") return "bundled-source";
   if (BUNDLED_LANGUAGE_SERVER_SLUGS.has(manifest.slug)) return "bundled-claim";
   const [component, ...others] = manifest.components;
   if (
@@ -123,26 +149,43 @@ function entryRefusal(
   return undefined;
 }
 
-export const LanguageServerPackageEntry = LanguageServerPackageEntryShape.pipe(
+/** The document at a language server package's root, as its author writes it. */
+export const LanguageServerPackageDocument = LanguageServerPackageDocumentShape.pipe(
   Schema.filter((entry) => {
     const reason = entryRefusal(entry);
     return reason === undefined ? true : `A language server package is refused: ${reason}.`;
   }),
 );
-export type LanguageServerPackageEntry = typeof LanguageServerPackageEntry.Type;
+export type LanguageServerPackageDocument = typeof LanguageServerPackageDocument.Type;
 
-export type LanguageServerPackageEntryReading =
-  | { readonly status: "accepted"; readonly entry: LanguageServerPackageEntry }
+export type LanguageServerPackageDocumentReading =
+  | { readonly status: "accepted"; readonly document: LanguageServerPackageDocument }
   | { readonly status: "refused"; readonly reason: LanguageServerPackageRefusalReason };
 
-const decodeShape = Schema.decodeUnknownEither(LanguageServerPackageEntryShape);
+const decodeShape = Schema.decodeUnknownEither(LanguageServerPackageDocumentShape);
 
 /** Reads a language server package's document, naming the closed reason when it is refused. */
-export function readLanguageServerPackageEntry(value: unknown): LanguageServerPackageEntryReading {
+export function readLanguageServerPackageDocument(
+  value: unknown,
+): LanguageServerPackageDocumentReading {
+  if (isRecord(value) && isRecord(value.manifest)) {
+    const authored = value.manifest;
+    const provenance = isRecord(authored.provenance) ? authored.provenance : {};
+    if (
+      HOST_ASSIGNED_MANIFEST_FIELDS.some((field) => Object.hasOwn(authored, field)) ||
+      HOST_ASSIGNED_PROVENANCE_FIELDS.some((field) => Object.hasOwn(provenance, field))
+    ) {
+      return { status: "refused", reason: "host-assigned-field" };
+    }
+  }
   const decoded = decodeShape(value);
   if (decoded._tag === "Left") return { status: "refused", reason: "entry-invalid" };
   const reason = entryRefusal(decoded.right);
   return reason === undefined
-    ? { status: "accepted", entry: decoded.right }
+    ? { status: "accepted", document: decoded.right }
     : { status: "refused", reason };
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

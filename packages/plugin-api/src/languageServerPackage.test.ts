@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readLanguageServerPackageEntry } from "./languageServerPackage";
+import { readLanguageServerPackageDocument } from "./languageServerPackage";
 
 function manifest(
   overrides: Record<string, unknown> = {},
@@ -7,14 +7,10 @@ function manifest(
 ) {
   return {
     manifestVersion: 1,
-    extensionId: "10000000-0000-4000-8000-000000000001",
-    packageId: "20000000-0000-4000-8000-000000000001",
     slug: "lua-language",
     displayName: "Lua",
     version: "1.0.0",
-    digest: `sha256:${"a".repeat(64)}`,
-    source: { kind: "local-folder", sourceRef: "local-folder-lua" },
-    provenance: { reviewed: false },
+    provenance: { publisher: "Example Lua", canonicalUrl: "https://example.com/lua" },
     license: { kind: "spdx", identifier: "MIT" },
     compatibility: { platforms: ["macos", "linux"], modes: ["code"], providerFamilies: [] },
     declaredCapabilities: ["filesystem"],
@@ -34,14 +30,27 @@ function manifest(
 }
 
 function refusal(value: unknown) {
-  const reading = readLanguageServerPackageEntry(value);
+  const reading = readLanguageServerPackageDocument(value);
   return reading.status === "refused" ? reading.reason : undefined;
 }
 
 describe("language server package schema", () => {
-  it("accepts one static language server whose binary is inside the package", () => {
-    const reading = readLanguageServerPackageEntry({ manifest: manifest() });
+  it("accepts the document an author writes: one static language server whose binary is inside the package", () => {
+    const reading = readLanguageServerPackageDocument({ manifest: manifest() });
     expect(reading.status).toBe("accepted");
+  });
+
+  it("refuses a document that states the identity, source, digest, or review Octant sets", () => {
+    for (const overrides of [
+      { extensionId: "10000000-0000-4000-8000-000000000001" },
+      { packageId: "20000000-0000-4000-8000-000000000001" },
+      { digest: `sha256:${"a".repeat(64)}` },
+      { source: { kind: "bundled", sourceRef: "app:lua" } },
+      { provenance: { publisher: "Example", reviewed: true } },
+      { provenance: { reviewedAt: "2026-10-26T12:00:00.000Z" } },
+    ]) {
+      expect(refusal({ manifest: manifest(overrides) })).toBe("host-assigned-field");
+    }
   });
 
   it("refuses a server that would need more than the static class grants", () => {
@@ -78,9 +87,6 @@ describe("language server package schema", () => {
   });
 
   it("refuses a package that claims the bundled server or reaches outside itself", () => {
-    expect(
-      refusal({ manifest: manifest({ source: { kind: "bundled", sourceRef: "app:lua" } }) }),
-    ).toBe("bundled-source");
     expect(refusal({ manifest: manifest({ slug: "typescript-language-server" }) })).toBe(
       "bundled-claim",
     );

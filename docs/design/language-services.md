@@ -664,9 +664,9 @@ accounts or hardware.
      notarized Apple Silicon package needs the maintainer's signing credentials
      and a Mac.
 5. **User-added `static` servers.** Container: yes.
-   - Install through the existing package store, quarantined. The review card
-     names the binary, digest, languages, class, and "cannot write, run other
-     programs, or reach the network". Then enable.
+   - Install through the existing package store, untrusted and switched off.
+     The review card names the binary, digest, languages, class, and "cannot
+     write, run other programs, or reach the network". Then enable.
    - _Accepts when:_ an unreviewed server never starts, and a server that tries
      to exec or connect fails under confinement.
    - _Verify:_ extension lifecycle and supervisor tests, plus a hostile fixture
