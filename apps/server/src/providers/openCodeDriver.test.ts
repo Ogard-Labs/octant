@@ -60,6 +60,35 @@ describe("OpenCode driver", () => {
     );
   });
 
+  it("runs a resumed session on the thread's current model when it changed", async () => {
+    const fixture = driverFixture();
+    const otherModel = "anthropic/claude-opus" as ProviderModelId;
+    await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project" }).pipe(
+          Effect.flatMap((connection) =>
+            connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }).pipe(
+              Effect.flatMap((handle) =>
+                connection.resume({
+                  sessionId,
+                  resumeCursor: handle.resumeCursor!,
+                  executionPolicy: "approval-gated",
+                  modelId: otherModel,
+                }),
+              ),
+              Effect.flatMap(() =>
+                connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    // The resume must not refuse a model change it can honor, and the prompt
+    // must name the new model rather than the one the session was opened with.
+    expect(fixture.promptModels).toEqual([otherModel]);
+  });
+
   it("does not widen the process authority when a live session resumes with another policy", async () => {
     const fixture = driverFixture();
     const exit = await Effect.runPromise(
@@ -1004,7 +1033,7 @@ describe("OpenCode driver", () => {
     expect(fixture.calls).not.toContain("session.promptAsync");
   });
 
-  it("records the session's task, folder, mode, and model at start and refuses a resume that names others", async () => {
+  it("records the session's task, folder, and mode at start and refuses a resume that names others of those", async () => {
     const fixture = driverFixture();
     const binding = {
       instanceId,
@@ -1033,7 +1062,6 @@ describe("OpenCode driver", () => {
       { sessionId: decodeProviderSessionId("90000000-0000-4000-8000-0000000000aa") },
       { projectRoot: "/tmp/other" },
       { mode: "code" as const },
-      { modelId: "openai/gpt-5" as ProviderModelId },
     ]) {
       const exit = await Effect.runPromise(
         Effect.scoped(
