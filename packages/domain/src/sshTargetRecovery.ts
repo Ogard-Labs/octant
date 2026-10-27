@@ -94,3 +94,25 @@ export function describeSshAdmissionRefusal(
       return "Full access is not remembered for this Project. Remember it from this Mac, or choose a narrower posture.";
   }
 }
+
+/**
+ * Why an operation other than a turn is refused on a Code thread whose
+ * checkout is on an SSH target: terminals, tests, Git, files, checkpoints,
+ * and pull requests each act on a folder of this host. The host refuses with
+ * this sentence and a window shows the same one beside the control it hides.
+ */
+export const REMOTE_CODE_THREAD_OPERATION_UNAVAILABLE =
+  "This thread's checkout is on an SSH target, where this operation is not available.";
+
+/** Why a connector or plugin cannot join a turn of a thread on an SSH target. */
+export const REMOTE_CODE_THREAD_CONNECTORS_UNAVAILABLE =
+  "Connectors and plugins run their tools on this Mac, so a thread on an SSH target cannot use them. Send the message without them.";
+
+/**
+ * Why a provider other than Octant's own harness is not offered for a thread
+ * on an SSH target. The host refuses such a turn before anything launches,
+ * with admission's reason for a runtime it cannot place and with this rule
+ * for one it could place but does not start yet.
+ */
+export const REMOTE_CODE_THREAD_PROVIDER_UNAVAILABLE =
+  "Threads on an SSH target run on Octant's own harness for now. Choose a model it runs.";

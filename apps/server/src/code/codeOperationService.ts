@@ -7,6 +7,10 @@ import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { randomUUID } from "node:crypto";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import {
+  REMOTE_CODE_THREAD_CONNECTORS_UNAVAILABLE,
+  REMOTE_CODE_THREAD_OPERATION_UNAVAILABLE,
+} from "@octant/domain/ssh-target-recovery";
+import {
   decodeCodeOperationCommand,
   decodeCodeOperationResult,
   decodeCodeRepositoryTestStatus,
@@ -1074,7 +1078,25 @@ export class CodeOperationService {
       return this.#failed(
         command.operationId,
         "unavailable",
-        "This thread's checkout is on an SSH target, where this operation is not available.",
+        REMOTE_CODE_THREAD_OPERATION_UNAVAILABLE,
+      );
+    }
+    // A connector or plugin runs its tools on this host, and a remote turn's
+    // tools are only the harness's on the target. Selecting one is refused
+    // before any extension is resolved or started, as Browser and Computer
+    // are, rather than started here and dropped from the turn.
+    if (
+      scope.checkout.kind === "remote-root" &&
+      command.kind === "start-provider-turn" &&
+      command.extensionSelections?.some(
+        (selection) => selection.kind === "plugin" && !isBrowserUseSelection(selection),
+      ) === true
+    ) {
+      return this.#failed(
+        command.operationId,
+        "unavailable",
+        REMOTE_CODE_THREAD_CONNECTORS_UNAVAILABLE,
+        "refused",
       );
     }
     if (command.kind === "start-provider-turn" && command.delivery !== undefined) {
@@ -3577,7 +3599,13 @@ export class CodeOperationService {
       );
     const selections =
       command.extensionSelections?.filter((selection) => !isBrowserUseSelection(selection)) ?? [];
-    const pinnedExtensionIds = this.#options.pinnedExtensionIds?.(String(thread.projectId)) ?? [];
+    // A remote thread's turn has only the harness's tools on the target, so
+    // no pinned extension is started for it.
+    const remoteThread =
+      this.#options.authority.readCheckout(thread.checkoutId)?.kind === "remote-root";
+    const pinnedExtensionIds = remoteThread
+      ? []
+      : (this.#options.pinnedExtensionIds?.(String(thread.projectId)) ?? []);
     let skillContext: ReadonlyArray<ProviderContextBlock> = [];
     let extensionTools: AppManagedToolSet | undefined;
     if (selections.length > 0 || pinnedExtensionIds.length > 0) {

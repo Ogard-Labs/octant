@@ -686,6 +686,20 @@ function cardMeta(
   };
 }
 
+/** Where a thread's checkout is, in the words the host's board uses. */
+function checkoutFactText(kind: CodeBoardCard["checkoutKind"]): string {
+  switch (kind) {
+    case "managed-worktree":
+      return "Managed worktree";
+    // A remote root is a folder on the target, never this host's checkout.
+    case "remote-root":
+      return "On an SSH target";
+    case "existing-worktree":
+    case "plain-folder":
+      return "Current checkout";
+  }
+}
+
 function cardFacts(
   card: CodeBoardCard,
   projectName: string | undefined,
@@ -697,7 +711,7 @@ function cardFacts(
   if (projectName !== undefined) facts.push({ key: "project", text: projectName });
   facts.push({
     key: "checkout",
-    text: card.checkoutKind === "managed-worktree" ? "Managed worktree" : "Current checkout",
+    text: checkoutFactText(card.checkoutKind),
   });
   if (card.worktree.kind === "available" && card.worktree.head.kind === "branch") {
     facts.push({
@@ -804,7 +818,12 @@ function cardDetailRows(
   if (projectName !== undefined) rows.push({ label: "Project", value: projectName });
   if (card.worktree.kind === "available") {
     rows.push({
-      label: card.checkoutKind === "managed-worktree" ? "Worktree" : "Checkout",
+      label:
+        card.checkoutKind === "managed-worktree"
+          ? "Worktree"
+          : card.checkoutKind === "remote-root"
+            ? "Folder on the SSH target"
+            : "Checkout",
       value: card.worktree.path,
     });
   }
