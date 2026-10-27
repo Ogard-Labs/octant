@@ -220,9 +220,9 @@ absent rather than imitating them:
 
 - **No usage window.** A prompt result carries only a stop reason, so the
   driver declares `usage: "unsupported"`. The runtime card reads **Context
-  window: Not reported**, a Code thread's context meter says the runtime
-  reports no usage instead of waiting for a figure, and a spend ceiling
-  leaves the turns out.
+  window: Not reported**, a Code, Work, or Chat thread's context meter says
+  the runtime reports no usage instead of waiting for a figure, and a spend
+  ceiling leaves the turns out.
 - **No compaction request.** The driver declares no `sessionCompaction`, so
   the host refuses compaction as `runtime-cannot-compact`. The runtime card
   reads **Compaction: Not available**, and the context popover and inspector

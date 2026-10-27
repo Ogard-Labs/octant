@@ -57,11 +57,14 @@ export function ConnectorsView(props: ConnectorsViewProps) {
   const installedFor = (entry: ConnectorCatalogEntry): Connected | undefined => {
     const known = connected[entry.id];
     if (known !== undefined) return known;
+    // The package name is the mark: the host gives `connector-<id>` only to a
+    // catalog add and refuses it to a hand-added server. The installed source
+    // cannot be: the host reports its own packages as `plugin-package`, so a
+    // check for "user-added" showed every connector as unconnected after a
+    // reload. The sign-in control asks the host, which vouches for the package.
     const pkg = snapshot?.packages.find(
       (candidate) =>
-        candidate.source.kind === "user-added" &&
-        candidate.activation.installed &&
-        candidate.slug === connectorPackageName(entry.id),
+        candidate.activation.installed && candidate.slug === connectorPackageName(entry.id),
     );
     if (pkg === undefined) return undefined;
     return {

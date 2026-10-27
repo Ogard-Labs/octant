@@ -65,7 +65,7 @@ this Project**; until you do, it does not start.
 
 - Only you, at a window on this computer, can allow it. A paired device is
   never offered the choice and is never served by such a server.
-- Plan threads are never served by it.
+- Plan threads and agents' reads are never served by it.
 - It reaches the network only through Octant, and only the hosts in the
   Project's rules (add one from a Code thread's **Network access** list). Every
   connection it asks for, allowed or refused, is recorded.
@@ -87,6 +87,26 @@ this Project**; until you do, it does not start.
 | This file is too large for language services          | The file is past what the server is sent. Editing still works.                                  |
 
 Files the server does not read, such as Markdown or Python, show nothing.
+
+## Agents
+
+An agent in a Code thread can ask the same server two things: the problems in
+a file (`octant_code_diagnostics`) and where a name in it is defined
+(`octant_code_definition`). It can do this in Plan mode too, since both only
+read. They are offered on providers that can carry Octant's own tools, the
+same ones listed for the other Octant tools in [Code](/guide/code), and a
+profile whose tool list leaves them out does not offer them.
+
+- The agent gets answers for the file as saved, with lines counted from 1, so
+  they match what it reads. If you have unsaved changes in that file, the
+  agent is told to wait for you to save; your text stays as you typed it and
+  is never sent to the provider.
+- A definition outside the checkout is named only as a library or "elsewhere",
+  never by its host path.
+- An agent can start the bundled server, but is never served by one that runs
+  the repository's own tooling, even one you allowed and have open in the
+  editor, and it never restarts a server that stopped:
+  **Retry** in the editor stays yours.
 
 ## Turning them off
 

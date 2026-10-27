@@ -70,9 +70,10 @@ describe("ComposerContextMeter", () => {
     const user = userEvent.setup();
     render(
       <ComposerContextMeterProvider
-        fallback={{ limits: [], usageReporting: "not-reported" }}
+        fallback={{ limits: [] }}
         status="not-planned"
         subjectKey="code-thread:acp"
+        usageReporting="not-reported"
       >
         <ComposerContextMeterGate enabled>
           <ComposerContextMeter />
@@ -85,6 +86,39 @@ describe("ComposerContextMeter", () => {
       "This runtime reports no usage, so this thread has no context window to show.",
     );
     expect(popover).not.toHaveTextContent("No usage has been reported for this thread.");
+  });
+
+  it("says a Work thread's runtime reports no usage where its planned context names no window", async () => {
+    // Octant plans every Work and Chat turn, so an ACP agent's Work thread has
+    // a snapshot with its own estimate but no usage report and no window.
+    const { latestUsage: _unreported, ...planned } = contextFixture();
+    const user = userEvent.setup();
+    render(
+      <ComposerContextMeterProvider
+        snapshot={{
+          ...planned,
+          modelLimits: {
+            ...planned.modelLimits,
+            contextWindow: 4_096,
+            source: "conservative-fallback",
+            confidence: "low",
+          },
+        }}
+        status="ready"
+        subjectKey="work-thread:acp"
+        usageReporting="not-reported"
+      >
+        <ComposerContextMeterGate enabled>
+          <ComposerContextMeter />
+        </ComposerContextMeterGate>
+      </ComposerContextMeterProvider>,
+    );
+    await user.click(screen.getByRole("button", { name: /Show context usage/i }));
+    const popover = screen.getByRole("dialog", { name: "Context used" });
+    expect(popover).toHaveTextContent(
+      "This runtime reports no usage, so this thread has no context window to show.",
+    );
+    expect(popover).not.toHaveTextContent("No model has reported a context-window maximum");
   });
 
   it.each([undefined, 0])(

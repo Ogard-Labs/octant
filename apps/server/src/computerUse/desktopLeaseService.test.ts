@@ -1553,6 +1553,42 @@ describe("desktop lease service for a person's Desktop tab", () => {
     });
   });
 
+  it("bounds a running desktop's frames by the screen it started with after a person edits the recipe", async () => {
+    const png = (width: number, height: number) => {
+      const bytes = new Uint8Array(24);
+      bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
+      bytes.set(new TextEncoder().encode("IHDR"), 12);
+      const view = new DataView(bytes.buffer);
+      view.setUint32(16, width);
+      view.setUint32(20, height);
+      return { mediaType: "image/png" as const, width, height, bytes };
+    };
+    const fake = createFakeDesktopProvider({ behaviour: { frame: png(1280, 800) } });
+    const { service, state } = host({ providers: [fake] });
+    const leaseId = await acquired(service, threadA);
+    const viewId = await viewing(service, leaseId);
+
+    // A smaller screen applies to the next desktop; this one keeps showing.
+    state.recipes.set(
+      threadA,
+      decodeDesktopRecipe({ ...recipeFor("fake-desktop"), screen: { width: 1024, height: 768 } }),
+    );
+    await expect(service.frame({ ...at(threadA), leaseId, viewId })).resolves.toMatchObject({
+      status: "frame",
+      frame: { width: 1280, height: 800 },
+    });
+
+    // A larger one does not let this desktop's driver pass a frame past its own screen.
+    state.recipes.set(
+      threadA,
+      decodeDesktopRecipe({ ...recipeFor("fake-desktop"), screen: { width: 1920, height: 1080 } }),
+    );
+    fake.backend.behaviour.frame = png(1920, 1080);
+    await expect(service.frame({ ...at(threadA), leaseId, viewId })).resolves.toEqual({
+      status: "no-frame",
+    });
+  });
+
   it("tells a person whether the thread can start a desktop, and why not", async () => {
     const { service, state } = host();
     await expect(service.overview(at(threadA))).resolves.toEqual({

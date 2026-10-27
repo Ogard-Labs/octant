@@ -1,6 +1,8 @@
 import type {
   DiscoveryCandidate,
   DiscoverySnapshot,
+  OutsideHarnessEndpointProviderConfiguration,
+  OutsideProviderDriverListing,
   ProviderDriverKind,
   ProviderInstance,
   ProviderInstanceId,
@@ -29,6 +31,8 @@ import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { ProviderGlyph } from "../ProviderGlyph";
 import { PROVIDER_LOGOS } from "../providerLogoPaths";
+import type { TransientProviderCredential } from "../useProviderController";
+import { OutsideDriverAddForm } from "./OutsideDriverAddForm";
 import {
   agentLoopLabel,
   modeSupportLabel,
@@ -74,14 +78,51 @@ export interface ProviderCatalogViewProps {
   readonly onDetailChange?: (entryName: string | undefined) => void;
   /** The listings to show; the bundled drivers unless a test supplies others. */
   readonly listings?: ReadonlyArray<ProviderDriverCatalogListing>;
+  /** The outside drivers the host admits, which a provider may be added from. */
+  readonly outsideDrivers?: ReadonlyArray<OutsideProviderDriverListing>;
+  /** Whether this window can put a key in the host's keychain. */
+  readonly credentialManagementAvailable?: boolean;
+  /** Adds a provider from an outside driver; the host creates it off. */
+  readonly onAddOutsideProvider?: (
+    displayName: string,
+    configuration: OutsideHarnessEndpointProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
 }
 
 const BUNDLED_LISTINGS = bundledProviderDriverCatalog();
 
+/**
+ * One catalog row. A bundled driver is keyed by its kind; an outside driver by
+ * its package and component, since every outside driver shares one family
+ * kind.
+ */
 interface CatalogEntry {
-  readonly listing: ProviderDriverCatalogListing;
+  readonly key: string;
+  readonly driverKind: ProviderDriverKind;
+  readonly source:
+    | { readonly kind: "bundled"; readonly listing: ProviderDriverCatalogListing }
+    | { readonly kind: "outside"; readonly listing: OutsideProviderDriverListing };
   readonly name: string;
   readonly state: ProviderCatalogState;
+}
+
+function outsideEntryKey(listing: OutsideProviderDriverListing): string {
+  return `outside-${String(listing.driver.extensionId)}-${String(listing.driver.componentId)}`;
+}
+
+/** Whether an instance runs this outside driver, at the exact digest it lists. */
+function bindsOutsideDriver(
+  instance: ProviderInstance,
+  listing: OutsideProviderDriverListing,
+): boolean {
+  if (instance.driverKind !== "outside-harness-endpoint") return false;
+  const driver = instance.configuration.driver;
+  return (
+    String(driver.extensionId) === String(listing.driver.extensionId) &&
+    String(driver.componentId) === String(listing.driver.componentId) &&
+    String(driver.digest) === String(listing.driver.digest)
+  );
 }
 
 /**
@@ -92,14 +133,23 @@ interface CatalogEntry {
  */
 export function ProviderCatalogView(props: ProviderCatalogViewProps) {
   const listings = props.listings ?? BUNDLED_LISTINGS;
-  const [openKind, setOpenKind] = useState<ProviderDriverKind>();
-  const [returnFocusTo, setReturnFocusTo] = useState<ProviderDriverKind>();
+  const [openKey, setOpenKey] = useState<string>();
+  const [returnFocusTo, setReturnFocusTo] = useState<string>();
   const list = useRef<HTMLDivElement>(null);
   const snapshot = props.discovery?.snapshot;
-  const entries = useMemo<ReadonlyArray<CatalogEntry>>(
-    () =>
-      listings.map((listing) => ({
-        listing,
+  const outsideDrivers = props.outsideDrivers;
+  const entries = useMemo<ReadonlyArray<CatalogEntry>>(() => {
+    const host = {
+      instances: props.instances,
+      observedByInstance: props.observedByInstance,
+      probingIds: props.probingIds,
+      discovery: snapshot,
+    };
+    const bundled = listings.map(
+      (listing): CatalogEntry => ({
+        key: listing.entry.driverKind,
+        driverKind: listing.entry.driverKind,
+        source: { kind: "bundled", listing },
         name: listing.entry.manifest.displayName,
         state: resolveProviderCatalogState(
           {
@@ -108,17 +158,42 @@ export function ProviderCatalogView(props: ProviderCatalogViewProps) {
             trusted: listing.trusted,
             available: listing.activation.kind === "effective",
           },
+          host,
+        ),
+      }),
+    );
+    // The host lists only the outside drivers it admits; each continues the
+    // providers bound to its own package and digest.
+    const outside = (outsideDrivers ?? []).map(
+      (listing): CatalogEntry => ({
+        key: outsideEntryKey(listing),
+        driverKind: "outside-harness-endpoint",
+        source: { kind: "outside", listing },
+        name: listing.displayName,
+        state: resolveProviderCatalogState(
           {
-            instances: props.instances,
-            observedByInstance: props.observedByInstance,
-            probingIds: props.probingIds,
-            discovery: snapshot,
+            driverKind: "outside-harness-endpoint",
+            installed: listing.installed,
+            trusted: listing.trusted,
+            available: true,
+          },
+          {
+            ...host,
+            instances: props.instances.filter((instance) => bindsOutsideDriver(instance, listing)),
           },
         ),
-      })),
-    [listings, props.instances, props.observedByInstance, props.probingIds, snapshot],
-  );
-  const open = entries.find((entry) => entry.listing.entry.driverKind === openKind);
+      }),
+    );
+    return [...bundled, ...outside];
+  }, [
+    listings,
+    outsideDrivers,
+    props.instances,
+    props.observedByInstance,
+    props.probingIds,
+    snapshot,
+  ]);
+  const open = entries.find((entry) => entry.key === openKey);
 
   const { onDetailChange } = props;
   const openName = open?.name;
@@ -130,7 +205,7 @@ export function ProviderCatalogView(props: ProviderCatalogViewProps) {
   // Back returns focus to the row the setup was opened from.
   useEffect(() => {
     if (open !== undefined || returnFocusTo === undefined) return;
-    list.current?.querySelector<HTMLElement>(`[data-catalog-kind="${returnFocusTo}"]`)?.focus();
+    list.current?.querySelector<HTMLElement>(`[data-catalog-key="${returnFocusTo}"]`)?.focus();
     setReturnFocusTo(undefined);
   }, [open, returnFocusTo]);
 
@@ -140,32 +215,30 @@ export function ProviderCatalogView(props: ProviderCatalogViewProps) {
         {...props}
         entry={open}
         onBack={() => {
-          setReturnFocusTo(open.listing.entry.driverKind);
-          setOpenKind(undefined);
+          setReturnFocusTo(open.key);
+          setOpenKey(undefined);
         }}
         // The catalog shares a page with Providers & Models, so sending a
         // person there means closing this setup to show the providers list.
         onOpenProviders={() => {
-          setOpenKind(undefined);
+          setOpenKey(undefined);
           props.onOpenProviders();
         }}
       />
     );
   }
 
-  const runtimes = entries.filter((entry) => entry.state.setup === "runtime");
-  const endpoints = entries.filter((entry) => entry.state.setup === "endpoint");
+  const bundledEntries = entries.filter((entry) => entry.source.kind === "bundled");
+  const runtimes = bundledEntries.filter((entry) => entry.state.setup === "runtime");
+  const endpoints = bundledEntries.filter((entry) => entry.state.setup === "endpoint");
+  const outsideEntries = entries.filter((entry) => entry.source.kind === "outside");
   const ready = entries.filter((entry) => entry.state.next.kind === "done").length;
   const needsYou = entries.filter((entry) => {
     const tone = providerCatalogStatus(entry.state).tone;
     return tone === "needs-you" || tone === "failed";
   }).length;
   const renderRow = (entry: CatalogEntry) => (
-    <CatalogRow
-      entry={entry}
-      key={entry.listing.entry.driverKind}
-      onOpen={() => setOpenKind(entry.listing.entry.driverKind)}
-    />
+    <CatalogRow entry={entry} key={entry.key} onOpen={() => setOpenKey(entry.key)} />
   );
 
   return (
@@ -177,7 +250,9 @@ export function ProviderCatalogView(props: ProviderCatalogViewProps) {
           has, so it names itself before its two lists. */}
       <SettingsSection title="Provider catalog">
         <p className="settings-section-line provider-catalog__intro">
-          Every provider driver here ships with Octant, so each is already installed and trusted.
+          {outsideEntries.length === 0
+            ? "Every provider driver here ships with Octant, so each is already installed and trusted."
+            : "Bundled drivers ship with Octant, so each is already installed and trusted. Outside drivers are listed once you have trusted and switched them on under Plugins."}{" "}
           Opening one reads what this host already knows; nothing runs until you choose a step.
           <span
             aria-label="Provider catalog summary"
@@ -204,6 +279,16 @@ export function ProviderCatalogView(props: ProviderCatalogViewProps) {
           {endpoints.map(renderRow)}
         </ul>
       </SettingsSection>
+      {outsideEntries.length === 0 ? null : (
+        <SettingsSection
+          description="Drivers you installed from outside Octant and trusted. Each runs in its own confined process with no network, and Octant makes every request it asks for."
+          title="Outside drivers"
+        >
+          <ul aria-label="Outside drivers" className="endpoint-list">
+            {outsideEntries.map(renderRow)}
+          </ul>
+        </SettingsSection>
+      )}
     </div>
   );
 }
@@ -231,9 +316,14 @@ function kindLabel(state: ProviderCatalogState): string {
   return state.setup === "endpoint" ? "Model endpoint" : "Agent runtime";
 }
 
+/** An outside driver never borrows the bundled label: it says where it came from. */
+function originLabel(entry: CatalogEntry): string {
+  return entry.source.kind === "outside" ? "Outside driver" : "Bundled";
+}
+
 function CatalogRow(props: { readonly entry: CatalogEntry; readonly onOpen: () => void }) {
   const { entry } = props;
-  const driverKind = entry.listing.entry.driverKind;
+  const driverKind = entry.driverKind;
   const status = providerCatalogStatus(entry.state);
   const configured =
     entry.state.instanceCount > 1 ? ` · ${entry.state.instanceCount} configured` : "";
@@ -242,8 +332,8 @@ function CatalogRow(props: { readonly entry: CatalogEntry; readonly onOpen: () =
       <a
         aria-label={`${entry.name}, ${status.label.toLowerCase()}. Open setup`}
         className="endpoint-row__link window-no-drag"
-        data-catalog-kind={driverKind}
-        href={`#provider-catalog-${driverKind}`}
+        data-catalog-key={entry.key}
+        href={`#provider-catalog-${entry.key}`}
         onClick={(event) => {
           event.preventDefault();
           props.onOpen();
@@ -253,7 +343,8 @@ function CatalogRow(props: { readonly entry: CatalogEntry; readonly onOpen: () =
         <span className="endpoint-row__text">
           <span className="endpoint-row__name">{entry.name}</span>
           <span className="endpoint-row__sub">
-            {kindLabel(entry.state)} · Bundled{configured}
+            {kindLabel(entry.state)} · {originLabel(entry)}
+            {configured}
           </span>
         </span>
         <span className="endpoint-row__state">
@@ -270,8 +361,7 @@ function ProviderCatalogDetail(
 ) {
   const { entry } = props;
   const { state } = entry;
-  const { manifest } = entry.listing.entry;
-  const driverKind = entry.listing.entry.driverKind;
+  const driverKind = entry.driverKind;
   const root = useRef<HTMLDivElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const headingId = useId();
@@ -287,8 +377,10 @@ function ProviderCatalogDetail(
   };
   const status = providerCatalogStatus(state);
   const { modes, agentLoop, sandbox } = state.capabilities;
+  // An outside driver's provider has no Model endpoints page: its card on
+  // Providers & Models holds its key, its models, and Verify tools.
   const runtimeCard =
-    state.setup === "runtime" && state.instance !== undefined
+    (state.setup === "runtime" || entry.source.kind === "outside") && state.instance !== undefined
       ? props.renderRuntimeCard?.(state.instance)
       : undefined;
 
@@ -329,7 +421,9 @@ function ProviderCatalogDetail(
       </SettingsSection>
 
       {runtimeCard}
-      {state.setup === "endpoint" && state.instance !== undefined ? (
+      {state.setup === "endpoint" &&
+      entry.source.kind === "bundled" &&
+      state.instance !== undefined ? (
         <SettingsSection title="Its endpoint">
           <p className="settings-section-line">
             {state.instance.displayName} is configured under Octant Harness › Model endpoints, where
@@ -385,37 +479,95 @@ function ProviderCatalogDetail(
         </dl>
       </SettingsSection>
 
-      <SettingsSection title="Package">
-        <p className="settings-section-line">
-          Bundled with Octant, so it is already installed and trusted. There is nothing to download
-          or approve here, and the catalog cannot change what it is allowed to do.
-        </p>
-        <dl className="provider-catalog__facts">
-          <div className="provider-catalog__fact">
-            <dt>Source</dt>
-            <dd>Bundled with Octant</dd>
-          </div>
-          <div className="provider-catalog__fact">
-            <dt>Installed</dt>
-            <dd>{state.installed ? "Yes" : "No"}</dd>
-          </div>
-          <div className="provider-catalog__fact">
-            <dt>Trusted</dt>
-            <dd>
-              {state.trusted
-                ? manifest.provenance.reviewed
-                  ? `Yes, reviewed by ${manifest.provenance.publisher ?? "Octant"}`
-                  : "Yes"
-                : "No"}
-            </dd>
-          </div>
-          <div className="provider-catalog__fact">
-            <dt>Driver version</dt>
-            <dd className="oct-meta--mono">{manifest.version}</dd>
-          </div>
-        </dl>
-      </SettingsSection>
+      {entry.source.kind === "bundled" ? (
+        <BundledPackageFacts listing={entry.source.listing} state={state} />
+      ) : (
+        <OutsidePackageFacts listing={entry.source.listing} state={state} />
+      )}
     </div>
+  );
+}
+
+function BundledPackageFacts(props: {
+  readonly listing: ProviderDriverCatalogListing;
+  readonly state: ProviderCatalogState;
+}) {
+  const { manifest } = props.listing.entry;
+  const { state } = props;
+  return (
+    <SettingsSection title="Package">
+      <p className="settings-section-line">
+        Bundled with Octant, so it is already installed and trusted. There is nothing to download or
+        approve here, and the catalog cannot change what it is allowed to do.
+      </p>
+      <dl className="provider-catalog__facts">
+        <div className="provider-catalog__fact">
+          <dt>Source</dt>
+          <dd>Bundled with Octant</dd>
+        </div>
+        <div className="provider-catalog__fact">
+          <dt>Installed</dt>
+          <dd>{state.installed ? "Yes" : "No"}</dd>
+        </div>
+        <div className="provider-catalog__fact">
+          <dt>Trusted</dt>
+          <dd>
+            {state.trusted
+              ? manifest.provenance.reviewed
+                ? `Yes, reviewed by ${manifest.provenance.publisher ?? "Octant"}`
+                : "Yes"
+              : "No"}
+          </dd>
+        </div>
+        <div className="provider-catalog__fact">
+          <dt>Driver version</dt>
+          <dd className="oct-meta--mono">{manifest.version}</dd>
+        </div>
+      </dl>
+    </SettingsSection>
+  );
+}
+
+/**
+ * An outside driver's package as the person admitted it. A local folder is
+ * unsigned developer input: nobody but the person reviewed it, and trust holds
+ * for this digest only.
+ */
+function OutsidePackageFacts(props: {
+  readonly listing: OutsideProviderDriverListing;
+  readonly state: ProviderCatalogState;
+}) {
+  const { listing, state } = props;
+  return (
+    <SettingsSection title="Package">
+      <p className="settings-section-line">
+        Installed from a folder on this computer. It is unsigned developer input: Octant checked its
+        files against the digest you trusted, and nobody else reviewed it. Trust, switches, and
+        removal are under Plugins.
+      </p>
+      <dl className="provider-catalog__facts">
+        <div className="provider-catalog__fact">
+          <dt>Source</dt>
+          <dd>Local folder, unsigned</dd>
+        </div>
+        <div className="provider-catalog__fact">
+          <dt>Installed</dt>
+          <dd>{state.installed ? "Yes" : "No"}</dd>
+        </div>
+        <div className="provider-catalog__fact">
+          <dt>Trusted</dt>
+          <dd>{state.trusted ? "Yes, by you, at this digest" : "No"}</dd>
+        </div>
+        <div className="provider-catalog__fact">
+          <dt>Driver version</dt>
+          <dd className="oct-meta--mono">{String(listing.driver.version)}</dd>
+        </div>
+        <div className="provider-catalog__fact">
+          <dt>Digest</dt>
+          <dd className="oct-meta--mono">{String(listing.driver.digest)}</dd>
+        </div>
+      </dl>
+    </SettingsSection>
   );
 }
 
@@ -576,6 +728,27 @@ function CurrentStep(
       break;
     }
     case "add-endpoint":
+      if (entry.source.kind === "outside") {
+        const listing = entry.source.listing;
+        const onAdd = props.onAddOutsideProvider;
+        sentence = `Add a provider from ${name}: give the address of the service it speaks to and the models to offer. It is added off; its process starts only when you check the connection.`;
+        action =
+          onAdd === undefined ? null : (
+            <OutsideDriverAddForm
+              credentialManagementAvailable={props.credentialManagementAvailable === true}
+              disabled={disabled}
+              listing={listing}
+              onAdd={(displayName, configuration, credential) =>
+                void run(
+                  () => onAdd(displayName, configuration, credential),
+                  `Octant could not add a provider from ${name}.`,
+                )
+              }
+              pending={pending}
+            />
+          );
+        break;
+      }
       sentence = `Add it under Octant Harness › Model endpoints: choose ${name} in Add endpoint and give its address. A key you enter is stored in the system keychain.`;
       action = openEndpoints;
       break;
@@ -600,11 +773,13 @@ function CurrentStep(
       break;
     case "sign-in":
       sentence =
-        state.setup === "endpoint"
-          ? "Its last check says it needs a sign-in or a key. Add it on its Model endpoints page; a key is stored in the system keychain, never in the catalog."
-          : "Its last check says it needs a sign-in. Sign in from its card below, then check again. A key you enter there is stored in the system keychain, never in the catalog.";
+        entry.source.kind === "outside"
+          ? "Its last check says the service refused the key or has none. Add or replace it on its card below, then check again. The key is stored in the system keychain and never reaches the driver."
+          : state.setup === "endpoint"
+            ? "Its last check says it needs a sign-in or a key. Add it on its Model endpoints page; a key is stored in the system keychain, never in the catalog."
+            : "Its last check says it needs a sign-in. Sign in from its card below, then check again. A key you enter there is stored in the system keychain, never in the catalog.";
       action =
-        state.setup === "endpoint" ? (
+        state.setup === "endpoint" && entry.source.kind === "bundled" ? (
           openEndpoints
         ) : (
           <CheckButton {...props} instanceId={next.instanceId} label="Check again" run={run} />
@@ -631,9 +806,11 @@ function CurrentStep(
           ? "This version is not one Octant can drive. Update it from its maker, then check again."
           : next.readiness === "degraded"
             ? "It answered but reported a problem. Its card has what it said; check again once it is fixed."
-            : state.setup === "endpoint"
-              ? "Octant could not reach it. Its Model endpoints page has what the host answered."
-              : "Octant could not start it at its configured path. If it moved, use Locate binary… on its card below, then check again.";
+            : entry.source.kind === "outside"
+              ? "Octant could not start the driver or reach the service. Its card below has what the host answered."
+              : state.setup === "endpoint"
+                ? "Octant could not reach it. Its Model endpoints page has what the host answered."
+                : "Octant could not start it at its configured path. If it moved, use Locate binary… on its card below, then check again.";
       action = (
         <CheckButton
           {...props}
@@ -643,7 +820,8 @@ function CurrentStep(
           pending={pending}
         />
       );
-      secondary = state.setup === "endpoint" ? openEndpoints : null;
+      secondary =
+        state.setup === "endpoint" && entry.source.kind === "bundled" ? openEndpoints : null;
       break;
     case "done":
     case "unavailable":

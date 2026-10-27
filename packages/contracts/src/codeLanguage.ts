@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { CodeCheckoutId, CodeFileId, CodeRelativePath, CodeThreadId } from "./code";
 import { ProjectId } from "./projects";
+import type { ProviderToolDefinition } from "./providers";
 
 /**
  * Language reads for one file of a Code thread: diagnostics and
@@ -197,6 +198,78 @@ export const CodeLanguageDocumentResult = Schema.Union(
   }).annotations(strict),
 );
 export type CodeLanguageDocumentResult = typeof CodeLanguageDocumentResult.Type;
+
+/**
+ * The agent-facing reads (`code-diagnostics` and `code-definition` in the
+ * closed tool catalog). An agent names a file by its checkout-relative path,
+ * as its other file tools do, and never by a file reference: it holds no
+ * editor document. Lines and columns are one-based, as the agent's file reads
+ * and searches number them; the host converts them to the zero-based
+ * positions above. A column counts UTF-16 code units, as the editor does.
+ */
+export const CODE_DIAGNOSTICS_TOOL_NAME = "octant_code_diagnostics";
+export const CODE_DEFINITION_TOOL_NAME = "octant_code_definition";
+
+const OneBased = Schema.Int.pipe(Schema.between(1, MAX_POSITION));
+
+export const CodeDiagnosticsToolArguments = Schema.Struct({ path: CodeRelativePath }).annotations(
+  strict,
+);
+export type CodeDiagnosticsToolArguments = typeof CodeDiagnosticsToolArguments.Type;
+
+export const CodeDefinitionToolArguments = Schema.Struct({
+  path: CodeRelativePath,
+  line: OneBased,
+  column: OneBased,
+}).annotations(strict);
+export type CodeDefinitionToolArguments = typeof CodeDefinitionToolArguments.Type;
+
+export const decodeCodeDiagnosticsToolArguments = Schema.decodeUnknownSync(
+  CodeDiagnosticsToolArguments,
+);
+export const decodeCodeDefinitionToolArguments = Schema.decodeUnknownSync(
+  CodeDefinitionToolArguments,
+);
+
+const checkoutPathProperty = {
+  type: "string",
+  description: "A file of this thread's checkout, relative to its root, such as src/index.ts.",
+} as const;
+
+/**
+ * Both reads answer for the file as saved on disk, so their lines match what
+ * the agent's own file reads show. They read; they never change a file.
+ */
+export const CODE_LANGUAGE_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefinition> = [
+  {
+    name: CODE_DIAGNOSTICS_TOOL_NAME,
+    description:
+      "The language server's errors and warnings for one saved file of the checkout, read with the Project's own configuration and the other files. Lines and columns are one-based. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: { path: checkoutPathProperty },
+      required: ["path"],
+    },
+  },
+  {
+    name: CODE_DEFINITION_TOOL_NAME,
+    description:
+      "Where the name at a one-based line and column of a saved checkout file is defined, as checkout locations. A definition outside the checkout is named only by a label. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: checkoutPathProperty,
+        line: { type: "integer", minimum: 1 },
+        column: {
+          type: "integer",
+          minimum: 1,
+          description: "UTF-16 code units, as editors count.",
+        },
+      },
+      required: ["path", "line", "column"],
+    },
+  },
+];
 
 /**
  * How far a person's approval of a `repo-tooling` server reaches: the one

@@ -14,7 +14,11 @@ import {
   type ProviderCatalogHostFacts,
   type ProviderCatalogPackage,
 } from "./providerCatalogPolicy";
-import { createCodexProvider, createOllamaProvider } from "./providerPolicy";
+import {
+  createCodexProvider,
+  createOllamaProvider,
+  createOutsideHarnessEndpointProvider,
+} from "./providerPolicy";
 
 const now = "2026-10-11T12:00:00.000Z" as UtcTimestamp;
 const codexId = "codex-1" as ProviderInstanceId;
@@ -256,6 +260,40 @@ describe("provider catalog state", () => {
     );
     expect(unconfigured.presence).toEqual({ kind: "not-applicable" });
     expect(unconfigured.next).toEqual({ kind: "add-endpoint" });
+  });
+
+  it("sets an outside driver up as an endpoint added with its address, keyless only on loopback", () => {
+    const outside = resolveProviderCatalogState(bundled("outside-harness-endpoint"), host());
+    expect(outside).toMatchObject({ setup: "endpoint", presence: { kind: "not-applicable" } });
+    expect(outside.next).toEqual({ kind: "add-endpoint" });
+    expect(outside.capabilities.agentLoop).toBe("octant-harness");
+
+    const keyless = createOutsideHarnessEndpointProvider({
+      id: "outside-1" as ProviderInstanceId,
+      displayName: "Loopback chat",
+      configuration: {
+        kind: "outside-harness-endpoint",
+        driver: {
+          extensionId: "00000000-0000-4000-8000-000000000911",
+          packageId: "00000000-0000-4000-8000-000000000912",
+          componentId: "driver",
+          version: "0.1.0",
+          digest: `sha256:${"d".repeat(64)}`,
+        },
+        baseUrl: "http://127.0.0.1:8080",
+        modelIds: ["local-model"],
+      } as never,
+      existingInstances: [],
+      expectedVersion: 0 as AggregateVersion,
+      createdAt: now,
+    });
+    const added = resolveProviderCatalogState(
+      bundled("outside-harness-endpoint"),
+      host({ instances: [keyless] }),
+    );
+    // Added off, so the next step is turning it on, and a keyless one needs no sign-in.
+    expect(added.next).toEqual({ kind: "turn-on", instanceId: keyless.id });
+    expect(added.authenticated).toBe("not-needed");
   });
 
   it("states each driver's modes and agent loop as the send gates apply them", () => {

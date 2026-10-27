@@ -157,7 +157,13 @@ function runtimeSandbox(driverKind: ProviderDriverKind): ProviderCatalogSandbox 
 }
 
 export function providerCatalogSetupKind(driverKind: ProviderDriverKind): ProviderCatalogSetupKind {
-  return requiresManualEndpoint(driverKind) || driverKind === "ollama" ? "endpoint" : "runtime";
+  // An outside driver is a harness endpoint added with its address, never a
+  // runtime found on the host.
+  return requiresManualEndpoint(driverKind) ||
+    driverKind === "ollama" ||
+    driverKind === "outside-harness-endpoint"
+    ? "endpoint"
+    : "runtime";
 }
 
 function scanCompleted(snapshot: DiscoverySnapshot | undefined): snapshot is DiscoverySnapshot {
@@ -209,6 +215,9 @@ function chooseInstance(
 
 function takesNoCredential(instance: ProviderInstance): boolean {
   if (instance.driverKind === "ollama") return true;
+  if (instance.driverKind === "outside-harness-endpoint") {
+    return instance.configuration.key === undefined;
+  }
   return (
     instance.driverKind === "openai-compatible" && instance.configuration.authentication === "none"
   );

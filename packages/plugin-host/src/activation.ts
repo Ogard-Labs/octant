@@ -2,6 +2,7 @@ import type {
   ExtensionActivationState,
   ExtensionComponent,
   ExtensionEffectiveState,
+  ExtensionPackageState,
 } from "@octant/contracts/extensions";
 import type { OctantMode } from "@octant/contracts/modes";
 
@@ -129,4 +130,66 @@ export function resolveExtensionActivation(
   if (state.interrupted) return { kind: "blocked", reason: "interrupted" };
   if (state.waiting) return { kind: "blocked", reason: "waiting" };
   return { kind: "effective" };
+}
+
+/** The exact package an outside driver instance binds, as the activation ladder reads it. */
+export interface OutsideDriverActivationTarget {
+  readonly extensionId: string;
+  readonly packageId: string;
+  readonly componentId: string;
+  readonly version: string;
+  readonly digest: string;
+}
+
+/**
+ * Whether the outside driver one provider instance binds is effective on this
+ * host. It is the ladder every component climbs, at host scope: a provider
+ * instance serves every mode and belongs to no Project or thread, so the
+ * driver must be safe in all three modes. Beyond the ladder, the package must
+ * still select the exact version and digest the instance was added with; any
+ * other selection is `superseded`, so trust and Verify tools records never
+ * carry over to code the person did not add the provider from.
+ */
+export function resolveOutsideDriverActivation(input: {
+  readonly platform: string;
+  readonly packageState: ExtensionPackageState | undefined;
+  /** The host's own verdict on the package's app range and platforms. */
+  readonly compatible: boolean;
+  readonly driver: OutsideDriverActivationTarget;
+}): ExtensionEffectiveState {
+  if (!isOutsideDriverHostConfined(input.platform)) {
+    return { kind: "blocked", reason: "host-prohibited" };
+  }
+  const packageState = input.packageState;
+  const componentState = packageState?.components.find(
+    (candidate) => String(candidate.component.id) === input.driver.componentId,
+  );
+  if (
+    packageState === undefined ||
+    String(packageState.extensionId) !== input.driver.extensionId ||
+    String(packageState.packageId) !== input.driver.packageId ||
+    componentState === undefined ||
+    componentState.component.kind !== "provider-driver" ||
+    !componentState.activation.installed
+  ) {
+    return { kind: "blocked", reason: "not-installed" };
+  }
+  if (
+    String(packageState.version) !== input.driver.version ||
+    String(packageState.digest) !== input.driver.digest
+  ) {
+    return { kind: "blocked", reason: "superseded" };
+  }
+  const component = componentState.component;
+  return resolveExtensionActivation({
+    ...componentState.activation,
+    compatible: input.compatible && componentState.activation.compatible,
+    hostAllowed: true,
+    modeAllowed: (["chat", "work", "code"] as const).every((mode) =>
+      isExtensionComponentModeSafe(mode, component),
+    ),
+    projectAllowed: true,
+    threadAllowed: true,
+    catalogCurrent: true,
+  });
 }

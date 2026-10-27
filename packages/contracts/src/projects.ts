@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { CanvasDesignBrand } from "./canvasBrand";
+import { DesktopRecipe } from "./desktopLease";
 import { ActorId, AggregateVersion, EventActor, UtcTimestamp } from "./events";
 import { HostId } from "./host";
 import { ProviderInstanceId } from "./providers";
@@ -217,6 +218,12 @@ export const CodeProject = Schema.Struct({
    */
   newThreadWorkspace: Schema.optional(CodeNewThreadWorkspace),
   pullRequestBackgroundRefresh: Schema.optional(CodeProjectPullRequestBackgroundRefresh),
+  /**
+   * The disposable desktop this Project's threads lease from. Absent means no
+   * recipe, so every lease command refuses `no-provider-configured`. A person
+   * sets it from a local window; an agent cannot.
+   */
+  desktopRecipe: Schema.optional(DesktopRecipe),
 }).annotations(strict);
 export type CodeProject = typeof CodeProject.Type;
 
@@ -245,6 +252,7 @@ const CodeProjectSummary = Schema.Struct({
   codeAccessPersistence: CodeAccessPersistence,
   newThreadWorkspace: Schema.optional(CodeNewThreadWorkspace),
   pullRequestBackgroundRefresh: Schema.optional(CodeProjectPullRequestBackgroundRefresh),
+  desktopRecipe: Schema.optional(DesktopRecipe),
   connectedRepository: Schema.optional(ConnectedGitHubRepository),
   providerPolicy: Schema.optional(ProjectProviderPolicy),
 }).annotations(strict);
@@ -461,6 +469,12 @@ export const ProjectCommand = Schema.Union(
     /** An empty kit clears it. */
     brandKit: CanvasDesignBrand,
   }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-code-project-desktop-recipe"),
+    ...ProjectCommandFields,
+    /** `null` removes the recipe. */
+    recipe: Schema.NullOr(DesktopRecipe),
+  }).annotations(strict),
 );
 export type ProjectCommand = typeof ProjectCommand.Type;
 
@@ -515,6 +529,10 @@ export const ProjectCommandResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("project-brand-kit-changed"),
     project: Project,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("code-project-desktop-recipe-changed"),
+    project: CodeProject,
   }).annotations(strict),
 );
 export type ProjectCommandResult = typeof ProjectCommandResult.Type;
@@ -639,6 +657,11 @@ export const WorkProjectStatusFileChanged = Schema.Struct({
 export type WorkProjectStatusFileChanged = typeof WorkProjectStatusFileChanged.Type;
 export const ProjectBrandKitChanged = Schema.Struct({ project: Project }).annotations(strict);
 export type ProjectBrandKitChanged = typeof ProjectBrandKitChanged.Type;
+/** Journaled once per person's save or removal; the lease service reads the Project it leaves. */
+export const CodeProjectDesktopRecipeChanged = Schema.Struct({
+  project: CodeProject,
+}).annotations(strict);
+export type CodeProjectDesktopRecipeChanged = typeof CodeProjectDesktopRecipeChanged.Type;
 
 export const MemoryEntryCreated = Schema.Struct({ entry: ActiveMemoryEntry }).annotations(strict);
 export type MemoryEntryCreated = typeof MemoryEntryCreated.Type;
@@ -669,6 +692,7 @@ export const PROJECT_EVENT_NAMES = [
   "project.provider-policy-changed@1",
   "project.work-status-file-changed@1",
   "project.brand-kit-changed@1",
+  "project.code-desktop-recipe-changed@1",
   "memory.entry-created@1",
   "memory.entry-superseded@1",
   "memory.entry-retracted@1",
@@ -712,6 +736,9 @@ export const decodeWorkProjectStatusFileChanged = Schema.decodeUnknownSync(
   WorkProjectStatusFileChanged,
 );
 export const decodeProjectBrandKitChanged = Schema.decodeUnknownSync(ProjectBrandKitChanged);
+export const decodeCodeProjectDesktopRecipeChanged = Schema.decodeUnknownSync(
+  CodeProjectDesktopRecipeChanged,
+);
 export const decodeMemoryEntryCreated = Schema.decodeUnknownSync(MemoryEntryCreated);
 export const decodeMemoryEntrySuperseded = Schema.decodeUnknownSync(MemoryEntrySuperseded);
 export const decodeMemoryEntryRetracted = Schema.decodeUnknownSync(MemoryEntryRetracted);

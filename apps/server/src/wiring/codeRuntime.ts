@@ -18,8 +18,10 @@ import { attachWorkRequestRuntime } from "../work/workRequestRuntime";
 import { CodeService, CodeServiceError } from "../code/codeService";
 import {
   type CodeOperationRuntime,
+  type CodeOperationRuntimeOptions,
   createCodeOperationRuntime,
 } from "../code/codeOperationRuntime";
+import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { CodePlannerService } from "../code/codePlannerService";
 import { INHERITED_MARK_REFUSAL } from "../context/inheritedExternalContentMark";
 import {
@@ -377,6 +379,16 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
   return Effect.gen(function* () {
     // A host started with its own runtime uses it; otherwise it is built below.
     let codeOperationRuntime: CodeOperationRuntime | undefined = options.codeOperationRuntime;
+    // Areas built after this one add tools to a Code turn here, as they do to
+    // a Chat thread, so the runtime never holds the services behind them.
+    const codeToolContributors: Array<
+      NonNullable<CodeOperationRuntimeOptions["contributedTools"]>
+    > = [];
+    const contributeCodeTools = (
+      contributor: NonNullable<CodeOperationRuntimeOptions["contributedTools"]>,
+    ): void => {
+      codeToolContributors.push(contributor);
+    };
     const {
       androidToolchainRoutes,
       appleDeviceRoutes,
@@ -920,6 +932,12 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             profileDisplayName: thread.profileDisplayName ?? "the bound profile",
             readPosture,
           }),
+        contributedTools: (input) =>
+          codeToolContributors.length === 0
+            ? undefined
+            : combineAppManagedToolSets(
+                ...codeToolContributors.map((contribute) => contribute(input)),
+              ),
         // The facts come from the host's own records on every call. The
         // Code runtime, the decision reader, and the mention directory are
         // declared later in this startup; a turn runs only after they exist.
@@ -1263,6 +1281,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       codeOperationRuntime,
       codeService,
       codeTurnDecisions,
+      contributeCodeTools,
       routeCodeService,
       terminalProcessPort,
     };

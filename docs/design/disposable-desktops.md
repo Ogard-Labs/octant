@@ -8,27 +8,27 @@ app-managed ([Architecture: extensions and skills](../architecture.md#extensions
 launches go through the shared confinement port, and authority is checked on the
 server ([Architecture: security and authority](../architecture.md#security-and-authority)).
 
-**Delivery state.** Accepted 2026-10-26; slices 1–5 are built, and slice 6
-is built for E2B; its Cua Spaces driver is blocked on a design decision (see
-[Built in slice 6](#built-in-slice-6)). The maintainer authorized this
-scope as post-preview work and accepted the
+**Delivery state.** Accepted 2026-10-26; slices 1–5 and recipe storage are
+built, and slice 6 is built for E2B; its Cua Spaces driver is blocked on a
+design decision (see [Built in slice 6](#built-in-slice-6)). The maintainer
+authorized this scope as post-preview work and accepted the
 [maintainer decisions](#maintainer-decisions) below on 2026-10-26, naming the
 two cloud providers on 2026-10-27; it is not part of the first release, and the
 [Current Release Boundary](../../AGENTS.md#current-release-boundary) is
 unchanged by this document. The lease contract, the `desktop-provider` seam
 and its conformance suite, the host lease service, the host-local provider,
 artifact transfer, the agent's binding of `octant_computer` to a lease, the
-Desktop pane, the cloud HTTPS port, and the E2B driver exist; no recipe
-storage does, so a running host's Desktop tab shows that the Project has no
-recipe, every lease command refuses as a value, no lease exists for a send to
-bind, and no host offers E2B for leasing (see
+Desktop pane, a Code Project's stored recipe with its settings editor, the
+cloud HTTPS port, and the E2B driver exist; no host offers E2B for leasing yet,
+so a recipe can name only the host-local provider (see
 [Built in slice 1](#built-in-slice-1),
 [Built in slice 2](#built-in-slice-2),
 [Built in slice 3](#built-in-slice-3),
 [Built in slice 4](#built-in-slice-4),
-[Built in slice 5](#built-in-slice-5), and
-[Built in slice 6](#built-in-slice-6)). Slice 4's real-provider smoke and
-slice 6's E2B live smoke are still owed by the maintainer.
+[Built in slice 5](#built-in-slice-5),
+[Built in slice 6](#built-in-slice-6), and
+[Built: recipe storage](#built-recipe-storage)). Slice 4's real-provider smoke
+and slice 6's E2B live smoke are still owed by the maintainer.
 
 **Name.** The product calls it a _disposable desktop_. "Computer" already names
 the Mac computer-use destination and the paired-host Computers card, and a
@@ -516,9 +516,9 @@ and Work-mode leasing if it is not delivered with Code.
 The running host registers no desktop provider, and no Project stores a
 recipe. No caller can open a thread through the service and confirmation
 always declines, because the Desktop pane (slice 5) and the agent's lease
-binding (slice 4) bring their own caller authority and approval surface. Recipe
-storage and its Project settings editor are not yet assigned to a slice; a
-Project's recipe will take decision 4's limits as defaults.
+binding (slice 4) bring their own caller authority and approval surface.
+Recipe storage and its Project settings editor came later
+([Built: recipe storage](#built-recipe-storage)).
 
 ### Built in slice 2
 
@@ -553,7 +553,8 @@ Rules this slice resolved:
   The host-local driver refuses a recipe whose network is `allow`
   (`network-allow-unsupported`) until a desktop gets egress that keeps its own
   namespace, as proxied tool launches do through the host's egress proxy.
-  Decision 5's per-recipe `allow` stays the target; no recipe can set it yet.
+  Decision 5's per-recipe `allow` stays the target; the host refuses to store
+  a host-local recipe that sets it ([recipe storage](#built-recipe-storage)).
 - **Loaded for teardown, offered when ready.** The driver is loaded on every
   Linux host, so teardown and restart reconciliation can reap its desktops
   after its programs were removed. It is effective, and so leasable and
@@ -806,8 +807,9 @@ covers a destination reaching the turn's tool set and its approval in the
 thread. `computerUseRuntime.test.ts` and the earlier tool-service tests pass.
 Owed by the maintainer: a real-provider smoke, a turn on a provider
 credential's image-capable model driving a leased desktop through
-`octant_computer`. Until recipe storage exists, that smoke needs a
-development host that supplies a recipe.
+`octant_computer`. The smoke sets the Project's recipe in its settings
+([recipe storage](#built-recipe-storage)) and starts the desktop from the
+Desktop tab.
 
 ### Built in slice 5
 
@@ -915,6 +917,95 @@ and a narrow width in both themes, its live state against a real host-local
 desktop through the real route with a development recipe supplied by the QA
 fixture, since no recipe storage exists.
 
+### Built: recipe storage
+
+Not one of the numbered slices: the Project-side half of the model's
+**Recipe**, delivered after slice 5 so a shipped host can lease at all.
+
+- **Contract.** `packages/contracts/src/projects.ts`: `desktopRecipe` on the
+  Code Project record and its summary (a `DesktopRecipe`, absent when none),
+  the command `change-code-project-desktop-recipe` (`recipe: null` removes
+  it), its result, and the event `project.code-desktop-recipe-changed@1`,
+  which carries the whole Project as every Project event does. The Desktop
+  pane request `recipe-providers` answers the providers a recipe may name.
+- **Policy.** `changeCodeProjectDesktopRecipe` in
+  `packages/domain/src/projectPolicy.ts`.
+- **Host.** `ProjectService` journals the event; the Project projection
+  stores it with the rest of the Project, so it rebuilds from the journal
+  like any other Project field. `apps/server/src/computerUse/projectDesktopRecipe.ts`
+  is the lease service's recipe lookup, wired in
+  `apps/server/src/wiring/computerUse.ts`.
+- **Editor.** **Disposable desktop** in a Code Project's settings
+  (`apps/web/src/projects/ProjectDesktopRecipeSection.tsx`): provider, screen
+  size, how long a desktop lasts, its longest run, and idle time, with Set,
+  Save, and Remove.
+
+Rules this delivery resolved:
+
+- **Only a Code Project holds a recipe.** Only Code threads have a Desktop
+  tab, so a Work recipe could never start a desktop; Work gets one when Work
+  leasing is delivered. A Chat Project never does.
+- **Set from a local window; read anywhere the Project is.** Setting or
+  removing a recipe chooses what this host runs, so only a local window may:
+  the Project route refuses the command from a paired device, which the
+  remote route policy already denies a Project command. A paired device sees
+  the recipe with the Project, and still watches and operates its desktops
+  ([decision 3](#maintainer-decisions)). An agent has no command that
+  reaches it.
+- **The host validates every save.** The command decodes against
+  `DesktopRecipe`, so the screen, lease limits, and provider id are bounded
+  and a lease cannot start longer than its maximum. The recipe must name a
+  provider the host offers for leasing now (the same list destination
+  reporting gives); a host-local recipe cannot allow network
+  ([slice 2](#built-in-slice-2)), while a cloud recipe may, and must name a
+  credential reference ([slice 6](#built-in-slice-6)). A save that changes
+  nothing, and any change to an archived Project, is refused. Removing is
+  always allowed.
+- **Read afresh on every lease command.** The lease service asks for the
+  recipe on each acquire, operating command, and sweep, from the thread's
+  Project as stored now. A new screen size or limit applies to the next
+  desktop; a running desktop's frames stay bounded by the screen it was
+  acquired with, so shrinking the recipe does not blank it and growing it
+  does not let its driver pass a larger frame. Removing the recipe, changing its provider or credential
+  reference, or archiving the Project ends the Project's running desktops at
+  the next sweep as `recipe-removed`, through the teardown path that outlives
+  revocation.
+- **What the editor offers.** It lists only the providers the host answers
+  for `recipe-providers`; a saved provider the host no longer offers is shown
+  as not available and cannot be saved again. Screen sizes and the three
+  lease limits are choices from short preset lists, each inside the
+  four-hour bound, and a saved value off a list is offered too, so opening
+  the editor never changes a recipe by itself. A new recipe starts from
+  decision 4's limits: a 30-minute lease, four hours at most, idle after
+  15 minutes. Network is always none. Image and credential reference are for
+  a cloud provider and are not editable until a host offers one (slice 6
+  builds E2B but offers it nowhere yet); a save keeps the ones already stored
+  for the same provider. Remove asks first,
+  because it destroys running desktops.
+
+Evidence: `projectDesktopRecipe.test.ts` saves a recipe through
+`ProjectService` on a real journal, restarts the host, acquires a lease from
+the stored recipe with the recipe's limits and screen reaching the driver,
+then removes the recipe and sees the sweep release the desktop as
+`recipe-removed` and the next start refused `no-provider-configured`; it also
+refuses a provider the host does not offer. Before the lookup existed the
+same acquire was refused `no-provider-configured`. `projectService.test.ts`
+refuses recipes the schema refuses and journals nothing while the host
+offers the provider; `desktopLeaseService.test.ts` keeps a running desktop's
+frames bounded by its own screen after the recipe's screen changes;
+`projectPolicy.test.ts` covers set, replace, remove, the provider and network
+refusals, a cloud recipe kept only with a credential, Work and Chat Projects,
+and no-ops; `projectRoutes.test.ts` refuses
+a paired device's change and keeps a local window's; `desktopPaneRoutes.test.ts`
+lists the offered providers; `ProjectDesktopRecipeSection.test.tsx` sets a
+recipe on an offered provider, keeps an unavailable saved provider from being
+saved, removes after asking, and offers nothing when the host offers no
+provider. Rendered QA ran the editor in a Project overview in a headless
+browser, light and dark, at 1280 and 390 pixels wide, for a new recipe set on
+the host's provider, a saved recipe, a saved provider the host no longer
+offers, and a host that offers none, with no console error and no horizontal
+overflow.
+
 ### Built in slice 6
 
 Slice 6 lands the shared cloud pieces with the E2B driver. The Cua Spaces
@@ -964,10 +1055,13 @@ Rules this slice resolved:
 - **Desktop keys have their own broker namespace.** A recipe's credential
   reference names a key in `/v1/desktop-provider-credentials/*`, apart from
   model providers' keys, so neither can stand in for the other. A host with
-  no broker attaches no key. Entering a key arrives with recipe storage.
+  no broker attaches no key. No editor enters a key yet; that arrives with
+  the person's opt-in to a billed provider.
 - **A cloud recipe must name a credential.** A recipe for a cloud provider
-  with no credential reference configures nothing that could run and refuses
-  `no-provider-configured` before any provider call.
+  with no credential reference configures nothing that could run: the lease
+  service refuses it `no-provider-configured` before any provider call, and
+  the recipe store refuses to save it
+  ([recipe storage](#built-recipe-storage)).
 - **Restart lists account by account.** Reconciliation lists each provider
   once with no credential and once per credential reference any of its leases
   recorded, and destroys tagged desktops that have no live lease. A listing
@@ -982,8 +1076,8 @@ Rules this slice resolved:
 - **Loaded for teardown, offered after the person opts in.** The E2B driver
   is loaded on every host, so teardown and restart reconciliation reach any
   E2B lease a host ever journaled. It is not effective: no host offers it for
-  leasing or reports it as a destination until recipe storage brings the
-  person's own choice of provider and key. A billed provider is never on by
+  leasing, reports it as a destination, or lets a recipe name it until the
+  person can choose it and enter its key. A billed provider is never on by
   default.
 - **E2B.** The control plane is `api.e2b.app` with the key in `X-API-Key`.
   A desktop is a sandbox created from the recipe's template (E2B's public

@@ -72,7 +72,7 @@ export interface WorkBoardEvidenceSource {
 
 /**
  * Derive board activity from the thread's latest provider turn, a pending
- * request, and child-run activity.
+ * request, the lead's own harness approval, and child-run activity.
  *
  * Only the latest turn speaks for provider activity. A newer turn supersedes
  * every older one, so a stale running or waiting row cannot pin an idle thread.
@@ -87,9 +87,19 @@ export function boardRuntimeActivityFromTurnsAndSignals(input: {
   }>;
   readonly pendingRequest: boolean;
   readonly pendingRequestKind?: "approval" | "user-input";
+  /**
+   * The agent's own harness approval waits on the person, live or left behind
+   * by a restart. It is the same wait a pending request is, so it parks the
+   * thread exactly as a question does; a pending Work request still names the
+   * wait when both are open.
+   */
+  readonly leadApprovalWaiting?: boolean;
   readonly childActive: number;
   readonly childWaiting: number;
 }): WorkBoardRuntimeActivity {
+  const pendingRequest = input.pendingRequest || input.leadApprovalWaiting === true;
+  const pendingRequestKind =
+    input.pendingRequestKind ?? (input.leadApprovalWaiting === true ? "approval" : undefined);
   const latest = input.turns.at(-1);
   const interrupted = latest !== undefined && turnInterrupted(latest);
   // A turn that asked for an approval or an answer keeps its `running` status
@@ -98,17 +108,17 @@ export function boardRuntimeActivityFromTurnsAndSignals(input: {
   const turnExecuting =
     latest !== undefined &&
     (latest.status === "accepted" || latest.status === "running") &&
-    !input.pendingRequest;
+    !pendingRequest;
   const turnWaiting = latest !== undefined && latest.status === "waiting" && !interrupted;
   const executing = turnExecuting || input.childActive > 0;
-  const awaitingInput = input.pendingRequest || turnWaiting || input.childWaiting > 0;
+  const awaitingInput = pendingRequest || turnWaiting || input.childWaiting > 0;
   const waiting = awaitingInput || interrupted;
   return {
     executing,
     awaitingInput,
     interrupted,
-    ...(awaitingInput && input.pendingRequestKind !== undefined
-      ? { awaitingKind: input.pendingRequestKind }
+    ...(awaitingInput && pendingRequestKind !== undefined
+      ? { awaitingKind: pendingRequestKind }
       : {}),
     ...(waiting && !executing
       ? {

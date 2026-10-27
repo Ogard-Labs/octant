@@ -42,6 +42,7 @@ import {
   createOpenAiImageProvider,
   createCodexProvider,
   createOpenCodeProvider,
+  createOutsideHarnessEndpointProvider,
   effectiveProviderAuthority,
   isImageProfileDriverKind,
   removeProvider,
@@ -2488,6 +2489,66 @@ describe("provider instance policy", () => {
   it("rejects removing an instance with active sessions", () => {
     expect(() => removeProvider(provider(), { activeSessionCount: 1 })).toThrow(
       "Stop active sessions before removing this provider.",
+    );
+  });
+});
+
+describe("outside driver provider policy", () => {
+  const createdAt = "2026-10-27T12:00:00.000Z" as UtcTimestamp;
+  const driver = {
+    extensionId: "00000000-0000-4000-8000-000000000911",
+    packageId: "00000000-0000-4000-8000-000000000912",
+    componentId: "driver",
+    version: "0.1.0",
+    digest: `sha256:${"c".repeat(64)}`,
+  } as const;
+  const create = (configuration: Record<string, unknown>, existingInstances = []) =>
+    createOutsideHarnessEndpointProvider({
+      id: decodeProviderInstanceId("00000000-0000-4000-8000-000000000913"),
+      displayName: " Team models ",
+      configuration: {
+        kind: "outside-harness-endpoint",
+        driver,
+        baseUrl: "https://models.example.test/v1",
+        key: { header: "authorization", scheme: "Bearer" },
+        modelIds: [decodeProviderModelId("model-a")],
+        ...configuration,
+      } as never,
+      existingInstances,
+      expectedVersion: 0 as AggregateVersion,
+      createdAt,
+    });
+
+  it("adds the provider off, bound to the exact package, with its address normalized", () => {
+    const instance = create({});
+    expect(decodeProviderInstance(instance)).toEqual(instance);
+    expect(instance).toMatchObject({
+      displayName: "Team models",
+      driverKind: "outside-harness-endpoint",
+      enabled: false,
+      version: 1,
+      configuration: {
+        driver,
+        baseUrl: "https://models.example.test/v1/",
+        key: { header: "authorization", scheme: "Bearer" },
+        modelIds: ["model-a"],
+      },
+    });
+  });
+
+  it("refuses an address that is not HTTPS or loopback HTTP, and a keyless address off loopback", () => {
+    expect(() => create({ baseUrl: "http://models.example.test/" })).toThrow(
+      ProviderPolicyRejected,
+    );
+    expect(() => create({ baseUrl: "https://user:secret@models.example.test/" })).toThrow(
+      ProviderPolicyRejected,
+    );
+    expect(() => create({ key: undefined })).toThrow(
+      "Unauthenticated providers must use a loopback endpoint.",
+    );
+    const { key: _key, ...keyless } = create({ baseUrl: "http://127.0.0.1:8080" }).configuration;
+    expect(create({ baseUrl: "http://127.0.0.1:8080", key: undefined }).configuration).toEqual(
+      keyless,
     );
   });
 });

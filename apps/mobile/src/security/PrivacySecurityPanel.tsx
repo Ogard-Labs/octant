@@ -14,11 +14,17 @@ import { MOBILE_COPY } from "../copy";
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
 import { useTheme } from "../../design-system";
 import type { MobileDeviceIntegrityPort } from "./deviceIntegrityPort";
+import {
+  describeKeyStorageProtection,
+  type KeyStorageProtection,
+  type MobileKeyStorageProtectionPort,
+} from "./keyStorageProtectionPort";
 import type { MobileScreenshotPrivacyPort } from "./screenshotPrivacyPort";
 
 export interface PrivacySecurityPanelProps {
   readonly hostHealth: HostSessionHealthKind;
   readonly integrity: MobileDeviceIntegrityPort;
+  readonly keyStorage: MobileKeyStorageProtectionPort;
   readonly screenshotPrivacy: MobileScreenshotPrivacyPort;
 }
 
@@ -26,6 +32,7 @@ export function PrivacySecurityPanel(props: PrivacySecurityPanelProps) {
   const { colors } = useTheme();
   const [busy, setBusy] = useState(false);
   const [integrityView, setIntegrityView] = useState<DeviceIntegrityPresentation>();
+  const [keyStorage, setKeyStorage] = useState<KeyStorageProtection>();
   const [privacyDecision, setPrivacyDecision] = useState<ScreenshotPrivacyDecision>();
   const [nativeApply, setNativeApply] = useState<"applied" | "unavailable" | undefined>();
   const [staleView, setStaleView] = useState<StaleHostSecurityPresentation>(() =>
@@ -43,6 +50,9 @@ export function PrivacySecurityPanel(props: PrivacySecurityPanelProps) {
       const signal = await props.integrity.probe();
       if (cancelled) return;
       setIntegrityView(evaluateDeviceIntegrityHeuristic(signal));
+      const protection = await props.keyStorage.probe();
+      if (cancelled) return;
+      setKeyStorage(protection);
       const mode = await props.screenshotPrivacy.getMode();
       if (cancelled) return;
       setPrivacyDecision(decideScreenshotPrivacyMode(mode));
@@ -50,7 +60,7 @@ export function PrivacySecurityPanel(props: PrivacySecurityPanelProps) {
     return () => {
       cancelled = true;
     };
-  }, [props.integrity, props.screenshotPrivacy]);
+  }, [props.integrity, props.keyStorage, props.screenshotPrivacy]);
 
   const setMode = async (mode: ScreenshotPrivacyMode) => {
     if (!props.screenshotPrivacy.available) return;
@@ -137,6 +147,12 @@ export function PrivacySecurityPanel(props: PrivacySecurityPanelProps) {
           testID="mobile-integrity-status"
         >
           {integrityView.message}
+        </Text>
+      ) : null}
+
+      {keyStorage !== undefined ? (
+        <Text style={styles.status} testID="mobile-key-storage-status">
+          {describeKeyStorageProtection(keyStorage)}
         </Text>
       ) : null}
 

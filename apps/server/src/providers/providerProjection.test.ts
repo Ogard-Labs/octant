@@ -310,6 +310,8 @@ describe("ProviderProjection", () => {
           version: "1.2.0",
           digest: `sha256:${"a".repeat(64)}`,
         },
+        baseUrl: "http://127.0.0.1:8080/",
+        modelIds: ["local-model"],
       },
       enabled: false,
     });

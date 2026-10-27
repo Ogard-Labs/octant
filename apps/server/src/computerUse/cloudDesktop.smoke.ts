@@ -6,8 +6,8 @@
  * is never run by tests or CI: it spends money. The API key is read from
  * standard input, never from an argument or the environment, and is held only
  * in this process's memory, where the credential broker would otherwise
- * answer for it. A Project recipe is supplied here because no recipe storage
- * exists yet.
+ * answer for it. A Project recipe is supplied here because no host offers a
+ * cloud provider to the recipe store yet.
  *
  *   read -rs KEY; printf %s "$KEY" | bun run desktop:cloud:smoke e2b run
  *   read -rs KEY; printf %s "$KEY" | bun run desktop:cloud:smoke e2b kill

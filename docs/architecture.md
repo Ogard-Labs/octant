@@ -209,6 +209,12 @@ may then write the checkout and run programs as a terminal does, and reaches
 the network through its own `proxied` egress proxy under the Project's rules,
 audited like a harness command's launch
 ([Repository tooling](design/language-services.md#repository-tooling)).
+Agents read the same servers through two read-only app-managed tools in the
+closed catalog, `code-diagnostics` and `code-definition`, offered on every Code
+turn (Plan included) whose provider carries Octant's tools; they read the saved
+file, never an editor's draft, and never start or read through a server that
+runs repository tooling, approved or not
+([agent read rules](design/language-services.md#agent-read-rules)).
 
 **Host resources.** `GET /api/host/resources` is a read-only snapshot of this
 host's load: CPU use averaged over a short sample of the process's CPU times,
@@ -274,7 +280,12 @@ links, and store listing stay closed until
 an authorized post-preview track, opens with a separate maintainer action for
 submission. A build counts only after the
 device pass in the [TestFlight runbook](mobile-testflight.md), not when EAS or
-Apple finishes processing it. Android builds, push notifications, capture and
+Apple finishes processing it. Internal Android builds carry the same client
+under the same rules: the manually dispatched `Mobile (Android internal)`
+workflow builds a signed APK from `main` in its own protected
+`mobile-android-internal` environment, EAS holds the keystore, the public log
+names no install link, and testers are maintainer-chosen
+([Android runbook](mobile-android-internal.md)). Push notifications, capture and
 voice input, and store distribution extend this client under
 [Mobile maturity](design/mobile-maturity.md), which grants the phone no
 authority beyond what the host grants.
@@ -2622,9 +2633,10 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   other than `builtin:provider-driver/<kind>`, and any source other than
   `bundled`. That schema stays closed: an outside driver has its own public
   `OutsideProviderDriverEntry` schema in `@octant/plugin-api`, read from a
-  local folder and installed quarantined, with nothing yet admitting it;
-  third-party provider-driver plugins are an authorized post-preview track
-  under [Outside provider drivers](design/outside-provider-drivers.md). The catalog repeats installed and trusted from the activation context
+  local folder, installed held, and admitted at its digest when its source is
+  trusted; the catalog lists effective outside drivers in their own group from
+  the registry snapshot. Third-party provider-driver plugins are an authorized
+  post-preview track under [Outside provider drivers](design/outside-provider-drivers.md). The catalog repeats installed and trusted from the activation context
   that admits the driver; it never sets them. `resolveProviderCatalogState` in
   `@octant/domain` derives available, enabled, signed in, and ready separately.
   It reads the registry, the last observations, and the last scan, with each
@@ -3165,9 +3177,11 @@ Octant sent inside the prompt is counted. Per runtime:
   tokens and the model's `limit.context`) and Pi (assistant `message_end` usage;
   the occupancy is the last message's input, cache and output) report one
   figure and no categories. The ACP driver reports no usage at all, so an ACP
-  thread shows no window, and its Code context meter says the runtime reports
-  no usage (from the runtime's integration `context.usage`) rather than that
-  none has arrived yet. Lists of tools, MCP servers, skills or instruction
+  thread shows no window, and its context meter says the runtime reports no
+  usage (from the runtime's integration `context.usage`) rather than that none
+  has arrived yet. That holds in every mode: a Work or Chat thread is planned by
+  Octant, so its meter still shows Octant's own estimate, and the line stands
+  where a window's share would be. Lists of tools, MCP servers, skills or instruction
   files exist in some runtimes but carry no token weight, so they are not parts.
 
   Pi usage is accumulated from completed assistant messages, not streaming usage
@@ -3430,8 +3444,8 @@ action.
 | Code on Octant Harness (journaled transcript)            | Octant Harness           | The harness connection's `compact` summarizes the transcript turns before the tail with the same endpoint and journals a `compacted` transcript event; later requests are built from the summary and the tail.                                                                                                                                                                                                                         | `nothing-to-compact`, `no-session`                            |
 | Codex app-server, any mode                               | Codex                    | `thread/compact/start` with the thread id (codex-cli 0.159.3 and 0.162.1 app-server schemas); the run is observed as a turn carrying the `contextCompaction` item.                                                                                                                                                                                                                                                                     | `runtime-version-unsupported` when the method is not found    |
 | Claude Code, any mode                                    | Claude Code              | The runtime's own `/compact`, sent by the port as a user-role input that carries no tools and is not counted as a turn; observed as `system`/`compact_boundary` (`compact_metadata.trigger: "manual"`, `pre_tokens`) and the `status` message's `compact_result`. A resumed session sends its `compacting` status and a `rate_limit_event` before it initializes; the port holds both and delivers them after the initialized message. | `runtime-version-unsupported` when `compact` is not announced |
-| OpenCode, any mode                                       | OpenCode                 | `/api/session/:sessionID/compact` (served by OpenCode 2.0.26); observed as `session.compaction.ended`, `session.next.compaction.ended` or `session.compacted`.                                                                                                                                                                                                                                                                         | `runtime-version-unsupported` on a server without the route   |
-| Pi and Oh My Pi, any mode                                | Pi                       | Pi's RPC `compact` command (`packages/coding-agent/docs/rpc.md`); observed as `compaction_end`, which changed nothing when it carries no `result`.                                                                                                                                                                                                                                                                                     | `runtime-version-unsupported` when the command is refused     |
+| OpenCode, any mode                                       | Nobody yet               | Octant sends no compaction request, so the driver declares no `sessionCompaction`. OpenCode 2.0.26 serves `/api/session/:sessionID/compact`, but the adapter does not call it (see below). OpenCode's own compactions are observed as `session.compaction.ended`, `session.next.compaction.ended` or `session.compacted`.                                                                                                              | `runtime-cannot-compact`                                      |
+| Pi and Oh My Pi, any mode                                | Nobody yet               | Octant sends no compaction request, so the driver declares no `sessionCompaction`. Pi documents an RPC `compact` command (`packages/coding-agent/docs/rpc.md`), but the adapter does not send it (see below). Pi's own compactions are observed as `compaction_end`, which changed nothing when it carries no `result`.                                                                                                                | `runtime-cannot-compact`                                      |
 | ACP agents                                               | Nobody                   | The protocol has no compaction request; the thread says so in place of the button.                                                                                                                                                                                                                                                                                                                                                     | `runtime-cannot-compact`                                      |
 | Any other adapter                                        | Nobody, unless it claims | An adapter compacts only by reporting the capability and implementing the seam below.                                                                                                                                                                                                                                                                                                                                                  | `runtime-cannot-compact`                                      |
 
@@ -3450,12 +3464,16 @@ changed it. The Claude adapter claims compaction when the runtime announces
 `compact` among its commands (Claude Code 2.1.296 does, read through the SDK's
 initialization without a model call), and settles a compaction once both the
 boundary and a successful `compact_result` are in, on a failed one, or at the
-latest on the result that closes the command. The OpenCode and Pi rows come from those runtimes' published API
-descriptions and are not probed against a pinned release: OpenCode's route only
-admits the request and reports completion on its session events, and Pi answers
-its command with the compaction data. Each of those adapters starts by recording
-the request, the completion signal, and the refusal for the release it pins,
-and reports `sessionCompaction: "unsupported"` until that record exists.
+latest on the result that closes the command. The OpenCode route and Pi command
+named in their rows come from those runtimes' published API descriptions and
+have not been probed against a pinned release: OpenCode's route only admits the
+request and reports completion on its session events, and Pi answers its
+command with the compaction data. Neither adapter sends its request yet. Each
+starts by recording the request, the completion signal, and the refusal for
+the release it pins; until that record exists it declares no
+`sessionCompaction`, so **Compact session** on an OpenCode or Pi thread is
+refused `runtime-cannot-compact`, and only the runtime's own compactions are
+observed.
 
 Every runtime also refuses, before anything is journaled, with `turn-running`
 (a turn is in flight; compaction never runs inside one), `compaction-running`,
@@ -5035,15 +5053,26 @@ the model at another size.
      composition call site still supplies each port.
   2. **Approval attention.** A pending approval raises the same attention as
      a pending question: the thread's state, the Inbox, and the sidebar mark,
-     and it shows inline in the thread. Not yet pinned by a test.
+     and it shows inline in the thread. `workThreadBoardService.test.ts` pins
+     that a Work thread parked on the lead's approval, live or after a
+     restart, reads exactly as one parked on a question (same state, same
+     board column), differing only in naming the wait an approval;
+     `chatService.test.ts` and `codeService.test.ts` pin the Chat and Code
+     navigation rows, `leadApprovalAttention.test.ts` and
+     `pendingRequestRoutes.test.ts` the Inbox row,
+     `collectThreadAttention.test.ts` the sidebar mark, and
+     `ThreadHarnessApproval.test.tsx` the inline card.
   3. **Task list.** `todo-write` records pending, in-progress, and done
      without a plan approval. Not yet pinned at the offered-set level beyond
      item 1; the progress states are covered by `nativeHarnessTodo.test.ts`.
   4. **One session everywhere.** The same session state is visible in web,
      terminal, and phone.
   5. **Terminal focus escape.** A keyboard user can leave the terminal pane
-     with a documented chord, and the pane says so. Not yet pinned; pinned
-     when the terminal focus escape lands, in the existing xterm tests.
+     with a documented chord (Mod+Escape to the next control,
+     Mod+Shift+Escape to the previous one, rebindable), and the pane says so.
+     `XtermTerminalAdapter.test.tsx` pins the chord, that Tab and a bare
+     Escape stay with the shell, and that the pane names a way out even when
+     another action has taken the chord.
 
 Follow-up suggestions are every provider's, not the harness's
 (`apps/server/src/followUps`). Every Chat, Work, and Code turn, on any
@@ -5997,15 +6026,15 @@ same. This holds in Chat, Work, and Code.
   service, the host-local provider (a virtual X display in a dedicated
   Bubblewrap launch, Linux only), artifact transfer, a Code send's binding
   of `octant_computer` to one of its thread's leases, the Code dock's
-  Desktop tool, and E2B, the first of the two named cloud providers (E2B and
-  Cua Spaces), are built; Cua Spaces waits on a design for reaching its local
+  Desktop tool, a Code Project's stored desktop recipe with its settings
+  editor, and E2B, the first of the two named cloud providers (E2B and Cua
+  Spaces), are built; Cua Spaces waits on a design for reaching its local
   daemon. A cloud driver reaches its provider only through the host's
   HTTPS port, which sends nothing outside the hosts the driver declares and
   attaches the person's key from the credential broker's
   `/v1/desktop-provider-credentials/*` namespace itself; a person confirms
-  every billed desktop. No recipe storage is built, so every lease command
-  refuses as a value, no lease exists to bind, and no host offers a cloud
-  provider yet.
+  every billed desktop. No host offers a cloud provider yet, so a recipe can
+  name only the host-local provider.
 
 **Canvas export.** A destination plugin contributes an export target through
 `@octant/plugin-api`. The contribution names the formats it accepts. The host
@@ -6176,7 +6205,14 @@ host. Connecting works only from the Octant window on the host, like Add
 MCP server.
 
 **Sign-in to a hosted server.** A user-added server reached over Streamable
-HTTP shows Sign in under its component in Settings. The host runs the MCP
+HTTP shows Sign in under its component in Settings. The host decides which
+components those are: the installed package's source reads `plugin-package`
+like any other, so the host recognizes its own package by the source
+reference its store of generated folders holds, and Settings asks the host's
+sign-in status for each MCP server component (`not-applicable` shows
+nothing) rather than reading a source kind. A host without the credential
+broker still answers `not-applicable` for every other component and names
+the missing broker only for a server that could sign in. The host runs the MCP
 authorization flow as the protocol lays it out: a bare request to the server
 answers 401 and names its protected resource metadata (RFC 9728, or the
 well-known path when the header names none), whose `resource` must be the
@@ -6302,8 +6338,10 @@ that harness-endpoint shape is a design accepted on 2026-10-26, in
 their inspection and quarantined install from a local folder, and the host
 proxy that runs one over the harness endpoint wire protocol (closed failures,
 a capability ceiling, and a brokered request with this instance's key to its
-configured origin only), and the confined process per instance that carries
-that protocol on macOS are built; nothing admits one yet.
+configured origin only), the confined process per instance that carries that
+protocol on macOS, and admission (trust at a digest, a provider added off from
+a local window, host-run Verify tools, and the process stopped whenever the
+driver stops being effective) are built. Only a macOS host admits one.
 
 The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a
@@ -7171,9 +7209,10 @@ mechanisms are:
     Each cell is a ceiling: the bundled Harness endpoints' declaration, held
     by the host's clamp on every probe claim (`outsideDriverCeiling.ts`), which
     an outside driver's own claims can lower but never exceed, and Octant's
-    tools reach only models the host itself verified. No outside driver package is
-    admitted yet, so an instance reports `driver-not-admitted` with no models
-    and runs no turn.
+    tools reach only models the host itself verified, through a Verify tools
+    request the host makes itself. An instance whose driver is not effective at
+    the digest it binds (on every host but macOS, always) reports
+    `driver-not-admitted` with no models and runs no turn.
   - **Oh My Pi** lists models and starts no session; its driver refuses
     `acquire`, so it never reaches a picker.
 
