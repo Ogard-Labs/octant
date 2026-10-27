@@ -646,7 +646,9 @@ describe("Canvas create panel and card list", () => {
       const client = clientWith();
       render(<InlineThreadCanvas card={inlineCard()} client={client} onOpen={onOpen} />);
 
-      expect(await screen.findByText("Signups this week")).toBeInTheDocument();
+      expect(
+        await screen.findByText("Signups this week", {}, { timeout: 5000 }),
+      ).toBeInTheDocument();
       expect(client.get).toHaveBeenCalledWith("20000000-0000-4000-8000-000000000002");
       // The frame names the Canvas once; the document inside does not repeat it as a page title.
       expect(screen.queryByRole("heading", { level: 1 })).toBeNull();

@@ -1254,17 +1254,30 @@ export function createDesktopLeaseService(
       .filter((lease) => !desktopLeaseHoldsDesktop(lease.state))
       .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
       .slice(0, 1);
-    const admitted = admitAcquire(caller);
     return {
       status: "overview",
       leases: [...holding, ...lastEnded],
       providers: options.providers().map((entry) => leasableOf(entry.provider)),
-      start:
-        admitted.status === "refused"
-          ? admitted
-          : { status: "available", provider: leasableOf(admitted.provider) },
+      start: startFor(caller),
     };
   };
+
+  /**
+   * Every refusal an acquire would meet without asking the provider, the Plan
+   * gate included, so a tab never offers a Start that would only refuse once
+   * pressed. Acquire still checks each of them itself.
+   */
+  function startFor(caller: DesktopLeaseCaller): DesktopPaneStart {
+    const admitted = admitAcquire(caller);
+    if (admitted.status === "refused") return admitted;
+    const gate = decideDesktopLeaseAcquire({
+      executionPolicy: admitted.thread.executionPolicy,
+      billed: admitted.provider.billed,
+      initiator: caller.actor.kind,
+    });
+    if (gate.kind === "refused") return refused(gate.reason);
+    return { status: "available", provider: leasableOf(admitted.provider) };
+  }
 
   /** A view the caller holds on this lease, with the lease still operable by them. */
   function admitView(

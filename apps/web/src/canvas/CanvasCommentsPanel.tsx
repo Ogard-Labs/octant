@@ -19,7 +19,7 @@ import {
 import type { CanvasVersionHistoryEntry } from "@octant/contracts/canvas-revision";
 import { decodeUtcTimestamp } from "@octant/contracts/events";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { canvasBlockLabel } from "./CanvasDocument";
+import { canvasBlockLabel } from "./canvasBlockLabel";
 import { canvasTableRowLabel } from "./blocks/TableBlock";
 import { canvasCommentAgentState } from "./canvasCommentAgentTurn";
 import { OctantButton } from "../ui/base/OctantButton";

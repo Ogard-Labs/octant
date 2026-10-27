@@ -33,6 +33,12 @@ interface BrowserToolApprovalServiceOptions {
    * that scope, so its approvals go to the windows that can see the thread.
    */
   readonly isHostScope?: (windowId: WindowId) => boolean;
+  /**
+   * The waiting set changed: a prompt became listable or left the list for
+   * a decision, a cancel, an expiry, a close, or a revocation. Wired only at
+   * composition so the service stays free of the change feed.
+   */
+  readonly onChanged?: () => void;
 }
 
 interface PendingApproval {
@@ -84,6 +90,7 @@ export class BrowserToolApprovalService {
         const current = this.#pending.get(String(approvalId));
         if (current === undefined) return;
         this.#pending.delete(String(approvalId));
+        this.#options.onChanged?.();
         clearTimeout(current.timer);
         if (current.signal !== undefined && current.onAbort !== undefined) {
           current.signal.removeEventListener("abort", current.onAbort);
@@ -104,6 +111,7 @@ export class BrowserToolApprovalService {
         ...(onAbort === undefined ? {} : { onAbort }),
       };
       this.#pending.set(String(approvalId), pending);
+      this.#options.onChanged?.();
       if (input.signal !== undefined && onAbort !== undefined) {
         input.signal.addEventListener("abort", onAbort, { once: true });
       }

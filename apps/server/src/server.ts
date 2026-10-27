@@ -575,6 +575,7 @@ export function startOctantServer(
       windowHoldsProject,
     } = yield* wireBrowser({
       browserAuthority,
+      machineChangeFeed,
       onWindowRevoked,
       browserCaptures,
       codeEvidence,

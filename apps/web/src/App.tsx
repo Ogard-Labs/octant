@@ -111,6 +111,7 @@ import { pastedImageName } from "./chat/composerImagePaste";
 import { markInteraction, markInteractionAfterPaint } from "./polling/interactionTrace";
 import { useMinuteTick } from "./polling/useMinuteTick";
 import { useMachineChangeFeed } from "./polling/useMachineChangeFeed";
+import { ThreadActivityRevisionsContext } from "./polling/ThreadActivityRevisions";
 import type {
   CodeOperationId,
   NativeHarnessFollowUpCreation,
@@ -1500,6 +1501,22 @@ function LaunchedShell(
     workTurnClient,
   } = launchedClients;
   const machineChanges = useMachineChangeFeed(machineChangeClient);
+  // The auxiliary readers' revision context must not change identity on a
+  // navigation or text notice, so it memoizes the four topics on its own.
+  const threadActivityRevisions = useMemo(
+    () => ({
+      browserCaptures: machineChanges.browserCaptures,
+      toolApprovals: machineChanges.toolApprovals,
+      threadFollowUps: machineChanges.threadFollowUps,
+      threadMessageQueue: machineChanges.threadMessageQueue,
+    }),
+    [
+      machineChanges.browserCaptures,
+      machineChanges.toolApprovals,
+      machineChanges.threadFollowUps,
+      machineChanges.threadMessageQueue,
+    ],
+  );
   // One Navigator reader for the whole window: the dock panel and Zen's
   // assistant are two fronts on it, so a turn sent from either is immediately
   // on screen in both.
@@ -7052,59 +7069,61 @@ function LaunchedShell(
   return (
     <ComputerUseEnabledContext.Provider value={controller.settings?.computerUse.enabled === true}>
       <ImageJobChangeRevisionContext.Provider value={machineChanges.imageJobs}>
-        <SpeechCapabilityProvider
-          client={speechClient}
-          instances={providerController.snapshot?.instances ?? NO_PROVIDER_INSTANCES}
-          settings={controller.settings?.voice ?? NO_VOICE_SETTINGS}
-        >
-          <OctantCommandProvider commands={octantCommands}>
-            <NeedsYouProvider source={needsYouSource}>
-              {/* Held here rather than with any Code pane: a thread's controller has to
+        <ThreadActivityRevisionsContext.Provider value={threadActivityRevisions}>
+          <SpeechCapabilityProvider
+            client={speechClient}
+            instances={providerController.snapshot?.instances ?? NO_PROVIDER_INSTANCES}
+            settings={controller.settings?.voice ?? NO_VOICE_SETTINGS}
+          >
+            <OctantCommandProvider commands={octantCommands}>
+              <NeedsYouProvider source={needsYouSource}>
+                {/* Held here rather than with any Code pane: a thread's controller has to
         outlive the surfaces reading it, so closing a diff tab never tears down
         the turn that thread is running. */}
-              <CodeThreadControllerSlots
-                client={codeClient}
-                readCursorStore={codeReadCursorStore}
-                registry={codeThreadControllers}
-                threadIds={openCodeThreadIds}
-              />
-              <TrackerReferenceProvider ports={trackerReferencePorts}>
-                <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
-                  <SidebarThreadTabsContext.Provider value={sidebarThreadTabs}>
-                    <ProjectThreadsProvider value={projectThreadsAccess}>
-                      <NewTaskDraftsContext.Provider value={newTaskDrafts}>
-                        <StreamRepliesContext.Provider
-                          value={controller.settings?.streamReplies !== false}
-                        >
-                          {/* The floor for every rendered link: panes that can host a
+                <CodeThreadControllerSlots
+                  client={codeClient}
+                  readCursorStore={codeReadCursorStore}
+                  registry={codeThreadControllers}
+                  threadIds={openCodeThreadIds}
+                />
+                <TrackerReferenceProvider ports={trackerReferencePorts}>
+                  <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
+                    <SidebarThreadTabsContext.Provider value={sidebarThreadTabs}>
+                      <ProjectThreadsProvider value={projectThreadsAccess}>
+                        <NewTaskDraftsContext.Provider value={newTaskDrafts}>
+                          <StreamRepliesContext.Provider
+                            value={controller.settings?.streamReplies !== false}
+                          >
+                            {/* The floor for every rendered link: panes that can host a
                     Browser layer their in-app open over this, and surfaces that
                     never can — dock tools, dialogs, Chat — still get the
                     external open and copy rather than a dead anchor. */}
-                          <MarkdownLinkActionsContext.Provider value={rootLinkActions}>
-                            <WorkKindChoiceContext.Provider value={workKindChoice}>
-                              <ModelToolVerificationContext.Provider
-                                value={providerController.verifyModelTools}
-                              >
-                                <HostFederationStackContext.Provider value={federation}>
-                                  <PlanUsageProvider
-                                    barStyle={controller.settings?.usageBars ?? "smooth"}
-                                    client={launchedClients.providerUsageLimitsClient}
-                                  >
-                                    {shell}
-                                  </PlanUsageProvider>
-                                </HostFederationStackContext.Provider>
-                              </ModelToolVerificationContext.Provider>
-                            </WorkKindChoiceContext.Provider>
-                          </MarkdownLinkActionsContext.Provider>
-                        </StreamRepliesContext.Provider>
-                      </NewTaskDraftsContext.Provider>
-                    </ProjectThreadsProvider>
-                  </SidebarThreadTabsContext.Provider>
-                </SidebarThreadDragContext.Provider>
-              </TrackerReferenceProvider>
-            </NeedsYouProvider>
-          </OctantCommandProvider>
-        </SpeechCapabilityProvider>
+                            <MarkdownLinkActionsContext.Provider value={rootLinkActions}>
+                              <WorkKindChoiceContext.Provider value={workKindChoice}>
+                                <ModelToolVerificationContext.Provider
+                                  value={providerController.verifyModelTools}
+                                >
+                                  <HostFederationStackContext.Provider value={federation}>
+                                    <PlanUsageProvider
+                                      barStyle={controller.settings?.usageBars ?? "smooth"}
+                                      client={launchedClients.providerUsageLimitsClient}
+                                    >
+                                      {shell}
+                                    </PlanUsageProvider>
+                                  </HostFederationStackContext.Provider>
+                                </ModelToolVerificationContext.Provider>
+                              </WorkKindChoiceContext.Provider>
+                            </MarkdownLinkActionsContext.Provider>
+                          </StreamRepliesContext.Provider>
+                        </NewTaskDraftsContext.Provider>
+                      </ProjectThreadsProvider>
+                    </SidebarThreadTabsContext.Provider>
+                  </SidebarThreadDragContext.Provider>
+                </TrackerReferenceProvider>
+              </NeedsYouProvider>
+            </OctantCommandProvider>
+          </SpeechCapabilityProvider>
+        </ThreadActivityRevisionsContext.Provider>
       </ImageJobChangeRevisionContext.Provider>
     </ComputerUseEnabledContext.Provider>
   );

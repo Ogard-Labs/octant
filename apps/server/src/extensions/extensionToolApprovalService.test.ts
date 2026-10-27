@@ -133,6 +133,69 @@ describe("extension tool approval service", () => {
     expect(service.list(atWindow(windowId))).toEqual([]);
   });
 
+  it("reports a new prompt and every way it leaves the waiting list", async () => {
+    vi.useFakeTimers();
+    try {
+      const lists: Array<number> = [];
+      const service = new ExtensionToolApprovalService({
+        uuid: () => crypto.randomUUID(),
+        now: Date.now,
+        ttlMs: 1_000,
+        onChanged: () => lists.push(service.list(atWindow(windowId)).length),
+      });
+      const controller = new AbortController();
+      const first = request(service);
+      expect(lists).toEqual([1]);
+      const pending = service.list(atWindow(windowId))[0];
+      expect(
+        service.decide(atWindow(windowId), {
+          approvalId: pending?.approvalId ?? ("" as never),
+          decision: "approved",
+        }),
+      ).toBe(true);
+      await expect(first).resolves.toBe(true);
+      expect(lists).toEqual([1, 0]);
+
+      const second = request(service, controller.signal);
+      controller.abort();
+      await expect(second).resolves.toBe(false);
+      expect(lists).toEqual([1, 0, 1, 0]);
+
+      const third = request(service);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(third).resolves.toBe(false);
+      expect(lists).toEqual([1, 0, 1, 0, 1, 0]);
+
+      const fourth = request(service);
+      service.revokeWindow(windowId);
+      await expect(fourth).resolves.toBe(false);
+      expect(lists).toEqual([1, 0, 1, 0, 1, 0, 1, 0]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stays quiet when a request is refused before it waits or an answer settles nothing", async () => {
+    const lists: Array<number> = [];
+    const service = new ExtensionToolApprovalService({
+      uuid: () => crypto.randomUUID(),
+      now: Date.now,
+      onChanged: () => lists.push(service.list(atWindow(windowId)).length),
+    });
+    for (let index = 0; index < MAX_PENDING_APPROVALS; index += 1) void request(service);
+    expect(lists).toHaveLength(MAX_PENDING_APPROVALS);
+    // Past the cap the request is denied at once and never joins the list.
+    await expect(request(service)).resolves.toBe(false);
+    // An answer naming a prompt nobody may answer settles nothing either.
+    expect(
+      service.decide(atWindow(windowId), {
+        approvalId: "44000000-0000-4000-8000-0000000000ff" as never,
+        decision: "approved",
+      }),
+    ).toBe(false);
+    expect(lists).toHaveLength(MAX_PENDING_APPROVALS);
+  });
+
   it("expires unanswered approval requests", async () => {
     vi.useFakeTimers();
     try {

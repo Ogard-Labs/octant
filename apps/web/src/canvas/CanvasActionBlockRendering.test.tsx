@@ -43,8 +43,9 @@ describe("Canvas action blocks", () => {
     expect(gate.ok).toBe(true);
   });
 
-  it("offers no action control when the workspace supplies no runtime", () => {
+  it("offers no action control when the workspace supplies no runtime", async () => {
     render(<CanvasView input={canvasWithAction()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     expect(screen.queryByRole("group", { name: openSourceActionFixture.label })).toBeNull();
   });
@@ -53,6 +54,7 @@ describe("Canvas action blocks", () => {
     const user = userEvent.setup();
     const actionRuntime = runtime();
     render(<CanvasView input={canvasWithAction()} actionRuntime={actionRuntime} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     const control = screen.getByRole("button", { name: new RegExp(openSourceActionFixture.label) });
     await user.click(control);
@@ -75,6 +77,7 @@ describe("Canvas action blocks", () => {
     });
     const user = userEvent.setup();
     render(<CanvasView input={canvasWithAction()} actionRuntime={actionRuntime} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     await user.click(
       screen.getByRole("button", { name: new RegExp(openSourceActionFixture.label) }),
@@ -84,8 +87,9 @@ describe("Canvas action blocks", () => {
     expect(screen.getByText("This action is not available here.")).toBeVisible();
   });
 
-  it("keeps action blocks out of the document flow so content reads as content", () => {
+  it("keeps action blocks out of the document flow so content reads as content", async () => {
     render(<CanvasView input={canvasWithAction()} actionRuntime={runtime()} />);
+    await screen.findByRole("heading", { name: canvasFixture.title }, { timeout: 5000 });
 
     expect(document.querySelector('[data-block-kind="action"]')).toBeNull();
     expect(screen.getByRole("region", { name: "Canvas actions" })).toBeVisible();
