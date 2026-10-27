@@ -362,6 +362,7 @@ async function host(
       // The Project allows no host: every connection the server asks for is
       // outside its rules.
       projectRules: () => [],
+      joinRecheck: () => () => undefined,
       endpoint:
         process.platform === "darwin"
           ? { kind: "loopback" }
@@ -383,6 +384,7 @@ async function host(
       readThreads: () => threads,
       readCheckout: (checkoutId) =>
         String(checkoutId) === String(checkoutIdentity.id) ? checkoutIdentity : undefined,
+      readThreadFolder: () => checkout,
       canAccessProject: () => true,
       effectiveThread: (_scope, candidate) => candidate,
       resolveRoot: (_scope, candidate, current, relativePath) => ({
