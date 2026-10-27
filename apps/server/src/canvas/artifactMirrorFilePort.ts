@@ -1,5 +1,5 @@
 import { constants, mkdir, realpath } from "node:fs/promises";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { openConfinedPath, removeConfinedEntry } from "../confinedPathOpen";
 import { writeConfinedWorkFile } from "../work/workConfinedWrite";
 import { liveWorkFilesystem } from "../work/workFilesystemPort";
@@ -26,6 +26,25 @@ export function createArtifactMirrorFilePort(): ArtifactMirrorFilePort {
 
     async ensureRoot(absolutePath) {
       if (!isAbsolute(absolutePath)) return;
+      // The root is stored by its real path, so every folder above it that
+      // still exists is at its own real path too. One that is not has been
+      // swapped for a link since, and creating the root through it would put
+      // a folder wherever that link points, so it is refused before anything
+      // is created, as the export folder refuses. Node offers no
+      // directory-relative mkdir, so a swap between this check and the create
+      // can still leave one empty folder there; no file is ever written
+      // through it, because the service then refuses the root.
+      let above = dirname(absolutePath);
+      for (;;) {
+        const real = await realpath(above).catch(() => undefined);
+        if (real !== undefined) {
+          if (real !== above) throw new Error("Refusing to create the mirror root through a link.");
+          break;
+        }
+        const parent = dirname(above);
+        if (parent === above) return;
+        above = parent;
+      }
       await mkdir(absolutePath, { recursive: true });
     },
 

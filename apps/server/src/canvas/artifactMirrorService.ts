@@ -21,6 +21,7 @@ import {
   reimportRefusalText,
   resolveArtifactDestination,
 } from "@octant/domain";
+import { basename, dirname, join, resolve } from "node:path";
 import { buildArtifactBundle, readArtifactBundle } from "./artifactBundle";
 
 /**
@@ -53,7 +54,8 @@ export interface ArtifactMirrorFilePort {
   /** Canonicalize a root, or report that it cannot be reached. */
   readonly resolveRoot: (absolutePath: string) => Promise<string | undefined>;
   /**
-   * Create a folder destination that does not exist yet. Optional: a port
+   * Create a folder destination that does not exist yet, refusing when a
+   * folder above it is no longer at its own real path. Optional: a port
    * without it leaves a missing folder unavailable, as before.
    */
   readonly ensureRoot?: (absolutePath: string) => Promise<void>;
@@ -228,16 +230,20 @@ export class ArtifactMirrorService {
     const command = decodeArtifactMirrorCommand(commandInput);
     if (command.kind === "reimport-artifact-from-file") return this.#reimport(command);
 
+    // Measured before anything else so the version check and the journal
+    // append below run with no await between them.
+    const destination =
+      "destination" in command ? await this.#chosenDestination(command.destination) : undefined;
     if (command.expectedVersion !== this.#settings.version) {
       return this.#refused("stale-version", "The mirror settings changed since you read them.");
     }
     // The effective fallback, so a first override does not quietly journal
     // the empty record's `internal-only` in place of the host default.
     const fallback =
-      command.kind === "set-artifact-mirror-fallback"
-        ? command.destination
+      command.kind === "set-artifact-mirror-fallback" && destination !== undefined
+        ? destination
         : this.settings().fallback;
-    const overrides = this.#nextOverrides(command);
+    const overrides = this.#nextOverrides(command, destination);
     const requestedAutoCommit =
       command.kind === "set-artifact-mirror-auto-commit"
         ? command.autoCommit
@@ -476,31 +482,65 @@ export class ArtifactMirrorService {
   ): Promise<string | undefined> {
     if (destination.kind === "internal-only") return undefined;
     if (destination.kind === "global-folder") {
-      // A folder destination is created on demand: the person (or the host
-      // default) named it, and a missing folder is not a reason to write
-      // nothing.
-      await this.#dependencies.files.ensureRoot?.(destination.canonicalRoot).catch(() => undefined);
-      return this.#dependencies.files.resolveRoot(destination.canonicalRoot);
+      // The folder is stored by its real path, as the export folder is, and
+      // must still resolve to exactly that path. Resolving it afresh and
+      // writing wherever it led meant a folder inside a checkout, swapped for
+      // a link to a host folder, received every write the mirror then
+      // confined to it. A folder that has gone is created on demand, since
+      // the person (or the host default) named it; the port refuses to create
+      // it under a folder that is no longer at its own real path.
+      const files = this.#dependencies.files;
+      const stored = destination.canonicalRoot;
+      let resolved = await files.resolveRoot(stored);
+      if (resolved === undefined) {
+        await files.ensureRoot?.(stored).catch(() => undefined);
+        resolved = await files.resolveRoot(stored);
+      }
+      return resolved === stored ? stored : undefined;
     }
     return checkoutRoot === undefined
       ? undefined
       : this.#dependencies.files.resolveRoot(checkoutRoot);
   }
 
-  #nextOverrides(command: {
-    readonly kind: string;
-    readonly projectId?: ProjectId;
-    readonly destination?: ArtifactMirrorDestination;
-  }): ArtifactMirrorSettings["overrides"] {
+  /**
+   * A chosen folder destination, by its real path.
+   *
+   * Every later use requires the folder to resolve to the stored path, so the
+   * person may name it through a link or with a trailing separator and still
+   * have it work. A folder that does not exist yet keeps the real path of its
+   * nearest existing ancestor followed by the names still to be created.
+   */
+  async #chosenDestination(
+    destination: ArtifactMirrorDestination,
+  ): Promise<ArtifactMirrorDestination> {
+    if (destination.kind !== "global-folder") return destination;
+    const chosen = resolve(destination.canonicalRoot);
+    const missing: string[] = [];
+    let candidate = chosen;
+    for (;;) {
+      const real = await this.#dependencies.files.resolveRoot(candidate).catch(() => undefined);
+      if (real !== undefined) return { ...destination, canonicalRoot: join(real, ...missing) };
+      const parent = dirname(candidate);
+      if (parent === candidate) return { ...destination, canonicalRoot: chosen };
+      missing.unshift(basename(candidate));
+      candidate = parent;
+    }
+  }
+
+  #nextOverrides(
+    command: { readonly kind: string; readonly projectId?: ProjectId },
+    destination: ArtifactMirrorDestination | undefined,
+  ): ArtifactMirrorSettings["overrides"] {
     const others = this.#settings.overrides.filter(
       (override) => String(override.projectId) !== String(command.projectId ?? ""),
     );
     if (
       command.kind === "set-artifact-mirror-override" &&
       command.projectId !== undefined &&
-      command.destination !== undefined
+      destination !== undefined
     ) {
-      return [...others, { projectId: command.projectId, destination: command.destination }];
+      return [...others, { projectId: command.projectId, destination }];
     }
     if (command.kind === "clear-artifact-mirror-override") return others;
     return this.#settings.overrides;
