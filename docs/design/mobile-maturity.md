@@ -405,6 +405,16 @@ sender holding it. The sender is a minimal Octant push gateway
   slots. The local window has no such budget. Reason: thirty one-minute clips
   bound a device to half an hour of audio an hour, which is ample for
   dictation and caps what a lost phone can spend before the owner revokes it.
+- One of the host's two transcription slots is reserved for the computer's
+  own windows: paired devices together hold at most one, and a clip from a
+  second device while another device's clip is transcribing is refused `503`
+  `unavailable` before admission, so the refusal spends none of its budget. A
+  local window may still use both slots when no paired device is sending.
+  Reason: without the reservation two phones could fill both slots and the
+  person at the computer would be told dictation is busy. Capping paired
+  devices together reuses the per-device in-flight count and leaves the host's
+  limit of two concurrent calls on the endpoint unchanged; a separate local
+  slot on top of the two would raise that limit.
 - The budget lives in memory and starts afresh when the host restarts; the
   host stores no clip, transcript, or count, and journals nothing for
   dictation. Reason: a durable counter would be the only thing written for a

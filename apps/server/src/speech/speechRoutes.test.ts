@@ -295,16 +295,57 @@ describe("speech routes for a paired device", () => {
     );
     expect(second?.status).toBe(503);
     expect(decodeSpeechFailureResponse(await second!.json()).category).toBe("unavailable");
-    const otherDevice = handler(
-      pairedRequest("/api/speech/transcriptions", {
-        method: "POST",
-        body: clip(),
-        deviceId: otherDeviceId,
-      }),
-    );
     release();
     expect((await first)?.status).toBe(200);
-    expect((await otherDevice)?.status).toBe(200);
+  });
+
+  it("keeps a slot for the computer's own dictation while paired devices are mid-clip", async () => {
+    let release: () => void = () => undefined;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { handler } = setup({
+      adapter: {
+        transcribe: async () => {
+          await blocked;
+          return { status: "completed", text: "late" };
+        },
+      },
+    });
+    const first = handler(
+      pairedRequest("/api/speech/transcriptions", { method: "POST", body: clip() }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const otherDeviceClip = pairedRequest("/api/speech/transcriptions", {
+      method: "POST",
+      body: clip(),
+      deviceId: otherDeviceId,
+    });
+    const otherDevice = handler(otherDeviceClip);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const computer = handler(
+      request("/api/speech/transcriptions", { method: "POST", body: clip() }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    release();
+    expect((await first)?.status).toBe(200);
+    expect((await computer)?.status).toBe(200);
+    const refused = await otherDevice;
+    expect(refused?.status).toBe(503);
+    expect(decodeSpeechFailureResponse(await refused!.json()).category).toBe("unavailable");
+    expect(otherDeviceClip.bodyUsed).toBe(false);
+
+    // The busy refusal spent none of the other device's budget.
+    for (let index = 0; index < REMOTE_TRANSCRIPTION_BUDGET.maximum; index += 1) {
+      const admitted = await handler(
+        pairedRequest("/api/speech/transcriptions", {
+          method: "POST",
+          body: clip(),
+          deviceId: otherDeviceId,
+        }),
+      );
+      expect(admitted?.status).toBe(200);
+    }
   });
 });
 
