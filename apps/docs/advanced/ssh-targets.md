@@ -11,15 +11,12 @@ target is only where the files are and where commands run, and only after it
 proves it confines them as your Mac would.
 
 In this technical preview you can register targets, bind a folder on one as a
-Code Project, read its files, Git status, and diff, open terminals there, and
-create managed worktrees. **The composer does not offer remote Projects for
-a new task yet**: its Project picker lists them so you can see them. Octant
-on your Mac can already run a remote Project's thread, and the composer step
-is next. Such a thread runs only on Octant's own harness (a model you reach
-through an endpoint, such as an OpenAI-compatible one), whose inference
-stays on your Mac while its file tools and commands act on the target with
-the usual approvals; any other provider is refused for it, and Full access
-is not offered there. macOS targets are not admitted yet either.
+Code Project, read its files, Git status, and diff, open terminals there,
+create managed worktrees, and start Code tasks in it from the desktop app.
+Such a task runs only on Octant's own harness (a model you reach through an
+endpoint, such as an OpenAI-compatible one), whose inference stays on your
+Mac while its file tools and commands act on the target with the usual
+approvals. macOS targets are not admitted yet.
 
 ## What the target needs
 
@@ -76,6 +73,36 @@ type the folder as the target names it, and name the Project. Octant resolves
 the folder on the target and refuses `/` and any folder that holds or sits in
 your `~/.ssh`. From the composer, **New Project on an SSH target…** in the
 Project picker opens this page.
+
+## Start a task on a target
+
+1. Connect the target in **Settings › SSH targets** and check that **Ask for
+   approvals** (or **Plan**) is admitted on its row.
+2. In Code, find the Project under **On SSH targets** in the sidebar, beside a
+   dot that is green while the target is connected, and choose it; or pick it
+   under **On SSH targets** in the composer's Project menu.
+3. The composer shows the folder on the target where it would show a branch.
+   Choose a model under **Octant**: models of other providers are listed as
+   unavailable, because only Octant's own harness runs a task on a target
+   for now. **Access** offers **Plan** and **Ask for approvals**. Full access
+   is not offered on a target, and neither is Auto-accept edits, because
+   Octant keeps no checkpoint of the target's files to go back to, so you
+   approve each write.
+4. Type the task and send it.
+
+The task works in the bound folder itself, not a new worktree. Each command
+and edit it makes waits for your approval as on your Mac, and its network
+reaches only what the task's egress rules allow.
+
+A task on a target keeps to its conversation. The Git, terminal, tests,
+files, and pull-request tools of a local task are not offered for it, and
+neither are forks, checkpoints, rewind, `@` file mentions, Browser, Computer,
+or connectors; use the Project's terminal in Settings › SSH targets for
+anything you want to do on the target yourself.
+
+If the target disconnects, the running turn stops as interrupted and the task
+says the target is not connected. It offers no send until the target is
+connected again; nothing reconnects or replays on its own.
 
 ## Terminals
 
