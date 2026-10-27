@@ -1,6 +1,36 @@
 import type { ProviderFailure } from "@octant/contracts";
-import { Effect, type Scope } from "effect";
-import type { ProviderAcquireInput, ProviderConnection, ProviderDriver } from "./driver";
+import { SshDeniedRootEntries, SshPlacedVariables } from "@octant/contracts/ssh-executor-protocol";
+import { Effect, Schema, type Scope } from "effect";
+import type {
+  ProviderAcquireInput,
+  ProviderConnection,
+  ProviderDriver,
+  ProviderPlacedLaunch,
+} from "./driver";
+
+const isPlacedVariables = Schema.is(SshPlacedVariables);
+const isDeniedRootEntries = Schema.is(SshDeniedRootEntries);
+
+/**
+ * Whether a launch's fixed variables and denied root entries are ones a target
+ * accepts, so a driver decides what it can declare from the seam and not from
+ * one target's protocol. The bounds are the executor's own wire schemas, the
+ * one definition both sides read; a launch outside them is refused at the
+ * host before any frame.
+ */
+export function placedLaunchExpressible(
+  launch: Pick<ProviderPlacedLaunch, "accountState" | "fixedVariables" | "deniedRootEntries">,
+): boolean {
+  const fixed = launch.fixedVariables ?? {};
+  return (
+    isPlacedVariables(Object.entries(fixed).map(([name, value]) => ({ name, value }))) &&
+    isDeniedRootEntries(launch.deniedRootEntries ?? []) &&
+    // The target sets an account-state path's variable to that path itself.
+    !(launch.accountState ?? []).some(
+      (state) => state.variable !== undefined && Object.hasOwn(fixed, state.variable),
+    )
+  );
+}
 
 /**
  * Acquires a connection from a driver, refusing a remote placement the driver

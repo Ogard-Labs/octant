@@ -11,6 +11,7 @@ import { Cause, Deferred, Effect, Exit, Option, Queue, Scope, Stream } from "eff
 import { describe, expect, it } from "vitest";
 import {
   acquireProviderConnection,
+  placedLaunchExpressible,
   runRemotePlacementConformance,
   type ProviderConnection,
   type ProviderDriver,
@@ -343,5 +344,28 @@ describe("acquiring with a remote placement", () => {
       ),
     );
     expect(fixture.localLaunches()).toBe(1);
+  });
+
+  it("tells a driver which fixed variables and denied root entries a target accepts", () => {
+    expect(
+      placedLaunchExpressible({
+        accountState: [{ path: ".agent", access: "read-write", variable: "AGENT_HOME" }],
+        fixedVariables: { NO_COLOR: "1" },
+        deniedRootEntries: [".mcp.json", ".github/hooks"],
+      }),
+    ).toBe(true);
+    // A path value, a name the target sets itself, an entry above the root,
+    // and a name an account-state path already takes are each refused there.
+    for (const launch of [
+      { fixedVariables: { AGENT_CONFIG: "/home/person/.agent" } },
+      { fixedVariables: { PATH: "bin" } },
+      { deniedRootEntries: ["../hooks"] },
+      {
+        fixedVariables: { AGENT_HOME: "elsewhere" },
+        accountState: [{ path: ".agent", access: "read-write" as const, variable: "AGENT_HOME" }],
+      },
+    ]) {
+      expect(placedLaunchExpressible(launch)).toBe(false);
+    }
   });
 });

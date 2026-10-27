@@ -83,7 +83,7 @@ export interface ProviderRemotePlacementSupport {
 /**
  * One runtime process a driver asks to start on the target. Its working
  * directory is the bound root and its environment is built on the target, so
- * no field here can carry a folder or a credential from this host.
+ * no field here can carry a folder of this host, and none is for a credential.
  */
 export interface ProviderPlacedLaunch {
   /** The runtime's absolute path on the target: the placement's own `executable`. */
@@ -97,6 +97,26 @@ export interface ProviderPlacedLaunch {
    * target refuses, is refused.
    */
   readonly accountState?: ReadonlyArray<ProviderPlacedAccountState>;
+  /**
+   * Variables the runtime's own local launch sets to constants of the
+   * driver's (a switch that turns off auto-update, telemetry, or a Project's
+   * own configuration), at most 32. A value holds no `/`, so it names no
+   * folder of this host; a name the target sets itself (`PATH`, `HOME`,
+   * `TMPDIR`), the loader's, the proxy's, Octant's own, or one an
+   * account-state path names is refused (`placedLaunchExpressible` says
+   * which a target accepts), and one the target also sets (`LANG`) keeps the
+   * target's value. Never a credential: provider credentials do not reach a
+   * target.
+   */
+  readonly fixedVariables?: Readonly<Record<string, string>>;
+  /**
+   * Entries of the bound root, relative to it, that the runtime may neither
+   * read nor write, at most 32: files and folders the runtime would load by
+   * itself and that start tools without Octant's approval. Each entry that
+   * exists when the runtime starts is covered in its capsule, as a local
+   * launch covers it.
+   */
+  readonly deniedRootEntries?: ReadonlyArray<string>;
 }
 
 /** One home-relative path a placed runtime signs in with on the target. */
