@@ -382,6 +382,7 @@ export function startOctantServer(
       discoveryRoutes,
       extensionActivationService,
       extensionApiService,
+      extensionLifecycleService,
       extensionPackageStore,
       extensionRoutes,
       generatedImageStore,
@@ -700,6 +701,8 @@ export function startOctantServer(
       codeOperationRuntime,
       codeSessionAuthority,
       codeWorkingDirectoryProbePath,
+      extensionLifecycleService,
+      extensionPackageStore,
       managedWorktreeReceipts,
       options,
       persistence,
@@ -708,6 +711,7 @@ export function startOctantServer(
       roots,
       routeCodeService,
       terminalProcessPort,
+      version,
       windowAuthorityStore,
     });
     const {

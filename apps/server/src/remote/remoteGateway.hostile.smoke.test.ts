@@ -1625,16 +1625,48 @@ const FORBIDDEN_SECRET_PATTERNS = [
 ];
 
 /**
+ * JSON fields the protocol fills with fresh randomness, a signature, or key
+ * material, never with configuration. Base64url can spell any short word: a
+ * merge-queue run failed because a hello's random nonce read as `sk-` and
+ * twenty letters and digits. A base64url value in one of these fields is
+ * masked before the secret patterns are matched; any other value there stays
+ * in the scan.
+ */
+const RANDOM_PROTOCOL_FIELDS: ReadonlySet<string> = new Set([
+  "nonce",
+  "clientNonce",
+  "signature",
+  "hostPublicKey",
+]);
+
+function maskRandomProtocolValues(surface: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(surface);
+  } catch {
+    return surface;
+  }
+  return JSON.stringify(parsed, (key, value: unknown) =>
+    RANDOM_PROTOCOL_FIELDS.has(key) && typeof value === "string" && /^[A-Za-z0-9_-]+$/.test(value)
+      ? "<random protocol value>"
+      : value,
+  );
+}
+
+/**
  * Scan a real captured surface string for the sentinel canary and forbidden
- * secret patterns. Returns violations (empty if clean).
+ * secret patterns. Returns violations (empty if clean). The canary is a fixed
+ * string randomness cannot produce, so it is matched against the whole
+ * surface, random protocol fields included.
  */
 function scanSurface(label: string, surface: string): string[] {
   const violations: string[] = [];
   if (surface.includes(SENTINEL_CANARY)) {
     violations.push(`${label}: sentinel canary leaked`);
   }
+  const scanned = maskRandomProtocolValues(surface);
   for (const pattern of FORBIDDEN_SECRET_PATTERNS) {
-    if (pattern.test(surface)) {
+    if (pattern.test(scanned)) {
       violations.push(`${label}: forbidden pattern ${String(pattern)} matched`);
     }
   }
@@ -1673,6 +1705,52 @@ async function waitForRegistryDrain(
   }
   return registry.size() === 0;
 }
+
+describe("secret surface scan — controls that need no network", () => {
+  // Assembled at run time so the source never holds a key-shaped literal.
+  const keyShaped = `sk-${"a1B2c3".repeat(4)}`;
+  const helloShaped = (overrides: Record<string, unknown>) =>
+    JSON.stringify({
+      productId: "octant",
+      hostId,
+      displayName: "This Mac",
+      hostKeyFingerprint: "a".repeat(64),
+      hostPublicKey: `MFkw${"E".repeat(84)}`,
+      serverBuildVersion: "0.1.0",
+      supportedProtocolRange: { min: 1, max: 1 },
+      authenticationProtocolVersions: [1],
+      securityFloor: 1,
+      remoteOrigin: "https://192.0.2.10:9469",
+      nonce: "Q".repeat(43),
+      expiresAt: nowIso,
+      signature: "R".repeat(86),
+      ...overrides,
+    });
+
+  it("flags a key-shaped value in a field that can carry configuration", () => {
+    const violations = scanSurface("control", helloShaped({ displayName: keyShaped }));
+    expect(violations).toEqual([
+      `control: forbidden pattern ${String(/sk-[a-zA-Z0-9]{20,}/)} matched`,
+    ]);
+  });
+
+  it("does not flag a hello whose random nonce, signature, or key happens to spell a key shape", () => {
+    const randomSpelling = `${keyShaped}${"x".repeat(43 - keyShaped.length)}`;
+    for (const field of ["nonce", "clientNonce", "signature", "hostPublicKey"]) {
+      expect(scanSurface(field, helloShaped({ [field]: randomSpelling }))).toEqual([]);
+    }
+  });
+
+  it("still flags a random protocol field that holds something other than base64url", () => {
+    const violations = scanSurface("control", helloShaped({ nonce: `${keyShaped} leaked` }));
+    expect(violations.length).toBe(1);
+  });
+
+  it("still flags the sentinel canary inside a random protocol field", () => {
+    const violations = scanSurface("control", helloShaped({ nonce: SENTINEL_CANARY }));
+    expect(violations).toEqual(["control: sentinel canary leaked"]);
+  });
+});
 
 describe("sentinel secret injection — real captured surface scan", () => {
   if (prereqs.iface === undefined || prereqs.certs === undefined) {

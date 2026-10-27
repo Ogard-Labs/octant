@@ -13,7 +13,9 @@
     "./replica-store": "./src/replicaStore.ts",
     "./desktop-provider": "./src/desktopProvider.ts",
     "./desktop-provider-conformance": "./src/desktopProviderConformance.ts",
-    "./provider-driver-catalog": "./src/providerDriverCatalog.ts"
+    "./provider-driver-catalog": "./src/providerDriverCatalog.ts",
+    "./language-server-package": "./src/languageServerPackage.ts",
+    "./outside-provider-driver": "./src/outsideProviderDriver.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

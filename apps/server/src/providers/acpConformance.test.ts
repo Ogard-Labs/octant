@@ -5,6 +5,7 @@ import {
 } from "@octant/contracts";
 import { runProviderConformance } from "@octant/provider-sdk/conformance";
 import { runProviderChatConformance } from "@octant/provider-sdk/chat-conformance";
+import { runRemotePlacementConformance } from "@octant/provider-sdk/process-placement-conformance";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { makeAcpDriver, type AcpClientPort } from "./acpDriver";
@@ -88,6 +89,23 @@ describe.each(Object.values(acpProviderProfiles))(
         failureClassified: true,
         released: true,
       });
+    });
+
+    it("reports placement on a remote target unsupported, and launches nothing when handed one", async () => {
+      const fixture = createFixture(profile);
+      const evidence = await runRemotePlacementConformance({
+        driver: fixture.driver,
+        acquireInput: { instanceId, projectRoot, mode: "code" },
+        sessionStart: { sessionId, modelId, executionPolicy: "approval-gated" },
+        turn: { sessionId, prompt: "hello", attachments: [], tools: [] },
+        target: {
+          kind: "remote",
+          launch: () => Effect.fail({ category: "unavailable", message: "No target." }),
+        },
+        localLaunches: () => fixture.active() + fixture.released(),
+        isReleased: () => fixture.active() === 0,
+      });
+      expect(evidence).toMatchObject({ claim: "unsupported", refusedBeforeAnyLaunch: true });
     });
 
     it("passes chat conformance with explicit unsupported native attachments", async () => {

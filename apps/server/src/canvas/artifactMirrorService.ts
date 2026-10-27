@@ -35,7 +35,12 @@ import { buildArtifactBundle, readArtifactBundle } from "./artifactBundle";
 export interface ArtifactMirrorFilePort {
   /** Write one file, creating parent directories. Absolute path. */
   readonly write: (absolutePath: string, contents: string) => Promise<void>;
-  readonly read: (absolutePath: string) => Promise<string | undefined>;
+  /**
+   * Read one file back, or report that it cannot be read. A file that does
+   * not resolve inside `root`, the canonical root it was written under, is
+   * refused.
+   */
+  readonly read: (absolutePath: string, root: string) => Promise<string | undefined>;
   /** Remove a file the mirror previously wrote and no longer produces. */
   readonly remove: (absolutePath: string) => Promise<void>;
   /** Canonicalize a root, or report that it cannot be reached. */
@@ -410,7 +415,7 @@ export class ArtifactMirrorService {
       return this.#refused("file-missing", reimportRefusalText("file-missing"));
     }
     const bundlePath = `${known.root}/${relativeBundle}`;
-    const text = await this.#dependencies.files.read(bundlePath).catch(() => undefined);
+    const text = await this.#dependencies.files.read(bundlePath, known.root).catch(() => undefined);
     const parsed = text === undefined ? undefined : readArtifactBundle(text);
     const decision = decideArtifactReimport({
       canvasId: String(command.canvasId),

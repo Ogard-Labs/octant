@@ -1,4 +1,4 @@
-import type { BigIntStats } from "node:fs";
+import { closeSync, openSync, readlinkSync, type BigIntStats } from "node:fs";
 import { constants, open, readlink, type FileHandle } from "node:fs/promises";
 
 const darwinNoFollowAny = 0x20000000;
@@ -54,6 +54,32 @@ export async function openConfinedPath(
     throw new Error("the opened object is not at the confined path");
   }
   return handle;
+}
+
+/**
+ * `openConfinedPath` for a caller that has to stay synchronous: the Git launch
+ * preparation that decides which out-of-root metadata a confined Git child may
+ * reach is built synchronously by every Git port. Returns a descriptor the
+ * caller must close.
+ */
+export function openConfinedPathSync(canonicalPath: string, flags: number): number {
+  if (process.platform === "darwin") return openSync(canonicalPath, flags | darwinNoFollowAny);
+  if (process.platform !== "linux") {
+    throw new Error("this platform cannot prove where an open handle landed");
+  }
+  const descriptor = openSync(canonicalPath, flags | constants.O_NOFOLLOW);
+  let location: string;
+  try {
+    location = readlinkSync(`/proc/self/fd/${descriptor}`);
+  } catch (error) {
+    closeSync(descriptor);
+    throw error;
+  }
+  if (location !== canonicalPath) {
+    closeSync(descriptor);
+    throw new Error("the opened object is not at the confined path");
+  }
+  return descriptor;
 }
 
 /**

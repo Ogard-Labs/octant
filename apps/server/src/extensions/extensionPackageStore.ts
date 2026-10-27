@@ -233,6 +233,29 @@ export class ExtensionPackageStore {
     }
   }
 
+  /**
+   * The absolute path of a component's declared executable entry point, only
+   * after the whole stored version is verified against its digest; undefined
+   * when it is not, or when the component declares no executable entry.
+   */
+  async verifiedEntryPoint(
+    target: ExtensionVersionReference,
+    componentId: string,
+  ): Promise<string | undefined> {
+    try {
+      validateTarget(target);
+      if (!(await this.verifyVersion(target))) return undefined;
+      const directory = this.#versionPath(target);
+      const receipt = await readReceipt(directory);
+      const relativeEntryPoint = receipt.entryPoints[componentId];
+      const entry = receipt.files.find((file) => file.path === relativeEntryPoint);
+      if (relativeEntryPoint === undefined || entry?.executable !== true) return undefined;
+      return safeContentPath(join(directory, "content"), relativeEntryPoint);
+    } catch {
+      return undefined;
+    }
+  }
+
   contentRoot(target: ExtensionVersionReference): string {
     validateTarget(target);
     return join(this.#versionPath(target), "content");

@@ -13,6 +13,7 @@ import {
   ExtensionContentDigest,
   ExtensionDiagnostic,
   ExtensionEffectivePackageState,
+  ExtensionLanguageServerDeclaration,
   ExtensionLicense,
   ExtensionPackageId,
   ExtensionPackageState,
@@ -425,12 +426,45 @@ export type ExtensionCatalogEntry = typeof ExtensionCatalogEntry.Type;
 
 export const MAX_SKILL_PREVIEW_INSTRUCTIONS_LENGTH = 128 * 1024;
 
+/**
+ * A file inside the package, named by its package-relative path: never an
+ * absolute path, a `.` or `..` segment, or a backslash, so the review names
+ * what the package holds and nothing about where this host keeps it.
+ */
+const PackageRelativePath = Schema.String.pipe(
+  Schema.maxLength(1024),
+  Schema.filter(
+    (path) =>
+      path.length > 0 &&
+      !path.startsWith("/") &&
+      !path.includes("\\") &&
+      !path.includes("\0") &&
+      path.split("/").every((segment) => segment !== "" && segment !== "." && segment !== ".."),
+  ),
+);
+
+/**
+ * What a person reviews before a language server can run: the binary the host
+ * will start, that file's own digest, the languages it serves, and its launch
+ * class, which decides its confinement.
+ */
+export const ExtensionPackageReviewLanguageServer = Schema.Struct({
+  ...ExtensionLanguageServerDeclaration.fields,
+  binary: PackageRelativePath,
+  binaryDigest: ExtensionContentDigest,
+}).annotations(strict);
+export type ExtensionPackageReviewLanguageServer = typeof ExtensionPackageReviewLanguageServer.Type;
+export const decodeExtensionPackageReviewLanguageServer = Schema.decodeUnknownSync(
+  ExtensionPackageReviewLanguageServer,
+);
+
 export const ExtensionPackageReviewComponent = Schema.Struct({
   id: ExtensionComponentId,
   kind: ExtensionComponentKind,
   displayName: boundedText(128),
   declaredCapabilities: Schema.Array(ExtensionCapability).pipe(Schema.maxItems(32)),
   instructions: Schema.optional(boundedText(MAX_SKILL_PREVIEW_INSTRUCTIONS_LENGTH)),
+  languageServer: Schema.optional(ExtensionPackageReviewLanguageServer),
 }).annotations(strict);
 export type ExtensionPackageReviewComponent = typeof ExtensionPackageReviewComponent.Type;
 

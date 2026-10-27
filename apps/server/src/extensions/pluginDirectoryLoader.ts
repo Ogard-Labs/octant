@@ -10,9 +10,16 @@ import {
   type LoadAgentPluginDirectoryOptions,
   type ReadPluginDirectory,
 } from "./agentPluginFilesystem";
+import { LANGUAGE_SERVER_PACKAGE_DOCUMENT_PATH } from "@octant/plugin-api/language-server-package";
+import { OUTSIDE_PROVIDER_DRIVER_DOCUMENT_PATH } from "@octant/plugin-api/outside-provider-driver";
 import { packageSlug } from "./userAddedMcpServers";
 
-export type PluginDirectoryFormat = "agent-plugins" | "codex-plugin" | "claude-plugin";
+export type PluginDirectoryFormat =
+  | "agent-plugins"
+  | "codex-plugin"
+  | "claude-plugin"
+  | "language-server-package"
+  | "outside-provider-driver";
 
 export interface LoadedPluginDirectory extends ReadPluginDirectory {
   readonly format: PluginDirectoryFormat;
@@ -27,10 +34,18 @@ export interface LoadedPluginDirectory extends ReadPluginDirectory {
  * package (root `plugin.json`), a Codex plugin (`.codex-plugin/plugin.json`),
  * or a Claude Code plugin (`.claude-plugin/plugin.json`, `.mcp.json`, or a
  * `skills/` folder). Undefined means none of them.
+ *
+ * A folder with a language server package's document or an outside provider
+ * driver's document at its root is read as that package and as nothing else,
+ * so neither ever also arrives as skills or MCP servers, and no other layout
+ * is ever read as one of them. A folder holding both documents is refused by
+ * the loader rather than read as either.
  */
 export function detectPluginDirectoryFormat(
   entries: ReadonlyArray<AgentPluginsPackageEntry>,
 ): PluginDirectoryFormat | undefined {
+  if (holdsFile(entries, LANGUAGE_SERVER_PACKAGE_DOCUMENT_PATH)) return "language-server-package";
+  if (holdsFile(entries, OUTSIDE_PROVIDER_DRIVER_DOCUMENT_PATH)) return "outside-provider-driver";
   if (looksLikeAgentPlugin(entries)) return "agent-plugins";
   if (
     entries.some((entry) => entry.path === ".codex-plugin/plugin.json" && entry.kind === "file")
@@ -62,6 +77,18 @@ export async function loadPluginDirectory(
   options: LoadAgentPluginDirectoryOptions = {},
 ): Promise<LoadedPluginDirectory> {
   const read = await readPluginDirectory(directoryPath, options);
+  // Each of these packages is read as nothing else, so a folder claiming to be
+  // both is neither: reading it as either would let the other's files ride
+  // along under rules written for a different kind of package.
+  if (
+    holdsFile(read.entries, LANGUAGE_SERVER_PACKAGE_DOCUMENT_PATH) &&
+    holdsFile(read.entries, OUTSIDE_PROVIDER_DRIVER_DOCUMENT_PATH)
+  ) {
+    fail(
+      "manifest-schema",
+      `Folder holds both ${LANGUAGE_SERVER_PACKAGE_DOCUMENT_PATH} and ${OUTSIDE_PROVIDER_DRIVER_DOCUMENT_PATH}; a package is a language server or a provider driver, not both.`,
+    );
+  }
   const format = detectPluginDirectoryFormat(read.entries);
   if (format === undefined) {
     fail(
@@ -69,7 +96,13 @@ export async function loadPluginDirectory(
       "Folder is not a plugin: no plugin.json, .codex-plugin/plugin.json, .claude-plugin/plugin.json, .mcp.json or skills/ found.",
     );
   }
-  if (format === "agent-plugins") return { ...read, format, notes: [] };
+  if (
+    format === "agent-plugins" ||
+    format === "language-server-package" ||
+    format === "outside-provider-driver"
+  ) {
+    return { ...read, format, notes: [] };
+  }
   if (format === "codex-plugin") {
     return {
       ...read,
@@ -79,6 +112,10 @@ export async function loadPluginDirectory(
     };
   }
   return claudePluginAsAgentPlugins(read);
+}
+
+function holdsFile(entries: ReadonlyArray<AgentPluginsPackageEntry>, path: string): boolean {
+  return entries.some((entry) => entry.path === path && entry.kind === "file");
 }
 
 function claudePluginAsAgentPlugins(read: ReadPluginDirectory): LoadedPluginDirectory {

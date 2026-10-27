@@ -140,6 +140,38 @@ describe("host-owned extension package inspector", () => {
     );
   });
 
+  it("takes a provider driver's entry only as a module, never as a program", () => {
+    const driver = (entryExecutable: boolean) =>
+      packageFixture({
+        entries: [
+          {
+            path: "dist/driver.mjs",
+            kind: "file",
+            content: executable,
+            ...(entryExecutable ? { executable: true } : {}),
+          },
+        ],
+        manifest: {
+          source: { kind: "local-folder", sourceRef: "local-driver" },
+          declaredCapabilities: [],
+          primaryComponentId: "driver",
+          components: [
+            {
+              id: "driver",
+              kind: "provider-driver",
+              displayName: "Driver",
+              declaredCapabilities: [],
+              entryPoint: "dist/driver.mjs",
+            },
+          ],
+        } as never,
+      });
+    expect(inspectExtensionPackage(driver(false)).entryPoints).toEqual({
+      driver: "dist/driver.mjs",
+    });
+    expectRejected(driver(true), "entry-point-missing");
+  });
+
   it("rejects unsupported formats, digest mismatches, and strict-manifest failures", () => {
     expectRejected(packageFixture({ format: "rar" }), "unsupported-format");
     expectRejected(

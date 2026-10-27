@@ -154,7 +154,8 @@ server through `@octant/cli` (`octant server run`, `octant web`). The
 installable headless artifact (`scripts/package-headless.ts`) is self-contained:
 it carries the bundled CLI (`bin/octant`), the bundled server (`lib/server`), the
 web assets, and a top-level `node_modules` holding the third-party and native
-dependencies both bundles leave external, built on the target platform itself.
+dependencies both bundles leave external, built on the target platform itself,
+and the target's bundled TypeScript language server with its license notice.
 An installed CLI starts that server under its own Bun runtime with
 `OCTANT_ARTIFACT_ROOT` and `OCTANT_ARTIFACT_VERSION` set. The server verifies
 every listed file before it opens the store, and reports that version on
@@ -182,16 +183,24 @@ next step.
 **Language services.** Code editor language services and, later, a debugger
 run as confined children the server launches per checkout, under the
 [Language services](design/language-services.md) design accepted on 2026-10-26.
+The desktop app and the headless artifact carry the bundled server's binary for
+their target with its license notice, signed with the app on macOS
+([packaging rules](design/language-services.md#packaging-rules)).
 Its seam and companion are built: the `language-server` component kind, the
 pure launch policy, the read and document contracts, the remote-approvable
 `code.language.read` action, and the server's confined, receipted,
 crash-limited language servers behind `POST /api/code/language/documents` and
-`POST /api/code/language/read`. The bundled TypeScript server is the only
-component. The Monaco editor calls those routes through the Code client: it
-shows the server's diagnostics as markers and opens a definition in another
-file through the ordinary file-open path, locally and from a paired device. A
-Settings › Code switch, stored in the journaled Code settings, turns the
-bundled server off, and the host then answers `turned-off`.
+`POST /api/code/language/read`. Besides the bundled TypeScript server, a
+person can add a `static` server from a local folder holding an
+`octant-language-server.json` package document: it installs through the
+extension package store untrusted and disabled, its review names the binary,
+its digest, its languages, and its class, and it serves only once trusted and
+switched on, verified against that digest at every start. The Monaco editor
+calls those routes through the Code client: it shows the server's diagnostics
+as markers and opens a definition in another file through the ordinary
+file-open path, locally and from a paired device. A Settings › Code switch,
+stored in the journaled Code settings, turns the bundled server off, and the
+host then answers `turned-off`.
 
 **Host resources.** `GET /api/host/resources` is a read-only snapshot of this
 host's load: CPU use averaged over a short sample of the process's CPU times,
@@ -786,7 +795,9 @@ confinement attestation, binding a remote root with Files, Git status, and
 diff reads through the executor, and the native harness's file tools,
 commands, and egress for a remote-bound Project's turn are built; the Code
 turn runtime does not yet start a thread there, so no product route reaches a
-target's tools. SSH targets, their attestation digests, and remote bindings
+target's tools. The provider-sdk seam for placing a runtime on a target, and
+its conformance, are built; no driver declares it and no runtime is launched
+there yet. SSH targets, their attestation digests, and remote bindings
 are journaled. Its
 admission, confinement attestation,
 transport, and how it differs from a paired host are owned by
@@ -2426,7 +2437,11 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   `start`, `resume`, `send`, `interrupt`, `stop`, `answerApproval`,
   `answerUserInput`, and `answerTool`, with optional current-turn `steer`. Every driver passes
   the shared conformance harness (chat, child-agent, and context-facts
-  suites) before it is selectable.
+  suites) before it is selectable. An acquisition may carry a host-supplied
+  remote placement, which reaches only a driver that declares
+  `remotePlacement` and only through `acquireProviderConnection`; every other
+  driver reports it unsupported and launches nothing
+  ([Provider runtimes on a target](design/remote-ssh-environments.md#provider-runtimes-on-a-target)).
 - **Probe scheduling.** Operations on one provider instance run one at a time.
   A probe asked for while another probe of that instance is running joins it
   and shares its result, unless an enable or configuration change queued after
@@ -2581,11 +2596,11 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   properties (no install, trust, enable, credential, or capability claims),
   declared capabilities, contributions, a second component, an entry point
   other than `builtin:provider-driver/<kind>`, and any source other than
-  `bundled`. Outside drivers need their own design before the schema admits
-  them; third-party provider-driver plugins are an authorized post-preview
-  track whose design is
-  [Outside provider drivers](design/outside-provider-drivers.md), and the
-  schema refuses them until its slices land. The catalog repeats installed and trusted from the activation context
+  `bundled`. That schema stays closed: an outside driver has its own public
+  `OutsideProviderDriverEntry` schema in `@octant/plugin-api`, read from a
+  local folder and installed quarantined, with nothing yet admitting it;
+  third-party provider-driver plugins are an authorized post-preview track
+  under [Outside provider drivers](design/outside-provider-drivers.md). The catalog repeats installed and trusted from the activation context
   that admits the driver; it never sets them. `resolveProviderCatalogState` in
   `@octant/domain` derives available, enabled, signed in, and ready separately.
   It reads the registry, the last observations, and the last scan, with each
@@ -6237,8 +6252,10 @@ A direct-endpoint provider driver supplies a transport through the provider-sdk
 harness endpoint port; the harness loop, endpoint registry, lead fallback,
 retries, and context-window memory stay host-owned
 ([Native harness](#native-harness)). Admitting outside (non-bundled) drivers in
-that harness-endpoint shape is a design accepted on 2026-10-26, not yet
-built, in [Outside provider drivers](design/outside-provider-drivers.md).
+that harness-endpoint shape is a design accepted on 2026-10-26, in
+[Outside provider drivers](design/outside-provider-drivers.md). Their identity
+and their inspection and quarantined install from a local folder are built;
+nothing admits one yet.
 
 The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a
@@ -6571,13 +6588,24 @@ mechanisms are:
   nested user namespace: its inherited mounts stay locked, and mapping the
   host's uid 0 needs a capability it no longer has.
   Full access's deny-only host-root bind keeps the host's own authority and
-  does not drop them. On a root host its extension and host-auth denials are
-  therefore not a boundary: the runtime is host root and shares the host's
-  process namespace, so it can read a denied file through another process's
-  `/proc/<pid>/root`. Measured on bwrap 0.9.0, that worked with no
-  capabilities at all, and dropping `CAP_SYS_ADMIN` stopped only `umount`;
-  hiding host processes would take away what Full access grants. The capsule
-  binds `/etc` and `/sys` read-only because
+  does not drop them. It shares the host's process namespace, so its
+  extension and host-auth denials hold only while the runtime sits in a user
+  namespace of its own, which is how Bubblewrap runs for an ordinary user:
+  reading another process's `/proc/<pid>/root` needs `CAP_SYS_PTRACE` over
+  that process's user namespace, and the capsule never holds it over the
+  host's, so the same uid is not enough. Measured on bwrap 0.9.0 as an
+  ordinary user, the runtime was refused the `/proc/<pid>/root` and
+  `/proc/<pid>/cwd` of both its Bubblewrap parent and another of that user's
+  processes. On a root host the denials are therefore not a boundary:
+  Bubblewrap started by uid 0 makes no user namespace, so the runtime is host
+  root in the host's namespaces and can read a denied file through another
+  process's `/proc/<pid>/root`. Measured on bwrap 0.9.0, that worked with no
+  capabilities at all, and dropping `CAP_SYS_ADMIN` stopped only `umount`.
+  A setuid-root Bubblewrap makes no user namespace for an ordinary user
+  either; measured on bwrap 0.9.0 installed setuid, the runtime read the
+  denied file through both processes, and Octant does not refuse such an
+  install. Hiding host processes would take away what Full access grants.
+  The capsule binds `/etc` and `/sys` read-only because
   workloads read them: resolver and `nsswitch` files, TLS roots, `passwd`,
   the dynamic linker cache, `alternatives` links, and login shell startup
   files from `/etc`; cgroup limits and CPU topology from `/sys`, which
@@ -6936,7 +6964,16 @@ mechanisms are:
   anyone who can write the checkout, the grant requires Git's reciprocal
   record: the `gitdir` sits in a `worktrees` directory, its `gitdir` file
   points back at this marker, and its `commondir` resolves to the main
-  repository's `.git`. On macOS each ancestor of the two paths gets literal
+  repository's `.git`. The host reads every pointer through an open that must
+  land on its canonical path (as for host reads of a bound root) and compares
+  the backlink with the canonical marker path rather than resolving the marker
+  again: a marker that passed a first look and was then swapped for a link to
+  another linked worktree's marker made the pointer read and `realpath(marker)`
+  both follow it, so that repository's metadata was granted, writable for a
+  mutation. The `gitdir` and `commondir` files sit outside the bound root and
+  their contents are untrusted by design; each path they name is resolved and
+  checked structurally, so a link there yields nothing their writer could not
+  write directly. On macOS each ancestor of the two paths gets literal
   `file-read-metadata` only, for Git's component-by-component walk, plus
   literal reads of the two xcode-select links the `/usr/bin/git` shim needs;
   on Linux the same paths are bound, and only when they exist. Write on that
@@ -7005,7 +7042,9 @@ mechanisms are:
   that value is refined once the driver probes or runs. A refinement that
   upgrades a declaration (`unavailable` to `supported` after a reply reports
   usage) is the degraded form: the capability exists but is not promised before
-  it is seen.
+  it is seen. Placement on an SSH target is not a capability and has no row:
+  it is the driver's own `ProviderDriver.remotePlacement` declaration, never a
+  probe, and no driver declares it yet.
 
   | Capability               | Claude Code                                                  | Codex                                                     | OpenCode                                                          | Pi                                                                                      | ACP agents                                                                    | Ollama                                                           | Harness endpoints                                                                 | Outside harness endpoints                                        | Oh My Pi                              |
   | ------------------------ | ------------------------------------------------------------ | --------------------------------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------- |
@@ -7118,7 +7157,18 @@ mechanisms are:
   because listings report its kind and size without opening the file: a path
   `stat` after the swap put a host file's size in the Files panel. An entry
   the host process cannot open is therefore not listed. Canvas refresh opens its source through the same open, so
-  a link anywhere in that path refuses it too. A Linux listing enumerates the held directory through
+  a link anywhere in that path refuses it too. Artifact mirror re-import reads
+  its bundle the same way: the bundle must resolve inside the destination root
+  it was written under, and the open must land on that path, because a plain
+  read followed a mirrored folder swapped for a link to a host folder. A
+  checkout's `.git` marker is read through the same open; see the confined Git
+  rule for the linked-worktree pointers it leads to. The managed-worktree
+  identity check, the folder browser's repository test, and managed-clone
+  verification never read a marker themselves: Git reads it, and each acts only
+  on an answer it checks again (the gitdir's backlink and an unchanged marker
+  inode, a reported top level equal to the browsed folder, a common directory
+  inside a staging folder Octant created), so a swapped marker yields a refusal
+  rather than host bytes or a grant. A Linux listing enumerates the held directory through
   `/proc/self/fd/N`; a macOS listing resolves the path once more, so every name
   it yields is re-resolved and a name present in both the root and the
   swapped-in folder is the remaining residual there. Hard links are not
