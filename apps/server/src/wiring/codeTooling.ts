@@ -27,7 +27,6 @@ import { DebugConfigurationApprovalStore } from "../code/debugConfigurationAppro
 import { createDebugSessionEgress } from "../code/debugSessionEgress";
 import { DebugSessionRecords } from "../code/debugSessionRecords";
 import { installedDebugAdapterComponents } from "../code/installedDebugAdapters";
-import { CODE_DEBUG_CONFIGURATION_AGGREGATE } from "@octant/contracts/code-debug";
 import { CodeLanguageService, type CodeLanguageServerComponent } from "../code/codeLanguageService";
 import { LanguageServerApprovalStore } from "../code/languageServerApprovals";
 import { createLanguageServerEgress } from "../code/languageServerEgress";
@@ -350,19 +349,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     // A thread archived, completed, or moved to Plan or across Full access, a
     // checkout gone, an adapter's package changed, or a confirmation the
     // journal no longer holds ends a session at once.
-    const unsubscribeDebugAuthority = persistence.journal.subscribeCommitted((append) => {
-      if (
-        append.events.some(
-          (event) =>
-            event.aggregateType === "code-thread" ||
-            event.aggregateType === "code-checkout" ||
-            event.aggregateType === EXTENSION_AGGREGATE_TYPE ||
-            event.aggregateType === CODE_DEBUG_CONFIGURATION_AGGREGATE,
-        )
-      ) {
-        void debugService.sweep().catch(() => undefined);
-      }
-    });
+    const unsubscribeDebugAuthority = debugService.endOnAuthorityChanges(persistence.journal);
     yield* Effect.addFinalizer(() => Effect.sync(unsubscribeDebugAuthority));
     yield* Effect.addFinalizer(() => Effect.promise(() => debugService.close()));
     // The same reads as app-managed tools on each Code turn whose provider

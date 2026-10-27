@@ -385,6 +385,8 @@ async function host(
       all: () => connection.prepare("SELECT payload_json FROM event_journal").all(),
     },
     records,
+    approvalStore,
+    journalStore: journal,
     reloadedApprovals: approvals,
     processPort,
     launches: () => launches,
@@ -747,7 +749,58 @@ describe("a running debug session", () => {
     );
   });
 
-  it("ends when the thread stops being active, its Project is erased, or the host stops, and never restarts on its own", async () => {
+  it("ends at once when the window whose own Full access it ran under moves the thread to Plan", async () => {
+    const test = await host(passthrough);
+    await test.install(adapterFolder(test.root));
+    await test.enable();
+    const unsubscribe = test.service.endOnAuthorityChanges(test.journalStore);
+    try {
+      test.windowGrant.fullAccess = true;
+      const sessionId = await startedSession(test);
+      const confirmed = test.approvalStore.approvals(test.thread().projectId)[0];
+      if (confirmed === undefined) throw new Error("no confirmation");
+      // As the access command does it: the thread's event is committed first,
+      // and only then does the window lose its session grant.
+      test.threads[0] = { ...test.thread(), executionPolicy: "plan" };
+      expect(
+        test.approvalStore.record({
+          projectId: test.thread().projectId,
+          checkoutId: test.thread().checkoutId,
+          configuration: test.configuration({ name: "Another" }),
+          configurationDigest: decodeCodeDebugConfigurationDigest(`sha256:${"f".repeat(64)}`),
+          adapter: confirmed.adapter,
+          scope: "checkout",
+        }),
+      ).toBe("recorded");
+      test.windowGrant.fullAccess = false;
+      const deadline = Date.now() + 10_000;
+      while (test.service.running > 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(test.service.running).toBe(0);
+      expect(test.journal.sessions().at(-1)?.payload).toMatchObject({
+        sessionId,
+        endReason: "plan-read-only",
+      });
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("launches nothing for a Start that the host's stop overtook", async () => {
+    const test = await host(passthrough);
+    await test.install(adapterFolder(test.root));
+    await test.enable();
+    const value = test.configuration();
+    expect(await test.approve(value)).toMatchObject({ status: "approved" });
+    const pending = test.start(value);
+    await test.service.close();
+    expect(await pending).toEqual({ status: "failed", reason: "launch-failed" });
+    expect(test.launches()).toBe(0);
+    expect(test.journal.sessions()).toEqual([]);
+  });
+
+  it("ends when the thread stops being active or is purged, its Project is erased, or the host stops, and never restarts on its own", async () => {
     const test = await host(passthrough);
     await test.install(adapterFolder(test.root));
     await test.enable();
@@ -758,6 +811,16 @@ describe("a running debug session", () => {
     test.threads[0] = { ...test.thread(), lifecycle: "active" };
     expect(await test.ask(first, { kind: "state" })).toMatchObject({
       state: { status: "ended", endReason: "thread-inactive" },
+    });
+
+    // A thread purge ends the session before it takes the session's records.
+    const purged = await test.start(test.configuration());
+    if (purged.status !== "started") throw new Error(`not started: ${JSON.stringify(purged)}`);
+    await test.service.endThread(test.thread().id);
+    expect(test.service.running).toBe(0);
+    expect(test.journal.sessions().at(-1)?.payload).toMatchObject({
+      sessionId: purged.sessionId,
+      endReason: "thread-inactive",
     });
 
     const second = await test.start(test.configuration());
@@ -785,7 +848,7 @@ describe("a running debug session", () => {
     await test.service.close();
     expect(test.service.running).toBe(0);
     expect(test.journal.sessions().at(-1)?.payload).toMatchObject({ endReason: "host-shutdown" });
-    expect(test.launches()).toBe(4);
+    expect(test.launches()).toBe(5);
   });
 
   it("is reaped, and its record closed, by a restarted host", async () => {

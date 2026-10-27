@@ -1216,7 +1216,8 @@ the addendum left a choice open.
   folder does not outlive it. A debug port on Linux is a free port the host
   picks (never the egress forwarder's) inside the capsule's namespace; on
   macOS the profile allows binding, inbound, and outbound on
-  `localhost:<port>` only, which 8d measures.
+  `localhost:<port>` only. Those Seatbelt rules are unmeasured: no Mac has
+  run an adapter with a debug port yet, and 8d measures whether they work.
 - **Network.** The session's egress launch id is its session id, so its
   records on `code-debug-egress` and its journaled start (which names the
   configuration digest) are one launch. Decisions use the thread's and its
@@ -1234,7 +1235,13 @@ the addendum left a choice open.
   changed since the session started, even if confirmed again), `project-erased`,
   `host-shutdown`, and `host-restarted`, which a host appends at its next
   start for every session a previous run left open. Every request re-checks
-  these before it runs, and a window reading a session that ended learns why
+  these before it runs, and committed `code-thread`, `code-checkout`,
+  extension, and confirmation events run the check once the call that
+  committed them has finished, because a window leaving its own session grant
+  of Full access commits the thread's event before it drops the grant. A
+  thread purge ends the thread's session before it removes anything, and a
+  Start the host's shutdown overtakes launches nothing. A window reading a
+  session that ended learns why
   (the last 64 endings are remembered, never their values). The posture is
   the thread's as the window that pressed Start holds it, because Full access
   can be that window's own session grant; a grant that lapses without a

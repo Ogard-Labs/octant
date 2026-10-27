@@ -12,6 +12,7 @@ import type {
 } from "@octant/contracts";
 import { decodeCodeRelativePath } from "@octant/contracts";
 import {
+  CODE_DEBUG_CONFIGURATION_AGGREGATE,
   MAX_CODE_DEBUG_APPROVED_CONFIGURATIONS,
   MAX_CODE_DEBUG_MESSAGE_LENGTH,
   MAX_CODE_DEBUG_OUTPUT_ENTRIES,
@@ -77,6 +78,8 @@ import {
   toVariables,
 } from "./debugSessionResults";
 import type { CodeDebugAdapterComponent } from "./installedDebugAdapters";
+import { EXTENSION_AGGREGATE_TYPE } from "../persistence/extensionProjection";
+import type { Journal } from "../persistence/journal";
 import { LINUX_EGRESS_FORWARDER_PORT } from "../process/proxiedNetworkEgress";
 
 /**
@@ -358,6 +361,10 @@ export class CodeDebugService {
     // may have changed under the confirmed configuration since.
     const paths = await this.#resolvePaths(caller, authorized, request.configuration);
     if (paths === undefined) return refused("configuration-invalid");
+    // The host may have begun stopping while the paths were read; `close`
+    // ends only the sessions it can see, so a Start it cannot see launches
+    // nothing.
+    if (this.#closed) return { status: "failed", reason: "launch-failed" };
     const network = decision.shape.network === "allow" ? "allow" : "proxied";
     if (network === "proxied" && !this.#processes.proxies) {
       return refused("confinement-unavailable");
@@ -388,6 +395,9 @@ export class CodeDebugService {
       this.#sessions.delete(String(sessionId));
       return { status: "failed", reason: "adapter-unverified" };
     }
+    // Ended while the binary was verified (the thread moved to Plan, the host
+    // is stopping): nothing is journaled as started and nothing launches.
+    if (record.ending !== undefined) return { status: "failed", reason: "launch-failed" };
     const started = this.#records.started({
       sessionId,
       projectId: thread.projectId,
@@ -407,6 +417,10 @@ export class CodeDebugService {
         await this.#end(record, "start-failed");
         return { status: "failed", reason: "launch-failed" };
       }
+    }
+    if (record.ending !== undefined) {
+      await record.ending;
+      return { status: "failed", reason: "launch-failed" };
     }
     const outcome = await this.#processes.launch({
       sessionId: String(sessionId),
@@ -596,6 +610,36 @@ export class CodeDebugService {
       if (reason !== undefined) ends.push(this.#end(record, reason));
     }
     await Promise.all(ends);
+  }
+
+  /**
+   * A thread purge ends the thread's session before the purge takes its
+   * records and its managed worktree, so nothing the session writes as it
+   * ends (its end record, its egress summary, its proposals) lands after the
+   * purge and outlives it.
+   */
+  async endThread(threadId: CodeThreadId): Promise<void> {
+    await Promise.all(
+      [...this.#sessions.values()]
+        .filter((record) => sameThread(record, threadId))
+        .map((record) => this.#end(record, "thread-inactive")),
+    );
+  }
+
+  /**
+   * Ends sessions as soon as a committed `code-thread`, `code-checkout`,
+   * extension, or confirmation event could have withdrawn what let them
+   * start. The sweep runs after the committing call has finished, not inside
+   * its append: a window that moves a thread out of its own session grant of
+   * Full access appends the thread's event first and withdraws the grant
+   * after, so a sweep inside the append still read Full access and kept the
+   * session on the open network.
+   */
+  endOnAuthorityChanges(journal: Pick<Journal, "subscribeCommitted">): () => void {
+    return journal.subscribeCommitted((append) => {
+      if (!append.events.some((event) => AUTHORITY_AGGREGATES.has(event.aggregateType))) return;
+      setImmediate(() => void this.sweep().catch(() => undefined)).unref?.();
+    });
   }
 
   /** A Project erase ends its sessions at once, whatever else still holds. */
@@ -1133,6 +1177,14 @@ export class CodeDebugService {
     return record.ending;
   }
 }
+
+/** The aggregates whose committed events can end a running session. */
+const AUTHORITY_AGGREGATES: ReadonlySet<string> = new Set([
+  "code-thread",
+  "code-checkout",
+  EXTENSION_AGGREGATE_TYPE,
+  CODE_DEBUG_CONFIGURATION_AGGREGATE,
+]);
 
 const STEP_COMMANDS = {
   continue: "continue",

@@ -429,6 +429,9 @@ export function wireRemote(deps: RemoteDependencies) {
       void debugService.endProject(decodeProjectId(projectId)).catch(() => undefined);
     },
     purgeThreadArtifacts: async ({ mode, threadId }) => {
+      // A running debug session ends before the purge takes its records and
+      // its checkout, so nothing it writes as it ends outlives the purge.
+      if (mode === "code") await debugService.endThread(decodeCodeThreadId(String(threadId)));
       const released = await threadMessageQueue.purgeThread(
         decodeThreadMessageQueueScope({ mode, threadId }),
       );
