@@ -360,24 +360,29 @@ export class ThreadMessageQueueService {
     if (this.#allScopesTick !== undefined) return this.#allScopesTick;
     // Install the promise before reading: several timer/journal wakes in the
     // same turn must not each scan and decode every pending queue.
-    const pending = Promise.resolve().then(async () => {
-      if (this.#disposed) return;
-      const scopes = [
-        ...new Map(
-          [
-            ...this.#store.scopes(),
-            ...[...this.#retained.values()].map((resource) => resource.scope),
-          ].map((current) => [queueId(current), current]),
-        ).values(),
-      ];
-      await this.#tickScopes(scopes);
-    });
-    this.#allScopesTick = pending;
-    try {
-      await pending;
-    } finally {
-      if (this.#allScopesTick === pending) this.#allScopesTick = undefined;
-    }
+    const discovery = Promise.resolve().then(() =>
+      this.#disposed
+        ? []
+        : [
+            ...new Map(
+              [
+                ...this.#store.scopes(),
+                ...[...this.#retained.values()].map((resource) => resource.scope),
+              ].map((current) => [queueId(current), current]),
+            ).values(),
+          ],
+    );
+    const pass = discovery.then((scopes) => this.#tickScopes(scopes));
+    // Coalescing ends with discovery. A Chat admission resolves only when its
+    // turn is accepted, so sharing the whole pass would let one slow queue
+    // stall the next recovery tick for every other queue; #pendingTicks and
+    // #serial keep a still-running queue from being driven twice.
+    const settled = () => {
+      if (this.#allScopesTick === pass) this.#allScopesTick = undefined;
+    };
+    discovery.then(settled, settled);
+    this.#allScopesTick = pass;
+    return pass;
   }
   async #tickScopes(scopes: ReadonlyArray<ThreadMessageQueueScope>): Promise<void> {
     await Promise.all(
@@ -778,7 +783,10 @@ function queueScopeForEvent(
     case "chat.attempt-updated@1": {
       const attempt = eventField(payload, "attempt");
       const outcome = eventField(attempt, "outcome");
-      return outcome === "completed" || outcome === "failed" || outcome === "interrupted"
+      return outcome === "completed" ||
+        outcome === "failed" ||
+        outcome === "interrupted" ||
+        outcome === "cancelled"
         ? scope("chat", eventField(attempt, "threadId"))
         : undefined;
     }

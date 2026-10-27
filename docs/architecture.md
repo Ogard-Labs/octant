@@ -2320,9 +2320,11 @@ flowchart LR
   unavailable until dispatch can revalidate the originating device's grants.
   A committed queue change or terminal turn event wakes only its thread's
   dispatcher. Response text and unrelated journal writes do not scan other
-  queues. One coalesced recovery pass per second catches runtime state that
-  settles after its event and retries retained-content cleanup; it reads
-  queue identities without decoding their full state. Per-thread ordering
+  queues. A recovery pass runs once per second to catch runtime state that
+  settles after its event and retry retained-content cleanup; it reads queue
+  identities without decoding their full state. Overlapping passes share one
+  discovery only, so a queue still waiting on a slow admission never stops a
+  later pass from advancing the others. Per-thread ordering
   and current-authority checks still precede admission.
   Queuing a future message is distinct from steering a running turn; steering
   remains subject to the active runtime's actual capability.

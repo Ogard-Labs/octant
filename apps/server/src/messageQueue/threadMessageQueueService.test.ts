@@ -863,6 +863,16 @@ describe("scoped queue wakes", () => {
       ],
     },
     {
+      name: "a Chat attempt being cancelled",
+      mode: "chat" as const,
+      events: (first: ThreadMessageQueueScope) => [
+        {
+          eventName: "chat.attempt-updated@1",
+          payload: { attempt: { outcome: "cancelled", threadId: first.threadId } },
+        },
+      ],
+    },
+    {
       name: "a Work turn completing",
       mode: "work" as const,
       events: (first: ThreadMessageQueueScope) => [
@@ -882,7 +892,7 @@ describe("scoped queue wakes", () => {
         },
       ],
     },
-  ])("wakes only its thread's dispatcher when %s lands", async (row) => {
+  ])("wakes only its thread's dispatcher when $name lands", async (row) => {
     const f = fixture();
     const first = scoped(row.mode);
     const second = scoped(row.mode);
@@ -960,6 +970,38 @@ describe("scoped queue wakes", () => {
     discovery.mockRestore();
   });
 
+  it("lets a later full pass discover and admit another queue while one admission is still pending", async () => {
+    const f = fixture();
+    const second = scoped("chat");
+    let secondReady = false;
+    f.p.inspect.mockImplementation(async (input) =>
+      String(input.scope.threadId) === String(second.threadId) && !secondReady
+        ? { status: "busy", binding: "authorized-target" }
+        : { status: "ready", binding: "authorized-target" },
+    );
+    const firstCommand = enqueue();
+    const secondCommand = enqueueFor(second);
+    expect((await f.service.execute(windowId, firstCommand)).status).toBe("applied");
+    expect((await f.service.execute(windowId, secondCommand)).status).toBe("applied");
+    let finish: ((value: { status: "accepted" }) => void) | undefined;
+    f.p.admit.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const slow = f.service.tick();
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+    secondReady = true;
+    const later = f.service.tick();
+    await vi.waitFor(() => expect(f.p.admit).toHaveBeenCalledTimes(2));
+    expect(f.p.admit.mock.calls[1]?.[0].messageId).toBe(secondCommand.messageId);
+    expect(f.p.admit.mock.calls[0]?.[0].messageId).toBe(firstCommand.messageId);
+    finish?.({ status: "accepted" });
+    await Promise.all([slow, later]);
+    expect(f.p.admit).toHaveBeenCalledTimes(2);
+  });
+
   it("recovers from a failed full pass and leaves nothing running after dispose", async () => {
     const f = fixture();
     const discovery = vi
@@ -972,11 +1014,17 @@ describe("scoped queue wakes", () => {
     await f.service.tick();
     expect(discovery).toHaveBeenCalledTimes(2);
     expect(f.p.admit).toHaveBeenCalledTimes(1);
-    discovery.mockRestore();
+    const inspected = f.p.inspect.mock.calls.length;
     const deferred = f.service.tick();
     f.service.dispose();
     await f.service.awaitIdle();
     await deferred;
+    await f.service.tick();
+    expect(discovery).toHaveBeenCalledTimes(2);
+    expect(f.p.inspect).toHaveBeenCalledTimes(inspected);
+    expect(f.p.admit).toHaveBeenCalledTimes(1);
+    expect(f.p.reconcile).not.toHaveBeenCalled();
+    discovery.mockRestore();
   });
 
   it("reads only queue identities during discovery", async () => {
