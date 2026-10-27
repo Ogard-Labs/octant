@@ -16,7 +16,7 @@ import {
   type ToolActionAuthority,
 } from "@octant/contracts";
 import { validateComputerUseSelection } from "@octant/plugin-host/computer-use";
-import { isToolAllowedByAllowlist } from "@octant/domain";
+import { decideDesktopArtifactPath, isToolAllowedByAllowlist } from "@octant/domain";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { createComputerUsePlugin } from "../plugins/computerUse/computerUsePlugin";
 import {
@@ -96,7 +96,15 @@ export function createComputerUseToolService(options: {
     string,
     { readonly owner: ComputerUseOwner; readonly appId: string }
   >();
-  const grants = new Map<string, number>();
+  /** Five-minute app grants, keyed by owner, authority, and app. */
+  const grants = new Map<
+    string,
+    {
+      readonly appId: string;
+      readonly leaseId: ComputerUseOwner["leaseId"];
+      readonly expiresAt: number;
+    }
+  >();
   /**
    * Why the tool-call authority gate refuses this owner, or undefined when it
    * admits it. `approved` says a one-time approval for this very action was
@@ -348,7 +356,8 @@ export function createComputerUseToolService(options: {
     // irreversible action (untrustedContentPolicy), so the runtime asks again
     // and the person confirms this action freshly.
     const requiresApproval =
-      (grants.get(grantKey) ?? 0) <= Date.now() || options.externalContentIngested(owner);
+      (grants.get(grantKey)?.expiresAt ?? 0) <= Date.now() ||
+      options.externalContentIngested(owner);
     const action = { owner, command, appId, sessionId, authority };
     pending.set(actionId, action);
     // A desktop's approval is also asked in the thread, where any client that
@@ -461,7 +470,7 @@ export function createComputerUseToolService(options: {
         const approved = view.events.find((event) => event.kind === "approval-approved");
         if (approved !== undefined) {
           const expiresAt = Date.parse(approved.occurredAt) + 5 * 60_000;
-          grants.set(grantKey, expiresAt);
+          grants.set(grantKey, { appId, leaseId: owner.leaseId, expiresAt });
           owners.set(ownerKey(owner), { owner, authority, expiresAt });
         }
       }
@@ -502,20 +511,45 @@ export function createComputerUseToolService(options: {
         "unavailable",
         "Computer use is unavailable for this task's current authority.",
       );
-    return options.leases.sendFile(
-      owner,
-      path,
-      async (request) => {
-        const { artifact, provider } = request;
-        const offMachine =
-          request.asks === "off-machine"
-            ? ` This sends the file off this machine to ${provider.displayName}.`
-            : "";
-        const summary = `Send ${artifact.path.slice(0, 512)} (${artifact.size} bytes, SHA-256 ${artifact.sha256}) into ${DESKTOP_LABEL} on ${provider.displayName.slice(0, 128)} for "${options.threadTitle(owner).slice(0, 100)}"?${offMachine}`;
-        return (await ask(summary, signal)) === "approved" ? "approved" : "declined";
-      },
-      options.externalContentIngested(owner),
-    );
+    const decided = decideDesktopArtifactPath(path);
+    if (decided.kind === "relative") endDesktopAppGrants(owner, decided.name);
+    try {
+      return await options.leases.sendFile(
+        owner,
+        path,
+        async (request) => {
+          const { artifact, provider } = request;
+          const offMachine =
+            request.asks === "off-machine"
+              ? ` This sends the file off this machine to ${provider.displayName}.`
+              : "";
+          const summary = `Send ${artifact.path.slice(0, 512)} (${artifact.size} bytes, SHA-256 ${artifact.sha256}) into ${DESKTOP_LABEL} on ${provider.displayName.slice(0, 128)} for "${options.threadTitle(owner).slice(0, 100)}"?${offMachine}`;
+          return (await ask(summary, signal)) === "approved" ? "approved" : "declined";
+        },
+        options.externalContentIngested(owner),
+      );
+    } finally {
+      // Again once the send settles: an approval answered while the bytes were
+      // on their way must not stand for what landed.
+      if (decided.kind === "relative") endDesktopAppGrants(owner, decided.name);
+    }
+  }
+
+  /**
+   * A desktop app is the inbox file of its name, so a file sent under that
+   * name may be a different program than the one a person allowed. Every
+   * grant for the name on that lease ends, whichever turn or window holds it,
+   * and whether or not the send is confirmed: a send cut off midway may still
+   * have replaced the file.
+   */
+  function endDesktopAppGrants(owner: ComputerUseOwner, appId: string): void {
+    for (const [key, grant] of grants)
+      if (
+        grant.leaseId !== undefined &&
+        String(grant.leaseId) === String(owner.leaseId) &&
+        grant.appId === appId
+      )
+        grants.delete(key);
   }
 
   return {
@@ -539,7 +573,7 @@ export function createComputerUseToolService(options: {
             sessionId: action.sessionId,
           });
       }
-      for (const [key, expiresAt] of grants) if (expiresAt <= Date.now()) grants.delete(key);
+      for (const [key, grant] of grants) if (grant.expiresAt <= Date.now()) grants.delete(key);
       await Promise.all(
         [...owners.values()]
           .filter(({ owner, authority, expiresAt }) => {

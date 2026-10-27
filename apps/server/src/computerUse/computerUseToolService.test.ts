@@ -946,6 +946,30 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
     }
   });
 
+  it("asks for an app again once a file of its name is sent, leaving other apps' grants alone", async () => {
+    const f = desktop();
+    try {
+      const tools = f.tools();
+      await tools.execute(call({ operation: "launch", appId: "notes-app" }));
+      await tools.execute(call({ operation: "launch", appId: "other-app" }));
+      expect(f.asked).toHaveLength(2);
+      await expect(
+        tools.execute(call({ operation: "send-file", path: "dist/notes-app" })),
+      ).resolves.toEqual({ result: sent, isError: false });
+      expect(f.asked).toHaveLength(3);
+      // The file under that name may now be a different program than the one
+      // the person approved, so its next launch asks again.
+      await tools.execute(call({ operation: "launch", appId: "notes-app" }));
+      await tools.execute(call({ operation: "windows", appId: "other-app" }));
+      expect(f.asked.slice(3)).toEqual([
+        `Allow control of notes-app on this thread's disposable desktop for "Notes app" for 5 minutes.`,
+      ]);
+      expect(f.control).toHaveBeenCalledTimes(4);
+    } finally {
+      await f.service.close();
+    }
+  });
+
   it("keeps keyboard-focus typing to the desktop and refuses it on this Mac", async () => {
     const f = desktop({ withMac: true });
     try {
