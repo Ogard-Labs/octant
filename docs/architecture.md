@@ -6522,7 +6522,9 @@ a capability ceiling, and a brokered request with this instance's key to its
 configured origin only), the confined process per instance that carries that
 protocol on macOS, and admission (trust at a digest, a provider added off from
 a local window, host-run Verify tools, and the process stopped whenever the
-driver stops being effective) are built. Only a macOS host admits one.
+driver stops being effective) are built, as is moving an instance to a newly
+trusted digest of its driver with its records cleared. Publisher signatures
+are not. Only a macOS host admits one.
 
 The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a

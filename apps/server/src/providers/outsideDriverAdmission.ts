@@ -4,14 +4,17 @@ import {
   decodeProviderSessionId,
   OutsideProviderDriverListing,
   type OutsideHarnessEndpointProviderInstance,
-  type OutsideProviderDriverReference,
+  OutsideProviderDriverReference,
   type ProviderFailure,
   type ProviderFailureCategory,
   type ProviderInstance,
   type ProviderInstanceId,
 } from "@octant/contracts";
 import type { ExtensionEffectiveState, ExtensionPackageState } from "@octant/contracts/extensions";
-import { resolveOutsideDriverActivation } from "@octant/plugin-host/activation";
+import {
+  resolveOutsideDriverActivation,
+  resolveOutsideDriverRebind,
+} from "@octant/plugin-host/activation";
 import type { HarnessEndpointDriver } from "@octant/provider-sdk/harness-endpoint";
 import { Effect, Schema } from "effect";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
@@ -98,7 +101,7 @@ function refusalFailure(reason: OutsideDriverProcessRefusal): ProviderFailure {
     case "quarantined":
       return failure(
         "unavailable",
-        "The provider driver stopped too often, so Octant holds it until Octant restarts.",
+        "The provider driver stopped too often, so Octant holds this version until Octant restarts or you trust another version.",
         "runtime-unavailable",
       );
     case "already-running":
@@ -138,6 +141,7 @@ interface RunningDriver {
 }
 
 const decodeListing = Schema.decodeUnknownEither(OutsideProviderDriverListing);
+const decodeReference = Schema.decodeUnknownEither(OutsideProviderDriverReference);
 
 export class OutsideDriverAdmission {
   readonly #platform: string;
@@ -187,6 +191,31 @@ export class OutsideDriverAdmission {
 
   isAdmitted(instance: OutsideHarnessEndpointProviderInstance): boolean {
     return this.activation(instance).kind === "effective";
+  }
+
+  /**
+   * The digest the instance moves to because its person trusted another
+   * selection of the same driver, or nothing. Reading it starts nothing.
+   */
+  rebindTarget(
+    instance: OutsideHarnessEndpointProviderInstance,
+  ): OutsideProviderDriverReference | undefined {
+    const driver = instance.configuration.driver;
+    const target = resolveOutsideDriverRebind({
+      packageState: this.#packages().find(
+        (candidate) => String(candidate.extensionId) === String(driver.extensionId),
+      ),
+      driver: {
+        extensionId: String(driver.extensionId),
+        packageId: String(driver.packageId),
+        componentId: String(driver.componentId),
+        version: String(driver.version),
+        digest: String(driver.digest),
+      },
+    });
+    if (target === undefined) return undefined;
+    const decoded = decodeReference(target);
+    return decoded._tag === "Right" ? decoded.right : undefined;
   }
 
   /**
