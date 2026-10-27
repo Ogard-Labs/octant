@@ -7,6 +7,8 @@ import {
   decodeDesktopCredentialRef,
   decodeDesktopHostTag,
   decodeDesktopLeaseId,
+  decodeDesktopPlacementId,
+  decodeDesktopProviderId,
   decodeDesktopRecipe,
   decodeEventActor,
   decodeUtcTimestamp,
@@ -42,6 +44,7 @@ import {
   RECORDED_SPACE_TOKEN,
   RecordedCuaDaemon,
   textOf,
+  type RecordedCuaHost,
   type RecordedCuaScenario,
 } from "./cuaRecordedDaemon.test-support";
 
@@ -56,6 +59,12 @@ const recipe: DesktopRecipe = decodeDesktopRecipe({
   maximumLeaseMinutes: 240,
   idleMinutes: 15,
 });
+const otherMachineRecipe: DesktopRecipe = decodeDesktopRecipe({
+  ...recipe,
+  placementId: "other-machine",
+});
+/** The person's spare machine, set up with `cua host setup --provide-spaces`. */
+const SPARE: RecordedCuaHost = { id: "m-7f3a", name: "spare mini", via: "relay", online: true };
 const hostTag = decodeDesktopHostTag("c5000000-0000-4000-8000-0000000000aa");
 const ELEMENT_CLICK = decodeComputerControlCommand({
   operation: "click",
@@ -93,16 +102,20 @@ async function harness(scenario: RecordedCuaScenario = {}) {
   return { clock, daemon, provider: driverOver(daemon, () => clock.now) };
 }
 
-const acquireRequest = (minutes = 30, signal = new AbortController().signal) => ({
+const acquireRequest = (
+  minutes = 30,
+  signal = new AbortController().signal,
+  leaseRecipe: DesktopRecipe = recipe,
+) => ({
   leaseId: decodeDesktopLeaseId(randomUUID()),
   hostTag,
-  recipe,
+  recipe: leaseRecipe,
   expiresAt: decodeUtcTimestamp(new Date(START + minutes * MINUTE).toISOString()),
   signal,
 });
 
-async function acquired(provider: DesktopProvider) {
-  const request = acquireRequest();
+async function acquired(provider: DesktopProvider, leaseRecipe: DesktopRecipe = recipe) {
+  const request = acquireRequest(30, new AbortController().signal, leaseRecipe);
   const result = await provider.acquire(request);
   if (result.status !== "acquired") throw new Error(`not acquired: ${JSON.stringify(result)}`);
   return { leaseId: request.leaseId, result };
@@ -118,7 +131,12 @@ const person = decodeEventActor({
 });
 
 /** One host process: the lease service over the journal on disk, with its own Cua driver. */
-function hostProcess(connection: SqliteConnection, provider: DesktopProvider) {
+function hostProcess(
+  connection: SqliteConnection,
+  provider: DesktopProvider,
+  leaseRecipe: DesktopRecipe = recipe,
+  asked: Array<string> = [],
+) {
   const runtime = createPhase1RuntimeRegistries();
   const clock = () => new Date(START).toISOString();
   const journal = new Journal({
@@ -139,11 +157,14 @@ function hostProcess(connection: SqliteConnection, provider: DesktopProvider) {
       platform: "linux",
       hasScreen: false,
       providers: () => [{ provider, effective: true }],
-      recipe: () => recipe,
+      recipe: () => leaseRecipe,
       thread: () => ({ active: true, executionPolicy: "full-access" }),
       callerMayOpen: () => true,
       computerUseEnabled: () => true,
-      confirm: async () => "declined",
+      confirm: async (request) => {
+        asked.push(request.asks);
+        return "declined";
+      },
       threadRoot: async () => undefined,
       confirmTransfer: async () => "declined",
       systemActor: decodeEventActor({
@@ -197,6 +218,194 @@ describe("Cua desktop provider", () => {
       refusedUnsupportedCommand: true,
       foundAfterRestart: true,
     });
+  });
+
+  it("keeps the seam's promises for a Space on the person's other machine", async () => {
+    const ordinary = await daemonWith({ hosts: [SPARE] });
+    const declining = await daemonWith({ hosts: [SPARE], holdsLifetimeMs: 45 * MINUTE });
+    const lingering = await daemonWith({ hosts: [SPARE], outlivesDelete: true });
+    const backends = new WeakMap<DesktopProvider, RecordedCuaDaemon>();
+    await expect(
+      runDesktopProviderConformance({
+        create: (scenario) => {
+          const daemon = scenario.providerDeclinesExtension
+            ? declining
+            : scenario.desktopOutlivesDestroy
+              ? lingering
+              : ordinary;
+          const provider = driverOver(daemon);
+          backends.set(provider, daemon);
+          return provider;
+        },
+        restarted: (previous) => {
+          const daemon = backends.get(previous);
+          if (daemon === undefined) throw new Error("no recorded daemon for that driver");
+          return driverOver(daemon);
+        },
+        recipe: otherMachineRecipe,
+        unsupportedCommand: ELEMENT_CLICK,
+      }),
+    ).resolves.toMatchObject({
+      stoppedWhenCancelled: true,
+      taggedWhatItCreated: true,
+      extendedOnlyWhenConfirmed: true,
+      reportedAbsenceOnlyWhenAbsent: true,
+      foundAfterRestart: true,
+    });
+  });
+
+  it("creates a Space on the person's one other machine that answers, and refuses to choose among several or none", async () => {
+    const asleep = { ...SPARE, id: "m-0b1c", name: "old laptop", online: false };
+    const { daemon, provider } = await harness({ hosts: [asleep, SPARE] });
+    await acquired(provider, otherMachineRecipe);
+    const [space] = daemon.spaces();
+    const create = space?.createRequest ?? [];
+    expect(textOf(create, 2)).toBe("host:m-7f3a");
+    expect(textOf(create, 3)).toBe("vm");
+    expect(textOf(create, 4)).toBe("qemu");
+    expect(textOf(create, 20)).toBe("none");
+    expect(space?.host).toBe("m-7f3a");
+    expect(methodsCalled(daemon).slice(0, 2)).toEqual([
+      "/cua.daemon.v1.SpaceService/ListHosts",
+      "/cua.daemon.v1.SpaceService/CreateSpace",
+    ]);
+
+    const second = { ...SPARE, id: "m-9d2e", name: "studio" };
+    for (const [hosts, reason] of [
+      [[], "no-other-machine"],
+      [[asleep], "no-other-machine"],
+      [[SPARE, second], "other-machine-ambiguous"],
+    ] as const) {
+      const other = await harness({ hosts });
+      await expect(
+        other.provider.acquire(
+          acquireRequest(30, new AbortController().signal, otherMachineRecipe),
+        ),
+      ).resolves.toEqual({ status: "refused", reason });
+      expect(methodsCalled(other.daemon)).toEqual(["/cua.daemon.v1.SpaceService/ListHosts"]);
+    }
+  });
+
+  it("destroys a Space the daemon reports on another machine than the one asked", async () => {
+    const elsewhere = await harness({ hosts: [SPARE], placesOnHost: "m-9d2e" });
+    await expect(
+      elsewhere.provider.acquire(
+        acquireRequest(30, new AbortController().signal, otherMachineRecipe),
+      ),
+    ).resolves.toEqual({ status: "failed", reason: "space-mismatched" });
+    expect(elsewhere.daemon.spaces()).toEqual([]);
+
+    const awayFromHere = await harness({ placesOnHost: "m-7f3a" });
+    await expect(awayFromHere.provider.acquire(acquireRequest())).resolves.toEqual({
+      status: "failed",
+      reason: "space-mismatched",
+    });
+    expect(awayFromHere.daemon.spaces()).toEqual([]);
+  });
+
+  it("refuses the screen, input, files, and agent control of a Space on another machine while Cua's relay can read the session", async () => {
+    const { daemon, provider } = await harness({ hosts: [SPARE], route: "relay_https" });
+    const { result } = await acquired(provider, otherMachineRecipe);
+    const acquiring = daemon.calls().length;
+    const relayReads = { status: "refused", reason: "relay-reads-session" };
+    await expect(provider.screen(result.handle)).resolves.toEqual(relayReads);
+    await expect(
+      provider.deliver(result.handle, "app", new TextEncoder().encode("#!/bin/sh\n")),
+    ).resolves.toEqual(relayReads);
+    await expect(provider.control(result.handle, { operation: "apps" })).resolves.toMatchObject({
+      kind: "refused",
+      reason: "relay-reads-session",
+    });
+    // Each was refused on the route alone: nothing reached the Space.
+    expect(methodsCalled(daemon).slice(acquiring)).toEqual(
+      Array.from({ length: 3 }, () => "/cua.daemon.v1.SpaceService/GetSpaceRoute"),
+    );
+
+    // The end-to-end mesh and a direct route carry the session.
+    for (const transport of ["mesh", "direct"]) {
+      daemon.routeOver(transport);
+      const opened = await provider.screen(result.handle);
+      if (opened.status !== "ready") throw new Error(`no screen over ${transport}`);
+      await expect(opened.screen.frame()).resolves.toMatchObject({ status: "frame" });
+    }
+
+    // A route that falls back to the relay's HTTPS path while a view is open
+    // stops the view's frames and input.
+    const open = await provider.screen(result.handle);
+    if (open.status !== "ready") throw new Error("no screen");
+    daemon.routeOver("relay_https");
+    await expect(open.screen.frame()).resolves.toEqual(relayReads);
+    await expect(open.screen.input({ kind: "text", text: "secret" })).resolves.toEqual(relayReads);
+    expect(daemon.spaces()[0]?.input.filter((line) => line.startsWith("type"))).toEqual([]);
+
+    // A route Octant cannot name is refused as well.
+    for (const transport of ["cloud", "", "relay_wss"]) {
+      daemon.routeOver(transport);
+      await expect(provider.screen(result.handle)).resolves.toEqual({
+        status: "refused",
+        reason: "route-unverified",
+      });
+    }
+  });
+
+  it("asks a person before a Space starts on another machine, and starts it only for the placement they confirmed", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-cua-away-"));
+    directories.push(directory);
+    const connection = openSqlite(join(directory, "octant.sqlite3"));
+    applyMigrations(connection, MIGRATIONS, () => new Date(START).toISOString());
+    const daemon = await daemonWith({ hosts: [SPARE] }, () => START);
+    const asked: Array<string> = [];
+    const { service } = hostProcess(
+      connection,
+      driverOver(daemon, () => START),
+      otherMachineRecipe,
+      asked,
+    );
+    const caller = { owner: { mode: "code" as const, threadId }, actor: person, scopeId: "w-1" };
+    const cua = decodeDesktopProviderId("cua");
+
+    // An agent under Full access asks in its thread, and is declined here.
+    await expect(
+      service.acquire({
+        owner: { mode: "code", threadId },
+        actor: decodeEventActor({
+          kind: "agent",
+          actorId: "c5000000-0000-4000-8000-0000000000b5",
+          providerInstanceId: "c5000000-0000-4000-8000-0000000000b6",
+          threadId,
+        }),
+      }),
+    ).resolves.toEqual({ status: "refused", reason: "declined" });
+    expect(asked).toEqual(["off-machine"]);
+    // A person's Start without their confirmation of this placement starts nothing.
+    for (const unconfirmed of [
+      caller,
+      { ...caller, confirmedProvider: cua },
+      {
+        ...caller,
+        confirmedProvider: cua,
+        confirmedPlacement: decodeDesktopPlacementId("this-machine"),
+      },
+    ]) {
+      await expect(service.acquire(unconfirmed)).resolves.toEqual({
+        status: "refused",
+        reason: "declined",
+      });
+    }
+    expect(methodsCalled(daemon)).not.toContain("/cua.daemon.v1.SpaceService/ListHosts");
+    expect(methodsCalled(daemon)).not.toContain("/cua.daemon.v1.SpaceService/CreateSpace");
+
+    await expect(
+      service.acquire({
+        ...caller,
+        confirmedProvider: cua,
+        confirmedPlacement: decodeDesktopPlacementId("other-machine"),
+      }),
+    ).resolves.toMatchObject({
+      status: "acquired",
+      lease: { placementId: "other-machine", locality: "cloud", billed: false },
+    });
+    expect(daemon.spaces().map((space) => space.host)).toEqual(["m-7f3a"]);
   });
 
   it("creates a labelled QEMU VM on this machine with the lease id as its create id, and nothing else", async () => {
@@ -324,10 +533,10 @@ describe("Cua desktop provider", () => {
     expect(newer.daemon.spaces()).toEqual([]);
   });
 
-  it("refuses a recipe off this machine's placement, with network, or naming a key, before calling Cua", async () => {
+  it("refuses a placement it does not offer, a recipe with network, or one naming a key, before calling Cua", async () => {
     const { daemon, provider } = await harness();
     for (const refusedRecipe of [
-      decodeDesktopRecipe({ ...recipe, placementId: "other-machine" }),
+      decodeDesktopRecipe({ ...recipe, placementId: "your-aws" }),
       decodeDesktopRecipe({ ...recipe, network: "allow" }),
       decodeDesktopRecipe({ ...recipe, credentialRef: "c5000000-0000-4000-8000-0000000000c1" }),
     ]) {
@@ -350,6 +559,8 @@ describe("Cua desktop provider", () => {
         "/cua.daemon.v1.SpaceService/ListSpaces",
         "/cua.daemon.v1.SpaceService/ResolveSpace",
         "/cua.daemon.v1.SpaceService/ConnectSpace",
+        "/cua.daemon.v1.SpaceService/ListHosts",
+        "/cua.daemon.v1.SpaceService/GetSpaceRoute",
         "/v1/spaces/*/env/cua.env.v1.SystemService/GetCapabilities",
         "/v1/spaces/*/env/cua.env.v1.ComputerService/Screenshot",
         "/v1/spaces/*/env/cua.env.v1.ComputerService/Pointer",
@@ -364,7 +575,8 @@ describe("Cua desktop provider", () => {
     for (const forbidden of [
       "/cua.daemon.v1.DaemonService/Shutdown",
       "/cua.daemon.v1.SpaceService/CallSpaceTool",
-      "/cua.daemon.v1.SpaceService/GetSpaceRoute",
+      "/cua.daemon.v1.SpaceService/PoolRequest",
+      "/cua.daemon.v1.SpaceService/AddSpace",
       "/cua.daemon.v1.ShareService/CreateShare",
       "/mcp",
     ]) {
@@ -444,6 +656,8 @@ describe("Cua desktop provider", () => {
     await expect(
       screen.screen.input({ kind: "key", action: "down", key: "constructor" }),
     ).resolves.toEqual({ status: "refused", reason: "unsupported-key" });
+    // A Space on this machine is never asked for its route.
+    expect(methodsCalled(daemon)).not.toContain("/cua.daemon.v1.SpaceService/GetSpaceRoute");
     const shot = daemon.spaces()[0]?.input.find((line) => line.startsWith("pointer"));
     expect(shot).toMatch(/ space=3 shot=shot-\d+$/);
     expect(

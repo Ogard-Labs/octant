@@ -6,7 +6,7 @@
  * Sources, read 2026-10-27 from github.com/trycua/cua at commit
  * 8fbdf83c1e05bf0a8b84a6199fe697cc58f0e24f:
  * - `libs/cua/proto/cua/daemon/v1/spaces.proto`: `Space`, `CreatingSpace`,
- *   and the `SpaceService` requests and responses below.
+ *   `SpacesHost`, and the `SpaceService` requests and responses below.
  * - `libs/cua/proto/cua/daemon/v1/daemon.proto`: `GetInfoResponse`.
  * - `libs/cua/proto/cua/env/v1/common.proto`: `Point`, `PixelSize`,
  *   `CoordinateSpace`.
@@ -138,6 +138,8 @@ export interface CuaSpace {
   readonly powerState: string;
   /** Empty for a Space that is not in a cloud. */
   readonly cloud: string;
+  /** The machine of the person's that provides the Space; empty for one on this machine. */
+  readonly host: string;
   readonly labels: ReadonlyMap<string, string>;
 }
 
@@ -152,6 +154,7 @@ function space(fields: Fields | undefined): CuaSpace | undefined {
     kind: text(fields, 12),
     powerState: text(fields, 17),
     cloud: text(fields, 18),
+    host: text(fields, 14),
     labels,
   };
 }
@@ -170,22 +173,23 @@ export function readCuaGetInfo(
 
 export interface CuaCreateSpace {
   readonly image: string;
+  /** `local`, or `host:<id>` for one of the person's other machines. */
+  readonly location: string;
   readonly name: string;
   readonly createId: string;
   readonly labels: Readonly<Record<string, string>>;
 }
 
 /**
- * `CreateSpaceRequest` for a QEMU VM on this machine with no network:
- * image (1), location (2) `local`, kind (3) `vm`, runtime (4) `qemu`,
- * name (5), wait (9) false, create_id (17), network (20) `none`, and
- * labels (21). Nothing else is set, so no volume, environment, service,
- * egress, durability, or reuse.
+ * `CreateSpaceRequest` for a QEMU VM with no network: image (1), location
+ * (2), kind (3) `vm`, runtime (4) `qemu`, name (5), wait (9) false,
+ * create_id (17), network (20) `none`, and labels (21). Nothing else is set,
+ * so no volume, environment, service, egress, durability, or reuse.
  */
 export function cuaCreateSpaceRequest(create: CuaCreateSpace): Uint8Array {
   const writer = new ProtobufWriter()
     .string(1, create.image)
-    .string(2, "local")
+    .string(2, create.location)
     .string(3, "vm")
     .string(4, "qemu")
     .string(5, create.name)
@@ -227,7 +231,10 @@ export function readCuaLifetime(bytes: Uint8Array): number | undefined {
   return fields === undefined ? undefined : timestamp(nested(fields, 1));
 }
 
-/** `DeleteSpaceRequest`, `ResolveSpaceRequest`, `ConnectSpaceRequest`: space (1). */
+/**
+ * `DeleteSpaceRequest`, `ResolveSpaceRequest`, `ConnectSpaceRequest`, and
+ * `GetSpaceRouteRequest`: space (1).
+ */
 export const cuaSpaceRequest = (spaceId: string): Uint8Array => single(1, spaceId);
 
 /** `ResolveSpaceResponse`: space (1). */
@@ -269,6 +276,35 @@ export function readCuaListSpaces(bytes: Uint8Array):
     complete: !bool(fields, 2) && !bool(fields, 4),
     creating: creating.map((each) => text(each, 3)),
   };
+}
+
+export const cuaListHostsRequest = (): Uint8Array => new Uint8Array(0);
+
+/** `SpacesHost`, the fields the driver checks. */
+export interface CuaHost {
+  readonly id: string;
+  readonly name: string;
+  /** `relay` or `direct`. */
+  readonly via: string;
+  readonly online: boolean;
+}
+
+/** `ListHostsResponse`: hosts (1), each with id (1), name (2), via (3), and online (4). */
+export function readCuaListHosts(bytes: Uint8Array): ReadonlyArray<CuaHost> | undefined {
+  const fields = parse(bytes);
+  const hosts = fields === undefined ? undefined : nestedAll(fields, 1);
+  return hosts?.slice(0, 256).map((host) => ({
+    id: text(host, 1),
+    name: text(host, 2),
+    via: text(host, 3),
+    online: bool(host, 4),
+  }));
+}
+
+/** `GetSpaceRouteResponse`: transport (3), what carries the daemon's connection to the Space now. */
+export function readCuaRouteTransport(bytes: Uint8Array): string | undefined {
+  const fields = parse(bytes);
+  return fields === undefined ? undefined : text(fields, 3);
 }
 
 /** `ConnectSpaceResponse`: env_url (2) only. The Space's token (3) is never read. */

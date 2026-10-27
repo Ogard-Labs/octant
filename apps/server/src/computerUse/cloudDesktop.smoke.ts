@@ -21,10 +21,17 @@
  *   bun run desktop:cloud:smoke cua kill
  *   bun run desktop:cloud:smoke cua restart
  *
- * Cua needs a Linux host with Cua's daemon running as this user
- * (`cua daemon start`), signed in, and QEMU installed.
+ *   bun run desktop:cloud:smoke cua-other-machine run
+ *   bun run desktop:cloud:smoke cua-other-machine kill
+ *   bun run desktop:cloud:smoke cua-other-machine restart
  *
- * `run` acquires a billed desktop as a person who confirmed it, reads a frame,
+ * Cua needs a Linux host with Cua's daemon running as this user
+ * (`cua daemon start`), signed in, and QEMU installed. `cua-other-machine`
+ * also needs exactly one other machine of the same Cua account online and
+ * set up with `cua host setup --provide-spaces`, with QEMU installed there.
+ *
+ * `run` acquires a desktop as a person who confirmed its provider and
+ * placement, as a billed or off-machine one asks, reads a frame,
  * sends a person's click and text, sends a small app as the agent, launches,
  * observes, clicks, and types into it as the agent, extends the lease, then
  * releases it and asks the provider whether anything of this host remains.
@@ -42,6 +49,7 @@ import {
   decodeDesktopHostTag,
   decodeDesktopRecipe,
   decodeEventActor,
+  type DesktopPlacementId,
   type DesktopProviderId,
 } from "@octant/contracts";
 import { decodeComputerControlCommand } from "@octant/contracts/computer-use-plugin";
@@ -67,6 +75,7 @@ import {
   createCuaDesktopProvider,
   CUA_DESKTOP_DAEMON,
   CUA_DESKTOP_PROVIDER_ID,
+  CUA_OTHER_MACHINE_PLACEMENT,
   CUA_THIS_MACHINE_PLACEMENT,
 } from "../plugins/cuaDesktop/cuaDesktopProvider";
 
@@ -80,7 +89,7 @@ type CloudDriver =
   | {
       readonly reach: "daemon";
       readonly id: DesktopProviderId;
-      readonly placementId: string;
+      readonly placementId: DesktopPlacementId;
       readonly create: (daemon: DesktopDaemonPort) => DesktopProvider;
     };
 
@@ -94,7 +103,13 @@ const DRIVERS: Readonly<Record<string, CloudDriver>> = {
   cua: {
     reach: "daemon",
     id: CUA_DESKTOP_PROVIDER_ID,
-    placementId: String(CUA_THIS_MACHINE_PLACEMENT),
+    placementId: CUA_THIS_MACHINE_PLACEMENT,
+    create: (daemon) => createCuaDesktopProvider(daemon),
+  },
+  "cua-other-machine": {
+    reach: "daemon",
+    id: CUA_DESKTOP_PROVIDER_ID,
+    placementId: CUA_OTHER_MACHINE_PLACEMENT,
     create: (daemon) => createCuaDesktopProvider(daemon),
   },
 };
@@ -169,7 +184,7 @@ const recipe = decodeDesktopRecipe({
   providerId: String(cloud.id),
   ...(cloud.reach === "https"
     ? { credentialRef: String(credentialRef) }
-    : { placementId: cloud.placementId }),
+    : { placementId: String(cloud.placementId) }),
   screen: { width: 1024, height: 768 },
   network: "none",
   leaseMinutes: 10,
@@ -245,7 +260,11 @@ if (phase === "restart") {
   process.exit(left === 0 ? 0 : 1);
 }
 
-const acquired = await service.acquire({ ...caller, confirmedProvider: cloud.id });
+const acquired = await service.acquire({
+  ...caller,
+  confirmedProvider: cloud.id,
+  ...(cloud.reach === "daemon" ? { confirmedPlacement: cloud.placementId } : {}),
+});
 step("acquire", acquired);
 if (acquired.status !== "acquired") process.exit(1);
 const leaseId = acquired.lease.leaseId;
