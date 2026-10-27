@@ -1,5 +1,6 @@
 import type {
   HiddenProviderModelRef,
+  HostPlatform,
   ProviderDataTag,
   ProviderDataTags,
   ProviderModelId,
@@ -779,9 +780,11 @@ function NameAndAddressSection(
 function authenticationFact(
   instance: ModelEndpointInstance,
   offer: { readonly accountLabel: string } | undefined,
+  hostPlatform: HostPlatform | undefined,
 ): string {
   if (offer !== undefined) return `${offer.accountLabel} sign-in (bearer token)`;
-  if (instance.driverKind === "ollama") return "None (this Mac only)";
+  // Ollama answers only on the host's loopback, so the host names its computer.
+  if (instance.driverKind === "ollama") return `None (${thisComputerName(hostPlatform)} only)`;
   if (instance.driverKind === "azure-foundry") {
     return instance.configuration.authentication === "directory-oauth"
       ? "Organization account (Microsoft Entra ID bearer token)"
@@ -812,6 +815,7 @@ function protocolFact(
 
 function DiagnosticsSection(props: ModelEndpointDetailProps & { readonly failing: boolean }) {
   const { instance, observed, failure } = props;
+  const hostPlatform = useHostPlatform();
   const [copied, setCopied] = useState(false);
   const verified = observed?.verifiedToolModelIds?.length ?? 0;
   const supported =
@@ -826,7 +830,10 @@ function DiagnosticsSection(props: ModelEndpointDetailProps & { readonly failing
     { label: "Address", value: instance.configuration.baseUrl },
     { label: "Kind", value: driverLabel(instance.driverKind) },
     { label: "Protocol", value: protocolFact(instance, observed) },
-    { label: "Authentication", value: authenticationFact(instance, props.signInOffer) },
+    {
+      label: "Authentication",
+      value: authenticationFact(instance, props.signInOffer, hostPlatform),
+    },
     ...(observed?.directoryBinding === undefined
       ? []
       : [
@@ -921,8 +928,9 @@ function RemoveSection(props: ModelEndpointDetailProps & { readonly disabled: bo
   const [roles, setRoles] = useState<ReadonlyArray<string> | "unknown" | undefined>(undefined);
   const [pending, setPending] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
-  // The host keeps credential removal to the app on this Mac; an endpoint
-  // that holds a key or a sign-in can't be removed from a browser.
+  // The host keeps credential removal to the Octant app on the host; an
+  // endpoint that holds a key or a sign-in can't be removed from a browser.
+  const computer = thisComputerName(useHostPlatform());
   const blocked = instance.driverKind !== "ollama" && !props.credentialManagementAvailable;
   const open = () => {
     setConfirming(true);
@@ -948,7 +956,7 @@ function RemoveSection(props: ModelEndpointDetailProps & { readonly disabled: bo
         <SettingRow
           description={
             blocked
-              ? "Remove it from the Octant app on this Mac."
+              ? `Remove it from the Octant app on ${computer}.`
               : "Signs out and deletes its settings. Threads that used it keep their history."
           }
           label={`Remove ${instance.displayName}`}

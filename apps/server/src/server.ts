@@ -1231,6 +1231,8 @@ export function startOctantServer(
               }
               // Intentionally pre-auth (like /health): returns static, non-sensitive
               // host identity so the UI can render the selector before capability exchange.
+              // Only this loopback listener answers it; the private listener refuses
+              // the route, so the host's platform reaches only a window on this host.
               if (url.pathname === "/api/hosts") {
                 const origin = request.headers.get("origin");
                 const headers = new Headers({ vary: "Origin" });

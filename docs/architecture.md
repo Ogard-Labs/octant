@@ -8377,16 +8377,19 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   an unreachable host's cached items stay listed as stale and read-only, and
   an authority-bearing mutation is allowed only on a host whose read model is
   ready.
-- **Host platform in copy.** The host's identity report (`GET /api/hosts`,
-  pre-auth like `/health`) carries the host's `platform`, set from
-  `process.platform`; it is optional in the contract because an older host
-  does not send it. Its display name already told a Mac from anything else
-  before sign-in; the platform adds only which other OS. The renderer reads it from
-  the window's own host's answer, not from federation registry entries, which
-  are the client's records and carry no platform, and copy that names the
-  host's computer or credential store follows it. Before the answer arrives,
-  or from a host that sends none, copy uses the neutral "this computer" rather
-  than the window's platform, which is wrong exactly for a remote window.
+- **Host platform in copy.** The host's identity report (`GET /api/hosts`)
+  carries the host's `platform`, set from `process.platform`; it is optional
+  in the contract because an older host does not send it. Only the loopback
+  listener answers that route, so only a window on the host itself learns the
+  host's OS. The private listener refuses `/api/hosts` before and after
+  sign-in and never hands it to product dispatch, so a paired device or
+  remote browser learns no platform and its copy stays neutral. The renderer
+  reads it from the window's own host's answer, not from federation registry
+  entries, which are the client's records and carry no platform, and copy
+  that names the host's computer or credential store follows it. Before the
+  answer arrives, or from a host that sends none, copy uses the neutral "this
+  computer" rather than the window's platform, which is wrong exactly for a
+  remote window.
 - **Local servers and Running services.** Listener observation is ephemeral,
   scoped to listening sockets of the current user, and never journaled. One
   classifier decides what may be listed at all: a system daemon, another user's

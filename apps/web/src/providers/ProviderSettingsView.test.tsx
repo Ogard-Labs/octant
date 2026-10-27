@@ -2469,6 +2469,28 @@ describe("ProviderSettingsView", () => {
     expect(within(card).queryByText(/Keychain|this Mac/)).not.toBeInTheDocument();
   });
 
+  it("sends a browser on a Linux host to the Octant app on this computer to remove a keyed endpoint", () => {
+    renderExpanded(
+      <ModelEndpointSettingsView
+        {...fixture({ instance: httpProvider(), credentialManagementAvailable: false })}
+      />,
+      "linux",
+    );
+    const card = screen.getByRole("region", { name: "Private gateway" });
+    expect(within(card).getByText("Remove it from the Octant app on this computer.")).toBeVisible();
+    expect(within(card).queryByText(/this Mac/)).not.toBeInTheDocument();
+  });
+
+  it("says a Linux host's Ollama needs no key because it answers only on this computer", () => {
+    renderExpanded(
+      <ModelEndpointSettingsView {...fixture({ instance: ollamaProvider() })} />,
+      "linux",
+    );
+    const card = screen.getByRole("region", { name: "Ollama local" });
+    expect(within(card).getByText(/None \(this computer only\)/)).toBeInTheDocument();
+    expect(within(card).queryByText(/this Mac/)).not.toBeInTheDocument();
+  });
+
   it("shows a pending credential check without claiming the key is missing", async () => {
     const pending = deferred<ProviderCredentialStatus>();
     const props = {
