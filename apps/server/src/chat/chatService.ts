@@ -358,10 +358,12 @@ function appendedEnvelopeSuperseded(
     readonly eventName: string;
     readonly payload: unknown;
   },
-  next: {
-    readonly eventName: string;
-    readonly payload: unknown;
-  } | undefined,
+  next:
+    | {
+        readonly eventName: string;
+        readonly payload: unknown;
+      }
+    | undefined,
 ): boolean {
   if (next === undefined || next.eventName !== "chat.attempt-response-appended@1") return false;
   try {
