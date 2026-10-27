@@ -210,7 +210,7 @@ takes a debug port. An adapter runs the programs you confirm from the
 checkout and can write the checkout, reaches only the hosts the thread's
 network rules allow, and never runs in Plan, for a paired device, or for an
 agent. **Confirm install** stores it disabled until you trust and enable it.
-The Run and debug panel that starts a session is not available yet.
+Start a session from the Code dock's [Run and debug](/advanced/debugging) tool.
 
 ### Add a language server
 

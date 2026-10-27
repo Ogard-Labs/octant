@@ -342,7 +342,8 @@ Outputs, Background tasks, Running now; see [DESIGN.md](../../DESIGN.md#shell-an
 its title band offers the common tools, Add tool lists the rest, and an open
 dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
 Document, Canvas, artifact-gated Plan, conditional Delivery, Review, Terminal,
-Tests, iOS Simulator, Android emulator, and Desktop, as mode and capability allow. Chat
+Tests, Run and debug ([language services](language-services.md#debugger-panel-rules)),
+iOS Simulator, Android emulator, and Desktop, as mode and capability allow. Chat
 admits only the [Agents dock](#subagents) and has no bottom panel. Side
 Chat is a Chat conversation about the pane's thread: it reads that thread's
 conversation, current state, files, and subagent results, and changes none of
