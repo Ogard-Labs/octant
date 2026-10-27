@@ -11,6 +11,7 @@ import {
   isChildPendingRequest,
   isFindOnlyPendingRequest,
   isLeadApprovalPendingRequest,
+  isLeadQuestionPendingRequest,
   pendingRequestChoices,
   type PendingRequestAnswerResult,
   type PendingRequestResponse,
@@ -42,8 +43,8 @@ export interface PendingRequestRowProps {
   /**
    * Opens the thread, where a typed answer goes in its composer. For a
    * subagent's request it opens the thread's Agents tab on that subagent, the
-   * only place the request is answered. For the agent's own approval it opens
-   * the thread, whose approval card answers it.
+   * only place the request is answered. For the agent's own approval or Work
+   * question it opens the thread, whose approval or question card answers it.
    */
   readonly onOpenThread: (request: PendingRequest) => void;
 }
@@ -57,10 +58,10 @@ export interface PendingRequestRowProps {
  * is the ask a finished turn closed with: its options are numbered the same
  * way, the recommended one first and marked, and picking one sends those
  * words as the thread's next turn. A waiting subagent's request, and the
- * agent's own approval, are only found here: each has one action, Review
- * request, and no answer; the thread's own cards decide them. The row owns only
- * its own busy state and its refusal line; it carries no authority and knows
- * nothing about the card or board that lists it.
+ * agent's own approval or Work question, are only found here: each has one
+ * action, Review request, and no answer; the thread's own cards decide them.
+ * The row owns only its own busy state and its refusal line; it carries no
+ * authority and knows nothing about the card or board that lists it.
  */
 export function PendingRequestRow(props: PendingRequestRowProps) {
   const { request } = props;
@@ -110,9 +111,11 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
           ? `${request.threadTitle} has a subagent waiting for you`
           : lead !== undefined
             ? `${request.threadTitle} needs your approval`
-            : request.kind === "decision"
-              ? `${request.threadTitle} asks you to decide`
-              : `${request.threadTitle} is waiting for you`
+            : isLeadQuestionPendingRequest(request)
+              ? `${request.threadTitle} is waiting for your answer`
+              : request.kind === "decision"
+                ? `${request.threadTitle} asks you to decide`
+                : `${request.threadTitle} is waiting for you`
       }
       className="pending-request"
       data-embedded={embedded ? "true" : "false"}

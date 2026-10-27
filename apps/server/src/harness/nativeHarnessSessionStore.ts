@@ -162,16 +162,23 @@ export class NativeHarnessSessionStore {
   }
 
   /**
-   * The ids of the questions the lead itself asked, not a subagent, that
-   * nobody has settled. Like {@link pendingLeadApprovals}, a navigation read
-   * asks this once per thread without decoding the session view.
+   * The questions the lead itself asked, not a subagent, that nobody has
+   * settled, oldest first, with the session they belong to. Like
+   * {@link pendingLeadApprovals}, a navigation read asks this once per thread
+   * without decoding the session view.
    */
-  pendingLeadQuestionIds(threadId: string): ReadonlyArray<string> {
+  pendingLeadQuestions(threadId: string):
+    | {
+        readonly session: NativeHarnessSession;
+        readonly questions: ReadonlyArray<NativeHarnessQuestion>;
+      }
+    | undefined {
     const record = this.#records.get(threadId);
-    if (record === undefined) return [];
-    return record.questions
-      .filter((entry) => entry.status === "pending" && entry.source === undefined)
-      .map((entry) => String(entry.id));
+    if (record === undefined) return undefined;
+    const questions = record.questions.filter(
+      (entry) => entry.status === "pending" && entry.source === undefined,
+    );
+    return questions.length === 0 ? undefined : { session: record.session, questions };
   }
 
   /** The threads that hold at least one unsettled lead approval. */

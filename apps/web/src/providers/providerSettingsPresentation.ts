@@ -3,11 +3,13 @@ import {
   isAcpAgentKind,
   type AnthropicCompatibleProtocol,
   type DiscoverySnapshot,
+  type HostPlatform,
   type OpenAiCompatibleProtocol,
   type ProviderInstance,
   type ProviderObservedState,
   type ProviderRefusalReason,
 } from "@octant/contracts";
+import { thisComputerName } from "../platform";
 
 export const capabilityLabels: ReadonlyArray<
   readonly [Exclude<keyof ProviderObservedState["capabilities"], "sessionCompaction">, string]
@@ -61,9 +63,14 @@ export function protocolLabel(
  * state rather than implying absence: a scan that has not run, failed, or was
  * cancelled is not evidence that the runtime is gone.
  */
-export function providerDetectionBlockedReason(snapshot: DiscoverySnapshot | undefined): string {
+export function providerDetectionBlockedReason(
+  snapshot: DiscoverySnapshot | undefined,
+  hostPlatform: HostPlatform | undefined,
+): string {
+  // The scan runs on the host, so the host's platform names the computer.
+  const computer = thisComputerName(hostPlatform);
   if (snapshot === undefined) {
-    return "This Mac has not been scanned for it yet. Use “Check again” to scan.";
+    return `${computer.charAt(0).toUpperCase()}${computer.slice(1)} has not been scanned for it yet. Use “Check again” to scan.`;
   }
   if (snapshot.status === "failed") {
     return "The last scan failed, so its presence is unknown. Use “Check again” to retry.";
@@ -74,7 +81,7 @@ export function providerDetectionBlockedReason(snapshot: DiscoverySnapshot | und
   if (snapshot.status === "partial") {
     return "The last scan did not finish, so it may have missed this binary. Use “Check again” to scan again.";
   }
-  return "The latest scan did not find its binary on this Mac. Use “Check again” to scan again.";
+  return `The latest scan did not find its binary on ${computer}. Use “Check again” to scan again.`;
 }
 
 /**

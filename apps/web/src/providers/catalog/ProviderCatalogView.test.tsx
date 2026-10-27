@@ -11,6 +11,7 @@ import type {
 import { createCodexProvider } from "@octant/domain";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { HostPlatformContext } from "../../platform";
 import { ProviderCatalogView, type ProviderCatalogViewProps } from "./ProviderCatalogView";
 
 const now = "2026-10-11T12:00:00.000Z" as UtcTimestamp;
@@ -427,6 +428,46 @@ describe("ProviderCatalogView outside drivers", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add provider" }));
     expect(screen.getByText(/at least one model ID/)).toBeDefined();
     expect(onAddOutsideProvider).not.toHaveBeenCalled();
+  });
+
+  it("names where the host keeps the driver's key: the Keychain on a Mac, the credential store on Linux", () => {
+    const view = props({
+      outsideDrivers: [listing],
+      onAddOutsideProvider: vi.fn(async () => true),
+      credentialManagementAvailable: true,
+    });
+    const { unmount } = render(
+      <HostPlatformContext.Provider value="linux">
+        <ProviderCatalogView {...view} />
+      </HostPlatformContext.Provider>,
+    );
+    openSetup(/^Loopback chat, /);
+    expect(screen.getByText(/^Saved in this computer's credential store\./)).toBeDefined();
+    unmount();
+
+    render(
+      <HostPlatformContext.Provider value="darwin">
+        <ProviderCatalogView {...view} />
+      </HostPlatformContext.Provider>,
+    );
+    openSetup(/^Loopback chat, /);
+    expect(screen.getByText(/^Saved in this Mac's Keychain\./)).toBeDefined();
+  });
+
+  it("tells a browser on a Linux host its key is added in the desktop app on this computer", () => {
+    render(
+      <HostPlatformContext.Provider value="linux">
+        <ProviderCatalogView
+          {...props({
+            outsideDrivers: [listing],
+            onAddOutsideProvider: vi.fn(async () => true),
+            credentialManagementAvailable: false,
+          })}
+        />
+      </HostPlatformContext.Provider>,
+    );
+    openSetup(/^Loopback chat, /);
+    expect(screen.getByText(/desktop app on this computer\.$/)).toBeDefined();
   });
 
   it("continues the provider bound to this digest, and says the package is unsigned developer input", () => {

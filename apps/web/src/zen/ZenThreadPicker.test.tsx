@@ -8,6 +8,7 @@ import {
 } from "@octant/contracts";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { HostPlatformContext } from "../platform";
 import { ZenThreadPicker } from "./ZenThreadPicker";
 
 const threadId = decodeChatThreadId("00000000-0000-4000-8000-000000000001");
@@ -80,5 +81,25 @@ describe("ZenThreadPicker", () => {
     fireEvent.click(screen.getByRole("button", { name: "Pin Release blocker" }));
     expect(onQueryChange).toHaveBeenCalledWith("release");
     expect(onPin).toHaveBeenCalledWith(catalogRef);
+  });
+
+  it("names the host's computer the listed work is authorized on", () => {
+    const picker = (
+      <ZenThreadPicker
+        entries={[entry]}
+        onPin={vi.fn()}
+        onClose={vi.fn()}
+        onQueryChange={vi.fn()}
+        query=""
+      />
+    );
+    const { unmount } = render(
+      <HostPlatformContext.Provider value="linux">{picker}</HostPlatformContext.Provider>,
+    );
+    expect(screen.getByText(/^Authorized work on this computer\./)).toBeVisible();
+    unmount();
+
+    render(<HostPlatformContext.Provider value="darwin">{picker}</HostPlatformContext.Provider>);
+    expect(screen.getByText(/^Authorized work on this Mac\./)).toBeVisible();
   });
 });

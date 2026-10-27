@@ -9,26 +9,39 @@ import {
   type ProviderRegistrySnapshot,
 } from "@octant/contracts";
 import type { ProviderClient } from "@octant/client-runtime/provider-client";
+import type { HostPlatform } from "@octant/contracts/host";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderCreateForm } from "./ProviderSettingsConfiguration";
 import { ProviderSettingsList } from "./ProviderSettingsList";
 import { ProviderSettingsView, type ProviderSettingsViewProps } from "./ProviderSettingsView";
 import { ModelEndpointSettingsView } from "../settings/ModelEndpointSettingsView";
 import { useProviderController } from "./useProviderController";
+import { HostPlatformContext } from "../platform";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
 
 const id = decodeProviderInstanceId("80000000-0000-4000-8000-000000000092");
 
-const renderProviderSettings = render;
+// Settings here run against a macOS host, which keeps keys in its Keychain,
+// unless a test names another host platform.
+function renderProviderSettings(ui: ReactElement, hostPlatform: HostPlatform = "darwin") {
+  function OnHost(props: { readonly children: ReactNode }) {
+    return (
+      <HostPlatformContext.Provider value={hostPlatform}>
+        {props.children}
+      </HostPlatformContext.Provider>
+    );
+  }
+  return render(ui, { wrapper: OnHost });
+}
 
-function renderExpanded(ui: ReactElement) {
-  const result = renderProviderSettings(ui);
+function renderExpanded(ui: ReactElement, hostPlatform: HostPlatform = "darwin") {
+  const result = renderProviderSettings(ui, hostPlatform);
   // Octant Harness: a single endpoint opens on its detail page, where its
   // configuration is always shown; with none, Add endpoint opens the form.
   const endpointLinks = screen.queryAllByRole("link", { name: /Open details$/ });
@@ -49,20 +62,27 @@ function renderExpanded(ui: ReactElement) {
 }
 
 /** Opens Add endpoint, whose dialog holds the endpoint-by-address form. */
-function renderAdding(ui: ReactElement) {
-  const result = renderProviderSettings(ui);
+function renderAdding(ui: ReactElement, hostPlatform: HostPlatform = "darwin") {
+  const result = renderProviderSettings(ui, hostPlatform);
   fireEvent.click(screen.getByRole("button", { name: "Add endpoint" }));
   return result;
 }
 
-function renderProviderListExpanded(props: ProviderSettingsViewProps) {
+function renderProviderListExpanded(
+  props: ProviderSettingsViewProps,
+  hostPlatform: HostPlatform = "darwin",
+) {
   return renderExpanded(
     <ProviderSettingsList {...props} discoverySnapshot={props.discoverySnapshot} />,
+    hostPlatform,
   );
 }
 
-function renderImageProviderCreation(props: ProviderSettingsViewProps) {
-  const result = render(
+function renderImageProviderCreation(
+  props: ProviderSettingsViewProps,
+  hostPlatform: HostPlatform = "darwin",
+) {
+  const result = renderProviderSettings(
     <ProviderCreateForm
       {...props}
       allowedProviderTypes={[
@@ -75,6 +95,7 @@ function renderImageProviderCreation(props: ProviderSettingsViewProps) {
       initialProviderType="openai-image"
       triggerLabel="Add image provider"
     />,
+    hostPlatform,
   );
   fireEvent.click(screen.getByRole("button", { name: "Add image provider" }));
   return result;
@@ -2146,7 +2167,7 @@ describe("ProviderSettingsView", () => {
   it("shows stored Keychain status and omits a connection check for an OpenAI image profile", async () => {
     renderProviderListExpanded(fixture({ instance: openAiImageProvider() }));
     const stored = screen.getByRole("article", { name: "GPT Image" });
-    expect(await within(stored).findByText("Stored in Keychain")).toBeVisible();
+    expect(await within(stored).findByText("Stored in this Mac's Keychain")).toBeVisible();
     expect(
       within(stored).queryByRole("button", { name: /check connection/i }),
     ).not.toBeInTheDocument();
@@ -2169,7 +2190,7 @@ describe("ProviderSettingsView", () => {
     const props = fixture({ instance: bflImageProvider() });
     renderProviderListExpanded(props);
     const card = screen.getByRole("article", { name: "FLUX" });
-    expect(await within(card).findByText("Stored in Keychain")).toBeVisible();
+    expect(await within(card).findByText("Stored in this Mac's Keychain")).toBeVisible();
     await user.type(
       within(card).getByLabelText("Base URL for FLUX"),
       "https://proxy.example.test/bfl",
@@ -2179,7 +2200,7 @@ describe("ProviderSettingsView", () => {
     );
 
     expect(await within(card).findByText("Not configured")).toBeVisible();
-    expect(within(card).queryByText("Stored in Keychain")).not.toBeInTheDocument();
+    expect(within(card).queryByText("Stored in this Mac's Keychain")).not.toBeInTheDocument();
   });
 
   it("shows unavailable credential status for an image profile on a remote client", () => {
@@ -2436,6 +2457,46 @@ describe("ProviderSettingsView", () => {
     );
     expect(props.onClearProviderCredential).toHaveBeenCalledWith(id);
     expect(await within(card).findByText("No key is saved for it yet.")).toBeVisible();
+  });
+
+  it("names a Linux host's credential store, not the Keychain, for a saved key", async () => {
+    const pending = deferred<ProviderCredentialStatus>();
+    const props = {
+      ...fixture({ instance: httpProvider() }),
+      onProviderCredentialStatus: vi.fn(() => pending.promise),
+    };
+    renderExpanded(<ModelEndpointSettingsView {...props} />, "linux");
+    const card = screen.getByRole("region", { name: "Private gateway" });
+    expect(within(card).getByText("Checking the credential store…")).toBeVisible();
+    await act(async () => pending.resolve("stored"));
+    expect(
+      await within(card).findByText(
+        "Saved in this computer's credential store. Octant can't show it.",
+      ),
+    ).toBeVisible();
+    expect(within(card).queryByText(/Keychain|this Mac/)).not.toBeInTheDocument();
+  });
+
+  it("sends a browser on a Linux host to the Octant app on this computer to remove a keyed endpoint", () => {
+    renderExpanded(
+      <ModelEndpointSettingsView
+        {...fixture({ instance: httpProvider(), credentialManagementAvailable: false })}
+      />,
+      "linux",
+    );
+    const card = screen.getByRole("region", { name: "Private gateway" });
+    expect(within(card).getByText("Remove it from the Octant app on this computer.")).toBeVisible();
+    expect(within(card).queryByText(/this Mac/)).not.toBeInTheDocument();
+  });
+
+  it("says a Linux host's Ollama needs no key because it answers only on this computer", () => {
+    renderExpanded(
+      <ModelEndpointSettingsView {...fixture({ instance: ollamaProvider() })} />,
+      "linux",
+    );
+    const card = screen.getByRole("region", { name: "Ollama local" });
+    expect(within(card).getByText(/None \(this computer only\)/)).toBeInTheDocument();
+    expect(within(card).queryByText(/this Mac/)).not.toBeInTheDocument();
   });
 
   it("shows a pending credential check without claiming the key is missing", async () => {
@@ -3495,6 +3556,17 @@ describe("ProviderSettingsView", () => {
     expect(control).toHaveAccessibleDescription(/has not been scanned/i);
   });
 
+  it("names the host's computer when a Linux host has not been scanned yet", () => {
+    renderProviderSettings(
+      <ProviderSettingsView {...fixture({ instance: provider({ enabled: false }) })} />,
+      "linux",
+    );
+    const card = screen.getByRole("article", { name: "Existing CLI" });
+    expect(
+      within(card).getByRole("switch", { name: "Enable Existing CLI" }),
+    ).toHaveAccessibleDescription(/^This computer has not been scanned for it yet\./);
+  });
+
   it("keeps a manual endpoint enable-able and out of any detection group", () => {
     renderProviderSettings(
       <ModelEndpointSettingsView
@@ -3894,6 +3966,130 @@ describe("ProviderSettingsView", () => {
     expect(
       screen.getByText(/does not currently expose the full Bedrock Converse API/i),
     ).toBeVisible();
+  });
+});
+
+// Each host is seen from a window on the other platform, so copy that read the
+// window's platform instead of the host's would name the wrong computer.
+describe.each([
+  {
+    host: "linux",
+    window: "MacIntel",
+    computer: "this computer",
+    store: "this computer's credential store",
+    storeName: "credential store",
+    elsewhere: /Keychain|this Mac/,
+  },
+  {
+    host: "darwin",
+    window: "Linux x86_64",
+    computer: "this Mac",
+    store: "this Mac's Keychain",
+    storeName: "Keychain",
+    elsewhere: /credential store|this computer/,
+  },
+] as const)("provider forms on a $host host", (platform) => {
+  beforeEach(() => {
+    Object.defineProperty(window.navigator, "platform", {
+      value: platform.window,
+      configurable: true,
+    });
+  });
+  afterEach(() => Reflect.deleteProperty(window.navigator, "platform"));
+
+  it("says where each image profile's key is kept and that a proxy may use HTTP only on the host's computer", async () => {
+    const user = userEvent.setup();
+    renderImageProviderCreation(fixture({ instance: openAiImageProvider() }), platform.host);
+    for (const type of [
+      "OpenAI Image",
+      "Gemini Image",
+      "Black Forest Labs Image",
+      "Ideogram Image",
+    ]) {
+      await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), type);
+      const guidance = screen.getByText(/The API key is stored write-only in/);
+      expect(guidance).toHaveTextContent(`The API key is stored write-only in ${platform.store}.`);
+      if (type === "Black Forest Labs Image" || type === "Ideogram Image") {
+        expect(guidance).toHaveTextContent(`(HTTPS, or HTTP on ${platform.computer})`);
+      }
+      expect(guidance.textContent).not.toMatch(platform.elsewhere);
+    }
+  });
+
+  it("says where an Azure AI Foundry endpoint's key is kept when its settings are edited", () => {
+    renderExpanded(
+      <ModelEndpointSettingsView {...fixture({ instance: foundryProvider() })} />,
+      platform.host,
+    );
+    const guidance = within(screen.getByLabelText("Foundry relay")).getByText(
+      /API keys are stored write-only in/,
+    );
+    expect(guidance).toHaveTextContent(
+      `API keys are stored write-only in ${platform.store} and sent as the api-key header.`,
+    );
+    expect(guidance.textContent).not.toMatch(platform.elsewhere);
+  });
+
+  it("says where an Azure AI Foundry endpoint's key is kept when it is created", () => {
+    renderProviderSettings(
+      <ProviderCreateForm
+        {...fixture()}
+        allowedProviderTypes={["azure-foundry"]}
+        initialProviderType="azure-foundry"
+        triggerLabel="Add Foundry endpoint"
+      />,
+      platform.host,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add Foundry endpoint" }));
+    const guidance = screen.getByText(/API keys are stored write-only in/);
+    expect(guidance).toHaveTextContent(
+      `API keys are stored write-only in ${platform.store} and sent as the api-key header.`,
+    );
+    expect(guidance.textContent).not.toMatch(platform.elsewhere);
+  });
+
+  it("says where a Bedrock Mantle key is kept in the setup guide", async () => {
+    const user = userEvent.setup();
+    renderAdding(<ModelEndpointSettingsView {...fixture()} />, platform.host);
+    await user.click(screen.getByRole("button", { name: /^OpenAI-compatible/ }));
+    await user.click(screen.getByText("Connecting Amazon Bedrock?"));
+    const step = screen.getByText(/Create a Bedrock API key/);
+    expect(step).toHaveTextContent(platform.store);
+    expect(step.textContent).not.toMatch(platform.elsewhere);
+  });
+
+  it("says where a missing Claude API key is kept in its repair guidance", () => {
+    renderExpanded(
+      <ProviderSettingsView
+        {...fixture({
+          instance: claudeProvider("api-key"),
+          observed: observation({ readiness: "unauthenticated", credentialStatus: "missing" }),
+        })}
+      />,
+      platform.host,
+    );
+    const guidance = within(screen.getByRole("article", { name: "Claude local" })).getByText(
+      /replace.*Anthropic API key/i,
+    );
+    expect(guidance).toHaveTextContent(
+      `It remains write-only and is stored in ${platform.store}, then check the connection again.`,
+    );
+    expect(guidance.textContent).not.toMatch(platform.elsewhere);
+  });
+
+  it("names the host's store while checking a saved key and once it is found", async () => {
+    const pending = deferred<ProviderCredentialStatus>();
+    renderProviderListExpanded(
+      {
+        ...fixture({ instance: openAiImageProvider() }),
+        onProviderCredentialStatus: vi.fn(() => pending.promise),
+      },
+      platform.host,
+    );
+    const card = screen.getByRole("article", { name: "GPT Image" });
+    expect(within(card).getByText(`Checking the ${platform.storeName}…`)).toBeVisible();
+    await act(async () => pending.resolve("stored"));
+    expect(await within(card).findByText(`Stored in ${platform.store}`)).toBeVisible();
   });
 });
 

@@ -7,6 +7,7 @@ import type {
   ExtensionPackagePreview,
 } from "@octant/contracts/extension-rpc";
 import { useCallback, useEffect, useState } from "react";
+import { thisComputerName, useHostPlatform } from "../platform";
 import { SettingsSection } from "../settings/primitives";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -41,12 +42,14 @@ function blockedReason(server: DiscoveredMcpServer): string | undefined {
 }
 
 /**
- * Found on this Mac: the MCP servers and plugins Claude Code and Codex
- * already know here, each with one button that copies it into Octant. The
+ * Found on the host's computer: the MCP servers and plugins Claude Code and
+ * Codex already know there, each with one button that copies it into Octant. The
  * list is read-only until the person clicks; nothing is added by looking.
  */
 export function DiscoveredToolingSection(props: DiscoveredToolingSectionProps) {
   const [listing, setListing] = useState<DiscoveredAgentToolingListing>();
+  // The scan reads the host's files, so the host names its computer.
+  const computer = thisComputerName(useHostPlatform());
   const [busyId, setBusyId] = useState<string>();
   // The refusal is shown in the row that was clicked, so it is seen there.
   const [failure, setFailure] = useState<{
@@ -132,12 +135,12 @@ export function DiscoveredToolingSection(props: DiscoveredToolingSectionProps) {
   return (
     <SettingsSection
       className="extensions-settings__section"
-      description="Servers and plugins other agent tools on this Mac already use. Adding one copies it into Octant; the other tool's files are not changed."
-      title="Found on this Mac"
+      description={`Servers and plugins other agent tools on ${computer} already use. Adding one copies it into Octant; the other tool's files are not changed.`}
+      title={`Found on ${computer}`}
     >
       <div className="extensions-settings__body">
         {listing.servers.length === 0 ? null : (
-          <ul aria-label="Servers found on this Mac" className="discovered-tooling">
+          <ul aria-label={`Servers found on ${computer}`} className="discovered-tooling">
             {listing.servers.map((server) => (
               <li className="discovered-tooling__row" key={server.id}>
                 <span className="discovered-tooling__text">
@@ -178,7 +181,7 @@ export function DiscoveredToolingSection(props: DiscoveredToolingSectionProps) {
           </ul>
         )}
         {listing.plugins.length === 0 ? null : (
-          <ul aria-label="Plugins found on this Mac" className="discovered-tooling">
+          <ul aria-label={`Plugins found on ${computer}`} className="discovered-tooling">
             {listing.plugins.map((plugin) => (
               <li className="discovered-tooling__row" key={plugin.id}>
                 <span className="discovered-tooling__text">

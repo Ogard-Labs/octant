@@ -458,6 +458,7 @@ import {
 import { usePendingRequests } from "./palette/usePendingRequests";
 import { usePendingRequests as usePendingRequestRead } from "./pendingRequests/usePendingRequests";
 import { useCommandExtensions } from "./palette/useCommandSkills";
+import { HostPlatformContext } from "./platform";
 
 export type { ShellLaunch } from "./shell/shellLaunch";
 export { launchFromLocation } from "./shell/shellLaunch";
@@ -1825,6 +1826,12 @@ function LaunchedShell(
     [hostFederationLifecycle, federationRevision],
   );
   const hosts = lifecycleHostIdentities.length > 0 ? lifecycleHostIdentities : observedHosts;
+  // Copy that names the host's computer reads the platform the window's own
+  // host reports. The federation registry's entries are the client's records of
+  // hosts and carry no platform, so this reads the host's answer directly.
+  const hostPlatform = observedHosts.find(
+    (host) => String(host.hostId) === String(LOCAL_HOST_ID),
+  )?.platform;
   const environmentNames = useMemo(
     () => new Map(hosts.map((host) => [String(host.hostId), host.displayName] as const)),
     [hosts],
@@ -7183,11 +7190,13 @@ function LaunchedShell(
                                       barStyle={controller.settings?.usageBars ?? "smooth"}
                                       client={launchedClients.providerUsageLimitsClient}
                                     >
-                                      <RemoteCodeProjectsContext.Provider
-                                        value={remoteCodeProjects}
-                                      >
-                                        {shell}
-                                      </RemoteCodeProjectsContext.Provider>
+                                      <HostPlatformContext.Provider value={hostPlatform}>
+                                        <RemoteCodeProjectsContext.Provider
+                                          value={remoteCodeProjects}
+                                        >
+                                          {shell}
+                                        </RemoteCodeProjectsContext.Provider>
+                                      </HostPlatformContext.Provider>
                                     </PlanUsageProvider>
                                   </HostFederationStackContext.Provider>
                                 </ModelToolVerificationContext.Provider>

@@ -187,3 +187,16 @@ export function workLeadApproval(lostInRestart = false): PendingRequest {
     requestedAt: "2026-10-06T08:07:00.000Z",
   });
 }
+
+/** A Work thread's agent waiting on its own question, found from anywhere and answered in the thread. */
+export function workLeadQuestion(): PendingRequest {
+  return decodePendingRequest({
+    mode: "work",
+    kind: "lead-question",
+    projectId: pendingIds.project,
+    threadId: pendingIds.workThread,
+    threadTitle: "Quarterly report",
+    text: "Which quarter should the summary cover?",
+    requestedAt: "2026-10-06T08:07:00.000Z",
+  });
+}

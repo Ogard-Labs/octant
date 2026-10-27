@@ -174,13 +174,22 @@
   background: color-mix(in srgb, Canvas 92%, CanvasText 8%);
 }
 
-/* The agent's own approval above a thread's composer, where a question would sit. */
-.thread-harness-approval {
+/* The agent's own approval, or a Work agent's own question, above a thread's
+   composer, where a provider question would sit. */
+.thread-harness-approval,
+.thread-harness-question {
   display: flex;
   flex-direction: column;
   gap: var(--oct-space-2);
   min-width: 0;
   margin-bottom: var(--oct-space-2);
+}
+
+/* Inside the composer the question spans it, as the approval card does; the
+   72ch cap is for a card standing alone in a thread column, and here it left
+   the card's edge floating partway across the composer. */
+.thread-harness-question .provider-question-card {
+  max-width: none;
 }
 
 /* Notes for the lead of a running turn, above the composer beside an approval. */

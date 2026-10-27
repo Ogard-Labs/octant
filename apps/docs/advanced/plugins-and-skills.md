@@ -320,18 +320,19 @@ again**. A server whose sign-in needs a client id Octant cannot register for
 itself says so; you can still add that server with a key in a header. Signing
 in and out work only from the Octant window on this host.
 
-### Found on this Mac
+### Found on this computer
 
-Below the extension packages, **Found on this Mac** lists the MCP servers
-and plugins Claude Code and Codex already use on this computer: the servers
+Below the extension packages, **Found on this computer** (**Found on this
+Mac** when the host is a Mac) lists the MCP servers and plugins Claude Code
+and Codex already use on the host's computer: the servers
 in Claude Code's configuration (yours, and the ones kept for a Project folder
 Octant knows), a Project's `.mcp.json`, Codex's configured servers, and the
 plugins each tool has installed. Looking changes nothing. **Add to Octant**
 copies one server in, the same way Add MCP server does: a value whose name
 reads like a credential goes to the credential store. A variable the other
 tool reads from its environment is filled in, into a variable or header
-value only, when this Mac has it. A server that uses a variable in its
-command, arguments or address, or needs one this Mac lacks, cannot be added
+value only, when the host has it. A server that uses a variable in its
+command, arguments or address, or needs one the host lacks, cannot be added
 from here: its row says which, and you add it by hand with the value
 entered. **Review and import** reads one plugin for
 the usual review and Install; a Claude Code plugin keeps its skills and MCP

@@ -82,6 +82,13 @@ but they do not own a second palette or visual language.
   still asks before writes and commands."
 - **One sentence of help.** A subtitle or row description is one sentence
   that says what the thing does. Longer explanations move to the docs.
+- **Name the host's computer from the host.** Copy about where something is
+  kept or runs on the host says "this Mac" and "Keychain" only when the host
+  reports macOS, and "this computer" and "credential store" otherwise. The
+  window's own platform never decides it: a browser on a Mac can drive a Linux
+  host. Until the host has reported, the neutral words show. The platform is
+  a host fact (see "Host platform in copy" under
+  [Security and authority](docs/architecture.md#security-and-authority)).
 - **Vocabulary.** `Project`, `thread`, `checkout`, `worktree`, `base branch`,
   `Environment`, `access` (Plan / Approval / Auto-accept edits / Full access),
   `delivery` (Investigation / Local implementation / Pull request / Merged).

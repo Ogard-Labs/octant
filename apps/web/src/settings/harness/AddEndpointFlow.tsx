@@ -23,6 +23,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { hostCredentialStore, thisComputerName, useHostPlatform } from "../../platform";
 import { ProviderGlyph } from "../../providers/ProviderGlyph";
 import {
   directoryGuid,
@@ -363,6 +364,8 @@ type ConnectStepProps = AddEndpointFlowProps & {
 
 function ConnectStep(props: ConnectStepProps) {
   const presentation = endpointKindPresentation(props.kind);
+  const hostPlatform = useHostPlatform();
+  const keyStore = hostCredentialStore(hostPlatform);
   const preset = props.preset;
   const [name, setName] = useState(preset?.displayName ?? presentation.defaultName ?? "");
   const [url, setUrl] = useState(preset?.baseUrl ?? presentation.defaultUrl ?? "");
@@ -783,12 +786,12 @@ function ConnectStep(props: ConnectStepProps) {
                 <a href={preset.keyPage.url} rel="noreferrer" target="_blank">
                   {preset.keyPage.label}
                 </a>
-                . Saved in this Mac's Keychain. Octant can't show it again.
+                . Saved in {keyStore}. Octant can't show it again.
               </>
             ) : presentation.key === "required" ? (
-              "Saved in this Mac's Keychain. Octant can't show it again."
+              `Saved in ${keyStore}. Octant can't show it again.`
             ) : (
-              "Saved in this Mac's Keychain. For a server that takes no key, choose that under Advanced."
+              `Saved in ${keyStore}. For a server that takes no key, choose that under Advanced.`
             )}
           </span>
         </div>
@@ -797,7 +800,7 @@ function ConnectStep(props: ConnectStepProps) {
           <span>API key</span>
           <p className="endpoint-flow__note" data-testid="endpoint-key-later">
             This browser can't store keys. Add it now and it shows Needs key; then add the key in
-            the Octant desktop app on this Mac.
+            the Octant desktop app on {thisComputerName(hostPlatform)}.
             {preset !== undefined ? (
               <>
                 {" "}

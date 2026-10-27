@@ -81,7 +81,7 @@ Complete only for personal data that actually enters the hosted component.
 | Special categories       | `[NONE, or counsel-approved description]`                                                      |
 | Processing operations    | `[storage, transmission, support access; list only what the component does]`                   |
 
-Do not list journal transcripts, Keychain secrets, or provider payloads as
+Do not list journal transcripts, credential-store secrets, or provider payloads as
 Octant-processed categories unless the hosted component truly receives them.
 In the technical preview those stay on the host or travel only to providers
 the customer configured.
@@ -97,7 +97,7 @@ that constrain those clauses:
 2. **Confidentiality.** Persons authorized to process are bound to
    confidentiality.
 3. **Security.** Apply measures appropriate to the hosted component's actual
-   threat model. Owner-only host permissions and Keychain handling on the
+   threat model. Owner-only host permissions and credential-store handling on the
    customer's machine remain the customer's responsibility for local data.
 4. **Sub-processors.** Engage further processors only with prior notice and
    the customer's ability to object, under a written contract that imposes

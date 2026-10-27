@@ -10,6 +10,7 @@ import { createElement, useState } from "react";
 import { PluginSettingsSection } from "./PluginSettingsSection";
 import { describe, expect, it, vi } from "vitest";
 import { settingsPastFirstRun } from "../App.test-fixtures";
+import { HostPlatformContext } from "../platform";
 import { SettingsView, type SettingsViewProps } from "./SettingsView";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import type { ChatController } from "../chat/useChatController";
@@ -278,6 +279,28 @@ describe("SettingsView", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Profile" })).toBeVisible();
     expect(screen.getByLabelText("Name")).toBeVisible();
     expect(screen.getByLabelText("Name").closest("details")).toBeNull();
+  });
+
+  it("says the profile is kept on the host's computer, which a Linux host does not call a Mac", () => {
+    const props = { ...defaultProps(), initialDeepLink: { section: "profile" } } as const;
+    const { unmount } = render(
+      <HostPlatformContext.Provider value="linux">
+        <SettingsView {...props} />
+      </HostPlatformContext.Provider>,
+    );
+    expect(
+      screen.getByText(
+        "Choose how you appear inside Octant. Everything is optional and kept on this computer.",
+      ),
+    ).toBeVisible();
+    unmount();
+
+    render(
+      <HostPlatformContext.Provider value="darwin">
+        <SettingsView {...props} />
+      </HostPlatformContext.Provider>,
+    );
+    expect(screen.getByText(/Everything is optional and kept on this Mac\.$/)).toBeVisible();
   });
 
   it("keeps existing profile setting links pointed at the profile editor", () => {

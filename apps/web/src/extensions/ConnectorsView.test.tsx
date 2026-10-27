@@ -4,6 +4,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ExtensionSnapshot } from "@octant/contracts/extension-rpc";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { HostPlatformContext } from "../platform";
 import { ConnectorsView } from "./ConnectorsView";
 
 const EXTENSION = "44000000-0000-4000-8000-000000000002";
@@ -223,7 +224,7 @@ describe("Connectors", () => {
     ).toBe(false);
   });
 
-  it("names the credential store of the computer the key is kept on", async () => {
+  it("names the credential store of the host's computer, not the window's", async () => {
     const user = userEvent.setup();
     const props = {
       actions: null,
@@ -233,18 +234,26 @@ describe("Connectors", () => {
       onConnected: vi.fn(),
       snapshot: snapshotWith(),
     };
-    // Connect works only from the window on the host, so the platform this
-    // window reports is the host's own. A Linux host read "this Mac's".
-    setPlatform("Linux x86_64");
-    const { unmount } = render(<ConnectorsView {...props} />);
+    // The window's platform is set opposite to the host's each time: the host
+    // keeps the key, so only the host's own report may name its computer.
+    setPlatform("MacIntel");
+    const { unmount } = render(
+      <HostPlatformContext.Provider value="linux">
+        <ConnectorsView {...props} />
+      </HostPlatformContext.Provider>,
+    );
     await user.click(screen.getByRole("button", { name: "Connect GitHub" }));
     expect(screen.getByRole("form", { name: "GitHub key" })).toHaveTextContent(
       "Kept in this computer's credential store.",
     );
     unmount();
 
-    setPlatform("MacIntel");
-    render(<ConnectorsView {...props} />);
+    setPlatform("Linux x86_64");
+    render(
+      <HostPlatformContext.Provider value="darwin">
+        <ConnectorsView {...props} />
+      </HostPlatformContext.Provider>,
+    );
     await user.click(screen.getByRole("button", { name: "Connect GitHub" }));
     expect(screen.getByRole("form", { name: "GitHub key" })).toHaveTextContent(
       "Kept in this Mac's credential store.",

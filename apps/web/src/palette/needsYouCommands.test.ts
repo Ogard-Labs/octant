@@ -11,6 +11,7 @@ import {
   workApproval,
   workChildApproval,
   workLeadApproval,
+  workLeadQuestion,
 } from "./pendingRequests.test-fixtures";
 
 const NOW = Date.parse("2026-10-06T08:04:30.000Z");
@@ -165,6 +166,24 @@ describe("the Needs you commands", () => {
       projectId: pendingIds.project,
     });
     expect(onAnswerApproval).not.toHaveBeenCalled();
+  });
+
+  it("lists a Work agent's own question as one row that opens the thread", () => {
+    const onOpenThread = vi.fn();
+    const commands = buildNeedsYouCommands(
+      sources({ requests: [workLeadQuestion()], onOpenThread }),
+    );
+
+    expect(commands.map((command) => [command.title, command.detail])).toEqual([
+      ["Quarterly report", "Work · waiting on your answer · <1m"],
+    ]);
+    run(commands[0]);
+    expect(onOpenThread).toHaveBeenCalledExactlyOnceWith({
+      threadId: pendingIds.workThread,
+      title: "Quarterly report",
+      mode: "work",
+      projectId: pendingIds.project,
+    });
   });
 
   it("opens the thread itself when a subagent is not the only thing it waits on", () => {
