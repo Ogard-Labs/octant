@@ -6042,8 +6042,10 @@ same. This holds in Chat, Work, and Code.
   of `octant_computer` to one of its thread's leases, the Code dock's
   Desktop tool, a Code Project's stored desktop recipe with its settings
   editor, and E2B, the first of the two named cloud providers (E2B and Cua
-  Spaces), are built; Cua Spaces waits on a design for reaching its local
-  daemon. A cloud driver reaches its provider only through the host's
+  Spaces), are built; Cua Spaces, reached through the person's local Cua daemon, is
+  designed (accepted on 2026-10-27) but not yet built; see
+  [Disposable desktops](design/disposable-desktops.md#cua-spaces-through-the-local-daemon).
+  A cloud driver reaches its provider only through the host's
   HTTPS port, which sends nothing outside the hosts the driver declares and
   attaches the person's key from the credential broker's
   `/v1/desktop-provider-credentials/*` namespace itself; a person confirms
