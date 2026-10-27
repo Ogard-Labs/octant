@@ -119,6 +119,18 @@
   align-self: center;
 }
 
+/* On a phone the actions take their own row under the name. Beside it, at
+   390px the three installed-card buttons left the name column 0px wide, so
+   the name disappeared and its source wrapped one word a line. */
+@media (max-width: 640px) {
+  .extensions-settings__cards .extcard > .extcard-right {
+    grid-column: 2 / -1;
+    grid-row: 3;
+    justify-content: flex-start;
+    margin-top: var(--oct-space-2);
+  }
+}
+
 .extensions-settings__state {
   margin: 0;
   padding: 2px 0 4px;

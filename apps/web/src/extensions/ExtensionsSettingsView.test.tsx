@@ -2192,6 +2192,20 @@ describe("Use in a Project", () => {
   });
 });
 
+describe("Installed cards at phone width", () => {
+  it("gives a card's actions their own row so the name keeps the width beside the icon", () => {
+    // Observed at 390px: the three lifecycle buttons beside the name left its
+    // column 0px wide, so the name vanished and its source wrapped a word a line.
+    const styles = readFileSync(
+      resolve(process.cwd(), "src/styles/extensions-settings.css"),
+      "utf8",
+    ).replace(/\s+/g, " ");
+    expect(styles).toMatch(
+      /@media \(max-width: 640px\) \{ \.extensions-settings__cards \.extcard > \.extcard-right \{[^}]*grid-column: 2 \/ -1;[^}]*grid-row: 3;/,
+    );
+  });
+});
+
 describe("Sign in to a server you added", () => {
   it("offers Sign in on the card of a hosted server the host reports as a plain plugin package", async () => {
     // The host rewrites a generated package's installed source to
@@ -2219,6 +2233,56 @@ describe("Sign in to a server you added", () => {
       extensionId,
       componentId: "server",
     });
+  });
+
+  it("names a server added in Settings by the name the person gave it, and says where it came from", async () => {
+    // The host names the package it writes after a slug and reports its
+    // source as a plain plugin package, so these cards read
+    // "connector-linear" and "Plugin package". Its mark on the package, not
+    // the slug, says the host wrote it.
+    const base = installedSnapshot();
+    const [pkg] = base.packages;
+    if (pkg === undefined) throw new Error("Expected the installed package.");
+    const written = (slug: string, serverName: string, id: string) => ({
+      ...pkg,
+      extensionId: id,
+      slug,
+      displayName: slug,
+      version: "1.0.0",
+      source: { kind: "plugin-package", sourceRef: `user-added:${slug}` },
+      addedInSettings: true,
+      components: pkg.components.map((component) => ({
+        ...component,
+        component: { ...component.component, displayName: serverName },
+      })),
+    });
+    const snapshot = {
+      ...base,
+      packages: [
+        written("docs-search", "Docs search", "71000000-0000-4000-8000-000000000001"),
+        written("connector-linear", "Linear", "71000000-0000-4000-8000-000000000002"),
+        {
+          ...pkg,
+          extensionId: "71000000-0000-4000-8000-000000000003",
+          slug: "connector-notion",
+          displayName: "connector-notion",
+          source: { kind: "plugin-package", sourceRef: "local-notion" },
+        },
+      ],
+    } as never;
+    const { container } = render(
+      <ExtensionsSettingsView client={client({ snapshot })} scope={scope} />,
+    );
+    await screen.findByText("Docs search", { selector: ".extcard-name" });
+    const cards = [...container.querySelectorAll("li.extcard")].map((card) => [
+      card.querySelector(".extcard-name")?.textContent,
+      card.querySelector(".extcard-src")?.textContent,
+    ]);
+    expect(cards).toEqual([
+      ["Docs search", "Added by you · v1.0.0"],
+      ["Linear", "Connector · v1.0.0"],
+      ["connector-notion", "Plugin package · v1.2.0"],
+    ]);
   });
 
   it("asks nothing of a paired device, which cannot sign in", async () => {

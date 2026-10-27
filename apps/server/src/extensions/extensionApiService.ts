@@ -109,7 +109,25 @@ export class ExtensionApiService {
 
   snapshot(): ExtensionSnapshot {
     const snapshot = this.#lifecycle.snapshot();
-    return this.#skills?.snapshot(snapshot) ?? snapshot;
+    return this.#markAddedInSettings(this.#skills?.snapshot(snapshot) ?? snapshot);
+  }
+
+  /**
+   * Marks each package the host wrote for a server the person added in
+   * Settings, by the source reference its store of generated folders holds.
+   * The mark is set here and nowhere else, and taken off any package the
+   * store does not vouch for, so a plugin's slug or manifest cannot claim it.
+   */
+  #markAddedInSettings(snapshot: ExtensionSnapshot): ExtensionSnapshot {
+    return {
+      ...snapshot,
+      packages: snapshot.packages.map(({ addedInSettings: _claimed, ...packageState }) =>
+        "sourceRef" in packageState.source &&
+        this.#userAddedMcpServers?.owns(packageState.source.sourceRef) === true
+          ? { ...packageState, addedInSettings: true as const }
+          : packageState,
+      ),
+    };
   }
 
   async execute(command: ExtensionCommand, signal?: AbortSignal): Promise<ExtensionCommandResult> {
@@ -267,7 +285,7 @@ export class ExtensionApiService {
     if (this.#onStateChanged !== undefined) {
       await this.#onStateChanged(snapshot, command);
     }
-    return { kind: "extension-state-updated", snapshot };
+    return { kind: "extension-state-updated", snapshot: this.#markAddedInSettings(snapshot) };
   }
 }
 
