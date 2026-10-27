@@ -2437,10 +2437,13 @@ describe("CodeOperationRuntime", () => {
   });
 
   it("tells the model to deliver kept work as a Canvas only when Code offers the Canvas tool", async () => {
-    const sentContext = async (canvas: boolean) => {
+    const sentContext = async (canvas: boolean, artifactTool?: string) => {
       const provider = providerConnection(Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>()));
       const fixture = runtimeFixture({
-        provider: providerDriver(provider),
+        provider:
+          artifactTool === undefined
+            ? providerDriver(provider)
+            : { ...providerDriver(provider), nativeArtifactTool: () => artifactTool },
         supportsAppManagedTools: true,
         ...(canvas
           ? {
@@ -2474,6 +2477,19 @@ describe("CodeOperationRuntime", () => {
     expect(withCanvas.filter((block) => block.text.includes("as a Canvas"))).toHaveLength(1);
     const withoutCanvas = await sentContext(false);
     expect(JSON.stringify(withoutCanvas)).not.toContain("octant_canvas");
+
+    // A driver that names its own artifact tool for the turn (Claude, with
+    // the person's switch on) gets the artifact rule in the Canvas rule's place.
+    const withArtifacts = await sentContext(true, "Artifact");
+    expect(withArtifacts).toContainEqual({
+      kind: "instructions",
+      text: expect.stringContaining("publish that file with Artifact"),
+    });
+    expect(
+      withArtifacts.filter((block) =>
+        block.text.includes("as a Canvas with the octant_canvas tool, not as a file"),
+      ),
+    ).toHaveLength(0);
   });
 
   it("runs a provider turn asynchronously and owns exact input, approval, and cancellation", async () => {

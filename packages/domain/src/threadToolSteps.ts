@@ -91,11 +91,13 @@ export function recordThreadToolStep(
     case "tool-failure": {
       const summary = boundedSummary(event.kind === "tool-success" ? event.summary : event.message);
       const kept = summary ?? previous?.summary;
+      const published = event.kind === "tool-success" ? event.published : undefined;
       next = {
         toolCallId,
         toolName: previous?.toolName ?? "Tool",
         state: event.kind === "tool-success" ? "completed" : "failed",
         ...(kept === undefined ? {} : { summary: kept }),
+        ...(published === undefined ? {} : { published }),
       };
       break;
     }

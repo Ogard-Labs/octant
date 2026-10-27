@@ -77,7 +77,25 @@ session's tool list. Measured with the Agent SDK (`query({ tools: ["Read",
 2.1.211 (bundled) and 2.1.304 (on `PATH`), 2026-10-20, the runtime offers its
 `Artifact` tool only when launched by Anthropic's own desktop app (it keys on
 the launching entrypoint), so a query from Octant lists `["Read"]` with the
-umbrella and without it alike. The same probe showed that
+umbrella and without it alike. Reading the bundled 2.1.211 binary
+(2026-10-27) found the opt-in that measurement did not set: an Agent SDK
+launch lists `Artifact` once `CLAUDE_CODE_ARTIFACT` is set, and then only for
+a claude.ai sign-in on a Pro, Max, Team, or Enterprise plan whose
+organization allows it, on the first-party API, with nonessential traffic
+allowed, and while claude.ai's own feature switch is on. Octant sets
+`CLAUDE_CODE_ARTIFACT=1` and adds `Artifact` to the tool list only for a Work
+or Code session outside Plan on an account whose person turned on
+[Claude artifacts](model-endpoints.md#claude-artifacts); every other launch
+is unchanged. No probe can read claude.ai's plan checks without a turn, so
+the account reports `nativeArtifacts` supported in Work and Code for a
+claude.ai sign-in (unsupported for an API key, and in Chat everywhere), and
+a session whose runtime leaves the tool out delivers as a Canvas. The tool
+publishes a local `.html` or `.md` file and answers with the page's claude.ai
+address; the decoder keeps that address and title from the structured
+result (an `https` claude.ai address only), the mapper attaches it to the
+call's `tool-success` as `published`, and the call is reported as outside
+content (`hosted-tool`), because claude.ai's answer reaches the model. The
+same probe showed that
 `strictMcpConfig: true`, which every Octant query sets, keeps the account's
 claude.ai connectors (listed by 2.1.304 with `settingSources: []` when the
 option is absent) out of the session. The decoder tolerates the narrower list

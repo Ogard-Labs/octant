@@ -1878,7 +1878,10 @@ its journaled `tool-activity` events. Chat and Work record exactly the same
 step per tool call and nothing more: the provider's tool call id, the tool
 name, a state (`started`, `running`, `completed`, `failed`), and an optional
 progress or result message of at most 2048 bytes, redacted before it is kept. No tool
-input and no tool output is captured. A turn keeps at most 64 steps in arrival
+input and no tool output is captured, except the `published` page a call put
+outside this host (its `https` address and title, never its content; today
+only a Claude artifact), which Code's `tool-activity` and its conversation
+steps carry too and the transcript shows as a link card. A turn keeps at most 64 steps in arrival
 order and sets a truncated flag when it called more. Chat carries them as
 `ChatAttempt.toolSteps` on `chat.attempt-updated@1`; Work carries them as
 `WorkTurnState.toolSteps` journaled with the settled `work.turn-updated@1`,
@@ -7091,11 +7094,39 @@ mechanisms are:
   on a flag or command Octant never passes; and the advisor, like every other
   tool the runtime might add, stays out because the port holds the
   initialized tool list to the requested set. The runtime's `Artifact` tool
-  is not a reason either way: measured the same day, the runtime offers it
-  only when launched by Anthropic's own desktop app (it keys on the launching
-  entrypoint), so from Octant it is absent with or without the umbrella. A
+  is not a reason either way: an Agent SDK launch lists it only when
+  `CLAUDE_CODE_ARTIFACT` opts in, which Octant sets only under the exception
+  below, so every other launch is without it, umbrella or not. A
   host that exports `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` itself keeps
-  the umbrella on every launch; only that disabling value crosses.
+  the umbrella on every launch; only that disabling value crosses (the
+  runtime then withholds `Artifact` as well).
+  **Claude artifacts (a person-authorized external publish).** The one place
+  a Claude launch sends Project content to Anthropic other than as inference
+  is the person's own **Deliver documents as Claude artifacts** switch on a
+  claude.ai account (off by default; maintainer request, 2026-10-27;
+  [Providers and model endpoints](design/model-endpoints.md#claude-artifacts)).
+  With it on, a Work or Code session outside Plan is launched with
+  `CLAUDE_CODE_ARTIFACT=1` and `Artifact` in its tool list, and the model may
+  ask to publish one `.html` or `.md` file to the person's claude.ai account,
+  where Anthropic stores it under that account and it is no longer on this
+  computer alone. The driver's gate holds every call, in both the
+  `PreToolUse` hook and `canUseTool`, before the runtime runs it: the switch
+  is read again at each call, so turning it off refuses the next publish of a
+  session already running; only a publish is admitted (`list`, which reads
+  titles other people chose into the conversation, is refused); and the file
+  must be inside the bound Project and outside the login keychain folder, in
+  Full access too. Above that gate the thread's ordinary posture decides:
+  approval-gated and auto-accepting-edits threads raise an approval that says
+  the file goes to claude.ai and leaves this computer, Full access publishes
+  unasked, and Plan, whose read-only rule refuses an outward side effect,
+  never offers the tool (Chat runs in Plan, so Chat never publishes). Only a
+  person at this host's own window can change the switch. claude.ai's answer
+  (the page's address, title, and warnings) reaches the model, so each call
+  is reported as outside content (`hosted-tool`); Octant keeps only the
+  `https` claude.ai address and title, as the call's `published` page, and
+  never fetches or frames the page (the transcript links to it in the
+  person's browser). Every other provider, and every Claude account with the
+  switch off, keeps the Canvas delivery rule and sends nothing to claude.ai.
   A confined Claude Plan launch reads the assigned leaf of that account's
   state directory (`~/.claude` or `~/.claude-accounts/<instanceId>`) and
   writes only `sessions/` and its own session in `projects/`: the
@@ -7400,6 +7431,9 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   | `sessionCompaction.chat` | `supported`; `unavailable` when the install lacks `/compact` | `supported`; `unavailable` before Codex 0.162.1           | `absent`                                                          | `absent`                                                                                | `absent`                                                                      | `unsupported`; Octant summarizes                                 | `unsupported`; Octant summarizes                                                  | `unsupported`; Octant summarizes                                 | `absent`                              |
   | `sessionCompaction.work` | as Chat                                                      | as Chat                                                   | `absent`                                                          | `absent`                                                                                | `absent`                                                                      | `unsupported`; Octant summarizes                                 | `unsupported`; Octant summarizes                                                  | `unsupported`; Octant summarizes                                 | `absent`                              |
   | `sessionCompaction.code` | as Chat                                                      | as Chat                                                   | `absent`                                                          | `absent`                                                                                | `absent`                                                                      | `supported`; Octant Harness compacts its own transcript          | `supported`; Octant Harness compacts its own transcript                           | `supported`; Octant Harness compacts its own transcript          | `absent`                              |
+  | `nativeArtifacts.chat`   | `unsupported`; Chat runs in Plan                             | `absent`                                                  | `absent`                                                          | `absent`                                                                                | `absent`                                                                      | `absent`                                                         | `absent`                                                                          | `absent`                                                         | `absent`                              |
+  | `nativeArtifacts.work`   | `supported` on claude.ai sign-in; `unsupported` on API key   | `absent`                                                  | `absent`                                                          | `absent`                                                                                | `absent`                                                                      | `absent`                                                         | `absent`                                                                          | `absent`                                                         | `absent`                              |
+  | `nativeArtifacts.code`   | as Work                                                      | `absent`                                                  | `absent`                                                          | `absent`                                                                                | `absent`                                                                      | `absent`                                                         | `absent`                                                                          | `absent`                                                         | `absent`                              |
   | `citations`              | `unsupported`                                                | `unsupported`                                             | `unsupported`                                                     | `unsupported`                                                                           | `unsupported`                                                                 | `unsupported`                                                    | `unsupported`                                                                     | `unsupported`                                                    | `unsupported`                         |
   | `harnessAutoReview`      | `supported`                                                  | `supported`                                               | `unsupported`                                                     | `unsupported`                                                                           | `unsupported`                                                                 | `unsupported`                                                    | `unsupported`                                                                     | `unsupported`                                                    | `unsupported`                         |
 

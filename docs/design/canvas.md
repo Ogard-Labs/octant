@@ -159,6 +159,24 @@ runtime with its own file tools read the tool description and still wrote the
 memo as a Markdown file, then pasted it into the reply after the write was
 denied.
 
+A Claude Code account whose person turned on **Deliver documents as Claude
+artifacts** (off by default; see
+[Providers and model endpoints](model-endpoints.md#claude-artifacts)) gets a
+different rule in that place for its Work and Code turns outside Plan: write
+the document as one `.html` or `.md` file in the working folder and publish it
+with Claude's own `Artifact` tool, which puts it on the person's claude.ai
+account. The rule keeps a Canvas as the answer when the person asks for one or
+when the runtime leaves the tool out of its session, and `octant_canvas` stays
+offered. The driver names its artifact tool through the provider-neutral
+`nativeArtifactTool` seam, so the host chooses the rule without naming a
+provider, and every other provider, Chat, and Plan keep the Canvas rule.
+Naming the tool grants nothing: the driver's gate decides each call (see
+[Architecture: security and authority](../architecture.md#security-and-authority)).
+A published page appears in the thread as a link card under the turn's tool
+rows that opens in the person's browser. Octant never fetches, stores, or
+frames the page: the tool returns only its claude.ai address and title, and
+the card stays visible when the settled toolchain folds.
+
 ## Presentation and schema versions
 
 `create` and `revise` take an optional thread `presentation`: `inline` or

@@ -191,6 +191,7 @@ function harness(
     readonly autoCompactThreshold?: number;
     readonly compactAnnounced?: boolean;
     readonly configDirectory?: string;
+    readonly artifactDelivery?: () => boolean;
     readonly makeEnvironmentScope?: (
       authentication: ClaudeAuthentication,
       options?: ClaudeEnvironmentScopeOptions,
@@ -322,6 +323,9 @@ function harness(
       ...(options.configDirectory === undefined
         ? {}
         : { configDirectory: options.configDirectory }),
+      ...(options.artifactDelivery === undefined
+        ? {}
+        : { artifactDelivery: options.artifactDelivery }),
       process,
       sdk,
       credentialResolver,
@@ -2797,6 +2801,201 @@ function collectTerminal(
     ),
   );
 }
+
+describe("Claude artifact delivery", () => {
+  async function openedTools(
+    f: ReturnType<typeof harness>,
+    mode: "chat" | "work" | "code",
+    executionPolicy: "plan" | "approval-gated" | "full-access",
+  ) {
+    const acquired = await acquire(f.driver, mode);
+    try {
+      await Effect.runPromise(acquired.connection.start({ sessionId, modelId, executionPolicy }));
+      return f.opens.at(-1)?.tools ?? [];
+    } finally {
+      await acquired.close();
+    }
+  }
+
+  it("offers Claude's Artifact tool only to Work and Code turns outside Plan, once the person turns it on", async () => {
+    const off = harness("subscription", "current-session", { artifactDelivery: () => false });
+    expect(await openedTools(off, "code", "approval-gated")).not.toContain("Artifact");
+    expect(
+      off.driver.nativeArtifactTool?.({ mode: "code", executionPolicy: "approval-gated" }),
+    ).toBeUndefined();
+
+    const on = harness("subscription", "current-session", { artifactDelivery: () => true });
+    expect(await openedTools(on, "code", "approval-gated")).toContain("Artifact");
+    expect(await openedTools(on, "work", "approval-gated")).toContain("Artifact");
+    expect(await openedTools(on, "code", "plan")).not.toContain("Artifact");
+    expect(await openedTools(on, "chat", "plan")).not.toContain("Artifact");
+    expect(
+      on.driver.nativeArtifactTool?.({ mode: "work", executionPolicy: "approval-gated" }),
+    ).toBe("Artifact");
+    expect(
+      on.driver.nativeArtifactTool?.({ mode: "code", executionPolicy: "plan" }),
+    ).toBeUndefined();
+    expect(
+      on.driver.nativeArtifactTool?.({ mode: "chat", executionPolicy: "plan" }),
+    ).toBeUndefined();
+
+    // An API key has no claude.ai account to publish to.
+    const apiKey = harness("api-key", "current-session", { artifactDelivery: () => true });
+    expect(await openedTools(apiKey, "code", "approval-gated")).not.toContain("Artifact");
+    expect(
+      apiKey.driver.nativeArtifactTool?.({ mode: "code", executionPolicy: "approval-gated" }),
+    ).toBeUndefined();
+  });
+
+  it("refuses an Artifact call in Plan without raising an approval, because publishing leaves the computer", async () => {
+    const f = harness("subscription", "current-session", { artifactDelivery: () => true });
+    const acquired = await acquire(f.driver, "code");
+    const approvals: ProviderRuntimeEvent[] = [];
+    const subscription = Effect.runFork(
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+        Effect.sync(() => {
+          if (event.kind === "approval-request") approvals.push(event);
+        }),
+      ),
+    );
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+      );
+      const open = f.opens[0]!;
+      await expect(
+        open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Artifact",
+          input: { file_path: `${projectRoot}/report.html`, favicon: "📊" },
+          toolUseId: "plan-artifact",
+          signal: new AbortController().signal,
+        }),
+      ).resolves.toMatchObject({ behavior: "deny" });
+      expect(approvals).toEqual([]);
+    } finally {
+      await Effect.runPromise(Fiber.interrupt(subscription));
+      await acquired.close();
+    }
+  });
+
+  it("asks before publishing a Project file, and refuses once the person turns the switch off mid-session", async () => {
+    let on = true;
+    const f = harness("subscription", "current-session", { artifactDelivery: () => on });
+    const acquired = await acquire(f.driver, "work");
+    const approval = Effect.runPromise(
+      Stream.runHead(
+        Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+          Stream.filter((event) => event.kind === "approval-request"),
+        ),
+      ),
+    );
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      const open = f.opens[0]!;
+      const signal = new AbortController().signal;
+      const input = { file_path: `${projectRoot}/report.html`, favicon: "📊" };
+      await expect(
+        open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Artifact",
+          input,
+          toolUseId: "publish-1",
+          signal,
+        }),
+      ).resolves.toEqual({ behavior: "ask" });
+      const decision = open.canUseTool({
+        toolName: "Artifact",
+        input,
+        toolUseId: "publish-1",
+        signal,
+      });
+      const raised = await approval;
+      expect(raised._tag === "Some" ? raised.value : undefined).toMatchObject({
+        kind: "approval-request",
+        description: expect.stringContaining("claude.ai"),
+      });
+      await Effect.runPromise(
+        acquired.connection.answerApproval({ sessionId, requestId: "request-1", approved: true }),
+      );
+      await expect(decision).resolves.toEqual({ behavior: "allow" });
+
+      on = false;
+      await expect(
+        open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Artifact",
+          input,
+          toolUseId: "publish-2",
+          signal,
+        }),
+      ).resolves.toMatchObject({
+        behavior: "deny",
+        message: "Claude artifacts are turned off in Settings.",
+      });
+    } finally {
+      await acquired.close();
+    }
+  });
+
+  it("publishes only a Project file, even in Full access, and never lists the account's artifacts", async () => {
+    const f = harness("subscription", "current-session", { artifactDelivery: () => true });
+    const acquired = await acquire(f.driver, "code");
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "full-access" }),
+      );
+      const open = f.opens[0]!;
+      const call = (toolUseId: string, input: Record<string, unknown>) =>
+        open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Artifact",
+          input,
+          toolUseId,
+          signal: new AbortController().signal,
+        });
+      await expect(
+        call("outside", { file_path: "/Users/someone/.ssh/id_ed25519" }),
+      ).resolves.toMatchObject({ behavior: "deny" });
+      await expect(call("listing", { action: "list" })).resolves.toMatchObject({
+        behavior: "deny",
+      });
+      await expect(
+        call("keychain", { file_path: `${projectRoot}/../..${claudeLoginKeychainPath()}` }),
+      ).resolves.toMatchObject({ behavior: "deny" });
+      await expect(call("inside", { file_path: `${projectRoot}/report.html` })).resolves.toEqual({
+        behavior: "allow",
+      });
+    } finally {
+      await acquired.close();
+    }
+  });
+
+  it("reports artifacts in Work and Code for a claude.ai sign-in and nowhere for an API key", async () => {
+    const subscription = harness();
+    const signedIn = await Effect.runPromise(
+      Effect.scoped(subscription.driver.probe({ instanceId })),
+    );
+    expect(signedIn.capabilities.nativeArtifacts).toEqual({
+      chat: "unsupported",
+      work: "supported",
+      code: "supported",
+    });
+    const apiKey = harness("api-key");
+    const keyed = await Effect.runPromise(Effect.scoped(apiKey.driver.probe({ instanceId })));
+    expect(keyed.capabilities.nativeArtifacts).toEqual({
+      chat: "unsupported",
+      work: "unsupported",
+      code: "unsupported",
+    });
+  });
+});
 
 describe("Claude driver probe", () => {
   it("rejects the wrong instance without probing any authentication source", async () => {

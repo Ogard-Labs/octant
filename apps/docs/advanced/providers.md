@@ -617,6 +617,34 @@ active key runs out.
   switch keys within a turn. A command-line runtime, such as Claude Code or
   Codex, uses the first key for now and does not switch.
 
+### Claude artifacts
+
+By default Claude delivers a document, report, deck, or page as a Canvas.
+A Claude Code account signed in with claude.ai can publish them as Claude
+artifacts instead: open the account's card in **Settings → Providers**, open
+its details, and turn on **Deliver documents as Claude artifacts**. It is off
+for every account until you turn it on, and only the Octant app on the host
+can change it; a paired device cannot.
+
+With it on, in Work and Code threads:
+
+- Claude writes the document as a page in the folder and publishes it to your
+  claude.ai account. **The page is uploaded to claude.ai and leaves this
+  computer.**
+- Claude asks before each publish, unless the thread has Full access. It can
+  only publish a file inside the thread's folder.
+- Plan never publishes, and Chat never does.
+- The thread shows a link card under the turn's steps; it opens the page in
+  your browser, where you are signed in to claude.ai. Octant does not
+  download or display the page itself.
+- Ask for a Canvas and you still get one.
+
+Whether Claude offers its Artifact tool also depends on your Claude plan and
+organization. When it doesn't, documents stay Canvases. An account that uses an
+Anthropic API key has no claude.ai account to publish to, so the switch is
+unavailable there. Turning the switch off takes effect at Claude's next publish,
+even in a thread that is already running.
+
 ### Signing in with a subscription
 
 An **OpenAI-compatible** endpoint can sign in with a subscription instead of

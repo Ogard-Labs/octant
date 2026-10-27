@@ -77,6 +77,7 @@ import {
   createOpenCodeProvider,
   removeProvider,
   renameProvider,
+  setClaudeArtifactDelivery,
   setProviderEnabled,
   setProviderDataTags,
   setProviderModelDataTags,
@@ -1018,6 +1019,17 @@ export class ProviderService implements ProviderServiceApi {
           if (command.kind === "set-provider-data-tags") {
             instance = setProviderDataTags(current, command.dataTags, updatedAt);
             eventName = "provider.instance-data-tags-changed@1";
+          } else if (command.kind === "set-claude-artifact-delivery") {
+            if (current.driverKind !== "claude") {
+              throw this.#unsupported("Only a Claude account delivers documents as artifacts.");
+            }
+            instance = setClaudeArtifactDelivery(current, { enabled: command.enabled, updatedAt });
+            // The process, its sign-in, and its models stay as they are: the
+            // driver reads this switch at each session it opens and again at
+            // every Artifact call, so turning it off holds for a session
+            // that is already running.
+            keepsRuntime = true;
+            eventName = "provider.instance-configuration-changed@1";
           } else if (command.kind === "rename-provider") {
             instance = renameProvider(current, {
               displayName: command.displayName,

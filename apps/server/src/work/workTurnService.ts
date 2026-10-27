@@ -1476,9 +1476,16 @@ export class WorkTurnService {
         return;
       }
     }
+    // A Work turn never runs in Plan: it runs ask-first or auto-accepting edits.
+    const artifactToolName = input.driver.nativeArtifactTool?.({
+      mode: "work",
+      executionPolicy:
+        input.access === "auto-accept-edits" ? "auto-accept-edits" : "approval-gated",
+    });
     const finalPlan = includeWorkToolDefinitions({
       plan: input.contextPlan,
       tools: appManagedTools?.definitions ?? [],
+      ...(artifactToolName === undefined ? {} : { artifactToolName }),
       uuid: this.#uuid,
       safeInputBudget: this.#safeInputBudgetTokens,
     });

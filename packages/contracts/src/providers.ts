@@ -8,6 +8,7 @@ import {
   ToolExtensionId,
 } from "./extensionIdentity";
 import { OctantMode } from "./modes";
+import { ThreadPublishedPage } from "./threadToolSteps";
 import {
   ACP_AGENT_KINDS,
   AcpAgentAuthentication,
@@ -849,6 +850,13 @@ export const ClaudeProviderConfiguration = Schema.Struct({
   /** Claude-owned directory for this account. Absent uses Claude's default. */
   configDirectory: Schema.optional(ClaudeConfigDirectory),
   accent: Schema.optional(ClaudeAccountAccent),
+  /**
+   * The person turned on delivering Work and Code documents with Claude's own
+   * Artifact tool, which publishes them to their claude.ai account. Absent is
+   * off. Only `set-claude-artifact-delivery` changes it; a configuration
+   * change or a new account never carries it.
+   */
+  artifactDelivery: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type ClaudeProviderConfiguration = typeof ClaudeProviderConfiguration.Type;
 
@@ -1374,6 +1382,20 @@ export const ProviderCapabilities = Schema.Struct({
   ),
   citations: ProviderCapabilitySupport,
   harnessAutoReview: ProviderCapabilitySupport,
+  /**
+   * Whether the runtime has its own tool that publishes a document to the
+   * person's account with the model's provider, outside this host, per mode.
+   * Absent reads as unsupported in every mode. Supported means Octant can
+   * offer the tool once the person turns it on; the runtime may still leave it
+   * out of a session, and such a turn delivers as a Canvas instead.
+   */
+  nativeArtifacts: Schema.optional(
+    Schema.Struct({
+      chat: ProviderCapabilitySupport,
+      work: ProviderCapabilitySupport,
+      code: ProviderCapabilitySupport,
+    }).annotations(strict),
+  ),
 }).annotations(strict);
 export type ProviderCapabilities = typeof ProviderCapabilities.Type;
 
@@ -1994,6 +2016,15 @@ export const ProviderRegistryCommand = Schema.Union(
     ...ProviderInstanceCommandFields,
     enabled: Schema.Boolean,
   }).annotations(strict),
+  /**
+   * Turns delivering documents as Claude artifacts on or off for one Claude
+   * account. Only a person at the Octant window on this host sends it.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("set-claude-artifact-delivery"),
+    ...ProviderInstanceCommandFields,
+    enabled: Schema.Boolean,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("set-provider-data-tags"),
     ...ProviderInstanceCommandFields,
@@ -2389,6 +2420,13 @@ export const ProviderRuntimeEvent = Schema.Union(
     kind: Schema.Literal("tool-success"),
     toolCallId: Schema.NonEmptyTrimmedString,
     summary: Schema.NonEmptyTrimmedString,
+    /**
+     * The page the tool published outside this host, when it is a tool whose
+     * whole result is such a page (a Claude artifact). Only the address and
+     * title cross; the adapter checks the address belongs to the service the
+     * tool publishes to.
+     */
+    published: Schema.optional(ThreadPublishedPage),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,

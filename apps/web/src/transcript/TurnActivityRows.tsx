@@ -2,6 +2,7 @@ import { ChatRichText } from "../chat/ChatRichText";
 import { Check, ChevronRight, Circle, CircleX, Clock3, LoaderCircle } from "lucide-react";
 import { useState, type KeyboardEvent, type ReactNode, type ToggleEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { PublishedPageCard } from "./PublishedPageCard";
 import {
   alwaysVisibleActivityRows,
   settledTurnActivitySummary,
@@ -75,6 +76,10 @@ function outcomeIcon(row: TurnActivityRow, settled: boolean) {
   }
 }
 
+type PublishedToolRow = Extract<TurnActivityRow, { kind: "tool" }> & {
+  readonly published: NonNullable<Extract<TurnActivityRow, { kind: "tool" }>["published"]>;
+};
+
 function rowKey(row: TurnActivityRow): string {
   return `${row.kind}:${row.id}`;
 }
@@ -143,6 +148,11 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
   const foldableRows = activity.rows.filter((row) => !pinnedIds.has(rowKey(row)));
   const summary = settledTurnActivitySummary(activity);
   const foldSettledToolchain = settled && !running && summary.length > 0 && foldableRows.length > 0;
+  // A published page is what the turn delivered, so it stays in view below the
+  // rows even when the settled toolchain folds away.
+  const publishedPages = activity.rows.filter(
+    (row): row is PublishedToolRow => row.kind === "tool" && row.published !== undefined,
+  );
 
   const onToggle = (id: string) => (event: ToggleEvent<HTMLDetailsElement>) => {
     const nextOpen = event.newState === "open";
@@ -237,6 +247,15 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
         </>
       ) : (
         <>{activity.rows.map(renderDisclosure)}</>
+      )}
+      {publishedPages.length === 0 ? null : (
+        <ul aria-label="Published pages" className="turn-activity__published">
+          {publishedPages.map((row) => (
+            <li key={rowKey(row)}>
+              <PublishedPageCard page={row.published} />
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

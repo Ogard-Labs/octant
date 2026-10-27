@@ -560,6 +560,7 @@ async function projectConversationTurns(
           toolName: step.toolName,
           state: step.state,
           ...(step.summary === undefined ? {} : { summary: step.summary }),
+          ...(step.published === undefined ? {} : { published: step.published }),
         });
         continue;
       }

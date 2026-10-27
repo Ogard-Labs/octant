@@ -3181,6 +3181,30 @@ describe("provider runtime contracts", () => {
     ).toThrow();
   });
 
+  it("carries a published page only as a plain https address, never a script or credentialed link", () => {
+    const success = {
+      ...common,
+      kind: "tool-success",
+      toolCallId: "tool-1",
+      summary: "Published to claude.ai.",
+    } as const;
+    const page = { url: "https://claude.ai/artifact/abc123", title: "Quarterly report" };
+    expect(decodeProviderRuntimeEvent({ ...success, published: page })).toMatchObject({
+      published: page,
+    });
+    for (const url of [
+      "javascript:alert(1)",
+      "http://claude.ai/artifact/abc123",
+      "https://person:secret@claude.ai/artifact/abc123",
+      `https://claude.ai/${"a".repeat(2_048)}`,
+    ]) {
+      expect(() => decodeProviderRuntimeEvent({ ...success, published: { url } })).toThrow();
+    }
+    expect(() =>
+      decodeProviderRuntimeEvent({ ...success, published: { ...page, html: "<script>" } }),
+    ).toThrow();
+  });
+
   it("refuses an outside-content read of an unknown source or with an unbounded target", () => {
     const read = {
       ...common,

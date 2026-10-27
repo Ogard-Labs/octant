@@ -199,6 +199,14 @@ does not delete a gist afterward; take it down on GitHub. A folder export
 makes no network call. See
 [Export a Canvas or artifact](/guide/export#export-to-a-github-gist).
 
+A Claude artifact goes to your claude.ai account. Only once you turn on
+**Deliver documents as Claude artifacts** for a Claude account does Claude
+Code publish a page from the thread's folder to claude.ai, where Anthropic
+stores it under that account; Claude asks first unless the thread has Full
+access, and Plan and Chat never publish. Octant keeps the page's address and
+title and never downloads the page. Take a page down on claude.ai. See
+[Claude artifacts](/advanced/providers#claude-artifacts).
+
 A Canvas published as a public link goes to the public Canvas share service.
 Octant operates that service, at `https://canvas.octant.sh` unless you enter
 another URL in **Settings › Permissions › Public links**, which is off by default.

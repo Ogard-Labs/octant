@@ -275,6 +275,12 @@ export type ClaudeDecodedMessage =
       readonly results: readonly {
         readonly toolUseId: string;
         readonly isError: boolean;
+        /**
+         * The claude.ai page the tool's structured result names, read only
+         * from a message that settles one call. The mapper keeps it only for
+         * an Artifact call.
+         */
+        readonly publishedPage?: { readonly url: string; readonly title?: string };
       }[];
     }
   | {
@@ -921,6 +927,11 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                 // `TodoWrite`, which restates the whole list in every call,
                 // so the task panel never has to piece it together.
                 CLAUDE_CODE_ENABLE_TASKS: "false",
+                // Claude Code 2.1.211 keeps its Artifact tool out of an Agent
+                // SDK launch unless this opts in (read from the bundled
+                // binary, 2026-10-27), so it is set only for a session the
+                // driver asked to offer the tool.
+                ...(input.tools.includes("Artifact") ? { CLAUDE_CODE_ARTIFACT: "1" } : {}),
               },
               model: input.model,
               // Claude Code upgrades Haiku to Sonnet in Plan unless Sonnet is

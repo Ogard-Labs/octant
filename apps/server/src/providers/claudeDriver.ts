@@ -86,6 +86,13 @@ const CLAUDE_TOOLS = [
   CLAUDE_CHECKLIST_TOOL,
 ];
 const CLAUDE_PLAN_TOOLS = ["Read", "Glob", "Grep"] as const;
+/**
+ * Claude's own tool that publishes an `.html` or `.md` file to the signed-in
+ * claude.ai account. Claude Code 2.1.211 lists it for an Agent SDK launch only
+ * when `CLAUDE_CODE_ARTIFACT` is set, and then only for a claude.ai plan its
+ * service admits (read from the bundled binary, 2026-10-27).
+ */
+export const CLAUDE_ARTIFACT_TOOL = "Artifact";
 const CLAUDE_READ_TOOLS = new Set<string>(CLAUDE_PLAN_TOOLS);
 /**
  * Tools that change only Claude's own session state: no file, shell, network,
@@ -146,6 +153,63 @@ export function claudeExecutionOptions(
     return { ...options, tools: [...options.tools, "Bash"] };
   }
   return options;
+}
+
+/**
+ * Whether a session is offered Claude's Artifact tool. Only a Work or Code
+ * turn outside Plan, on a claude.ai sign-in, with the person's switch on:
+ * publishing sends a Project file to claude.ai, an outward side effect Plan's
+ * read-only rule refuses, and Chat runs in Plan.
+ */
+export function claudeOffersArtifacts(input: {
+  readonly authentication: ClaudeAuthentication;
+  readonly artifactDelivery: boolean;
+  readonly mode: ProviderAcquireInput["mode"];
+  readonly executionPolicy: ProviderExecutionPolicy;
+}): boolean {
+  return (
+    input.artifactDelivery &&
+    input.authentication === "subscription" &&
+    (input.mode === "work" || input.mode === "code") &&
+    input.executionPolicy !== "plan"
+  );
+}
+
+/**
+ * Why an Artifact call is refused, or undefined when it may go on to the
+ * thread's ordinary approval posture. Octant offers the tool to publish one
+ * Project file and nothing else: `list` reads titles other people chose from
+ * claude.ai into the conversation, and a file outside the Project would send
+ * something the thread was never bound to, in Full access too.
+ */
+export function claudeArtifactCallRefusal(input: {
+  readonly stillOn: boolean;
+  readonly input: Readonly<Record<string, unknown>>;
+  readonly projectRoot: string;
+  readonly isProjectConfinedPath: (projectRoot: string, absolutePath: string) => boolean;
+}): string | undefined {
+  if (!input.stillOn) return "Claude artifacts are turned off in Settings.";
+  const action = input.input.action;
+  if (action !== undefined && action !== "publish") {
+    return "Octant offers Claude's Artifact tool only to publish a page from the Project.";
+  }
+  const filePath = input.input.file_path;
+  if (typeof filePath !== "string") {
+    return "Claude tool request has no authoritative confined path.";
+  }
+  // A home folder opened as a Project contains the login keychain folder.
+  if (claudeToolPathIsInKeychainFolder(filePath)) {
+    return "Claude tool request is outside the Project.";
+  }
+  let confined = false;
+  try {
+    confined =
+      filePath !== input.projectRoot &&
+      input.isProjectConfinedPath(input.projectRoot, filePath) === true;
+  } catch {
+    confined = false;
+  }
+  return confined ? undefined : "Claude tool request is outside the Project.";
 }
 
 /** Whether this call is a Plan turn's shell command, which its sandbox confines. */
@@ -285,6 +349,12 @@ export interface ClaudeDriverOptions {
   readonly authentication: ClaudeAuthentication;
   /** Claude-owned directory for this account. */
   readonly configDirectory?: string;
+  /**
+   * The person's current "Deliver documents as Claude artifacts" switch for
+   * this account, read when a session opens and again at every Artifact call
+   * so turning it off holds for a session already running. Absent is off.
+   */
+  readonly artifactDelivery?: () => boolean;
   readonly process: ClaudeProcessPort;
   readonly sdk: ClaudeAgentSdkPort;
   readonly credentialResolver?: ProviderCredentialResolver;
@@ -675,6 +745,10 @@ function observation(
   // Claude Code keeps every mode's session, so `/compact` reaches all of them
   // alike; an install that does not announce the command cannot be asked.
   const sessionCompaction = input.compactAnnounced === true ? "supported" : "unavailable";
+  // Only a claude.ai sign-in has an account to publish to. Chat runs in Plan,
+  // which never publishes. Whether the runtime then lists the tool rests on
+  // claude.ai's own plan checks, which no probe can read without a turn.
+  const nativeArtifacts = options.authentication === "subscription" ? "supported" : "unsupported";
   const result = decodeProviderProbeResult({
     instanceId: options.instanceId,
     readiness: input.readiness,
@@ -690,6 +764,11 @@ function observation(
               chat: sessionCompaction,
               work: sessionCompaction,
               code: sessionCompaction,
+            },
+            nativeArtifacts: {
+              chat: "unsupported",
+              work: nativeArtifacts,
+              code: nativeArtifacts,
             },
           }
         : unavailableCapabilities,
@@ -1007,6 +1086,15 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
   return {
     kind: "claude",
     conversationOwnership: "provider",
+    nativeArtifactTool: ({ mode, executionPolicy }) =>
+      claudeOffersArtifacts({
+        authentication: options.authentication,
+        artifactDelivery: options.artifactDelivery?.() === true,
+        mode,
+        executionPolicy,
+      })
+        ? CLAUDE_ARTIFACT_TOOL
+        : undefined,
     probe: makeProbe(options, environmentFactory, factories.clock),
     contextFacts: makeClaudeContextFacts(options, environmentFactory, factories.clock),
     acquire: ({ instanceId, projectRoot, mode }) => {
@@ -1493,11 +1581,32 @@ function makeConnection(
             );
           }
         }
-        const executionOptions = claudeExecutionOptions(
+        const baseExecutionOptions = claudeExecutionOptions(
           input.executionPolicy,
           input.autoApprove,
           mode,
         );
+        const offersArtifacts = claudeOffersArtifacts({
+          authentication: options.authentication,
+          artifactDelivery: options.artifactDelivery?.() === true,
+          mode,
+          executionPolicy: input.executionPolicy,
+        });
+        const executionOptions: ClaudeExecutionOptions = offersArtifacts
+          ? {
+              ...baseExecutionOptions,
+              tools: [...baseExecutionOptions.tools, CLAUDE_ARTIFACT_TOOL],
+            }
+          : baseExecutionOptions;
+        // The switch is read again at every call: a session opened while it
+        // was on keeps the tool in its list after the person turns it off.
+        const artifactCallRefusal = (toolInput: Readonly<Record<string, unknown>>) =>
+          claudeArtifactCallRefusal({
+            stillOn: options.artifactDelivery?.() === true,
+            input: toolInput,
+            projectRoot,
+            isProjectConfinedPath: options.isProjectConfinedPath,
+          });
         const sandbox = claudeSandboxSettings(input.executionPolicy, projectRoot);
         let callbackState: SessionState | undefined;
         const canUseTool: ClaudeOpenQueryInput["canUseTool"] = async (request) => {
@@ -1528,6 +1637,10 @@ function makeConnection(
             return deny("Claude tool request did not pass the Octant authority gate.");
           }
           activeState.preToolRequests.delete(request.toolUseId);
+          if (request.toolName === CLAUDE_ARTIFACT_TOOL) {
+            const refusal = artifactCallRefusal(request.input);
+            if (refusal !== undefined) return deny(refusal);
+          }
           if (
             (input.executionPolicy === "full-access" && request.toolName !== "AskUserQuestion") ||
             // Auto-accept edits covers exactly the file writes the gate above
@@ -1693,6 +1806,12 @@ function makeConnection(
               : undefined;
           if (requestInput === undefined) {
             return deny("Claude tool request has invalid input.");
+          }
+          // Checked here, before any posture: Full access answers "allow" in
+          // this hook and Claude Code then never calls `canUseTool`.
+          if (request.toolName === CLAUDE_ARTIFACT_TOOL) {
+            const refusal = artifactCallRefusal(requestInput);
+            if (refusal !== undefined) return deny(refusal);
           }
           if (request.toolName === "AskUserQuestion" && Object.hasOwn(requestInput, "answers")) {
             return deny("Claude user question input was invalid.");

@@ -225,6 +225,14 @@ Remote Control stay out because Octant starts the runtime without them. If
 you export `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` yourself, Octant
 passes it through.
 
+Claude's own **Artifact** tool, which publishes a page to your claude.ai
+account, stays off unless you turn on
+[Deliver documents as Claude artifacts](/advanced/providers#claude-artifacts)
+for a Claude account. With it on, a page Claude publishes is uploaded to
+claude.ai and stored there under your account: it leaves this computer.
+Octant keeps only the page's address and title and shows a link to it; it
+never downloads the page.
+
 ## Remote transport
 
 Remote access is HTTPS-only with browser-trusted certificates; certificate

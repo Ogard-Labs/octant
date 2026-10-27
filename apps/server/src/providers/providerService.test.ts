@@ -2070,6 +2070,51 @@ describe("ProviderService", () => {
     });
   });
 
+  it("records the Claude artifact switch during a session without stopping it, and refuses it for other providers", async () => {
+    const fixture = serviceFixture({
+      instances: [claudeProvider(), provider({ id: otherId, displayName: "OpenCode other" })],
+    });
+    fixture.runtime.setObservedState(observation());
+    fixture.runtime.setActiveSessionCount(instanceId, 1);
+    const invalidate = vi.spyOn(fixture.runtime, "invalidateRuntime");
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "set-claude-artifact-delivery",
+        instanceId,
+        expectedVersion: 1,
+        enabled: true,
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: { version: 2, configuration: { artifactDelivery: true } },
+    });
+    expect(fixture.persistence.readProviderInstance(instanceId)).toMatchObject({
+      configuration: { artifactDelivery: true },
+    });
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(fixture.runtime.observedState(instanceId)).toMatchObject({ readiness: "ready" });
+
+    const off = await fixture.service.execute(windowId, {
+      kind: "set-claude-artifact-delivery",
+      instanceId,
+      expectedVersion: 2,
+      enabled: false,
+    });
+    expect(
+      off.kind === "provider-updated" ? off.instance.configuration : undefined,
+    ).not.toHaveProperty("artifactDelivery");
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "set-claude-artifact-delivery",
+        instanceId: otherId,
+        expectedVersion: 1,
+        enabled: true,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
+  });
+
   it("assigns a separate Claude-owned directory to each additional Claude account", async () => {
     const fixture = serviceFixture();
     await fixture.service.execute(windowId, {

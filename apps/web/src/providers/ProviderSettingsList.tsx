@@ -25,6 +25,7 @@ import {
 import { CheckCircle2, ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ProviderToolVerification } from "./ProviderToolVerification";
+import { ClaudeArtifactDeliverySetting } from "./ClaudeArtifactDeliverySetting";
 import { ModelContextWindowField } from "./ModelContextWindowField";
 import { hostCredentialStore, useHostPlatform } from "../platform";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -106,6 +107,7 @@ export type ProviderSettingsListProps = Pick<
   | "onCompleteProviderAuthentication"
   | "onUpdateProviderCli"
   | "onSetEnabled"
+  | "onSetClaudeArtifactDelivery"
   | "onDataTagsChange"
   | "onModelDataTagsChange"
   | "onModelContextWindowChange"
@@ -314,6 +316,9 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         onRemove={props.onRemove}
         onRename={props.onRename}
         onSetEnabled={props.onSetEnabled}
+        {...(props.onSetClaudeArtifactDelivery === undefined
+          ? {}
+          : { onSetClaudeArtifactDelivery: props.onSetClaudeArtifactDelivery })}
         onDataTagsChange={props.onDataTagsChange}
         onModelDataTagsChange={props.onModelDataTagsChange}
         {...(props.onModelContextWindowChange === undefined
@@ -627,6 +632,7 @@ interface ProviderRowProps {
   readonly onCompleteProviderAuthentication: ProviderSettingsViewProps["onCompleteProviderAuthentication"];
   readonly onUpdateProviderCli?: ProviderSettingsViewProps["onUpdateProviderCli"];
   readonly onSetEnabled: ProviderSettingsViewProps["onSetEnabled"];
+  readonly onSetClaudeArtifactDelivery?: ProviderSettingsViewProps["onSetClaudeArtifactDelivery"];
   readonly onDataTagsChange: ProviderSettingsViewProps["onDataTagsChange"];
   readonly onModelDataTagsChange: ProviderSettingsViewProps["onModelDataTagsChange"];
   readonly onModelContextWindowChange?: ProviderSettingsViewProps["onModelContextWindowChange"];
@@ -1589,6 +1595,18 @@ function ProviderRow(props: ProviderRowProps) {
                       />
                     )}
                   </div>
+                )}
+                {props.instance.driverKind !== "claude" ||
+                props.onSetClaudeArtifactDelivery === undefined ? null : (
+                  <ClaudeArtifactDeliverySetting
+                    disabled={disabled}
+                    instance={props.instance}
+                    {...(props.observed === undefined ? {} : { observed: props.observed })}
+                    onChange={(enabled) =>
+                      props.onSetClaudeArtifactDelivery?.(props.instance.id, enabled) ??
+                      Promise.resolve(false)
+                    }
+                  />
                 )}
                 {acpInstance === undefined ? null : (
                   <div

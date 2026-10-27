@@ -280,6 +280,19 @@ export interface ProviderDriver {
   readonly contextFacts?: ProviderContextFactsSource;
   /** Optional read-only local history reader owned by the configured driver. */
   readonly localUsageHistory?: ProviderLocalUsageHistorySource;
+  /**
+   * The name of the runtime's own tool that publishes a document to the
+   * person's account with the model's provider, when a turn in this mode and
+   * posture is offered it: the driver reports `nativeArtifacts` supported
+   * there and the person turned it on. Undefined otherwise. The host then
+   * asks the model to deliver documents with that tool instead of a Canvas.
+   * Naming the tool grants nothing: the driver's own gate still decides every
+   * call.
+   */
+  readonly nativeArtifactTool?: (input: {
+    readonly mode: "chat" | "work" | "code";
+    readonly executionPolicy: ProviderExecutionPolicy;
+  }) => string | undefined;
   readonly probe: (
     input: ProviderProbeInput,
   ) => Effect.Effect<ProviderProbeResult, ProviderFailure, Scope.Scope>;
