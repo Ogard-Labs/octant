@@ -76,7 +76,8 @@ export interface RecordedCuaScenario {
 export interface RecordedCuaHost {
   readonly id: string;
   readonly name: string;
-  readonly via: "relay" | "direct";
+  /** `relay` or `direct` as Cua documents them, or any other value a daemon could answer. */
+  readonly via: string;
   readonly online: boolean;
 }
 

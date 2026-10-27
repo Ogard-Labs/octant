@@ -6181,7 +6181,8 @@ same. This holds in Chat, Work, and Code.
   editor, and E2B, the first of the two named cloud providers (E2B and Cua
   Spaces), are built; Cua Spaces, reached through the person's local Cua daemon, is
   designed (accepted on 2026-10-27), and its local-daemon port and its driver
-  for a Space on this machine or on the person's other machine are built but
+  for a Space on this computer or on another of the person's computers that
+  the recipe names are built but
   offered on no host until the maintainer's live smokes pass; see
   [Disposable desktops](design/disposable-desktops.md#cua-spaces-through-the-local-daemon).
   A driver whose provider runs a daemon on this machine reaches it only

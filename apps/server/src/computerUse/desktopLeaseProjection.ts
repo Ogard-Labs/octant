@@ -73,6 +73,7 @@ export class DesktopLeaseProjection implements Projection {
             ? {}
             : { credentialRef: requested.credentialRef }),
           ...(requested.placementId === undefined ? {} : { placementId: requested.placementId }),
+          ...(requested.machine === undefined ? {} : { machine: requested.machine }),
           ...(requested.daemon === undefined ? {} : { daemon: requested.daemon }),
           state: "requested",
           requestedAt: event.occurredAt,
