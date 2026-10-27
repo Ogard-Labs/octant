@@ -33,9 +33,14 @@ import {
 } from "./codeLanguageEditor";
 import { useCodeLanguageServices } from "./useCodeLanguageServices";
 import {
+  MAX_CODE_DEBUG_BREAKPOINT_FILES,
+  MAX_CODE_DEBUG_BREAKPOINTS_PER_FILE,
+} from "@octant/contracts/code-debug";
+import {
   codeDebugThreadKey,
   codeDebugWindowState,
   useCodeDebugThreadState,
+  type BreakpointToggle,
 } from "../debug/codeDebugWindowState";
 
 interface CodeEditorFileFields {
@@ -340,9 +345,13 @@ function AvailableEditor(
     }),
     [breakpointLines, stoppedLine],
   );
+  // A toggle past the bounds the host takes at Start sets nothing; the
+  // person hears why rather than seeing the gutter ignore them.
+  const [breakpointNotice, setBreakpointNotice] = useState<string>();
   const toggleBreakpoint = useCallback(
     (lineNumber: number) => {
-      codeDebugWindowState.toggleBreakpoint(debugKey, path, lineNumber);
+      const outcome = codeDebugWindowState.toggleBreakpoint(debugKey, path, lineNumber);
+      setBreakpointNotice(breakpointLimitText(outcome));
     },
     [debugKey, path],
   );
@@ -458,6 +467,8 @@ function AvailableEditor(
         </div>
       )}
 
+      {breakpointNotice === undefined ? null : <p role="status">{breakpointNotice}</p>}
+
       {loadState.kind === "loading" ? <p role="status">Loading file…</p> : null}
       {loadState.kind === "unavailable" ? (
         <OctantAlert tone="warning">{loadState.message}</OctantAlert>
@@ -490,6 +501,18 @@ function AvailableEditor(
       ) : null}
     </section>
   );
+}
+
+function breakpointLimitText(outcome: BreakpointToggle): string | undefined {
+  switch (outcome) {
+    case "added":
+    case "removed":
+      return undefined;
+    case "file-full":
+      return `This file already has ${MAX_CODE_DEBUG_BREAKPOINTS_PER_FILE} breakpoints, the most a debug session takes. Remove one to add another.`;
+    case "files-full":
+      return `Breakpoints are already set in ${MAX_CODE_DEBUG_BREAKPOINT_FILES} files, the most a debug session takes. Clear another file's breakpoints to set one here.`;
+  }
 }
 
 function ReadOnlyFile(props: {

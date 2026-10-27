@@ -10,7 +10,7 @@ import {
   type NativeHarnessSessionView,
 } from "@octant/contracts";
 import { NativeHarnessClientFailure } from "@octant/client-runtime/native-harness-client";
-import { ThreadHarnessSteering } from "./ThreadHarnessSteering";
+import { ThreadHarnessCards } from "./ThreadHarnessCards";
 
 const threadId = "00000000-0000-4000-8000-000000000020";
 const queued = {
@@ -78,8 +78,8 @@ describe("ThreadHarnessSteering", () => {
         execute: vi.fn(),
       };
       render(
-        <ThreadHarnessSteering
-          client={client}
+        <ThreadHarnessCards
+          client={client as never}
           queueClient={queue}
           running={false}
           threadId={threadId}
@@ -112,8 +112,8 @@ describe("ThreadHarnessSteering", () => {
       execute: vi.fn(),
     };
     render(
-      <ThreadHarnessSteering
-        client={client}
+      <ThreadHarnessCards
+        client={client as never}
         queueClient={queue}
         running={false}
         threadId={threadId}
@@ -140,7 +140,7 @@ describe("ThreadHarnessSteering", () => {
       session: vi.fn(async () => view()),
       steer,
     };
-    render(<ThreadHarnessSteering client={client} running threadId={threadId} />);
+    render(<ThreadHarnessCards client={client as never} running threadId={threadId} />);
     const input = await screen.findByRole("textbox", { name: "Note for the lead" });
     await userEvent.type(input, "Use the smaller change");
     await userEvent.click(screen.getByRole("button", { name: "Send note" }));
@@ -170,7 +170,7 @@ describe("ThreadHarnessSteering", () => {
       session: vi.fn(async () => view()),
       steer,
     };
-    render(<ThreadHarnessSteering client={client} running threadId={threadId} />);
+    render(<ThreadHarnessCards client={client as never} running threadId={threadId} />);
     const input = await screen.findByRole("textbox", { name: "Note for the lead" });
     await userEvent.type(input, "First note");
     await userEvent.click(screen.getByRole("button", { name: "Send note" }));
@@ -188,7 +188,7 @@ describe("ThreadHarnessSteering", () => {
       session: vi.fn(async () => view()),
       steer,
     };
-    render(<ThreadHarnessSteering client={client} running threadId={threadId} />);
+    render(<ThreadHarnessCards client={client as never} running threadId={threadId} />);
     const input = await screen.findByRole("textbox", { name: "Note for the lead" });
     await userEvent.type(input, "Use sqlite");
     await userEvent.click(screen.getByRole("button", { name: "Send note" }));
@@ -224,8 +224,8 @@ describe("ThreadHarnessSteering", () => {
           execute: vi.fn(),
         };
         render(
-          <ThreadHarnessSteering
-            client={client}
+          <ThreadHarnessCards
+            client={client as never}
             queueClient={queue}
             threadId={threadId}
             running={false}
@@ -278,8 +278,8 @@ describe("ThreadHarnessSteering", () => {
         ),
       };
       render(
-        <ThreadHarnessSteering
-          client={client}
+        <ThreadHarnessCards
+          client={client as never}
           queueClient={queue}
           threadId={threadId}
           running={false}
@@ -320,8 +320,8 @@ describe("ThreadHarnessSteering", () => {
         steer: vi.fn(),
       };
       render(
-        <ThreadHarnessSteering
-          client={client}
+        <ThreadHarnessCards
+          client={client as never}
           refreshIntervalMs={50}
           running={false}
           threadId={threadId}
@@ -351,7 +351,7 @@ describe("ThreadHarnessSteering", () => {
       session: vi.fn(async () => view("running", [queued, delivered])),
       steer: vi.fn(),
     };
-    render(<ThreadHarnessSteering client={client} running threadId={threadId} />);
+    render(<ThreadHarnessCards client={client as never} running threadId={threadId} />);
     const list = await screen.findByRole("list", { name: "Notes for the running turn" });
     expect(within(list).getByText("queued")).toBeVisible();
     expect(within(list).getByText("delivered")).toBeVisible();
@@ -365,7 +365,7 @@ describe("ThreadHarnessSteering", () => {
       session: vi.fn(async () => view("idle", [queued])),
       steer,
     };
-    render(<ThreadHarnessSteering client={client} running={false} threadId={threadId} />);
+    render(<ThreadHarnessCards client={client as never} running={false} threadId={threadId} />);
     const list = await screen.findByRole("list", { name: "Notes for the running turn" });
     expect(within(list).getByText("not reached")).toBeVisible();
     expect(screen.queryByRole("textbox", { name: "Note for the lead" })).toBeNull();
@@ -380,7 +380,7 @@ describe("ThreadHarnessSteering", () => {
       steer: vi.fn(),
     };
     const { container } = render(
-      <ThreadHarnessSteering client={client} running={false} threadId={threadId} />,
+      <ThreadHarnessCards client={client as never} running={false} threadId={threadId} />,
     );
     await waitFor(() => expect(client.session).toHaveBeenCalled());
     expect(container).toBeEmptyDOMElement();
@@ -395,8 +395,8 @@ describe("ThreadHarnessSteering", () => {
         steer: vi.fn(),
       };
       const { container } = render(
-        <ThreadHarnessSteering
-          client={client}
+        <ThreadHarnessCards
+          client={client as never}
           refreshIntervalMs={50}
           running
           threadId={threadId}

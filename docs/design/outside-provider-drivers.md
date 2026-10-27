@@ -202,19 +202,21 @@ confirmation.
 - **One process per provider instance**, started by the extension supervisor on
   first use and drained on disable, so two instances of one driver share no
   memory, credential lease, or request channel.
-- **Runtime.** The host runs the package's single ESM entry with the Bun
-  runtime that runs the server; the package ships no executable, native addon,
-  or install script (refused at inspection;
+- **Runtime.** The host runs the package's single `.mjs` ES module entry with
+  the runtime that runs the server: Bun in development, and in the packaged
+  app the Electron executable it already ships, run as Node. The package ships
+  no executable, native addon, or install script (refused at inspection;
   [decision 6](#maintainer-decisions)).
 - **Seatbelt profile**, stricter than the MCP server profile: deny default; read
-  the system roots, the runtime's install, and the package root only; write a
-  per-process temporary folder only, removed at stop; **no network**; no
-  process exec beyond the runtime itself and no fork. Each grant beyond
-  deny-default is measured on macOS before it ships, as the extension profile's
-  were.
+  the system roots, the runtime's install (for Electron's Node, the app bundle
+  that holds its executable), and the package root only; write a per-process
+  temporary folder only, removed at stop; **no network**; no process exec
+  beyond the runtime itself and no fork. Each grant beyond deny-default is
+  measured on macOS before it ships, as the extension profile's were.
 - **Environment.** A fixed minimal set (`PATH=/usr/bin:/bin`, locale, the
-  temporary folder). No inherited variables, no provider or cloud keys, no
-  broker coordinates, no Project or checkout path.
+  temporary folder, and for Electron only the switch that makes it run as
+  Node). No inherited variables, no provider or cloud keys, no broker
+  coordinates, no Project or checkout path.
 - **Platforms.** Extension processes have no Linux confinement, so a Linux host
   never starts an outside driver: the component reports `host-prohibited` there.
   Windows is out of scope with Windows Work/Code.
@@ -232,9 +234,8 @@ the fail-closed option.
   shared confinement builder (`apps/server/src/process/seatbeltProfile.ts`)
   and sets the environment itself, ignoring whatever environment the caller
   passed. No caller can widen either.
-- **The grants.** Read: the package root, the runtime's folder and its parent
-  (and, for a Homebrew runtime, the prefix's `Cellar`, `opt`, and
-  `etc/openssl@3`), `/System`, `/usr`, `/private/etc`, `/private/var/db`,
+- **The grants.** Read: the package root, the runtime's install, `/System`,
+  `/usr`, `/private/etc`, `/private/var/db`,
   `/Library/Apple`, the data devices `/dev/null`, `/dev/zero`, `/dev/random`,
   and `/dev/urandom`, `/` itself, and metadata of every parent folder of those.
   These are the extension profile's measured roots less `/bin` and `/sbin`
@@ -249,19 +250,43 @@ the fail-closed option.
   `macos-15` CI job, which passed on 2026-10-27 with no grant added
   ([job][macos-escape-2026-10-27]); a grant the runtime turns out to need is
   added only with its observed failure.
+- **The runtime's install** is taken from the runtime's own resolved path,
+  never a fixed location. For Bun it is the executable's folder and its parent
+  (and, for a Homebrew Bun, the prefix's `Cellar`, `opt`, and
+  `etc/openssl@3`). For Electron's Node it is the app bundle that holds the
+  executable (`<name>.app` above `Contents/MacOS/<name>`), which holds
+  Electron's framework, its ICU data and V8 snapshot, and its resources; the
+  folder the bundle sits in (such as `/Applications`) is not readable. An
+  Electron executable outside
+  an app bundle is a layout no profile was measured for, so the process port
+  refuses that launch. The same escape tests run a driver on the Electron the
+  desktop app pins, fetched in that job before they run; no grant was added
+  for Electron's Node without a macOS run, so the job's result is the
+  measurement, and a grant it needs is added with that observed failure.
 - **The environment.** Exactly `PATH=/usr/bin:/bin`, `LANG=en_US.UTF-8`, and
   the process's temporary folder as both `TMPDIR` and `HOME`, so a runtime
   that keeps a cache under its home writes only into the folder removed at
-  stop and learns no path of the person's.
-- **The runtime.** Only the Bun that runs the server
-  ([decision 6](#maintainer-decisions)). The package store authorizes a
-  driver launch only as that runtime with the entry module as its one
+  stop and learns no path of the person's. On Electron's Node the set adds
+  exactly `ELECTRON_RUN_AS_NODE=1`, without which the executable starts as an
+  app rather than as Node.
+- **Nothing widens the runtime.** The packaged app leaves Electron's fuses at
+  their defaults, so its Node would honour `NODE_OPTIONS` and the `--inspect`
+  family of flags. Neither can reach a driver: the environment above replaces
+  the caller's whole environment, so no `NODE_OPTIONS` is set, and the command
+  line is the runtime and the entry and nothing else, which the package store
+  checks. An inspector the driver opens from inside itself needs a listening
+  socket, which the profile's no-network rule refuses, as it does for Bun's.
+- **The runtime.** Only the runtime that runs the server
+  ([decision 6](#maintainer-decisions)): its own Bun, or the Electron
+  executable it runs on as Node (`process.versions.electron` set and no
+  Electron process type). A server on plain Node, in Electron's main process,
+  or on anything unrecognised starts no driver and refuses every start as
+  `runtime-unavailable`. The runtime is a kind and a path, and the launch's
+  `outside-driver` sandbox names the kind so the process port sets that
+  runtime's environment. The package store authorizes a driver launch only as
+  the host's own runtime, by path and kind, with the entry module as its one
   argument, in the package root, under the `outside-driver` sandbox bound to
-  that root, for an entry the receipt records as not executable. A server on
-  any other runtime starts no driver: the packaged app runs its server on
-  Electron's Node today, so a packaged build refuses every driver start as
-  `runtime-unavailable` until the maintainer chooses to ship a Bun with it or
-  to measure a profile for Electron's Node.
+  that root, for an entry the receipt records as not executable.
 - **Platforms.** On any host but macOS the component is `host-prohibited` on
   the activation ladder, which the ladder reports before quarantine or trust,
   and both the process owner and the process port refuse before a folder or
@@ -516,9 +541,16 @@ takes the fail-closed option.
   `{ driverKind, protocolVersions, manifest }`: the family kind, one or more
   `harness-endpoint/<major>` versions, and an extension package manifest held
   to the rules under [Marketplace and catalog](#marketplace-and-catalog). Its
-  entry point is a `.mjs` or `.js` file path inside the package with no
-  scheme and no `.` or `..` segment. `readOutsideProviderDriverEntry` returns
-  a closed `OutsideProviderDriverRefusalReason` instead of throwing.
+  entry point is a `.mjs` file path inside the package with no scheme and no
+  `.` or `..` segment. `readOutsideProviderDriverEntry` returns a closed
+  `OutsideProviderDriverRefusalReason` instead of throwing.
+- **Why `.mjs` only.** The entry runs on Bun or on Electron's Node, and
+  `.mjs` is the one suffix both load as plain JavaScript in an ES module
+  whatever the package says. Node reads a `.js` file as CommonJS when the
+  nearest `package.json` declares `"type": "commonjs"`, where Bun still runs
+  it as a module, and the two run TypeScript differently (Node only strips
+  erasable types). A driver author writes plain JavaScript; what the entry
+  imports resolves by the runtime's own rules.
 - **A bundled-kind claim** is a `driverKind` other than the family, a slug
   equal to any `ProviderDriverKind` value, or a `builtin:` entry point. A slug
   is the package's name in Settings and in `@` addressing, so a bundled
@@ -682,9 +714,24 @@ alternatives considered and the reason for the choice follow it.
    Deferred: a curated driver catalog.
 5. **Platforms.** macOS only. Linux follows a Linux extension-process
    confinement design; until then Linux reports `host-prohibited`.
-6. **Driver runtime.** One ESM entry on the server's Bun runtime, with no
-   executables. This keeps one measured profile and no native code to review.
-   Rejected: any executable the package ships.
+6. **Driver runtime.** One `.mjs` ES module entry on the runtime that runs the
+   server, with no executables: Bun in development, and in the packaged app
+   the Electron executable it already ships, run as Node
+   (`ELECTRON_RUN_AS_NODE=1` with the server's own `process.execPath`, as the
+   packaged server, the managed device tools, and the terminal-browser grant
+   already run). This keeps one measured profile per runtime, no second runtime
+   to ship, and no native code to review. Rejected: any executable the package
+   ships; shipping Bun in the packaged app, which would be a second runtime to
+   sign, notarize, and update for drivers alone.
+   _Rationale (maintainer decision, 2026-10-27; earlier this decision allowed
+   only the server's Bun, so a packaged build started no driver)._ Measured in
+   a Linux container per idle driver process, Electron 43.7.11 run as Node
+   against Bun 1.4.4: app size added 0 MB against about 89 MB for an unpacked
+   Apple Silicon Bun; startup 77 ms against 14 ms; private memory about 15 MB
+   against about 4 MB (Electron's roughly 81 MB of file-backed pages are shared
+   with the server's own Electron process); a 300k JSON round-trip loop
+   527 ms against 267 ms. A driver relays a few thousand deltas per turn, so
+   the slower runtime is negligible beside the model's network time.
 7. **Modes.** Chat, Work, and Code with verified-model tools, like bundled
    harness endpoints. The driver cannot reach anything the configured endpoint
    does not already receive. Rejected: Chat only at first.

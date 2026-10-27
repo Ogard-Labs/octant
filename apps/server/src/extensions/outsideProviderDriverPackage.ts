@@ -150,7 +150,7 @@ export function outsideProviderDriverRefusalMessage(
     case "not-one-provider-driver":
       return "A provider driver package holds exactly one provider driver and nothing else.";
     case "entry-point-not-package-relative":
-      return "A provider driver's entry must be a JavaScript module inside its package.";
+      return "A provider driver's entry must be a JavaScript module (.mjs) inside its package.";
     case "entry-point-missing":
       return "This provider driver's entry module is not in its package.";
     case "source-unsupported":

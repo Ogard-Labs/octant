@@ -25,9 +25,10 @@ import {
   readDiagnosticsExportReceipt,
 } from "./persistence/diagnosticsExportProjection";
 import type { Journal } from "./persistence/journal";
-import { readJournalGrowth } from "./persistence/journalGrowth";
+import { journalGrowthDays, readJournalGrowth } from "./persistence/journalGrowth";
 import type { SqliteConnection } from "./persistence/sqlitePort";
 import { OCTANT_LOCAL_ACTOR_ID } from "./shellService";
+import { readDebugSessionCounts } from "./code/debugSessionRecords";
 
 /**
  * The single host-authoritative diagnostics export command. Both the
@@ -134,6 +135,16 @@ function readJournalGrowthOrUndefined(connection: SqliteConnection, generatedAt:
   }
 }
 
+function readDebugSessionCountsOrUndefined(connection: SqliteConnection, generatedAt: string) {
+  const since = journalGrowthDays(new Date(generatedAt))[0];
+  if (since === undefined) return undefined;
+  try {
+    return readDebugSessionCounts(connection, since);
+  } catch {
+    return undefined;
+  }
+}
+
 export function exportDiagnosticsEvidence(
   request: DiagnosticsExportRequest,
   deps: DiagnosticsExportServiceDeps,
@@ -180,6 +191,9 @@ export function exportDiagnosticsEvidence(
   // Growth is context for a reviewer, not part of proving the failure, so an
   // unreadable journal leaves the section out rather than failing the export.
   const journalGrowth = readJournalGrowthOrUndefined(deps.connection, generatedAt);
+  // Counts and end reasons only (docs/design/language-services.md § Debugger
+  // data and privacy), and context too, so an unreadable journal leaves it out.
+  const debugSessions = readDebugSessionCountsOrUndefined(deps.connection, generatedAt);
 
   const built = buildDiagnosticsPacket({
     packetId,
@@ -193,6 +207,7 @@ export function exportDiagnosticsEvidence(
     ...(deps.hostHealth === undefined ? {} : { hostHealth: deps.hostHealth() }),
     generatedAt,
     ...(journalGrowth === undefined ? {} : { journalGrowth }),
+    ...(debugSessions === undefined ? {} : { debugSessions }),
   });
 
   if (built.kind === "failed") {

@@ -17,6 +17,13 @@ function utcDay(epochMs: number): string {
   return new Date(epochMs).toISOString().slice(0, 10);
 }
 
+/** The window's UTC days as YYYY-MM-DD, oldest first, today last. */
+export function journalGrowthDays(now: Date): ReadonlyArray<string> {
+  return Array.from({ length: JOURNAL_GROWTH_WINDOW_DAYS }, (_, index) =>
+    utcDay(now.getTime() - (JOURNAL_GROWTH_WINDOW_DAYS - 1 - index) * DAY_MS),
+  );
+}
+
 /**
  * Journal events per aggregate kind per UTC day for the last
  * {@link JOURNAL_GROWTH_WINDOW_DAYS} days, today included, plus the journal head
@@ -29,9 +36,7 @@ function utcDay(epochMs: number): string {
  * opened or exported, never on a timer.
  */
 export function readJournalGrowth(connection: SqliteConnection, now: Date): JournalGrowth {
-  const days = Array.from({ length: JOURNAL_GROWTH_WINDOW_DAYS }, (_, index) =>
-    utcDay(now.getTime() - (JOURNAL_GROWTH_WINDOW_DAYS - 1 - index) * DAY_MS),
-  );
+  const days = journalGrowthDays(now);
   const firstDay = days[0] ?? utcDay(now.getTime());
   const rows = connection
     .prepare(

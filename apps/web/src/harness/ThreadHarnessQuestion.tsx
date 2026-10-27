@@ -1,21 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { NativeHarnessSessionView } from "@octant/contracts";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
-import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import "./native-harness.css";
 
 export interface ThreadHarnessQuestionProps {
-  readonly client: Pick<NativeHarnessClient, "session" | "answerQuestion">;
+  readonly client: Pick<NativeHarnessClient, "answerQuestion">;
   readonly threadId: string;
-  /**
-   * The thread list already says this thread waits on the person. It starts the
-   * quick refresh straight away; without it the card reads the session once and
-   * then only while a question is showing, so an idle thread costs one read.
-   */
-  readonly waiting?: boolean;
-  readonly refreshIntervalMs?: number;
+  /** The thread's session as `ThreadHarnessCards` last read it. */
+  readonly view: NativeHarnessSessionView | null | undefined;
+  readonly reload: () => Promise<unknown>;
+}
+
+/**
+ * A Work lead's own pending question that a turn can still receive. Code's
+ * and Chat's reach their threads another way, a subagent's is the Agents
+ * tab's, and one a restart left behind reaches no turn.
+ */
+export function workLeadQuestion(view: NativeHarnessSessionView | null | undefined) {
+  return view === null ||
+    view === undefined ||
+    view.session.mode !== "work" ||
+    view.session.status === "recovery-required"
+    ? undefined
+    : view.questions.find((entry) => entry.status === "pending" && entry.source === undefined);
 }
 
 /**
@@ -32,53 +41,11 @@ export interface ThreadHarnessQuestionProps {
  * it. A question a restart left behind reaches no turn, so it is not offered.
  */
 export function ThreadHarnessQuestion(props: ThreadHarnessQuestionProps) {
-  const { client, threadId } = props;
-  const [read, setRead] = useState<{
-    readonly threadId: string;
-    readonly view: NativeHarnessSessionView | null;
-  }>();
+  const { client, threadId, view, reload } = props;
   const [notice, setNotice] = useState<string>();
-  const generation = useRef(0);
-  const inFlight = useRef(false);
   const answering = useRef(false);
 
-  const load = useCallback(async () => {
-    if (inFlight.current) return;
-    inFlight.current = true;
-    const mine = ++generation.current;
-    try {
-      const view = await client.session(threadId);
-      // A response for a thread the card has left must not paint over the one
-      // it shows now.
-      if (generation.current === mine) setRead({ threadId, view });
-    } catch {
-      // Keep what was last read while the host reconnects.
-    } finally {
-      inFlight.current = false;
-    }
-  }, [client, threadId]);
-
-  useEffect(
-    () => () => {
-      generation.current += 1;
-    },
-    [],
-  );
-
-  const view = read?.threadId === threadId ? read.view : undefined;
-  const question =
-    view === null ||
-    view === undefined ||
-    view.session.mode !== "work" ||
-    view.session.status === "recovery-required"
-      ? undefined
-      : view.questions.find((entry) => entry.status === "pending" && entry.source === undefined);
-  const polling = props.waiting === true || question !== undefined;
-  useEffect(() => {
-    void load();
-    if (!polling) return;
-    return scheduleVisibleInterval(() => void load(), props.refreshIntervalMs ?? 1_500);
-  }, [load, polling, props.refreshIntervalMs]);
+  const question = workLeadQuestion(view);
   useEffect(() => setNotice(undefined), [threadId, question?.id]);
 
   const answer = useCallback(
@@ -96,11 +63,11 @@ export function ThreadHarnessQuestion(props: ThreadHarnessQuestionProps) {
       } catch {
         setNotice("The answer was not delivered. Try again.");
       } finally {
-        await load();
+        await reload();
         answering.current = false;
       }
     },
-    [question, client, threadId, load],
+    [question, client, threadId, reload],
   );
 
   if (question === undefined) return null;

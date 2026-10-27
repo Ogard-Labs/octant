@@ -49,7 +49,10 @@ import { makeAnthropicCompatibleDriver } from "../providers/anthropicCompatibleD
 import { makeAzureFoundryDriver } from "../providers/azureFoundryDriver";
 import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
 import { OutsideDriverAdmission } from "../providers/outsideDriverAdmission";
-import { OutsideDriverProcesses } from "../providers/outsideDriverProcess";
+import {
+  OutsideDriverProcesses,
+  resolveOutsideDriverRuntime,
+} from "../providers/outsideDriverProcess";
 import {
   makeCredentialBrokerClient,
   makeMcpServerCredentialBrokerClient,
@@ -519,13 +522,18 @@ export function wireProviders(deps: ProvidersDependencies) {
     const acpProcess = options.acpProcess ?? makeAcpProcessLive();
     const piProcess = options.piProcess ?? makePiProcessLive();
     const ohMyPiProcess = options.ohMyPiProcess ?? makeOhMyPiProcessLive();
+    // An outside driver runs on the runtime that runs this server and on
+    // nothing else: Bun in development, Electron's Node in the packaged app.
+    // A server on any other runtime authorizes and starts no driver.
+    const outsideDriverRuntime = resolveOutsideDriverRuntime({
+      versions: process.versions,
+      execPath: process.execPath,
+      type: "type" in process && typeof process.type === "string" ? process.type : undefined,
+    });
     const extensionPackageStore = new ExtensionPackageStore({
       dataDirectory: providerDataDirectory,
       uuid: randomUUID,
-      // An outside driver runs on the Bun that runs this server and on nothing
-      // else. A server on another runtime (the packaged app's Electron Node)
-      // authorizes no driver launch.
-      ...(process.versions.bun === undefined ? {} : { outsideDriverRuntime: process.execPath }),
+      ...(outsideDriverRuntime === undefined ? {} : { outsideDriverRuntime }),
     });
     let recordExtensionRuntimeEvidence: ((event: ExtensionRuntimeEvidence) => void) | undefined;
     const extensionSupervisor =
@@ -1107,7 +1115,7 @@ export function wireProviders(deps: ProvidersDependencies) {
         ? new OutsideDriverProcesses({
             supervisor: extensionSupervisor,
             platform: process.platform,
-            runtime: process.versions.bun === undefined ? undefined : process.execPath,
+            runtime: outsideDriverRuntime,
             temporaryRoot: tmpdir(),
           })
         : {

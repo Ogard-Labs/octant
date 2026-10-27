@@ -112,9 +112,7 @@ import { ThreadPlanProvider } from "../plan/ThreadPlanContext";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
 import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
 import { ThreadSubagentsTray } from "../agents/ComposerSubagentsTray";
-import { ThreadHarnessApproval } from "../harness/ThreadHarnessApproval";
-import { ThreadHarnessQuestion } from "../harness/ThreadHarnessQuestion";
-import { ThreadHarnessSteering } from "../harness/ThreadHarnessSteering";
+import { ThreadHarnessCards } from "../harness/ThreadHarnessCards";
 import { createThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import { useWorkResearchController } from "../work/useWorkResearchController";
@@ -948,41 +946,24 @@ function outsideContentFor(
 /**
  * What the composer of a pane that shows a Chat, Work, or Code thread keeps
  * above it: the agent's own approval (or a Work agent's own question) waiting
- * on the person, and the thread's subagent tray. Both mount, and read the host, only once that composer
- * renders, so a thread still loading asks for nothing.
+ * on the person, notes for its running turn, and the thread's subagent tray.
+ * They mount, and read the host, only once that composer renders, so a thread
+ * still loading asks for nothing.
  */
 function subagentsTrayFor(surface: WorkspaceTab, props: WorkspaceViewProps): ReactNode {
   if (!offersThreadComposer(surface)) return null;
   if (!("threadId" in surface)) return null;
   const threadId = String(surface.threadId);
-  // The approval card reads this window's host, so a pane showing a thread on
-  // another host has no local approval to show.
+  // The harness cards read this window's host, so a pane showing a thread on
+  // another host has no local session to show.
   const ownHost = !("hostId" in surface) || surface.hostId === undefined;
-  const approval =
+  const harness =
     props.nativeHarnessClient === undefined || !ownHost ? null : (
-      <ThreadHarnessApproval
-        client={props.nativeHarnessClient}
-        threadId={threadId}
-        waiting={props.waitingThreadIds?.has(threadId) === true}
-      />
-    );
-  // Only a Work lead's question waits here for an answer: Code's reaches the
-  // thread through its own inline question, and Chat's parks the Chat turn.
-  const question =
-    props.nativeHarnessClient === undefined || !ownHost || surface.kind !== "work-thread" ? null : (
-      <ThreadHarnessQuestion
-        client={props.nativeHarnessClient}
-        threadId={threadId}
-        waiting={props.waitingThreadIds?.has(threadId) === true}
-      />
-    );
-  const steering =
-    props.nativeHarnessClient === undefined || !ownHost ? null : (
-      <ThreadHarnessSteering
-        key={threadId}
+      <ThreadHarnessCards
         client={props.nativeHarnessClient}
         running={props.runningThreadIds?.has(threadId) === true}
         threadId={threadId}
+        waiting={props.waitingThreadIds?.has(threadId) === true}
         {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
         {...(props.projectWindowCapability === undefined
           ? {}
@@ -1000,12 +981,10 @@ function subagentsTrayFor(surface: WorkspaceTab, props: WorkspaceViewProps): Rea
         threadId={threadId}
       />
     );
-  if (approval === null && question === null && steering === null && tray === null) return null;
+  if (harness === null && tray === null) return null;
   return (
     <>
-      {approval}
-      {question}
-      {steering}
+      {harness}
       {tray}
     </>
   );

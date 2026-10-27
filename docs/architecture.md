@@ -2131,9 +2131,14 @@ flowchart LR
   kind per day for the last 14 days, the journal head sequence, and the database
   size, as kind names and counts only: no payload, identifier, or thread or
   Project name. A packet carrying this section or the `hostHealth` counters
-  (see the development loop) is version 2; a version 1 packet carries neither. One grouped query over the `event_journal_occurred_at` index
+  (see the development loop) is version 2, or version 3 when it also counts
+  debug sessions (below); a version 1 packet carries neither. One grouped query over the `event_journal_occurred_at` index
   reads it when diagnostics are exported or Settings opens, never on a timer,
-  and Settings shows the same table.
+  and Settings shows the same table. An export also counts Code debug
+  sessions started, and ended per end reason, over the same window
+  (`debugSessions`, a version 3 packet, absent when there were none), with
+  no session, thread, or Project named; the rule is in
+  [Debugger session rules](design/language-services.md#debugger-session-rules).
 - **Recovery.** Sequence-based reconnect replay for local and remote clients —
   a dropped stream catches up from the authoritative snapshot before it reopens,
   keeps retrying while the host is unreachable, and a remote session whose window
@@ -5097,7 +5102,16 @@ the model at another size.
   thread.
 - **Surfaces.** `/api/native-harness/routing` and
   `/api/native-harness/sessions/:threadId` serve the web, desktop, phone, and
-  `octant agent` / `octant harness` from one `NativeHarnessSessionView`.
+  `octant agent` / `octant harness` from one `NativeHarnessSessionView`. A
+  thread pane reads that view once for everything above its composer (the
+  lead's approval card, a Work lead's question card, and the steering notes)
+  and refreshes it on one timer: quickly while the thread waits on the person
+  or shows a card, more slowly while a turn runs or unreached notes wait to be
+  handed on, and not at all for a thread whose lead is not the harness unless
+  the thread list says it waits on the person. A pane that switches threads
+  reads the new thread at once, even while a read for the last one is out.
+  `WorkspaceView.test.tsx` pins the single read when a Work thread opens and
+  `ThreadHarnessQuestion.test.tsx` the single timer while every card shows.
 
 - **Parity checklist.** The 2026-10-16 parity run found Harness leads that
   could not record task progress, were offered `second-opinion` and
@@ -5174,7 +5188,14 @@ the model at another size.
      without a plan approval. Not yet pinned at the offered-set level beyond
      item 1; the progress states are covered by `nativeHarnessTodo.test.ts`.
   4. **One session everywhere.** The same session state is visible in web,
-     terminal, and phone.
+     desktop, terminal, and phone: each reads and changes the one journaled
+     session through `/api/native-harness/sessions/:threadId`, and none keeps
+     a copy it could act on. `nativeHarnessSessionRoutes.test.ts` pins that
+     the app window (web and desktop share it), `octant agent`'s own window,
+     and a paired phone read the identical view, that a pause from the
+     terminal is what the others read next, and that a command sent against a
+     version read before another surface's change is refused as
+     `stale-version` and changes nothing.
   5. **Terminal focus escape.** A keyboard user can leave the terminal pane
      with a documented chord (Mod+Escape to the next control,
      Mod+Shift+Escape to the previous one, rebindable), and the pane says so.
@@ -5852,7 +5873,9 @@ same. This holds in Chat, Work, and Code.
   `<prefix>/etc/openssl@3`, never the rest of the prefix. It also grants
   `/` and metadata of every parent folder of those roots, because a runtime
   such as node will not start without them. Metadata names a folder; it does
-  not read its contents. An outside provider driver's process takes a stricter
+  not read its contents. An outside provider driver's process runs on the
+  server's own runtime (Bun in development, Electron's Node in the packaged
+  app, whose app bundle is then the runtime's install) and takes a stricter
   profile from the shared confinement builder (no network, no exec but its
   runtime, no fork, a read-only package, one temporary folder, and a fixed
   environment), and on any host but macOS its component is `host-prohibited`
@@ -8893,7 +8916,7 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   its SQL shape and duration, never bound values, and an event-loop lag over
   `OCTANT_EVENT_LOOP_LAG_MS` (default 100) logs the lag. Both log lines are off
   under tests unless the variable is set. The diagnostics export carries
-  `hostHealth` counters (a version 2 packet) since process start: slow statement count and worst
+  `hostHealth` counters (a version 2 or 3 packet) since process start: slow statement count and worst
   duration, lag event count and worst lag, in milliseconds, with no SQL text or
   route names.
 - `bun run dev` starts Vite for `apps/web` and launches Electron against it.
