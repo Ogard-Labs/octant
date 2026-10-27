@@ -1,7 +1,9 @@
 import type { DesktopPaneClient } from "@octant/client-runtime/desktop-pane-client";
 import {
+  decodeDesktopMachineId,
   decodeDesktopPlacementId,
   decodeDesktopProviderId,
+  type DesktopPaneAnswer,
   type DesktopRecipe,
   type LeasableDesktopProvider,
 } from "@octant/contracts/desktop-lease";
@@ -82,6 +84,9 @@ interface RecipeDraft {
   readonly providerId: string;
   /** The provider's placement, or empty for a provider that offers none. */
   readonly placementId: string;
+  /** The person's computer, for a placement that chooses one; empty until one is chosen. */
+  readonly machineId: string;
+  readonly machineName: string;
   readonly screen: string;
   readonly leaseMinutes: number;
   readonly maximumLeaseMinutes: number;
@@ -91,6 +96,16 @@ interface RecipeDraft {
 type OfferedProviders =
   | { readonly status: "loading" }
   | { readonly status: "loaded"; readonly providers: ReadonlyArray<LeasableDesktopProvider> }
+  | { readonly status: "failed" };
+
+type ListedMachines = Extract<
+  DesktopPaneAnswer,
+  { readonly status: "recipe-machines" }
+>["machines"];
+
+type OfferedMachines =
+  | { readonly status: "loading" }
+  | { readonly status: "loaded"; readonly machines: ListedMachines }
   | { readonly status: "failed" };
 
 const screenId = (screen: DesktopRecipe["screen"]) => `${screen.width}x${screen.height}`;
@@ -113,6 +128,8 @@ function draftOf(
     return {
       providerId,
       placementId: firstPlacement(providerId, providers),
+      machineId: "",
+      machineName: "",
       screen: DEFAULT_SCREEN,
       ...DEFAULT_LIMITS,
     };
@@ -120,6 +137,8 @@ function draftOf(
   return {
     providerId: String(saved.providerId),
     placementId: String(saved.placementId ?? ""),
+    machineId: String(saved.machine?.machineId ?? ""),
+    machineName: saved.machine?.displayName ?? "",
     screen: screenId(saved.screen),
     leaseMinutes: saved.leaseMinutes,
     maximumLeaseMinutes: saved.maximumLeaseMinutes,
@@ -131,6 +150,7 @@ function sameDraft(left: RecipeDraft, right: RecipeDraft): boolean {
   return (
     left.providerId === right.providerId &&
     left.placementId === right.placementId &&
+    left.machineId === right.machineId &&
     left.screen === right.screen &&
     left.leaseMinutes === right.leaseMinutes &&
     left.maximumLeaseMinutes === right.maximumLeaseMinutes &&
@@ -170,6 +190,14 @@ function recipeOf(
     ...(draft.placementId === ""
       ? {}
       : { placementId: decodeDesktopPlacementId(draft.placementId) }),
+    ...(draft.machineId === ""
+      ? {}
+      : {
+          machine: {
+            machineId: decodeDesktopMachineId(draft.machineId),
+            displayName: draft.machineName,
+          },
+        }),
     screen: { width: width ?? 1280, height: height ?? 800 },
     network: "none",
     leaseMinutes: draft.leaseMinutes,
@@ -211,6 +239,11 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
     return () => controller.abort();
   }, [props.client]);
   const providers = offered.status === "loaded" ? offered.providers : [];
+
+  // Asked only when a person has a placement that chooses a computer in view:
+  // listing the person's computers asks their provider, which nothing else
+  // in this editor does.
+  const [offeredMachines, setOfferedMachines] = useState<OfferedMachines>({ status: "loading" });
 
   const [draft, setDraft] = useState<RecipeDraft>(() => draftOf(saved, providers));
   // The recipe and provider list the draft was last filled from. When another
@@ -260,6 +293,48 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
   );
   const providerOffered = draftProvider !== undefined;
   const placements = draftProvider?.placements ?? [];
+  const machinesKey =
+    draftProvider !== undefined &&
+    placements.some(
+      (placement) =>
+        String(placement.placementId) === draft.placementId && placement.choosesMachine === true,
+    )
+      ? `${draft.providerId}|${draft.placementId}`
+      : undefined;
+  useEffect(() => {
+    const client = props.client;
+    if (machinesKey === undefined) return undefined;
+    if (client === undefined) {
+      setOfferedMachines({ status: "failed" });
+      return undefined;
+    }
+    const [providerId = "", placementId = ""] = machinesKey.split("|");
+    const controller = new AbortController();
+    setOfferedMachines({ status: "loading" });
+    client
+      .request(
+        {
+          kind: "recipe-machines",
+          providerId: decodeDesktopProviderId(providerId),
+          placementId: decodeDesktopPlacementId(placementId),
+        },
+        controller.signal,
+      )
+      .then(
+        (answer) => {
+          if (controller.signal.aborted) return;
+          setOfferedMachines(
+            answer.status === "recipe-machines"
+              ? { status: "loaded", machines: answer.machines }
+              : { status: "failed" },
+          );
+        },
+        () => {
+          if (!controller.signal.aborted) setOfferedMachines({ status: "failed" });
+        },
+      );
+    return () => controller.abort();
+  }, [props.client, machinesKey]);
   // A provider that offers placements is leased only on one of them, and one
   // that offers none only on its own terms.
   const placementOffered =
@@ -283,13 +358,47 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
           },
         ]),
   ];
+  // A placement that runs on one of the person's computers names which one,
+  // from those the host lists now; a saved one stays visible if it is not
+  // listed, but cannot be chosen again.
+  const choosesMachine =
+    placements.find((placement) => String(placement.placementId) === draft.placementId)
+      ?.choosesMachine === true;
+  const listedMachines = offeredMachines.status === "loaded" ? offeredMachines.machines : [];
+  const machineListed = listedMachines.some(
+    (machine) => String(machine.machineId) === draft.machineId,
+  );
+  const machineOptions: ReadonlyArray<OctantSelectOption> = [
+    ...listedMachines.map((machine) => ({
+      id: String(machine.machineId),
+      label: machine.online ? machine.displayName : `${machine.displayName} (not answering now)`,
+    })),
+    ...(draft.machineId === "" || machineListed
+      ? []
+      : [
+          {
+            id: draft.machineId,
+            label:
+              offeredMachines.status === "loaded"
+                ? `${draft.machineName} (not listed now)`
+                : draft.machineName,
+            disabled: true,
+          },
+        ]),
+  ];
+  const machineOffered = choosesMachine ? machineListed : draft.machineId === "";
   const limitsRefusal =
     draft.leaseMinutes > draft.maximumLeaseMinutes
       ? "A desktop can't start with longer than its longest run."
       : undefined;
   const unchanged = saved !== undefined && sameDraft(draft, draftOf(saved, providers));
   const canSave =
-    !disabled && providerOffered && placementOffered && limitsRefusal === undefined && !unchanged;
+    !disabled &&
+    providerOffered &&
+    placementOffered &&
+    machineOffered &&
+    limitsRefusal === undefined &&
+    !unchanged;
 
   async function commit(next: DesktopRecipe | null): Promise<void> {
     setPending(true);
@@ -339,6 +448,8 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
                   ...current,
                   providerId,
                   placementId: firstPlacement(providerId, providers),
+                  machineId: "",
+                  machineName: "",
                 }))
               }
               options={providerOptions}
@@ -352,13 +463,52 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
                 aria-label="Where the desktop runs"
                 disabled={disabled}
                 onValueChange={(placementId) =>
-                  setDraft((current) => ({ ...current, placementId }))
+                  setDraft((current) => ({
+                    ...current,
+                    placementId,
+                    machineId: "",
+                    machineName: "",
+                  }))
                 }
                 options={placementOptions}
                 value={draft.placementId}
               />
             </label>
           )}
+          {choosesMachine ? (
+            <>
+              <label className="project-provider-policy__mode">
+                <span>Computer</span>
+                <OctantSelectField
+                  aria-label="Which computer"
+                  disabled={disabled}
+                  onValueChange={(machineId) =>
+                    setDraft((current) => ({
+                      ...current,
+                      machineId,
+                      machineName:
+                        listedMachines.find((machine) => String(machine.machineId) === machineId)
+                          ?.displayName ?? machineId,
+                    }))
+                  }
+                  options={machineOptions}
+                  placeholder={
+                    offeredMachines.status === "loading"
+                      ? "Listing your computers…"
+                      : "Choose a computer"
+                  }
+                  value={draft.machineId}
+                />
+              </label>
+              {offeredMachines.status === "failed" ? (
+                <p className="project-provider-policy__hint" role="status">
+                  Octant couldn't list your computers just now. Check that{" "}
+                  {draftProvider?.displayName ?? "the provider"} is running here, then open these
+                  settings again.
+                </p>
+              ) : null}
+            </>
+          ) : null}
           <label className="project-provider-policy__mode">
             <span>Screen</span>
             <OctantSelectField

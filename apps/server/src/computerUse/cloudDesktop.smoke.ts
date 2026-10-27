@@ -28,10 +28,11 @@
  * Cua needs a Linux host with Cua's daemon running as this user
  * (`cua daemon start`), signed in, and QEMU installed. `cua-other-machine`
  * also needs exactly one other machine of the same Cua account online and
- * set up with `cua host setup --provide-spaces`, with QEMU installed there.
+ * set up with `cua host setup --provide-spaces`, with QEMU installed there;
+ * its recipe names that machine, as a person would in the recipe editor.
  *
- * `run` acquires a desktop as a person who confirmed its provider and
- * placement, as a billed or off-machine one asks, reads a frame,
+ * `run` acquires a desktop as a person who confirmed its provider,
+ * placement, and machine, as a billed or off-machine one asks, reads a frame,
  * sends a person's click and text, sends a small app as the agent, launches,
  * observes, clicks, and types into it as the agent, extends the lease, then
  * releases it and asks the provider whether anything of this host remains.
@@ -180,11 +181,33 @@ const driver =
 // A daemon provider's account is the placement its daemon is signed in to,
 // never a key; a cloud provider's is the key piped in above.
 const account = cloud.reach === "https" ? credentialRef : undefined;
+/**
+ * The machine a placement that chooses one runs on: the one online machine
+ * this smoke's setup asks for, as a person would pick it in the recipe
+ * editor. A restart only reconciles, so it names none.
+ */
+async function machineToName(): Promise<{ machineId: string; displayName: string } | undefined> {
+  if (cloud.reach !== "daemon" || phase === "restart") return undefined;
+  const choosing = driver.placements?.find(
+    (placement) => String(placement.id) === String(cloud.placementId),
+  );
+  if (choosing?.choosesMachine !== true || driver.listMachines === undefined) return undefined;
+  const listed = await driver.listMachines(cloud.placementId, new AbortController().signal);
+  const online = listed.status === "listed" ? listed.machines.filter((each) => each.online) : [];
+  const [only] = online;
+  if (only === undefined || online.length !== 1) {
+    console.error(`Expected exactly one other machine online: ${JSON.stringify(listed)}`);
+    process.exit(2);
+  }
+  return { machineId: only.id, displayName: only.name || only.id };
+}
+const machine = await machineToName();
 const recipe = decodeDesktopRecipe({
   providerId: String(cloud.id),
   ...(cloud.reach === "https"
     ? { credentialRef: String(credentialRef) }
     : { placementId: String(cloud.placementId) }),
+  ...(machine === undefined ? {} : { machine }),
   screen: { width: 1024, height: 768 },
   network: "none",
   leaseMinutes: 10,
@@ -264,6 +287,7 @@ const acquired = await service.acquire({
   ...caller,
   confirmedProvider: cloud.id,
   ...(cloud.reach === "daemon" ? { confirmedPlacement: cloud.placementId } : {}),
+  ...(recipe.machine === undefined ? {} : { confirmedMachine: recipe.machine.machineId }),
 });
 step("acquire", acquired);
 if (acquired.status !== "acquired") process.exit(1);

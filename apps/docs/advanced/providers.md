@@ -246,10 +246,14 @@ model use Octant's tools, use **Verify tools** on the provider's card: Octant
 sends one request and checks the answer itself.
 
 Trust holds for the exact version you trusted. If the folder's contents change
-and you update, the provider stays blocked, with its history and key, until you
-remove it and add it again. Turning the plugin off, withdrawing trust, or
+and you update, the new version arrives untrusted and the provider is blocked,
+with its history and key. Trusting the new version moves the provider to it:
+its next check starts the new version, and its models need **Verify tools**
+again, since what Octant learned about the old version does not carry over. A
+rollback works the same way. Turning the plugin off, withdrawing trust, or
 uninstalling stops the driver and blocks the provider. Linux and Windows hosts
-cannot confine a driver, so they never run one.
+cannot confine a driver, so they never run one. To write one, see
+[Build a provider driver](/advanced/provider-drivers).
 
 An endpoint driver (OpenAI-compatible, Anthropic-compatible, Azure AI Foundry,
 Ollama) is added under **Octant Harness → Model endpoints** with **Add

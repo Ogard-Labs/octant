@@ -253,12 +253,15 @@ host's; a file reaches it only when the agent sends one.
 A desktop on a cloud provider such as E2B runs on your own account and bills
 it, so Octant asks you to confirm each one before it starts
 it, even under Full access; the key stays on this host. A desktop on another
-of your machines, such as a Cua Space on **Your other machine**, also asks
-each time and says where it runs: if this machine stops, Octant cannot end
-it, and it may keep running there until you delete it. Octant shows and
-drives it only while Cua reaches it end to end, never through the relay's
-HTTPS path, where Cua's relay could read it. This version does not offer a
-cloud provider or another machine yet.
+of your computers, such as a Cua Space on **Your other computer**, also asks
+each time and names the computer it runs on: if this computer stops, Octant
+cannot end it, and it may keep running there until you delete it. The pane's
+title names the computer while the desktop runs. Octant shows and drives it
+only while Cua reaches it end to end, never through the relay's HTTPS path,
+where Cua's relay could read it; while that is the only way through, the pane
+says **Not shown: the connection could be read**, the desktop keeps running,
+and **Try again** looks once more. This version does not offer a cloud
+provider or another computer yet.
 
 A paired phone or browser that can open the thread can watch and use its
 desktop too.
@@ -275,6 +278,10 @@ settings:
   ImageMagick are installed and Octant has restarted.
 - **Runs on** appears for a provider that names where its desktops run, and
   picks where this Project's desktops run.
+- **Computer** appears when they run on one of your other computers, and
+  lists the computers the provider knows about, marking any that isn't
+  answering now. Pick the one this Project's desktops run on; Octant never
+  picks one for you.
 - **Screen** sets the desktop's size.
 - **Lasts**, **Longest**, and **Idle** set how long a desktop lasts at first,
   the most it can be extended to, and how long it may sit unused. They start
@@ -282,7 +289,7 @@ settings:
 
 **Set recipe** saves it; the next desktop uses it. The desktop never has
 network access. **Remove recipe** asks first: removing it, or changing its
-provider, ends the Project's running desktops. Only a window on the host
+provider, where it runs, or its computer, ends the Project's running desktops. Only a window on the host
 itself can set or remove a recipe; a paired phone or browser sees it but
 can't change it.
 

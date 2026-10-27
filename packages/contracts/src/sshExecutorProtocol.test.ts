@@ -289,6 +289,35 @@ describe("SSH executor protocol", () => {
         })),
       }),
     ).toBe("Left");
+    // A fixed variable is a constant of the driver's: it names no path, and
+    // none the target sets itself or that could steer the loader or proxy.
+    const variables = (entries: ReadonlyArray<object>) => start({ fixedVariables: entries });
+    expect(variables([{ name: "NO_COLOR", value: "1" }])).toBe("Right");
+    expect(variables([{ name: "AGENT_CONFIG", value: '{"telemetry":false}' }])).toBe("Right");
+    for (const value of ["/home/build/.agent", "../agent", "a\u0000b", "a\nb", "x".repeat(1_025)]) {
+      expect(variables([{ name: "AGENT_SWITCH", value }])).toBe("Left");
+    }
+    for (const name of ["PATH", "HOME", "TMPDIR", "LD_PRELOAD", "HTTPS_PROXY", "OCTANT_X"]) {
+      expect(variables([{ name, value: "1" }])).toBe("Left");
+    }
+    expect(
+      variables([
+        { name: "NO_COLOR", value: "1" },
+        { name: "NO_COLOR", value: "0" },
+      ]),
+    ).toBe("Left");
+    expect(
+      variables(
+        Array.from({ length: 33 }, (_, index) => ({ name: `V${String(index)}`, value: "1" })),
+      ),
+    ).toBe("Left");
+    // A denied entry names something inside the bound root, never above it.
+    const denied = (entries: ReadonlyArray<string>) => start({ deniedRootEntries: entries });
+    expect(denied([".mcp.json", ".github/hooks"])).toBe("Right");
+    for (const entry of ["/etc/hooks", "../hooks", ".github/../..", "", ".", "a//b"]) {
+      expect(denied([entry])).toBe("Left");
+    }
+    expect(denied(Array.from({ length: 33 }, (_, index) => `.entry${String(index)}`))).toBe("Left");
     // A placed process is stopped by its stream, beside the request slot.
     expect(decode({ type: "stop-process", stream: 2 })._tag).toBe("Right");
     expect(decode({ type: "stop-process", stream: 1 })._tag).toBe("Left");

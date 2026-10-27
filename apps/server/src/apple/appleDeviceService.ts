@@ -29,6 +29,7 @@ import {
   type AppleDevelopmentSigningGap,
   type AppleDeviceExecutionScope,
   type AppleDeviceHost,
+  type AppleDevicePolicyDecision,
   type AppleDeviceThreadHoldings,
 } from "@octant/domain";
 import type { AppleDeviceLeases, EndedAppleDeviceLease } from "./appleDeviceLeases";
@@ -82,6 +83,8 @@ const MAX_CONSOLE_BYTES = 1024 * 1024;
 const MAX_HELD_PRODUCTS = 64;
 /** The most latest-screenshot pointers the host holds, one per thread, checkout, and device. */
 const MAX_HELD_SCREENSHOTS = 64;
+/** The most console reads the host keeps readable, oldest forgotten first. */
+const MAX_HELD_CONSOLES = 64;
 const MAX_DIAGNOSTICS = 64;
 const MAX_DIAGNOSTIC_LENGTH = 2_048;
 /**
@@ -189,19 +192,32 @@ interface HeldProduct {
   readonly signing: AppleDeviceSigning;
 }
 
-/** The latest screen a thread captured of one device, readable only by that thread. */
-interface HeldScreenshot {
+/** Evidence a thread holds by reference, readable only by that thread on that checkout. */
+interface HeldReference {
   readonly threadId: string;
   readonly checkoutId: string;
-  readonly deviceId: AppleDeviceId;
   readonly reference: AppleEvidenceReference;
+}
+
+/** The latest screen a thread captured of one device. */
+interface HeldScreenshot extends HeldReference {
+  readonly deviceId: AppleDeviceId;
   readonly capturedAt: string;
 }
 
-/** What reading a held screenshot found. Another thread's, or one replaced since, is not found. */
+/**
+ * What reading a held screenshot or console output found. Another thread's,
+ * or one replaced since, is not found.
+ */
 export type AppleDeviceScreenshotRead =
   | { readonly kind: "found"; readonly bytes: Uint8Array }
   | { readonly kind: "not-found" }
+  | { readonly kind: "unavailable" };
+
+/** What the policy would answer a request as it stands; nothing was carried out. */
+export type AppleDeviceCheck =
+  | { readonly kind: "allowed" }
+  | { readonly kind: "refused"; readonly reason: AppleDeviceRefusalReason }
   | { readonly kind: "unavailable" };
 
 interface ThreadBundle {
@@ -288,6 +304,7 @@ export class AppleDeviceService {
   readonly #products: HeldProduct[] = [];
   readonly #installed: ThreadBundle[] = [];
   readonly #screenshots: HeldScreenshot[] = [];
+  readonly #consoles: HeldReference[] = [];
   /** Capture files a screenshot launch is writing right now; a sweep leaves them alone. */
   readonly #capturesInProgress = new Set<string>();
   /** The latest console session per device and bundle, running or ended. */
@@ -320,8 +337,61 @@ export class AppleDeviceService {
     context: AppleDeviceExecutionContext,
     signal?: AbortSignal,
   ): Promise<AppleDeviceResponse> {
+    const unreadable = await this.#lookFor(request, signal);
+    if (unreadable !== undefined) return unreadable;
+    // From here to the lease change nothing awaits, so two confirmed requests
+    // for one device cannot both see it free.
+    const { decision, host } = this.#decide(request, context);
+    if (decision.kind === "denied") return refused(decision.reason);
+    if (host === undefined) return refused("toolchain-unavailable");
+    return await this.#carryOut(request, context, host, signal);
+  }
+
+  /**
+   * What the policy would answer this request as it stands, carrying nothing
+   * out. The agent's tool asks before it puts a lease or an effect to the
+   * person, so nobody is asked to approve a call the host would then refuse
+   * for a reason that needs nobody's answer. The request itself is decided
+   * again when it arrives.
+   */
+  async check(
+    request: AppleDeviceRequest,
+    context: AppleDeviceExecutionContext,
+    signal?: AbortSignal,
+  ): Promise<AppleDeviceCheck> {
+    if ((await this.#lookFor(request, signal)) !== undefined) return { kind: "unavailable" };
+    const { decision } = this.#decide(request, context);
+    return decision.kind === "denied"
+      ? { kind: "refused", reason: decision.reason }
+      : { kind: "allowed" };
+  }
+
+  /**
+   * Looks at the device layer for a request, and answers it with a failure
+   * when the paired devices could not be listed.
+   */
+  async #lookFor(
+    request: AppleDeviceRequest,
+    signal: AbortSignal | undefined,
+  ): Promise<AppleDeviceResponse | undefined> {
+    // Nothing stands in for a Mac: no process starts, and the policy names why.
+    if (this.#platform !== "darwin") return undefined;
+    // Releasing needs no fresh look at the device: a person may let go of a
+    // phone that is already unplugged.
+    if (request.kind === "release-device") return undefined;
+    if ((await this.#refresh(signal)) !== "unreadable") return undefined;
+    return decodeAppleDeviceResponse({
+      kind: "apple-device-failure",
+      failure: { category: "unavailable", message: "Paired devices could not be listed." },
+    });
+  }
+
+  /** The policy's answer against what the host last found. Synchronous, so no lease changes under it. */
+  #decide(
+    request: AppleDeviceRequest,
+    context: AppleDeviceExecutionContext,
+  ): { readonly decision: AppleDevicePolicyDecision; readonly host?: AppleDeviceHost } {
     if (this.#platform !== "darwin") {
-      // Nothing stands in for a Mac: no process starts, and the policy names why.
       const decision = evaluateAppleDeviceRequest(
         request,
         context,
@@ -335,20 +405,13 @@ export class AppleDeviceService {
         },
         { builtProducts: [], installed: [], launched: [] },
       );
-      return refused(decision.kind === "denied" ? decision.reason : "toolchain-unavailable");
+      return {
+        decision:
+          decision.kind === "denied"
+            ? decision
+            : { kind: "denied", reason: "toolchain-unavailable" },
+      };
     }
-    // Releasing needs no fresh look at the device: a person may let go of a
-    // phone that is already unplugged.
-    if (request.kind !== "release-device") {
-      if ((await this.#refresh(signal)) === "unreadable") {
-        return decodeAppleDeviceResponse({
-          kind: "apple-device-failure",
-          failure: { category: "unavailable", message: "Paired devices could not be listed." },
-        });
-      }
-    }
-    // From here to the lease change nothing awaits, so two confirmed requests
-    // for one device cannot both see it free.
     const host: AppleDeviceHost = {
       macos: true,
       toolchain: { available: this.#layer.toolchainAvailable },
@@ -358,9 +421,10 @@ export class AppleDeviceService {
       // Decision 7 keeps distribution closed until its own release-boundary change.
       distributionEnabled: false,
     };
-    const decision = evaluateAppleDeviceRequest(request, context, host, this.#holdingsFor(request));
-    if (decision.kind === "denied") return refused(decision.reason);
-    return await this.#carryOut(request, context, host, signal);
+    return {
+      decision: evaluateAppleDeviceRequest(request, context, host, this.#holdingsFor(request)),
+      host,
+    };
   }
 
   /**
@@ -372,13 +436,32 @@ export class AppleDeviceService {
     reference: string,
     scope: Pick<AppleDeviceExecutionScope, "threadId" | "checkoutId">,
   ): Promise<AppleDeviceScreenshotRead> {
-    const held = this.#screenshots.some(
-      (shot) =>
-        String(shot.reference) === reference &&
-        shot.threadId === String(scope.threadId) &&
-        shot.checkoutId === String(scope.checkoutId),
+    return await this.#readHeld(this.#screenshots, reference, scope);
+  }
+
+  /**
+   * The console output a `logs` read of this thread, on this checkout, kept.
+   * Anything else, another thread's included, is not found.
+   */
+  async readConsole(
+    reference: string,
+    scope: Pick<AppleDeviceExecutionScope, "threadId" | "checkoutId">,
+  ): Promise<AppleDeviceScreenshotRead> {
+    return await this.#readHeld(this.#consoles, reference, scope);
+  }
+
+  async #readHeld(
+    held: ReadonlyArray<HeldReference>,
+    reference: string,
+    scope: Pick<AppleDeviceExecutionScope, "threadId" | "checkoutId">,
+  ): Promise<AppleDeviceScreenshotRead> {
+    const holds = held.some(
+      (candidate) =>
+        String(candidate.reference) === reference &&
+        candidate.threadId === String(scope.threadId) &&
+        candidate.checkoutId === String(scope.checkoutId),
     );
-    if (!held) return { kind: "not-found" };
+    if (!holds) return { kind: "not-found" };
     const bytes = await this.#options.readArtifact?.(reference);
     return bytes === undefined ? { kind: "unavailable" } : { kind: "found", bytes };
   }
@@ -950,6 +1033,14 @@ export class AppleDeviceService {
     if (this.#options.writeArtifact !== undefined) {
       await this.#options.writeArtifact(reference, console);
       work.artifacts.push({ kind: "log", reference });
+      // Only the thread that read it may read it back: its agent receives the
+      // text inside the lease the person confirmed, never by reference alone.
+      this.#consoles.push({
+        threadId: String(work.request.threadId),
+        checkoutId: String(work.request.checkoutId),
+        reference,
+      });
+      if (this.#consoles.length > MAX_HELD_CONSOLES) this.#consoles.shift();
     }
     work.notes.push(
       `Console output of ${session.bundleIdentifier}: ${console.byteLength} bytes, kept as evidence by reference; the app ${

@@ -1,0 +1,31 @@
+{
+  "driverKind": "outside-harness-endpoint",
+  "protocolVersions": ["harness-endpoint/1"],
+  "manifest": {
+    "manifestVersion": 1,
+    "slug": "loopback-chat-example",
+    "displayName": "Loopback chat (example)",
+    "version": "0.1.0",
+    "provenance": {
+      "publisher": "Octant examples",
+      "canonicalUrl": "https://github.com/Ogard-Labs/octant/tree/main/packages/provider-sdk/examples/loopback-chat-driver"
+    },
+    "license": { "kind": "spdx", "identifier": "MIT" },
+    "compatibility": {
+      "platforms": ["macos"],
+      "modes": ["chat", "work", "code"],
+      "providerFamilies": []
+    },
+    "declaredCapabilities": [],
+    "primaryComponentId": "driver",
+    "components": [
+      {
+        "id": "driver",
+        "kind": "provider-driver",
+        "displayName": "Loopback chat (example)",
+        "declaredCapabilities": [],
+        "entryPoint": "driver.mjs"
+      }
+    ]
+  }
+}

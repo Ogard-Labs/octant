@@ -1,5 +1,9 @@
 import type { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
-import { decodeDesktopProviderId, decodeDesktopViewId } from "@octant/contracts";
+import {
+  decodeDesktopMachineId,
+  decodeDesktopProviderId,
+  decodeDesktopViewId,
+} from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { createRemoteDevicePrincipal } from "./clientPrincipal";
 import type { DesktopLeaseService } from "./computerUse/desktopLeaseService";
@@ -86,6 +90,20 @@ function routes() {
       frame: { mediaType: "image/png", width: 1, height: 1, bytes: png },
     })),
     input: vi.fn<DesktopLeaseService["input"]>(async () => ({ status: "delivered" })),
+    recipeMachines: vi.fn<DesktopLeaseService["recipeMachines"]>(async ({ actor }) =>
+      actor.kind === "local-user"
+        ? {
+            status: "recipe-machines",
+            machines: [
+              {
+                machineId: decodeDesktopMachineId("host-studio"),
+                displayName: "studio",
+                online: true,
+              },
+            ],
+          }
+        : { status: "refused", reason: "not-permitted" },
+    ),
     destination: vi.fn<DesktopLeaseService["destination"]>(() => ({
       status: "leasable",
       kind: "disposable-desktop",
@@ -216,6 +234,31 @@ describe("Desktop pane routes", () => {
     expect(
       (await handler(post("/api/code/desktops", { kind: "recipe-providers", threadId })))?.status,
     ).toBe(400);
+  });
+
+  it("asks for the person's machines as the authenticated person, so a paired device is refused", async () => {
+    const { handler, service } = routes();
+    const request = { kind: "recipe-machines", providerId: "cua", placementId: "other-machine" };
+    const local = await handler(post("/api/code/desktops", request));
+    await expect(local?.json()).resolves.toEqual({
+      status: "recipe-machines",
+      machines: [{ machineId: "host-studio", displayName: "studio", online: true }],
+    });
+    const remote = await handler(post("/api/code/desktops", request, { remote: true }));
+    await expect(remote?.json()).resolves.toEqual({ status: "refused", reason: "not-permitted" });
+    expect(service.recipeMachines.mock.calls.map(([input]) => input.actor.kind)).toEqual([
+      "local-user",
+      "remote-device",
+    ]);
+    const namesActor = await handler(
+      post(
+        "/api/code/desktops",
+        { ...request, actor: { kind: "local-user", actorId: localActorId } },
+        { remote: true },
+      ),
+    );
+    expect(namesActor?.status).toBe(400);
+    expect(service.recipeMachines).toHaveBeenCalledTimes(2);
   });
 
   it("leaves every other path to the routes that own it", async () => {

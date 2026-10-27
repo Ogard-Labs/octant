@@ -705,6 +705,10 @@ It also captures a leased device's screen with the selected Xcode's own
 tooling, a read like a Simulator screenshot, and the Apple workbench's
 **Physical devices** section shows the picker, setup checklist, lease
 confirmation, and that latest screenshot; a physical device has no live view.
+The agent's `octant_apple` asks for the same lease, effects, screenshots, and
+console reads through the same device policy; its lease and device-effect
+asks are answered in the thread by a person at the Mac only, never by a paired
+device.
 `/api/apple/devices` is readable by a paired device, and
 `/api/apple/device-leases`, `/api/apple/device-actions`, and
 `/api/apple/device-screenshots` (the pixels of a thread's latest device
@@ -864,9 +868,12 @@ commands, and egress for a remote-bound Project's turn are built. A Code
 thread can be created in a remote-bound Project through the Code commands, on
 a `remote-root` checkout no local Files, Git, terminal, test, or checkpoint
 path resolves, and the Code turn runtime runs its turns on the native harness
-with that remote tool set alone; every other provider is refused before
-anything launches, other Code operations on the thread are refused, and Full
-access is not offered there yet. A local desktop window lists such Projects
+with that remote tool set alone, or on an ACP agent placed on the target whose
+client file and terminal requests run as those same calls; every other
+provider is refused before anything launches, other Code operations on the
+thread are refused, and Full access is not offered there yet. A restart
+interrupts a remote turn it cut off, and a target is not removed while a
+thread on it holds a turn. A local desktop window lists such Projects
 in the Code sidebar and the composer and starts their threads: a Code draft
 in one binds the window to it with no folder of this host (`boundRoot` null),
 so root-backed surfaces fail closed, and only the thread's own view opens; a
@@ -877,8 +884,9 @@ admission. The provider-sdk seam for placing a
 runtime on a target, its conformance, and the executor's confined runtime
 launches with their own proxy on this host are built, and the ACP driver
 declares placement for a profile whose whole launch can be stated on a
-target, at the runtime path the person set for it there; no shipped profile
-can be stated there yet, so no provider's runtime runs on a target. SSH
+target (its fixed variables and the Project entries it denies included), at
+the runtime path the person set for it there; GitHub Copilot's profile is the
+first that can, and the composer does not offer it for a remote Project yet. SSH
 targets, their runtime paths, their
 attestation digests, remote bindings, managed worktrees, remote terminals'
 starts and ends, and a placed runtime's egress are journaled. Its
@@ -6197,7 +6205,8 @@ same. This holds in Chat, Work, and Code.
   editor, and E2B, the first of the two named cloud providers (E2B and Cua
   Spaces), are built; Cua Spaces, reached through the person's local Cua daemon, is
   designed (accepted on 2026-10-27), and its local-daemon port and its driver
-  for a Space on this machine or on the person's other machine are built but
+  for a Space on this computer or on another of the person's computers that
+  the recipe names are built but
   offered on no host until the maintainer's live smokes pass; see
   [Disposable desktops](design/disposable-desktops.md#cua-spaces-through-the-local-daemon).
   A driver whose provider runs a daemon on this machine reaches it only
@@ -6534,7 +6543,12 @@ a capability ceiling, and a brokered request with this instance's key to its
 configured origin only), the confined process per instance that carries that
 protocol on macOS, and admission (trust at a digest, a provider added off from
 a local window, host-run Verify tools, and the process stopped whenever the
-driver stops being effective) are built. Only a macOS host admits one.
+driver stops being effective) are built, as is moving an instance to a newly
+trusted digest of its driver with its records cleared. Publisher signatures
+are not. Only a macOS host admits one. The author kit
+(`@octant/provider-sdk/outside-driver`, `outside-driver-serve`, and
+`outside-driver-conformance`) and an example loopback driver package live in
+the provider SDK; its conformance evidence is advisory and enables nothing.
 
 The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a
@@ -7375,7 +7389,7 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   it is seen. Placement on an SSH target is not a capability and has no row:
   it is the driver's own `ProviderDriver.remotePlacement` declaration, never a
   probe. The ACP driver makes it only for a profile whose whole launch can be
-  stated on a target, which no shipped profile is yet.
+  stated on a target, which among shipped profiles is GitHub Copilot's.
 
   | Capability               | Claude Code                                                  | Codex                                                     | OpenCode                                                          | Pi                                                                                      | ACP agents                                                                    | Ollama                                                           | Harness endpoints                                                                 | Outside harness endpoints                                        | Oh My Pi                              |
   | ------------------------ | ------------------------------------------------------------ | --------------------------------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------- |

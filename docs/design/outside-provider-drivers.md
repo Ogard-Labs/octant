@@ -36,7 +36,18 @@ keep the provider blocked, and the provider catalog lists effective outside
 drivers in their own group (see [Admission rules](#admission-rules)). Its
 product acceptance, the live loopback smoke on macOS with a local model
 server, is the maintainer's to run; on Linux every outside driver stays
-`host-prohibited`. Slice 6 is next. The maintainer authorized this scope as
+`host-prohibited`. Slice 6 (provenance) is half built: an instance moves to a
+newly trusted digest of its driver, and only then, with its records cleared
+(see [Rebind rules](#rebind-rules)); publisher signatures are not built,
+because the rules listed under
+[Signature rules not yet settled](#signature-rules-not-yet-settled) are open,
+and until they are no source but an unsigned local folder yields a driver.
+Slice 7 (author kit and example driver) is built: the author-facing protocol
+re-export, the serve helper, the out-of-process conformance kit, and an
+example loopback driver package that passes the kit and the host proxy's
+conformance in CI (see [Author kit rules](#author-kit-rules)); nothing is
+published to a registry ([decision 8](#maintainer-decisions)).
+The maintainer authorized this scope as
 post-preview work and accepted the [maintainer decisions](#maintainer-decisions)
 below on 2026-10-26; the release boundary in `AGENTS.md` and the architecture
 is updated separately. Slices and their evidence are tracked in Linear; this
@@ -317,7 +328,11 @@ the fail-closed option.
   into a client, a diagnostic, or the journal.
 - **The temporary folder** is made per process, private to the person's user,
   under the host's temporary root, and removed when the process stops or
-  exits.
+  exits. The process port checks it rather than trusting the caller, since
+  the profile grants it whole: it must be a real folder (not a link), owned
+  by the person's user and closed to everyone else, empty, apart from the
+  package root, and not holding the home folder; anything else refuses the
+  start before a process exists.
 
 ### Wire protocol
 
@@ -409,9 +424,9 @@ takes the fail-closed option.
   of response.
 - **The channel.** The proxy reads and writes lines through a channel
   interface; slice 3 runs it in memory, and slice 4 attaches the confined
-  process's stdin and stdout. The author-facing re-export from
-  `@octant/provider-sdk` lands with the author kit in slice 7, by
-  [decision 8](#maintainer-decisions).
+  process's stdin and stdout. The author-facing re-export is
+  `@octant/provider-sdk/outside-driver`, part of the author kit (see
+  [Author kit rules](#author-kit-rules)).
 
 ### Admission rules
 
@@ -476,7 +491,8 @@ implementation; each takes the fail-closed option.
   and conformance belong to the digest it binds. A package that selects
   another digest leaves the instance `driver-not-admitted` with no models,
   keeping the instance, its records, threads, and key until the person
-  removes them; slice 6 rebinds an instance on trust and clears its records.
+  removes them or trusts the new selection, which moves the instance to it
+  and clears its records ([Rebind rules](#rebind-rules)).
 - **The catalog group.** The registry snapshot lists every effective outside
   driver from a local folder (`outsideDrivers`), with the package's name, the
   exact reference, and installed and trusted from the activation context.
@@ -488,6 +504,48 @@ implementation; each takes the fail-closed option.
   Package facts say "Local folder, unsigned", trusted by the person at this
   digest. A driver that is not effective is not listed; its instances show
   the block on their cards.
+
+### Rebind rules
+
+These rules resolve how an instance follows a newly trusted digest; each takes
+the fail-closed option.
+
+- **Only trust moves an instance.** An instance moves when its package is
+  trusted at the selection it holds now, nothing quarantines that selection,
+  the package and the provider-driver component are the ones the instance was
+  added from, and the selection's version or digest differs from the bound
+  one (`resolveOutsideDriverRebind` in `@octant/plugin-host`). Every install,
+  update, and rollback clears trust and holds the package, so none of them
+  moves an instance by itself, and no command, route, or remote client can
+  ask for a move. Withdrawn trust moves nothing. A package whose new version
+  drops or renames the component, or that is another package, never moves
+  the instance; it stays `superseded` until the person removes it.
+- **The switches are not consulted.** Trusting is the review step; the
+  plugin and component switches decide only whether the bound digest runs.
+  An instance moved while a switch is off reports `driver-not-admitted` until
+  it is switched on.
+- **What moves.** Only the driver reference's version and digest, as a
+  journaled `provider.instance-driver-rebound@1` that only the host writes,
+  with the person's trust as its cause; it is its own event so that
+  `provider.instance-configuration-changed@1` still never carries an outside
+  instance. The name, address, key placement, listed models, provider
+  switch, threads, and stored key stay as the person set them. The move is idempotent and runs after every extension lifecycle
+  change and once at host start, so a host that stopped between a trust and
+  its move makes the move on its next pass.
+- **What is cleared.** Everything learned at the old digest: the provider
+  catalogue is invalidated with its Verify tools record removed and its model
+  evidence marked invalid, the observation is cleared, and the runtime is
+  invalidated. The next connection check or turn starts one process at the
+  new digest, unverified until Verify tools runs again. The crash limit is
+  kept per instance and digest, so the new digest starts with no crashes and
+  a quarantine of the old digest does not follow it; the capability ceiling
+  is the proxy's and applies to every process alike.
+- **The old process.** The update or rollback that changed the selection
+  already stopped it, so a turn still holding the old runtime fails at once;
+  a move never waits on a session.
+- **Same digest, same records.** Trusting the digest an instance already
+  binds (after withdrawing trust, or after a rollback to it) moves and clears
+  nothing, since its records belong to that digest.
 
 ### Credentials and egress
 
@@ -513,10 +571,40 @@ implementation; each takes the fail-closed option.
   re-trusts it as a new publisher. A local-folder package is unsigned developer
   input, labelled so in review ([decision 3](#maintainer-decisions)).
 - **Updates are never automatic.** No background check runs. An update is an
-  inspect and install of the new digest, which arrives quarantined while the
-  trusted version keeps serving; trusting it switches the instances, restarts
-  their processes, and clears their Verify tools records. Rollback uses the
-  existing `rollback-package` and also clears them.
+  inspect and install of the new digest, which arrives held and untrusted.
+  Trust binds a digest, so the earlier version does not keep serving under
+  it: the instances report `driver-not-admitted` and their processes stop
+  until the person trusts the new digest. Trusting it moves the instances to
+  it, so the next use starts a new process, and clears their Verify tools
+  records. Rollback uses the existing `rollback-package`, is held the same
+  way, and moving back on trust also clears them
+  ([Rebind rules](#rebind-rules)). _Rationale: an earlier draft of this
+  bullet kept the trusted version serving while an update was held; the
+  admission rules built in slice 5 hold the package whenever its selection
+  changes, which is the fail-closed reading, and this bullet follows them._
+
+### Signature rules not yet settled
+
+Signature verification is not built, because these consequential rules are
+open; until a maintainer settles them, no source but a local folder yields a
+driver, so no package is admitted on a signature Octant cannot check.
+
+- **What is signed, and where it travels.** "Its manifest and digest" does not
+  name the bytes: the host derives the manifest's identity, source, and
+  digest itself, so a publisher cannot sign them as the host writes them, and
+  the digest algorithm and its canonical encoding are not a published format.
+  Nor is it settled whether the signature and public key travel in the
+  package (a file beside the driver document), in the driver document, or in
+  the npm registry's metadata.
+- **What the pin belongs to.** Whether the first-trust pin is kept per
+  extension, per package name, or per source; where it is stored (a journaled
+  lifecycle fact or the package store); and whether an uninstall forgets it.
+- **Re-trusting a new publisher.** Which action it is: a separate command, a
+  flag on `set-source-trust`, or an uninstall and fresh install, and what it
+  clears.
+- **Refused or held.** Whether a missing signature, a signature that does not
+  verify, and a valid signature by an unpinned key are refused at inspection
+  or installed held, and with which closed reasons.
 
 ### Marketplace and catalog
 
@@ -619,6 +707,67 @@ Conformance is enforced by the host, not trusted from the author:
   driver binary in the author's CI. Its evidence is advisory and never enables
   anything.
 
+### Author kit rules
+
+These rules resolve what slice 7 left to implementation.
+
+- **What the kit is.** Three provider SDK entry points:
+  `@octant/provider-sdk/outside-driver` re-exports the protocol schemas a
+  driver reads and writes from `@octant/contracts`;
+  `@octant/provider-sdk/outside-driver-serve` is the serve helper; and
+  `@octant/provider-sdk/outside-driver-conformance` is the out-of-process
+  conformance kit (`runOutsideDriverConformance`). The user guide's
+  [Build a provider driver](../../apps/docs/advanced/provider-drivers.md) page
+  is the author's how-to.
+- **The serve helper is plain JavaScript a package carries.** A driver can
+  read nothing outside its package root, so it cannot import the helper from
+  anywhere else. `outsideDriverServe.mjs` is one `.mjs` module that imports
+  only `node:readline` (present on Bun and on Electron's Node), with its types
+  in a declaration file beside it; a driver package keeps a copy, and a test
+  holds the example's copy byte-identical to the SDK's.
+- **What the helper does for a driver.** It answers `initialize` on
+  `harness-endpoint/1` alone and refuses any other offer as `incompatible`;
+  numbers brokered requests and hands back their head, then their body as the
+  host streams it; aborts a send's signal on `session/cancel` and stops
+  streaming its events; and writes every failure as the structure the host
+  reads (a category, `retryAfterMs`, `contextOverflow`), dropping a value the
+  host's schema would refuse and turning any other thrown value into
+  `provider-failed`, so a driver's own text never needs to cross. On stdio it
+  sends `console` output to stderr, since the host stops a driver at the first
+  stdout line that is not a protocol message, and exits when the host closes
+  stdin.
+- **What the conformance kit checks.** It plays the host against a channel:
+  a driver's process stdio in the author's CI, or an in-memory channel in a
+  test. Every line is held to the 4 MiB cap and to the strict schemas the host
+  decodes; an answer or event for a call never made fails. A brokered request
+  must keep to the configured origin, set none of the headers only the host
+  sets, and ask for the key only where the fixture says the provider sends it;
+  the kit sends a placeholder credential, never a real one, and relays the
+  body in pieces a few characters long, because the host relays it wherever
+  its reads end. The run passes when the handshake agrees on a version the
+  host speaks, the probe reports a listed model, a send settles with text or
+  tool calls, the driver still answers after a cancel and after a release,
+  and every failure carries a category the host reads.
+- **The key placement is the person's.** `initialize` carries no key facts,
+  so a driver asks for the key in the header its service reads, and the
+  person chooses that placement when they add the provider; the driver's own
+  documentation says which. A driver for a service that takes no key asks for
+  none, and the host accepts such a provider only on loopback.
+- **The example driver.** `packages/provider-sdk/examples/loopback-chat-driver`
+  translates to the OpenAI-compatible chat completions protocol of a local
+  model server (llama.cpp's server, LM Studio, vLLM, or Ollama's `/v1`):
+  `GET models` for the probe, reporting only listed models, and a streamed
+  `POST chat/completions` per send, with tool calls assembled from their
+  streamed pieces. It asks for no key. CI runs it through the kit in process
+  and as its own process on the test runtime, reads its folder through the
+  host's inspection, and runs it through the host proxy and
+  `runHarnessEndpointConformance` against a loopback model server; a Linux host
+  starts no driver process, so the proxy run is in process. The maintainer's
+  live smoke on macOS uses this package.
+- **Publication.** Nothing is published to npm or any registry; that needs an
+  npm organization and account and stays a maintainer action
+  ([decision 8](#maintainer-decisions)).
+
 ### Capability honesty and fail-closed behaviour
 
 - The driver's probe claims are clamped on the host by a ceiling equal to the
@@ -664,7 +813,7 @@ put a package in front of the person. Controls marked new are this design's;
 | Over-claims capabilities (tools, approvals, resume)                 | New, built: host ceiling clamp; `admitTurn` computed by the host; host-run Verify tools                                                                             |
 | Fabricates tool calls or injects instructions in output             | Existing: model output is untrusted; the harness offers, approves, and runs tools under thread authority; taint rules apply                                         |
 | Puts attacker text in Settings or diagnostics                       | New, built: closed reasons only; stderr bounded and kept out of clients                                                                                             |
-| Swaps code under a trusted name (update, mirror, typosquat)         | New, built for trust: digest-bound trust and records. New: publisher key pin, quarantined updates that clear verification                                           |
+| Swaps code under a trusted name (update, mirror, typosquat)         | New, built: digest-bound trust and records; held updates and rollbacks that move an instance only on trust and clear its verification. New: publisher key pin       |
 | Points the key at an internal service or attacker host              | Existing endpoint rule, built for the brokered call: HTTPS or loopback HTTP, origin-checked before the key is read; no redirect                                     |
 | Exhausts the host (floods, hangs, crash loops)                      | Existing supervisor bounds; new, built: per-message cap, host-owned deadlines, bounded brokered calls, per-instance crash limit                                     |
 | An agent, mention, routine, or paired device installs or trusts one | Existing and new, built: lifecycle, add-provider, and Verify tools only from a local window; structured references stay inert; install stays held until trusted     |
