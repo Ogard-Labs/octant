@@ -517,15 +517,37 @@ classes.
   no field for toolchain roots yet, so a server reads the system folders a
   terminal's launch reads and nothing under the home folder; a toolchain
   installed there is out of reach until such a field exists.
+- **Ending its children.** Stopping the server ends its process group, and
+  then its proxy closes. On Linux that ends every descendant: Bubblewrap's
+  `--unshare-all` gives the server its own PID namespace and
+  `--die-with-parent` ends the namespace with the capsule, so a child that
+  called `setsid()` dies with it. On macOS Seatbelt has no PID namespace, so
+  a child that calls `setsid()` leaves the group and outlives the stop. It
+  keeps the server's confinement (the checkout and cache writable, no home
+  folder), and its only network was the proxy, which has closed. A
+  terminal's commands share this residual, since both end a process group.
+  Not yet measured: on a Mac, a `repo-tooling` fixture server and a terminal
+  command that each start a child calling `setsid()` and sleeping, stopped by
+  the host (server stop, terminal close, host restart), then `ps` shows
+  whether the child survived each stop and whether the restart's receipt reap
+  ends it. A shared fix waits on that measurement.
 - **Network (D6).** Each start gets its own egress proxy, the one harness
   commands use, and the `proxied` OS level: loopback on macOS, a Unix socket
   and in-capsule forwarder on Linux. Its connections are decided on the Code
-  Project's rules alone. Those rules are suspended while any active thread on
-  the checkout has taken in outside content, because that thread's agent may
-  have written the tooling the server runs. A proxy whose listener or start
-  record fails means the server does not start; a host with no proxy refuses
-  the class as `confinement-unavailable`, never runs it with no network or an
-  open one.
+  Project's rules alone. Those rules are suspended while any active thread
+  that can write the server's folder has taken in outside content, because
+  that thread's agent may have written the tooling the server runs. That is
+  every thread on the checkout and every thread of any Code Project whose
+  folder is the server's, holds it, or lies inside it, compared by canonical
+  real path on the host: two Projects bound to one folder give their threads
+  different checkout ids, and a tainted thread in either can write the
+  files. A thread whose folder the host cannot tell counts as writing it. The
+  proxy joins the egress rules' active recheck, so a Project rule revoked, or
+  a thread taking in outside content, closes an idle tunnel at once rather
+  than at its next chunk. A proxy whose listener or start record fails, or
+  that cannot join the recheck, means the server does not start; a host with
+  no proxy refuses the class as `confinement-unavailable`, never runs it with
+  no network or an open one.
 - **Audit.** Each start is journaled the way a `proxied` command's launch is,
   with the same payloads and limits, under
   `code.language-server-egress-launch-started@1`,
@@ -1411,7 +1433,12 @@ accounts or hardware.
      covered in `MonacoEditorPane.test.tsx` and
      `ExtensionsSettingsView.test.tsx`; a Project erase removes the
      approvals, from the running host too, and the egress records
-     (`threadPurge.test.ts`). The `macos-15` CI
+     (`threadPurge.test.ts`). A revoked Project rule, or a thread taking in
+     outside content, closes a server's idle tunnel at once,
+     and a proxy that cannot join that recheck does not start
+     (`nativeHarnessEgress.hostile.test.ts`), and a tainted thread in
+     another Project bound to the same folder, to one holding it, or to one
+     inside it (a child named `..cache` included) suspends the rules (`codeLanguageServiceProcess.test.ts`). The `macos-15` CI
      job runs the same process test for Seatbelt evidence; it has not yet run
      on a Mac. The rules are under [Repository tooling](#repository-tooling).
 7. **Agent read tools** (D5; after the editor slices ship). Container: yes.

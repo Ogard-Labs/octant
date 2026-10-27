@@ -5161,8 +5161,9 @@ Saying so is the honest boundary; routing those runtimes through the proxy
 with provider-endpoint rules is a separate follow-up. An approved
 `repo-tooling` language server also runs on `proxied`, whatever the starting
 thread's posture, with the same proxy and launch records on an aggregate of
-its own: it serves a checkout, so only its Project's rules apply, its bytes
-taint no thread, and it raises no proposals
+its own: it serves a checkout, so only its Project's rules apply, suspended
+while any thread that can write its folder is tainted, whichever Project that
+thread is in; its bytes taint no thread, and it raises no proposals
 ([Repository tooling](design/language-services.md#repository-tooling)).
 
 **Enforcement point.** A forward proxy owned by the server process, one
@@ -5296,7 +5297,10 @@ listener per confined launch:
   offer 7 days (the default) and 30 days. The proxy compares `now` against
   `expiresAt` on every new request and on every chunk relayed through an open
   tunnel, so a rule is dead at `expiresAt` whatever a timer or a sleeping
-  machine did, and its tunnels close then. Revocation closes them at once.
+  machine did, and its tunnels close then. Revocation, and a thread taking in
+  outside content, close them at once: the host decides every open tunnel
+  again, for every proxy these rules serve, a `repo-tooling` language
+  server's included, so an idle tunnel does not wait for its next chunk.
   Expiry is derived from the stored timestamp rather than journaled as its own
   event, so replay reaches the same answer with no clock-dependent record.
   The host keeps an expired rule in memory for 24 hours after it first sees
@@ -6033,8 +6037,15 @@ same. This holds in Chat, Work, and Code.
   service, the host-local provider (a virtual X display in a dedicated
   Bubblewrap launch, Linux only), artifact transfer, a Code send's binding
   of `octant_computer` to one of its thread's leases, the Code dock's
-  Desktop tool, and a Code Project's stored desktop recipe with its settings
-  editor are built; only the cloud provider driver is not.
+  Desktop tool, a Code Project's stored desktop recipe with its settings
+  editor, and E2B, the first of the two named cloud providers (E2B and Cua
+  Spaces), are built; Cua Spaces waits on a design for reaching its local
+  daemon. A cloud driver reaches its provider only through the host's
+  HTTPS port, which sends nothing outside the hosts the driver declares and
+  attaches the person's key from the credential broker's
+  `/v1/desktop-provider-credentials/*` namespace itself; a person confirms
+  every billed desktop. No host offers a cloud provider yet, so a recipe can
+  name only the host-local provider.
 
 **Canvas export.** A destination plugin contributes an export target through
 `@octant/plugin-api`. The contribution names the formats it accepts. The host
@@ -6101,7 +6112,12 @@ other destination's.
 **Connectors and user-added MCP servers.** A person connects an MCP server
 from Settings › Skills & Extensions without writing a package: Add MCP server
 takes a command Octant starts (with arguments and environment) or an address
-it connects to over Streamable HTTP (with headers). The host writes an
+it connects to over Streamable HTTP (with headers). Environment values
+belong only to a command and headers only to an address: the dialog keeps the
+two lists apart and submits only the selected transport's, and the request
+contract refuses a command carrying headers or an address carrying
+environment before anything is written, so a value meant for a local process
+never reaches a remote server. The host writes an
 ordinary Agent Plugins package for it (`plugin.json` and an `mcp.json` with
 the one server) into its own folder under the data directory and registers it
 under the `user-added` source kind, so the activation ladder, per-call
@@ -6655,7 +6671,15 @@ mechanisms are:
   recorded in [decisions/0057-linux-confinement-bubblewrap.md](decisions/0057-linux-confinement-bubblewrap.md).
   The child runs `--unshare-all`, regains the network only when egress
   resolves to `allow`, dies with its parent, and gets a new session except for
-  interactive terminals. Every confined launch passes `--cap-drop ALL`, so the
+  interactive terminals. Its own PID namespace ends with the capsule, so a
+  descendant that called `setsid()` still ends when a terminal or a
+  `repo-tooling` language server stops. Seatbelt has no PID namespace: on
+  macOS such a descendant leaves the process group the host ends and
+  outlives the stop, still under that launch's Seatbelt profile; a
+  `repo-tooling` server's proxy closes with the server, so its descendant
+  keeps no network. Terminals and `repo-tooling` servers share this residual; the
+  Mac measurement a shared fix waits on is named under
+  [Repository tooling](design/language-services.md#repository-tooling). Every confined launch passes `--cap-drop ALL`, so the
   capsule's effective capability set is empty whether or not the server runs
   as root. Bubblewrap started by uid 0 otherwise keeps every capability:
   measured on bwrap 0.9.0, a root capsule remounted a read-only bind writable

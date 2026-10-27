@@ -1,4 +1,5 @@
 import {
+  decodeDesktopCredentialRef,
   decodeDesktopRecipe,
   decodeLeasableDesktopProvider,
 } from "@octant/contracts/desktop-lease";
@@ -302,6 +303,27 @@ describe("Project creation and lifecycle", () => {
           updatedAt,
         ),
       ).toThrow(ProjectPolicyRejected);
+    });
+
+    it("keeps a cloud recipe only when it names a credential, and lets it reach the network", () => {
+      const cloud = decodeLeasableDesktopProvider({
+        providerId: "e2b",
+        displayName: "E2B",
+        locality: "cloud",
+        billed: true,
+      });
+      const project = makeProject(ids.code, "0/1", { type: "code" });
+      const keyless = { ...recipe, providerId: cloud.providerId, network: "allow" as const };
+      expect(() => changeCodeProjectDesktopRecipe(project, keyless, [cloud], updatedAt)).toThrow(
+        ProjectPolicyRejected,
+      );
+      const keyed = {
+        ...keyless,
+        credentialRef: decodeDesktopCredentialRef("5f0c6f7e-7b0a-4d43-9a3c-2f1d8f4e6a10"),
+      };
+      expect(
+        changeCodeProjectDesktopRecipe(project, keyed, [cloud], updatedAt).desktopRecipe,
+      ).toEqual(keyed);
     });
 
     it("refuses a Work or Chat Project and a change that changes nothing", () => {

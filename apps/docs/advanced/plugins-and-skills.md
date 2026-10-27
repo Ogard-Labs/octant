@@ -263,6 +263,11 @@ without a package. Give it a name and choose how Octant reaches it:
   confined, the way it starts a plugin's own server.
 - **Address**: an `https` address (or `http` on this computer) and headers.
 
+Each choice keeps its own values: environment variables you type for a
+command stay with the command and are never sent as headers if you switch to
+Address. Only the values of the choice selected when you add the server are
+used.
+
 Mark a value **Secret** to keep it in this Mac's credential store instead of
 the package; Octant cannot show it again. The server appears under Extension
 packages as **Added by you**, installed, trusted and switched on, and its tools

@@ -70,7 +70,15 @@ function AddMcpServerForm(props: Omit<AddMcpServerDialogProps, "open">) {
   const [command, setCommand] = useState("");
   const [args, setArgs] = useState("");
   const [url, setUrl] = useState("");
-  const [rows, setRows] = useState<ReadonlyArray<ValueRow>>([]);
+  // Environment variables and headers are separate lists. Sharing one list
+  // made a variable typed for a local command reappear as a header after
+  // switching to Address, so a value meant only for a process on this computer
+  // was sent to the remote server. Each transport keeps its own rows, like its
+  // command or address, and only the selected transport's rows are submitted.
+  const [envRows, setEnvRows] = useState<ReadonlyArray<ValueRow>>([]);
+  const [headerRows, setHeaderRows] = useState<ReadonlyArray<ValueRow>>([]);
+  const rows = kind === "stdio" ? envRows : headerRows;
+  const setRows = kind === "stdio" ? setEnvRows : setHeaderRows;
   const [nextRowId, setNextRowId] = useState(1);
   const [problem, setProblem] = useState<string>();
   const [failure, setFailure] = useState<ExtensionCommandFailure>();

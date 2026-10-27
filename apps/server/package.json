@@ -5,6 +5,7 @@
   "scripts": {
     "build": "tsdown",
     "browser:smoke": "bun src/browser/browserRuntime.smoke.ts",
+    "desktop:cloud:smoke": "bun src/computerUse/cloudDesktop.smoke.ts",
     "canvas:browser:smoke": "bun src/canvas/canvasRendererBrowser.smoke.ts",
     "canvas:inventory:browser:smoke": "bun src/canvas/canvasInventoryBrowser.smoke.ts",
     "canvas:preview:browser:smoke": "bun src/canvas/canvasPreviewBrowser.smoke.ts",

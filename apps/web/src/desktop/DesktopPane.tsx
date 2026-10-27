@@ -9,6 +9,7 @@ import type {
   DesktopPaneAnswer,
   DesktopPaneRequest,
   DesktopViewId,
+  LeasableDesktopProvider,
 } from "@octant/contracts";
 import { decodeDesktopPaneRequest } from "@octant/contracts";
 import { Clock, Monitor, Power, RotateCw } from "lucide-react";
@@ -74,6 +75,7 @@ export function DesktopPane(props: {
   const [pending, setPending] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [confirmRelease, setConfirmRelease] = useState(false);
+  const [confirmBilled, setConfirmBilled] = useState<LeasableDesktopProvider>();
   const [shown, setShown] = useState<Shown>();
   const mounted = useRef(true);
   useEffect(() => {
@@ -191,20 +193,28 @@ export function DesktopPane(props: {
     [ask, refresh],
   );
 
-  const start = useCallback(async () => {
-    setNotice(undefined);
-    setAcquiring(true);
-    try {
-      const answer = await act("start", { kind: "acquire", threadId });
-      if (answer?.status === "acquired") await show(answer.lease.leaseId);
-      else if (answer?.status === "not-acquired") {
-        setChosen(String(answer.lease.leaseId));
-        setNotice("The desktop could not be started.");
+  const start = useCallback(
+    async (billed?: LeasableDesktopProvider) => {
+      setConfirmBilled(undefined);
+      setNotice(undefined);
+      setAcquiring(true);
+      try {
+        const answer = await act("start", {
+          kind: "acquire",
+          threadId,
+          ...(billed === undefined ? {} : { confirmedBilledProvider: billed.providerId }),
+        });
+        if (answer?.status === "acquired") await show(answer.lease.leaseId);
+        else if (answer?.status === "not-acquired") {
+          setChosen(String(answer.lease.leaseId));
+          setNotice("The desktop could not be started.");
+        }
+      } finally {
+        if (mounted.current) setAcquiring(false);
       }
-    } finally {
-      if (mounted.current) setAcquiring(false);
-    }
-  }, [act, show, threadId]);
+    },
+    [act, show, threadId],
+  );
 
   const release = useCallback(
     async (lease: DesktopLease) => {
@@ -273,7 +283,14 @@ export function DesktopPane(props: {
             void act("retry", { kind: "retry-release", threadId, leaseId: lease.leaseId })
           }
           onShow={(lease) => void show(lease.leaseId)}
-          onStart={() => void start()}
+          onStart={() => {
+            // A billed desktop spends the person's money, so they confirm
+            // every one here, for the provider they see.
+            const offered =
+              overview?.start.status === "available" ? overview.start.provider : undefined;
+            if (offered?.billed === true) setConfirmBilled(offered);
+            else void start();
+          }}
           pending={pending}
           providers={providers}
           state={state}
@@ -293,6 +310,17 @@ export function DesktopPane(props: {
           so.
         </OctantConfirmDialog>
       ) : null}
+      {confirmBilled === undefined ? null : (
+        <OctantConfirmDialog
+          confirmLabel="Start desktop"
+          onCancel={() => setConfirmBilled(undefined)}
+          onConfirm={() => void start(confirmBilled)}
+          title={`Start a desktop on ${confirmBilled.displayName}?`}
+        >
+          It runs on your own {confirmBilled.displayName} account, which bills you while it runs. It
+          ends when you release it or when it expires, and Octant confirms it is gone.
+        </OctantConfirmDialog>
+      )}
     </section>
   );
 }

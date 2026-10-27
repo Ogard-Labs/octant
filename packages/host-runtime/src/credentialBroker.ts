@@ -43,6 +43,10 @@ const ROUTES = new Set([
   "/v1/mcp-server-credentials/resolve",
   "/v1/mcp-server-credentials/set",
   "/v1/mcp-server-credentials/delete",
+  "/v1/desktop-provider-credentials/has",
+  "/v1/desktop-provider-credentials/resolve",
+  "/v1/desktop-provider-credentials/set",
+  "/v1/desktop-provider-credentials/delete",
   "/v1/oauth/begin",
   "/v1/oauth/status",
   "/v1/oauth/refresh",
@@ -53,6 +57,7 @@ const REPLICA_DEVICE_KEY_PREFIX = "/v1/replica-device-keys/";
 const REPLICA_STORE_CREDENTIAL_PREFIX = "/v1/replica-store-credentials/";
 const CANVAS_PUBLIC_SHARE_SECRET_PREFIX = "/v1/canvas-public-share-secrets/";
 const MCP_SERVER_CREDENTIAL_PREFIX = "/v1/mcp-server-credentials/";
+const DESKTOP_PROVIDER_CREDENTIAL_PREFIX = "/v1/desktop-provider-credentials/";
 type NamespacedIdField = "instanceId" | "credentialRef" | "secretId";
 const MAX_CREDENTIAL_BYTES = 12 * 1_024;
 const PURGE_FAILURE_STATUS: Readonly<Record<CredentialPurgeFailure["category"], number>> = {
@@ -107,6 +112,14 @@ export async function startCredentialBroker(
    * key pair with the same UUID can reach one.
    */
   mcpServerCredentials?: CredentialStore,
+  /**
+   * The API keys a person gives a cloud desktop provider for a Project's
+   * desktop recipe, in a credential namespace of their own. They are served
+   * only on `/v1/desktop-provider-credentials/*`, keyed by the recipe's
+   * credential reference, so no model provider, device key, or other secret
+   * with the same UUID can reach one, and a desktop driver can reach no other.
+   */
+  desktopProviderCredentials?: CredentialStore,
 ): Promise<CredentialBroker> {
   const token = randomBytes(32).toString("base64url");
   const runtime = createHostOAuthRuntime({
@@ -129,6 +142,7 @@ export async function startCredentialBroker(
       replicaStoreCredentials,
       canvasPublicShareSecrets,
       mcpServerCredentials,
+      desktopProviderCredentials,
     ).then(
       ({ destroyIncoming, response }) => {
         const headers: Record<string, string> = {};
@@ -200,6 +214,7 @@ export async function startCredentialBroker(
         replicaStoreCredentials,
         canvasPublicShareSecrets,
         mcpServerCredentials,
+        desktopProviderCredentials,
       ),
   });
 }
@@ -215,6 +230,7 @@ async function handleIncoming(
   replicaStoreCredentials: CredentialStore | undefined,
   canvasPublicShareSecrets: CredentialStore | undefined,
   mcpServerCredentials: CredentialStore | undefined,
+  desktopProviderCredentials: CredentialStore | undefined,
 ): Promise<{ destroyIncoming: boolean; response: ResponseData }> {
   if (brokerUrl === undefined) throw new Error("unavailable");
   const headers = requestHeaders(incoming.headers);
@@ -248,6 +264,7 @@ async function handleIncoming(
         replicaStoreCredentials,
         canvasPublicShareSecrets,
         mcpServerCredentials,
+        desktopProviderCredentials,
       ),
     ),
   };
@@ -264,6 +281,7 @@ async function handleBrokerRequest(
   replicaStoreCredentials: CredentialStore | undefined,
   canvasPublicShareSecrets: CredentialStore | undefined,
   mcpServerCredentials: CredentialStore | undefined,
+  desktopProviderCredentials: CredentialStore | undefined,
 ): Promise<Response> {
   const url = new URL(request.url);
   if (!isAuthorized(peerAddress, request.headers, token)) {
@@ -320,6 +338,16 @@ async function handleBrokerRequest(
       "secretId",
       request,
       mcpServerCredentials,
+    );
+  }
+
+  if (url.pathname.startsWith(DESKTOP_PROVIDER_CREDENTIAL_PREFIX)) {
+    if (desktopProviderCredentials === undefined) return failure("not-found", 404);
+    return handleNamespacedRoute(
+      url.pathname.slice(DESKTOP_PROVIDER_CREDENTIAL_PREFIX.length),
+      "credentialRef",
+      request,
+      desktopProviderCredentials,
     );
   }
 

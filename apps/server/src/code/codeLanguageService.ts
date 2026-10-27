@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { realpath } from "node:fs/promises";
-import { extname, join } from "node:path";
+import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import type {
   CodeCheckoutId,
@@ -155,6 +155,11 @@ export interface CodeLanguageAuthority {
   readonly readThread: (threadId: CodeThreadId) => CodeThread | undefined;
   readonly readThreads: () => ReadonlyArray<CodeThread>;
   readonly readCheckout: (checkoutId: CodeCheckoutId) => CodeCheckoutIdentity | undefined;
+  /**
+   * The canonical real path of the folder a thread's checkout is, read on the
+   * host with no window; undefined when it cannot be told.
+   */
+  readonly readThreadFolder: (thread: CodeThread) => string | undefined;
   /** Reach: a local window's Project binding, or a paired device's Code reach. */
   readonly canAccessProject: (scopeId: WindowId, projectId: ProjectId) => boolean;
   readonly effectiveThread: (scopeId: WindowId, thread: CodeThread) => CodeThread;
@@ -232,8 +237,8 @@ export interface CodeLanguageServiceOptions {
   readonly approvals?: CodeLanguageApprovals;
   /**
    * Whether a thread has taken in outside content. A `repo-tooling` server's
-   * Project rules are suspended while any active thread on its checkout has;
-   * absent, or a read that throws, counts as tainted.
+   * Project rules are suspended while any active thread that can write its
+   * folder has; absent, or a read that throws, counts as tainted.
    */
   readonly threadTainted?: (threadId: CodeThreadId) => boolean;
   /** The `language-server` components effective in Code right now. */
@@ -937,16 +942,38 @@ export class CodeLanguageService {
     );
   }
 
-  /** Whether any active thread on the checkout has taken in outside content. */
-  #checkoutTainted(checkoutId: CodeCheckoutId): boolean {
+  /**
+   * Whether any active thread that can write the server's folder has taken in
+   * outside content. That is every thread on the checkout, and every thread
+   * of any Project whose folder is the server's, holds it, or lies inside it:
+   * two Projects bound to one folder have different checkout ids, and a
+   * tainted thread in either may have written the tooling the server runs.
+   */
+  #checkoutTainted(record: ServerRecord): boolean {
     return this.#authority
       .readThreads()
       .some(
         (thread) =>
-          String(thread.checkoutId) === String(checkoutId) &&
           isActiveThread(thread) &&
-          this.#threadTaintedSafely(thread.id),
+          this.#threadTaintedSafely(thread.id) &&
+          this.#writesFolder(thread, record),
       );
+  }
+
+  /** A thread whose folder cannot be told counts as writing the server's. */
+  #writesFolder(thread: CodeThread, record: ServerRecord): boolean {
+    if (String(thread.checkoutId) === String(record.checkoutId)) return true;
+    let folder: string | undefined;
+    try {
+      folder = this.#authority.readThreadFolder(thread);
+    } catch {
+      return true;
+    }
+    return (
+      folder === undefined ||
+      folderHolds(record.rootPath, folder) ||
+      folderHolds(folder, record.rootPath)
+    );
   }
 
   #threadTaintedSafely(threadId: CodeThreadId): boolean {
@@ -988,7 +1015,7 @@ export class CodeLanguageService {
             egress: {
               projectId: String(record.projectId),
               threadId: String(record.watchThreadId),
-              checkoutTainted: () => this.#checkoutTainted(record.checkoutId),
+              checkoutTainted: () => this.#checkoutTainted(record),
             },
           }
         : {}),
@@ -1234,6 +1261,16 @@ function documentItem(document: OpenDocument) {
     version: document.version,
     text: document.text,
   };
+}
+
+/**
+ * Whether a folder is the directory or lies inside it. Only a `..` segment
+ * leaves it: a child named `..cache` is inside, and a test on the `..` prefix
+ * alone would let a tainted thread bound there keep the server's rules.
+ */
+function folderHolds(directory: string, folder: string): boolean {
+  const path = relative(resolve(directory), resolve(folder));
+  return path === "" || (!isAbsolute(path) && path !== ".." && !path.startsWith(`..${sep}`));
 }
 
 function initializeParams(rootPath: string) {

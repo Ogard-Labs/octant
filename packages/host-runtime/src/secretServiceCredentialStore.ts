@@ -29,6 +29,12 @@ export const SECRET_SERVICE_CANVAS_PUBLIC_SHARE_SECRET_ATTRIBUTE =
  * the secret id the server's package references. A person may replace one.
  */
 export const SECRET_SERVICE_MCP_SERVER_CREDENTIAL_ATTRIBUTE = "octant.mcp-server-credentials.v1";
+/**
+ * The API keys a person gives a cloud desktop provider, keyed by the desktop
+ * recipe's credential reference. A person may replace one.
+ */
+export const SECRET_SERVICE_DESKTOP_PROVIDER_CREDENTIAL_ATTRIBUTE =
+  "octant.desktop-provider-credentials.v1";
 const NAMESPACES = {
   provider: { attribute: SECRET_SERVICE_ATTRIBUTE, label: "Octant provider credential" },
   "replica-device-key": {
@@ -46,6 +52,10 @@ const NAMESPACES = {
   "mcp-server-credential": {
     attribute: SECRET_SERVICE_MCP_SERVER_CREDENTIAL_ATTRIBUTE,
     label: "Octant MCP server secret",
+  },
+  "desktop-provider-credential": {
+    attribute: SECRET_SERVICE_DESKTOP_PROVIDER_CREDENTIAL_ATTRIBUTE,
+    label: "Octant desktop provider key",
   },
 } as const;
 const DEFAULT_TIMEOUT_MS = 2_000;

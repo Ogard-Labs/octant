@@ -42,7 +42,7 @@ import {
   type CodeLanguageServerComponent,
   type CodeLanguageServiceOptions,
 } from "./codeLanguageService";
-import type { LanguageServerEgress } from "./languageServerEgress";
+import type { LanguageServerEgress, LanguageServerEgressScope } from "./languageServerEgress";
 import { LanguageServerProcessPort } from "./languageServerProcess";
 
 const scopeId = "10000000-0000-4000-8000-000000000001" as WindowId;
@@ -136,6 +136,8 @@ interface Harness {
     thread: CodeThread;
     threads: CodeThread[];
     checkout: CodeCheckoutIdentity;
+    /** Each thread's folder, by thread id; a thread on the harness's checkout is at its root. */
+    folders: Map<string, string>;
     reach: boolean;
     turnedOff: boolean;
   };
@@ -164,11 +166,13 @@ function harness(input: {
   readonly watcher?: CodeLanguageServiceOptions["watcher"];
   readonly approvals?: CodeLanguageServiceOptions["approvals"];
   readonly egress?: LanguageServerEgress;
+  readonly threadTainted?: CodeLanguageServiceOptions["threadTainted"];
 }): Harness {
   const state = {
     thread: codeThread(),
     threads: [] as CodeThread[],
     checkout: plainCheckout(),
+    folders: new Map<string, string>(),
     reach: true,
     turnedOff: false,
   };
@@ -186,6 +190,10 @@ function harness(input: {
       readThreads: () => state.threads,
       readCheckout: (checkoutId) =>
         String(checkoutId) === String(state.checkout.id) ? state.checkout : undefined,
+      readThreadFolder: (thread) =>
+        String(thread.checkoutId) === String(state.checkout.id)
+          ? input.checkout
+          : state.folders.get(String(thread.id)),
       canAccessProject: () => state.reach,
       effectiveThread: (_scope, thread) => thread,
       resolveRoot: (_scope, thread, checkout, relativePath) => ({
@@ -208,6 +216,7 @@ function harness(input: {
     ...(input.limits === undefined ? {} : { limits: input.limits }),
     ...(input.watcher === undefined ? {} : { watcher: input.watcher }),
     ...(input.approvals === undefined ? {} : { approvals: input.approvals }),
+    ...(input.threadTainted === undefined ? {} : { threadTainted: input.threadTainted }),
   });
   services.push(service);
   const scope = () => ({ threadId: state.thread.id, checkoutId: state.checkout.id });
@@ -585,6 +594,70 @@ describe("Code language service authority", () => {
       status: "refused",
       reason: "confinement-unavailable",
     });
+  });
+
+  it("suspends a repository-tooling server's Project rules while a tainted thread of any Project can write its folder", async () => {
+    const scopes: LanguageServerEgressScope[] = [];
+    const tainted = new Set<string>();
+    const paths = workspace();
+    const test = harness({
+      ...paths,
+      component: {
+        ...fakeComponent("normal", join(paths.root, "server.log")),
+        launchClass: "repo-tooling",
+      },
+      confinement: passthrough,
+      approvals: { holds: () => true, record: () => "recorded" },
+      threadTainted: (threadId) => tainted.has(String(threadId)),
+      egress: {
+        start: async (scope) => {
+          scopes.push(scope);
+          return {
+            status: "listening",
+            endpoint: { kind: "loopback", port: 9 },
+            token: "language-server-egress",
+            close: async () => undefined,
+          };
+        },
+      },
+    });
+    test.state.thread = codeThread({ executionPolicy: "full-access" });
+    // Two other Projects: one bound to the same folder, which gives its
+    // thread a checkout id of its own, and one bound to a folder beside it.
+    const sameFolder = codeThread({
+      id: "20000000-0000-4000-8000-000000000003",
+      projectId: "40000000-0000-4000-8000-000000000003",
+      checkoutId: "30000000-0000-4000-8000-000000000003",
+    });
+    const beside = codeThread({
+      id: "20000000-0000-4000-8000-000000000004",
+      projectId: "40000000-0000-4000-8000-000000000004",
+      checkoutId: "30000000-0000-4000-8000-000000000004",
+    });
+    test.state.threads = [test.state.thread, sameFolder, beside];
+    test.state.folders.set(String(sameFolder.id), paths.checkout);
+    test.state.folders.set(String(beside.id), paths.outside);
+    expect((await test.open("a.ts")).status).toBe("synced");
+    const [scope] = scopes;
+    if (scope === undefined) throw new Error("the server started with no egress");
+
+    expect(scope.checkoutTainted()).toBe(false);
+    tainted.add(String(beside.id));
+    expect(scope.checkoutTainted()).toBe(false);
+    tainted.add(String(sameFolder.id));
+    expect(scope.checkoutTainted()).toBe(true);
+
+    // A Project bound to a folder that holds the checkout can write it too.
+    test.state.folders.set(String(sameFolder.id), paths.root);
+    expect(scope.checkoutTainted()).toBe(true);
+    // So can one bound to a folder inside it, whatever that folder is named.
+    test.state.folders.set(String(sameFolder.id), join(paths.checkout, "..cache"));
+    expect(scope.checkoutTainted()).toBe(true);
+    // A folder that cannot be told counts as the server's.
+    test.state.folders.delete(String(sameFolder.id));
+    expect(scope.checkoutTainted()).toBe(true);
+    test.state.threads = [test.state.thread, beside];
+    expect(scope.checkoutTainted()).toBe(false);
   });
 
   it("answers a read only for a document this thread opened", async () => {
