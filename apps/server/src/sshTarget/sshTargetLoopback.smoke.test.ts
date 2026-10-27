@@ -16,7 +16,8 @@ import {
 import { createServer as createHttpServer } from "node:http";
 import { createServer, connect } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Effect, Fiber, Schema, Stream } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -32,7 +33,8 @@ import {
   type ProviderRuntimeEvent,
   type ToolActionAuthority,
 } from "@octant/contracts";
-import { decodeCodeRelativePath } from "@octant/contracts/code";
+import { decodeCodeRelativePath, decodeCodeTerminalId } from "@octant/contracts/code";
+import { WindowId } from "@octant/contracts/shell";
 import { decodeUtcTimestamp } from "@octant/contracts/events";
 import { decodeProjectId } from "@octant/contracts/projects";
 import type { SshRemoteProject } from "@octant/contracts/ssh-remote-project";
@@ -63,6 +65,7 @@ import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import { bindSshRemoteHarness, type SshRemoteHarnessOptions } from "./sshRemoteHarness";
 import { SshRemoteProjectService } from "./sshRemoteProjectService";
+import { SshRemoteTerminalService } from "./sshRemoteTerminalService";
 import { SshTargetConnectionService } from "./sshTargetConnectionService";
 import type { SshTargetStore } from "./sshTargetStore";
 import { openSshTargetTestStore } from "./sshTargetStore.test-support";
@@ -228,6 +231,15 @@ function projectsOn(connections: SshTargetConnectionService): SshRemoteProjectSe
     uuid: randomUUID,
     clock: () => new Date().toISOString(),
   });
+}
+
+const terminalWindow = Schema.decodeUnknownSync(WindowId)(randomUUID());
+
+function terminalsOn(
+  connections: SshTargetConnectionService,
+  projects: SshRemoteProjectService,
+): SshRemoteTerminalService {
+  return new SshRemoteTerminalService({ projects, connections, store: openedStore() });
 }
 
 /**
@@ -626,9 +638,17 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
       executorEntry,
       "--target=node",
       "--format=esm",
+      // The headless artifact keeps its native pseudo-terminal module beside
+      // the bundle, in its own node_modules; so does this one.
+      "--external=node-pty",
       `--outfile=${join(root, "executor", "executor.mjs")}`,
     ]);
     chmodSync(join(root, "executor", "executor.mjs"), 0o644);
+    mkdirSync(join(root, "executor", "node_modules"), { mode: 0o755 });
+    symlinkSync(
+      dirname(createRequire(import.meta.url).resolve("node-pty/package.json")),
+      join(root, "executor", "node_modules", "node-pty"),
+    );
     // A data directory with a space, as macOS's Application Support is.
     const opened = openSshTargetTestStore(root, join(root, "Application Support"));
     store = opened.store;
@@ -968,9 +988,214 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
       reason: "not-admitted",
       decision: { reason: "confinement-canary-escaped" },
     });
+    // Nor does it open a terminal or make a worktree there.
+    expect(await projects.createWorktree({ projectId, name: "escaped" })).toMatchObject({
+      status: "refused",
+      reason: "not-admitted",
+      decision: { reason: "confinement-canary-escaped" },
+    });
+    const terminals = terminalsOn(connections, projects);
+    const started = await terminals.execute(terminalWindow, {
+      kind: "start",
+      projectId,
+      terminalId: decodeCodeTerminalId(randomUUID()),
+      columns: 80,
+      rows: 24,
+    });
+    expect(started).toMatchObject({ kind: "project-terminal-refused", reason: "unavailable" });
+    expect(started.kind === "project-terminal-refused" && started.message).toMatch(
+      /^Confinement did not hold on the target/u,
+    );
     connections.close();
     connections.remove(status.target.id);
   }, 120_000);
+
+  it("opens a confined terminal and a managed worktree on the target, and ends the shell with its session", async () => {
+    const parent = join(root, "nobody-projects");
+    mkdirSync(parent, { mode: 0o755 });
+    chownSync(parent, NOBODY, NOBODY);
+    const checkout = join(parent, "service");
+    mkdirSync(checkout);
+    writeFileSync(join(checkout, "README.md"), "service\n");
+    run("git", ["-C", checkout, "init", "-q", "--initial-branch=main"]);
+    run("git", ["-C", checkout, "add", "."]);
+    run("git", [
+      "-C",
+      checkout,
+      "-c",
+      "user.name=Octant",
+      "-c",
+      "user.email=octant@example.invalid",
+      "commit",
+      "-q",
+      "-m",
+      "initial",
+    ]);
+    // A hook the checkout names never runs when Octant creates a worktree.
+    writeFileSync(
+      join(checkout, ".git", "hooks", "post-checkout"),
+      `#!/bin/sh\ntouch ${join(root, "hook-ran")}\n`,
+      { mode: 0o755 },
+    );
+    run("chown", ["-R", `${String(NOBODY)}:${String(NOBODY)}`, checkout]);
+
+    const connections = service();
+    const status = await register(connections, target("terminals", asNobody()));
+    expect(reasons(status)).toEqual(["admitted", "admitted", "admitted"]);
+    const projects = projectsOn(connections);
+    const bound = await projects.bind({
+      targetId: status.target.id,
+      remoteRoot: remotePath(checkout),
+      name: "Service",
+    });
+    if (bound.status !== "ok") throw new Error("bind refused");
+    const projectId = bound.value.id;
+
+    // The worktree is Git's own, beside the root, on its own branch.
+    const created = await projects.createWorktree({ projectId, name: "feature" });
+    const worktreePath = join(parent, ".octant-worktrees", String(projectId), "feature");
+    expect(created).toMatchObject({
+      status: "ok",
+      value: { name: "feature", branch: "octant/feature", path: worktreePath },
+    });
+    if (created.status !== "ok") return;
+    expect(existsSync(join(worktreePath, "README.md"))).toBe(true);
+    expect(existsSync(join(root, "hook-ran"))).toBe(false);
+    expect(statSync(join(parent, ".octant-worktrees")).mode & 0o777).toBe(0o700);
+    expect(await projects.gitStatus({ projectId, worktreeId: created.value.id })).toMatchObject({
+      status: "ok",
+      value: { head: { kind: "branch", name: "octant/feature" } },
+    });
+
+    // A shell in the worktree commits there, and cannot write beside it.
+    const terminals = terminalsOn(connections, projects);
+    const terminalId = decodeCodeTerminalId(randomUUID());
+    expect(
+      await terminals.execute(terminalWindow, {
+        kind: "start",
+        projectId,
+        terminalId,
+        worktreeId: created.value.id,
+        columns: 120,
+        rows: 30,
+      }),
+    ).toMatchObject({
+      kind: "project-terminal",
+      terminal: { state: "running", posture: "approval-gated" },
+    });
+    const output = async (): Promise<string> => {
+      const read = await terminals.execute(terminalWindow, {
+        kind: "read-output",
+        projectId,
+        terminalId,
+        afterCharacters: 0,
+      });
+      return read.kind === "project-terminal" ? (read.output?.text ?? "") : read.message;
+    };
+    await terminals.execute(terminalWindow, {
+      kind: "write",
+      projectId,
+      terminalId,
+      data: [
+        "pwd",
+        // Each marker is printed by `printf`, so the typed line never matches it.
+        "echo made > made.txt && git add made.txt && git -c user.name=O -c user.email=o@example.invalid commit -qm made && printf 'COMMIT-%s\\n' OK",
+        `touch ${join(parent, "beside.txt")}`,
+        "printf 'END-%s\\n' SCRIPT",
+        "",
+      ].join("\r"),
+    });
+    await expect.poll(output, { timeout: 30_000 }).toContain("END-SCRIPT");
+    const printed = await output();
+    expect(printed).toContain(worktreePath);
+    expect(printed).toContain("COMMIT-OK");
+    // Outside its folders the shell writes nowhere that reaches the target's disk.
+    expect(existsSync(join(parent, "beside.txt"))).toBe(false);
+    expect(
+      spawnSync(
+        "git",
+        ["-c", "safe.directory=*", "-C", checkout, "log", "-1", "--format=%s", "octant/feature"],
+        {
+          encoding: "utf8",
+        },
+      ).stdout.trim(),
+    ).toBe("made");
+
+    await terminals.execute(terminalWindow, {
+      kind: "write",
+      projectId,
+      terminalId,
+      data: "exit\r",
+    });
+    await expect
+      .poll(async () => {
+        const view = await terminals.execute(terminalWindow, {
+          kind: "attach",
+          projectId,
+          terminalId,
+        });
+        return view.kind === "project-terminal" ? view.terminal.state : view.reason;
+      })
+      .toBe("exited");
+
+    // A worktree holding an untracked file is kept; a clean one is removed,
+    // and its branch stays.
+    writeFileSync(join(worktreePath, "untracked.txt"), "keep me\n");
+    chownSync(join(worktreePath, "untracked.txt"), NOBODY, NOBODY);
+    expect(await projects.removeWorktree({ worktreeId: created.value.id })).toEqual({
+      status: "refused",
+      reason: "worktree-dirty",
+    });
+    rmSync(join(worktreePath, "untracked.txt"));
+    expect(await projects.removeWorktree({ worktreeId: created.value.id })).toEqual({
+      status: "ok",
+      value: null,
+    });
+    expect(existsSync(worktreePath)).toBe(false);
+    expect(projects.listWorktrees()).toEqual([]);
+
+    // A shell's session ends: the shell and what it started die with it.
+    const second = decodeCodeTerminalId(randomUUID());
+    await terminals.execute(terminalWindow, {
+      kind: "start",
+      projectId,
+      terminalId: second,
+      columns: 80,
+      rows: 24,
+    });
+    await terminals.execute(terminalWindow, {
+      kind: "write",
+      projectId,
+      terminalId: second,
+      data: "sleep 4243 & printf 'START%s\\n' ED\r",
+    });
+    await expect
+      .poll(async () => {
+        const read = await terminals.execute(terminalWindow, {
+          kind: "read-output",
+          projectId,
+          terminalId: second,
+          afterCharacters: 0,
+        });
+        return read.kind === "project-terminal" ? (read.output?.text ?? "") : "";
+      })
+      .toContain("STARTED");
+    expect(processRunning("sleep 4243")).toBe(true);
+    connections.close();
+    await expect
+      .poll(async () => {
+        const view = await terminals.execute(terminalWindow, {
+          kind: "attach",
+          projectId,
+          terminalId: second,
+        });
+        return view.kind === "project-terminal" ? view.terminal.state : view.reason;
+      })
+      .toBe("interrupted");
+    await expect.poll(() => processRunning("sleep 4243"), { timeout: 10_000 }).toBe(false);
+    expect(openedStore().runningTerminals()).toEqual([]);
+    connections.remove(status.target.id);
+  }, 180_000);
 
   it("runs a harness turn's reads, edits, tests, and network on the target with approvals, deciding and journaling its egress here", async () => {
     const checkout = harnessCheckout("harness-app");

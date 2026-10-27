@@ -8,6 +8,7 @@ import {
   type SshExecutorRequest,
   type SshExecutorResolveFrame,
   type SshExecutorStreamFrame,
+  type SshExecutorTerminalHostFrame,
 } from "@octant/contracts/ssh-executor-protocol";
 import { encodeExecutorFrame, ExecutorFrameReader, executorPreamble } from "./executorFrames";
 
@@ -20,20 +21,24 @@ import { encodeExecutorFrame, ExecutorFrameReader, executorPreamble } from "./ex
  * nothing on its own initiative, and ends the session on the first frame it
  * cannot read, because a stream that lost its framing cannot be trusted.
  * Requests run one at a time; a `cancel` stops the one in flight. The frames
- * of a running command's egress go to its handler, which ends the session on
- * one that breaks the protocol.
+ * of a running command's egress and of the open terminals go to their
+ * handler, which ends the session on one that breaks the protocol.
  */
 
-export type ExecutorEgressFrame =
+export type ExecutorPeerFrame =
   | SshExecutorDialFrame
   | SshExecutorResolveFrame
-  | SshExecutorStreamFrame;
+  | SshExecutorStreamFrame
+  | SshExecutorTerminalHostFrame;
 
 export interface SshExecutorSessionHandlers {
-  /** Answers one request: the attestation, a read, a file tool, or a command. */
+  /**
+   * Answers one request: the attestation, a read, a file tool, a command, a
+   * terminal's opening, or a managed worktree's creation or removal.
+   */
   readonly answer: (request: SshExecutorRequest, signal: AbortSignal) => Promise<SshExecutorReply>;
-  /** A frame of a running command's egress; `violated` ends the session. */
-  readonly receive: (frame: ExecutorEgressFrame) => "accepted" | "violated";
+  /** A frame of a running command's egress or an open terminal; `violated` ends the session. */
+  readonly receive: (frame: ExecutorPeerFrame) => "accepted" | "violated";
   /** The session is over; nothing more arrives or leaves. */
   readonly end: () => void;
 }

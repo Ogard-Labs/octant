@@ -135,6 +135,66 @@ describe("SSH executor protocol", () => {
     expect(executor({ type: "stream-credit", stream: 1, bytes: 262_145 })._tag).toBe("Left");
   });
 
+  it("opens a terminal only in a posture that runs one, offline unless in Full access", () => {
+    const decode = Schema.decodeUnknownEither(SshExecutorHostFrame);
+    const terminal = (value: object) =>
+      decode({
+        type: "request",
+        id: 5,
+        request: {
+          kind: "open-terminal",
+          root: "/home/build/app",
+          terminal: 1,
+          columns: 80,
+          rows: 24,
+          ...value,
+        },
+      })._tag;
+    expect(terminal({ posture: "approval-gated", network: "none" })).toBe("Right");
+    expect(terminal({ posture: "full-access", network: "allow" })).toBe("Right");
+    expect(terminal({ posture: "plan", network: "none" })).toBe("Left");
+    expect(terminal({ posture: "approval-gated", network: "allow" })).toBe("Left");
+    // A terminal has no egress proxy of its own to carry.
+    expect(terminal({ posture: "approval-gated", network: "proxied" })).toBe("Left");
+    expect(terminal({ posture: "approval-gated", network: "none", terminal: 0 })).toBe("Left");
+    const executor = Schema.decodeUnknownEither(SshExecutorFrame);
+    expect(executor({ type: "terminal-output", terminal: 1, data: "bHMK" })._tag).toBe("Right");
+    // The executor never types into a terminal or grants itself room.
+    expect(executor({ type: "terminal-input", terminal: 1, data: "bHMK" })._tag).toBe("Left");
+    expect(decode({ type: "terminal-credit", terminal: 1, bytes: 262_145 })._tag).toBe("Left");
+  });
+
+  it("names a managed worktree only by its Project and a one-folder name, never a path", () => {
+    const decode = Schema.decodeUnknownEither(SshExecutorHostFrame);
+    const create = (name: string) =>
+      decode({
+        type: "request",
+        id: 6,
+        request: {
+          kind: "create-worktree",
+          root: "/home/build/app",
+          project: "00000000-0000-4000-8000-000000000002",
+          name,
+        },
+      })._tag;
+    expect(create("fix-login")).toBe("Right");
+    for (const name of ["../escape", "-b", "a/b", "Fix", "", "a-", "x".repeat(49)]) {
+      expect(create(name)).toBe("Left");
+    }
+    const executor = Schema.decodeUnknownEither(SshExecutorFrame);
+    expect(
+      executor({
+        type: "reply",
+        id: 6,
+        reply: {
+          kind: "worktree-created",
+          path: "/home/build/.octant-worktrees/p/x",
+          branch: "main",
+        },
+      })._tag,
+    ).toBe("Left");
+  });
+
   it("names the reader of every harness file tool, with the tool's own arguments", () => {
     const decode = Schema.decodeUnknownEither(SshExecutorHostFrame);
     const file = (value: object) =>

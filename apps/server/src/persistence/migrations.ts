@@ -2331,6 +2331,27 @@ CREATE INDEX validation_evidence_authority_idx
       CREATE INDEX ssh_remote_project_target_idx ON ssh_remote_project_projection(target_id);
     `,
   },
+  {
+    version: 87,
+    name: "create_ssh_remote_worktree_and_terminal_projection",
+    sql: `
+      CREATE TABLE ssh_remote_worktree_projection (
+        worktree_id TEXT PRIMARY KEY CHECK(length(trim(worktree_id)) > 0),
+        project_id TEXT NOT NULL CHECK(length(trim(project_id)) > 0),
+        worktree_json TEXT NOT NULL CHECK(json_valid(worktree_json)),
+        aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0),
+        last_sequence INTEGER NOT NULL CHECK(last_sequence > 0)
+      ) STRICT;
+      CREATE INDEX ssh_remote_worktree_project_idx ON ssh_remote_worktree_projection(project_id);
+      CREATE TABLE ssh_remote_terminal_projection (
+        terminal_id TEXT PRIMARY KEY CHECK(length(trim(terminal_id)) > 0),
+        project_id TEXT NOT NULL CHECK(length(trim(project_id)) > 0),
+        state TEXT NOT NULL CHECK(state IN ('running', 'ended')),
+        aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0),
+        last_sequence INTEGER NOT NULL CHECK(last_sequence > 0)
+      ) STRICT;
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {

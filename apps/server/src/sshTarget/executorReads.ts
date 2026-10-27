@@ -355,7 +355,7 @@ function gitFailure(ran: { readonly exitCode: number | null; readonly stderr: st
     : ("read-failed" as const);
 }
 
-type GitRun =
+export type GitRun =
   | {
       readonly status: "ran";
       readonly exitCode: number | null;
@@ -365,12 +365,19 @@ type GitRun =
     }
   | { readonly status: "refused"; readonly reason: SshRemoteReadRefusalReason };
 
-/** One Git launch in the root with Plan's grants, its output cut at `maximumBytes`. */
-async function runGit(
+/**
+ * One Git launch in the root, its output cut at `maximumBytes`. A read runs
+ * with Plan's grants. A write (a managed worktree's creation or removal)
+ * names the one folder outside the root it may also write, and runs with the
+ * approval-gated grants, the writing posture whose canaries speak for it,
+ * still with no network.
+ */
+export async function runGit(
   environment: ExecutorReadEnvironment,
   root: string,
   args: ReadonlyArray<string>,
   maximumBytes: number,
+  write?: { readonly additionalWriteRoot: string },
 ): Promise<GitRun> {
   if (environment.sessionDirectory === undefined)
     return { status: "refused", reason: "read-failed" };
@@ -391,22 +398,23 @@ async function runGit(
         platform: environment.platform,
         ...(environment.bwrapPath === undefined ? {} : { sandboxPath: environment.bwrapPath }),
       });
-    // Whatever the Git launch asks for, it runs with Plan's grants: the
-    // posture whose canaries speak for it.
-    const plan: ProcessConfinementPort = {
-      prepare: (input) =>
-        base.prepare({ ...input, ...postureGrants("plan"), networkEgress: "none" }),
+    // Whatever the Git launch asks for, it runs with its posture's grants:
+    // the posture whose canaries speak for it.
+    const grants = postureGrants(write === undefined ? "plan" : "approval-gated");
+    const confined: ProcessConfinementPort = {
+      prepare: (input) => base.prepare({ ...input, ...grants, networkEgress: "none" }),
     };
     let launch: ReturnType<ProcessConfinementPort["prepare"]>;
     try {
       launch = prepareGitSeatbeltLaunch({
-        confinement: plan,
+        confinement: confined,
         platform: environment.platform,
         gitExecutable,
         checkoutRoot: root,
         args: [...GIT_FIXED_OPTIONS, ...args],
         temporaryDirectory: scratch,
         networkEgress: "none",
+        ...(write === undefined ? {} : { additionalWriteRoots: [write.additionalWriteRoot] }),
       });
     } catch {
       return { status: "refused", reason: "read-failed" };

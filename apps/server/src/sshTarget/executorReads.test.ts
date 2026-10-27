@@ -13,6 +13,7 @@ import {
   parsePorcelainV2,
   type ExecutorReadEnvironment,
 } from "./executorReads";
+import { createExecutorWorktree, removeExecutorWorktree } from "./executorWorktrees";
 
 /**
  * The executor's reads against real folders on this machine. Confinement is
@@ -262,5 +263,38 @@ describe("executor reads of a bound remote root", () => {
       ],
       truncated: true,
     });
+  });
+});
+
+describe("executor managed worktrees of a bound root", () => {
+  it("removes only its own worktree's record when the folder is already gone, keeping the person's other worktrees", async () => {
+    git("init", "-q", "--initial-branch=main");
+    git("add", "README.md");
+    git("commit", "-q", "-m", "initial");
+    const project = "11111111-1111-4111-8111-111111111111";
+    const root = remotePath(checkout);
+    const created = await createExecutorWorktree(environment, {
+      kind: "create-worktree",
+      root,
+      project,
+      name: "gone",
+    });
+    expect(created).toMatchObject({ kind: "worktree-created", branch: "octant/gone" });
+    // The person's own worktree, whose folder is on a volume that is not
+    // mounted right now.
+    const mine = join(directory, "mine");
+    git("worktree", "add", "-q", "-b", "mine", mine);
+    rmSync(mine, { recursive: true, force: true });
+    rmSync(join(directory, ".octant-worktrees", project, "gone"), { recursive: true, force: true });
+
+    const remove = { kind: "remove-worktree", root, project, name: "gone" } as const;
+    expect(await removeExecutorWorktree(environment, remove)).toEqual({ kind: "worktree-removed" });
+    const listed = spawnSync("git", ["-C", checkout, "worktree", "list", "--porcelain"], {
+      encoding: "utf8",
+    }).stdout;
+    expect(listed).toContain(`worktree ${mine}`);
+    expect(listed).not.toContain("octant/gone");
+    // Asked again, there is nothing left of it to remove.
+    expect(await removeExecutorWorktree(environment, remove)).toEqual({ kind: "worktree-removed" });
   });
 });

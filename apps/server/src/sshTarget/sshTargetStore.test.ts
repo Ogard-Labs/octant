@@ -4,7 +4,10 @@ import { join } from "node:path";
 import { Schema } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { decodeUtcTimestamp } from "@octant/contracts/events";
+import { decodeCodeTerminalId } from "@octant/contracts/code";
 import { decodeProjectId } from "@octant/contracts/projects";
+import { decodeWindowId } from "@octant/contracts/shell";
+import { SshRemoteWorktreeId } from "@octant/contracts/ssh-remote-project";
 import {
   SshConnectionId,
   SshDestination,
@@ -103,6 +106,63 @@ describe("SSH target journal", () => {
     };
     expectState();
 
+    const projection = createPhase1RuntimeRegistries().projections.get("ssh-targets");
+    if (projection === undefined) throw new Error("the SSH target projection is not registered");
+    rebuildProjection({ connection, journal, projection, clock: () => new Date().toISOString() });
+    expectState();
+  });
+
+  it("replays managed worktrees and remote terminals, ending each terminal once", () => {
+    const { store, connection, journal } = opened;
+    store.register(devbox);
+    store.bindProject(project);
+    const worktree = {
+      id: Schema.decodeUnknownSync(SshRemoteWorktreeId)("55555555-5555-4555-8555-555555555555"),
+      projectId: project.id,
+      name: "feature",
+      branch: "octant/feature",
+      path: Schema.decodeUnknownSync(SshRemotePath)(
+        "/home/build/.octant-worktrees/44444444-4444-4444-8444-444444444444/feature",
+      ),
+      createdAt: decodeUtcTimestamp("2026-10-26T11:00:00.000Z"),
+    };
+    const removed = {
+      ...worktree,
+      id: Schema.decodeUnknownSync(SshRemoteWorktreeId)("66666666-6666-4666-8666-666666666666"),
+      name: "old",
+      branch: "octant/old",
+    };
+    expect(store.recordWorktreeCreated(worktree, attestation.connectionId)).toBe("recorded");
+    expect(store.recordWorktreeCreated(removed, attestation.connectionId)).toBe("recorded");
+    // A worktree is created once.
+    expect(store.recordWorktreeCreated(worktree, attestation.connectionId)).toBe("refused");
+    expect(store.recordWorktreeRemoved(removed.id, attestation.connectionId)).toBe("recorded");
+
+    const started = (terminalId: string) => ({
+      terminalId: decodeCodeTerminalId(terminalId),
+      projectId: project.id,
+      windowId: decodeWindowId("77777777-7777-4777-8777-777777777777"),
+      targetId: devbox.id,
+      connectionId: attestation.connectionId,
+      posture: "approval-gated" as const,
+    });
+    const ended = started("88888888-8888-4888-8888-888888888881");
+    const running = { ...started("88888888-8888-4888-8888-888888888882"), worktreeId: worktree.id };
+    expect(store.recordTerminalStarted(ended)).toBe("recorded");
+    expect(store.recordTerminalStarted(running)).toBe("recorded");
+    expect(
+      store.recordTerminalEnded({ terminalId: ended.terminalId, reason: "target-disconnected" }),
+    ).toBe("recorded");
+    expect(store.recordTerminalEnded({ terminalId: ended.terminalId, reason: "stopped" })).toBe(
+      "refused",
+    );
+
+    const expectState = () => {
+      expect(store.listWorktrees()).toEqual([worktree]);
+      expect(store.getWorktree(removed.id)).toBeUndefined();
+      expect(store.runningTerminals()).toEqual([running.terminalId]);
+    };
+    expectState();
     const projection = createPhase1RuntimeRegistries().projections.get("ssh-targets");
     if (projection === undefined) throw new Error("the SSH target projection is not registered");
     rebuildProjection({ connection, journal, projection, clock: () => new Date().toISOString() });

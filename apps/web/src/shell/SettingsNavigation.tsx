@@ -13,6 +13,7 @@ import {
   ListTodo,
   MessageCircle,
   Monitor,
+  Network,
   Mic,
   PanelLeft,
   Palette,
@@ -44,7 +45,8 @@ export interface SettingsNavigationProps {
 /* General is who you are and what Octant tells you; Look & feel is how it
    looks and is driven; AI & models is which model answers each job; Tools is
    what an agent may reach once running; Privacy & data is what is remembered,
-   stored, and shared; Advanced is the host process and its usage. */
+   stored, and shared; Advanced is the host process, the machines it reaches
+   over SSH, and its usage. */
 const SETTINGS_GROUPS = [
   "General",
   "Look & feel",
@@ -83,6 +85,7 @@ const SETTINGS_NAVIGATION_META: Readonly<
   sync: { group: "Privacy & data", icon: FolderSync },
   "remote-access": { group: "Privacy & data", icon: Radio },
   host: { group: "Advanced", icon: Server },
+  "ssh-targets": { group: "Advanced", icon: Network },
   usage: { group: "Advanced", icon: ChartNoAxesColumnIncreasing },
 };
 

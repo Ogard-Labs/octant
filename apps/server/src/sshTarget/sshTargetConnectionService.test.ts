@@ -7,7 +7,10 @@ import { SshDestination, SshExecutorPath, SshRemotePath } from "@octant/contract
 import { SSH_EXECUTOR_PREAMBLE } from "@octant/contracts/ssh-executor-protocol";
 import { SSH_CANARY_PROBES_BY_POSTURE } from "@octant/domain/ssh-target-admission-policy";
 import { bindSshRemoteHarness } from "./sshRemoteHarness";
+import { decodeCodeTerminalId } from "@octant/contracts/code";
+import { WindowId } from "@octant/contracts/shell";
 import { SshRemoteProjectService } from "./sshRemoteProjectService";
+import { SshRemoteTerminalService } from "./sshRemoteTerminalService";
 import { SshTargetConnectionService } from "./sshTargetConnectionService";
 import type { SshTargetStore } from "./sshTargetStore";
 import { openSshTargetTestStore } from "./sshTargetStore.test-support";
@@ -23,6 +26,7 @@ import { openSshTargetTestStore } from "./sshTargetStore.test-support";
 const HOST_KEY = "AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl";
 const BUILD = "0.9.0+test";
 const destination = Schema.decodeUnknownSync(SshDestination)("build@devbox.example");
+const decodeWindowId = Schema.decodeUnknownSync(WindowId);
 const executorPath = Schema.decodeUnknownSync(SshExecutorPath)("/opt/octant/bin/octant");
 
 const FAKE_SSH = String.raw`
@@ -75,6 +79,14 @@ const answer = (request) => {
       return { kind: "harness-file", result: { kind: "written", path: request.operation.arguments.path, bytes: 2, created: true } };
     case "run-command":
       return { kind: "command-ran", termination: "exited", exitCode: 0, stdout: Buffer.from("ran on " + request.root).toString("base64"), stderr: "" };
+    case "open-terminal":
+      if (mode === "terminals-full") return { kind: "terminal-unavailable" };
+      setTimeout(() => process.stdout.write(frame({ type: "terminal-output", terminal: request.terminal, data: Buffer.from("shell in " + request.root + "\r\n$ ").toString("base64") })), 10);
+      return { kind: "terminal-opened" };
+    case "create-worktree":
+      return { kind: "worktree-created", path: "/srv/.octant-worktrees/" + request.project + "/" + request.name, branch: "octant/" + request.name };
+    case "remove-worktree":
+      return { kind: "worktree-removed" };
     default:
       return { kind: "refused", reason: "read-failed" };
   }
@@ -86,6 +98,16 @@ process.stdin.on("data", (chunk) => {
     const length = buffered.readUInt32BE(0);
     const request = JSON.parse(buffered.subarray(4, 4 + length).toString());
     buffered = buffered.subarray(4 + length);
+    if (request.type === "terminal-input") {
+      fs.appendFileSync(process.env.FAKE_SSH_REQUEST + ".log", "terminal-input\n");
+      process.stdout.write(frame({ type: "terminal-output", terminal: request.terminal, data: request.data }));
+      continue;
+    }
+    if (request.type === "terminal-close") {
+      process.stdout.write(frame({ type: "terminal-exited", terminal: request.terminal, exitCode: 0 }));
+      continue;
+    }
+    if (request.type !== "request") continue;
     if (request.request.kind === "attest") fs.writeFileSync(process.env.FAKE_SSH_REQUEST, JSON.stringify(request));
     fs.appendFileSync(process.env.FAKE_SSH_REQUEST + ".log", request.request.kind + "\n");
     const outOfTurn = mode === "answers-out-of-turn" && request.request.kind !== "attest";
@@ -415,6 +437,208 @@ describe("SSH target connection service", () => {
     ]);
     expect(unattestedProjects.list().map((project) => project.id)).toEqual([projectId]);
     unattested.close();
+  });
+
+  it("opens terminals and creates worktrees only where the approval-gated posture attested, refusing elsewhere before any frame", async () => {
+    const remoteRoot = Schema.decodeUnknownSync(SshRemotePath)("/home/build/app");
+    const requests = () =>
+      readFileSync(join(directory, "request.json.log"), "utf8").trim().split("\n");
+    const windowId = decodeWindowId("77777777-7777-4777-8777-777777777777");
+    let next = 0;
+    const uuid = () => `88888888-8888-4888-8888-${String(++next).padStart(12, "0")}`;
+
+    const connections = service();
+    const projects = new SshRemoteProjectService({
+      store: registry,
+      connections,
+      uuid,
+      clock: () => "2026-10-26T10:00:00.000Z",
+    });
+    const terminals = new SshRemoteTerminalService({ projects, connections, store: registry });
+    const status = await registered(connections);
+    const bound = await projects.bind({ targetId: status.target.id, remoteRoot, name: "App" });
+    if (bound.status !== "ok") throw new Error("bind refused");
+    const projectId = bound.value.id;
+
+    // A worktree is the folder the executor made, journaled with its session.
+    const created = await projects.createWorktree({ projectId, name: "fix-login" });
+    expect(created).toMatchObject({
+      status: "ok",
+      value: {
+        projectId,
+        name: "fix-login",
+        branch: "octant/fix-login",
+        path: `/srv/.octant-worktrees/${String(projectId)}/fix-login`,
+      },
+    });
+    if (created.status !== "ok") return;
+    expect(projects.listWorktrees().map((worktree) => worktree.id)).toEqual([created.value.id]);
+    expect(await projects.createWorktree({ projectId, name: "fix-login" })).toEqual({
+      status: "refused",
+      reason: "worktree-exists",
+    });
+
+    // A terminal in the worktree runs there, approval-gated, and is the
+    // opening window's alone.
+    const terminalId = decodeCodeTerminalId("99999999-9999-4999-8999-999999999991");
+    const started = await terminals.execute(windowId, {
+      kind: "start",
+      projectId,
+      terminalId,
+      worktreeId: created.value.id,
+      columns: 80,
+      rows: 24,
+    });
+    expect(started).toMatchObject({
+      kind: "project-terminal",
+      terminal: { state: "running", posture: "approval-gated" },
+    });
+    const output = async () => {
+      const read = await terminals.execute(windowId, {
+        kind: "read-output",
+        projectId,
+        terminalId,
+        afterCharacters: 0,
+      });
+      return read.kind === "project-terminal" ? read.output?.text : read.message;
+    };
+    const prompt = `shell in /srv/.octant-worktrees/${String(projectId)}/fix-login\r\n$ `;
+    await expect.poll(output).toBe(prompt);
+    await terminals.execute(windowId, { kind: "write", projectId, terminalId, data: "ls\r" });
+    await expect.poll(output).toBe(`${prompt}ls\r`);
+    expect(
+      await terminals.execute(decodeWindowId("77777777-7777-4777-8777-000000000000"), {
+        kind: "attach",
+        projectId,
+        terminalId,
+      }),
+    ).toMatchObject({ kind: "project-terminal-refused", reason: "unauthorized" });
+    expect(registry.runningTerminals()).toEqual([terminalId]);
+
+    // The session ends: the shell died with it, and the record says so.
+    connections.close();
+    await expect
+      .poll(async () => {
+        const view = await terminals.execute(windowId, { kind: "attach", projectId, terminalId });
+        return view.kind === "project-terminal" ? view.terminal.state : view.reason;
+      })
+      .toBe("interrupted");
+    expect(registry.runningTerminals()).toEqual([]);
+    const sent = requests().length;
+
+    // A target whose approval-gated canary proved nothing still reads in Plan,
+    // and opens no terminal and changes no worktree, sending nothing.
+    const facts = passingFacts();
+    const unattested = service({
+      facts: {
+        ...facts,
+        canaries: facts.canaries.map((entry) =>
+          entry.posture === "approval-gated"
+            ? {
+                ...entry,
+                results: entry.results.map((result) =>
+                  result.probe === "write-outside-root"
+                    ? { ...result, outcome: "inconclusive" }
+                    : result,
+                ),
+              }
+            : entry,
+        ),
+      },
+    });
+    const unattestedProjects = new SshRemoteProjectService({
+      store: registry,
+      connections: unattested,
+      uuid,
+      clock: () => "2026-10-26T10:00:00.000Z",
+    });
+    const unattestedTerminals = new SshRemoteTerminalService({
+      projects: unattestedProjects,
+      connections: unattested,
+      store: registry,
+    });
+    await unattested.connect(status.target.id);
+    const refusal = {
+      status: "refused",
+      reason: "not-admitted",
+      decision: {
+        status: "refused",
+        reason: "not-attested",
+        posture: "approval-gated",
+        probe: "write-outside-root",
+      },
+    };
+    expect(await unattestedProjects.createWorktree({ projectId, name: "other" })).toEqual(refusal);
+    expect(await unattestedProjects.removeWorktree({ worktreeId: created.value.id })).toEqual(
+      refusal,
+    );
+    expect(
+      await unattestedTerminals.execute(windowId, {
+        kind: "start",
+        projectId,
+        terminalId: decodeCodeTerminalId("99999999-9999-4999-8999-999999999992"),
+        columns: 80,
+        rows: 24,
+      }),
+    ).toEqual({
+      kind: "project-terminal-refused",
+      reason: "unavailable",
+      message:
+        "The target could not show that approval-gated work is confined (write-outside-root). Connect it again to attest.",
+    });
+    expect(await unattestedProjects.gitStatus({ projectId })).toMatchObject({ status: "ok" });
+    expect(requests().slice(sent)).toEqual(["attest", "git-status"]);
+    unattested.close();
+
+    // Once attested again, the worktree is removed and its record goes.
+    const again = service();
+    const againProjects = new SshRemoteProjectService({
+      store: registry,
+      connections: again,
+      uuid,
+      clock: () => "2026-10-26T10:00:00.000Z",
+    });
+    await again.connect(status.target.id);
+    expect(await againProjects.removeWorktree({ worktreeId: created.value.id })).toEqual({
+      status: "ok",
+      value: null,
+    });
+    expect(againProjects.listWorktrees()).toEqual([]);
+    again.close();
+  });
+
+  it("tells the person the target opened no terminal, not that its session ended, when the executor holds its most", async () => {
+    const remoteRoot = Schema.decodeUnknownSync(SshRemotePath)("/home/build/app");
+    const connections = service({ mode: "terminals-full" });
+    const projects = new SshRemoteProjectService({
+      store: registry,
+      connections,
+      uuid: () => "88888888-8888-4888-8888-000000000001",
+      clock: () => "2026-10-26T10:00:00.000Z",
+    });
+    const terminals = new SshRemoteTerminalService({ projects, connections, store: registry });
+    const status = await registered(connections);
+    const bound = await projects.bind({ targetId: status.target.id, remoteRoot, name: "App" });
+    if (bound.status !== "ok") throw new Error("bind refused");
+
+    expect(
+      await terminals.execute(decodeWindowId("77777777-7777-4777-8777-777777777777"), {
+        kind: "start",
+        projectId: bound.value.id,
+        terminalId: decodeCodeTerminalId("99999999-9999-4999-8999-999999999993"),
+        columns: 80,
+        rows: 24,
+      }),
+    ).toEqual({
+      kind: "project-terminal-refused",
+      reason: "unavailable",
+      message:
+        "The target opened no terminal: this connection already holds its most, or the target cannot open one. Close a terminal and retry.",
+    });
+    expect(registry.runningTerminals()).toEqual([]);
+    // The session is still there to carry the next request.
+    expect(await projects.gitStatus({ projectId: bound.value.id })).toMatchObject({ status: "ok" });
+    connections.close();
   });
 
   it("binds a turn's tools to the session it started on, tells the turn once when it ends, and sends nothing on the next", async () => {

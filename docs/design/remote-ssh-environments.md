@@ -37,7 +37,12 @@ host's admission of a placed runtime from its driver's declaration
 driver declares remote placement yet, the executor cannot yet start a
 runtime process, and so no runtime has been launched on a target; its
 executor-backed placement was [accepted](#runtime-placement) on 2026-10-27
-and is next. Slices 7 and 8 are not built. Remote SSH
+and is next. Slice 7 is
+built: a person's terminals and managed worktrees on a remote-bound Project,
+under the same admission
+([Terminals and managed worktrees](#terminals-and-managed-worktrees)),
+Settings › SSH targets, and the Project picker's listing; its packaged
+desktop smoke on a Mac remains. Slice 8 is not built. Remote SSH
 environments are authorized post-preview work as of 2026-10-26, when the
 maintainer unlocked the parked backlog and accepted the
 [maintainer decisions](#maintainer-decisions) below. That authorizes this design
@@ -249,10 +254,12 @@ connection-head questions for egress (below). The executor cannot start a turn,
 ask for approval, call an app tool, or write to the journal.
 
 The protocol (`packages/contracts/src/sshExecutorProtocol.ts`) carries the
-introduction, the attestation, since slice 4 the reads of a bound root, and
+introduction, the attestation, since slice 4 the reads of a bound root,
 since slice 5 the native harness's file tools, its commands, a `cancel` for
 the command in flight, and the byte streams of a proxied command's
-connections. These rules settle what the paragraph above leaves open:
+connections, and since slice 7 a person's terminals and the creation and
+removal of managed worktrees. These rules settle what the paragraph above
+leaves open:
 
 - **Framing.** A frame is a four-byte big-endian length and that many bytes of
   UTF-8 JSON, at most 1 MiB. A longer frame, a body that is not JSON, or a
@@ -274,10 +281,21 @@ connections. These rules settle what the paragraph above leaves open:
   read as the reply to the request after it. A reply that would exceed the
   frame bound, such as a diff of control characters whose JSON escapes outgrew
   it, is answered `too-large` instead.
-- **Protocol 1 gained the reads, then the harness.** The read requests, and in
-  slice 5 the file tools, commands, `cancel`, and streams, joined protocol 1
+- **Protocol 1 gained the reads, then the harness.** The read requests, in
+  slice 5 the file tools, commands, `cancel`, and streams, and in slice 7 the
+  terminal and worktree requests and terminal frames, joined protocol 1
   before any build with protocol 1 shipped, so the version did not change; the
   exact build match still refuses any executor of another build.
+- **Terminals are frames with their own windows.** Opening a terminal is a
+  request that answers at once (`terminal-opened`); the shell then lives
+  beside the requests, so a command or a read never waits for it. This host
+  names each terminal with a new, higher id; the executor refuses an id that
+  is not new and a ninth open terminal. The executor sends at most 256 KiB of
+  a terminal's output that this host has not granted back, in chunks of at
+  most 64 KiB, and holds the shell while it waits; this host grants the room
+  back once its bounded transcript took the bytes. Output past the window, or
+  for a terminal this host never opened, ends the session. A shell that exits
+  sends what it printed, then `terminal-exited`.
 - **A command holds the session's one request.** Requests still run one at a
   time, so while a command runs (up to its ten-minute bound) the target's
   reads and other tool calls wait their turn; the host waits for a command's
@@ -519,8 +537,8 @@ direction:
 - **A remote-bound Project is its own record until threads run there.** Its
   events are the `ssh-remote-project` aggregate, apart from local Projects, so
   no local Files, Git, terminal, or provider path can read a remote root as a
-  folder on this Mac. Remote threads (slice 5) and the Project picker
-  (slice 7) join it to the Project list.
+  folder on this Mac. The composer's Project picker lists it (slice 7) but
+  does not offer it for a thread; remote threads join it to the Project list.
 - **Reads outside a turn run in Plan.** Binding, listing, and reading a file
   are file operations, and Git status and diff are Octant's own launches; each
   is admitted only when this connection holds a passing Plan attestation, the
@@ -625,6 +643,104 @@ the proxy's most security-sensitive code into the executor, or left those
 checks out on targets. Carrying the bytes keeps one implementation and one
 record; the cost is that a command's traffic crosses the SSH session twice,
 which bounds its throughput by the session's.
+
+### Terminals and managed worktrees
+
+Slice 7 gives a person a shell on a remote-bound Project's target and
+managed worktrees there (`apps/server/src/sshTarget/sshRemoteTerminalService.ts`,
+`executorTerminals.ts`, `executorWorktrees.ts`), and the surfaces that reach
+them: Settings › SSH targets and the composer's Project picker. These rules
+settle what the slice needs, each in the fail-closed direction:
+
+- **Only a local window or the local CLI.** Terminals and worktrees sit on
+  the local administration routes beside binding, as a local Project terminal
+  is local-window only: a remote-bound Project has no thread whose approvals
+  could gate a paired device's shell. A terminal belongs to the window that
+  opened it; another window's command on it is refused `unauthorized`.
+- **A terminal is one of Octant's own launches, approval-gated.** Opening one
+  asks the admission policy for an Octant launch in Ask for approvals, the
+  posture a local Project terminal gets without remembered Full access, which
+  a remote-bound Project cannot have yet. Plan opens no terminal. The decision
+  and the opening are one step on the admitted session, and the terminal
+  belongs to that session: when it ends, the shell died with the executor,
+  the terminal ends `target-disconnected`, and nothing reconnects it or queues
+  its input. A refusal carries the admission reason's recovery sentence
+  (`describeSshAdmissionRefusal` in `packages/domain/src/sshTargetRecovery.ts`).
+- **A terminal is offline.** A terminal has no thread, so no egress rules a
+  proxy could decide its connections under, and a networked posture without
+  rules runs offline rather than open, as harness commands do. Fetching and
+  pushing from a remote terminal wait for a design that gives it rules.
+- **A shell is confined as a harness command is.** The executor runs the
+  remote user's login shell (`SHELL` when it is an executable absolute path,
+  else `/bin/sh`) on a pseudo-terminal through its `ProcessConfinementPort`
+  with the posture's attested grants and the command launches' read rules.
+  Its home is an owner-only folder of the session's runtime directory, so the
+  remote user's own dotfiles are not read and history ends with the session;
+  its environment is built on the target. In a managed worktree, the
+  repository's own `.git` is granted only through Git's reciprocal
+  linked-worktree record, as for a local linked worktree. The pseudo-terminal
+  module is loaded only when a terminal opens, so an executor without it
+  answers everything else and reports the terminal unavailable.
+- **The record says who opened which shell, never what it printed.** A
+  terminal's start (Project, worktree, window, target, and connection) and
+  its end (stopped, exited, `target-disconnected`, or `host-restarted`) are
+  `ssh-remote-terminal` events; a restart ends every terminal still recorded
+  as running as `host-restarted`. A terminal answers in a local Project
+  terminal's shape, so the same terminal surface draws either.
+- **A managed worktree sits beside the root, on its own branch.** Its folder
+  is `<parent of root>/.octant-worktrees/<Project>/<name>` and its branch
+  `octant/<name>`, from the root's checked-out commit, as a local managed
+  worktree sits beside its repository. The name is lowercase letters, digits,
+  and inner hyphens, so it is one folder and one branch segment. The executor
+  derives the folder from the bound root itself, so this host never names a
+  path to write; both folders above the worktree must be the remote user's
+  own real folders, owner-only, and never links, or creation refuses
+  `worktree-failed`.
+- **The root must be its repository's top level.** `git worktree add` records
+  the worktree in the repository's `.git`; a root inside a larger repository,
+  or a root that is itself a linked worktree, keeps that record outside the
+  root, where no grant reaches. Such a root refuses `not-repository-root`.
+- **Git writes the worktree with the approval-gated grants, and runs no
+  hook.** Creating and removing a worktree are Octant launches admitted in Ask
+  for approvals, the person at a local window being the approval as for a
+  terminal. Git may write the root and the Project's worktree folder and
+  nothing else, with no network and `core.hooksPath=/dev/null`. Git starts
+  its own subprocesses to check a worktree out, so the launch keeps the exec
+  grant: a filter the checkout's configuration names can still run, inside
+  the confinement an approval-gated command gets.
+- **Removal keeps anything Git would keep.** Removal is Git's own `worktree
+remove` without force: a worktree holding a change, an untracked file, or a
+  lock is kept and refuses `worktree-dirty` or `worktree-failed`. The branch
+  and its commits stay. A worktree folder the person already deleted leaves
+  only Git's record, which the same `worktree remove` drops; `worktree prune`
+  is never run, because it would also drop the record of every other worktree
+  whose folder is missing, such as the person's own on an unmounted volume.
+  Removing a target deletes no worktree on it.
+- **A worktree is its Project's, and its folder is a root.** Creation and
+  removal are `ssh-remote-worktree` events naming the connection whose
+  executor acted; the journal keeps the canonical folder the executor
+  reported. A read or a terminal in a worktree names that folder as its root,
+  so every containment, `root-moved`, and `root-not-confinable` rule of a
+  remote root holds there. A worktree named for another Project refuses
+  `unknown-worktree`.
+- **Settings › SSH targets is a desktop window's.** The page sits in
+  Settings' Advanced group and reaches the local routes through the desktop's
+  main process, which alone holds the bridge secret and forwards only the
+  named operations to their fixed paths. It shows each target's connection,
+  remote user and platform while attested, fingerprint, and what each confined
+  posture admits now with the refusal's recovery; it adds, connects, re-pins,
+  and removes targets, binds a folder, creates and removes worktrees, and
+  opens a terminal in the root or a worktree. It shows one terminal and lists
+  none, so opening another or leaving the page stops the one shown rather
+  than leave a shell nothing can reach again. A key is pinned only after the
+  person confirms the fingerprint in a dialog that also says what the pin and
+  the attestation do not prove. Any other window shows where to do it.
+- **The Project picker lists a remote-bound Project without offering it.**
+  In Code, the composer's picker lists remote-bound Projects under "On SSH
+  targets" with their `destination:folder`, disabled with the reason that
+  threads on SSH targets are not available yet, and offers "New Project on an
+  SSH target…", which opens Settings › SSH targets at binding. A thread is
+  never started in a local Project in their place.
 
 ### Provider runtimes on a target
 
@@ -1001,7 +1117,9 @@ direction:
   export carries each target as its registration time, bound Project ids, and
   last attestation's digest and decisions, without destination, host key, or
   executor path, and each remote-bound Project as a Project's identity without
-  its folder.
+  its folder. It carries no managed worktree or remote terminal: a
+  worktree's record is its folder on the target, and a terminal's is a window
+  and a session, none of which leaves this host.
 
 Removing a target is local-only, refuses while a thread in one of its Projects is
 running, and removes the registration and pin. Its Projects' threads stay
@@ -1192,6 +1310,25 @@ agent can implement and verify it in a Linux container with OpenSSH installed an
    rendered QA in a browser; desktop packaged smoke needs a Mac (maintainer).
    Remote terminals and worktrees under the same admission, the SSH targets
    Settings page and Project picker per `DESIGN.md`, and the user guide.
+   Built 2026-10-27 ([Terminals and managed worktrees](#terminals-and-managed-worktrees));
+   the packaged desktop smoke on a Mac remains. Its evidence is
+   `sshTargetLoopback.smoke.test.ts` (on the loopback target, a managed
+   worktree created beside the root with no hook run, its Git status read, a
+   confined shell in it that commits there and cannot write beside it, a
+   worktree holding an untracked file kept and a clean one removed with its
+   branch, a shell and what it started killed with its session and recorded
+   `target-disconnected`, and a target whose canary escaped opening no
+   terminal and making no worktree), `sshTargetConnectionService.test.ts`
+   (terminals and worktrees only where the approval-gated posture attested,
+   refused before any frame elsewhere, and a terminal ended with its
+   session), `executorTerminals.test.ts` (the output window, the shell held
+   while it waits, the exit after the last output, the terminal limit and new
+   ids), `sshTargetStore.test.ts` (journal replay of worktrees and terminals,
+   each terminal ended once), `sshTargetAdministrationRoutes.test.ts`,
+   `sshExecutorProtocol.test.ts`, `sshTargetCommand.test.ts`,
+   `sshTargetControls.test.ts` (desktop), and the web
+   `SshTargetsSettingsSection.test.tsx` and `ComposerProjectSelector.test.tsx`.
+   The projection tables are migration 87.
 8. **macOS targets.** Needs a second Mac reachable by SSH (maintainer). Seatbelt
    canaries and the same end-to-end evidence as slice 3 against a macOS target.
 

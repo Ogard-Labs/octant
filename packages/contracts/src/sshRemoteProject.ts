@@ -11,8 +11,9 @@
  */
 
 import { Schema } from "effect";
-import { CodeRelativePath } from "./code";
+import { CodeRelativePath, CodeTerminalId } from "./code";
 import { UtcTimestamp } from "./events";
+import { ProjectTerminalCommand } from "./projectTerminals";
 import { ProjectId } from "./projects";
 import {
   SshAdmissionDecision,
@@ -61,8 +62,72 @@ export const SshRemoteProjectBindRequest = Schema.Struct({
 }).annotations(strict);
 export type SshRemoteProjectBindRequest = typeof SshRemoteProjectBindRequest.Type;
 
+/**
+ * One managed worktree of a remote-bound Project. The executor creates it
+ * beside the remote root, at `<parent>/.octant-worktrees/<project>/<name>`,
+ * on a new branch `octant/<name>`, and reports its canonical path; the host
+ * journals that path and later names it as the root of the worktree's reads
+ * and terminals, so no folder a caller describes is ever written to.
+ */
+export const SshRemoteWorktreeId = Schema.UUID.pipe(Schema.brand("SshRemoteWorktreeId"));
+export type SshRemoteWorktreeId = typeof SshRemoteWorktreeId.Type;
+
+/**
+ * A worktree's name: one folder name and the tail of its branch. Lowercase
+ * letters, digits, and inner hyphens, so it is the same word as a folder, a
+ * Git branch segment, and a frame value, and never an option or a path.
+ */
+export const SshRemoteWorktreeName = Schema.String.pipe(
+  Schema.pattern(/^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/u),
+);
+export type SshRemoteWorktreeName = typeof SshRemoteWorktreeName.Type;
+
+/** The branch a managed worktree is created on. */
+export const SshRemoteWorktreeBranch = Schema.String.pipe(
+  Schema.pattern(/^octant\/[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/u),
+);
+export type SshRemoteWorktreeBranch = typeof SshRemoteWorktreeBranch.Type;
+
+export const SshRemoteWorktree = Schema.Struct({
+  id: SshRemoteWorktreeId,
+  projectId: ProjectId,
+  name: SshRemoteWorktreeName,
+  branch: SshRemoteWorktreeBranch,
+  path: SshRemotePath,
+  createdAt: UtcTimestamp,
+}).annotations(strict);
+export type SshRemoteWorktree = typeof SshRemoteWorktree.Type;
+
+export const SshRemoteWorktreeList = Schema.Struct({
+  worktrees: Schema.Array(SshRemoteWorktree),
+}).annotations(strict);
+export type SshRemoteWorktreeList = typeof SshRemoteWorktreeList.Type;
+
+/** Creates a managed worktree from the remote root's checked-out commit. Local only. */
+export const SshRemoteWorktreeCreateRequest = Schema.Struct({
+  projectId: ProjectId,
+  name: SshRemoteWorktreeName,
+}).annotations(strict);
+export type SshRemoteWorktreeCreateRequest = typeof SshRemoteWorktreeCreateRequest.Type;
+
+/** Removes a managed worktree that holds no change. Its branch is kept. Local only. */
+export const SshRemoteWorktreeRequest = Schema.Struct({
+  worktreeId: SshRemoteWorktreeId,
+}).annotations(strict);
+export type SshRemoteWorktreeRequest = typeof SshRemoteWorktreeRequest.Type;
+
+/**
+ * Which folder of a remote-bound Project a read or a terminal acts in: the
+ * remote root, or one of the Project's managed worktrees.
+ */
+const WorktreeScope = {
+  /** Absent acts in the remote root. */
+  worktreeId: Schema.optional(SshRemoteWorktreeId),
+} as const;
+
 export const SshRemoteDirectoryRequest = Schema.Struct({
   projectId: ProjectId,
+  ...WorktreeScope,
   /** Absent lists the remote root itself. */
   directory: Schema.optional(CodeRelativePath),
 }).annotations(strict);
@@ -70,17 +135,20 @@ export type SshRemoteDirectoryRequest = typeof SshRemoteDirectoryRequest.Type;
 
 export const SshRemoteFileRequest = Schema.Struct({
   projectId: ProjectId,
+  ...WorktreeScope,
   path: CodeRelativePath,
 }).annotations(strict);
 export type SshRemoteFileRequest = typeof SshRemoteFileRequest.Type;
 
 export const SshRemoteGitStatusRequest = Schema.Struct({
   projectId: ProjectId,
+  ...WorktreeScope,
 }).annotations(strict);
 export type SshRemoteGitStatusRequest = typeof SshRemoteGitStatusRequest.Type;
 
 export const SshRemoteGitDiffRequest = Schema.Struct({
   projectId: ProjectId,
+  ...WorktreeScope,
   /** Absent diffs the whole checkout. */
   path: Schema.optional(CodeRelativePath),
 }).annotations(strict);
@@ -191,6 +259,14 @@ export const SshRemoteReadRefusalReason = Schema.Literal(
   "not-a-repository",
   "git-unavailable",
   "read-failed",
+  /** A worktree needs a root that is its repository's own top level, with `.git` a folder inside it. */
+  "not-repository-root",
+  /** A worktree folder of that name, or its branch, already exists. */
+  "worktree-exists",
+  /** The worktree holds a change or an untracked file, so Git keeps it. */
+  "worktree-dirty",
+  /** Git could not create or remove the worktree. */
+  "worktree-failed",
 );
 export type SshRemoteReadRefusalReason = typeof SshRemoteReadRefusalReason.Type;
 
@@ -208,6 +284,7 @@ export const SshRemoteProjectRefusal = Schema.Union(
       SshRemoteReadRefusalReason,
       Schema.Literal(
         "unknown-project",
+        "unknown-worktree",
         /** The session ended, the executor did not answer in time, or it answered out of turn. */
         "executor-unavailable",
       ),
@@ -215,3 +292,25 @@ export const SshRemoteProjectRefusal = Schema.Union(
   }).annotations(strict),
 );
 export type SshRemoteProjectRefusal = typeof SshRemoteProjectRefusal.Type;
+
+const [, ...LocalProjectTerminalCommands] = ProjectTerminalCommand.members;
+
+/**
+ * A person's command to a terminal on a remote-bound Project's target, in the
+ * shape a local Project terminal takes, answered as one is
+ * (`ProjectTerminalResult`). Only `start` differs: it may name one of the
+ * Project's managed worktrees to open in. The host resolves the folder, the
+ * posture, and the owning window itself.
+ */
+export const SshRemoteTerminalCommand = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("start"),
+    projectId: ProjectId,
+    terminalId: CodeTerminalId,
+    ...WorktreeScope,
+    columns: Schema.Int.pipe(Schema.between(1, 500)),
+    rows: Schema.Int.pipe(Schema.between(1, 500)),
+  }).annotations(strict),
+  ...LocalProjectTerminalCommands,
+);
+export type SshRemoteTerminalCommand = typeof SshRemoteTerminalCommand.Type;

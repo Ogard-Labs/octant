@@ -101,7 +101,8 @@ import { HomeStart } from "./HomeStart";
 import { WelcomeHeading } from "../composer/WelcomeHeading";
 import { HomeDashboard } from "../home/HomeDashboard";
 import type { HomeCardDefinition } from "../home/homeCards";
-import type { OctantHostBridge } from "./hostBridge";
+import { sshTargetAdministrationOf, type OctantHostBridge } from "./hostBridge";
+import { useSshRemoteProjectEntries } from "../projects/sshRemoteProjectEntries";
 import { WorkKindSwitch } from "./WorkKindSwitch";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
@@ -191,6 +192,8 @@ export interface DraftThreadWorkspaceProps {
   ) => void;
   readonly onAttachFolder?: () => void;
   readonly onOpenCodeSettings?: () => void;
+  /** Opens Settings › SSH targets, where a folder on a target is bound. Desktop windows only. */
+  readonly onOpenSshTargetSettings?: () => void;
   /** Opens Providers & Models from the start composer while none is ready. */
   readonly onOpenSettings?: () => void;
   /**
@@ -497,6 +500,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             : {}),
         } satisfies ComposerProjectEntry)
       : undefined;
+  const remoteProjectEntries = useSshRemoteProjectEntries(
+    props.mode === "code" ? props.hostBridge : undefined,
+  );
   const projectEntries: ReadonlyArray<ComposerProjectEntry> = [
     ...compatibleProjects.map(
       (project): ComposerProjectEntry => ({
@@ -506,11 +512,17 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         rootPath: project.type === "chat" ? "" : project.binding.canonicalRoot,
       }),
     ),
+    ...remoteProjectEntries,
     ...(props.mode === "chat"
       ? [{ kind: "unfiled" as const }]
       : [
           ...(defaultFolderEntry === undefined ? [] : [defaultFolderEntry]),
           { kind: "add-folder" as const },
+          ...(props.mode === "code" &&
+          props.onOpenSshTargetSettings !== undefined &&
+          sshTargetAdministrationOf(props.hostBridge) !== undefined
+            ? [{ kind: "add-remote" as const }]
+            : []),
         ]),
   ];
   const selectedProjectName =
@@ -591,6 +603,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         {...(props.creating === undefined ? {} : { disabled: props.creating })}
         entries={projectEntries}
         onAddFolder={addFolder}
+        {...(props.onOpenSshTargetSettings === undefined
+          ? {}
+          : { onAddRemote: props.onOpenSshTargetSettings })}
         onSelect={(entry) => {
           if (entry.kind === "saved-project") {
             selectProject(entry.projectId);

@@ -1,7 +1,10 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { Schema } from "effect";
 import {
+  SSH_EXECUTOR_MAX_TERMINAL_CHUNK_BYTES,
+  SSH_EXECUTOR_TERMINAL_WINDOW_BYTES,
   SshExecutorFrame,
+  type SshExecutorOpenTerminalRequest,
   type SshEgressAddress,
   type SshEgressHostName,
   type SshExecutorHello,
@@ -29,6 +32,11 @@ import { ExecutorStreams, type ExecutorStream } from "./executorStreams";
  * the executor opens for it goes to that egress, and only then may this host
  * ask the target to resolve a name or open a connection. A stream opened
  * while no proxied command runs is a violation.
+ *
+ * An open terminal lives beside the requests. Its output goes to the listener
+ * that opened it, within the window this host grants back as the listener
+ * takes it; output past the window, or for a terminal never opened, is a
+ * violation. Every terminal ends with the session.
  */
 
 const MAX_STDERR_BYTES = 16_384;
@@ -62,6 +70,30 @@ export interface ExecutorRequestOptions {
   readonly egress?: ExecutorLaunchEgress | undefined;
 }
 
+/** What becomes of one open terminal's output and its end. */
+export interface ExecutorTerminalListener {
+  readonly output: (bytes: Buffer) => void;
+  /** The shell exited (`exited`), or the session ended under it (`lost`). Called once. */
+  readonly end: (
+    ending:
+      | { readonly kind: "exited"; readonly exitCode: number | undefined }
+      | { readonly kind: "lost" },
+  ) => void;
+}
+
+/** One terminal of this session, as this host drives it. */
+export interface ExecutorTerminal {
+  readonly id: number;
+  write(data: string): void;
+  resize(columns: number, rows: number): void;
+  close(): void;
+}
+
+export type ExecutorTerminalOpening =
+  | { readonly status: "opened"; readonly terminal: ExecutorTerminal }
+  | { readonly status: "replied"; readonly reply: SshExecutorReply }
+  | { readonly status: "lost" };
+
 interface InFlight {
   readonly id: number;
   readonly egress: ExecutorLaunchEgress | undefined;
@@ -80,6 +112,12 @@ export class ExecutorChannel {
   readonly #dialed: ExecutorStreams;
   readonly #dialing = new Map<number, ExecutorStream>();
   readonly #questions = new Map<number, (addresses: ReadonlyArray<string> | undefined) => void>();
+  /** Open terminals, and output each sent that this host has not granted back yet. */
+  readonly #terminals = new Map<
+    number,
+    { readonly listener: ExecutorTerminalListener; outstanding: number }
+  >();
+  #nextTerminal = 1;
   #introduce: (outcome: ExecutorIntroduction) => void = () => undefined;
   #introduced = false;
   #inFlight: InFlight | undefined;
@@ -200,6 +238,56 @@ export class ExecutorChannel {
     return stream;
   }
 
+  /**
+   * Asks the executor to open a terminal under a new id, as the session's
+   * one request. Its output goes to `listener` from the moment it is asked
+   * for, and each chunk's room is granted back once the listener took it, so
+   * the executor holds the shell while this host falls behind. A reply other
+   * than `terminal-opened` is handed back, and the id is never used again.
+   */
+  async openTerminal(
+    request: Omit<SshExecutorOpenTerminalRequest, "terminal">,
+    listener: ExecutorTerminalListener,
+    timeoutMs: number,
+  ): Promise<ExecutorTerminalOpening> {
+    if (this.#ended !== undefined) return { status: "lost" };
+    const id = this.#nextTerminal;
+    this.#nextTerminal += 1;
+    const entry = { listener, outstanding: 0 };
+    this.#terminals.set(id, entry);
+    const outcome = await this.request({ ...request, terminal: id }, timeoutMs);
+    if (outcome.status !== "replied") {
+      this.#terminals.delete(id);
+      return { status: "lost" };
+    }
+    if (outcome.reply.kind !== "terminal-opened") {
+      this.#terminals.delete(id);
+      return { status: "replied", reply: outcome.reply };
+    }
+    return {
+      status: "opened",
+      terminal: {
+        id,
+        write: (data) => {
+          if (!this.#terminals.has(id)) return;
+          // Whole characters per frame, so the executor can hand each one to
+          // the shell as text.
+          for (const chunk of utf8Chunks(data, SSH_EXECUTOR_MAX_TERMINAL_CHUNK_BYTES)) {
+            this.#write({ type: "terminal-input", terminal: id, data: chunk.toString("base64") });
+          }
+        },
+        resize: (columns, rows) => {
+          if (this.#terminals.has(id)) {
+            this.#write({ type: "terminal-resize", terminal: id, columns, rows });
+          }
+        },
+        close: () => {
+          if (this.#terminals.has(id)) this.#write({ type: "terminal-close", terminal: id });
+        },
+      },
+    };
+  }
+
   /** Ends the session; the executor exits when its input closes. */
   close(): void {
     this.#end("ended");
@@ -311,6 +399,34 @@ export class ExecutorChannel {
         if (answer !== undefined) answer(frame.addresses);
         return frame.question < this.#nextQuestion ? "accepted" : "violated";
       }
+      case "terminal-output": {
+        const terminal = this.#terminals.get(frame.terminal);
+        // A terminal this host stopped following can still have output in
+        // flight; one it never asked for cannot.
+        if (terminal === undefined) {
+          return frame.terminal < this.#nextTerminal ? "accepted" : "violated";
+        }
+        const bytes = Buffer.from(frame.data, "base64");
+        terminal.outstanding += bytes.byteLength;
+        if (bytes.byteLength === 0 || terminal.outstanding > SSH_EXECUTOR_TERMINAL_WINDOW_BYTES) {
+          return "violated";
+        }
+        terminal.listener.output(bytes);
+        // The listener took the bytes into its own bounded record, so their
+        // room goes back to the executor at once.
+        terminal.outstanding -= bytes.byteLength;
+        this.#write({ type: "terminal-credit", terminal: frame.terminal, bytes: bytes.byteLength });
+        return "accepted";
+      }
+      case "terminal-exited": {
+        const terminal = this.#terminals.get(frame.terminal);
+        if (terminal === undefined) {
+          return frame.terminal < this.#nextTerminal ? "accepted" : "violated";
+        }
+        this.#terminals.delete(frame.terminal);
+        terminal.listener.end({ kind: "exited", exitCode: frame.exitCode });
+        return "accepted";
+      }
       default:
         return (frame.stream % 2 === 1 ? this.#forwarded : this.#dialed).receive(frame);
     }
@@ -360,10 +476,33 @@ export class ExecutorChannel {
     this.#dialed.abandonAll();
     this.#dialing.clear();
     for (const answer of this.#questions.values()) answer(undefined);
+    // Every shell on the target died with the session.
+    const terminals = [...this.#terminals.values()];
+    this.#terminals.clear();
+    for (const terminal of terminals) terminal.listener.end({ kind: "lost" });
     this.#inFlight?.settle({ status: "lost", cause });
     for (const release of this.#waiting.splice(0)) release();
     const listeners = [...this.#endListeners];
     this.#endListeners.clear();
     for (const listener of listeners) listener();
   }
+}
+
+/** The text's UTF-8 bytes in pieces of at most `maximum`, never splitting a character. */
+function utf8Chunks(text: string, maximum: number): ReadonlyArray<Buffer> {
+  const chunks: Buffer[] = [];
+  let pending: Buffer[] = [];
+  let size = 0;
+  for (const character of text) {
+    const bytes = Buffer.from(character, "utf8");
+    if (size + bytes.byteLength > maximum) {
+      chunks.push(Buffer.concat(pending));
+      pending = [];
+      size = 0;
+    }
+    pending.push(bytes);
+    size += bytes.byteLength;
+  }
+  if (size > 0) chunks.push(Buffer.concat(pending));
+  return chunks;
 }

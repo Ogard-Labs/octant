@@ -82,6 +82,7 @@ import {
 } from "../host/HostSettingsSection";
 import { RememberedToolApprovalsPanel } from "../extensions/RememberedToolApprovalsPanel";
 import { RemoteAccessSettingsSection } from "../host/RemoteAccessSettingsSection";
+import { SshTargetsSettingsPage } from "../host/SshTargetsSettingsSection";
 import { PublicLinkSettings } from "../settings/PublicLinkSettings";
 import { SyncSettingsSection } from "../settings/SyncSettingsSection";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
@@ -154,6 +155,7 @@ import { ProviderUsageLimitsPanel } from "../usage/ProviderUsageLimitsPanel";
 import {
   pairedComputersOf,
   remoteAccessAdministrationOf,
+  sshTargetAdministrationOf,
   type OctantHostBridge,
 } from "./hostBridge";
 import { openExternalUrl } from "./openExternalUrl";
@@ -1150,6 +1152,19 @@ function ActiveSectionContent({
             Enabling the remote listener and pairing devices happen on the host machine, in the
             Octant desktop app or with the <code>octant pair</code> and <code>octant auth</code>{" "}
             commands.
+          </p>
+        </section>
+      );
+    }
+    case "ssh-targets": {
+      const administration = sshTargetAdministrationOf(props.hostBridge);
+      return administration !== undefined ? (
+        <SshTargetsSettingsPage bridge={administration} />
+      ) : (
+        <section aria-label="SSH targets" id="settings-ssh-targets">
+          <p>
+            SSH targets are added and their folders bound on the host machine, in the Octant desktop
+            app or with the <code>octant ssh-target</code> command.
           </p>
         </section>
       );

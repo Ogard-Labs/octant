@@ -32,6 +32,7 @@ export const SETTINGS_SECTION_IDS = [
   "sync",
   "remote-access",
   "host",
+  "ssh-targets",
   "usage",
 ] as const;
 

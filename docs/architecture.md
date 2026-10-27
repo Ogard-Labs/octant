@@ -821,10 +821,14 @@ confinement attestation, binding a remote root with Files, Git status, and
 diff reads through the executor, and the native harness's file tools,
 commands, and egress for a remote-bound Project's turn are built; the Code
 turn runtime does not yet start a thread there, so no product route reaches a
-target's tools. The provider-sdk seam for placing a runtime on a target, and
-its conformance, are built; no driver declares it and no runtime is launched
-there yet. SSH targets, their attestation digests, and remote bindings
-are journaled. Its
+target's tools. A person's terminals and managed worktrees on a remote-bound
+Project are built, from a local window (Settings › SSH targets) or the local
+CLI, under the same admission; the composer's Project picker lists such a
+Project without offering it for a thread. The provider-sdk seam for placing a
+runtime on a target, and its conformance, are built; no driver declares it
+and no runtime is launched there yet. SSH targets, their attestation
+digests, remote bindings, managed worktrees, and remote terminals' starts and
+ends are journaled. Its
 admission, confinement attestation,
 transport, and how it differs from a paired host are owned by
 [Remote SSH environments](design/remote-ssh-environments.md).

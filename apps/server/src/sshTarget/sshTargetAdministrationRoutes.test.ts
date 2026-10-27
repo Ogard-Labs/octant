@@ -3,6 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { decodeWindowId } from "@octant/contracts";
+import { decodeUtcTimestamp } from "@octant/contracts/events";
+import { decodeProjectId } from "@octant/contracts/projects";
+import { SshRemotePath, SshTargetId } from "@octant/contracts/ssh-target";
+import { Schema } from "effect";
 import { createRemoteRoutePolicy } from "../remoteRoutePolicy";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import {
@@ -10,10 +14,13 @@ import {
   createSshTargetAdministrationRouteHandler,
 } from "./sshTargetAdministrationRoutes";
 import { SshRemoteProjectService } from "./sshRemoteProjectService";
+import { SshRemoteTerminalService } from "./sshRemoteTerminalService";
 import { SshTargetConnectionService } from "./sshTargetConnectionService";
 import { openSshTargetTestStore } from "./sshTargetStore.test-support";
 
 const windowId = decodeWindowId("33333333-3333-4333-8333-333333333333");
+const decodeSshTargetId = Schema.decodeUnknownSync(SshTargetId);
+const decodeSshRemotePath = Schema.decodeUnknownSync(SshRemotePath);
 const capability = "A".repeat(43);
 const secret = "desktop-secret";
 const HOST_KEY = "AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl";
@@ -61,14 +68,18 @@ function setup() {
     uuid: () => "55555555-5555-4555-8555-555555555555",
     clock: () => new Date().toISOString(),
   });
+  const terminals = new SshRemoteTerminalService({ projects, connections, store: opened.store });
   return {
     connections,
     projects,
+    terminals,
+    store: opened.store,
     handle: createSshTargetAdministrationRouteHandler({
       desktopBridgeSecret: secret,
       windowAuthorityStore: authority,
       connections,
       projects,
+      terminals,
     }),
   };
 }
@@ -214,6 +225,79 @@ describe("SSH target administration routes", () => {
         )
       )?.status,
     ).toBe(400);
+  });
+
+  it("opens no terminal and makes no worktree on a target with no attested connection, answering with the recovery", async () => {
+    const { handle, store } = setup();
+    const probed = await handle(post(SSH_TARGET_ROUTES.hostKey, { destination: "devbox" }));
+    const probe = (await probed?.json()) as { probeId: string; fingerprint: string };
+    const registered = await handle(
+      post(SSH_TARGET_ROUTES.register, {
+        probeId: probe.probeId,
+        fingerprint: probe.fingerprint,
+        executorPath: "/opt/octant/bin/octant",
+      }),
+    );
+    if (registered === undefined) throw new Error("the route did not answer");
+    const { target } = (await registered.json()) as { target: { id: string } };
+    // A Project bound while the target last attested.
+    const projectId = "77777777-7777-4777-8777-777777777777";
+    store.bindProject({
+      id: decodeProjectId(projectId),
+      name: "App",
+      targetId: decodeSshTargetId(target.id),
+      remoteRoot: decodeSshRemotePath("/home/build/app"),
+      boundAt: decodeUtcTimestamp("2026-10-26T10:00:00.000Z"),
+    });
+
+    const started = await handle(
+      post(SSH_TARGET_ROUTES.terminal, {
+        kind: "start",
+        projectId,
+        terminalId: "88888888-8888-4888-8888-888888888888",
+        columns: 80,
+        rows: 24,
+      }),
+    );
+    expect(started?.status).toBe(200);
+    expect(await started?.json()).toEqual({
+      kind: "project-terminal-refused",
+      reason: "unavailable",
+      message: "The SSH target is not connected. Connect it again when it is reachable.",
+    });
+    const created = await handle(
+      post(SSH_TARGET_ROUTES.worktreeCreate, { projectId, name: "feature" }),
+    );
+    expect(created?.status).toBe(409);
+    expect(await created?.json()).toEqual({
+      status: "refused",
+      reason: "not-admitted",
+      decision: { status: "refused", reason: "target-unreachable" },
+    });
+    const worktrees = await handle(
+      new Request(`http://127.0.0.1${SSH_TARGET_ROUTES.worktrees}`, {
+        headers: { "x-octant-desktop-secret": secret, "x-octant-window-capability": capability },
+      }),
+    );
+    expect(await worktrees?.json()).toEqual({ worktrees: [] });
+    // A name that is not one folder, or a terminal command naming another
+    // window's shell, never reaches the target.
+    expect(
+      (await handle(post(SSH_TARGET_ROUTES.worktreeCreate, { projectId, name: "../escape" })))
+        ?.status,
+    ).toBe(400);
+    expect(
+      await (
+        await handle(
+          post(SSH_TARGET_ROUTES.terminal, {
+            kind: "attach",
+            projectId,
+            terminalId: "88888888-8888-4888-8888-888888888888",
+          }),
+        )
+      )?.json(),
+    ).toMatchObject({ kind: "project-terminal-refused", reason: "unavailable" });
+    expect(store.runningTerminals()).toEqual([]);
   });
 
   it("refuses a destination the SSH client could read as an option before running the client", async () => {
