@@ -157,6 +157,39 @@ The message appears in the thread like one you typed, and the agent works with
 the thread's usual model and access. Untick it to get only the outline. Add
 what the Canvas should cover in the box beneath, if you like.
 
+### Import an HTML page
+
+You can bring a single HTML page you already have into a new Canvas: a page
+you saved from a website builder, a report exported as HTML, or a page an AI
+assistant made for you (for example, an HTML artifact from Claude saved as a
+`.html` file). Under the Create Canvas form, choose **Import HTML…**, then
+either pick the file under **File** or paste the page's markup under
+**Paste**. Add a title if you like; otherwise the Canvas is named after the
+file. Choose **Import**.
+
+- The page becomes one design in its own look, as wide as the Canvas and as
+  tall as its content, in the same thread and Project a new Canvas would go
+  to.
+- A page with its own script (inline code or buttons with click handlers)
+  becomes a prototype and runs exactly like one the agent makes: contained,
+  with **Running** and **Stop** above it, starting when you open it in the
+  sidebar or press **Run** in the thread. A page without script is drawn as a
+  static page.
+- A Canvas loads nothing from the internet and links nowhere outside itself,
+  so Octant takes out anything the page would fetch or leave for: script
+  files from a CDN, web fonts and stylesheets, images that are not built into
+  the page, links to other sites, embedded pages, and form destinations.
+  After the import, Octant lists what it took out, with a few of the
+  addresses. A page that relied on a script library from the internet may
+  not work without it.
+- Octant refuses a page larger than 256 KB, text that is not HTML, markup
+  that breaks off part-way (such as a tag that never closes), a page with
+  nothing left to draw, and markup a Canvas design still cannot hold. It
+  says which, and creates nothing.
+- The page came from outside Octant. If you later ask an agent to read or
+  change that Canvas, Octant treats the agent as having read outside content,
+  as it does after a web page or a synced artifact.
+
 A created Canvas appears in its thread at the end of the turn that made it, as
 a row you can click to open it. The row shows a live miniature of the Canvas
 and one line about what it holds, such as a plan's next task and how many

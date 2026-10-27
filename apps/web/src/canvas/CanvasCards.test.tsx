@@ -487,6 +487,116 @@ describe("Start a Canvas from a recipe", () => {
   });
 });
 
+describe("Import HTML on the Create Canvas panel", () => {
+  const imported = {
+    kind: "imported" as const,
+    receipt: {} as never,
+    card: referenceCardFixture({ title: "habit-tracker" }),
+    frame: "running" as const,
+    dropped: [
+      { kind: "script-file" as const, count: 1, examples: ["https://cdn.tailwindcss.com"] },
+      {
+        kind: "file" as const,
+        count: 4,
+        examples: ["https://images.test/a.png", "https://images.test/b.png"],
+      },
+    ],
+  };
+
+  it("sends a chosen file to the host in the thread's scope and says what was taken out", async () => {
+    const user = userEvent.setup();
+    const importHtml = vi.fn().mockResolvedValue(imported);
+    const onImported = vi.fn();
+    const client = { create: vi.fn(), importHtml } as unknown as CanvasClient;
+    render(<CanvasCreatePanel client={client} context={chatContext} onImported={onImported} />);
+
+    await user.click(screen.getByRole("button", { name: "Import HTML…" }));
+    const page = '<!doctype html><title>Tracker</title><button onclick="add()">Add</button>';
+    await user.upload(
+      screen.getByLabelText("HTML file"),
+      new File([page], "habit-tracker.html", { type: "text/html" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Import" }));
+
+    await waitFor(() => expect(onImported).toHaveBeenCalledWith(imported));
+    expect(importHtml).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "canvas-html-import",
+        source: "file",
+        fileName: "habit-tracker.html",
+        html: page,
+        mode: "chat",
+        workspace: chatContext.workspace,
+        originThreadId: threadId,
+      }),
+    );
+    expect(importHtml.mock.calls[0]?.[0]).not.toHaveProperty("title");
+    const result = screen.getByTestId("canvas-import-html-result");
+    expect(within(result).getByText("“habit-tracker” is ready")).toBeInTheDocument();
+    expect(
+      within(result).getByText(/runs its own script, contained like any Canvas prototype/),
+    ).toBeInTheDocument();
+    const dropped = within(result).getByTestId("canvas-import-html-dropped");
+    expect(dropped).toHaveTextContent("1 script file");
+    expect(dropped).toHaveTextContent("https://cdn.tailwindcss.com");
+    expect(dropped).toHaveTextContent("4 images, fonts, or media files");
+    expect(dropped).toHaveTextContent("https://images.test/a.png, https://images.test/b.png, …");
+  });
+
+  it("imports pasted markup and shows the host's refusal without reporting a Canvas", async () => {
+    const user = userEvent.setup();
+    const importHtml = vi.fn().mockResolvedValue({
+      kind: "refused",
+      reason: "unparseable",
+      message: "A tag in this page never ends.",
+    });
+    const onImported = vi.fn();
+    const client = { create: vi.fn(), importHtml } as unknown as CanvasClient;
+    render(<CanvasCreatePanel client={client} context={chatContext} onImported={onImported} />);
+
+    await user.click(screen.getByRole("button", { name: "Import HTML…" }));
+    await user.click(screen.getByRole("button", { name: "Paste" }));
+    const pasted = screen.getByLabelText("Page HTML");
+    fireEvent.change(pasted, { target: { value: '<div class="open' } });
+    await user.type(screen.getByLabelText("Title (optional)"), "Draft");
+    await user.click(screen.getByRole("button", { name: "Import" }));
+
+    expect(await screen.findByTestId("canvas-import-html-problem")).toHaveTextContent(
+      "A tag in this page never ends.",
+    );
+    expect(importHtml).toHaveBeenCalledWith(
+      expect.objectContaining({ source: "paste", html: '<div class="open', title: "Draft" }),
+    );
+    expect(importHtml.mock.calls[0]?.[0]).not.toHaveProperty("fileName");
+    expect(onImported).not.toHaveBeenCalled();
+  });
+
+  it("refuses a file past the import bound without sending it", async () => {
+    const user = userEvent.setup();
+    const importHtml = vi.fn();
+    const client = { create: vi.fn(), importHtml } as unknown as CanvasClient;
+    render(<CanvasCreatePanel client={client} context={chatContext} />);
+
+    await user.click(screen.getByRole("button", { name: "Import HTML…" }));
+    await user.upload(
+      screen.getByLabelText("HTML file"),
+      new File(["x".repeat(300_000)], "huge.html", { type: "text/html" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Import" }));
+
+    expect(await screen.findByTestId("canvas-import-html-problem")).toHaveTextContent(
+      "larger than 256 KB",
+    );
+    expect(importHtml).not.toHaveBeenCalled();
+  });
+
+  it("offers no import on a host without the import route", () => {
+    const client = { create: vi.fn() } as unknown as CanvasClient;
+    render(<CanvasCreatePanel client={client} context={chatContext} />);
+    expect(screen.queryByRole("button", { name: "Import HTML…" })).not.toBeInTheDocument();
+  });
+});
+
 describe("Canvas create panel and card list", () => {
   it("surfaces a typed create denial", async () => {
     const user = userEvent.setup();

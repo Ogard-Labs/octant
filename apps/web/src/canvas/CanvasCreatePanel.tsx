@@ -1,6 +1,8 @@
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type {
   CanvasCreateReceipt,
+  CanvasHtmlImportRequest,
+  CanvasHtmlImportResult,
   CanvasThreadReferenceCard,
 } from "@octant/contracts/canvas-cards";
 import type { CanvasDocumentRecipe } from "@octant/contracts/canvas-skill";
@@ -11,6 +13,7 @@ import {
   type CanvasRecipeFillRequest,
 } from "./CreateCanvasDraft";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { CanvasHtmlImport } from "./CanvasHtmlImport";
 
 export interface CanvasCreatePanelProps {
   readonly client: CanvasClient;
@@ -18,6 +21,13 @@ export interface CanvasCreatePanelProps {
   readonly onCreated?: (receipt: CanvasCreateReceipt, card: CanvasThreadReferenceCard) => void;
   /** Present when a thread is attached whose agent can fill a recipe's skeleton. */
   readonly onAskAgentToFill?: (request: CanvasRecipeFillRequest) => Promise<boolean>;
+  /**
+   * After an HTML page became a new Canvas. The panel stays open on the import
+   * summary, so the person can read what was taken out of the page.
+   */
+  readonly onImported?: (
+    result: Extract<CanvasHtmlImportResult, { readonly kind: "imported" }>,
+  ) => void;
 }
 
 export function CanvasCreatePanel(props: CanvasCreatePanelProps) {
@@ -25,6 +35,13 @@ export function CanvasCreatePanel(props: CanvasCreatePanelProps) {
   const [recipes, setRecipes] = useState<ReadonlyArray<CanvasDocumentRecipe>>([]);
   const createdCard = useRef<CanvasThreadReferenceCard | null>(null);
   const client = props.client;
+  // A host without the import route offers no import, rather than a form
+  // whose every submission fails.
+  const importHtml =
+    client.importHtml === undefined
+      ? undefined
+      : (request: CanvasHtmlImportRequest) =>
+          client.importHtml?.(request) ?? Promise.reject(new Error("Import is unavailable."));
 
   // A host without the recipe route, or one whose list fails to load, still
   // offers a blank Canvas; the chooser simply does not appear.
@@ -72,6 +89,13 @@ export function CanvasCreatePanel(props: CanvasCreatePanelProps) {
           {denial}
         </OctantAlert>
       ) : null}
+      {importHtml === undefined ? null : (
+        <CanvasHtmlImport
+          context={props.context}
+          onImport={importHtml}
+          {...(props.onImported === undefined ? {} : { onImported: props.onImported })}
+        />
+      )}
     </section>
   );
 }
