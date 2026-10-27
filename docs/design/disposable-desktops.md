@@ -1684,15 +1684,23 @@ requests over 4 MiB; responses over the driver's bound, the host's bound,
 and a stream that claims a huge message; a time-out; cancellation before,
 during the socket checks, and while waiting; seven malformed answers; a
 `HOME` pointing at a home with a live test daemon, and no `HOME` at all,
-both leaving the walk at the recorded home (under Bun the call runs in a Bun
-launched with that environment, since Bun reads `HOME` only at launch; this
-case failed under Bun before the home came from the user database); and a
-uid the user database has no record of. Removing each socket check in turn
+both leaving the walk at the recorded home, where the declared socket's
+folder is missing, so both fail as an unreachable daemon rather than refuse
+as a failed lookup would (under Bun the call runs in a Bun launched with that
+environment, since Bun reads `HOME` only at launch; this case failed under
+Bun before the home came from the user database); the lookup's answer held
+against Node's `os.userInfo().homedir`, which reads the user database
+itself (under Node only, since Bun answers that with `$HOME`); and a uid the
+user database has no record of. These tests read the real home and write
+nothing in it; the walk case skips, saying why, on a host whose home the
+port would refuse as not the user's alone. Removing each socket check in turn
 fails at least one of these tests. The same file passes under Bun 1.4.4,
 which runs the development and headless servers
 (`bun --bun x vitest run --project unit src/computerUse/desktopDaemonPort.test.ts`
 in `apps/server`), as well as under Node, which runs the packaged desktop's
-server, through `bun run test`. It also covers a whole stream, its shared
+server, through `bun run test`. The `macos-15` CI job runs the file under
+Node as well, which is the evidence that `/usr/bin/id -P` finds the home on
+macOS; it passed there on 2026-10-27 ([job](https://github.com/Ogard-Labs/octant/actions/runs/40537495871/job/122306586053)). It also covers a whole stream, its shared
 bound, a unary call refusing two messages, a `stream` that is not a boolean,
 and a stream that never ends.
 `protobufWire.test.ts` covers protobuf's documented encodings, a negative

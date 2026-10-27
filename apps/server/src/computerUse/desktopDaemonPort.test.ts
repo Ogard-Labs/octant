@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import {
   chmodSync,
   chownSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   renameSync,
@@ -9,12 +10,16 @@ import {
   symlinkSync,
 } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DesktopDaemonRequest } from "@octant/plugin-api/desktop-provider";
-import { createDesktopDaemonPort, type DesktopDaemonPortOptions } from "./desktopDaemonPort";
+import {
+  createDesktopDaemonPort,
+  recordedHomeDirectory,
+  type DesktopDaemonPortOptions,
+} from "./desktopDaemonPort";
 
 const userId = process.getuid?.() ?? 0;
 const SOCKET = ".cua/cua.sock";
@@ -371,14 +376,34 @@ describe("desktop daemon port", () => {
     });
   });
 
-  it("walks from the home the user database records, whether HOME points elsewhere or is unset", async () => {
-    // A path no real home has, so the walk from the real one never reaches a daemon.
-    const socket = ".octant-daemon-port-test/daemon.sock";
+  // Under Bun `userInfo()` answers with `$HOME` (observed on Bun 1.4.4), so
+  // it is an independent source only under Node, which `bun run test` uses.
+  it.skipIf(process.versions.bun !== undefined)(
+    "finds the home the user database records for Octant's user",
+    async () => {
+      await expect(recordedHomeDirectory(userId)).resolves.toBe(userInfo().homedir);
+    },
+  );
+
+  it("walks from the home the user database records, whether HOME points elsewhere or is unset", async (context) => {
+    // A path no real home has, so the walk from the real home reads it and
+    // stops at its first missing folder, writing nothing there. A failed
+    // lookup refuses instead, so asking for the missing daemon proves the
+    // walk started from a home, not that both calls refused alike.
+    const recorded = await recordedHomeDirectory(userId);
+    expect(recorded).toBeDefined();
+    const entry = lstatSync(recorded ?? "/");
+    if (entry.uid !== userId || (entry.mode & 0o022) !== 0) {
+      context.skip("the recorded home is not this user's alone, so the port refuses to walk it");
+    }
+    // Short, since macOS caps a socket path at 104 bytes and its temporary
+    // folder is long: `.octant-daemon-port-test/daemon.sock` there left no
+    // socket to chmod (observed on the macos-15 runner).
+    const socket = ".octant-port-test/cua.sock";
     const { home, seen } = await daemonHome({}, socket);
-    const elsewhere = await callWithHome(home, socket);
-    const unset = await callWithHome(undefined, socket);
-    expect(elsewhere).not.toMatchObject({ status: "answered" });
-    expect(elsewhere).toEqual(unset);
+    const unreachable = { status: "failed", reason: "daemon-unreachable" };
+    await expect(callWithHome(home, socket)).resolves.toEqual(unreachable);
+    await expect(callWithHome(undefined, socket)).resolves.toEqual(unreachable);
     expect(seen).toEqual([]);
   });
 

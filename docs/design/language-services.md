@@ -1393,8 +1393,9 @@ Each sub-slice is its own pull request with this addendum updated in place.
     stack, locals, `evaluate`, a step, continue, and exit all worked through
     the session host. It needs no `startDebugging` (above). `ptrace` works
     inside the capsule: the program attached to its own forked child with
-    `PTRACE_ATTACH`. Awaiting the maintainer: the `macos-15` CI run of the
-    same process test, and the Mac smoke of 8d.
+    `PTRACE_ATTACH`. The `macos-15` CI job ran the same process test under
+    Seatbelt and passed on 2026-10-27 ([job][macos-ci-2026-10-27]). Still to
+    run: the Mac smoke of 8d.
 - **8c. Run and debug panel.** Container: yes.
   - Gutter breakpoints, the configuration list with imported proposals and the
     confirmation card, the session toolbar, call stack, variables, the debug
@@ -1556,7 +1557,8 @@ accounts or hardware.
      checkout mismatch or unavailable checkout, a symlink escape, a device
      without reach, another platform, and a missing `bwrap` are refused before
      anything launches. The `macos-15` CI job runs the same test for Seatbelt
-     evidence; it has not yet run on a Mac. The rules are under
+     evidence; it passed there on 2026-10-27 ([job][macos-ci-2026-10-27]).
+     The rules are under
      [Companion rules](#companion-rules).
 3. **Editor wiring.** Container: yes.
    - Monaco shows the companion's diagnostics as markers. Definition (F12 or
@@ -1639,7 +1641,8 @@ accounts or hardware.
      connect to a listener on the host's loopback or to an internet address,
      or write the checkout (`EROFS`); it wrote only its cache, and the host's
      listener saw no connection. The `macos-15` CI job runs the same test for
-     Seatbelt evidence; it has not yet run on a Mac. The inspection preview's
+     Seatbelt evidence; it passed there on 2026-10-27
+     ([job][macos-ci-2026-10-27]). The inspection preview's
      language-server review is covered in the server test and in Settings
      (`ExtensionsSettingsView.test.tsx`). Rendered QA on 2026-10-27 (from
      `46834576e`, Chromium at 1440 and 390 px, light and dark) showed the
@@ -1693,8 +1696,9 @@ accounts or hardware.
      (`nativeHarnessEgress.hostile.test.ts`), and a tainted thread in
      another Project bound to the same folder, to one holding it, or to one
      inside it (a child named `..cache` included) suspends the rules (`codeLanguageServiceProcess.test.ts`). The `macos-15` CI
-     job runs the same process test for Seatbelt evidence; it has not yet run
-     on a Mac. The rules are under [Repository tooling](#repository-tooling).
+     job runs the same process test for Seatbelt evidence; it passed there on
+     2026-10-27 ([job][macos-ci-2026-10-27]). The rules are under
+     [Repository tooling](#repository-tooling).
 7. **Agent read tools** (D5; after the editor slices ship). Container: yes.
    - Add read-only `code-diagnostics` and `code-definition` app-managed tools
      to the closed catalog, through the provider SDK's tool transport, for
@@ -1738,6 +1742,8 @@ accounts or hardware.
 
 The extension host is not planned (D7). Each slice is reviewable and leaves
 the editor working when the companion is off or refused.
+
+[macos-ci-2026-10-27]: https://github.com/Ogard-Labs/octant/actions/runs/40518838249/job/122239890114
 
 ## Verification for this document
 
