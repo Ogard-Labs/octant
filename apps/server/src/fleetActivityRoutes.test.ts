@@ -88,34 +88,40 @@ describe("fleet activity route", () => {
     ]);
   });
 
-  it("lists a thread whose agent waits on its own approval as one needs-you row read from the session, never the request text", async () => {
-    const { route } = fixture({
-      pending: [
-        decodePendingRequest({
+  it.each([
+    ["approval", "lead-approval"],
+    ["question", "lead-question"],
+  ] as const)(
+    "lists a thread whose agent waits on its own %s as one needs-you row read from the session, never the request text",
+    async (_wait, kind) => {
+      const { route } = fixture({
+        pending: [
+          decodePendingRequest({
+            mode: "work",
+            kind,
+            projectId,
+            threadId: workThread,
+            threadTitle: "Quarterly report",
+            text: "edit: summary.md",
+            requestedAt: "2026-10-06T08:02:00.000Z",
+          }),
+        ],
+      });
+      const body = await (await route(request()))?.json();
+      expect(body.threads).toEqual([
+        {
           mode: "work",
-          kind: "lead-approval",
-          projectId,
           threadId: workThread,
-          threadTitle: "Quarterly report",
-          text: "edit: summary.md",
-          requestedAt: "2026-10-06T08:02:00.000Z",
-        }),
-      ],
-    });
-    const body = await (await route(request()))?.json();
-    expect(body.threads).toEqual([
-      {
-        mode: "work",
-        threadId: workThread,
-        title: "Quarterly report",
-        projectName: "Reports",
-        state: "needs-you",
-        activitySource: "session",
-        since: "2026-10-06T08:02:00.000Z",
-      },
-    ]);
-    expect(JSON.stringify(body)).not.toContain("summary.md");
-  });
+          title: "Quarterly report",
+          projectName: "Reports",
+          state: "needs-you",
+          activitySource: "session",
+          since: "2026-10-06T08:02:00.000Z",
+        },
+      ]);
+      expect(JSON.stringify(body)).not.toContain("summary.md");
+    },
+  );
 
   it("lists needs-you before working, naming where each state was read", async () => {
     const { route } = fixture({

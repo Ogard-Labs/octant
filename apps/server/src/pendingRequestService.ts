@@ -69,7 +69,7 @@ function requestKey(request: PendingRequest): string {
   const handle =
     request.kind === "child-approval" || request.kind === "child-question"
       ? `${request.kind}:${String(request.child.runId)}:${request.text}`
-      : request.kind === "lead-approval"
+      : request.kind === "lead-approval" || request.kind === "lead-question"
         ? `${request.kind}:${request.text}`
         : JSON.stringify(request.answer);
   return `${request.mode}:${String(request.threadId)}:${handle}`;

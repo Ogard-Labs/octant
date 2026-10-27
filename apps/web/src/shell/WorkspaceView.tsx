@@ -113,6 +113,7 @@ import type { PlanClient } from "@octant/client-runtime/plan-client";
 import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
 import { ThreadSubagentsTray } from "../agents/ComposerSubagentsTray";
 import { ThreadHarnessApproval } from "../harness/ThreadHarnessApproval";
+import { ThreadHarnessQuestion } from "../harness/ThreadHarnessQuestion";
 import { ThreadHarnessSteering } from "../harness/ThreadHarnessSteering";
 import { createThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
@@ -946,8 +947,8 @@ function outsideContentFor(
 
 /**
  * What the composer of a pane that shows a Chat, Work, or Code thread keeps
- * above it: the agent's own approval waiting on the person, and the thread's
- * subagent tray. Both mount, and read the host, only once that composer
+ * above it: the agent's own approval (or a Work agent's own question) waiting
+ * on the person, and the thread's subagent tray. Both mount, and read the host, only once that composer
  * renders, so a thread still loading asks for nothing.
  */
 function subagentsTrayFor(surface: WorkspaceTab, props: WorkspaceViewProps): ReactNode {
@@ -960,6 +961,16 @@ function subagentsTrayFor(surface: WorkspaceTab, props: WorkspaceViewProps): Rea
   const approval =
     props.nativeHarnessClient === undefined || !ownHost ? null : (
       <ThreadHarnessApproval
+        client={props.nativeHarnessClient}
+        threadId={threadId}
+        waiting={props.waitingThreadIds?.has(threadId) === true}
+      />
+    );
+  // Only a Work lead's question waits here for an answer: Code's reaches the
+  // thread through its own inline question, and Chat's parks the Chat turn.
+  const question =
+    props.nativeHarnessClient === undefined || !ownHost || surface.kind !== "work-thread" ? null : (
+      <ThreadHarnessQuestion
         client={props.nativeHarnessClient}
         threadId={threadId}
         waiting={props.waitingThreadIds?.has(threadId) === true}
@@ -989,10 +1000,11 @@ function subagentsTrayFor(surface: WorkspaceTab, props: WorkspaceViewProps): Rea
         threadId={threadId}
       />
     );
-  if (approval === null && steering === null && tray === null) return null;
+  if (approval === null && question === null && steering === null && tray === null) return null;
   return (
     <>
       {approval}
+      {question}
       {steering}
       {tray}
     </>

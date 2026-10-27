@@ -495,7 +495,8 @@ probe (every 2 s while a window is visible, 10 s otherwise). Every row names its
   Code binding could answer, read once per distinct binding since what a window
   can answer depends only on what it binds; a Code Project no local window
   binds stays out. A
-  waiting subagent, and the agent's own approval, are read the same way. The
+  waiting subagent, the agent's own approval, and a Work agent's own question
+  are read the same way. The
   menu bar's window binds no Project, so its Work and Code rows for them are the
   waits that each saved local window with a Work or Code Project binding could
   open, whether or not that window is open now; a window bound to no Project
@@ -5022,8 +5023,13 @@ the model at another size.
   and its navigation row carries `awaitingInput` with the `user-input` kind,
   exactly as for a pending Work question (a pending Work request, then the
   lead's approval, names the wait first), so the same sidebar mark and Inbox
-  entry follow; it is answered from the Agents tab's session card. Code shows
-  it through its inline question path. Only a question with a live waiter
+  entry follow. The pending-requests read lists it as a Work-only
+  `lead-question` row, and the thread shows the question as a card above its
+  composer, with its options and a field for a typed answer, as the Agents
+  tab's session card offers. The card decides nothing: it posts to
+  `POST /api/native-harness/sessions/:thread/questions`, the route the Agents
+  tab answers through, so the host checks the window and the principal first.
+  Code shows it through its inline question path. Only a question with a live waiter
   counts: one a restart left pending reaches no turn, the session already
   asks to be resumed, and the cut-off turn raises its own attention. An
   answer, an expiry, or a cancellation from any surface clears it. The
@@ -5145,10 +5151,17 @@ the model at another size.
      `codeService.test.ts` pin the Chat and Code
      navigation rows, `leadApprovalAttention.test.ts` and
      `pendingRequestRoutes.test.ts` the approval's Inbox row,
+     `leadApprovalAttention.test.ts` the Work lead question's row (listed
+     until answered, cancelled, or expired; never a subagent's, one a restart
+     left behind, or a Code or Chat lead's), `fleetActivityRoutes.test.ts`
+     both rows in the menu bar, `NeedsYouCard.test.tsx`,
+     `needsYouCommands.test.ts`, and `InboxView.test.tsx` that Home, the
+     palette, and the Inbox list them once,
      `collectThreadAttention.test.ts` the sidebar mark and Inbox entry for an
      approval and a question, `machineChangeFeed.test.ts` that asking or
      settling either refreshes the navigation reads, and
-     `ThreadHarnessApproval.test.tsx` the inline approval card.
+     `ThreadHarnessApproval.test.tsx` and `ThreadHarnessQuestion.test.tsx` the
+     inline approval and Work question cards.
   3. **Task list.** `todo-write` records pending, in-progress, and done
      without a plan approval. Not yet pinned at the offered-set level beyond
      item 1; the progress states are covered by `nativeHarnessTodo.test.ts`.
@@ -6694,7 +6707,17 @@ mechanisms are:
   route. It is listed while a turn is blocked on it or, after a restart, while
   the session awaits resuming, for a window that may open the thread (Work and
   Code: bound to the parent's project, as for a subagent; Chat: an active,
-  listed thread). A child agent's approval or question (`source` set) is listed as a
+  listed thread). A Work lead's own `ask-user` question is listed the same way
+  as a `lead-question` row: Work only (a Code lead's question is already a
+  Code question with an answer handle, and a Chat lead's parks the Chat
+  attempt and is a Chat question), with the thread, its title and Project,
+  and the prompt as Work's sanitized request text, and no options, answer
+  handle, or `lostInRestart`. It is listed only while a turn in this host is
+  blocked on it, for a window bound to the thread's project, never for a
+  subagent's question or one a restart left behind, and an answer, a
+  cancellation, or an expiry removes it. **Review request** opens the
+  thread, whose question card answers it through the harness session route.
+  A child agent's approval or question (`source` set) is listed as a
   `child-approval` or `child-question` row on a Work or Code parent: it carries
   the parent thread, the child's run, role, task (at most 200 characters, with
   a Work parent's task redacted of paths and URLs as its request text is),

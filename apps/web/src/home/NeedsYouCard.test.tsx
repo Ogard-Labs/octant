@@ -8,6 +8,7 @@ import {
   codeDecision,
   workChildApproval,
   workDecision,
+  workLeadQuestion,
 } from "../palette/pendingRequests.test-fixtures";
 import { HomeDashboard } from "./HomeDashboard";
 import { createNeedsYouCard, type NeedsYouCardSource } from "./NeedsYouCard";
@@ -229,6 +230,30 @@ describe("the Needs you card", () => {
     expect(onOpenThread).toHaveBeenCalledExactlyOnceWith(request);
     expect(answerClients.workRequestClient.execute).not.toHaveBeenCalled();
     expect(answerClients.codeClient.executeOperation).not.toHaveBeenCalled();
+  });
+
+  it("lists a Work agent's own question and opens its thread without answering it", async () => {
+    const user = userEvent.setup();
+    const answerClients = clients();
+    const onOpenThread = vi.fn();
+    const request = workLeadQuestion();
+    renderCard(
+      createNeedsYouCard(
+        source({
+          answerClients: answerClients as never,
+          onOpenThread,
+          pendingRequestClient: reader([request]),
+        }),
+      ),
+    );
+    const card = await findCard();
+    const row = await within(card).findByRole("group", {
+      name: "Quarterly report is waiting for your answer",
+    });
+    expect(within(row).getByText("Which quarter should the summary cover?")).toBeInTheDocument();
+    await user.click(within(row).getByRole("button", { name: "Review request" }));
+    expect(onOpenThread).toHaveBeenCalledExactlyOnceWith(request);
+    expect(answerClients.workRequestClient.execute).not.toHaveBeenCalled();
   });
 
   it("answers a Code approval and a Work approval through their own commands with the listed handle", async () => {
