@@ -244,7 +244,14 @@ export class ChatProjection implements Projection {
     assertEnvelope(event.aggregateType === "chat-thread");
     const attempt = decodeProjection(() => decodeChatAttemptUpdated(event.payload).attempt);
     assertEnvelope(String(attempt.threadId) === String(event.aggregateId));
-    this.#projectAttempt(connection, attempt, event);
+    // The event's attempt supersedes the stored row, so what the index holds
+    // is the stored row's references, read before this state replaces them.
+    this.#projectAttempt(
+      connection,
+      attempt,
+      readIndexedAttemptContentIds(connection, String(attempt.id)),
+      event,
+    );
   }
 
   /**
@@ -268,17 +275,25 @@ export class ChatProjection implements Projection {
     const alreadyAppended =
       String(attempt.responseRefs.at(-1)?.contentId) === String(appended.responseRef.contentId);
     const next = alreadyAppended
-      ? decodeChatAttempt({ ...attempt, updatedAt: appended.updatedAt })
-      : decodeChatAttempt({
+      ? { ...attempt, updatedAt: appended.updatedAt }
+      : {
           ...attempt,
           responseRefs: [...attempt.responseRefs, appended.responseRef],
           updatedAt: appended.updatedAt,
-        });
-    this.#projectAttempt(connection, next, event);
+        };
+    // The attempt read above is the row as the projection last wrote it, so
+    // its references are exactly what the search index already holds; reading
+    // the row back again would parse and decode the same JSON once more for
+    // every streamed delta.
+    this.#projectAttempt(connection, next, indexedAttemptContentIds(attempt), event);
   }
 
-  #projectAttempt(connection: SqliteConnection, attempt: ChatAttempt, event: EventEnvelope): void {
-    const indexedContentIds = readIndexedAttemptContentIds(connection, String(attempt.id));
+  #projectAttempt(
+    connection: SqliteConnection,
+    attempt: ChatAttempt,
+    indexedContentIds: ReadonlySet<string>,
+    event: EventEnvelope,
+  ): void {
     upsertAttempt(connection).run(
       attempt.id,
       attempt.turnId,
@@ -1448,12 +1463,11 @@ function indexTranscriptSearchForTurn(
 
 /**
  * The content the attempt's last projected state already put through the
- * index, read before that state is replaced. Streaming persists the whole
- * attempt per delta, so indexing the turn afresh each time read and rewrote
- * every earlier delta's body: a 775-delta reply cost some 300,000 content
- * reads and index writes on the host's one thread. Only what the delta added
- * is new to the index; the user message and earlier attempts were indexed
- * when their own events applied.
+ * index. Streaming indexes only what a delta added, so re-indexing an
+ * attempt's whole turn read and rewrote every earlier delta's body: a
+ * 775-delta reply cost some 300,000 content reads and index writes on the
+ * host's one thread. Only what the delta added is new to the index; the user
+ * message and earlier attempts were indexed when their own events applied.
  */
 function readIndexedAttemptContentIds(
   connection: SqliteConnection,
@@ -1469,6 +1483,13 @@ function readIndexedAttemptContentIds(
   };
   const ids = new Set((previous.responseRefs ?? []).map((reference) => reference.contentId));
   if (previous.researchRef !== undefined) ids.add(previous.researchRef.contentId);
+  return ids;
+}
+
+/** The same set, from an attempt the caller already read and decoded. */
+function indexedAttemptContentIds(attempt: ChatAttempt): ReadonlySet<string> {
+  const ids = new Set(attempt.responseRefs.map((reference) => String(reference.contentId)));
+  if (attempt.researchRef !== undefined) ids.add(String(attempt.researchRef.contentId));
   return ids;
 }
 
