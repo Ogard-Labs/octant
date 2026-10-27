@@ -56,7 +56,8 @@ recolours a warning or an error. It looks best in the light theme.
 
 **Increased contrast** strengthens primary, secondary, and muted text (darker in
 the light theme, brighter in the dark one) and draws firmer edges on panes,
-menus, dialogs, and cards. Turning on **Increase contrast** in macOS
+menus, dialogs, and cards. In a terminal it also raises how far colored output
+must stand out from its background. Turning on **Increase contrast** in macOS
 Accessibility settings does the same, whether or not the toggle is on.
 
 **Project view switcher** lives in **Settings → Code**. It chooses how the Code

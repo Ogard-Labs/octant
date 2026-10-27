@@ -1,8 +1,5 @@
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
-import {
-  INCREASED_CONTRAST_EDITOR_TEXT,
-  type EditorColorProjection,
-} from "@octant/theme/editor-colors";
+import { INCREASED_CONTRAST_TEXT, type EditorColorProjection } from "@octant/theme/editor-colors";
 import { act, render } from "@testing-library/react";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -339,7 +336,7 @@ describe("ThemeSettingsProvider", () => {
           <Probe />
         </ThemeSettingsProvider>,
       ).unmount();
-      expect(seen.at(-1)).toMatchObject(INCREASED_CONTRAST_EDITOR_TEXT[mode]);
+      expect(seen.at(-1)).toMatchObject(INCREASED_CONTRAST_TEXT[mode]);
     }
 
     // The editor cannot read the stylesheet, so its ink must be the very
@@ -350,7 +347,7 @@ describe("ThemeSettingsProvider", () => {
       light: /^html\[data-octant-theme-mode="light"\] \{([^}]*)\}/m.exec(sheet)?.[1] ?? "",
     };
     for (const mode of ["light", "dark"] as const) {
-      const ink = INCREASED_CONTRAST_EDITOR_TEXT[mode];
+      const ink = INCREASED_CONTRAST_TEXT[mode];
       expect(blocks[mode]).toContain(`--octant-text-primary-high-contrast: ${ink.foreground};`);
       expect(blocks[mode]).toContain(`--octant-text-muted-high-contrast: ${ink.mutedForeground};`);
     }

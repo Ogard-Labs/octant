@@ -12,7 +12,8 @@
     "./export": "./src/export.ts",
     "./backgrounds": "./src/backgrounds.ts",
     "./typography": "./src/typography.ts",
-    "./editor-colors": "./src/editorColors.ts"
+    "./editor-colors": "./src/editorColors.ts",
+    "./terminal-colors": "./src/terminalColors.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

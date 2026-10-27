@@ -5,9 +5,11 @@ import {
   type OctantKeybindings,
 } from "@octant/domain";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import type { TerminalColorProjection } from "@octant/theme/terminal-colors";
 import type { TerminalTypographyProjection } from "@octant/theme/typography";
 import { useKeybindings } from "../keybindings/useKeybindings";
 import { isApplePlatform } from "../platform";
+import { useTerminalColorProjection } from "../theme/ThemeSettingsProvider";
 import { useTypographyProjection } from "../theme/TypographyProvider";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
@@ -19,12 +21,15 @@ export interface XtermAdapterSession {
   readonly setInteractive: (interactive: boolean) => void;
   readonly setOutput: (output: string) => void;
   readonly setTypography?: (typography: TerminalTypographyProjection) => void;
+  /** Repaints in the app's current theme while the session stays mounted. */
+  readonly setColors?: (colors: TerminalColorProjection) => void;
 }
 
 export interface XtermAdapterRuntime {
   readonly mount: (
     element: HTMLElement,
     options: {
+      readonly colors?: TerminalColorProjection;
       /** The id of the element that tells a keyboard user how to leave. */
       readonly describedBy?: string;
       readonly interactive: boolean;
@@ -61,6 +66,7 @@ export interface XtermTerminalAdapterProps {
 export function XtermTerminalAdapter(props: XtermTerminalAdapterProps) {
   const contextualTypography = useTypographyProjection("terminal");
   const typography = props.typography ?? contextualTypography;
+  const colors = useTerminalColorProjection();
   const [runtimeUnavailable, setRuntimeUnavailable] = useState(false);
   const element = useRef<HTMLDivElement>(null);
   const hintId = useId();
@@ -69,6 +75,7 @@ export function XtermTerminalAdapter(props: XtermTerminalAdapterProps) {
   const latestKeybindings = useRef(keybindings);
   const latestProps = useRef(props);
   const latestTypography = useRef(typography);
+  const latestColors = useRef(colors);
   const session = useRef<XtermAdapterSession | undefined>(undefined);
   const loader = props.loadRuntime ?? loadXtermRuntime;
 
@@ -81,6 +88,10 @@ export function XtermTerminalAdapter(props: XtermTerminalAdapterProps) {
   }, [typography]);
 
   useLayoutEffect(() => {
+    latestColors.current = colors;
+  }, [colors]);
+
+  useLayoutEffect(() => {
     latestKeybindings.current = keybindings;
   }, [keybindings]);
 
@@ -91,6 +102,7 @@ export function XtermTerminalAdapter(props: XtermTerminalAdapterProps) {
       .then((runtime) => {
         if (disposed || element.current === null) return;
         const mounted = runtime.mount(element.current, {
+          colors: latestColors.current,
           describedBy: hintId,
           interactive: latestProps.current.interactive,
           interceptKey: (event) => {
@@ -135,6 +147,7 @@ export function XtermTerminalAdapter(props: XtermTerminalAdapterProps) {
   useEffect(() => session.current?.setOutput(props.output), [props.output]);
   useEffect(() => session.current?.setInteractive(props.interactive), [props.interactive]);
   useEffect(() => session.current?.setTypography?.(typography), [typography]);
+  useEffect(() => session.current?.setColors?.(colors), [colors]);
 
   return (
     <>

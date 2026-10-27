@@ -1,5 +1,7 @@
 import { act, render, screen } from "@testing-library/react";
+import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import { describe, expect, it, vi } from "vitest";
+import { ThemeSettingsProvider } from "../theme/ThemeSettingsProvider";
 import {
   XtermTerminalAdapter,
   type XtermAdapterRuntime,
@@ -277,6 +279,63 @@ describe("XtermTerminalAdapter", () => {
       />,
     );
     expect(session.setTypography).toHaveBeenLastCalledWith(second);
+  });
+
+  it("repaints an open terminal when the app's theme or increased contrast changes", async () => {
+    const live: XtermAdapterSession = { ...session(), setColors: vi.fn() };
+    const mount = vi.fn<XtermAdapterRuntime["mount"]>(() => live);
+    const loadRuntime = vi.fn(async () => ({ mount }));
+    const terminal = (
+      <XtermTerminalAdapter
+        ariaLabel="Repository terminal"
+        interactive
+        loadRuntime={loadRuntime}
+        onData={vi.fn()}
+        onResize={vi.fn()}
+        output=""
+      />
+    );
+    const { rerender } = render(
+      <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "light" }}>
+        {terminal}
+      </ThemeSettingsProvider>,
+    );
+    await act(async () => void (await loadRuntime.mock.results[0]?.value));
+    expect(mount).toHaveBeenCalledWith(
+      expect.any(HTMLElement),
+      expect.objectContaining({
+        colors: expect.objectContaining({
+          palette: expect.objectContaining({ background: "#ffffff", foreground: "#141414" }),
+        }),
+      }),
+    );
+
+    rerender(
+      <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "dark" }}>
+        {terminal}
+      </ThemeSettingsProvider>,
+    );
+    expect(live.setColors).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        minimumContrastRatio: 4.5,
+        palette: expect.objectContaining({ background: "#1a1a1a", foreground: "#f5f5f7" }),
+      }),
+    );
+
+    rerender(
+      <ThemeSettingsProvider
+        settings={{ ...DEFAULT_THEME_SETTINGS, mode: "dark", increasedContrast: true }}
+      >
+        {terminal}
+      </ThemeSettingsProvider>,
+    );
+    expect(live.setColors).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        minimumContrastRatio: 7,
+        palette: expect.objectContaining({ foreground: "#ffffff" }),
+      }),
+    );
+    expect(mount).toHaveBeenCalledOnce();
   });
 });
 
