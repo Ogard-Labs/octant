@@ -720,9 +720,13 @@ These rules settle what the step needs, each in the fail-closed direction:
   refused `unauthorized` before anything binds to the target or is
   journaled, with the same sentence telling the person to choose a narrower
   posture. That posture is the thread's as the asking window holds it, its
-  session grant included, narrowed by the turn's own request. A thread
-  created before the create-time rule can still hold Auto-accept edits; its
-  turns run only when they ask for Ask for approvals or Plan. Admission's
+  session grant included, narrowed by the turn's own request; a retried
+  start is narrowed by the posture its durable start recorded instead, since
+  that is the one it runs in. A thread created before the create-time rule
+  can still hold Auto-accept edits; its turns run only when they ask for Ask
+  for approvals or Plan, and a turn's closing decision is not offered on it,
+  because answering one starts a turn in the thread's own posture. Lowering
+  the thread's access lets any of these run. Admission's
   `full-access-not-remembered` stays the target's own refusal behind this
   one.
 - **Project authority is a local Project's.** A local window reaches a

@@ -2495,11 +2495,69 @@ describe("CodeOperationService", () => {
     expect(fixture.turns.start.mock.calls[0]?.[0].thread.executionPolicy).toBe("approval-gated");
   });
 
-  it("refuses an answer that would continue a turn on a thread on an SSH target holding Auto-accept edits", async () => {
+  // A retried start runs in the posture its durable start recorded, not the
+  // one the retry asks for. A start recorded in Auto-accept edits before the
+  // rule must not run again in it because the retry names Ask for approvals.
+  it.each([
+    ["before its result", false],
+    ["while its result still reads running", true],
+  ] as const)(
+    "refuses a retried turn on a thread on an SSH target whose start was recorded in Auto-accept edits %s",
+    async (_case, resultRecorded) => {
+      const fixture = providerTurnFixture({
+        remoteRoot: true,
+        recordEvents: true,
+        thread: decodeCodeThread({ ...thread(), executionPolicy: "auto-accept-edits" }),
+      });
+      fixture.events.append({
+        threadId: ids.thread,
+        operationId: startProviderTurn.operationId,
+        expectedCursor: 0,
+        event: {
+          kind: "conversation-turn-started",
+          providerInstanceId: thread().providerInstanceId,
+          modelId: thread().modelId,
+          sessionId: decodeProviderSessionId(startProviderTurn.sessionId),
+          prompt: startProviderTurn.prompt,
+          executionPolicy: "auto-accept-edits",
+        },
+      });
+      if (resultRecorded)
+        fixture.events.append({
+          threadId: ids.thread,
+          operationId: startProviderTurn.operationId,
+          expectedCursor: 1,
+          event: {
+            kind: "operation-result",
+            result: {
+              kind: "provider-turn-state",
+              operationId: startProviderTurn.operationId,
+              state: "running",
+            },
+          },
+        });
+      fixture.events.append.mockClear();
+
+      const result = await fixture.service.execute(ids.window, {
+        ...startProviderTurn,
+        executionPolicy: "approval-gated",
+      });
+
+      expect(result).toMatchObject({
+        kind: "operation-failed",
+        failure: { message: remoteCodeThreadPostureRefusal("auto-accept-edits") },
+      });
+      expect(fixture.turns.start).not.toHaveBeenCalled();
+      expect(fixture.events.append).not.toHaveBeenCalled();
+    },
+  );
+
+  it("refuses an answer that would continue a turn on a thread on an SSH target holding Auto-accept edits, and still lets it be stopped", async () => {
     const fixture = providerTurnFixture({
       remoteRoot: true,
       thread: decodeCodeThread({ ...thread(), executionPolicy: "auto-accept-edits" }),
     });
+    fixture.turns.cancel.mockResolvedValue({ state: "interrupted" });
     const result = await fixture.service.execute(ids.window, {
       kind: "answer-provider-approval",
       operationId: decodeCodeOperationId("49494949-4949-4494-8494-494949494949"),
@@ -2514,7 +2572,37 @@ describe("CodeOperationService", () => {
     });
     expect(fixture.turns.answerApproval).not.toHaveBeenCalled();
     expect(fixture.events.append).not.toHaveBeenCalled();
+
+    // Stopping only narrows what runs, so the posture rule never stands in its way.
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "cancel-provider-turn",
+        operationId: decodeCodeOperationId("51515151-5151-4515-8515-515151515151"),
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+    expect(fixture.turns.cancel).toHaveBeenCalledOnce();
   });
+
+  // A decision's answer starts a turn in the thread's own posture, so one is
+  // offered only where that turn would not be refused.
+  it.each([
+    ["approval-gated", true],
+    ["auto-accept-edits", false],
+    ["full-access", false],
+  ] as const)(
+    "offers a decision on a thread on an SSH target holding %s only where its answer could start",
+    async (executionPolicy, admitted) => {
+      const fixture = providerTurnFixture({
+        remoteRoot: true,
+        thread: decodeCodeThread({ ...thread(), executionPolicy }),
+      });
+      await expect(
+        fixture.service.admitsTurn(ids.window, { id: ids.thread, checkoutId: ids.checkout }),
+      ).resolves.toBe(admitted);
+    },
+  );
 
   it("refuses a selected skill before Code provider execution when no material resolver exists", async () => {
     const fixture = providerTurnFixture();
