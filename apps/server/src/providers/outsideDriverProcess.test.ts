@@ -14,9 +14,14 @@ import type {
   ExtensionProcessHandle,
   ExtensionRuntimeStartInput,
   ExtensionSupervisor,
+  OutsideDriverRuntime,
 } from "../extensions/extensionSupervisor";
 import { serveFixtureDriver, type InMemoryDriverEnd } from "./outsideDriverFixture.test-support";
-import { OutsideDriverProcesses, type OutsideDriverProcessStart } from "./outsideDriverProcess";
+import {
+  OutsideDriverProcesses,
+  resolveOutsideDriverRuntime,
+  type OutsideDriverProcessStart,
+} from "./outsideDriverProcess";
 import { makeOutsideHarnessEndpointProxy } from "./outsideHarnessEndpointProxy";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
@@ -29,7 +34,7 @@ const driver = {
   version: "0.1.0",
   digest: `sha256:${"a".repeat(64)}`,
 } as OutsideProviderDriverReference;
-const runtime = "/opt/octant/bin/bun";
+const runtime: OutsideDriverRuntime = { kind: "bun", path: "/opt/octant/bin/bun" };
 const packageRoot = "/data/extensions/versions/driver/content";
 const entryPoint = `${packageRoot}/driver/main.mjs`;
 const temporaryRoots: Array<string> = [];
@@ -110,7 +115,7 @@ async function temporaryRoot(): Promise<string> {
 async function processes(
   options: {
     readonly platform?: NodeJS.Platform;
-    readonly runtime?: string | undefined;
+    readonly runtime?: OutsideDriverRuntime | undefined;
     readonly refuse?: boolean;
     readonly exitAtStart?: boolean;
     readonly now?: () => number;
@@ -179,7 +184,56 @@ describe("outside driver processes", () => {
     },
   );
 
-  it("starts no driver when the server does not run on Bun", async () => {
+  it("finds a driver's runtime only in the server's own Bun or Electron run as Node", () => {
+    const electron = "/Applications/Octant.app/Contents/MacOS/Octant";
+    expect(
+      resolveOutsideDriverRuntime({
+        versions: { node: "24.3.0", bun: "1.4.4" },
+        execPath: "/opt/octant/bin/bun",
+      }),
+    ).toEqual({ kind: "bun", path: "/opt/octant/bin/bun" });
+    expect(
+      resolveOutsideDriverRuntime({
+        versions: { node: "24.21.0", electron: "43.7.11" },
+        execPath: electron,
+      }),
+    ).toEqual({ kind: "electron-node", path: electron });
+    // Electron's own main process is not Node; the packaged server never runs there.
+    expect(
+      resolveOutsideDriverRuntime({
+        versions: { node: "24.21.0", electron: "43.7.11" },
+        type: "browser",
+        execPath: electron,
+      }),
+    ).toBeUndefined();
+    expect(
+      resolveOutsideDriverRuntime({
+        versions: { node: "24.21.0" },
+        execPath: "/usr/local/bin/node",
+      }),
+    ).toBeUndefined();
+    expect(
+      resolveOutsideDriverRuntime({ versions: { node: "24.3.0", bun: "1.4.4" }, execPath: "bun" }),
+    ).toBeUndefined();
+  });
+
+  it("launches a driver on Electron's Node as that runtime, so the process port sets its environment", async () => {
+    const electron: OutsideDriverRuntime = {
+      kind: "electron-node",
+      path: "/Applications/Octant.app/Contents/MacOS/Octant",
+    };
+    const context = await processes({ runtime: electron });
+    channelOf(await context.start());
+
+    expect(context.processes[0]?.input).toMatchObject({
+      command: electron.path,
+      args: [entryPoint],
+      cwd: packageRoot,
+      sandbox: { kind: "outside-driver", runtime: "electron-node", packageRoot },
+    });
+  });
+
+  it("starts no driver when the server runs on neither Bun nor Electron's Node", async () => {
     const context = await processes({ runtime: undefined });
 
     expect(await context.start()).toEqual({ status: "refused", reason: "runtime-unavailable" });
@@ -199,11 +253,16 @@ describe("outside driver processes", () => {
     expect(first?.input).toMatchObject({
       ...driver,
       entryPoint,
-      command: runtime,
+      command: runtime.path,
       args: [entryPoint],
       cwd: packageRoot,
       env: {},
-      sandbox: { kind: "outside-driver", instanceId: String(instanceA), packageRoot },
+      sandbox: {
+        kind: "outside-driver",
+        runtime: "bun",
+        instanceId: String(instanceA),
+        packageRoot,
+      },
     });
     expect(second?.input.sandbox).toMatchObject({ instanceId: String(instanceB) });
     const folders = [first, second].map((process) =>

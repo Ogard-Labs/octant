@@ -73,7 +73,10 @@ const bundledDriverKinds: ReadonlySet<string> = new Set(ProviderDriverKind.liter
 /**
  * An entry is an ES module file inside the package: relative, with no scheme
  * (so no `builtin:` driver and no `file:` reach), no `.` or `..` segment, and
- * the `.mjs` or `.js` suffix of a module the host's runtime loads.
+ * the `.mjs` suffix. The host runs it on Bun or on Electron's Node, and `.mjs`
+ * is the one suffix both load as plain JavaScript in an ES module: Node reads
+ * a `.js` file as CommonJS when the nearest package.json says so, and the two
+ * runtimes run TypeScript differently.
  */
 function isPackageRelativeModule(entryPoint: string): boolean {
   if (entryPoint.includes(":") || entryPoint.includes("\\") || entryPoint.startsWith("/")) {
@@ -82,7 +85,7 @@ function isPackageRelativeModule(entryPoint: string): boolean {
   if (entryPoint.split("/").some((segment) => segment === "" || /^\.+$/.test(segment))) {
     return false;
   }
-  return entryPoint.endsWith(".mjs") || entryPoint.endsWith(".js");
+  return entryPoint.endsWith(".mjs");
 }
 
 function entryRefusal(
