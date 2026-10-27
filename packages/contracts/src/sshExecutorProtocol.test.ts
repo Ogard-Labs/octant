@@ -246,9 +246,9 @@ describe("SSH executor protocol", () => {
         },
       })._tag;
     expect(start({})).toBe("Right");
-    // Plan runs offline; a writing posture only through this host's proxy.
-    expect(start({ posture: "plan", network: "none", egressToken: undefined })).toBe("Right");
-    expect(start({ posture: "plan" })).toBe("Left");
+    // Every posture, Plan included, runs only through this host's proxy.
+    expect(start({ posture: "plan" })).toBe("Right");
+    expect(start({ posture: "plan", network: "none", egressToken: undefined })).toBe("Left");
     expect(start({ network: "none", egressToken: undefined })).toBe("Left");
     expect(start({ network: "allow", egressToken: undefined })).toBe("Left");
     expect(start({ posture: "full-access" })).toBe("Left");

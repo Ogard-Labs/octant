@@ -423,19 +423,20 @@ async function runProbe(
 ): Promise<SshConfinementCanaryOutcome> {
   const target = probeTarget(environment, layout, probe, context.networkReachable);
   if (target === undefined) return "inconclusive";
-  const runtimeProbe = probe.startsWith("runtime-");
   // Runtimes are placed on Linux targets only, so nothing else can show a
   // runtime's grants hold.
-  if (runtimeProbe && environment.platform !== "linux") return "inconclusive";
+  if (probe.startsWith("runtime-") && environment.platform !== "linux") return "inconclusive";
   const nonce = randomBytes(16).toString("hex");
   let launch: ReturnType<ProcessConfinementPort["prepare"]>;
   try {
     const egressSocket = join(mkdtempSync(join(layout.egressDirectory, "p-")), "s");
-    // The writing postures' commands and runtimes run proxied, so their
-    // probes do too; a capsule that only Plan's probes saw would prove
-    // nothing about them.
+    // The writing postures' commands and every placed runtime, Plan's
+    // included, run proxied, so their probes do too; a capsule that only
+    // Plan's command probes saw would prove nothing about them. A Plan
+    // runtime's probe runs in the nested capsule its forwarder starts.
+    const runtimeProbe = probe.startsWith("runtime-");
     const networkEgress =
-      posture === "plan"
+      posture === "plan" && !runtimeProbe
         ? ("none" as const)
         : {
             kind: "proxied" as const,

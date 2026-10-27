@@ -1,4 +1,12 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
@@ -11,6 +19,7 @@ import { SshRemotePath } from "@octant/contracts/ssh-target";
 import type { ProcessConfinementPort } from "../process/seatbeltProfile";
 import { ExecutorEgress } from "./executorLaunches";
 import { ExecutorProcesses } from "./executorProcesses";
+import { checkRuntimeBinary } from "./executorRuntimeGrants";
 import { ExecutorStreams } from "./executorStreams";
 
 /**
@@ -26,8 +35,12 @@ const uid = process.getuid?.() ?? 0;
 const PROJECT = "00000000-0000-4000-8000-0000000000a1";
 const INSTANCE = "00000000-0000-4000-8000-0000000000a2";
 
-/** Echoes each line it reads, writes a line of standard error, and exits when its input ends. */
-const ECHO_RUNTIME = `#!${process.execPath}
+/**
+ * Echoes each line it reads, writes a line of standard error, and exits when
+ * its input ends. Without warnings, because its proxy variables make Node
+ * announce its experimental proxy support on standard error.
+ */
+const ECHO_RUNTIME = `#!${process.execPath} --no-warnings
 process.stderr.write("runtime started\\n");
 process.stdin.on("data", (chunk) => process.stdout.write(chunk));
 process.stdin.on("end", () => process.exit(3));
@@ -101,7 +114,8 @@ function request(
     kind: "start-process",
     root: remotePath(root),
     posture: "plan",
-    network: "none",
+    network: "proxied",
+    egressToken: "a".repeat(64),
     executable: remotePath(binary),
     args: [],
     accountState: [],
@@ -223,6 +237,28 @@ describe("executor placed processes", () => {
     expect(
       await placed.start(request({ home: { project: PROJECT, instance: other }, stream: 4 }), 2),
     ).toEqual({ kind: "process-refused", reason: "runtime-home-not-confinable" });
+  });
+
+  it("never grants the home beside a binary folder in it, even when the home is reached through a link", () => {
+    // No ~/.ssh and no runtime homes yet, as on a first launch: only the
+    // home itself says the binary's parent must not be granted.
+    const realHome = join(base, "real-home");
+    mkdirSync(realHome, { mode: 0o700 });
+    const linkedHome = join(base, "linked-home");
+    symlinkSync(realHome, linkedHome);
+    const agent = executable(join(realHome, "agent-bin"));
+    const checked = checkRuntimeBinary(
+      { uid, homeDirectory: linkedHome, stateHome: undefined, sessionParent: undefined },
+      remotePath(root),
+      agent,
+    );
+    expect(checked).toEqual({
+      status: "granted",
+      value: {
+        path: realpathSync(agent),
+        readFolders: [realpathSync(join(realHome, "agent-bin"))],
+      },
+    });
   });
 
   it("grants account state only under the home, never the keys, the root, or a missing path", async () => {

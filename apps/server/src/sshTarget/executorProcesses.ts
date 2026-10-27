@@ -37,9 +37,9 @@ import type { ExecutorStream, ExecutorStreams } from "./executorStreams";
  *
  * A start is answered at once and frees the request slot, so reads, file
  * tools, and commands keep running one at a time beside the runtimes. A
- * runtime runs with its posture's attested runtime grants (R2), offline in
- * Plan and on this host's proxy for its launch otherwise (R3), and its
- * environment is built here: nothing of the host's crosses. Its output starts
+ * runtime runs with its posture's attested runtime grants (R2) on this host's
+ * proxy for its launch in every posture (R3), and its environment is built
+ * here: nothing of the host's crosses. Its output starts
  * only once the reply that names its stream was written. When it exits, its
  * output is delivered, its stream closes, and `process-ended` carries its exit
  * and the last of its standard error. Every runtime dies with the session.
@@ -65,7 +65,6 @@ interface PlacedProcess {
   readonly stream: ExecutorStream;
   readonly child: ChildProcess;
   readonly directory: string;
-  readonly proxied: boolean;
   stderr: Buffer;
   exit: { readonly code: number | null; readonly signal: NodeJS.Signals | null } | undefined;
   outputDone: boolean;
@@ -194,15 +193,14 @@ export class ExecutorProcesses {
     let child: ChildProcess;
     try {
       mkdirSync(temporaryDirectory, { recursive: true, mode: 0o700 });
-      if (request.network === "proxied") {
-        proxyPath = await this.#egress.open(session, launch);
-        // The session can end while the forwarder starts listening.
-        if (proxyPath === undefined || this.#abandoned) {
-          if (proxyPath !== undefined) this.#egress.close(launch);
-          rmSync(directory, { recursive: true, force: true });
-          return refusedStart("unavailable");
-        }
+      proxyPath = await this.#egress.open(session, launch);
+      // The session can end while the forwarder starts listening.
+      if (proxyPath === undefined || this.#abandoned) {
+        if (proxyPath !== undefined) this.#egress.close(launch);
+        rmSync(directory, { recursive: true, force: true });
+        return refusedStart("unavailable");
       }
+      const endpoint = { kind: "unix-socket" as const, path: proxyPath };
       const confinement =
         environment.confinement ??
         makeProcessConfinementLive({
@@ -219,13 +217,9 @@ export class ExecutorProcesses {
           temporaryDirectory,
           binaryFolders: binary.value.readFolders,
           accountState: accountState.value,
-          networkEgress:
-            proxyPath === undefined
-              ? "none"
-              : { kind: "proxied", endpoint: { kind: "unix-socket", path: proxyPath } },
+          networkEgress: { kind: "proxied", endpoint },
         }),
       });
-      const token = request.egressToken;
       child = spawn(prepared.command, [...prepared.args], {
         cwd: root,
         // Its own process group, so a stop reaches everything it started.
@@ -237,9 +231,7 @@ export class ExecutorProcesses {
           PATH: environment.path ?? DEFAULT_PATH,
           LANG: environment.language ?? "C.UTF-8",
           ...accountState.value.environment,
-          ...(proxyPath === undefined || token === undefined
-            ? {}
-            : proxiedLaunchEnvironment({ kind: "unix-socket", path: proxyPath }, token)),
+          ...proxiedLaunchEnvironment(endpoint, request.egressToken),
         },
       });
     } catch {
@@ -252,7 +244,6 @@ export class ExecutorProcesses {
       stream,
       child,
       directory,
-      proxied: proxyPath !== undefined,
       stderr: Buffer.alloc(0),
       exit: undefined,
       outputDone: false,
@@ -313,7 +304,7 @@ export class ExecutorProcesses {
     this.#running.delete(placed.stream.id);
     this.#ended.add(placed.stream.id);
     placed.stream.abandon();
-    if (placed.proxied) this.#egress.close(placed.launch);
+    this.#egress.close(placed.launch);
     rmSync(placed.directory, { recursive: true, force: true });
     this.#send({
       type: "process-ended",

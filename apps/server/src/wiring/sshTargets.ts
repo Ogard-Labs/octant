@@ -29,7 +29,7 @@ export function wireSshTargets(deps: SshTargetsDependencies) {
   // A provider runtime placed on a target reaches the network only through
   // a proxy of its own on this host, as a harness command's does: on
   // loopback on macOS and as a Unix socket in a private directory on Linux.
-  // Without one, no runtime is placed in a posture that needs the network.
+  // Without one, no runtime is placed at all.
   const runtimeEgressDirectory = join(deps.providerDataDirectory, "harness", "egress");
   const runtimeEgressEndpoint =
     process.platform === "darwin"

@@ -1011,15 +1011,31 @@ On macOS targets `proxied` waits for slice 8's forwarder, as the writing
 postures' commands do, so a placed runtime is admitted only on Linux targets
 until then.
 
-**Plan, as built: offline.** A Plan runtime runs with no network, not on
-`proxied`. Linux confinement starts a proxied launch's command from its
-forwarder, which needs the fork and exec Plan's process filter denies, so
-Plan and `proxied` cannot hold together in one capsule today. Of the two
-rules, 6b kept Plan's process grant and gave up the network rather than the
-other way round, because the narrower capsule fails closed: a Plan runtime
-that cannot reach its provider fails its turn, and none reaches anything
-unrecorded. Until a forwarder can run under the Plan filter, a driver that
-declares Plan places a runtime that cannot reach its model there.
+**Plan, as built: proxied through a nested capsule (maintainer decision,
+2026-10-27).** A Plan runtime runs on `proxied` as R3 says. Linux confinement
+starts a proxied launch's command from its forwarder, which needs the fork
+and exec Plan's process filter denies, so for a process-denied launch the
+forwarder alone runs outside the filter and starts a nested Bubblewrap that
+keeps every mount of the capsule, takes a pid namespace and `/proc` of its
+own, and loads Plan's filter onto the runtime
+(`apps/server/src/process/linuxConfinement.ts`). The forwarder's fork and
+exec of that nested capsule is the whole loosening: the runtime keeps Plan's
+read-only root and every other Plan restriction, cannot start a process
+(fork and `execveat` are refused, which the `runtime-fork-after-start` and
+`runtime-exec-after-start` canaries prove in the nested capsule), and cannot
+see or trace the forwarder. Residual, as for every Plan launch: the filter
+does not refuse `execve`, so the runtime can replace itself with a program
+its capsule shows (its binary's folders and interpreter, the forwarder's
+runtime, Bubblewrap, which cannot clone there, or a file with an execute bit
+in what it may write); host program folders stay masked. The outer capsule
+leaves `/proc/sys` uncovered, because the kernel refuses a new `/proc` under
+a covered one (measured on bubblewrap 0.9.0); the nested capsule covers its
+own, and only the forwarder sees the outer one. On a root host the nested
+capsule cannot map its uid and the runtime never starts, and the executor
+refuses a root target anyway. Rejected: running Plan offline, as 6b first
+built it, which left a Plan runtime unable to reach its model; and allowing
+fork and exec to the whole Plan capsule, which would let the runtime start
+programs.
 
 #### Which runtimes first
 
@@ -1072,7 +1088,9 @@ Each is its own reviewable change with this section updated in place.
     `providerRuntimeEgress.ts` in `apps/server/src/sshTarget/`). Its evidence
     is `sshTargetLoopback.smoke.test.ts` (a fixture runtime under Bubblewrap
     on the loopback target, in Plan and approval-gated, echoing while a read
-    and a command run beside it; refused a write outside its root and home,
+    and a command run beside it and reaching a public name through its
+    journaled proxy in both, the Plan one refused starting its own binary or
+    a shell; refused a write outside its root and home,
     `~/.ssh`, the target's loopback, a private name, and an address, and its
     allowed public connection and refusals journaled here; a binary inside
     the root or in a world-writable folder, a linked home, and a fifth
@@ -1110,9 +1128,9 @@ Each is its own reviewable change with this section updated in place.
 6b settled these details the decisions above leave open, each in the
 fail-closed direction:
 
-- **Plan runs offline.** See the end of R3: Plan's process filter and a
-  proxied launch's forwarder cannot share a capsule, so the process grant
-  stays and the network goes.
+- **Plan runs proxied through a nested capsule** (maintainer decision,
+  2026-10-27). See the end of R3: the forwarder alone runs outside Plan's
+  process filter, and the runtime keeps it.
 - **Stopping is a frame, not a request.** `stop-process` names the stream
   and travels beside the request slot, so a stop never waits behind a
   ten-minute command. One for a stream that never carried a process ends the
@@ -1140,7 +1158,8 @@ fail-closed direction:
   posture's command probes and these runtime probes all reported a refusal:
   in Plan, writing the root, writing read-only account state, exec, fork,
   reading `~/.ssh`, reading another runtime's home, and connecting around the
-  proxy; in the writing postures, writing outside the root and home, writing
+  proxy, each run proxied in the nested capsule a Plan runtime gets; in the
+  writing postures, writing outside the root and home, writing
   read-only account state, reading `~/.ssh`, reading another runtime's home,
   and connecting around the proxy. An escape in any of them refuses the whole
   connection, as any escape does. The probes run with the same grant
@@ -1174,8 +1193,8 @@ fail-closed direction:
   and another one stops the runtime and fails with `interrupted`, so the
   runtime is acquired again in the new posture.
 - **No proxy, no networked runtime.** A host without a runtime proxy (any
-  platform but macOS and Linux) places no runtime in a writing posture,
-  rather than run it offline or on the target's own network.
+  platform but macOS and Linux) places no runtime in any posture, rather
+  than run it offline or on the target's own network.
 - **What the records hold.** The runtime egress aggregate is
   `provider-runtime-egress`, one per launch: `launch-started` names the
   thread, Project, provider instance, target, and session; decisions and the

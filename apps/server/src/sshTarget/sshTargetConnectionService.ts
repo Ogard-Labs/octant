@@ -52,7 +52,7 @@ import {
   type SshExecutorRemoveWorktreeRequest,
   type SshExecutorWorktreeCreatedReply,
   type SshExecutorWorktreeRemovedReply,
-  SshPlacedAccountState,
+  SshExecutorStartProcessRequest,
 } from "@octant/contracts/ssh-executor-protocol";
 import {
   SSH_CANARY_PROBES_BY_POSTURE,
@@ -127,7 +127,12 @@ const decodeTargetId = Schema.decodeUnknownSync(SshTargetId);
 const decodeProbeId = Schema.decodeUnknownSync(SshHostKeyProbeId);
 const decodePinnedHostKey = Schema.decodeUnknownEither(SshPinnedHostKey);
 const decodeRemotePath = Schema.decodeUnknownEither(SshRemotePath);
-const decodeAccountState = Schema.decodeUnknownEither(Schema.Array(SshPlacedAccountState));
+// A launch is checked against the request's own bounds here, because a frame
+// the executor cannot decode ends the session every other launch shares.
+const placedFields = SshExecutorStartProcessRequest.fields;
+const decodeAccountState = Schema.decodeUnknownEither(placedFields.accountState);
+const decodePlacedArgs = Schema.decodeUnknownEither(placedFields.args);
+const decodePlacedHome = Schema.decodeUnknownEither(placedFields.home);
 
 /** How long a stopped runtime has to end on the target before this host stops waiting. */
 const PLACED_STOP_WAIT_MS = 10_000;
@@ -149,8 +154,8 @@ export interface SshTargetConnectionServiceOptions {
   readonly readTimeoutMs?: number;
   /**
    * The proxy a placed runtime's network goes through on this host. Without
-   * it no runtime is placed in a posture that needs the network; nothing
-   * falls back to the target's own.
+   * it no runtime is placed in any posture; nothing falls back to the
+   * target's own network or runs offline.
    */
   readonly runtimeEgress?: ProviderRuntimeEgress;
 }
@@ -373,9 +378,9 @@ export class SshTargetConnectionService {
    * The remote placement a provider driver launches its runtime through.
    * Each launch is admitted in the placement's posture at that moment, from
    * the driver's declaration and this connection's runtime canaries, and
-   * travels only on the session the placement names. A writing posture's
-   * runtime reaches the network only through a proxy of its own on this
-   * host; Plan's runs offline. The runtime stops when the launch's scope
+   * travels only on the session the placement names. In every posture, Plan
+   * included, the runtime reaches the network only through a proxy of its
+   * own on this host. The runtime stops when the launch's scope
    * closes, ends with its session, and is stopped when the thread's posture
    * moves. A refused or lost target fails the launch; nothing runs here
    * instead.
@@ -434,43 +439,39 @@ export class SshTargetConnectionService {
     const root = decodeRemotePath(input.root);
     const executable = decodeRemotePath(launch.executable);
     const accountState = decodeAccountState(launch.accountState ?? []);
-    if (root._tag === "Left" || executable._tag === "Left" || accountState._tag === "Left") {
+    const args = decodePlacedArgs(launch.args);
+    const home = decodePlacedHome({ project: input.projectId, instance: input.providerInstanceId });
+    if (
+      root._tag === "Left" ||
+      executable._tag === "Left" ||
+      accountState._tag === "Left" ||
+      args._tag === "Left" ||
+      home._tag === "Left"
+    ) {
       return refusedWith({
         category: "invalid-configuration",
         message: "The runtime's path, arguments, or account state cannot be placed on a target.",
       });
     }
-    let egress:
-      | {
-          readonly endpoint: ToolEgressProxyEndpoint;
-          readonly token: string;
-          readonly close: () => Promise<void>;
-        }
-      | undefined;
-    if (input.posture !== "plan") {
-      const started =
-        this.#runtimeEgress === undefined
-          ? undefined
-          : await this.#runtimeEgress.start({
-              threadId: input.threadId,
-              projectId: input.projectId,
-              providerInstanceId: input.providerInstanceId,
-              targetId: session.targetId,
-              connectionId: session.connectionId,
-              resolveAll: (host) => this.resolveOnTarget(session, host),
-              connect: (destination) => this.dialFromTarget(session, destination),
-            });
-      if (started?.status !== "listening") {
-        return refusedWith({
-          category: "unavailable",
-          message: "This host could not start the runtime's network proxy.",
-        });
-      }
-      egress = started;
+    const egress =
+      this.#runtimeEgress === undefined
+        ? undefined
+        : await this.#runtimeEgress.start({
+            threadId: input.threadId,
+            projectId: input.projectId,
+            providerInstanceId: input.providerInstanceId,
+            targetId: session.targetId,
+            connectionId: session.connectionId,
+            resolveAll: (host) => this.resolveOnTarget(session, host),
+            connect: (destination) => this.dialFromTarget(session, destination),
+          });
+    if (egress?.status !== "listening") {
+      return refusedWith({
+        category: "unavailable",
+        message: "This host could not start the runtime's network proxy.",
+      });
     }
-    const closeEgress = async () => {
-      await egress?.close();
-    };
+    const closeEgress = () => egress.close();
     // The proxy's start waited; the decision is made again with the request,
     // on the session it admitted.
     const second = admitted();
@@ -481,23 +482,19 @@ export class SshTargetConnectionService {
         second ?? { category: "unavailable", message: "The session to the SSH target ended." },
       );
     }
-    const proxy = egress;
     const opened = await channel.startProcess(
       {
         kind: "start-process",
         root: root.right,
         posture: input.posture,
-        ...(proxy === undefined
-          ? { network: "none" as const }
-          : { network: "proxied" as const, egressToken: proxy.token }),
+        network: "proxied",
+        egressToken: egress.token,
         executable: executable.right,
-        args: launch.args,
+        args: args.right,
         accountState: accountState.right,
-        home: { project: input.projectId, instance: input.providerInstanceId },
+        home: home.right,
       },
-      proxy === undefined
-        ? undefined
-        : { onStream: (stream) => joinToStream(connectToProxy(proxy.endpoint), stream) },
+      { onStream: (stream) => joinToStream(connectToProxy(egress.endpoint), stream) },
       this.#readTimeoutMs,
     );
     if (opened.status !== "started") {

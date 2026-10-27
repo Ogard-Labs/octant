@@ -394,19 +394,17 @@ const PlacedArgument = Schema.String.pipe(
 /**
  * Starts a provider runtime in the bound root, confined with the posture's
  * attested runtime grants, its standard input and output the even stream this
- * host names. Plan runs it offline, because the forwarder a proxied launch
- * starts its command from needs the fork and exec Plan denies; a writing
- * posture runs it on this host's proxy for the launch, never the target's own
- * network. Its home is one owner-only folder per Project and provider
- * instance on the target; the executor derives the folder, so this host
- * never names a path to write.
+ * host names. In every posture, Plan included, it runs on this host's proxy
+ * for the launch, never the target's own network. Its home is one owner-only
+ * folder per Project and provider instance on the target; the executor
+ * derives the folder, so this host never names a path to write.
  */
 export const SshExecutorStartProcessRequest = Schema.Struct({
   kind: Schema.Literal("start-process"),
   root: SshRemotePath,
   posture: SshConfinedPosture,
-  network: Schema.Literal("none", "proxied"),
-  egressToken: Schema.optional(SshEgressToken),
+  network: Schema.Literal("proxied"),
+  egressToken: SshEgressToken,
   executable: SshRemotePath,
   args: Schema.Array(PlacedArgument).pipe(Schema.maxItems(64)),
   accountState: Schema.Array(SshPlacedAccountState).pipe(
@@ -414,15 +412,7 @@ export const SshExecutorStartProcessRequest = Schema.Struct({
   ),
   home: Schema.Struct({ project: Schema.UUID, instance: Schema.UUID }).annotations(strict),
   stream: HostOpenedStreamId,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (request) =>
-        (request.network === "proxied") === (request.egressToken !== undefined) &&
-        (request.network === "none") === (request.posture === "plan"),
-    ),
-  );
+}).annotations(strict);
 export type SshExecutorStartProcessRequest = typeof SshExecutorStartProcessRequest.Type;
 
 export const SshExecutorRequest = Schema.Union(

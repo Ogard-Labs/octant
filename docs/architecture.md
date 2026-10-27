@@ -5278,13 +5278,13 @@ listener per confined launch:
   the target, while the private check and every decision stay here
   ([Native harness on a target](design/remote-ssh-environments.md#native-harness-on-a-target)).
 - **Provider runtimes on an SSH target.** A runtime placed on a target runs
-  on `proxied` in the writing postures through a proxy of its own on this
-  host that decides under the runtime rule (`decideProviderRuntimeEgress`):
-  any public name, with no thread or Project rule and nothing proposed,
-  and the same private-address check, so the target's own network and a
-  cloud machine's metadata service stay out of reach. Its records are the
-  `provider-runtime-egress` aggregate and taint no thread. In Plan it runs
-  offline
+  on `proxied` in every posture, Plan included, through a proxy of its own
+  on this host that decides under the runtime rule
+  (`decideProviderRuntimeEgress`): any public name, with no thread or Project
+  rule and nothing proposed, and the same private-address check, so the
+  target's own network and a cloud machine's metadata service stay out of
+  reach. Its records are the `provider-runtime-egress` aggregate and taint no
+  thread
   ([Runtime placement](design/remote-ssh-environments.md#runtime-placement)).
 - **Environment.** The launch environment adds `HTTPS_PROXY`, `HTTP_PROXY`,
   and `ALL_PROXY` (and their lowercase forms) set to
@@ -5542,8 +5542,15 @@ where it was or narrows it:
   under Electron) from the launch's `0700` socket directory, bound read-only
   together with the runtime's directory, so no command can rewrite it. It
   listens on `127.0.0.1:3128` in the private namespace and exits 125 without
-  running the command when it cannot listen. A proxied capsule refuses a
-  process-deny filter, because the forwarder starts the command.
+  running the command when it cannot listen. A process-denied (Plan) proxied
+  launch, which only a Plan runtime on an SSH target makes, keeps the
+  forwarder outside the process-deny filter: the forwarder starts a nested
+  Bubblewrap that keeps every mount of the capsule, takes a pid namespace and
+  `/proc` of its own (so the command cannot see or trace the forwarder), and
+  loads the filter onto the command alone. The outer capsule then leaves
+  `/proc/sys` uncovered, because the kernel refuses a new `/proc` under a
+  covered one; the nested capsule covers its own, and on a root host it
+  cannot map its uid and the command never starts.
 - _Linux native probes._ They ran on 2026-10-16 on arm64 Ubuntu 24.04 with
   bubblewrap 0.9.0 and passed. All 11 `commands on proxied network` cases ran,
   none skipped. The capsule is load-bearing: with a broken `bwrap`, 9 of the 11

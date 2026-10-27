@@ -193,10 +193,12 @@ export function checkRuntimeBinary(
     return refused("runtime-binary-not-confinable");
   }
   const parent = dirname(folder);
+  // The binary's folder is resolved, so the home is compared resolved too: a
+  // home reached through a link would otherwise not match its own real path.
   const parentReachesForbidden =
     parent === folder ||
     parent === "/" ||
-    within(environment.homeDirectory, parent) ||
+    within(canonical(environment.homeDirectory), parent) ||
     forbidden.some((candidate) => overlaps(parent, candidate));
   return {
     status: "granted",

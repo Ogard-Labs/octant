@@ -136,6 +136,7 @@ process.stdin.on("data", (chunk) => {
     }
     if (request.type !== "request") continue;
     if (request.request.kind === "attest") fs.writeFileSync(process.env.FAKE_SSH_REQUEST, JSON.stringify(request));
+    if (request.request.kind === "start-process") fs.writeFileSync(process.env.FAKE_SSH_REQUEST + ".start-process", JSON.stringify(request));
     fs.appendFileSync(process.env.FAKE_SSH_REQUEST + ".log", request.request.kind + "\n");
     const outOfTurn = mode === "answers-out-of-turn" && request.request.kind !== "attest";
     process.stdout.write(frame({ type: "reply", id: request.id + (outOfTurn ? 1 : 0), reply: answer(request.request) }));
@@ -851,12 +852,20 @@ describe("SSH target connection service", () => {
       ),
     };
     let proxies = 0;
+    let proxiesClosed = 0;
     const connections = service({
       facts: unproven,
       runtimeEgress: {
         start: async () => {
           proxies += 1;
-          return { status: "refused" };
+          return {
+            status: "listening",
+            endpoint: { kind: "unix-socket", path: join(directory, "runtime-proxy.sock") },
+            token: "b".repeat(64),
+            close: async () => {
+              proxiesClosed += 1;
+            },
+          };
         },
       },
     });
@@ -877,7 +886,7 @@ describe("SSH target connection service", () => {
       }),
     ).toEqual({ status: "admitted" });
 
-    // Plan's runtime canaries passed, and Plan's runtime needs no proxy.
+    // Plan's runtime canaries passed, and Plan's runtime runs on a proxy of its own too.
     const scope = Effect.runSync(Scope.make());
     const placed = await Effect.runPromise(
       Scope.extend(
@@ -898,15 +907,20 @@ describe("SSH target connection service", () => {
     await Effect.runPromise(placed.write(Buffer.from("hello")));
     expect([...(await Effect.runPromise(Fiber.join(output)))].join("")).toBe("hello");
     expect(requests()).toEqual(["attest", "start-process"]);
+    expect(proxies).toBe(1);
+    expect(
+      JSON.parse(readFileSync(join(directory, "request.json.start-process"), "utf8")).request,
+    ).toMatchObject({ posture: "plan", network: "proxied", egressToken: "b".repeat(64) });
     await Effect.runPromise(Scope.close(scope, Exit.void));
     expect(requests()).toEqual(["attest", "start-process", "stop-process"]);
+    expect(proxiesClosed).toBe(1);
     connections.close();
   });
 
   it("ends a placed runtime with its session, and places nothing on the next session", async () => {
     const requests = () =>
       readFileSync(join(directory, "request.json.log"), "utf8").trim().split("\n");
-    const connections = service();
+    const connections = service({ runtimeEgress: listeningEgress() });
     const status = await registered(connections);
     const session = connections.session(status.target.id);
     if (session === undefined) throw new Error("no session");
@@ -924,20 +938,80 @@ describe("SSH target connection service", () => {
     connections.close();
   });
 
-  it("places no runtime in a networked posture on a host without a runtime proxy", async () => {
+  it("refuses a launch whose arguments or home cannot be placed, without a frame and keeping the session", async () => {
     const requests = () =>
       readFileSync(join(directory, "request.json.log"), "utf8").trim().split("\n");
     const connections = service();
     const status = await registered(connections);
     const session = connections.session(status.target.id);
     if (session === undefined) throw new Error("no session");
+    const failure = async (input: SshTargetPlacementInput, args: ReadonlyArray<string>) => {
+      const exit = await Effect.runPromiseExit(
+        Effect.scoped(
+          connections.placement(input).launch({ executable: "/opt/agent/bin/agent", args }),
+        ),
+      );
+      return Exit.isFailure(exit) && exit.cause._tag === "Fail" ? exit.cause.error : undefined;
+    };
+    for (const args of [["a\u0000b"], ["x".repeat(4_097)], Array.from({ length: 65 }, () => "x")]) {
+      expect(await failure(placementOn(session, "plan"), args)).toMatchObject({
+        category: "invalid-configuration",
+      });
+    }
     expect(
-      await launchExit(connections.placement(placementOn(session, "approval-gated"))),
-    ).toMatchObject({ category: "unavailable" });
+      await failure({ ...placementOn(session, "plan"), projectId: "not-a-project" }, []),
+    ).toMatchObject({ category: "invalid-configuration" });
+    const fiveStates = await Effect.runPromiseExit(
+      Effect.scoped(
+        connections.placement(placementOn(session, "plan")).launch({
+          executable: "/opt/agent/bin/agent",
+          args: [],
+          accountState: Array.from({ length: 5 }, (_, index) => ({
+            path: `.agent${String(index)}`,
+            access: "read-only" as const,
+          })),
+        }),
+      ),
+    );
+    expect(
+      Exit.isFailure(fiveStates) && fiveStates.cause._tag === "Fail"
+        ? fiveStates.cause.error
+        : undefined,
+    ).toMatchObject({ category: "invalid-configuration" });
+    // Nothing reached the executor, and the session every other launch shares is still up.
+    expect(requests()).toEqual(["attest"]);
+    expect(connections.session(status.target.id)?.connectionId).toBe(session.connectionId);
+    connections.close();
+  });
+
+  it("places no runtime, in any posture, on a host without a runtime proxy", async () => {
+    const requests = () =>
+      readFileSync(join(directory, "request.json.log"), "utf8").trim().split("\n");
+    const connections = service();
+    const status = await registered(connections);
+    const session = connections.session(status.target.id);
+    if (session === undefined) throw new Error("no session");
+    for (const posture of ["plan", "approval-gated"] as const) {
+      expect(await launchExit(connections.placement(placementOn(session, posture)))).toMatchObject({
+        category: "unavailable",
+      });
+    }
     expect(requests()).toEqual(["attest"]);
     connections.close();
   });
 });
+
+/** A runtime proxy that listens on a socket nothing serves; the fake executor never dials it. */
+function listeningEgress(): ProviderRuntimeEgress {
+  return {
+    start: async () => ({
+      status: "listening",
+      endpoint: { kind: "unix-socket", path: join(directory, "runtime-proxy.sock") },
+      token: "b".repeat(64),
+      close: async () => undefined,
+    }),
+  };
+}
 
 const placementDriver = {
   remotePlacement: { postures: ["plan", "approval-gated"], appToolTransport: "stdio" },

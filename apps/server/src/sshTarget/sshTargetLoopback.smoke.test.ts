@@ -633,6 +633,10 @@ lines.on("line", (line) => {
       case "list":
         fs.readdirSync(request.path);
         return done(true);
+      case "spawn": {
+        const started = require("node:child_process").spawnSync(request.path, ["-c", "exit 0"]);
+        return started.error === undefined ? done(true, started.status) : done(false, started.error.code);
+      }
       case "connect": {
         const socket = net.connect({ host: request.host, port: request.port });
         socket.once("connect", () => { socket.destroy(); done(true); });
@@ -711,6 +715,20 @@ function placementFor(
     permissionPersistence: "current-session",
     currentPosture: () => posture,
     ...overrides,
+  });
+}
+
+/** This host's real runtime proxy, journaled, on a Unix socket in its own folder. */
+function journaledRuntimeEgress(folder: string): ProviderRuntimeEgress {
+  if (journal === undefined) throw new Error("the journal opens before the tests");
+  const egressDirectory = join(root, folder);
+  mkdirSync(egressDirectory, { recursive: true, mode: 0o700 });
+  return createProviderRuntimeEgress({
+    journal: journal.journal,
+    endpoint: { kind: "unix-socket", parentDirectory: egressDirectory },
+    hostActor: systemActor,
+    uuid: randomUUID,
+    clock: () => new Date().toISOString(),
   });
 }
 
@@ -1714,15 +1732,7 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
     const fixturePort =
       typeof fixtureAddress === "object" && fixtureAddress !== null ? fixtureAddress.port : 0;
     if (journal === undefined) throw new Error("the journal opens before the tests");
-    const egressDirectory = join(root, "host-runtime-egress");
-    mkdirSync(egressDirectory, { recursive: true, mode: 0o700 });
-    const realEgress = createProviderRuntimeEgress({
-      journal: journal.journal,
-      endpoint: { kind: "unix-socket", parentDirectory: egressDirectory },
-      hostActor: systemActor,
-      uuid: randomUUID,
-      clock: () => new Date().toISOString(),
-    });
+    const realEgress = journaledRuntimeEgress("host-runtime-egress");
     // The target's resolver has no record for the fixture's names, so the
     // test answers them: the public one with a public address the target
     // then dials the fixture in place of, the other with a private one. The
@@ -1769,7 +1779,7 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
       ] as const;
       const sshDirectory = join(root, "nobody-home", ".ssh");
 
-      // Plan: offline, the root read-only, its own home writable.
+      // Plan: the root read-only, its own home writable, the network only this host's proxy.
       const plan = await launchRuntime(placementFor(connections, bound.value, "plan"), {
         executable: binary,
         accountState,
@@ -1810,6 +1820,20 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
       expect(await plan.ask({ op: "connect", host: "127.0.0.1", port: sshdPort })).toMatchObject({
         ok: false,
       });
+      // Its forwarder started it, yet it still starts nothing itself: not its
+      // own binary, and not a shell.
+      for (const program of [binary, "/bin/sh"]) {
+        expect(await plan.ask({ op: "spawn", path: program })).toEqual({
+          ok: false,
+          detail: "EPERM",
+        });
+      }
+      expect(await plan.ask({ op: "fetch", host: "api.provider.example" })).toEqual({
+        ok: true,
+        detail: "HTTP/1.1 200 OK",
+      });
+      const planPrivate = await plan.ask({ op: "fetch", host: "private.provider.example" });
+      expect(String(planPrivate.detail)).toContain("private-destination");
       const stateFolder = await plan.ask({ op: "env", name: "AGENT_STATE" });
       expect(stateFolder).toEqual({ ok: true, detail: accountFolder });
       expect(await plan.ask({ op: "read", path: join(accountFolder, "token") })).toEqual({
@@ -1835,6 +1859,8 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
         await writing.ask({ op: "write", path: join(outsideFolder, "escaped") }),
       ).toMatchObject({ ok: false });
       expect(await writing.ask({ op: "list", path: sshDirectory })).toMatchObject({ ok: false });
+      // The writing postures may start programs, so Plan's refusal above is its filter.
+      expect(await writing.ask({ op: "spawn", path: binary })).toMatchObject({ ok: true });
       expect(await writing.ask({ op: "connect", host: "127.0.0.1", port: sshdPort })).toMatchObject(
         { ok: false },
       );
@@ -1858,9 +1884,26 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
         afterSequence: 0,
         limit: 1_000,
       });
-      const started = recorded.find(
-        (event) => event.eventName === "provider-runtime-egress.launch-started@1",
+      const launches = recorded.filter(
+        (event) =>
+          event.eventName === "provider-runtime-egress.launch-started@1" &&
+          (event.payload as { readonly targetId?: unknown }).targetId === status.target.id,
       );
+      // One launch each for the Plan and the approval-gated runtime.
+      expect(launches).toHaveLength(2);
+      for (const launchStarted of launches) {
+        const launchSummary = recorded.find(
+          (event) =>
+            event.eventName === "provider-runtime-egress.launch-summarized@1" &&
+            String(event.aggregateId) === String(launchStarted.aggregateId),
+        );
+        expect(launchSummary?.payload).toMatchObject({
+          entries: expect.arrayContaining([
+            expect.objectContaining({ host: "api.provider.example", decision: "allowed" }),
+          ]),
+        });
+      }
+      const started = launches[1];
       expect(started?.payload).toMatchObject({
         providerInstanceId: runtimeInstance,
         targetId: status.target.id,
@@ -1892,7 +1935,10 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
     const binary = runtimeBinary(join(root, "runtime-bin"));
     const inside = runtimeBinary(join(checkout, "tools"));
     const open = runtimeBinary(join(root, "runtime-open"), 0o777);
-    const connections = service();
+    const connections = service(
+      developmentBuild,
+      journaledRuntimeEgress("runtime-egress-refusals"),
+    );
     const status = await register(connections, target("runtime-refusals", asNobody()));
     try {
       const bound = await projectsOn(connections).bind({
@@ -1939,7 +1985,10 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
   it("ends a placed runtime with its session, and runs nothing of it on the next", async () => {
     const checkout = harnessCheckout("runtime-disconnect");
     const binary = runtimeBinary(join(root, "runtime-bin"));
-    const connections = service();
+    const connections = service(
+      developmentBuild,
+      journaledRuntimeEgress("runtime-egress-disconnect"),
+    );
     const status = await register(connections, target("runtime-disconnect", asNobody()));
     try {
       const bound = await projectsOn(connections).bind({

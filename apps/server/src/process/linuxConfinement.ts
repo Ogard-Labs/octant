@@ -207,13 +207,16 @@ export function buildBubblewrapLaunch(
         "A proxied Linux launch needs its proxy's Unix socket.",
       );
     }
-    if (input.allowProcessFork === false || input.allowProcessExec === false) {
-      throw new ProcessConfinementError(
-        "incompatible",
-        "A proxied Linux launch starts its command from the forwarder, so it needs fork and exec.",
-      );
-    }
   }
+  // A proxied launch starts its command from the forwarder, which needs the
+  // fork and exec a process-denied (Plan) launch may not have. Such a launch
+  // runs its command in a nested Bubblewrap the forwarder starts: the
+  // forwarder alone runs without the process filter, and the nested capsule
+  // loads it onto the command, in a pid namespace of its own so the command
+  // can neither see nor trace the forwarder. The command keeps every
+  // mount of this capsule, so it reads and writes exactly what it would here.
+  const nestedForProcessDenial =
+    proxied !== undefined && (input.allowProcessFork === false || input.allowProcessExec === false);
   const args: string[] = ["--unshare-all"];
   if (input.networkEgress === "allow") {
     args.push("--share-net");
@@ -243,7 +246,14 @@ export function buildBubblewrapLaunch(
   // `kernel.core_pattern`, which runs a program as host root on the next
   // crash. Sysctl values follow the reader's namespaces, not the procfs
   // mount, so binding the host's tree changes nothing a workload reads.
-  args.push("--ro-bind", "/proc/sys", "/proc/sys");
+  // A nested capsule mounts its own `/proc`, which the kernel refuses while
+  // anything covers part of this one (measured on bwrap 0.9.0: "Can't mount
+  // proc on /newroot/proc: Operation not permitted"), so the nested capsule
+  // puts the same cover on its own `/proc` instead. Only the forwarder sees
+  // this one, and a root host's nested capsule cannot map its uid (measured
+  // on bwrap 0.9.0: "setting up uid map: Operation not permitted") and never
+  // starts the command.
+  if (!nestedForProcessDenial) args.push("--ro-bind", "/proc/sys", "/proc/sys");
 
   if (input.networkEgress === "allow" && existsSync("/run/systemd/resolve")) {
     args.push("--ro-bind", "/run/systemd/resolve", "/run/systemd/resolve");
@@ -348,6 +358,14 @@ export function buildBubblewrapLaunch(
     addMount("ro-bind", socketDirectory, socketDirectory);
     tryBindReadOnly(dirname(runtime));
     forwarder = { runtime, script };
+  }
+  // The masks below hide every host program from a process-denied launch;
+  // the forwarder's runtime and the nested Bubblewrap stay, bound as single
+  // files. Neither lets the command start anything: under the filter it can
+  // only replace itself with one, and Bubblewrap cannot clone there.
+  if (nestedForProcessDenial && forwarder !== undefined) {
+    tryBindReadOnly(forwarder.runtime);
+    tryBindReadOnly(bwrapPath);
   }
   // Bubblewrap applies seccomp before execve of the command, so a filter that
   // blocked execve would prevent the launch itself. Overlay host executable
@@ -499,13 +517,49 @@ export function buildBubblewrapLaunch(
       forwarder.script,
       proxied.endpoint.path,
       String(LINUX_EGRESS_FORWARDER_PORT),
-      input.executable,
     );
+    if (nestedForProcessDenial) {
+      const filter = buildLinuxProcessDenySeccompFilter({
+        arch: linuxSeccompArch(options.processArch ?? process.arch),
+        denyFork: denyProcessFork,
+        denyExec: denyProcessExec,
+      });
+      const seccompPath = writeProcessDenySeccompFilter(
+        input.temporaryDirectory,
+        filter,
+        `${denyProcessFork ? "-fork" : ""}${denyProcessExec ? "-exec" : ""}`,
+      );
+      args.push(
+        "--child-seccomp",
+        seccompPath,
+        bwrapPath,
+        "--unshare-user",
+        "--unshare-pid",
+        "--die-with-parent",
+        "--cap-drop",
+        "ALL",
+        "--dev-bind",
+        "/",
+        "/",
+        "--proc",
+        "/proc",
+        "--ro-bind",
+        "/proc/sys",
+        "/proc/sys",
+        "--chdir",
+        input.boundRoot,
+        "--seccomp",
+        "3",
+        "--",
+      );
+    }
+    args.push(input.executable);
   } else {
     args.push("--", input.executable);
   }
   args.push(...input.args);
 
+  if (nestedForProcessDenial) return { command: bwrapPath, args };
   if (denyProcessFork || denyProcessExec) {
     const filter = buildLinuxProcessDenySeccompFilter({
       arch: linuxSeccompArch(options.processArch ?? process.arch),
