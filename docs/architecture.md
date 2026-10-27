@@ -215,13 +215,21 @@ turn (Plan included) whose provider carries Octant's tools; they read the saved
 file, never an editor's draft, and never start or read through a server that
 runs repository tooling, approved or not
 ([agent read rules](design/language-services.md#agent-read-rules)).
-Of the debugger, only the seam is built: the `debug-adapter` component kind
-(Code only, quarantined like any executable component), the
-`octant-debug-adapter.json` package document, which the host refuses to
-install until it can review one, the pure start policy, the configuration
-schema, and the mapping from a repository launch file to proposals. Nothing
-starts a debug session yet
-([Debugger seam rules](design/language-services.md#debugger-seam-rules)).
+The debugger's seam and session host are built: the `debug-adapter`
+component kind (Code only, quarantined like any executable component), the
+`octant-debug-adapter.json` package document, which installs from a local
+folder untrusted and disabled with a review of its binary, digest, runtimes,
+and `launch` body, the pure start policy, the configuration schema, and the
+mapping from a repository launch file to proposals. A person at a local
+window confirms a configuration (a journaled `shell-commands` approval for one
+configuration digest and adapter package state) and starts it; the adapter and
+the program run in one capsule confined as a terminal, on the session's own
+`proxied` egress under the thread's rules below Full access, and the session
+ends at once when the thread, its posture, its checkout, the confirmation, or
+the Project goes. The routes under `/api/code/debug/` are local-window only
+with no remote action, no agent tool reaches a session, and nothing a session
+shows is journaled. The Run and debug panel that calls them is not built yet
+([Debugger session rules](design/language-services.md#debugger-session-rules)).
 
 **Host resources.** `GET /api/host/resources` is a read-only snapshot of this
 host's load: CPU use averaged over a short sample of the process's CPU times,

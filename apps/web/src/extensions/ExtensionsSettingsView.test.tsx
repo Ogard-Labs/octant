@@ -2040,6 +2040,72 @@ describe("local Agent Plugin import", () => {
     ).toBeVisible();
   });
 
+  it("names a debug adapter's binary, digest, runtimes, launch request, and port, and what trusting it grants, before install", async () => {
+    const snapshot = installedSnapshot({ activation: baseActivation({ installed: false }) });
+    const c = client({ snapshot });
+    const binaryDigest = `sha256:${"d".repeat(64)}`;
+    c.importLocalPluginReceipt = vi.fn(async () => ({
+      kind: "package-inspected",
+      preview: {
+        entry: {
+          extensionId: extensionId as never,
+          packageId: packageId as never,
+          slug: "debugpy" as never,
+          displayName: "Python (debugpy)",
+          version: "1.8.22" as never,
+          digest: digest as never,
+          source: {
+            kind: "local-folder",
+            sourceRef: "local-dddddddddddddddddddddddddddddddd" as never,
+          },
+        },
+        review: previewReview({
+          declaredCapabilities: ["filesystem", "shell", "network"],
+          components: [
+            {
+              id: "adapter",
+              kind: "debug-adapter",
+              displayName: "Python (debugpy)",
+              declaredCapabilities: ["filesystem", "shell", "network"],
+              debugAdapter: {
+                runtimes: ["python"],
+                launchArguments: { type: "python", program: "{{program}}" },
+                importTypes: ["python"],
+                debugPorts: 0,
+                binary: "bin/adapter",
+                binaryDigest,
+              },
+            },
+          ],
+        } as never),
+        diagnostics: [],
+      },
+    })) as never;
+
+    render(
+      <ExtensionsSettingsView
+        client={c}
+        pickLocalPluginFolder={async () => ({ receiptId: "R".repeat(43), displayName: "debugpy" })}
+        scope={scope}
+      />,
+    );
+    fireEvent.click(await findViewButton(/marketplace/i));
+    fireEvent.click(await screen.findByRole("button", { name: /import local agent plugin/i }));
+
+    const review = await screen.findByLabelText("Debug adapter review");
+    expect(within(review).getByText("bin/adapter")).toBeVisible();
+    expect(within(review).getByText(binaryDigest)).toBeVisible();
+    expect(within(review).getByText("python")).toBeVisible();
+    expect(within(review).getByText("None")).toBeVisible();
+    expect(screen.getByText(/"program": "\{\{program\}\}"/)).toBeVisible();
+    expect(
+      screen.getByText(
+        /it runs programs from the checkout and can write the checkout\. it reaches only the hosts the thread's network rules allow, and runs only a configuration you confirm and start yourself\. it never runs in plan, for a paired device, or for an agent\./i,
+      ),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: /confirm install/i })).toBeInTheDocument();
+  });
+
   it("says before install that a server running the repository's tooling asks for an approval and what that approval grants", async () => {
     await reviewLanguageServer("repo-tooling");
     expect(

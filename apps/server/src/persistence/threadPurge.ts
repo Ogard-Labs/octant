@@ -13,6 +13,11 @@ import {
   CODE_LANGUAGE_SERVER_APPROVAL_AGGREGATE,
   CODE_LANGUAGE_SERVER_EGRESS_AGGREGATE,
 } from "@octant/contracts/code-language";
+import {
+  CODE_DEBUG_CONFIGURATION_AGGREGATE,
+  CODE_DEBUG_EGRESS_AGGREGATE,
+  CODE_DEBUG_SESSION_AGGREGATE,
+} from "@octant/contracts/code-debug";
 import { purgeAgentRunSubjectContent } from "./agentRunContentStore";
 import { purgeThreadContent } from "./chatProjection";
 import { purgeContextCompactions, purgeContextSubjectContent } from "./contextProjection";
@@ -347,11 +352,29 @@ export function erasePurgedProjectData(input: {
       `${CODE_LANGUAGE_SERVER_APPROVAL_AGGREGATE}:${projectId}`,
       { aggregateType: CODE_LANGUAGE_SERVER_APPROVAL_AGGREGATE, aggregateId: projectId },
     ],
+    [
+      `${CODE_DEBUG_CONFIGURATION_AGGREGATE}:${projectId}`,
+      { aggregateType: CODE_DEBUG_CONFIGURATION_AGGREGATE, aggregateId: projectId },
+    ],
   ]);
   // A language server's egress records are the Project's, one aggregate per
   // launch: they name the thread whose read started the server only inside
   // the launch, so a thread purge leaves them and a Project erase takes them.
   for (const aggregate of languageServerEgressAggregates(connection, projectId)) {
+    aggregates.set(`${aggregate.aggregateType}:${aggregate.aggregateId}`, aggregate);
+  }
+  // A debug session's records and its egress records are the Project's too:
+  // a thread purge takes the session records, which name the thread, and a
+  // Project erase takes both, with the confirmations above.
+  for (const aggregate of [
+    ...projectOwnedAggregates(connection, CODE_DEBUG_SESSION_AGGREGATE, "$.projectId", projectId),
+    ...projectOwnedAggregates(
+      connection,
+      CODE_DEBUG_EGRESS_AGGREGATE,
+      "$.launch.projectId",
+      projectId,
+    ),
+  ]) {
     aggregates.set(`${aggregate.aggregateType}:${aggregate.aggregateId}`, aggregate);
   }
   for (const canvasId of input.canvasIds) {
@@ -451,18 +474,29 @@ function languageServerEgressAggregates(
   connection: SqliteConnection,
   projectId: string,
 ): ReadonlyArray<AggregateKey> {
+  return projectOwnedAggregates(
+    connection,
+    CODE_LANGUAGE_SERVER_EGRESS_AGGREGATE,
+    "$.launch.projectId",
+    projectId,
+  );
+}
+
+function projectOwnedAggregates(
+  connection: SqliteConnection,
+  aggregateType: string,
+  projectPath: "$.projectId" | "$.launch.projectId",
+  projectId: string,
+): ReadonlyArray<AggregateKey> {
   const rows = connection
     .prepare(
       `SELECT DISTINCT aggregate_id FROM event_journal
-       WHERE aggregate_type = ? AND json_extract(payload_json, '$.launch.projectId') = ?`,
+       WHERE aggregate_type = ? AND json_extract(payload_json, '${projectPath}') = ?`,
     )
-    .all(CODE_LANGUAGE_SERVER_EGRESS_AGGREGATE, projectId) as ReadonlyArray<{
+    .all(aggregateType, projectId) as ReadonlyArray<{
     readonly aggregate_id: string;
   }>;
-  return rows.map((row) => ({
-    aggregateType: CODE_LANGUAGE_SERVER_EGRESS_AGGREGATE,
-    aggregateId: row.aggregate_id,
-  }));
+  return rows.map((row) => ({ aggregateType, aggregateId: row.aggregate_id }));
 }
 
 function aggregatesMatching(

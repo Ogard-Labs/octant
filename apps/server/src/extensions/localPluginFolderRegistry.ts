@@ -110,15 +110,18 @@ export class LocalPluginFolderRegistry {
       ...(entry.content === undefined ? {} : { content: entry.content }),
     }));
     const packageInput: PluginPackageInput =
-      loaded.format === "language-server-package" || loaded.format === "outside-provider-driver"
+      loaded.format === "language-server-package" ||
+      loaded.format === "outside-provider-driver" ||
+      loaded.format === "debug-adapter-package"
         ? {
             layout: loaded.format,
             source,
             format: "directory",
             archiveBytes: loaded.archiveBytes,
-            // A language server may run its one binary and nothing else, and a
-            // driver package may hold no program at all, so these layouts'
-            // files keep their execute permission for inspection to judge.
+            // A language server or a debug adapter may run its one binary and
+            // nothing else, and a driver package may hold no program at all,
+            // so these layouts' files keep their execute permission for
+            // inspection to judge.
             entries: loaded.entries.map((entry) => ({
               path: entry.path,
               kind: entry.kind === "directory" ? "directory" : "file",

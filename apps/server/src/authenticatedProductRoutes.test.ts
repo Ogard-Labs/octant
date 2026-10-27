@@ -109,6 +109,24 @@ describe("authenticated product route dispatch", () => {
         classifyProductAction(new Request(`https://octant.example${path}`, { method: "POST" })),
       ).toBe("code.language.read");
     }
+    // Debugging has no remote action: no device starts, controls, or observes a session.
+    for (const path of [
+      "/api/code/debug/configurations",
+      "/api/code/debug/approvals",
+      "/api/code/debug/start",
+      "/api/code/debug/session",
+    ]) {
+      for (const method of ["POST", "GET"]) {
+        expect(
+          classifyProductAction(new Request(`https://octant.example${path}`, { method })),
+        ).toBeUndefined();
+      }
+    }
+    expect(
+      classifyProductAction(
+        new Request("https://octant.example/api/code/debug/commands", { method: "POST" }),
+      ),
+    ).toBeUndefined();
     // Approving a server that runs the repository's tooling has no remote action.
     expect(
       classifyProductAction(

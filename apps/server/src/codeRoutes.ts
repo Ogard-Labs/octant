@@ -133,7 +133,18 @@ import {
   type CodeLanguageDocumentRequest,
   type CodeLanguageReadRequest,
 } from "@octant/contracts/code-language";
+import {
+  decodeCodeDebugApprovalRequest,
+  decodeCodeDebugApprovalResult,
+  decodeCodeDebugConfigurationsRequest,
+  decodeCodeDebugConfigurationsResult,
+  decodeCodeDebugSessionCall,
+  decodeCodeDebugSessionResult,
+  decodeCodeDebugStartRequest,
+  decodeCodeDebugStartResult,
+} from "@octant/contracts/code-debug";
 import { Schema } from "effect";
+import type { CodeDebugService } from "./code/codeDebugService";
 import type { CodeLanguageService } from "./code/codeLanguageService";
 import type { CodeService } from "./code/codeService";
 import type { FileIdentity } from "./code/fileOperationPort";
@@ -470,6 +481,11 @@ export interface CodeRouteDependencies {
    * without them, which then answers `unavailable` rather than 404.
    */
   readonly language?: Pick<CodeLanguageService, "syncDocument" | "read" | "approve">;
+  /**
+   * Debug sessions; absent on a host without them, which then answers
+   * `unavailable` rather than 404.
+   */
+  readonly debug?: Pick<CodeDebugService, "configurations" | "approve" | "start" | "session">;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxJsonBodySize?: number;
   readonly maxFileBodySize?: number;
@@ -686,6 +702,84 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             200,
             origin,
           );
+        }
+        case "debug-configurations":
+        case "debug-approvals":
+        case "debug-start":
+        case "debug-session": {
+          requireMethodAndEmptyQuery(request, url, "POST");
+          requireJsonContentType(request);
+          // Starting, controlling, and reading a session, and confirming what
+          // it runs, are the person's acts at the machine (decision DB7). The
+          // remote gate never forwards these routes; a paired device that
+          // reached one anyway is refused here before its body is read, and
+          // the service refuses it again.
+          if (callerKind !== "local-window") {
+            return failureResponse(
+              {
+                category: "unauthorized",
+                message: "Only this host's own windows can debug a program.",
+              },
+              403,
+              origin,
+            );
+          }
+          if (dependencies.debug === undefined) {
+            return failureResponse(
+              { category: "unavailable", message: "Code debugging is unavailable." },
+              503,
+              origin,
+            );
+          }
+          const value = parseJson(await readBoundedBytes(request, jsonLimit));
+          if (isRecord(value) && Object.prototype.hasOwnProperty.call(value, "windowId")) {
+            throw new CodeRouteRejected("Code requests cannot supply window identity.", 400);
+          }
+          const caller = { scopeId: authenticatedWindowId, principal: callerKind };
+          const decoded = <T>(decode: (input: unknown) => T): T => {
+            try {
+              return decode(value);
+            } catch {
+              throw new CodeRouteRejected("Code debug request is invalid.", 400);
+            }
+          };
+          switch (route.kind) {
+            case "debug-configurations": {
+              const listing = decoded(decodeCodeDebugConfigurationsRequest);
+              return jsonResponse(
+                decodeCodeDebugConfigurationsResult(
+                  await dependencies.debug.configurations(caller, listing),
+                ),
+                200,
+                origin,
+              );
+            }
+            case "debug-approvals": {
+              const approval = decoded(decodeCodeDebugApprovalRequest);
+              return jsonResponse(
+                decodeCodeDebugApprovalResult(await dependencies.debug.approve(caller, approval)),
+                200,
+                origin,
+              );
+            }
+            case "debug-start": {
+              const start = decoded(decodeCodeDebugStartRequest);
+              return jsonResponse(
+                decodeCodeDebugStartResult(await dependencies.debug.start(caller, start)),
+                200,
+                origin,
+              );
+            }
+            case "debug-session": {
+              const call = decoded(decodeCodeDebugSessionCall);
+              return jsonResponse(
+                decodeCodeDebugSessionResult(await dependencies.debug.session(caller, call)),
+                200,
+                origin,
+              );
+            }
+          }
+          break;
         }
         case "language-documents":
         case "language-read": {
@@ -1641,6 +1735,10 @@ type MatchedRoute =
         | "language-documents"
         | "language-read"
         | "language-approvals"
+        | "debug-configurations"
+        | "debug-approvals"
+        | "debug-start"
+        | "debug-session"
         | "file-save"
         | "file-open"
         | "git-history"
@@ -1796,6 +1894,10 @@ function matchRoute(pathname: string): MatchedRoute | undefined {
   if (pathname === "/api/code/language/documents") return { kind: "language-documents" };
   if (pathname === "/api/code/language/read") return { kind: "language-read" };
   if (pathname === "/api/code/language/approvals") return { kind: "language-approvals" };
+  if (pathname === "/api/code/debug/configurations") return { kind: "debug-configurations" };
+  if (pathname === "/api/code/debug/approvals") return { kind: "debug-approvals" };
+  if (pathname === "/api/code/debug/start") return { kind: "debug-start" };
+  if (pathname === "/api/code/debug/session") return { kind: "debug-session" };
   if (pathname === "/api/code/files/content") return { kind: "file-save" };
   if (pathname === "/api/code/files/open") return { kind: "file-open" };
   if (pathname === "/api/code/git/history") return { kind: "git-history" };

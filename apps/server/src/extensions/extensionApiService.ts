@@ -2,7 +2,9 @@ import { createHash } from "node:crypto";
 import {
   MAX_SKILL_PREVIEW_INSTRUCTIONS_LENGTH,
   type ExtensionPackageReviewComponent,
+  type ExtensionPackageReviewDebugAdapter,
   type ExtensionPackageReviewLanguageServer,
+  decodeExtensionPackageReviewDebugAdapter,
   decodeExtensionPackageReviewLanguageServer,
   ExtensionCommand,
   ExtensionCommandResult,
@@ -24,6 +26,11 @@ import {
   type ExtensionLifecycleService,
 } from "./extensionLifecycleService";
 import { MarketplaceFetchesDisabledError } from "./marketplaceHttps";
+import type { ExtensionDebugAdapterDeclaration } from "@octant/contracts/extensions";
+import {
+  DebugAdapterPackageRefusedError,
+  debugAdapterPackageRefusalMessage,
+} from "./debugAdapterPackage";
 import {
   LanguageServerPackageRefusedError,
   languageServerPackageRefusalMessage,
@@ -208,6 +215,9 @@ export class ExtensionApiService {
       if (error instanceof MarketplaceFetchesDisabledError) {
         return failure("blocked", error.message);
       }
+      if (error instanceof DebugAdapterPackageRefusedError) {
+        return failure("invalid", debugAdapterPackageRefusalMessage(error.reason));
+      }
       if (error instanceof LanguageServerPackageRefusedError) {
         return failure("invalid", languageServerPackageRefusalMessage(error.reason));
       }
@@ -322,6 +332,10 @@ function previewFor(inspection: InspectedExtensionPackage) {
           component.languageServer === undefined
             ? undefined
             : previewLanguageServer(inspection, component.id, component.languageServer);
+        const debugAdapter =
+          component.debugAdapter === undefined
+            ? undefined
+            : previewDebugAdapter(inspection, component.id, component.debugAdapter);
         return {
           id: component.id,
           kind: component.kind,
@@ -329,6 +343,7 @@ function previewFor(inspection: InspectedExtensionPackage) {
           declaredCapabilities: component.declaredCapabilities,
           ...(instructions === undefined ? {} : { instructions }),
           ...(languageServer === undefined ? {} : { languageServer }),
+          ...(debugAdapter === undefined ? {} : { debugAdapter }),
         } satisfies ExtensionPackageReviewComponent;
       }),
     },
@@ -379,6 +394,35 @@ function previewLanguageServer(
   return decodeExtensionPackageReviewLanguageServer({
     languages: declaration.languages,
     launchClass: declaration.launchClass,
+    binary,
+    binaryDigest: `sha256:${createHash("sha256").update(file.content).digest("hex")}`,
+  });
+}
+
+/**
+ * What a person reviews before trusting a debug adapter: the binary the host
+ * would start and that file's own digest, as for a language server, with the
+ * runtimes it labels, the `launch` body it sends, and whether it takes a
+ * debug port.
+ */
+function previewDebugAdapter(
+  inspection: InspectedExtensionPackage,
+  componentId: string,
+  declaration: ExtensionDebugAdapterDeclaration,
+): ExtensionPackageReviewDebugAdapter {
+  const binary = inspection.entryPoints[componentId];
+  const file =
+    binary === undefined
+      ? undefined
+      : inspection.files.find((candidate) => candidate.path === binary);
+  if (binary === undefined || file === undefined) {
+    throw new Error("Debug adapter binary is unavailable for review.");
+  }
+  return decodeExtensionPackageReviewDebugAdapter({
+    runtimes: declaration.runtimes,
+    launchArguments: declaration.launchArguments,
+    importTypes: declaration.importTypes,
+    debugPorts: declaration.debugPorts,
     binary,
     binaryDigest: `sha256:${createHash("sha256").update(file.content).digest("hex")}`,
   });
