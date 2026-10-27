@@ -260,10 +260,14 @@ mode's defaults), AI & models (Providers & Models, Octant Harness, Voice &
 images: which provider or model answers each job), Tools (Skills & Extensions,
 Computer use, Device tools, GitHub, Linear: what a running agent may reach),
 Privacy & data (Permissions, Data & storage, Sync, Remote access), and Advanced
-(Host, Usage). Permissions holds what a person has already allowed (remembered
+(Host, SSH targets, Usage). Permissions holds what a person has already allowed (remembered
 websites, remembered tool approvals, public links); Data & storage holds what
 the host keeps (data map, caches, backup, recovery, export, retention, purge);
-Notifications holds what Octant sends while a person is away. AI & models
+Notifications holds what Octant sends while a person is away. SSH targets
+holds the machines this host reaches with ssh, the Code Projects bound to
+folders on them, their managed worktrees, and a terminal in either; its
+controls appear only in a desktop window, and a key is pinned only from a
+dialog that shows the fingerprint and what the pin does not prove. AI & models
 lists each provider kind on the page of what it serves: Providers & Models
 holds the agent runtimes Octant drives (ACP agents, CLIs, the Agent SDK, RPC
 runtimes), and its manual add form offers only those kinds. It opens on the
@@ -1172,7 +1176,11 @@ nothing about delivery is asked up front (see "Language"). The Project
 control is one menu: saved Projects to search, then New Project from folder
 and New Project from GitHub repository. Choosing GitHub swaps the menu's body
 for the managed-clone flow in place, so there is no second repository control
-beside the Project. Access is
+beside the Project. In a desktop window's Code composer, Projects bound to a
+folder on an SSH target follow the saved Projects under "On SSH targets",
+each with its `destination:folder` and, until threads run there, disabled with
+the reason in the row; New Project on an SSH target… opens Settings › SSH
+targets at binding. Access is
 a titled menu on the prompt card, next to the model picker, and carries the
 "Remember for this Project" switch.
 Every composer's control row is two groups with the row's free space between
