@@ -89,7 +89,7 @@ export function createUserServiceManager(options: UserServiceManagerOptions): Us
 export function createLaunchdUserServiceManager(
   options: UserServiceManagerOptions,
 ): UserServiceManager {
-  const runner = options.runner ?? nodeRunner;
+  const runner = options.runner ?? nodeServiceCommandRunner;
   const home = options.home ?? homedir();
   const descriptorPath = join(home, "Library", "LaunchAgents", `${LAUNCHD_LABEL}.plist`);
   const invocation = resolveServiceInvocation(options);
@@ -171,7 +171,7 @@ export function createLaunchdUserServiceManager(
 export function createSystemdUserServiceManager(
   options: UserServiceManagerOptions,
 ): UserServiceManager {
-  const runner = options.runner ?? nodeRunner;
+  const runner = options.runner ?? nodeServiceCommandRunner;
   const home = options.home ?? homedir();
   const unitPath = join(home, ".config", "systemd", "user", SYSTEMD_UNIT);
   const invocation = resolveServiceInvocation(options);
@@ -434,7 +434,7 @@ function parseSystemdProperties(output: string): Record<string, string> {
   return properties;
 }
 
-const nodeRunner: ServiceCommandRunner = {
+export const nodeServiceCommandRunner: ServiceCommandRunner = {
   run: async (command, args) => {
     try {
       return await execFileAsync(command, [...args], {
@@ -545,4 +545,165 @@ function isMissing(error: unknown): boolean {
     "code" in error &&
     (error as { readonly code?: unknown }).code === "ENOENT"
   );
+}
+
+const LAUNCH_DAEMON_PATH = `/Library/LaunchDaemons/${LAUNCHD_LABEL}.plist`;
+
+export interface HubBootServiceOptions extends UserServiceManagerOptions {
+  /** The account the server runs as; the hub always serves as the person, never as root. */
+  readonly userName: string;
+  /** Where to look for an installed launch daemon; tests point it away from the real system. */
+  readonly launchDaemonProbePath?: string;
+}
+
+/**
+ * What it takes to make the server start with no one logged in. The CLI never
+ * runs the administrator step on its own: it prints `administratorCommand`, or
+ * runs it only when the person asked for that.
+ */
+export interface HubBootServicePlan {
+  readonly kind: "launch-daemon" | "lingering-user-unit";
+  /** The service description a launch daemon is installed from; absent for a user unit. */
+  readonly descriptor?: string;
+  /** The one command that needs administrator approval, as an argument list. */
+  readonly administratorCommand: readonly string[];
+  /** Whether the ordinary user service must be installed and enabled after the administrator step. */
+  readonly userServiceFollowUp: "none" | "install-and-enable";
+}
+
+export interface HubBootService {
+  readonly kind: HubBootServicePlan["kind"];
+  /** Installing: the hub comes back after a restart with no one logged in. */
+  installPlan(): HubBootServicePlan;
+  /** Returning to the ordinary login service. */
+  removalPlan(): HubBootServicePlan;
+  /** Whether the machine currently starts the server at boot for the hub. */
+  installed(): Promise<boolean>;
+}
+
+export function createHubBootService(options: HubBootServiceOptions): HubBootService {
+  const platform = options.platform ?? process.platform;
+  const runner = options.runner ?? nodeServiceCommandRunner;
+  assertSafeUserName(options.userName);
+  if (platform === "darwin") {
+    const home = options.home ?? homedir();
+    const invocation = resolveServiceInvocation(options);
+    return {
+      kind: "launch-daemon",
+      installPlan: () => {
+        assertSafeDescriptorValue(home);
+        const descriptor = launchDaemonDescriptor(
+          // A daemon starts with no HOME of its own, and the server derives its
+          // folders from it.
+          { ...invocation, environment: { HOME: home, ...invocation.environment } },
+          options.userName,
+        );
+        const encoded = Buffer.from(descriptor, "utf8").toString("base64");
+        return {
+          kind: "launch-daemon",
+          descriptor,
+          administratorCommand: [
+            "/usr/bin/sudo",
+            "/bin/sh",
+            "-c",
+            [
+              `printf %s ${shellQuote(encoded)} | /usr/bin/base64 -D > ${LAUNCH_DAEMON_PATH}`,
+              `/usr/sbin/chown root:wheel ${LAUNCH_DAEMON_PATH}`,
+              `/bin/chmod 644 ${LAUNCH_DAEMON_PATH}`,
+              // The login agent runs the same label; it must stop before the daemon starts.
+              `(/bin/launchctl bootout gui/${options.uid}/${LAUNCHD_LABEL} 2>/dev/null || true)`,
+              `/bin/launchctl bootstrap system ${LAUNCH_DAEMON_PATH}`,
+            ].join(" && "),
+          ],
+          userServiceFollowUp: "none",
+        };
+      },
+      removalPlan: () => ({
+        kind: "launch-daemon",
+        administratorCommand: [
+          "/usr/bin/sudo",
+          "/bin/sh",
+          "-c",
+          `(/bin/launchctl bootout system/${LAUNCHD_LABEL} 2>/dev/null || true) && /bin/rm -f ${LAUNCH_DAEMON_PATH}`,
+        ],
+        userServiceFollowUp: "install-and-enable",
+      }),
+      installed: () =>
+        lstat(options.launchDaemonProbePath ?? LAUNCH_DAEMON_PATH).then(
+          () => true,
+          (error: unknown) => {
+            if (isMissing(error)) return false;
+            throw error;
+          },
+        ),
+    };
+  }
+  if (platform === "linux") {
+    return {
+      kind: "lingering-user-unit",
+      installPlan: () => ({
+        kind: "lingering-user-unit",
+        administratorCommand: [
+          "/usr/bin/sudo",
+          "/usr/bin/loginctl",
+          "enable-linger",
+          options.userName,
+        ],
+        userServiceFollowUp: "install-and-enable",
+      }),
+      removalPlan: () => ({
+        kind: "lingering-user-unit",
+        administratorCommand: [
+          "/usr/bin/sudo",
+          "/usr/bin/loginctl",
+          "disable-linger",
+          options.userName,
+        ],
+        userServiceFollowUp: "none",
+      }),
+      installed: async () => {
+        const lingering = await runner
+          .run("/usr/bin/loginctl", ["show-user", options.userName, "--property=Linger", "--value"])
+          .catch(() => ({ stdout: "", stderr: "" }));
+        return /^yes\s*$/i.test(lingering.stdout.trim());
+      },
+    };
+  }
+  throw new ServiceManagerError(
+    "manager-unavailable",
+    "The hub role has no boot service for this platform yet.",
+  );
+}
+
+/** The launch daemon: the login agent's program, run as the person's account from boot. */
+function launchDaemonDescriptor(invocation: ServiceInvocation, userName: string): string {
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    '<plist version="1.0"><dict>',
+    `<key>Label</key><string>${LAUNCHD_LABEL}</string>`,
+    `<key>UserName</key><string>${escapeXml(userName)}</string>`,
+    "<key>ProgramArguments</key><array>",
+    `<string>${escapeXml(invocation.command)}</string>${invocation.args
+      .map((argument) => `<string>${escapeXml(argument)}</string>`)
+      .join("")}`,
+    "</array>",
+    `<key>EnvironmentVariables</key><dict>${Object.entries(invocation.environment)
+      .map(([key, value]) => `<key>${escapeXml(key)}</key><string>${escapeXml(value)}</string>`)
+      .join("")}</dict>`,
+    "<key>KeepAlive</key><true/>",
+    "<key>ThrottleInterval</key><integer>30</integer>",
+    "<key>RunAtLoad</key><true/>",
+    "</dict></plist>\n",
+  ].join("");
+}
+
+function assertSafeUserName(userName: string): void {
+  if (!/^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/.test(userName)) {
+    throw new ServiceManagerError("unsafe-descriptor", "The service account name is unsafe.");
+  }
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }

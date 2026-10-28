@@ -3,7 +3,17 @@ import { runStatusCommand } from "./status";
 import { runWebCommand } from "./web";
 import { resolveServerRunOptions, runServerRunCommand } from "./serverRun";
 import { resolveHostRuntimePaths, ServicePolicyStore } from "@octant/host-runtime";
-import { homedir, networkInterfaces, tmpdir } from "node:os";
+import { homedir, networkInterfaces, tmpdir, userInfo } from "node:os";
+import { readDiskEncryption } from "./diskEncryption";
+import { resolveHubCliCommand, runHubCliCommand, type HubCliCommand } from "./hubCommand";
+import {
+  createHubBootService,
+  createUserServiceManager,
+  nodeServiceCommandRunner,
+  type HubBootService,
+  type ServiceCommandRunner,
+  type UserServiceManager,
+} from "./serviceManager";
 import { createInterface } from "node:readline/promises";
 import { formatMissingLinuxHostTools, missingLinuxHostTools } from "./linuxHostTools";
 import { runServerLifecycleCommand, type ServerLifecycleAction } from "./serverLifecycle";
@@ -352,6 +362,14 @@ async function main(): Promise<number> {
       }),
     );
   }
+  if (args.command === "hub") {
+    const command = resolveHubCliCommand(args.positional, args.flags);
+    if (command === undefined) {
+      printUsage();
+      return 1;
+    }
+    return await runHubFlow(command);
+  }
   if (args.command === "status") {
     const report = await runStatusCommand({
       hostname: typeof args.flags.hostname === "string" ? args.flags.hostname : undefined,
@@ -459,6 +477,70 @@ async function runPairFlow(options: ServerPairingOptions): Promise<number> {
   }
 }
 
+/** `octant hub`: questions need a terminal; the administrator step runs only when asked for. */
+async function runHubFlow(command: HubCliCommand): Promise<number> {
+  const paths = resolveCliHostRuntimePaths();
+  const uid = process.getuid?.() ?? 0;
+  const serviceOptions = { paths, uid };
+  const prompt =
+    process.stdin.isTTY === true
+      ? createInterface({ input: process.stdin, output: process.stdout })
+      : undefined;
+  const closed =
+    prompt === undefined
+      ? undefined
+      : new Promise<undefined>((resolve) => prompt.once("close", () => resolve(undefined)));
+  try {
+    let bootService: HubBootService | undefined;
+    let loginService: UserServiceManager | undefined;
+    if (process.platform === "darwin" || process.platform === "linux") {
+      bootService = createHubBootService({ ...serviceOptions, userName: userInfo().username });
+      loginService = createUserServiceManager(serviceOptions);
+    }
+    return await withLocalControlSession((session) =>
+      runHubCliCommand({
+        command,
+        session,
+        stdout: process.stdout,
+        stderr: process.stderr,
+        platform: process.platform,
+        ...(bootService === undefined ? {} : { bootService }),
+        loginService: {
+          install: async () => await loginService?.install(),
+          enable: async () => await loginService?.enable(),
+        },
+        administrator: administratorRunner,
+        diskEncryption: () =>
+          readDiskEncryption({
+            platform: process.platform,
+            dataDirectory: paths.dataDirectory,
+            runner: nodeServiceCommandRunner,
+          }),
+        ...(prompt === undefined || closed === undefined
+          ? {}
+          : { ask: (question: string) => Promise.race([prompt.question(question), closed]) }),
+      }),
+    );
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
+  } finally {
+    prompt?.close();
+  }
+}
+
+/** Runs an administrator command with the terminal attached, so the password prompt works. */
+const administratorRunner: ServiceCommandRunner = {
+  run: (command, args) =>
+    new Promise((resolve, reject) => {
+      const child = spawn(command, [...args], { stdio: "inherit" });
+      child.once("error", reject);
+      child.once("exit", (code) =>
+        code === 0 ? resolve({ stdout: "", stderr: "" }) : reject(new Error(`exit ${code}`)),
+      );
+    }),
+};
+
 /** `octant provider sign-in`: the terms question needs a terminal; the code does not. */
 async function runProviderSignInFlow(command: ProviderSignInCliCommand): Promise<number> {
   const interactive = process.stdin.isTTY === true;
@@ -527,6 +609,14 @@ function printUsage(): void {
       "  octant listener [status]",
       "  octant listener enable --hostname <lan-or-tailscale-address> --port <port> --cert <path> --key <path>",
       "  octant listener disable",
+      "  octant hub status",
+      "  octant hub enable [--install-service]",
+      "  octant hub disable [--remove-service]",
+      "  octant hub join-code [--owner]",
+      "  octant hub join <code> [--items <roster,status,introduce,wake,owners,standby,push,provision,act|none>]",
+      "  octant hub grant [--items <list>|none]",
+      "  octant hub leave",
+      "  octant hub remove <member-id-or-name>",
       "  octant ssh-target [list]",
       "  octant ssh-target add <destination> --executor <path-of-octant-on-target> [--fingerprint <SHA256:...>]",
       "  octant ssh-target repin <target-id> [--fingerprint <SHA256:...>]",

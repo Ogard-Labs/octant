@@ -687,20 +687,6 @@ export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
     "/api/code/language/read",
     "Language services' diagnostics and definition reads, served by the host since 2026-10-26 ahead of the editor that calls them (docs/design/language-services.md, delivery plan slice 3). Remove once the Code editor shows diagnostics and jumps to definitions.",
   ],
-  ...[
-    "/api/desktop/hub/status",
-    "/api/desktop/hub/enable",
-    "/api/desktop/hub/disable",
-    "/api/desktop/hub/join-codes",
-    "/api/desktop/hub/members/remove",
-    "/api/desktop/hub/join",
-    "/api/desktop/hub/join/finish",
-    "/api/desktop/hub/grant",
-    "/api/desktop/hub/leave",
-  ].map((endpoint): [string, string] => [
-    endpoint,
-    "Loopback administration of the hub role and of this host's hub membership, served since 2026-10-29 ahead of the `octant hub` commands and the Settings screens that call it (docs/design/hub-and-spokes.md, delivery plan slice 3). Remove once those call it.",
-  ]),
   ...["/api/hub/join", "/api/hub/leave", "/api/hub/roster", "/api/hub/status"].map(
     (endpoint): [string, string] => [
       endpoint,

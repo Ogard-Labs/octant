@@ -1,0 +1,640 @@
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { resolveHostRuntimePaths } from "@octant/host-runtime";
+import { readDiskEncryption } from "./diskEncryption";
+import { resolveHubCliCommand, runHubCliCommand, type HubCliCommand } from "./hubCommand";
+import type { LocalControlRequest, LocalControlResponse } from "./localControl";
+import { createHubBootService, type ServiceCommandRunner } from "./serviceManager";
+
+const roots: string[] = [];
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
+
+const MEMBER = "11111111-1111-4111-8111-111111111111";
+const DEFAULT_GRANT = { items: ["roster", "introduce", "owners"], actProjects: [] };
+
+describe("octant hub command parsing", () => {
+  it("reads every hub command and its flags", () => {
+    expect(resolveHubCliCommand(["status"], {})).toEqual({ action: "status" });
+    expect(resolveHubCliCommand(["enable"], {})).toEqual({
+      action: "enable",
+      installService: false,
+    });
+    expect(resolveHubCliCommand(["enable"], { "install-service": true })).toEqual({
+      action: "enable",
+      installService: true,
+    });
+    expect(resolveHubCliCommand(["disable"], { "remove-service": true })).toEqual({
+      action: "disable",
+      removeService: true,
+    });
+    expect(resolveHubCliCommand(["join-code"], { owner: true })).toEqual({
+      action: "join-code",
+      owner: true,
+    });
+    expect(resolveHubCliCommand(["join", "CODE"], { items: "roster,Status,roster" })).toEqual({
+      action: "join",
+      code: "CODE",
+      items: ["roster", "status"],
+    });
+    expect(resolveHubCliCommand(["grant"], { items: "none" })).toEqual({
+      action: "grant",
+      items: [],
+    });
+    expect(resolveHubCliCommand(["leave"], {})).toEqual({ action: "leave" });
+    expect(resolveHubCliCommand(["remove", "Laptop"], {})).toEqual({
+      action: "remove",
+      member: "Laptop",
+    });
+  });
+
+  it("rejects unknown commands, stray flags, and items outside the closed list", () => {
+    expect(resolveHubCliCommand([], {})).toBeUndefined();
+    expect(resolveHubCliCommand(["promote"], {})).toBeUndefined();
+    expect(resolveHubCliCommand(["status"], { owner: true })).toBeUndefined();
+    expect(resolveHubCliCommand(["join"], {})).toBeUndefined();
+    expect(resolveHubCliCommand(["join-code"], { owner: "yes" })).toBeUndefined();
+    expect(resolveHubCliCommand(["enable"], { "install-service": "now" })).toBeUndefined();
+    expect(resolveHubCliCommand(["grant"], { items: "roster,teleport" })).toBeUndefined();
+    expect(resolveHubCliCommand(["grant"], { items: true })).toBeUndefined();
+    expect(resolveHubCliCommand(["remove"], {})).toBeUndefined();
+  });
+});
+
+type Responder = (request: LocalControlRequest) => LocalControlResponse;
+
+async function fixture(
+  responder: Responder,
+  options: {
+    readonly platform?: NodeJS.Platform;
+    readonly daemonInstalled?: boolean;
+    readonly ask?: (question: string) => Promise<string | undefined>;
+    readonly encryption?: "encrypted" | "not-encrypted" | "unknown";
+  } = {},
+) {
+  const root = await mkdtemp(join(tmpdir(), "octant-hub-cli-"));
+  roots.push(root);
+  const platform = options.platform ?? "darwin";
+  const probe = join(root, "daemon.plist");
+  if (options.daemonInstalled === true) await writeFile(probe, "");
+  const probeCommands: Array<readonly [string, readonly string[]]> = [];
+  const probeRunner: ServiceCommandRunner = {
+    run: async (command, args) => {
+      probeCommands.push([command, args]);
+      return { stdout: options.daemonInstalled === true ? "yes\n" : "no\n", stderr: "" };
+    },
+  };
+  const bootService =
+    platform === "win32"
+      ? undefined
+      : createHubBootService({
+          paths: resolveHostRuntimePaths({
+            env: { OCTANT_DATA_DIR: join(root, "data") },
+            platform,
+            home: join(root, "home"),
+            temporaryDirectory: "/tmp",
+            uid: 501,
+          }),
+          uid: 501,
+          home: "/Users/henrik",
+          userName: "henrik",
+          executable: "/opt/octant/bin/octant",
+          platform,
+          runner: probeRunner,
+          launchDaemonProbePath: probe,
+        });
+  const sent: LocalControlRequest[] = [];
+  const out: string[] = [];
+  const err: string[] = [];
+  const administrator = vi.fn(async (_command: string, _args: readonly string[]) => ({
+    stdout: "",
+    stderr: "",
+  }));
+  const installLogin = vi.fn(async () => undefined);
+  const enableLogin = vi.fn(async () => undefined);
+  let clock = 0;
+  const run = (command: HubCliCommand) =>
+    runHubCliCommand({
+      command,
+      session: {
+        kind: "opened",
+        windowId: "w",
+        send: async (request) => {
+          sent.push(request);
+          return responder(request);
+        },
+        close: async () => undefined,
+      },
+      stdout: { write: (chunk) => out.push(chunk), isTTY: false },
+      stderr: { write: (chunk) => err.push(chunk) },
+      platform,
+      ...(bootService === undefined ? {} : { bootService }),
+      loginService: { install: installLogin, enable: enableLogin },
+      administrator: { run: administrator },
+      diskEncryption: async () => options.encryption ?? "encrypted",
+      ...(options.ask === undefined ? {} : { ask: options.ask }),
+      now: () => clock,
+      sleep: async (milliseconds) => {
+        clock += milliseconds;
+      },
+    });
+  return {
+    root,
+    sent,
+    out,
+    err,
+    administrator,
+    installLogin,
+    enableLogin,
+    run,
+    text: () => out.join(""),
+    errors: () => err.join(""),
+  };
+}
+
+const ok = (body: unknown): LocalControlResponse => ({ status: 200, body });
+
+describe("octant hub enable", () => {
+  it("turns the role on and prints the one administrator command without running it or touching the system", async () => {
+    const host = await fixture(() => ok({ status: "enabled", roster: {} }));
+    const before = await readdir(host.root, { recursive: true });
+
+    expect(await host.run({ action: "enable", installService: false })).toBe(0);
+
+    expect(host.sent.map((request) => request.path)).toEqual(["/api/desktop/hub/enable"]);
+    expect(host.administrator).not.toHaveBeenCalled();
+    expect(host.installLogin).not.toHaveBeenCalled();
+    expect(await readdir(host.root, { recursive: true })).toEqual(before);
+    expect(host.text()).toContain("sudo /bin/sh -c");
+    expect(host.text()).toContain("/Library/LaunchDaemons/app.octant.server.plist");
+    expect(host.text()).toContain("octant hub enable --install-service");
+    expect(host.text()).toContain("sudo pmset -a autorestart 1");
+  });
+
+  it("runs the administrator command only when the person passed the flag", async () => {
+    const host = await fixture(() => ok({ status: "enabled", roster: {} }));
+
+    expect(await host.run({ action: "enable", installService: true })).toBe(0);
+
+    expect(host.administrator).toHaveBeenCalledTimes(1);
+    const [program, args = []] = host.administrator.mock.calls[0] ?? [];
+    expect(program).toBe("/usr/bin/sudo");
+    expect(args.slice(0, 2)).toEqual(["/bin/sh", "-c"]);
+    expect(host.installLogin).not.toHaveBeenCalled();
+  });
+
+  it("asks systemd to linger for the account on Linux and installs the user unit after the flag", async () => {
+    const host = await fixture(() => ok({ status: "enabled", roster: {} }), {
+      platform: "linux",
+    });
+
+    await host.run({ action: "enable", installService: false });
+    expect(host.text()).toContain("sudo /usr/bin/loginctl enable-linger henrik");
+    expect(host.text()).not.toContain("pmset");
+    expect(host.administrator).not.toHaveBeenCalled();
+
+    await host.run({ action: "enable", installService: true });
+    expect(host.administrator).toHaveBeenCalledWith("/usr/bin/sudo", [
+      "/usr/bin/loginctl",
+      "enable-linger",
+      "henrik",
+    ]);
+    expect(host.installLogin).toHaveBeenCalledTimes(1);
+    expect(host.enableLogin).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a failed administrator step with the command to run by hand and exits non-zero", async () => {
+    const host = await fixture(() => ok({ status: "enabled", roster: {} }));
+    host.administrator.mockRejectedValueOnce(new Error("exit 1"));
+
+    expect(await host.run({ action: "enable", installService: true })).toBe(1);
+
+    expect(host.errors()).toContain("sudo /bin/sh -c");
+    expect(host.out.join("")).not.toContain("starts at boot, with no one logged in");
+  });
+
+  it("warns when the disk is not encrypted or cannot be checked, and still succeeds", async () => {
+    const off = await fixture(() => ok({ status: "enabled", roster: {} }), {
+      encryption: "not-encrypted",
+    });
+    expect(await off.run({ action: "enable", installService: false })).toBe(0);
+    expect(off.text()).toContain("disk is not encrypted");
+
+    const unknown = await fixture(() => ok({ status: "enabled", roster: {} }), {
+      encryption: "unknown",
+    });
+    expect(await unknown.run({ action: "enable", installService: false })).toBe(0);
+    expect(unknown.text()).toContain("could not check");
+
+    const sound = await fixture(() => ok({ status: "enabled", roster: {} }));
+    await sound.run({ action: "enable", installService: false });
+    expect(sound.text()).not.toContain("Warning");
+  });
+
+  it("shows the server's refusal as it is and exits non-zero", async () => {
+    const host = await fixture(() => ({
+      status: 409,
+      body: { status: "refused", kind: "listener-not-private" },
+    }));
+
+    expect(await host.run({ action: "enable", installService: true })).toBe(1);
+
+    expect(host.errors()).toContain("not on a private network address");
+    expect(host.errors()).toContain("(listener-not-private)");
+    expect(host.administrator).not.toHaveBeenCalled();
+  });
+
+  it("says the hub role is not available on Windows and sends nothing", async () => {
+    const host = await fixture(() => ok({}), { platform: "win32" });
+
+    for (const command of [
+      { action: "enable", installService: false },
+      { action: "disable", removeService: false },
+      { action: "join-code", owner: false },
+    ] as const) {
+      expect(await host.run(command)).toBe(1);
+    }
+
+    expect(host.errors()).toContain("not available on Windows yet");
+    expect(host.sent).toEqual([]);
+  });
+});
+
+describe("octant hub disable", () => {
+  it("restores the ordinary login service after removing the launch daemon when the person passed the flag", async () => {
+    const host = await fixture(() => ok({ status: "disabled" }), { daemonInstalled: true });
+
+    expect(await host.run({ action: "disable", removeService: true })).toBe(0);
+
+    const [program, args = []] = host.administrator.mock.calls[0] ?? [];
+    expect(program).toBe("/usr/bin/sudo");
+    expect(args[2]).toContain("launchctl bootout system/app.octant.server");
+    expect(args[2]).toContain("rm -f /Library/LaunchDaemons/app.octant.server.plist");
+    expect(host.installLogin).toHaveBeenCalledTimes(1);
+    expect(host.enableLogin).toHaveBeenCalledTimes(1);
+    expect(host.text()).toContain("back to the ordinary login service");
+  });
+
+  it("prints the removal command and changes nothing when the person did not pass the flag", async () => {
+    const host = await fixture(() => ok({ status: "disabled" }), { daemonInstalled: true });
+
+    expect(await host.run({ action: "disable", removeService: false })).toBe(0);
+
+    expect(host.administrator).not.toHaveBeenCalled();
+    expect(host.installLogin).not.toHaveBeenCalled();
+    expect(host.text()).toContain("octant hub disable --remove-service");
+    expect(host.text()).toContain("octant server enable");
+  });
+
+  it("says nothing about services when no boot service is installed", async () => {
+    const host = await fixture(() => ok({ status: "disabled" }));
+
+    expect(await host.run({ action: "disable", removeService: false })).toBe(0);
+
+    expect(host.text()).toBe("The hub role is off.\n");
+  });
+
+  it("turns lingering off for the account on Linux", async () => {
+    const host = await fixture(() => ok({ status: "disabled" }), {
+      platform: "linux",
+      daemonInstalled: true,
+    });
+
+    await host.run({ action: "disable", removeService: true });
+
+    expect(host.administrator).toHaveBeenCalledWith("/usr/bin/sudo", [
+      "/usr/bin/loginctl",
+      "disable-linger",
+      "henrik",
+    ]);
+  });
+});
+
+describe("octant hub boot service files", () => {
+  it("describes a launch daemon that runs the server as the person with KeepAlive and RunAtLoad", async () => {
+    const host = await fixture(() => ok({}));
+    const boot = createHubBootService({
+      paths: resolveHostRuntimePaths({
+        env: { OCTANT_DATA_DIR: join(host.root, "data") },
+        platform: "darwin",
+        home: join(host.root, "home"),
+        temporaryDirectory: "/tmp",
+        uid: 501,
+      }),
+      uid: 501,
+      home: "/Users/henrik",
+      userName: "henrik",
+      executable: "/opt/octant/bin/octant",
+      platform: "darwin",
+    });
+
+    const plan = boot.installPlan();
+
+    expect(plan.descriptor).toContain("<key>UserName</key><string>henrik</string>");
+    expect(plan.descriptor).toContain("<key>KeepAlive</key><true/>");
+    expect(plan.descriptor).toContain("<key>RunAtLoad</key><true/>");
+    expect(plan.descriptor).toContain(
+      "<array><string>/opt/octant/bin/octant</string><string>server</string><string>run</string></array>",
+    );
+    expect(plan.descriptor).toContain("<key>HOME</key><string>/Users/henrik</string>");
+    // The command carries the same descriptor the person can inspect above it.
+    const script = plan.administratorCommand[3] ?? "";
+    const encoded = /printf %s '([^']+)'/.exec(script)?.[1] ?? "";
+    expect(Buffer.from(encoded, "base64").toString("utf8")).toBe(plan.descriptor);
+    expect(script).toContain("chown root:wheel");
+  });
+
+  it("refuses an account name that could break out of the command", () => {
+    expect(() =>
+      createHubBootService({
+        paths: resolveHostRuntimePaths({
+          env: { OCTANT_DATA_DIR: "/tmp/octant-unused" },
+          platform: "darwin",
+          home: "/Users/x",
+          temporaryDirectory: "/tmp",
+          uid: 501,
+        }),
+        uid: 501,
+        userName: "x; rm -rf /",
+        executable: "/opt/octant/bin/octant",
+        platform: "darwin",
+      }),
+    ).toThrow(/unsafe/);
+  });
+});
+
+describe("octant hub join codes and joining", () => {
+  it("prints the join code as a QR and as text with its lifetime", async () => {
+    const host = await fixture(() =>
+      ok({ status: "minted", code: "octant-join-abc", expiresAt: 5 * 60_000, owner: true }),
+    );
+
+    expect(await host.run({ action: "join-code", owner: true })).toBe(0);
+
+    expect(host.sent[0]).toMatchObject({
+      path: "/api/desktop/hub/join-codes",
+      body: { owner: true },
+    });
+    expect(host.text()).toContain("Join code octant-join-abc");
+    expect(host.text()).toContain("in about 5 minutes");
+    expect(host.text()).toContain("becomes an owner");
+    expect(host.text()).toContain("▀");
+  });
+
+  it("waits for approval on the hub, shows the grant with its defaults, and keeps them without a flag", async () => {
+    let finishes = 0;
+    const host = await fixture((request) => {
+      if (request.path === "/api/desktop/hub/join") {
+        return ok({
+          status: "awaiting-approval",
+          hubName: "Mac mini",
+          hubKeyFingerprint: "ab".repeat(32),
+          comparisonCode: "482913",
+        });
+      }
+      finishes += 1;
+      return finishes < 3
+        ? ok({ status: "awaiting-approval" })
+        : ok({ status: "joined", rosterSequence: 2, grant: DEFAULT_GRANT });
+    });
+
+    expect(await host.run({ action: "join", code: "CODE" })).toBe(0);
+
+    expect(finishes).toBe(3);
+    expect(host.text()).toContain("Comparison code 482913");
+    expect(host.text()).toContain("[x] roster");
+    expect(host.text()).toContain("[ ] wake");
+    expect(host.text()).toContain("The defaults stay.");
+    expect(host.sent.some((request) => request.path === "/api/desktop/hub/grant")).toBe(false);
+  });
+
+  it("changes the grant from the items flag and drops Act's Projects when Act is not ticked", async () => {
+    const host = await fixture((request) => {
+      if (request.path === "/api/desktop/hub/join") {
+        return ok({
+          status: "awaiting-approval",
+          hubName: "Mac mini",
+          hubKeyFingerprint: "ab".repeat(32),
+          comparisonCode: "482913",
+        });
+      }
+      if (request.path === "/api/desktop/hub/join/finish") {
+        return ok({ status: "joined", rosterSequence: 2, grant: DEFAULT_GRANT });
+      }
+      return ok({ status: "changed", grant: DEFAULT_GRANT });
+    });
+
+    expect(await host.run({ action: "join", code: "CODE", items: ["roster", "status"] })).toBe(0);
+
+    const grant = host.sent.find((request) => request.path === "/api/desktop/hub/grant");
+    expect(grant?.body).toEqual({ items: ["roster", "status"], actProjects: [] });
+  });
+
+  it("asks at a terminal and takes the person's own items", async () => {
+    const answers = ["n", "roster, wake"];
+    const host = await fixture(
+      (request) => {
+        if (request.path === "/api/desktop/hub/join") {
+          return ok({
+            status: "awaiting-approval",
+            hubName: "Mac mini",
+            hubKeyFingerprint: "ab".repeat(32),
+            comparisonCode: "482913",
+          });
+        }
+        if (request.path === "/api/desktop/hub/join/finish") {
+          return ok({ status: "joined", rosterSequence: 2, grant: DEFAULT_GRANT });
+        }
+        return ok({ status: "changed", grant: { items: ["roster", "wake"], actProjects: [] } });
+      },
+      { ask: async () => answers.shift() },
+    );
+
+    expect(await host.run({ action: "join", code: "CODE" })).toBe(0);
+
+    const grant = host.sent.find((request) => request.path === "/api/desktop/hub/grant");
+    expect(grant?.body).toEqual({ items: ["roster", "wake"], actProjects: [] });
+  });
+
+  it("shows a refused join as it is and exits non-zero", async () => {
+    const host = await fixture(() => ({
+      status: 409,
+      body: { status: "refused", kind: "hub-unreachable" },
+    }));
+
+    expect(await host.run({ action: "join", code: "CODE" })).toBe(1);
+
+    expect(host.errors()).toContain("could not reach the hub");
+    expect(host.errors()).toContain("(hub-unreachable)");
+  });
+
+  it("gives up with a plain sentence when the hub never approves", async () => {
+    const host = await fixture((request) =>
+      request.path === "/api/desktop/hub/join"
+        ? ok({
+            status: "awaiting-approval",
+            hubName: "Mac mini",
+            hubKeyFingerprint: "ab".repeat(32),
+            comparisonCode: "482913",
+          })
+        : ok({ status: "awaiting-approval" }),
+    );
+
+    expect(await host.run({ action: "join", code: "CODE" })).toBe(1);
+
+    expect(host.errors()).toContain("did not approve within five minutes");
+  });
+});
+
+describe("octant hub status, grant, leave and remove", () => {
+  const status = {
+    hub: {
+      enabled: true,
+      roster: {
+        roster: {
+          members: [
+            { memberId: MEMBER, name: "Laptop", role: "spoke", owner: false },
+            {
+              memberId: "22222222-2222-4222-8222-222222222222",
+              name: "Mac mini",
+              role: "hub",
+              owner: true,
+            },
+          ],
+        },
+      },
+    },
+    spoke: { membership: "none" },
+  };
+
+  it("lists the members and the role", async () => {
+    const host = await fixture(() => ok(status));
+
+    expect(await host.run({ action: "status" })).toBe(0);
+
+    expect(host.text()).toContain("Hub role on");
+    expect(host.text()).toContain(`${MEMBER}  spoke  Laptop`);
+    expect(host.text()).toContain("(owner)");
+    expect(host.text()).toContain("has not joined a hub");
+  });
+
+  it("removes a member named by its name", async () => {
+    const host = await fixture((request) =>
+      request.method === "GET" ? ok(status) : ok({ status: "removed", sequence: 3 }),
+    );
+
+    expect(await host.run({ action: "remove", member: "laptop" })).toBe(0);
+
+    expect(host.sent[1]).toMatchObject({
+      path: "/api/desktop/hub/members/remove",
+      body: { memberId: MEMBER },
+    });
+  });
+
+  it("refuses to remove a member the roster does not list, without asking the server", async () => {
+    const host = await fixture(() => ok(status));
+
+    expect(await host.run({ action: "remove", member: "Phone" })).toBe(1);
+
+    expect(host.errors()).toContain("No hub member is called Phone");
+    expect(host.sent).toHaveLength(1);
+  });
+
+  it("reads the grant, and refuses a grant change on a computer that has not joined", async () => {
+    const joined = {
+      ...status,
+      spoke: {
+        membership: "member",
+        hub: { memberId: MEMBER, name: "Mac mini" },
+        grant: { items: ["roster", "act"], actProjects: ["p1"] },
+      },
+    };
+    const reading = await fixture(() => ok(joined));
+    expect(await reading.run({ action: "grant" })).toBe(0);
+    expect(reading.text()).toContain("[x] act");
+
+    const keeping = await fixture((request) =>
+      request.method === "GET" ? ok(joined) : ok({ status: "changed", grant: DEFAULT_GRANT }),
+    );
+    await keeping.run({ action: "grant", items: ["roster", "act"] });
+    expect(keeping.sent[1]?.body).toEqual({ items: ["roster", "act"], actProjects: ["p1"] });
+
+    const none = await fixture(() => ok(status));
+    expect(await none.run({ action: "grant", items: ["roster"] })).toBe(1);
+    expect(none.errors()).toContain("has not joined a hub");
+  });
+
+  it("tells the person when the hub could not be told that this computer left", async () => {
+    const told = await fixture(() => ok({ status: "left", hubNotified: true }));
+    expect(await told.run({ action: "leave" })).toBe(0);
+    expect(told.text()).toContain("The hub was told");
+
+    const silent = await fixture(() => ok({ status: "left", hubNotified: false }));
+    expect(await silent.run({ action: "leave" })).toBe(0);
+    expect(silent.text()).toContain("could not be reached");
+
+    const refused = await fixture(() => ({
+      status: 409,
+      body: { status: "refused", kind: "not-a-spoke" },
+    }));
+    expect(await refused.run({ action: "leave" })).toBe(1);
+  });
+
+  it("reports an unauthorized control channel with the server's message", async () => {
+    const host = await fixture(() => ({
+      status: 401,
+      body: { category: "unauthorized", message: "Hub administration is unauthorized." },
+    }));
+
+    expect(await host.run({ action: "status" })).toBe(1);
+
+    expect(host.errors()).toContain("Hub administration is unauthorized.");
+  });
+});
+
+describe("disk encryption reading", () => {
+  const runnerReturning = (stdout: Record<string, string>): ServiceCommandRunner => ({
+    run: async (command) => {
+      const text = stdout[command];
+      if (text === undefined) throw new Error("missing");
+      return { stdout: text, stderr: "" };
+    },
+  });
+
+  it("reads FileVault on macOS", async () => {
+    const read = (text: string) =>
+      readDiskEncryption({
+        platform: "darwin",
+        dataDirectory: "/d",
+        runner: runnerReturning({ "/usr/bin/fdesetup": text }),
+      });
+    expect(await read("FileVault is On.\n")).toBe("encrypted");
+    expect(await read("FileVault is Off.\n")).toBe("not-encrypted");
+    expect(await read("unexpected")).toBe("unknown");
+  });
+
+  it("looks for a dm-crypt layer under the data folder's device on Linux", async () => {
+    const read = (layers: string, source = "/dev/mapper/root\n") =>
+      readDiskEncryption({
+        platform: "linux",
+        dataDirectory: "/d",
+        runner: runnerReturning({ "/usr/bin/findmnt": source, "/usr/bin/lsblk": layers }),
+      });
+    expect(await read("lvm\ncrypt\npart\ndisk\n")).toBe("encrypted");
+    expect(await read("part\ndisk\n")).toBe("not-encrypted");
+    expect(await read("part\n", "tmpfs\n")).toBe("unknown");
+  });
+
+  it("reports unknown when the tools are missing", async () => {
+    expect(
+      await readDiskEncryption({
+        platform: "linux",
+        dataDirectory: "/d",
+        runner: runnerReturning({}),
+      }),
+    ).toBe("unknown");
+  });
+});
