@@ -9,6 +9,7 @@ import {
   decodeCanvasCreateResult,
   decodeCanvasHtmlImportRequest,
   decodeCanvasHtmlImportResult,
+  decodeCanvasDeckProposeCommand,
   decodeCanvasDiagramLayoutReviseCommand,
   decodeCanvasPlanTaskReviseCommand,
   decodeCanvasId,
@@ -35,6 +36,7 @@ import {
   type CanvasCreateResult,
   type CanvasHtmlImportRequest,
   type CanvasHtmlImportResult,
+  type CanvasDeckProposeCommand,
   type CanvasDiagramLayoutReviseCommand,
   type CanvasDiagramLayoutReviseResult,
   type CanvasPlanTaskReviseCommand,
@@ -60,6 +62,7 @@ import {
   CanvasRevisionPolicyRejected,
   admitCanvasCreate,
   admitCanvasDiagramLayoutRevision,
+  admitCanvasDeckProposal,
   admitCanvasPlanTaskRevision,
   admitCanvasRevise,
   authorizeCanvasCreateRequest,
@@ -540,6 +543,30 @@ export class CanvasService {
    * a drag, it comes from the person's own window, so the host records it as
    * that person whatever actor the request names.
    */
+  proposeDeck(
+    requestInput: unknown,
+    context: CanvasAuthorizationContext,
+    project: CanvasProjectRecord | undefined,
+  ): CanvasDiagramLayoutReviseResult {
+    let command: CanvasDeckProposeCommand;
+    try {
+      command = { ...decodeCanvasDeckProposeCommand(requestInput), actor: this.#actor };
+    } catch {
+      return {
+        kind: "denied",
+        denialCode: "malformed-request",
+        message: "Canvas deck proposal is malformed.",
+      };
+    }
+    return this.#appendBoardRevision(
+      command,
+      context,
+      project,
+      "Canvas deck proposal is not authorized in this workspace.",
+      (current) => admitCanvasDeckProposal(command, current, command.versionId, this.#clock()),
+    );
+  }
+
   revisePlanTask(
     requestInput: unknown,
     context: CanvasAuthorizationContext,
@@ -1860,6 +1887,7 @@ function layoutDenialCode(code: CanvasBoardRejectionCode): CanvasBoardDenialCode
     case "missing-position":
     case "not-a-plan":
     case "unknown-task":
+    case "nothing-to-present":
       return code;
     case "comment-budget-exceeded":
     case "unknown-comment":

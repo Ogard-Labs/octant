@@ -872,3 +872,7 @@ governs over any number written earlier.
   review; rendered QA remains named-pending across the stack.
 - 2026-10-28: Maintainer asked for the nine ranked improvements; folded into
   slices 6–9 above and implemented the same day (see Verification).
+- 2026-10-28: Slice 9 implemented: the TSX handoff control, the one-click
+  deck proposal (command, policy, service, route, client, menu), and the
+  mockup per-node comment markers. The deck PDF is the single item left in
+  the plan, with its exact path recorded above.

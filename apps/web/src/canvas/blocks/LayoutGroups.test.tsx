@@ -31,6 +31,7 @@ function brief(): CanvasDefinition {
 function commentRuntime() {
   return {
     openCounts: new Map<string, number>(),
+    openNodeCounts: new Map(),
     openRowCounts: new Map<string, ReadonlyMap<string, number>>(),
     onOpen: vi.fn(),
   };

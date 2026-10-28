@@ -634,6 +634,10 @@ export type CanvasExportPrepareResult = typeof CanvasExportPrepareResult.Type;
 export const CANVAS_HTML_FILE_MAX_BYTES = 7 * 1024 * 1024;
 export const CANVAS_HTML_FILE_IMAGES_MAX_BYTES = 4 * 1024 * 1024;
 
+/** What one HTML-file request takes: the document, or the mockups' TSX handoff. */
+export const CanvasHtmlFileForm = Schema.Literal("document", "mockups-tsx");
+export type CanvasHtmlFileForm = typeof CanvasHtmlFileForm.Type;
+
 export const CanvasHtmlFileRequest = Schema.Struct({
   schemaVersion: CanvasExportSchemaVersion,
   kind: Schema.Literal("canvas-html-file"),
@@ -641,6 +645,8 @@ export const CanvasHtmlFileRequest = Schema.Struct({
   versionId: CanvasVersionId,
   /** The theme the window draws a workspace-themed design in, as for an HTML export. */
   frameTheme: Schema.optional(CanvasExportFrameTheme),
+  /** `mockups-tsx` returns each mockup's variants as dependency-free components. */
+  form: Schema.optional(CanvasHtmlFileForm),
 }).annotations(strict);
 export type CanvasHtmlFileRequest = typeof CanvasHtmlFileRequest.Type;
 

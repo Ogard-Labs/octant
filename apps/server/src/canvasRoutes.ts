@@ -1,5 +1,5 @@
 import { decodeCanvasDocumentRecipeCatalog } from "@octant/contracts/canvas-skill";
-import { importCanvasHtmlPage } from "@octant/domain";
+import { canvasMockupTsx, importCanvasHtmlPage } from "@octant/domain";
 import {
   type CanvasId,
   decodeCanvasActionResult,
@@ -1900,6 +1900,46 @@ async function renderCanvasHtmlFileForWindow(
     };
   }
   const definition = read.version.definition;
+  // The TSX handoff names no destination and journals nothing, exactly as the
+  // document form: the file goes back to the window that asked.
+  if (input.form === "mockups-tsx") {
+    const parts: string[] = [];
+    for (const block of definition.blocks) {
+      if (block.kind !== "mockup") continue;
+      const variants =
+        block.variants === undefined
+          ? [undefined]
+          : block.variants.map((variant) => String(variant.variantId));
+      for (const variant of variants) {
+        const tsx = canvasMockupTsx(block, variant);
+        if (tsx !== "") parts.push(tsx);
+      }
+    }
+    if (parts.length === 0) {
+      return {
+        kind: "refused",
+        code: "unavailable",
+        message: "This Canvas holds no mockup to hand off.",
+      };
+    }
+    const text = parts.join("\n");
+    if (text.length > CANVAS_HTML_FILE_MAX_BYTES) {
+      return {
+        kind: "refused",
+        code: "too-large",
+        message: `The mockup components are too large for one file (over ${String(CANVAS_HTML_FILE_MAX_BYTES / (1024 * 1024))} MB).`,
+      };
+    }
+    return {
+      kind: "ready",
+      canvasId: input.canvasId,
+      versionId: read.version.versionId,
+      fileName: `${canvasExportPlannedName(definition.title, "markdown").replace(/\.md$/, "")}.tsx`,
+      html: text,
+      writesDesignMarkup: false,
+      imagesLeftOut: 0,
+    };
+  }
   const designAssets = new Map<string, ReadonlyArray<CanvasDesignAssetResolution>>();
   const resolve = dependencies.resolveDesignAssets;
   if (resolve !== undefined) {

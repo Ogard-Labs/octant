@@ -59,6 +59,8 @@ export interface CanvasDocumentProps {
 export interface CanvasDocumentComments {
   readonly openCounts: ReadonlyMap<string, number>;
   readonly openRowCounts: ReadonlyMap<string, ReadonlyMap<string, number>>;
+  /** Unresolved threads anchored to a mockup or board node, by block then node. */
+  readonly openNodeCounts: ReadonlyMap<string, ReadonlyMap<string, number>>;
   readonly onOpen: (blockId: string, rowId?: string) => void;
 }
 
@@ -96,6 +98,14 @@ export function CanvasDocument({
               rowComments: {
                 openCounts: comments.openRowCounts.get(String(block.blockId)) ?? NO_ROW_COMMENTS,
                 onOpen: (rowId: string) => comments.onOpen(String(block.blockId), rowId),
+              },
+            })}
+        {...(comments === undefined || block.kind !== "mockup"
+          ? {}
+          : {
+              nodeComments: {
+                openCounts: comments.openNodeCounts.get(String(block.blockId)) ?? NO_ROW_COMMENTS,
+                onOpen: () => comments.onOpen(String(block.blockId)),
               },
             })}
       />

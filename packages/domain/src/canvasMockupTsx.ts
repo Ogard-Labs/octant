@@ -18,10 +18,15 @@ const toComponentName = (value: string): string => {
 };
 
 /** The generator's HTML, embedded verbatim: its text is already escaped for markup, and a JSX child reads the same entities a browser does. */
-export function canvasMockupTsx(block: CanvasMockupBlock): string {
-  const html = canvasMockupHtml(block);
+export function canvasMockupTsx(block: CanvasMockupBlock, variantId?: string | undefined): string {
+  const html = canvasMockupHtml(block, {
+    ...(variantId === undefined ? {} : { variantId }),
+  });
   if (html === "") return "";
-  const name = toComponentName(block.title);
+  const name =
+    variantId === undefined
+      ? toComponentName(block.title)
+      : `${toComponentName(block.title)}${toComponentName(variantId)}`;
   const escaped = html;
   const styles = CANVAS_MOCKUP_HTML_STYLES.join("");
   return [

@@ -273,3 +273,35 @@ describe("mockup library", () => {
     expect(within(callouts).getByText(/One placed row/)).toBeInTheDocument();
   });
 });
+
+describe("mockup node comment markers", () => {
+  it("shows where the open threads are on the node that holds them", () => {
+    render(
+      <CanvasDocument
+        definition={{
+          ...canvasFixture,
+          blocks: [
+            decodeCanvasBlock({
+              blockId: "screen",
+              schemaVersion: canvasFixture.schemaVersion,
+              kind: "mockup",
+              device: "phone",
+              title: "Search",
+              nodes: [
+                { nodeId: "window", component: "window", label: "Search" },
+                { nodeId: "go", parentId: "window", component: "button", label: "Go" },
+              ],
+            }),
+          ],
+        }}
+        comments={{
+          openCounts: new Map([["screen", 2]]),
+          openRowCounts: new Map(),
+          openNodeCounts: new Map([["screen", new Map([["go", 2]])]]),
+          onOpen: () => {},
+        }}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "2 open comments on Go" })).toBeInTheDocument();
+  });
+});
