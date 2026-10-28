@@ -422,7 +422,11 @@ once its owning specification documents its authority, privacy, and release
 boundaries. The authorization covers design and implementation; creating an
 account, spending money, submitting to a store, deploying a hosted service, or
 weakening any invariant each still needs a separate explicit maintainer
-action. Connectors (MCP servers added by hand, imported
+action. App Store distribution of a person's own apps is admitted (maintainer
+decision, 2026-10-28) under the
+[Apple devices distribution rules](docs/design/apple-devices.md#distribution):
+each upload, submission, and release is a local person's confirmed act.
+Connectors (MCP servers added by hand, imported
 from other tools on this Mac, signed in to, or chosen from the bundled catalog)
 are in scope under the architecture's
 [connector rules](docs/architecture.md#extensions-and-skills): user-added packages

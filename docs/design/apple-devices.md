@@ -14,9 +14,9 @@ extends ([Architecture: device transport and evidence](../architecture.md#device
 built, slices 3 (development-signed build, install, launch, terminate, and
 console logs) and 4 (device pane and screenshots) are built and wait on their
 native smoke on a Mac with a paired device, slice 6 (App Store Connect key
-custody) is built and stays closed behind the distribution gate of decision 7,
-and slices 7 and 8 wait on that gate and on the open choices recorded under
-them in the delivery plan.** The maintainer
+custody) is built and open since the maintainer admitted distribution on
+2026-10-28 (decision 7), and slices 7 and 8 wait on the open choices recorded
+under them in the delivery plan.** The maintainer
 authorized this scope as post-preview work and accepted the decisions below on
 2026-10-26. That authorizes this design and its slices; it does not by itself
 authorize spending, creating developer accounts,
@@ -47,8 +47,8 @@ TestFlight track for its mobile client is a separate operator runbook
   pure `evaluateAppleDeviceRequest` in
   [`appleToolchainPolicy.ts`](../../packages/domain/src/appleToolchainPolicy.ts)
   decide every row of the authority table below and every refusal named in
-  these rules; upload, submission, and release are refused until distribution
-  is enabled.
+  these rules; upload, submission, and release need a local person's
+  confirmation, and are refused whenever distribution is not admitted.
 - The host discovers paired iPhones and iPads through `devicectl`
   ([`appleDeviceService.ts`](../../apps/server/src/apple/appleDeviceService.ts),
   [`devicectl.ts`](../../apps/server/src/apple/devicectl.ts)), keeps their
@@ -102,7 +102,7 @@ TestFlight track for its mobile client is a separate operator runbook
   `app.octant.app-store-connect-keys.v1`), entered through the local-only
   `/api/desktop/app-store-connect-key/` routes
   ([`appStoreConnectKeyRoutes.ts`](../../apps/server/src/apple/appStoreConnectKeyRoutes.ts)),
-  which refuse a new key while distribution is closed.
+  which refuse a new key on a host that is not a Mac.
 
 ## Three layers, three authorities
 
@@ -427,12 +427,13 @@ find-identity -v -p codesigning` lists and the profiles Xcode installed in
 
 ### Distribution
 
-- Until the Current Release Boundary admits distribution (decision 7), every
-  upload, submission, and release is refused (`distribution-not-enabled`)
-  whoever asks and under every posture. The host passes the boundary to the
-  policy as an input that stays off until the decision-7 PR turns it on; the
-  distribution rows of the authority table are the rule that applies after
-  that.
+- The Current Release Boundary admits distribution since 2026-10-28
+  (decision 7). The host passes that boundary to the policy as one input,
+  `APPLE_DISTRIBUTION_ADMITTED`; were it turned off, every upload, submission,
+  and release would be refused (`distribution-not-enabled`) whoever asks and
+  under every posture. With it on, the distribution rows of the authority
+  table decide, and a step the host does not carry out yet is refused
+  `operation-unavailable`.
 - Distribution never runs on an agent's word. When the person asks in the
   thread, its agent may request an upload, a submission, or a release through
   `octant_apple`; the request raises the same confirmation the workbench
@@ -461,11 +462,13 @@ find-identity -v -p codesigning` lists and the profiles Xcode installed in
   The host accepts a key only as a UUID issuer ID, a ten-character key ID,
   and a PKCS #8 P-256 private key (App Store Connect's ES256 keys); it
   refuses to overwrite a stored key without `replace`, and answers only
-  `stored`, `missing`, `removed`, or a typed refusal. Until distribution is
-  admitted (decision 7), and on any host that is not a Mac, `status` and
-  `set` are refused (`distribution-not-enabled`, `unsupported-host`) and the
-  desktop shows no key entry; `remove` always runs, so a stored key can
-  always be taken out. The family serves `has`, `set`, and `delete` only:
+  `stored`, `missing`, `removed`, or a typed refusal. On a host that is not a
+  Mac, or were distribution not admitted (decision 7), `status` and `set` are
+  refused (`unsupported-host`, `distribution-not-enabled`) and the desktop
+  shows no key entry; `remove` always runs, so a stored key can always be
+  taken out. The desktop's key entry is the **App Store Connect** group in
+  Settings › Device tools, and its rows are in Settings search only where a
+  desktop window can show them. The family serves `has`, `set`, and `delete` only:
   nothing reads the key back until the upload slice decides how the key
   reaches its launch (see slices 7 and 8). Linux and Windows broker stores
   have no such family, because distribution needs a Mac. For one
@@ -611,7 +614,13 @@ alternatives considered and the reason for the choice follow it.
    the person without a confirmation tied to one version.
 7. **Distribution timing.** Distribution slices (6 to 8 below) start only
    after an explicit maintainer request and a change to the Current Release
-   Boundary in their own PR. That gate stays; device slices do not wait on it.
+   Boundary in their own PR; device slices do not wait on it. _Accepted
+   2026-10-28:_ the maintainer asked to open App Store distribution now, and
+   the change that admits it sets `APPLE_DISTRIBUTION_ADMITTED`, records the
+   admission in the Current Release Boundary, and opens key entry. Admitting
+   distribution makes the steps available to a local person; it does not
+   create an account, spend money, or upload, submit, or release anything by
+   itself, and each such step stays the person's confirmed act.
 
 ## Delivery plan
 
@@ -735,33 +744,36 @@ accounts or hardware; its real-hardware acceptance is separate where noted.
    _Accept:_ the key is never in a response, argument, environment, or the
    journal; remote and browser entry are refused. _Verify:_ broker and route
    negative tests.
-   _State:_ built, and closed behind the gate: `APPLE_DISTRIBUTION_ADMITTED`
+   _State:_ built, and open since 2026-10-28: `APPLE_DISTRIBUTION_ADMITTED`
    in [`appleDeviceService.ts`](../../apps/server/src/apple/appleDeviceService.ts)
-   is the one input the device policy and the key routes read, and it stays
-   `false` until the decision-7 change. Its evidence is the broker test that
+   is the one input the device policy and the key routes read, and the
+   decision-7 change set it `true`. Its evidence is the broker test that
    the App Store Connect family stores, tests for, and deletes a key that no
    route, its own included, reads back; the `App Store Connect key routes`
    suite (a valid key stored and only `stored` answered, no overwrite
    without `replace`, a malformed or non-P-256 key refused without echo, a
    browser `Origin`, a wrong bridge secret or window capability, and a
    non-loopback host refused before the key is read, key entry refused while
-   distribution is closed and on a non-Mac host while `remove` still runs);
+   distribution is not admitted and on a non-Mac host while `remove` still
+   runs);
    the desktop forwarder and preload tests; the `AppStoreConnectKeySection`
    component tests (hidden when the host refuses, the key sent once and
    cleared from the form, a refusal shown); the `octant apple key` CLI tests
    (the key only on standard input); and the local-only listener probe for
-   `/api/desktop/app-store-connect-key/set`. Still open: the Keychain helper
-   gained the service but runs only on a Mac, so a maintainer-run
-   save-status-remove on a Mac is its native check once the gate opens, and
-   the section's rows join Settings search in the same change that opens it.
+   `/api/desktop/app-store-connect-key/set`. The section's rows joined
+   Settings search when the gate opened, for desktop windows only, and its
+   three fields stack under their labels. Still
+   open: the Keychain helper gained the service but runs only on a Mac, so a
+   maintainer-run save-status-remove from a desktop window on a Mac is its
+   native check.
 7. **Person-confirmed upload** (maintainer account, a real app, and the
    decision-7 gate). Archive, export, and upload as one confirmed local action
    with a journaled record. _Accept:_ one confirmation uploads exactly the
    named build; an agent's request runs nothing until a local person
    confirms, and no remote path reaches it. _Verify:_ server tests with
    a stubbed uploader, plus a maintainer-run upload of a test app.
-   _Waits on:_ the decision-7 change, and two choices this specification
-   leaves open. First, how the distribution signature is made: decision 2
+   _Waits on:_ two choices this specification leaves open (the decision-7
+   gate opened on 2026-10-28). First, how the distribution signature is made: decision 2
    covers development signing only, and its fallback (letting `xcodebuild`
    sign with keychain access) needs its own maintainer approval, so it is
    undecided whether export signs in a host-owned `codesign` step with an
@@ -779,7 +791,7 @@ accounts or hardware; its real-hardware acceptance is separate where noted.
    confirms, and no remote path reaches either. _Verify:_ server
    tests with a stubbed App Store Connect client, plus a maintainer-run
    submission and release of a test app.
-   _Waits on:_ the decision-7 change, and the choice of how App Store
+   _Waits on:_ the choice of how App Store
    Connect API requests are authorized: the server holding the private key
    to sign each request's ES256 token, or the broker signing it and
    answering only the short-lived token, as it already signs cloud requests

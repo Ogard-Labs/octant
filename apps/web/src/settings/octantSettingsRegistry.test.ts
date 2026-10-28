@@ -240,6 +240,25 @@ describe("octantSettingsRegistry", () => {
     expect(results[0]?.sectionId).toBe("voice");
   });
 
+  it("finds the App Store Connect key on Device tools only in a desktop window", () => {
+    const desktop = searchSettings(
+      listAvailableSections(octantSettingsRegistry, capabilities),
+      capabilities,
+      "app store connect",
+    );
+    expect(desktop[0]).toMatchObject({
+      sectionId: "device-tools",
+      settingId: "app-store-connect-key-state",
+    });
+    const browserCapabilities = { ...capabilities, nativeBoundsAvailable: false };
+    const browser = searchSettings(
+      listAvailableSections(octantSettingsRegistry, browserCapabilities),
+      browserCapabilities,
+      "app store connect",
+    );
+    expect(browser.filter((result) => result.kind === "setting")).toEqual([]);
+  });
+
   it("lands a link to the model endpoints on the add-endpoint row of Octant Harness", () => {
     const resolved = resolveDeepLink(octantSettingsRegistry, capabilities, {
       section: "harness",
@@ -279,12 +298,6 @@ describe("octantSettingsRegistry", () => {
  * they are not things a person looks up.
  */
 const UNLISTED_SETTING_ROWS = new Set([
-  // Shown only once the release boundary admits distribution; search must not
-  // offer them before the section can appear.
-  "app-store-connect-issuer",
-  "app-store-connect-key-id",
-  "app-store-connect-key-state",
-  "app-store-connect-private-key",
   "first-run-task-mode",
   "first-run-task-project",
   "managed-tools-empty",

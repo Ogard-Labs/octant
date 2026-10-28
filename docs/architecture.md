@@ -718,9 +718,10 @@ device.
 screenshot) are local-only. The App Store Connect API key for distribution has
 its own credential broker family with no read-back route, entered only
 through the local-only `/api/desktop/app-store-connect-key/` routes from a
-desktop window or `octant apple key`; like every upload, submission, and
-release, a new key is refused until the Current Release Boundary admits
-distribution.
+desktop window or `octant apple key`. The Current Release Boundary admits
+distribution since 2026-10-28, so key entry is open on a Mac, and each
+upload, submission, and release is a local person's confirmed act under the
+distribution rules of that specification.
 
 On an approval-gated thread, **Allow input** is the confirmation that opens
 that destination; clicks, typing, Home, and Lock never raise it
@@ -9093,7 +9094,12 @@ owning specification documents its authority, privacy, and release
 boundaries. The authorization covers design and implementation; creating an
 account, spending money, submitting to a store, deploying a hosted service, or
 weakening an invariant in this document each still needs a separate explicit
-maintainer action. The earlier holds and their start gates
+maintainer action. App Store distribution of a person's own apps was admitted
+on 2026-10-28 ([Apple devices, decision 7](design/apple-devices.md#maintainer-decisions)):
+Octant may upload a person's build, submit a version for App Review, and
+release an approved version, each only when a local person confirms that exact
+build or version; admitting it creates no account and submits nothing on its
+own. The earlier holds and their start gates
 remain as rationale in [release-boundary holds](release-boundary-holds.md).
 The connector / OAuth marketplace hold was lifted on 2026-10-20 under the
 [Connectors and user-added MCP servers](#extensions-and-skills) rules: a

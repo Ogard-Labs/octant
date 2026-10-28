@@ -56,10 +56,13 @@ export function AppStoreConnectKeySection({
   }>();
   const mounted = useRef(true);
 
+  // Settings hands this section a new bridge object on every render, so the
+  // status read follows the request function, which the desktop keeps stable;
+  // following the object asked the host again on each keystroke elsewhere.
+  const request = bridge.appStoreConnectKeyRequest;
   useEffect(() => {
     mounted.current = true;
-    void bridge
-      .appStoreConnectKeyRequest("status", {})
+    void request("status", {})
       .then((answer) => {
         if (!mounted.current) return;
         const outcome = outcomeOf(answer);
@@ -75,7 +78,7 @@ export function AppStoreConnectKeySection({
     return () => {
       mounted.current = false;
     };
-  }, [bridge]);
+  }, [request]);
 
   if (shown.kind !== "shown") return null;
 
@@ -126,7 +129,11 @@ export function AppStoreConnectKeySection({
       title="App Store Connect"
       description="The API key Octant uses to upload your own app when you ask it to. It is kept in the Keychain and never shown again."
     >
-      <form className="setgroup" noValidate onSubmit={(event) => void save(event)}>
+      <form
+        className="setgroup app-store-connect-key__fields"
+        noValidate
+        onSubmit={(event) => void save(event)}
+      >
         <SettingRow
           settingId="app-store-connect-key-state"
           label="API key"
@@ -196,7 +203,7 @@ export function AppStoreConnectKeySection({
             onChange={(event) => setPrivateKey(event.target.value)}
           />
         </SettingRow>
-        <div className="settings-view__actions">
+        <div className="settings-view__actions app-store-connect-key__save">
           <OctantButton
             type="submit"
             size="sm"
