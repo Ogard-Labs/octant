@@ -5,7 +5,11 @@ import {
   type ProviderObservedState,
 } from "@octant/contracts";
 import type { SubscriptionOAuthOffer } from "@octant/contracts/host-oauth";
-import { isNativeHarnessDriverKind, modelCarriesAppManagedTools } from "@octant/domain";
+import {
+  AMAZON_BEDROCK_CLOUD_IAM_SIGN_IN,
+  isNativeHarnessDriverKind,
+  modelCarriesAppManagedTools,
+} from "@octant/domain";
 import { Plus } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useHostPlatform } from "../platform";
@@ -86,13 +90,20 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
       ),
     [props.instances],
   );
+  // An Amazon Bedrock row asks the host too: its answer comes from the
+  // endpoint's stored sign-in and configuration, with no broker call. An Azure
+  // AI Foundry or gateway status renews the token at the issuer, so those rows
+  // name the account only once the endpoint's page has read it.
   const signInTargets = useMemo(
     () =>
       endpoints.flatMap((instance) => {
-        const offer = signInOfferOf(instance);
-        return offer === undefined
+        const descriptorId =
+          instance.driverKind === "amazon-bedrock"
+            ? AMAZON_BEDROCK_CLOUD_IAM_SIGN_IN.descriptorId
+            : signInOfferOf(instance)?.descriptor.descriptorId;
+        return descriptorId === undefined
           ? []
-          : [{ instanceId: String(instance.id), descriptorId: offer.descriptor.descriptorId }];
+          : [{ instanceId: String(instance.id), descriptorId }];
       }),
     [endpoints],
   );
@@ -146,7 +157,8 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
             accountLabel: offer.accountLabel,
             action: SIGN_IN_ENDPOINTS[offer.descriptor.descriptorId]?.action ?? "Sign in",
           };
-    const signIn = offer === undefined ? undefined : signIns.get(String(instance.id));
+    const heldSignIn = signIns.get(String(instance.id));
+    const signIn = offer === undefined ? undefined : heldSignIn;
     // The last observed facts keep a row's count while it is checked again;
     // its state reads only the authoritative observation.
     const observed: ProviderObservedState | undefined = presentation.get(instance.id);
@@ -164,7 +176,13 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
       ...(signIn === undefined ? {} : { signIn }),
       ...(presentationOffer === undefined ? {} : { signInOffer: presentationOffer }),
     });
-    return { offer, presentationOffer, signIn, observed, failure, status, checking };
+    const subLine = endpointSubLine(
+      instance,
+      heldSignIn,
+      presentationOffer,
+      props.observedByInstance.get(instance.id),
+    );
+    return { offer, presentationOffer, signIn, observed, failure, status, checking, subLine };
   };
 
   const openEndpoint = (
@@ -459,7 +477,7 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
                 ? { signInTerms: row.offer.termsSummary }
                 : {})}
               status={row.status}
-              subLine={endpointSubLine(row.instance, row.signIn, row.presentationOffer)}
+              subLine={row.subLine}
             />
           ))}
         </ul>

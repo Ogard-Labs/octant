@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { CredentialStoreFailure, type CredentialStore } from "./credentialStore";
+import { issuerRequestDeadline } from "./issuerRequest";
 import { sigV4Date, signSigV4 } from "./sigV4";
 
 /**
@@ -32,10 +33,6 @@ const SLOW_DOWN_MS = 5_000;
 // after a wait that doubles with each one in a row, up to this, and never
 // past the code's own expiry.
 const TRANSIENT_POLL_MAX_MS = 60_000;
-// A portal request with no answer by then is read as no answer at all. Without
-// a bound, one hung device-code poll kept its attempt awaiting consent forever,
-// where neither expiry nor pruning could end it.
-const PORTAL_REQUEST_TIMEOUT_MS = 30_000;
 // A settled attempt stays readable this long past its code's expiry, longer
 // than the server follows one, so a late status read still learns how it
 // ended; after that the broker forgets it, so abandoned attempts do not pile up.
@@ -618,7 +615,7 @@ export function createCloudIamRuntime(options: {
           method: "POST",
           redirect: "error",
           headers: { "x-amz-sso_bearer_token": read.grant.session.accessToken },
-          signal: AbortSignal.timeout(PORTAL_REQUEST_TIMEOUT_MS),
+          signal: issuerRequestDeadline(),
         });
         await response.body?.cancel().catch(() => undefined);
       } catch {
@@ -718,7 +715,7 @@ async function mintRoleCredentials(
         method: "GET",
         redirect: "error",
         headers: { "x-amz-sso_bearer_token": sessionToken },
-        signal: AbortSignal.timeout(PORTAL_REQUEST_TIMEOUT_MS),
+        signal: issuerRequestDeadline(),
       },
     );
   } catch {
@@ -736,7 +733,12 @@ async function mintRoleCredentials(
     await response.body?.cancel().catch(() => undefined);
     return { kind: "unavailable" };
   }
-  const body = await readResponseJson(response);
+  let body: Record<string, unknown> | undefined;
+  try {
+    body = await readResponseJson(response);
+  } catch {
+    return { kind: "unavailable" };
+  }
   const role = body === undefined ? undefined : body.roleCredentials;
   if (!isRecord(role)) return { kind: "unavailable" };
   const accessKeyId = role.accessKeyId;
@@ -910,7 +912,7 @@ async function postJson(
       redirect: "error",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(PORTAL_REQUEST_TIMEOUT_MS),
+      signal: issuerRequestDeadline(),
     });
   } catch {
     return { kind: "unavailable" };
@@ -919,7 +921,12 @@ async function postJson(
     await response.body?.cancel().catch(() => undefined);
     return { kind: "unavailable" };
   }
-  const value = await readResponseJson(response);
+  let value: Record<string, unknown> | undefined;
+  try {
+    value = await readResponseJson(response);
+  } catch {
+    return { kind: "unavailable" };
+  }
   if (response.ok)
     return value === undefined ? { kind: "refused", error: undefined } : { kind: "json", value };
   const error = value?.error;
@@ -1239,18 +1246,19 @@ async function readObject(
   }
 }
 
+/**
+ * An answer's JSON object, or `undefined` for one too long or not an object.
+ * A body that stops arriving (the request's deadline passed, or the
+ * connection dropped) throws, so the caller reads it as no answer rather
+ * than as an answer it could not understand.
+ */
 async function readResponseJson(response: Response): Promise<Record<string, unknown> | undefined> {
   const declared = response.headers.get("content-length");
   if (declared !== null && /^\d+$/.test(declared) && Number(declared) > MAX_RESPONSE_CHARS) {
     await response.body?.cancel().catch(() => undefined);
     return undefined;
   }
-  let text: string;
-  try {
-    text = await response.text();
-  } catch {
-    return undefined;
-  }
+  const text = await response.text();
   if (text.length > MAX_RESPONSE_CHARS) return undefined;
   try {
     const value: unknown = JSON.parse(text);

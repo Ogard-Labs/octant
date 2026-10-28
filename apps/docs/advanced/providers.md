@@ -683,7 +683,8 @@ instead. The administrator's registration must then also set
 **Authentication › Allow public client flows** to **Yes**.
 
 The address must be on `openai.azure.com`, `services.ai.azure.com`, or
-`cognitiveservices.azure.com`. What the row says when the sign-in needs you:
+`cognitiveservices.azure.com`. Once you have opened the endpoint, its row also
+says who is signed in. What the row says when the sign-in needs you:
 
 - **Sign in again**: your organization wants you to sign in in person again,
   for example to complete multi-factor authentication. Octant keeps the
@@ -771,8 +772,8 @@ An Amazon Bedrock endpoint signs in only with
 in a terminal on the host: the command shows a page on
 `device.sso.<region>.amazonaws.com` or your access portal and a code to enter
 there. Settings never shows the code; after you sign in, choose **Check
-again**. The endpoint's page then says **Signed in as** the role and account,
-and **Sign out** asks your organization's portal to end the session and
+again**. The endpoint's row and page then say **Signed in as** the role and
+account, and **Sign out** asks your organization's portal to end the session and
 removes the sign-in from this computer. Changing the endpoint's region,
 portal, account, or role, or removing it, ends that sign-in; changing only its
 models keeps it. Each model is checked on its first request: a model the

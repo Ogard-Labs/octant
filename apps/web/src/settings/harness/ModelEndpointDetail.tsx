@@ -60,6 +60,7 @@ import {
   endpointModelCount,
   endpointTakesKey,
   isDirectorySignInEndpoint,
+  lastCheckFoundSignInGone,
   type EndpointFixKind,
   type EndpointSignIn,
   type EndpointStatus,
@@ -342,10 +343,7 @@ function AccessSection(
             <CloudEndpointSignIn
               disabled={props.disabled}
               instance={instance}
-              lastCheckRefusedSignIn={
-                props.observed?.readiness === "unauthenticated" &&
-                props.observed.unauthenticatedReason !== "not-authorized"
-              }
+              lastCheckRefusedSignIn={lastCheckFoundSignInGone(props.observed)}
               onSignedOut={() => void props.onProbe(instance.id, { quiet: true })}
               onStateChange={props.onSignInState}
               {...(props.onProviderOAuth === undefined
