@@ -191,7 +191,6 @@ export interface CodeThreadNavigationItem {
  * looking at it.
  */
 const MAX_CODE_RECONNECT_DELAY_MS = 10_000;
-
 /**
  * The one turn error the controller owns rather than relays. Activation sets
  * it when replay fails and clears exactly it when a later activation succeeds,
@@ -202,6 +201,46 @@ const INHERITED_HISTORY_UNAVAILABLE_MESSAGE = "Inherited conversation history co
 
 /** The first wait after a failed catch-up, before the delay starts doubling. */
 const MIN_CODE_RECONNECT_BACKOFF_MS = 100;
+
+/**
+ * A streamed reply commits its text and reasoning to conversation state on
+ * beats, not per chunk: every commit re-renders the workspace, and a reply's
+ * chunks arrive far faster than a frame paints. The accumulated text stays
+ * current in the stream loop, so the beat only decides when the state next
+ * sees it. `flush` commits what arrived on an exit, `settle` drops a beat
+ * whose truth a reload supersedes.
+ */
+const STREAM_REPLY_BEAT_MS = 50;
+
+function createReplyBeat(commit: () => void) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let settled = false;
+  const clear = () => {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timer = undefined;
+    }
+  };
+  return {
+    schedule: () => {
+      if (settled || timer !== undefined) return;
+      timer = setTimeout(() => {
+        timer = undefined;
+        commit();
+      }, STREAM_REPLY_BEAT_MS);
+    },
+    /** Re-arms a flushed beat: a replayed stream commits on beats again. */
+    reset: () => {
+      settled = false;
+    },
+    flush: () => {
+      if (settled) return;
+      settled = true;
+      clear();
+      commit();
+    },
+  };
+}
 
 /**
  * What a Code thread has consumed, and the provider usage windows it last
@@ -1380,208 +1419,248 @@ export function useCodeController(options: CodeControllerOptions) {
           operationStream = (async () => {
             let operationCursor = 0;
             let assistantText = "";
-            let snapshotRequired = false;
-            while (isActive(request, threadGeneration, mounted) && !controller.signal.aborted) {
-              if (snapshotRequired) {
-                const hydrated = await hydrateConversation(
-                  threadId,
-                  request,
-                  controller.signal,
-                ).catch(() => undefined);
-                if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted) {
-                  return;
-                }
-                if (hydrated === undefined) {
-                  await waitForReconnect(controller.signal, 250);
-                  continue;
-                }
-                if (hydrated.incomplete !== true) return;
-                operationCursor = 0;
-                assistantText = "";
-                snapshotRequired = false;
+            let reasoningTail = "";
+            const replyBeat = createReplyBeat(() => {
+              if (assistantText.length > 0) {
+                const nextText = assistantText;
+                setConversation((current) =>
+                  current.map((message) =>
+                    message.id === `${operationId}:assistant`
+                      ? { ...message, text: nextText, status: "incomplete" }
+                      : message,
+                  ),
+                );
               }
-              let received = 0;
-              try {
-                for await (const frame of client.subscribeOperation(
-                  threadId,
-                  operationId,
-                  operationCursor,
-                  controller.signal,
-                )) {
+              if (reasoningTail.length > 0) {
+                const chunk = reasoningTail;
+                reasoningTail = "";
+                noteReasoning(operationId, chunk);
+              }
+            });
+            let snapshotRequired = false;
+            try {
+              while (isActive(request, threadGeneration, mounted) && !controller.signal.aborted) {
+                if (snapshotRequired) {
+                  // Commit what arrived before the reload: a failed reload
+                  // must not lose the streamed text, and a successful one
+                  // replaces it.
+                  replyBeat.flush();
+                  const hydrated = await hydrateConversation(
+                    threadId,
+                    request,
+                    controller.signal,
+                  ).catch(() => undefined);
                   if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted) {
                     return;
                   }
-                  const event = frame.event;
-                  noteProviderRequest(event);
-                  noteActivity(operationId, event);
-                  noteUsage(operationId, event);
-                  if (event.kind === "conversation-turn-changed-files") {
-                    const changedFiles = event.changedFiles;
-                    setConversation((current) =>
-                      current.map((message) =>
-                        message.id === `${operationId}:assistant`
-                          ? { ...message, changedFiles }
-                          : message,
-                      ),
-                    );
+                  if (hydrated === undefined) {
+                    await waitForReconnect(controller.signal, 250);
+                    continue;
                   }
-                  if (event.kind === "context-handoff-attached") {
-                    const handoff = handoffSummary(event);
-                    setConversation((current) =>
-                      current.map((message) =>
-                        message.id === `${operationId}:assistant`
-                          ? { ...message, handoff }
-                          : message,
-                      ),
-                    );
-                  }
-                  if (event.kind === "fork-context-delivered") {
-                    const mergeBack = forkMergeBackSummary(event);
-                    setConversation((current) =>
-                      current.map((message) =>
-                        message.id === `${operationId}:assistant`
-                          ? withForkMergeBack(message, mergeBack)
-                          : message,
-                      ),
-                    );
-                  }
-                  if (event.kind === "provider-content" && event.channel === "reasoning") {
-                    const chunk =
-                      frame.displayText ??
-                      (await readOperationText(
-                        client,
-                        threadId,
-                        operationId,
-                        event.content.contentId,
-                        controller.signal,
-                      ));
-                    if (chunk !== undefined) noteReasoning(operationId, chunk);
-                  }
-                  if (event.kind === "provider-content" && event.channel === "message") {
-                    const chunk =
-                      frame.displayText ??
-                      (await readOperationText(
-                        client,
-                        threadId,
-                        operationId,
-                        event.content.contentId,
-                        controller.signal,
-                      ));
+                  if (hydrated.incomplete !== true) return;
+                  operationCursor = 0;
+                  assistantText = "";
+                  reasoningTail = "";
+                  // The operation replays from its beginning on a fresh base,
+                  // so its deltas commit on beats again.
+                  replyBeat.reset();
+                  snapshotRequired = false;
+                }
+                let received = 0;
+                try {
+                  for await (const frame of client.subscribeOperation(
+                    threadId,
+                    operationId,
+                    operationCursor,
+                    controller.signal,
+                  )) {
                     if (
                       !isActive(request, threadGeneration, mounted) ||
                       controller.signal.aborted
                     ) {
                       return;
                     }
-                    if (chunk !== undefined) {
-                      assistantText += chunk;
-                      const nextText = assistantText;
+                    const event = frame.event;
+                    noteProviderRequest(event);
+                    noteActivity(operationId, event);
+                    noteUsage(operationId, event);
+                    if (event.kind === "conversation-turn-changed-files") {
+                      const changedFiles = event.changedFiles;
                       setConversation((current) =>
                         current.map((message) =>
                           message.id === `${operationId}:assistant`
-                            ? { ...message, text: nextText, status: "incomplete" }
+                            ? { ...message, changedFiles }
                             : message,
                         ),
                       );
                     }
-                  }
-
-                  let terminalState: "completed" | "waiting" | "interrupted" | "failed" | undefined;
-                  let terminalMessage: string | undefined;
-                  let terminalFailureCategory: CodeOperationFailure["category"] | undefined;
-                  let terminalUsageLimit: ProviderUsageLimit | undefined;
-                  // Only a provider-turn-state result is the journaled stop a
-                  // resume opt-in can bind to; other terminal frames show the
-                  // limit but carry no schedulable stop.
-                  let terminalProviderTurnOperationId: CodeOperationId | undefined;
-                  if (event.kind === "operation-state" && event.state !== "running") {
-                    terminalState = event.state;
-                    terminalMessage = event.failure?.message;
-                    terminalFailureCategory = event.failure?.category;
-                    terminalUsageLimit = event.failure?.usageLimit;
-                  } else if (
-                    event.kind === "operation-result" &&
-                    event.result.kind === "provider-turn-state" &&
-                    event.result.state !== "running"
-                  ) {
-                    terminalState = event.result.state;
-                    terminalUsageLimit = event.result.failure?.usageLimit;
-                    terminalProviderTurnOperationId = operationId;
-                  } else if (
-                    event.kind === "operation-result" &&
-                    event.result.kind === "operation-failed"
-                  ) {
-                    terminalState = "failed";
-                    terminalMessage = event.result.failure.message;
-                    terminalFailureCategory = event.result.failure.category;
-                    terminalUsageLimit = event.result.failure.usageLimit;
-                  }
-
-                  operationCursor = Number(frame.cursor);
-                  received += 1;
-                  // The frame is on screen, so the activity the host had
-                  // reported by now has been read.
-                  markRenderedActivity(threadId);
-                  if (terminalState !== undefined) {
-                    activeTurnOperations.current.delete(String(threadId));
-                    if (terminalState !== "waiting") setProviderRequests([]);
-                    const hydrated = await hydrateConversation(
-                      threadId,
-                      request,
-                      controller.signal,
-                    ).catch(() => undefined);
-                    // The turn ended in front of the user. Recording it here,
-                    // rather than waiting for the timed refresh, is what keeps
-                    // leaving for another thread in the same moment from
-                    // raising an unread mark for the turn they just watched.
-                    // It is neither awaited nor guarded by the active thread:
-                    // the frame is already rendered, and the composer should
-                    // not wait on a read the user has no stake in.
-                    void recordSeenActivity(threadId);
-                    if (!isActive(request, threadGeneration, mounted)) return;
-                    setTurnUsageLimit(terminalUsageLimit);
-                    setLatestProviderTurnOperationId(terminalProviderTurnOperationId);
-                    if (terminalState === "completed") {
-                      if (hydrated?.incomplete !== true) {
-                        setTurnStatus("idle");
-                        setTurnError(undefined);
-                      }
-                    } else {
-                      setTurnStatus(
-                        terminalState === "waiting"
-                          ? "waiting"
-                          : terminalState === "interrupted"
-                            ? "interrupted"
-                            : "failed",
-                      );
-                      // The reloaded transcript already carries this turn's
-                      // row, so the callout above it would only repeat it.
-                      setTurnError(
-                        terminalMessage ??
-                          (terminalState === "waiting"
-                            ? "Reply to continue."
-                            : `Provider turn ${terminalState}.`),
-                        {
-                          inTranscript: true,
-                          ...(terminalFailureCategory === undefined
-                            ? {}
-                            : { category: terminalFailureCategory }),
-                        },
+                    if (event.kind === "context-handoff-attached") {
+                      const handoff = handoffSummary(event);
+                      setConversation((current) =>
+                        current.map((message) =>
+                          message.id === `${operationId}:assistant`
+                            ? { ...message, handoff }
+                            : message,
+                        ),
                       );
                     }
-                    return;
+                    if (event.kind === "fork-context-delivered") {
+                      const mergeBack = forkMergeBackSummary(event);
+                      setConversation((current) =>
+                        current.map((message) =>
+                          message.id === `${operationId}:assistant`
+                            ? withForkMergeBack(message, mergeBack)
+                            : message,
+                        ),
+                      );
+                    }
+                    if (event.kind === "provider-content" && event.channel === "reasoning") {
+                      const chunk =
+                        frame.displayText ??
+                        (await readOperationText(
+                          client,
+                          threadId,
+                          operationId,
+                          event.content.contentId,
+                          controller.signal,
+                        ));
+                      if (chunk !== undefined) {
+                        reasoningTail += chunk;
+                        replyBeat.schedule();
+                      }
+                    }
+                    if (event.kind === "provider-content" && event.channel === "message") {
+                      const chunk =
+                        frame.displayText ??
+                        (await readOperationText(
+                          client,
+                          threadId,
+                          operationId,
+                          event.content.contentId,
+                          controller.signal,
+                        ));
+                      if (
+                        !isActive(request, threadGeneration, mounted) ||
+                        controller.signal.aborted
+                      ) {
+                        return;
+                      }
+                      if (chunk !== undefined) {
+                        assistantText += chunk;
+                        replyBeat.schedule();
+                      }
+                    }
+
+                    let terminalState:
+                      | "completed"
+                      | "waiting"
+                      | "interrupted"
+                      | "failed"
+                      | undefined;
+                    let terminalMessage: string | undefined;
+                    let terminalFailureCategory: CodeOperationFailure["category"] | undefined;
+                    let terminalUsageLimit: ProviderUsageLimit | undefined;
+                    // Only a provider-turn-state result is the journaled stop a
+                    // resume opt-in can bind to; other terminal frames show the
+                    // limit but carry no schedulable stop.
+                    let terminalProviderTurnOperationId: CodeOperationId | undefined;
+                    if (event.kind === "operation-state" && event.state !== "running") {
+                      terminalState = event.state;
+                      terminalMessage = event.failure?.message;
+                      terminalFailureCategory = event.failure?.category;
+                      terminalUsageLimit = event.failure?.usageLimit;
+                    } else if (
+                      event.kind === "operation-result" &&
+                      event.result.kind === "provider-turn-state" &&
+                      event.result.state !== "running"
+                    ) {
+                      terminalState = event.result.state;
+                      terminalUsageLimit = event.result.failure?.usageLimit;
+                      terminalProviderTurnOperationId = operationId;
+                    } else if (
+                      event.kind === "operation-result" &&
+                      event.result.kind === "operation-failed"
+                    ) {
+                      terminalState = "failed";
+                      terminalMessage = event.result.failure.message;
+                      terminalFailureCategory = event.result.failure.category;
+                      terminalUsageLimit = event.result.failure.usageLimit;
+                    }
+
+                    operationCursor = Number(frame.cursor);
+                    received += 1;
+                    // The frame is on screen, so the activity the host had
+                    // reported by now has been read.
+                    markRenderedActivity(threadId);
+                    if (terminalState !== undefined) {
+                      // Commit what arrived before the authoritative reload:
+                      // it replaces this stream's text when it lands, and a
+                      // failed reload must not lose it.
+                      replyBeat.flush();
+                      activeTurnOperations.current.delete(String(threadId));
+                      if (terminalState !== "waiting") setProviderRequests([]);
+                      const hydrated = await hydrateConversation(
+                        threadId,
+                        request,
+                        controller.signal,
+                      ).catch(() => undefined);
+                      // The turn ended in front of the user. Recording it here,
+                      // rather than waiting for the timed refresh, is what keeps
+                      // leaving for another thread in the same moment from
+                      // raising an unread mark for the turn they just watched.
+                      // It is neither awaited nor guarded by the active thread:
+                      // the frame is already rendered, and the composer should
+                      // not wait on a read the user has no stake in.
+                      void recordSeenActivity(threadId);
+                      if (!isActive(request, threadGeneration, mounted)) return;
+                      setTurnUsageLimit(terminalUsageLimit);
+                      setLatestProviderTurnOperationId(terminalProviderTurnOperationId);
+                      if (terminalState === "completed") {
+                        if (hydrated?.incomplete !== true) {
+                          setTurnStatus("idle");
+                          setTurnError(undefined);
+                        }
+                      } else {
+                        setTurnStatus(
+                          terminalState === "waiting"
+                            ? "waiting"
+                            : terminalState === "interrupted"
+                              ? "interrupted"
+                              : "failed",
+                        );
+                        // The reloaded transcript already carries this turn's
+                        // row, so the callout above it would only repeat it.
+                        setTurnError(
+                          terminalMessage ??
+                            (terminalState === "waiting"
+                              ? "Reply to continue."
+                              : `Provider turn ${terminalState}.`),
+                          {
+                            inTranscript: true,
+                            ...(terminalFailureCategory === undefined
+                              ? {}
+                              : { category: terminalFailureCategory }),
+                          },
+                        );
+                      }
+                      return;
+                    }
                   }
+                } catch (error) {
+                  // A gap means later deltas have no trustworthy base. Reload
+                  // the durable conversation before replaying the operation
+                  // from its beginning; ordinary disconnects resume at the last
+                  // fully applied cursor.
+                  if (error instanceof CodeClientSnapshotRequiredError) snapshotRequired = true;
                 }
-              } catch (error) {
-                // A gap means later deltas have no trustworthy base. Reload
-                // the durable conversation before replaying the operation
-                // from its beginning; ordinary disconnects resume at the last
-                // fully applied cursor.
-                if (error instanceof CodeClientSnapshotRequiredError) snapshotRequired = true;
+                if (!controller.signal.aborted) {
+                  await waitForReconnect(controller.signal, received === 0 ? 250 : 50);
+                }
               }
-              if (!controller.signal.aborted) {
-                await waitForReconnect(controller.signal, received === 0 ? 250 : 50);
-              }
+            } finally {
+              // Every exit that did not settle the beat leaves whatever text
+              // and reasoning arrived in the state the person can see.
+              replyBeat.flush();
             }
           })().finally(() => {
             operationStream = undefined;
@@ -2628,12 +2707,31 @@ export function useCodeController(options: CodeControllerOptions) {
         let cursor = 0;
         let assistantAt: string | undefined;
         let assistantText = "";
+        let reasoningTail = "";
+        const replyBeat = createReplyBeat(() => {
+          if (assistantText.length > 0) {
+            const nextText = assistantText;
+            setConversation((current) =>
+              current.map((message) =>
+                message.id === assistantId ? { ...message, text: nextText } : message,
+              ),
+            );
+          }
+          if (reasoningTail.length > 0) {
+            const chunk = reasoningTail;
+            reasoningTail = "";
+            noteReasoning(operationId, chunk);
+          }
+        });
         let terminal = false;
         const settleActiveTurn = (
           status: "waiting" | "interrupted" | "failed",
           message: string,
           category?: CodeOperationFailure["category"],
         ) => {
+          // The turn ended: what the beat still holds belongs in the row the
+          // person is looking at, not one flush away.
+          replyBeat.flush();
           setTurnStatus(
             status === "waiting" ? "waiting" : status === "interrupted" ? "interrupted" : "failed",
           );
@@ -2658,156 +2756,159 @@ export function useCodeController(options: CodeControllerOptions) {
             ),
           );
         };
-        while (!terminal && !controller.signal.aborted) {
-          let received = 0;
-          for await (const frame of client.subscribeOperation(
-            view.thread.id,
-            operationId,
-            cursor,
-            controller.signal,
-          )) {
-            received += 1;
-            cursor = Number(frame.cursor);
-            assistantAt = frame.occurredAt;
-            const event = frame.event;
-            noteProviderRequest(event);
-            noteActivity(operationId, event);
-            noteUsage(operationId, event);
-            // The checkpoint is only known once the host has taken it, so the
-            // message the user already sees gains its restore point here
-            // rather than waiting for the thread to be reopened.
-            if (event.kind === "conversation-turn-started") {
-              const checkpoint = event.checkpoint;
-              const ranUnder = event.executionPolicy;
-              setConversation((current) =>
-                current.map((entry) =>
-                  entry.id === userMessage.id
-                    ? {
-                        ...entry,
-                        at: frame.occurredAt,
-                        ...(checkpoint === undefined ? {} : { checkpoint }),
-                        ...(ranUnder === undefined ? {} : { executionPolicy: ranUnder }),
-                      }
-                    : entry.id === assistantId
-                      ? { ...entry, startedAt: frame.occurredAt }
-                      : entry,
-                ),
-              );
-            }
-            // The host journals the change list just before the turn settles,
-            // so the reply gains its files here rather than on the next reopen.
-            if (event.kind === "conversation-turn-changed-files") {
-              const changedFiles = event.changedFiles;
-              setConversation((current) =>
-                current.map((message) =>
-                  message.id === assistantId ? { ...message, changedFiles } : message,
-                ),
-              );
-            }
-            // Journaled before the provider is sent anything, so the reply
-            // says what was handed over while it is still being written.
-            if (event.kind === "context-handoff-attached") {
-              const handoff = handoffSummary(event);
-              setConversation((current) =>
-                current.map((message) =>
-                  message.id === assistantId ? { ...message, handoff } : message,
-                ),
-              );
-            }
-            // Journaled with the handoff, before the provider is sent anything.
-            if (event.kind === "fork-context-delivered") {
-              const mergeBack = forkMergeBackSummary(event);
-              setConversation((current) =>
-                current.map((message) =>
-                  message.id === assistantId ? withForkMergeBack(message, mergeBack) : message,
-                ),
-              );
-            }
-            if (event.kind === "provider-content" && event.channel === "reasoning") {
-              const chunk =
-                frame.displayText ??
-                (await readOperationText(
-                  client,
-                  view.thread.id,
-                  operationId,
-                  event.content.contentId,
-                  controller.signal,
-                ));
-              if (chunk !== undefined) noteReasoning(operationId, chunk);
-            }
-            if (event.kind === "provider-content" && event.channel === "message") {
-              const chunk =
-                frame.displayText ??
-                (await readOperationText(
-                  client,
-                  view.thread.id,
-                  operationId,
-                  event.content.contentId,
-                  controller.signal,
-                ));
-              if (chunk !== undefined) {
-                assistantText += chunk;
-                const nextText = assistantText;
+        try {
+          while (!terminal && !controller.signal.aborted) {
+            let received = 0;
+            for await (const frame of client.subscribeOperation(
+              view.thread.id,
+              operationId,
+              cursor,
+              controller.signal,
+            )) {
+              received += 1;
+              cursor = Number(frame.cursor);
+              assistantAt = frame.occurredAt;
+              const event = frame.event;
+              noteProviderRequest(event);
+              noteActivity(operationId, event);
+              noteUsage(operationId, event);
+              // The checkpoint is only known once the host has taken it, so the
+              // message the user already sees gains its restore point here
+              // rather than waiting for the thread to be reopened.
+              if (event.kind === "conversation-turn-started") {
+                const checkpoint = event.checkpoint;
+                const ranUnder = event.executionPolicy;
                 setConversation((current) =>
-                  current.map((message) =>
-                    message.id === assistantId
-                      ? { ...message, text: nextText, at: frame.occurredAt }
-                      : message,
+                  current.map((entry) =>
+                    entry.id === userMessage.id
+                      ? {
+                          ...entry,
+                          at: frame.occurredAt,
+                          ...(checkpoint === undefined ? {} : { checkpoint }),
+                          ...(ranUnder === undefined ? {} : { executionPolicy: ranUnder }),
+                        }
+                      : entry.id === assistantId
+                        ? { ...entry, startedAt: frame.occurredAt }
+                        : entry,
                   ),
                 );
               }
-            }
-            if (event.kind === "operation-state") {
-              if (event.state !== "running") {
-                terminal = true;
-                if (event.state !== "completed") {
-                  settleActiveTurn(
-                    event.state,
-                    event.failure?.message ??
-                      (event.state === "waiting"
-                        ? "Reply to continue."
-                        : `Provider turn ${event.state}.`),
-                    event.failure?.category,
-                  );
-                  return false;
-                }
-              }
-            }
-            if (event.kind === "operation-result") {
-              if (event.result.kind === "provider-turn-state") {
-                terminal = event.result.state !== "running";
-                if (
-                  event.result.state === "waiting" ||
-                  event.result.state === "interrupted" ||
-                  event.result.state === "failed"
-                ) {
-                  settleActiveTurn(
-                    event.result.state,
-                    event.result.state === "waiting"
-                      ? "Reply to continue."
-                      : `Provider turn ${event.result.state}.`,
-                    event.result.failure?.category,
-                  );
-                  return false;
-                }
-              } else if (event.result.kind === "operation-failed") {
-                terminal = true;
-                settleActiveTurn(
-                  "failed",
-                  event.result.failure.message,
-                  event.result.failure.category,
+              // The host journals the change list just before the turn settles,
+              // so the reply gains its files here rather than on the next reopen.
+              if (event.kind === "conversation-turn-changed-files") {
+                const changedFiles = event.changedFiles;
+                setConversation((current) =>
+                  current.map((message) =>
+                    message.id === assistantId ? { ...message, changedFiles } : message,
+                  ),
                 );
-                return false;
-              } else {
-                terminal = event.result.kind !== "operation-accepted";
+              }
+              // Journaled before the provider is sent anything, so the reply
+              // says what was handed over while it is still being written.
+              if (event.kind === "context-handoff-attached") {
+                const handoff = handoffSummary(event);
+                setConversation((current) =>
+                  current.map((message) =>
+                    message.id === assistantId ? { ...message, handoff } : message,
+                  ),
+                );
+              }
+              // Journaled with the handoff, before the provider is sent anything.
+              if (event.kind === "fork-context-delivered") {
+                const mergeBack = forkMergeBackSummary(event);
+                setConversation((current) =>
+                  current.map((message) =>
+                    message.id === assistantId ? withForkMergeBack(message, mergeBack) : message,
+                  ),
+                );
+              }
+              if (event.kind === "provider-content" && event.channel === "reasoning") {
+                const chunk =
+                  frame.displayText ??
+                  (await readOperationText(
+                    client,
+                    view.thread.id,
+                    operationId,
+                    event.content.contentId,
+                    controller.signal,
+                  ));
+                if (chunk !== undefined) {
+                  reasoningTail += chunk;
+                  replyBeat.schedule();
+                }
+              }
+              if (event.kind === "provider-content" && event.channel === "message") {
+                const chunk =
+                  frame.displayText ??
+                  (await readOperationText(
+                    client,
+                    view.thread.id,
+                    operationId,
+                    event.content.contentId,
+                    controller.signal,
+                  ));
+                if (chunk !== undefined) {
+                  assistantText += chunk;
+                  replyBeat.schedule();
+                }
+              }
+              if (event.kind === "operation-state") {
+                if (event.state !== "running") {
+                  terminal = true;
+                  if (event.state !== "completed") {
+                    settleActiveTurn(
+                      event.state,
+                      event.failure?.message ??
+                        (event.state === "waiting"
+                          ? "Reply to continue."
+                          : `Provider turn ${event.state}.`),
+                      event.failure?.category,
+                    );
+                    return false;
+                  }
+                }
+              }
+              if (event.kind === "operation-result") {
+                if (event.result.kind === "provider-turn-state") {
+                  terminal = event.result.state !== "running";
+                  if (
+                    event.result.state === "waiting" ||
+                    event.result.state === "interrupted" ||
+                    event.result.state === "failed"
+                  ) {
+                    settleActiveTurn(
+                      event.result.state,
+                      event.result.state === "waiting"
+                        ? "Reply to continue."
+                        : `Provider turn ${event.result.state}.`,
+                      event.result.failure?.category,
+                    );
+                    return false;
+                  }
+                } else if (event.result.kind === "operation-failed") {
+                  terminal = true;
+                  settleActiveTurn(
+                    "failed",
+                    event.result.failure.message,
+                    event.result.failure.category,
+                  );
+                  return false;
+                } else {
+                  terminal = event.result.kind !== "operation-accepted";
+                }
               }
             }
+            if (!terminal && received === 0) {
+              await waitForReconnect(controller.signal, 150);
+            }
           }
-          if (!terminal && received === 0) {
-            await waitForReconnect(controller.signal, 150);
-          }
+        } finally {
+          // Every exit that did not settle the beat leaves whatever text and
+          // reasoning arrived in the row the person can see.
+          replyBeat.flush();
         }
         setProviderRequests([]);
+        replyBeat.flush();
         if (controller.signal.aborted) return false;
         setConversation((current) =>
           current.map((message) =>
