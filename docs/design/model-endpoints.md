@@ -255,6 +255,43 @@ fields may share columns; account rows must not become cells in that row.
 When the Settings pane is narrow, controls stack below their labels and help,
 keeping every input and the submit action reachable without horizontal clipping.
 
+### Claude artifacts
+
+Every Claude Code card's details carry one host-scoped switch, **Enable
+Claude artifacts**, off for every account until the person enables it
+(maintainer requests, 2026-10-27 and 2026-10-28). It makes the choice
+available; it switches no thread. Its help says what it does: the account's
+Work and Code threads may publish documents, reports, and pages to the
+person's claude.ai account instead of making a Canvas; Canvas stays the
+default and each thread chooses for itself; a published page leaves this
+computer; Claude asks before every publish; Plan never publishes. Under the
+switch a standing warning (a warning-tone notice read with the switch, not an
+interrupting alert) says: "Enabling Claude artifacts also turns on Claude
+Code's usage telemetry to Anthropic for this account's Work and Code threads
+that use them. Error reports and conversation uploads stay off." The wording
+states only what the setting changes. Turning the switch on opens a
+confirmation that repeats the warning, with Cancel focused; cancelling leaves
+it off. Turning it off needs no confirmation. An API-key account cannot
+enable it ("Claude artifacts need a claude.ai sign-in"), nor can a host that
+exports its own opt-out: `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, or a
+truthy `DISABLE_TELEMETRY` or `DO_NOT_TRACK` (the card says the computer's own
+telemetry opt-out keeps Claude Code's telemetry and Claude artifacts off).
+
+The switch is the account's `artifactDelivery` field, changed only by the
+`set-claude-artifact-delivery` provider command and journaled as an ordinary
+`provider.instance-configuration-changed@1`. Creating an account or saving
+its configuration never sets it; a saved change to API-key authentication
+clears it. The provider route refuses the command from anything but this
+host's own window, and remote forwarding never admits provider commands. The
+command keeps the running runtime, its readiness, and its models, and reports
+the account's `nativeArtifacts` capability again at once; the driver reads
+the setting at every launch (one per turn) and every Artifact call. Each
+thread's own choice, its offer, and its controls are in [Canvas](canvas.md);
+the runtime and its launch in
+[Provider runtimes](provider-runtimes.md#claude-code); the authority and the
+telemetry exception in
+[Architecture: security and authority](../architecture.md#security-and-authority).
+
 ### Add endpoint
 
 Add endpoint opens a dialog: the sign-ins first, then the presets, then a guided flow with a numbered strip of steps. A preset is a named service added with a pasted key (OpenCode Go, OpenCode Zen, Mistral, Requesty): its row sits in the same list as the sign-ins with a one-line description and Add with key, which opens Connect with the name, address and protocol filled in and the key hint naming the page where the key is made, as a link; the address stays editable, and the result is an ordinary endpoint of its kind. On the first-run page the same row opens the dialog on Connect. Kind is five cards (Azure AI Foundry, Amazon Bedrock, OpenAI-compatible, Anthropic-compatible, Local (Ollama)); Amazon Bedrock has its own Connect and ends there (below). Connect asks for a name, the address, and the key, each with a one-line hint, and no control is greyed out without a sentence saying why; protocol, how the key is sent, and "It takes no key" sit under Advanced, and an Azure address entered as OpenAI-compatible offers Switch to Azure AI Foundry. Azure also names at least one deployment, as chips, because the host cannot add it without one. Check and add adds the endpoint and shows its row state in the dialog, with its fix; from then on the endpoint exists, and closing the dialog keeps it. Models lists a short catalogue whole and chosen; a long one is searched, lists at most eight matches with a count of the rest, starts with nothing chosen, and has an Add by ID row; models left unchosen are hidden from the model picker. Azure edits its deployment chips; Local lists the models installed in Ollama, with no Add by ID. Verify tools checks each chosen model, one request at a time, after a button that says how many requests it sends; each model reads Checking…, Verified, or "Chat only" with the reason and Retry, and a failed check never stops the endpoint being added. Ollama models are checked the same way on this computer: the button says the requests run locally rather than that the service may bill, and a model Ollama says takes no tools reads Chat only without a generating request, with that reason. Ollama stays a loopback-only endpoint; a cloud, LAN, or tunnelled Ollama address is refused. When the endpoint lists a voice model (a preset's known transcription or speech model, or an id that reads as one), the last step and the endpoint's Voice section (after Models) say so in one line and offer Use for Transcription, which makes that model Voice's choice at once and then reads "Transcription uses <model> on <endpoint>"; a speech model is named with what it still needs, a voice from the provider, and Open Voice settings. Agents is optional: only verified models can be offered to helper agents or given an Octant Harness role (a Chat only model is listed with its checkbox off and a sentence saying why; role choices list verified models only, and Reading images only those that read images). A chosen role makes the model its first choice and keeps what it had as backups, saved with the roles' version; a stale version reloads the roles and asks again. In a browser, a kind that needs a key is added without one and reads Needs key, sending the person to the desktop app; Local works fully. "Chat only · Verify tools" is the one label for an unverified model on the endpoint row (when no shown model is verified), the endpoint's Models, the model pickers, and Add endpoint. Targets are 44px tall at phone width.

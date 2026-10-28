@@ -2,6 +2,7 @@ import { personDecides } from "./hostAnswer";
 import { HarnessRetryEventFields } from "./harnessRetry";
 import { ContextHandoffOmissions } from "./contextHandoff";
 import { ProviderChildActivityEvent } from "./providers";
+import { ThreadPublishedPage } from "./threadToolSteps";
 import { Schema } from "effect";
 import { AgentRunResultDeliveryMark, MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS } from "./agentRun";
 import { ExtensionSelection } from "./extensions";
@@ -1264,6 +1265,8 @@ const ToolEvent = Schema.Struct({
   toolName: boundedNonEmptyText(255),
   state: Schema.Literal("started", "running", "completed", "failed"),
   summary: Schema.optional(boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES)),
+  /** A page the call published outside this host; the transcript links to it. */
+  published: Schema.optional(ThreadPublishedPage),
 }).annotations(strict);
 /**
  * The bounds a Code approval or question is journaled under. Exported so a
@@ -1671,6 +1674,7 @@ export const CodeConversationStep = Schema.Union(
     toolName: boundedNonEmptyText(255),
     state: Schema.Literal("started", "running", "completed", "failed"),
     summary: Schema.optional(boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES)),
+    published: Schema.optional(ThreadPublishedPage),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("reasoning"),

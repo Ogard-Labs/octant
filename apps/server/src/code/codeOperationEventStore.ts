@@ -1235,6 +1235,7 @@ function foldTurnFrame(
       toolName: frame.event.toolName,
       state: frame.event.state,
       ...(frame.event.summary === undefined ? {} : { summary: frame.event.summary }),
+      ...(frame.event.published === undefined ? {} : { published: frame.event.published }),
     };
     if (existing === -1) appendStep(builder, step);
     else builder.steps[existing] = step;

@@ -1145,7 +1145,7 @@ function AutomationHistoryBody(props: {
   ]);
 
   if (controller.history.status === "collapsed" || controller.history.status === "loading") {
-    return <p role="status">Loading run history.</p>;
+    return <p role="status">Loading run history…</p>;
   }
   if (controller.history.status === "unavailable") {
     return (

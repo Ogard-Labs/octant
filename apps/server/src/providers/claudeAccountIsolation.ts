@@ -67,15 +67,72 @@ export const ISOLATED_CLAUDE_LAUNCH_GUARDS = {
 const HOST_DISABLE_ONLY_SWITCH = "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC";
 
 /**
- * The umbrella is the person's to set, not Octant's: a host that exports
- * `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` keeps it on every launch. Only
- * that disabling value crosses; any other value is dropped with the rest of
- * the host environment.
+ * The host's own telemetry opt-outs. Claude Code reads `DO_NOT_TRACK` the same
+ * way as `DISABLE_TELEMETRY`, and a launch that offers Claude's Artifact tool
+ * goes without Octant's `DISABLE_TELEMETRY`; a person who exported either one
+ * must keep telemetry off even in a thread that chose Claude artifacts, so
+ * either is carried as `DO_NOT_TRACK=1`, which that launch never removes.
+ */
+const HOST_TELEMETRY_OPT_OUTS = ["DISABLE_TELEMETRY", "DO_NOT_TRACK"] as const;
+const HOST_TELEMETRY_OPT_OUT = "DO_NOT_TRACK";
+
+function optsOut(value: string | undefined): boolean {
+  return value === "1" || value?.toLowerCase() === "true";
+}
+
+/**
+ * The person's own switches, never Octant's to remove: a host that exports
+ * `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` keeps it on every launch, and
+ * one that exports `DISABLE_TELEMETRY` or `DO_NOT_TRACK` keeps telemetry off as
+ * `DO_NOT_TRACK=1`. Only those disabling values cross; any other value is
+ * dropped with the rest of the host environment.
  */
 export function hostDisableOnlySwitches(hostEnvironment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return hostEnvironment[HOST_DISABLE_ONLY_SWITCH] === "1"
-    ? { [HOST_DISABLE_ONLY_SWITCH]: "1" }
-    : {};
+  return {
+    ...(hostEnvironment[HOST_DISABLE_ONLY_SWITCH] === "1"
+      ? { [HOST_DISABLE_ONLY_SWITCH]: "1" }
+      : {}),
+    ...(HOST_TELEMETRY_OPT_OUTS.some((name) => optsOut(hostEnvironment[name]))
+      ? { [HOST_TELEMETRY_OPT_OUT]: "1" }
+      : {}),
+  };
+}
+
+/** Whether a launch environment carries one of the host's own switches that keep Claude artifacts off. */
+export function disablesNonessentialTraffic(environment: NodeJS.ProcessEnv): boolean {
+  return (
+    environment[HOST_DISABLE_ONLY_SWITCH] === "1" || environment[HOST_TELEMETRY_OPT_OUT] === "1"
+  );
+}
+
+/**
+ * The one guard a launch offered Claude's Artifact tool goes without.
+ *
+ * Claude Code 2.1.211 reads claude.ai's switch for the tool
+ * (`tengu_cobalt_plinth`) through its feature-flag service, and that service
+ * runs only when the runtime's telemetry is on: `kol()` reads
+ * `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DISABLE_TELEMETRY`, and
+ * `DO_NOT_TRACK`, and any of them makes `Yee()` false, so the switch reads its
+ * default, off, and the tool is never listed. No other guard in
+ * {@link ISOLATED_CLAUDE_LAUNCH_GUARDS} is read on that path; error reports
+ * keep their own switch (read from the bundled binary, 2026-10-28). Lifting it
+ * turns on the runtime's usage telemetry to Anthropic for that launch, which
+ * the person accepted when they enabled Claude artifacts (maintainer decision,
+ * 2026-10-28).
+ */
+export const CLAUDE_ARTIFACT_LIFTED_GUARD = "DISABLE_TELEMETRY";
+
+/**
+ * The environment of a launch that offers Claude's Artifact tool: the
+ * runtime's opt-in for an Agent SDK launch, and every guard but
+ * {@link CLAUDE_ARTIFACT_LIFTED_GUARD}. A host that exports the umbrella or its
+ * own telemetry opt-out keeps its launch exactly as it was: either would keep
+ * the flag service off anyway, and the person's own switch is never weakened.
+ */
+export function claudeArtifactLaunchEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  if (disablesNonessentialTraffic(environment)) return environment;
+  const { [CLAUDE_ARTIFACT_LIFTED_GUARD]: _lifted, ...kept } = environment;
+  return { ...kept, CLAUDE_CODE_ARTIFACT: "1" };
 }
 
 export interface IsolatedClaudeAccountEnvironmentInput {

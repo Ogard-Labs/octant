@@ -17,8 +17,8 @@ import { describe, expect, it } from "vitest";
  * equals what that driver's static capability block declares, and the mode
  * columns equal the provider catalog policy. What it does not prove: the words
  * after the first token, which describe what a probe or a first reply
- * refines, and the compaction rows, which drivers assign outside the static
- * blocks. A block is read from source because the declarations are module
+ * refines, and the per-mode rows (compaction and native artifacts), which
+ * Claude Code and Codex assign at probe time outside their static blocks. A block is read from source because the declarations are module
  * constants that no driver exports and that a probe overwrites at run time;
  * building every driver to ask it would test the fixtures, not the declaration.
  */
@@ -201,10 +201,14 @@ const columnNames = (capabilityRows[0] ?? []).slice(1);
 const bodyRows = capabilityRows.slice(1);
 const columnRows = tableRows(matrixSection, "Column").slice(1);
 
-const compactionRows = ["chat", "work", "code"].map((mode) => `sessionCompaction.${mode}`);
+/** Capabilities a driver declares per mode, each with one row per mode. */
+const perModeCapabilities: ReadonlyArray<string> = ["sessionCompaction", "nativeArtifacts"];
+const perModeRows = perModeCapabilities.flatMap((capability) =>
+  ["chat", "work", "code"].map((mode) => `${capability}.${mode}`),
+);
 const expectedRowKeys = [
-  ...Object.keys(ProviderCapabilities.fields).filter((key) => key !== "sessionCompaction"),
-  ...compactionRows,
+  ...Object.keys(ProviderCapabilities.fields).filter((key) => !perModeCapabilities.includes(key)),
+  ...perModeRows,
 ];
 
 describe("provider capability matrix", () => {
@@ -242,7 +246,7 @@ describe("provider capability matrix", () => {
         const declared = declaredCapabilities(source.file, source.anchors);
         for (const row of bodyRows) {
           const key = row[0]?.replace(/`/g, "") ?? "";
-          if (key.startsWith("sessionCompaction.")) continue;
+          if (perModeCapabilities.includes(key.split(".")[0] ?? "")) continue;
           const documented = leadingToken(row[columnIndex + 1] ?? "");
           const actual = declared.get(key) ?? "absent";
           if (documented !== actual) {

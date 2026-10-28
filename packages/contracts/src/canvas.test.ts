@@ -16,6 +16,7 @@ import {
   CANVAS_DESIGN_SCHEMA_VERSION,
   CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION,
   CANVAS_THREAD_OWNED_SCHEMA_VERSION,
+  CANVAS_CHART_CALLOUTS_SCHEMA_VERSION,
   CANVAS_DESIGN_FIELDS_SCHEMA_VERSION,
   CANVAS_MAX_DESIGN_BRAND_TOKENS,
   CANVAS_MAX_DESIGN_NOTES_LENGTH,
@@ -2301,11 +2302,12 @@ describe("tabs and columns layout groups", () => {
     expect(decoded.blocks[1]).toEqual(columns);
     expect(CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION).toBe(19);
     expect(CANVAS_THREAD_OWNED_SCHEMA_VERSION).toBe(20);
-    expect(CANVAS_SCHEMA_VERSION).toBe(CANVAS_DESIGN_FIELDS_SCHEMA_VERSION);
+    expect(CANVAS_DESIGN_FIELDS_SCHEMA_VERSION).toBe(21);
+    expect(CANVAS_SCHEMA_VERSION).toBe(CANVAS_CHART_CALLOUTS_SCHEMA_VERSION);
   });
 
   it("keeps every version through the current one decodable when it gates nothing new", () => {
-    for (const schemaVersion of [15, 16, 17, 18, 19, 20, 21]) {
+    for (const schemaVersion of [15, 16, 17, 18, 19, 20, 21, 22]) {
       const decoded = decodeCanvasDefinition({
         ...definition,
         schemaVersion,
@@ -2480,6 +2482,81 @@ describe("design fields and richer diagrams", () => {
         nodes: [{ nodeId: "web", label: "Web", icon: "vendor-logo" }],
         groups: [],
       }),
+    ).toThrow();
+  });
+});
+
+describe("chart titles and point callouts", () => {
+  const trend = {
+    blockId: "subscribers",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "chart",
+    chartType: "line",
+    title: "Up 2,304 subscribers this year",
+    subtitle: "Email subscribers per month",
+    series: [
+      {
+        seriesId: "subscribers",
+        label: "Subscribers",
+        points: [
+          { x: "Jan", y: 7_808, note: "+344" },
+          { x: "Feb", y: 8_320 },
+          { x: "Sep", y: 9_400, emphasis: true },
+        ],
+      },
+    ],
+  } as const;
+
+  it("decodes a chart that states its finding and calls out its readings", () => {
+    expect(decodeCanvasBlock(trend)).toMatchObject({
+      title: "Up 2,304 subscribers this year",
+      subtitle: "Email subscribers per month",
+      series: [{ points: [{ note: "+344" }, { x: "Feb" }, { emphasis: true }] }],
+    });
+  });
+
+  it("refuses a title, subtitle, note, or emphasis in a document older than the version that introduced them", () => {
+    const older = { ...trend, schemaVersion: CANVAS_DESIGN_FIELDS_SCHEMA_VERSION };
+    expect(() =>
+      decodeCanvasDefinition({
+        ...definition,
+        schemaVersion: CANVAS_DESIGN_FIELDS_SCHEMA_VERSION,
+        blocks: [older],
+      }),
+    ).toThrow(/schema version 22/);
+    const { title: _title, subtitle: _subtitle, ...untitled } = older;
+    expect(() =>
+      decodeCanvasDefinition({
+        ...definition,
+        schemaVersion: CANVAS_DESIGN_FIELDS_SCHEMA_VERSION,
+        blocks: [
+          {
+            ...untitled,
+            series: [{ ...older.series[0], points: [{ x: "Jan", y: 1, emphasis: true }] }],
+          },
+        ],
+      }),
+    ).toThrow(/schema version 22/);
+  });
+
+  it("refuses a callout on a chart with no single point to label", () => {
+    expect(() =>
+      decodeCanvasBlock({
+        ...trend,
+        chartType: "pie",
+        series: [{ seriesId: "s", label: "Share", points: [{ x: "A", y: 1, note: "most" }] }],
+      }),
+    ).toThrow();
+  });
+
+  it("refuses more than twelve notes on one chart", () => {
+    const points = Array.from({ length: 13 }, (_, index) => ({
+      x: String(index),
+      y: index,
+      note: `+${String(index)}`,
+    }));
+    expect(() =>
+      decodeCanvasBlock({ ...trend, series: [{ seriesId: "s", label: "S", points }] }),
     ).toThrow();
   });
 });

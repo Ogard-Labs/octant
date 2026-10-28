@@ -890,6 +890,12 @@ export class WorkTurnService {
                     this.#supportsModelSwitch?.(command.authority.providerInstanceId) === true) &&
                 previous.authority.bindingRevisionId === command.authority.bindingRevisionId &&
                 previous.authority.workingDirectory === command.authority.workingDirectory,
+              // A same-provider model swap the provider cannot carry on starts
+              // a fresh session with a handoff instead of refusing the turn.
+              ...(previous.authority.modelId !== command.authority.modelId &&
+              this.#supportsModelSwitch?.(command.authority.providerInstanceId) !== true
+                ? { modelSwitchHandoff: true }
+                : {}),
               // The session cursor is recorded when the session starts, before
               // the provider is sent anything, so a turn that carried a
               // handoff and did not complete may never have delivered it.
@@ -1363,7 +1369,9 @@ export class WorkTurnService {
     // The live steps live only in this process until the turn settles; a window
     // that opens or reconnects mid-turn would otherwise miss the frame that
     // carried them, which no later frame replays.
-    const liveSteps = this.#liveToolSteps.get(String(turn.requestId));
+    const liveStepsHeld = this.#liveToolSteps.get(String(turn.requestId));
+    const liveSteps =
+      liveStepsHeld === undefined ? undefined : withoutPublishedSnapshots(liveStepsHeld);
     const withSteps =
       liveSteps === undefined || liveSteps.steps.length === 0
         ? turn
@@ -1476,9 +1484,22 @@ export class WorkTurnService {
         return;
       }
     }
+    // Only a thread whose person chose the runtime's artifact tool is offered
+    // it; every other thread of the account keeps Canvas and its launch keeps
+    // every guard. A Work turn never runs in Plan: it runs ask-first or
+    // auto-accepting edits.
+    const artifactToolName =
+      input.thread?.documentDelivery === "native-artifacts"
+        ? input.driver.nativeArtifactTool?.({
+            mode: "work",
+            executionPolicy:
+              input.access === "auto-accept-edits" ? "auto-accept-edits" : "approval-gated",
+          })
+        : undefined;
     const finalPlan = includeWorkToolDefinitions({
       plan: input.contextPlan,
       tools: appManagedTools?.definitions ?? [],
+      ...(artifactToolName === undefined ? {} : { artifactToolName }),
       uuid: this.#uuid,
       safeInputBudget: this.#safeInputBudgetTokens,
     });
@@ -1570,6 +1591,7 @@ export class WorkTurnService {
           ? {}
           : { outsideContentMarks: this.#outsideContentMarks }),
         ...(input.access === undefined ? {} : { access: input.access }),
+        ...(artifactToolName === undefined ? {} : { nativeArtifacts: true }),
         ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),
         ...(input.driver.conversationOwnership !== "provider" &&
         input.driver.conversationOwnership !== "host-resumable"
@@ -1720,7 +1742,7 @@ export class WorkTurnService {
           this.#liveUpdates.appendToolSteps(
             input.command.threadId,
             input.command.requestId,
-            toolSteps,
+            withoutPublishedSnapshots(toolSteps),
           );
         },
       });
@@ -2503,4 +2525,24 @@ function workTurnThreadFacts(
         workingDirectory:
           thread.workingDirectory === undefined ? undefined : String(thread.workingDirectory),
       };
+}
+
+/**
+ * A running turn's tool calls as the live feed carries them: a published
+ * page keeps its link, and its snapshot waits for the settled turn. Every
+ * step change restates the whole list, so a snapshot of up to
+ * `MAX_THREAD_PUBLISHED_SNAPSHOT_BYTES` carried live was resent to every
+ * window, and held in the feed's frames, once per later tool event of the
+ * turn (sixty later events held about 15 MB for one snapshot).
+ */
+function withoutPublishedSnapshots(toolSteps: ThreadToolSteps): ThreadToolSteps {
+  if (!toolSteps.steps.some((step) => step.published?.snapshot !== undefined)) return toolSteps;
+  return {
+    ...toolSteps,
+    steps: toolSteps.steps.map((step) => {
+      if (step.published?.snapshot === undefined) return step;
+      const { snapshot: _settled, ...page } = step.published;
+      return { ...step, published: page };
+    }),
+  };
 }

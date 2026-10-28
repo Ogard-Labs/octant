@@ -2009,6 +2009,54 @@ describe("CodeService commands", () => {
     });
   });
 
+  it("records the thread's choice of Claude artifacts and refuses it on an archived thread", async () => {
+    const fixture = serviceFixture();
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "change-code-thread-document-delivery",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        documentDelivery: "native-artifacts",
+      }),
+    ).resolves.toEqual({
+      kind: "thread-updated",
+      thread: expect.objectContaining({ documentDelivery: "native-artifacts", version: 2 }),
+    });
+    const stored =
+      fixture.persistence.journal.append.mock.calls.at(-1)?.[0].events[0].payload.thread;
+    expect(stored).toMatchObject({ documentDelivery: "native-artifacts" });
+
+    const archived = serviceFixture({ threads: [thread({ lifecycle: "archived" })] });
+    await expect(
+      archived.service.execute(ids.window, {
+        kind: "change-code-thread-document-delivery",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        documentDelivery: "native-artifacts",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+  });
+
+  it("refuses to create a thread that already chose Claude artifacts", async () => {
+    // The choice turns on the runtime's telemetry, so it is made only through
+    // the change command a paired device cannot send; a created thread that
+    // carried it would let any caller of create skip that refusal.
+    const fixture = serviceFixture({ threads: [] });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "create-code-thread",
+        thread: thread({ executionPolicy: "approval-gated", documentDelivery: "native-artifacts" }),
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "create-code-thread",
+        thread: thread({ executionPolicy: "approval-gated" }),
+      }),
+    ).resolves.toMatchObject({ kind: "thread-created" });
+  });
+
   it("pins a thread and erases the pin again rather than storing a false", async () => {
     const fixture = serviceFixture();
 

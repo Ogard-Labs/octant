@@ -1,4 +1,5 @@
 import { decodeCanvasDocumentRecipeCatalog } from "@octant/contracts/canvas-skill";
+import { importCanvasHtmlPage } from "@octant/domain";
 import {
   type CanvasId,
   decodeCanvasActionResult,
@@ -6,6 +7,11 @@ import {
   decodeCanvasDesignAssetsOutcome,
   decodeCanvasDesignRunOutcome,
   decodeCanvasDesignRunRequest,
+  decodePublishedSnapshotRunOutcome,
+  decodePublishedSnapshotRunRequest,
+  type PublishedSnapshotRunOutcome,
+  type PublishedSnapshotRunRequest,
+  type ThreadPublishedSnapshot,
   decodeCanvasGetOutcome,
   decodeCanvasHistoryOutcome,
   decodeCanvasId,
@@ -150,6 +156,14 @@ export interface CanvasRouteDependencies {
    * not serve them, and a running design then answers that it cannot run here.
    */
   readonly designRunTickets?: CanvasDesignRunTickets;
+  /**
+   * The host's snapshot of a page a Work or Code thread published, when the
+   * window may read that thread. Absent leaves published pages unrunnable.
+   */
+  readonly findPublishedSnapshot?: (
+    windowId: WindowId,
+    request: PublishedSnapshotRunRequest,
+  ) => Promise<ThreadPublishedSnapshot | undefined>;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly projects: Pick<ProjectService, "bootstrap">;
   readonly activeContextResolver: (
@@ -209,6 +223,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
       route !== "get" &&
       route !== "design-assets" &&
       route !== "design-run" &&
+      route !== "published-snapshot-run" &&
       route !== "design-page" &&
       route !== "history" &&
       route !== "revise" &&
@@ -370,6 +385,23 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         }
         const outcome = await issueDesignRun(dependencies, authenticatedWindowId, parsed);
         return jsonResponse(decodeCanvasDesignRunOutcome(outcome), 200, origin);
+      }
+
+      if (route === "published-snapshot-run" && request.method === "POST") {
+        const body = await readJson(request);
+        let parsed: PublishedSnapshotRunRequest;
+        try {
+          if (body.kind !== "ok") throw new Error("invalid");
+          parsed = decodePublishedSnapshotRunRequest(body.value);
+        } catch {
+          return failureResponse("Published page run request is invalid.", 400, origin);
+        }
+        const outcome = await issuePublishedSnapshotRun(
+          dependencies,
+          authenticatedWindowId,
+          parsed,
+        );
+        return jsonResponse(decodePublishedSnapshotRunOutcome(outcome), 200, origin);
       }
 
       if (route === "history" && request.method === "GET") {
@@ -1951,6 +1983,48 @@ async function issueDesignRun(
     blockId: block.blockId,
     page: canvasDesignPagePath(ticket),
   };
+}
+
+/**
+ * A running page for the snapshot of a page a thread published. The snapshot
+ * is read from the thread's own journal under the window's read authority,
+ * and drawn through the same importer and design policy an HTML page brought
+ * into a Canvas goes through, so it runs under the running tier's page,
+ * sandbox, and policy. Nothing the request carries becomes the page.
+ */
+async function issuePublishedSnapshotRun(
+  dependencies: CanvasRouteDependencies,
+  windowId: WindowId,
+  input: PublishedSnapshotRunRequest,
+): Promise<PublishedSnapshotRunOutcome> {
+  const unavailable = (reason: string): PublishedSnapshotRunOutcome => ({
+    kind: "unavailable",
+    reason,
+  });
+  const tickets = dependencies.designRunTickets;
+  const find = dependencies.findPublishedSnapshot;
+  if (tickets === undefined || find === undefined) {
+    return unavailable("This host does not run published pages.");
+  }
+  let snapshot: ThreadPublishedSnapshot | undefined;
+  try {
+    snapshot = await find(windowId, input);
+  } catch {
+    snapshot = undefined;
+  }
+  if (snapshot?.format !== "html") return unavailable("That published page is not in this thread.");
+  const imported = importCanvasHtmlPage(snapshot.content);
+  if (imported.status !== "imported" || imported.block.runsScript !== true) {
+    return unavailable("That published page has no script to run.");
+  }
+  const startFrameId = imported.block.frames[0]?.frameId;
+  if (startFrameId === undefined) return unavailable("That published page has nothing to run.");
+  const ticket = tickets.issue({
+    blockId: imported.block.blockId,
+    startFrameId: String(startFrameId),
+    block: imported.block,
+  });
+  return { kind: "ready", page: canvasDesignPagePath(ticket) };
 }
 
 /** The prototype a share access asked to run, when it asked for one. */

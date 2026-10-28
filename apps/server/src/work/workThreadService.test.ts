@@ -763,6 +763,47 @@ describe("WorkThreadService", () => {
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
 
+  it("records the thread's choice of Claude artifacts and refuses it on an archived thread", async () => {
+    const fixture = serviceFixture({ threads: [thread()] });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "change-work-thread-document-delivery",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        documentDelivery: "native-artifacts",
+      }),
+    ).resolves.toEqual({
+      kind: "thread-updated",
+      thread: thread({
+        documentDelivery: "native-artifacts",
+        version: 2 as AggregateVersion,
+        updatedAt: now,
+      }),
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: [
+          expect.objectContaining({
+            eventName: "work.thread-updated@1",
+            payload: expect.objectContaining({
+              thread: expect.objectContaining({ documentDelivery: "native-artifacts" }),
+            }),
+          }),
+        ],
+      }),
+    );
+
+    const archived = serviceFixture({ threads: [thread({ lifecycle: "archived" })] });
+    await expect(
+      archived.service.execute(ids.window, {
+        kind: "change-work-thread-document-delivery",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        documentDelivery: "native-artifacts",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+  });
+
   it("updates thread metadata with optimistic versions and maps concurrency conflicts", async () => {
     const current = thread();
     const fixture = serviceFixture({ threads: [current] });

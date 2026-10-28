@@ -5,6 +5,8 @@ import {
   decodeWindowId,
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
+import { createRemoteDevicePrincipal } from "./clientPrincipal";
+import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { createWorkThreadRouteHandler } from "./workThreadRoutes";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -62,6 +64,45 @@ describe("Work thread routes", () => {
     expect(response?.status).toBe(200);
     expect(await response?.json()).toEqual({ kind: "thread-created", thread: thread() });
     expect(execute).toHaveBeenCalledWith(windowId, command);
+  });
+
+  it("refuses a paired device turning on Claude artifacts for a thread, and lets it choose Canvas", async () => {
+    const execute = vi.fn(async () => ({ kind: "thread-updated", thread: thread() }));
+    const route = routeFixture({ execute });
+    const remoteDeviceId = "73000000-0000-4000-8000-000000000020";
+    const fromDevice = (documentDelivery: "canvas" | "native-artifacts") => {
+      const remote = request("/api/work/threads/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "change-work-thread-document-delivery",
+          threadId,
+          expectedVersion: 1,
+          documentDelivery,
+        }),
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "73000000-0000-4000-8000-000000000021" as never,
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remote;
+    };
+
+    const refused = await route(fromDevice("native-artifacts"));
+    expect(refused?.status).toBe(403);
+    expect(await refused?.json()).toMatchObject({ category: "unauthorized" });
+    expect(execute).not.toHaveBeenCalled();
+
+    expect((await route(fromDevice("canvas")))?.status).toBe(200);
+    expect(execute).toHaveBeenCalledOnce();
   });
 
   it("rejects missing capability and caller-supplied window identity", async () => {

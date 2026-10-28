@@ -200,7 +200,7 @@ import {
   type ProviderTurnContextDelta,
 } from "@octant/provider-sdk/chat-conformance";
 import {
-  CANVAS_DELIVERY_INSTRUCTIONS,
+  documentDeliveryInstructions,
   offersCanvasTool,
 } from "../canvas/canvasDeliveryInstructions";
 import { CodeEvidenceCapacityExceeded } from "./codeEvidenceStore";
@@ -2520,12 +2520,15 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const priorTurn = recovered.priorTurn;
     const priorTurnSettled = recovered.priorTurnSettled;
     // The composer offers another model of the same provider in a started
-    // thread; refusing every turn after that switch left the thread stuck. A
-    // provider that can resume onto the new model keeps the conversation, and
-    // the turn records the new model on its session.
+    // thread. A provider that can resume onto the new model keeps the
+    // conversation; one that cannot starts a fresh session with the same
+    // disclosed handoff a provider switch takes, rather than wedging the
+    // thread on a refusal it cannot act on.
     const providerSwitch =
       previous?.kind === "provider-session-ready" &&
-      String(previous.providerInstanceId) !== String(input.thread.providerInstanceId)
+      (String(previous.providerInstanceId) !== String(input.thread.providerInstanceId) ||
+        (String(previous.modelId) !== String(input.thread.modelId) &&
+          this.#options.supportsModelSwitch?.(input.thread) !== true))
         ? previous
         : undefined;
     if (
@@ -2535,16 +2538,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       return failStart(
         "This task's provider session belongs to a different checkout. Restore that selection or start a new task.",
       );
-    if (
-      previous?.kind === "provider-session-ready" &&
-      providerSwitch === undefined &&
-      String(previous.modelId) !== String(input.thread.modelId) &&
-      this.#options.supportsModelSwitch?.(input.thread) !== true
-    )
-      return failStart(
-        "This provider cannot carry the task's session on to another of its models. Restore that model, choose a different provider, or start a new task.",
-      );
-    // Another provider cannot take up this session, so the turn starts a new
+    // Another provider, or another model this provider cannot carry the
+    // session on to, cannot take up this session, so the turn starts a new
     // one with a disclosed text handoff of the thread's own conversation. The
     // handoff is chosen before anything else is prepared, so a refusal names
     // its reason and leaves nothing behind.
@@ -3961,13 +3956,26 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     let endedTurn: TurnEndSummary | undefined;
     const browserSelected = active.extensionSelections?.some(isBrowserUseSelection) === true;
     const appManagedTools = this.#appManagedTools(active);
+    // Only a thread whose person chose the runtime's artifact tool is told to
+    // use it; the turn runner starts that thread's session with the same
+    // choice, and every other thread keeps Canvas.
+    const deliveryInstructions = documentDeliveryInstructions({
+      artifactToolName:
+        active.thread.documentDelivery === "native-artifacts"
+          ? active.driver.nativeArtifactTool?.({
+              mode: "code",
+              executionPolicy: active.thread.executionPolicy,
+            })
+          : undefined,
+      canvasOffered: offersCanvasTool(appManagedTools?.definitions),
+    });
     const hostGuidance = [
       ...(browserSelected
         ? [{ kind: "instructions" as const, text: BROWSER_SELECTION_GUIDANCE }]
         : []),
-      ...(offersCanvasTool(appManagedTools?.definitions)
-        ? [{ kind: "instructions" as const, text: CANVAS_DELIVERY_INSTRUCTIONS }]
-        : []),
+      ...(deliveryInstructions === undefined
+        ? []
+        : [{ kind: "instructions" as const, text: deliveryInstructions }]),
     ];
     const fullContext = [...harnessContext, ...hostGuidance, ...(context ?? [])];
     // A runtime that keeps its own conversation already holds the standing
@@ -4223,7 +4231,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                     message === undefined
                       ? undefined
                       : {
-                          category: "failed",
+                          // A refused resume keeps its own category: the
+                          // transcript's parked-turn recovery keys on it, and
+                          // a plain "failed" would make it indistinguishable
+                          // from every other provider failure.
+                          category: failure?.resumeRefused === true ? "stale" : "failed",
                           message,
                           ...(failure?.usageLimit === undefined
                             ? {}
@@ -4560,6 +4572,9 @@ function normalizedOperationEvent(
       toolName: event.toolName,
       state: event.providerKind === "tool-success" ? "completed" : "failed",
       ...(summary === undefined ? {} : { summary }),
+      ...(event.providerKind === "tool-success" && event.published !== undefined
+        ? { published: event.published }
+        : {}),
     };
   }
   if (event.category === "usage")

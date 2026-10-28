@@ -2366,6 +2366,21 @@ CREATE INDEX validation_evidence_authority_idx
       ) STRICT;
     `,
   },
+  {
+    version: 89,
+    name: "index_event_journal_aggregate_sequence",
+    // A held chat event stream wakes on every machine change, and its frames
+    // journal on several aggregates — the thread's own events, its work-list
+    // and follow-up entries, its context ledger — all keyed by the thread id
+    // in aggregate_id. The payload threadId index serves Code operations, but
+    // chat payloads carry the thread inside their objects, so a chat stream
+    // replayed the whole journal to find its own rows, decoding every other
+    // thread's deltas on each wake. This index answers each wake from the
+    // thread's own rows alone.
+    sql: `CREATE INDEX event_journal_aggregate_sequence ON event_journal (
+      aggregate_type, aggregate_id, global_sequence
+    );`,
+  },
 ];
 
 interface AppliedMigrationRow {

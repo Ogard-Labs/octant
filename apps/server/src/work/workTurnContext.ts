@@ -14,7 +14,7 @@ import {
 } from "@octant/contracts";
 import { reduceContextToBudget } from "@octant/domain/context-policy";
 import {
-  CANVAS_DELIVERY_INSTRUCTIONS,
+  documentDeliveryInstructions,
   offersCanvasTool,
 } from "../canvas/canvasDeliveryInstructions";
 
@@ -135,6 +135,8 @@ export function planWorkTurnContext(input: {
 export function includeWorkToolDefinitions(input: {
   readonly plan: Extract<WorkTurnContextPlan, { readonly kind: "ok" }>;
   readonly tools: ReadonlyArray<ProviderToolDefinition>;
+  /** The runtime's own artifact tool, when the driver offers it to this turn. */
+  readonly artifactToolName?: string;
   readonly uuid: () => string;
   readonly safeInputBudget: number;
 }): WorkTurnContextPlan {
@@ -171,49 +173,53 @@ export function includeWorkToolDefinitions(input: {
   });
   // The Canvas tool is known only here, so its delivery rule joins the plan
   // with the tools and leads the context like the other Work instructions.
-  const canvasEntries = offersCanvasTool(input.tools)
-    ? [
-        decodeContextEntry({
-          id: input.uuid(),
-          source: { kind: "instruction", referenceId: "octant-canvas-delivery" },
-          category: "octant-policy",
-          label: "Work instructions",
-          eligibility: {
-            providerInstanceId: input.plan.manifest.providerInstanceId,
-            status: "eligible",
-            reason: "selected-provider",
-          },
-          posture: "required",
-          retention: "active",
-          priority: 100,
-          originalSize: canvasInstructionTokens,
-          includedSize: canvasInstructionTokens,
-          tokens: {
-            kind: "known",
-            tokens: canvasInstructionTokens,
-            accuracy: "conservative-heuristic",
-          },
-          state: "included",
-          introducedAtTurn: 1,
-          reuseCount: 0,
-          preview: { redacted: true, label: "octant-policy hidden" },
-        }),
-      ]
-    : [];
-  for (const entry of canvasEntries) {
-    blocks.set(String(entry.id), { kind: "instructions", text: CANVAS_DELIVERY_INSTRUCTIONS });
+  // The person's artifact switch puts the artifact rule in its place.
+  const deliveryText = documentDeliveryInstructions({
+    artifactToolName: input.artifactToolName,
+    canvasOffered: offersCanvasTool(input.tools),
+  });
+  const deliveryEntries: Array<ContextManifest["entries"][number]> = [];
+  if (deliveryText !== undefined) {
+    const deliveryTokens = Math.max(16, Math.ceil(deliveryText.length / 4));
+    const entry = decodeContextEntry({
+      id: input.uuid(),
+      source: {
+        kind: "instruction",
+        referenceId:
+          input.artifactToolName === undefined
+            ? "octant-canvas-delivery"
+            : "octant-artifact-delivery",
+      },
+      category: "octant-policy",
+      label: "Work instructions",
+      eligibility: {
+        providerInstanceId: input.plan.manifest.providerInstanceId,
+        status: "eligible",
+        reason: "selected-provider",
+      },
+      posture: "required",
+      retention: "active",
+      priority: 100,
+      originalSize: deliveryTokens,
+      includedSize: deliveryTokens,
+      tokens: { kind: "known", tokens: deliveryTokens, accuracy: "conservative-heuristic" },
+      state: "included",
+      introducedAtTurn: 1,
+      reuseCount: 0,
+      preview: { redacted: true, label: "octant-policy hidden" },
+    });
+    deliveryEntries.push(entry);
+    blocks.set(String(entry.id), { kind: "instructions", text: deliveryText });
   }
   return reduceWorkContext(
     decodeContextManifest({
       ...input.plan.manifest,
-      entries: [...canvasEntries, ...input.plan.manifest.entries, ...toolEntries],
+      entries: [...deliveryEntries, ...input.plan.manifest.entries, ...toolEntries],
     }),
     blocks,
     input.safeInputBudget,
   );
 }
-
-const canvasInstructionTokens = Math.max(16, Math.ceil(CANVAS_DELIVERY_INSTRUCTIONS.length / 4));
 
 /**
  * Whether a planned entry has a block in the plan's `context`, which lists

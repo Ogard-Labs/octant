@@ -36,6 +36,23 @@ describe("a turn's tool steps", () => {
     });
   });
 
+  it("keeps the page a finished call published, so a reopened Work thread still links it", () => {
+    const page = { url: "https://claude.ai/artifact/abc123", title: "Quarterly report" };
+    const steps = fold([
+      event({ kind: "tool-start", toolCallId: "a", toolName: "Artifact" }),
+      event({ kind: "tool-success", toolCallId: "a", summary: "Published.", published: page }),
+    ]);
+    expect(steps?.steps).toEqual([
+      {
+        toolCallId: "a",
+        toolName: "Artifact",
+        state: "completed",
+        summary: "Published.",
+        published: page,
+      },
+    ]);
+  });
+
   it("does not reopen a tool that already ended when a late progress message arrives", () => {
     const steps = fold([
       event({ kind: "tool-start", toolCallId: "a", toolName: "Read" }),

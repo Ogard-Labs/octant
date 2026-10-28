@@ -1,6 +1,6 @@
 import { threadCompactionSubject } from "../context/CompactionDivider";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
-import type { ProviderModelOptionValues } from "@octant/contracts";
+import type { ProviderModelOptionValues, ThreadDocumentDelivery } from "@octant/contracts";
 import {
   ApplicationMentionTypeahead,
   BrowserUseMention,
@@ -26,7 +26,8 @@ import {
   startedCodeThreadPickerGroups,
   type PickerGroup,
 } from "@octant/domain";
-import { CirclePause, X } from "lucide-react";
+import { CirclePause, FileOutput, X } from "lucide-react";
+import { OctantMenu } from "../ui/base/OctantMenu";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
@@ -67,6 +68,13 @@ import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
 import { ThreadCanvases } from "../canvas/InlineThreadCanvas";
+import {
+  ThreadArtifactsConfirm,
+  ThreadArtifactsOffer,
+  threadArtifactsOfferRow,
+  threadMayChooseArtifacts,
+} from "../canvas/ThreadArtifactsChoice";
+import { publishedSnapshotRunRuntimeFor } from "../canvas/blocks/designRunningFrame";
 import { placeThreadCanvases, threadTurnSpans } from "../canvas/threadCanvasPlacement";
 import { useThreadCanvasCards } from "../canvas/useThreadCanvasCards";
 import type { HostId } from "@octant/contracts/host";
@@ -388,6 +396,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const activeThreadKeyRef = useRef(String(props.threadId));
   activeThreadKeyRef.current = String(props.threadId);
   const [providerChanging, setProviderChanging] = useState(false);
+  const [deliveryChanging, setDeliveryChanging] = useState(false);
+  const [confirmArtifacts, setConfirmArtifacts] = useState(false);
   const optionSave = useRef<{ saving: boolean; queued: ProviderModelOptionValues | undefined }>({
     saving: false,
     queued: undefined,
@@ -683,14 +693,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     ...(turnAccessOverride === undefined ? {} : { requested: turnAccessOverride }),
   });
   const trimmed = draft.trim();
-  // A wait with no request to answer and no limit to show is a refused resume —
-  // the observed case is Mistral Vibe's "resume identity does not match this
-  // Project" — and the refused turn's operation has already ended.
+  // The host stated that this thread's saved provider session cannot be
+  // resumed — the observed case is Mistral Vibe's "resume identity does not
+  // match this Project" — and the refused turn's operation has already ended.
+  // Keyed on the journaled failure category, not on the absence of a request
+  // or a limit, which a future provider could park without refusing a resume.
   const parkedTurn =
-    props.controller.turnStatus === "waiting" &&
-    props.controller.providerRequests.length === 0 &&
-    props.controller.turnUsageLimit === undefined &&
-    props.controller.turnError !== undefined;
+    props.controller.turnStatus === "waiting" && props.controller.turnErrorCategory === "stale";
   const busy =
     props.controller.turnStatus === "sending" ||
     props.controller.turnStatus === "running" ||
@@ -781,6 +790,26 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     !messageQueue.uncertain &&
     (!queueFollowUp || messageQueue.available);
   const providerGroups = props.providerGroups ?? [];
+  // The account must allow Claude artifacts for the thread to choose them; a
+  // thread that already chose them can always go back to Canvas.
+  const artifactsChoosable =
+    thread.lifecycle !== "archived" &&
+    threadMayChooseArtifacts(providerGroups, thread.providerInstanceId, "code");
+  const changeDocumentDelivery = async (documentDelivery: ThreadDocumentDelivery) => {
+    if (deliveryChanging) return;
+    setDeliveryChanging(true);
+    try {
+      await props.controller.execute({
+        kind: "change-code-thread-document-delivery",
+        threadId: thread.id,
+        expectedVersion: thread.version,
+        documentDelivery,
+      });
+    } finally {
+      setDeliveryChanging(false);
+      setConfirmArtifacts(false);
+    }
+  };
   const threadDriverKind = providerGroups.find(
     (group) => String(group.instance.id) === String(thread.providerInstanceId),
   )?.instance.driverKind;
@@ -822,9 +851,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       (message.status === "completed" || message.handoff !== undefined) &&
       message.providerInstanceId !== undefined,
   );
+  const sessionModelGroup = providerGroups.find(
+    (group) => String(group.instance.id) === String(sessionReply?.providerInstanceId),
+  );
   const pendingSwitchNotice =
     sessionReply !== undefined &&
-    String(sessionReply.providerInstanceId) !== String(thread.providerInstanceId)
+    (String(sessionReply.providerInstanceId) !== String(thread.providerInstanceId) ||
+      // Another model of the same provider that cannot carry the session on
+      // also starts a fresh session with a handoff on the next message.
+      (String(sessionReply.modelId) !== String(thread.modelId) &&
+        sessionModelGroup?.modelSwitch !== "supported"))
       ? pendingProviderSwitchNotice(
           providerModelLabel(providerGroups, thread),
           providerModelLabel(providerGroups, {
@@ -843,6 +879,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     ),
     threadCanvases.cards,
   );
+  // Offered once: an answer either way is the thread's journaled choice.
+  const artifactsOfferRow = threadArtifactsOfferRow({
+    choosable: artifactsChoosable,
+    documentDelivery: thread.documentDelivery,
+    rowKeys: messages.map((message) => message.id),
+    canvasesByRow: canvasPlacement.byRow,
+  });
   const liveTasks = liveTaskProgress(
     messages.flatMap((message) => {
       if (message.role !== "assistant" || message.operationId === undefined) return [];
@@ -1459,11 +1502,19 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             ? {}
             : {
                 afterItem: (message: (typeof messages)[number]) => (
-                  <ThreadCanvases
-                    cards={canvasPlacement.byRow.get(message.id)}
-                    client={canvasClient}
-                    {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
-                  />
+                  <>
+                    <ThreadCanvases
+                      cards={canvasPlacement.byRow.get(message.id)}
+                      client={canvasClient}
+                      {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
+                    />
+                    {message.id === artifactsOfferRow ? (
+                      <ThreadArtifactsOffer
+                        onChoose={(choice) => void changeDocumentDelivery(choice)}
+                        pending={deliveryChanging}
+                      />
+                    ) : null}
+                  </>
                 ),
               })}
           renderItem={(message, index) => {
@@ -1674,6 +1725,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         {activity === undefined ? null : (
                           <TurnActivityRows
                             activity={activity}
+                            publishedSnapshotRuntime={(toolCallId) =>
+                              publishedSnapshotRunRuntimeFor(props.canvasClient, {
+                                mode: "code",
+                                threadId: String(thread.id),
+                                toolCallId,
+                              })
+                            }
                             running={message.status === "incomplete"}
                             settled={
                               message.status === "completed" ||
@@ -2139,6 +2197,43 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               )}
               {plan == null || plan.status === "withdrawn" ? (
                 <ThreadPlanProposal key={String(thread.id)} />
+              ) : null}
+              {thread.documentDelivery === "native-artifacts" || artifactsChoosable ? (
+                <OctantMenu
+                  items={
+                    thread.documentDelivery === "native-artifacts"
+                      ? [
+                          {
+                            value: "canvas",
+                            label: "Use Canvas instead of Claude artifacts",
+                            disabled: deliveryChanging,
+                          },
+                        ]
+                      : [
+                          {
+                            value: "native-artifacts",
+                            label: "Use Claude artifacts instead of Canvas",
+                            disabled: deliveryChanging,
+                          },
+                        ]
+                  }
+                  onValueChange={(value) => {
+                    if (value === "canvas") void changeDocumentDelivery("canvas");
+                    else setConfirmArtifacts(true);
+                  }}
+                  selectionMode="action"
+                  trigger={<FileOutput aria-hidden="true" size={16} />}
+                  triggerClassName="shell-icon-button"
+                  triggerLabel="How this thread delivers documents"
+                  value=""
+                />
+              ) : null}
+              {confirmArtifacts ? (
+                <ThreadArtifactsConfirm
+                  onCancel={() => setConfirmArtifacts(false)}
+                  onConfirm={() => void changeDocumentDelivery("native-artifacts")}
+                  pending={deliveryChanging}
+                />
               ) : null}
               <CodeAccessPicker
                 {...(props.harnessAutoReviewSupported === true

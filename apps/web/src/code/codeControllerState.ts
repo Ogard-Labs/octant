@@ -390,8 +390,8 @@ export function withUpdatedThread(
 }
 
 /**
- * Whether a command's result must re-open the active thread. A model or
- * reasoning change only rewrites the thread record, which the command result
+ * Whether a command's result must re-open the active thread. A model,
+ * reasoning, or document-delivery change only rewrites the thread record, which the command result
  * already carries; re-opening it cleared and re-read the whole conversation,
  * so every reasoning click flashed the transcript behind the picker.
  */
@@ -399,7 +399,8 @@ export function commandReloadsThread(command: CodeCommand, threadId: CodeThreadI
   return (
     "threadId" in command &&
     command.threadId === threadId &&
-    command.kind !== "change-code-thread-provider"
+    command.kind !== "change-code-thread-provider" &&
+    command.kind !== "change-code-thread-document-delivery"
   );
 }
 
@@ -567,6 +568,7 @@ async function projectConversationTurns(
           toolName: step.toolName,
           state: step.state,
           ...(step.summary === undefined ? {} : { summary: step.summary }),
+          ...(step.published === undefined ? {} : { published: step.published }),
         });
         continue;
       }

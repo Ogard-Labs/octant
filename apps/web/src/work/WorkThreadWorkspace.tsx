@@ -15,6 +15,7 @@ import {
   decodeWorkTurnId,
   decodeWorkTurnRequestId,
   type ProviderModelOptionValues,
+  type ThreadDocumentDelivery,
   type UsageResumeThreadState,
   type WorkAttachmentId,
   type WorkRequest,
@@ -89,6 +90,13 @@ import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
 import { ThreadCanvases } from "../canvas/InlineThreadCanvas";
+import {
+  ThreadArtifactsConfirm,
+  ThreadArtifactsOffer,
+  threadArtifactsOfferRow,
+  threadMayChooseArtifacts,
+} from "../canvas/ThreadArtifactsChoice";
+import { publishedSnapshotRunRuntimeFor } from "../canvas/blocks/designRunningFrame";
 import { placeThreadCanvases, threadTurnSpans } from "../canvas/threadCanvasPlacement";
 import { useThreadCanvasCards } from "../canvas/useThreadCanvasCards";
 import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
@@ -354,13 +362,21 @@ function WorkTurnHeader(props: {
  * runs; a settled turn folds behind "N tool calls" and shows a tool it never
  * saw end as unfinished.
  */
-function WorkToolGroup(props: { readonly turn: WorkTurnState }) {
+function WorkToolGroup(props: {
+  readonly turn: WorkTurnState;
+  readonly canvasClient?: CanvasClient;
+}) {
   const activity = toolStepsActivity(props.turn.toolSteps, props.turn.toolStepsTruncated);
   if (activity === undefined) return null;
   const status = props.turn.status;
+  const canvasClient = props.canvasClient;
+  const threadId = String(props.turn.threadId);
   return (
     <TurnActivityRows
       activity={activity}
+      publishedSnapshotRuntime={(toolCallId) =>
+        publishedSnapshotRunRuntimeFor(canvasClient, { mode: "work", threadId, toolCallId })
+      }
       running={status === "accepted" || status === "running"}
       settled={status === "completed" || status === "failed" || status === "cancelled"}
     />
@@ -762,6 +778,38 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   const fileMentionListId = useId();
   const trimmed = prompt.trim();
   const completionLocked = thread?.completionConfirmed === true;
+  const [deliveryChanging, setDeliveryChanging] = useState(false);
+  const [confirmArtifacts, setConfirmArtifacts] = useState(false);
+  // The account must allow Claude artifacts for the thread to choose them; a
+  // thread that already chose them can always go back to Canvas.
+  const artifactsChoosable =
+    thread !== undefined &&
+    thread.lifecycle === "active" &&
+    threadMayChooseArtifacts(props.providerGroups ?? [], thread.providerInstanceId, "work");
+  const changeDocumentDelivery = async (documentDelivery: ThreadDocumentDelivery) => {
+    if (thread === undefined || deliveryChanging) return;
+    setDeliveryChanging(true);
+    setErrorMessage(undefined);
+    try {
+      const result = await props.threadClient.execute({
+        kind: "change-work-thread-document-delivery",
+        threadId: thread.id,
+        expectedVersion: thread.version,
+        documentDelivery,
+      });
+      if (!("kind" in result) || result.kind !== "thread-updated") {
+        setErrorMessage("This task’s document choice could not be saved.");
+        return;
+      }
+      setThread(result.thread);
+      props.onThreadUpdated?.(result.thread);
+    } catch {
+      setErrorMessage("This task’s document choice could not be saved.");
+    } finally {
+      setDeliveryChanging(false);
+      setConfirmArtifacts(false);
+    }
+  };
   // The next turn starts a new session with the conversation handed over as
   // text when the selected provider keeps its own session and the latest turn
   // ran on another provider; the person hears that before sending.
@@ -1785,9 +1833,25 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     threadCanvases.cards,
   );
 
+  // Offered once: an answer either way is the thread's journaled choice.
+  const artifactsOfferRow = threadArtifactsOfferRow({
+    choosable: artifactsChoosable && !completionLocked,
+    documentDelivery: thread?.documentDelivery,
+    rowKeys: transcriptRows.map((row) => row.key),
+    canvasesByRow: canvasPlacement.byRow,
+  });
+
   return (
     <section aria-label="Task workspace" className="work-thread-workspace">
       <h1 className="sr-only">{props.title}</h1>
+
+      {confirmArtifacts ? (
+        <ThreadArtifactsConfirm
+          onCancel={() => setConfirmArtifacts(false)}
+          onConfirm={() => void changeDocumentDelivery("native-artifacts")}
+          pending={deliveryChanging}
+        />
+      ) : null}
 
       {completionFormOpen && thread?.lifecycle === "active" && !completionLocked ? (
         <OctantConfirmDialog
@@ -1821,11 +1885,19 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           ? {}
           : {
               afterItem: (row: WorkTranscriptRow) => (
-                <ThreadCanvases
-                  cards={canvasPlacement.byRow.get(row.key)}
-                  client={canvasClient}
-                  {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
-                />
+                <>
+                  <ThreadCanvases
+                    cards={canvasPlacement.byRow.get(row.key)}
+                    client={canvasClient}
+                    {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
+                  />
+                  {row.key === artifactsOfferRow ? (
+                    <ThreadArtifactsOffer
+                      onChoose={(choice) => void changeDocumentDelivery(choice)}
+                      pending={deliveryChanging}
+                    />
+                  ) : null}
+                </>
               ),
             })}
         renderItem={(row) => {
@@ -1884,7 +1956,12 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                     <HarnessRetryStatus
                       events={workRetryEvents(retries, String(row.head.requestId))}
                     />
-                    <WorkToolGroup turn={row.head} />
+                    <WorkToolGroup
+                      turn={row.head}
+                      {...(props.canvasClient === undefined
+                        ? {}
+                        : { canvasClient: props.canvasClient })}
+                    />
                   </>
                 )}
                 {row.entry.text === "" ? null : (
@@ -1913,7 +1990,12 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                     : { usageResume: thread.usageResume })}
                 />
                 <HarnessRetryStatus events={workRetryEvents(retries, String(row.turn.requestId))} />
-                <WorkToolGroup turn={row.turn} />
+                <WorkToolGroup
+                  turn={row.turn}
+                  {...(props.canvasClient === undefined
+                    ? {}
+                    : { canvasClient: props.canvasClient })}
+                />
               </div>
             );
           }
@@ -2308,8 +2390,29 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                       icon: <Check aria-hidden="true" size={14} />,
                       disabled: completing || providerChanging || creating,
                     },
+                    ...(thread.documentDelivery === "native-artifacts"
+                      ? [
+                          {
+                            value: "canvas",
+                            label: "Use Canvas instead of Claude artifacts",
+                            disabled: deliveryChanging,
+                          },
+                        ]
+                      : artifactsChoosable
+                        ? [
+                            {
+                              value: "native-artifacts",
+                              label: "Use Claude artifacts instead of Canvas",
+                              disabled: deliveryChanging,
+                            },
+                          ]
+                        : []),
                   ]}
-                  onValueChange={() => setCompletionFormOpen(true)}
+                  onValueChange={(value) => {
+                    if (value === "canvas") void changeDocumentDelivery("canvas");
+                    else if (value === "native-artifacts") setConfirmArtifacts(true);
+                    else setCompletionFormOpen(true);
+                  }}
                   selectionMode="action"
                   trigger={<Ellipsis aria-hidden="true" size={16} />}
                   triggerClassName="shell-icon-button"

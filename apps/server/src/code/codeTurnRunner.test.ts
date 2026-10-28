@@ -85,7 +85,13 @@ describe("CodeTurnRunner", () => {
     );
     expect(outcome).toMatchObject({
       _tag: "Left",
-      left: { category: "waiting", message: "Session is unavailable." },
+      left: {
+        category: "waiting",
+        message: "Session is unavailable.",
+        // The refused-resume fact must survive the boundary: the transcript's
+        // parked-turn recovery keys on it.
+        resumeRefused: true,
+      },
     });
     expect(connection.resume).toHaveBeenCalledOnce();
     expect(connection.start).not.toHaveBeenCalled();

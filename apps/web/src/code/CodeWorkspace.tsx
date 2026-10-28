@@ -19,7 +19,7 @@ import {
   presentAppleSimulatorLiveFrame,
   type AppleSimulatorLiveFrameAttach,
 } from "@octant/domain";
-import { LoaderCircle } from "lucide-react";
+import { FolderGit2, LoaderCircle } from "lucide-react";
 import { documentIsVisible } from "../polling/documentVisibility";
 import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
@@ -1487,7 +1487,11 @@ function TerminalWorkspaceSurface(
   if (props.checkoutAvailability === "unavailable") {
     return (
       <ShellState
-        action={{ label: "Use the Project's checkout", onClick: () => void rebindCheckout() }}
+        action={{
+          label: "Use the Project's checkout",
+          onClick: () => void rebindCheckout(),
+          glyph: FolderGit2,
+        }}
         eyebrow="Code terminal"
         message={
           rebindRefusal ??

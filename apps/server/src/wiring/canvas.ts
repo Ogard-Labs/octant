@@ -147,7 +147,12 @@ export type CanvasDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
     FoundationsWiring,
     "providerRuntimeRegistry" | "workArtifactProjection" | "workThreadProjection"
-  >;
+  > & {
+    /** Wired after Work and Code exist; read only when a request asks. */
+    readonly findPublishedSnapshot?: NonNullable<
+      Parameters<typeof createCanvasRouteHandler>[0]["findPublishedSnapshot"]
+    >;
+  };
 
 export function wireCanvas(deps: CanvasDependencies) {
   const {
@@ -1166,6 +1171,9 @@ export function wireCanvas(deps: CanvasDependencies) {
     canvasService,
     resolveDesignAssets,
     designRunTickets: new CanvasDesignRunTickets(),
+    ...(deps.findPublishedSnapshot === undefined
+      ? {}
+      : { findPublishedSnapshot: deps.findPublishedSnapshot }),
     canvasShareService,
     canvasExportService,
     canvasPublicShareService,

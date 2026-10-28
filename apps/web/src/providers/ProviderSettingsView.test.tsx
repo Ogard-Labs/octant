@@ -4409,6 +4409,31 @@ describe("browser key setup before the host reports its platform", () => {
   });
 });
 
+describe("a Claude account's artifact setting", () => {
+  it("sits in the Claude card's details, off, and is enabled for that account only after the person confirms", async () => {
+    const onSetClaudeArtifactDelivery = vi.fn(async () => true);
+    renderProviderListExpanded({
+      ...fixture({ instance: claudeProvider() }),
+      onSetClaudeArtifactDelivery,
+    });
+    const toggle = screen.getByRole("switch", {
+      name: "Enable Claude artifacts for Claude local",
+    });
+    expect(toggle).not.toBeChecked();
+    await userEvent.click(toggle);
+    await userEvent.click(await screen.findByRole("button", { name: "Enable Claude artifacts" }));
+    expect(onSetClaudeArtifactDelivery).toHaveBeenCalledWith(id, true);
+  });
+
+  it("is not offered on a card for another provider", () => {
+    renderProviderListExpanded({
+      ...fixture(),
+      onSetClaudeArtifactDelivery: vi.fn(async () => true),
+    });
+    expect(screen.queryByRole("switch", { name: /Claude artifacts/ })).toBeNull();
+  });
+});
+
 describe("where Settings lists each provider kind", () => {
   const endpointId = decodeProviderInstanceId("80000000-0000-4000-8000-0000000000b1");
   const ollamaId = decodeProviderInstanceId("80000000-0000-4000-8000-0000000000b2");

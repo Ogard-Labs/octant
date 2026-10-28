@@ -40,6 +40,8 @@ import {
   type ProjectId,
   CanvasDesignRunOutcome,
   decodeHostAnswer,
+  PublishedSnapshotRunOutcome,
+  type PublishedSnapshotRunRequest,
 } from "@octant/contracts";
 import {
   type CanvasExportFolderCommand,
@@ -94,6 +96,12 @@ export interface CanvasClient {
     readonly blockId: string;
     readonly frameId?: string;
   }): Promise<CanvasDesignRunStart>;
+  /**
+   * A single-use page for the snapshot of a page a Work or Code thread
+   * published, built by the host from that thread's own journal. A host
+   * without the route omits it and such a page says it cannot run here.
+   */
+  runPublishedSnapshot?(input: PublishedSnapshotRunRequest): Promise<CanvasDesignRunStart>;
   revise(request: CanvasReviseRequest): Promise<CanvasReviseResult>;
   /**
    * Journal a user's node positions as a new immutable version of a board.
@@ -261,6 +269,22 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
                 ? outcome.reason
                 : "This prototype is not available in this workspace.",
           };
+    },
+    async runPublishedSnapshot(input) {
+      const outcome = await request(
+        options.fetch,
+        new URL("/api/canvas/published-snapshot-run", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify(input),
+        },
+        decodeHostAnswer(PublishedSnapshotRunOutcome),
+      );
+      return outcome.kind === "ready"
+        ? { kind: "ready", url: new URL(outcome.page, options.baseUrl).toString() }
+        : { kind: "refused", reason: outcome.reason };
     },
     history(canvasId) {
       const url = new URL("/api/canvas/history", options.baseUrl);

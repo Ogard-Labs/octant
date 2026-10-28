@@ -2,6 +2,9 @@ import { ChatRichText } from "../chat/ChatRichText";
 import { Check, ChevronRight, Circle, CircleX, Clock3, LoaderCircle } from "lucide-react";
 import { useState, type KeyboardEvent, type ReactNode, type ToggleEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { PublishedPageCard } from "./PublishedPageCard";
+import { PublishedSnapshot } from "./PublishedSnapshot";
+import type { DesignRunRuntime } from "../canvas/blocks/designRunningFrame";
 import {
   alwaysVisibleActivityRows,
   settledTurnActivitySummary,
@@ -18,6 +21,11 @@ export interface TurnActivityRowsProps {
    * pending work and diffs remain visible.
    */
   readonly settled?: boolean;
+  /**
+   * How a published page's snapshot runs its script, by the tool call that
+   * published it. Absent leaves such a snapshot unable to run here.
+   */
+  readonly publishedSnapshotRuntime?: (toolCallId: string) => DesignRunRuntime | undefined;
 }
 
 /** Expanded summaries are clipped to this many characters until the user asks for all of it. */
@@ -74,6 +82,10 @@ function outcomeIcon(row: TurnActivityRow, settled: boolean) {
       return CircleX;
   }
 }
+
+type PublishedToolRow = Extract<TurnActivityRow, { kind: "tool" }> & {
+  readonly published: NonNullable<Extract<TurnActivityRow, { kind: "tool" }>["published"]>;
+};
 
 function rowKey(row: TurnActivityRow): string {
   return `${row.kind}:${row.id}`;
@@ -143,6 +155,11 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
   const foldableRows = activity.rows.filter((row) => !pinnedIds.has(rowKey(row)));
   const summary = settledTurnActivitySummary(activity);
   const foldSettledToolchain = settled && !running && summary.length > 0 && foldableRows.length > 0;
+  // A published page is what the turn delivered, so it stays in view below the
+  // rows even when the settled toolchain folds away.
+  const publishedPages = activity.rows.filter(
+    (row): row is PublishedToolRow => row.kind === "tool" && row.published !== undefined,
+  );
 
   const onToggle = (id: string) => (event: ToggleEvent<HTMLDetailsElement>) => {
     const nextOpen = event.newState === "open";
@@ -238,6 +255,22 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
       ) : (
         <>{activity.rows.map(renderDisclosure)}</>
       )}
+      {publishedPages.length === 0 ? null : (
+        <ul aria-label="Published pages" className="turn-activity__published">
+          {publishedPages.map((row) => (
+            <li className="turn-activity__published-page" key={rowKey(row)}>
+              <PublishedPageCard page={row.published} />
+              {row.published.snapshot === undefined ? null : (
+                <PublishedSnapshot
+                  snapshot={row.published.snapshot}
+                  title={row.published.title ?? "Published page"}
+                  {...withRuntime(props.publishedSnapshotRuntime?.(row.id))}
+                />
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -306,4 +339,10 @@ function activityDetail(
       ) : null}
     </>
   );
+}
+
+function withRuntime(runtime: DesignRunRuntime | undefined): {
+  readonly runRuntime?: DesignRunRuntime;
+} {
+  return runtime === undefined ? {} : { runRuntime: runtime };
 }

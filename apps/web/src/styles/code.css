@@ -1243,7 +1243,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   padding: 0 var(--oct-nav-inset);
   color: var(--octant-text-secondary);
   font-size: var(--oct-text-detail);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   text-align: start;
 }
 
@@ -1673,7 +1673,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   color: var(--oct-meta);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   letter-spacing: 0;
 }
 
@@ -1732,7 +1732,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   padding: 2px 0;
   margin-inline-start: 0;
   font-size: var(--oct-text-sm);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   text-align: left;
 }
 
@@ -2104,7 +2104,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   overflow: hidden;
   min-width: 0;
   color: var(--oct-fg);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2281,7 +2281,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   margin: 0;
   color: var(--octant-text-secondary);
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .code-turn-files__list {
@@ -2544,7 +2544,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   margin: 0;
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

@@ -1956,6 +1956,21 @@ export function useProviderController(options: ProviderControllerOptions) {
       }),
     [execute],
   );
+  const setClaudeArtifactDelivery = useCallback(
+    (instanceId: ProviderInstanceId, enabled: boolean) =>
+      execute((current) => {
+        const instance = findProvider(current, instanceId);
+        return instance === undefined
+          ? undefined
+          : {
+              kind: "set-claude-artifact-delivery",
+              instanceId,
+              expectedVersion: instance.version,
+              enabled,
+            };
+      }),
+    [execute],
+  );
   const setDataTags = useCallback(
     (instanceId: ProviderInstanceId, dataTags: ProviderDataTags) =>
       execute((current) => {
@@ -2387,6 +2402,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     changeAzureFoundryConfiguration,
     changeAmazonBedrockConfiguration,
     setEnabled,
+    setClaudeArtifactDelivery,
     setDataTags,
     setModelDataTags,
     setModelContextWindow,

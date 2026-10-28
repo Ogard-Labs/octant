@@ -621,6 +621,61 @@ active key runs out.
   switch keys within a turn. A command-line runtime, such as Claude Code or
   Codex, uses the first key for now and does not switch.
 
+### Claude artifacts
+
+By default Claude delivers a document, report, deck, or page as a Canvas, and
+Canvas stays the default. A Claude Code account signed in with claude.ai can
+let its threads publish them as Claude artifacts instead. Claude artifacts
+are a per-thread choice: Claude Code's usage telemetry is sent to Anthropic
+only for the threads that use them.
+
+1. Open the account's card in **Settings → Providers**, open its details, and
+   turn on **Enable Claude artifacts**. The warning under the switch, repeated
+   in a confirmation, says that it also turns on Claude Code's usage telemetry
+   to Anthropic for the account's Work and Code threads that use artifacts;
+   error reports and conversation uploads stay off. It is off for every
+   account until you turn it on, and only the Octant app on the host can
+   change it; a paired device cannot.
+2. In a Work or Code thread on that account, choose artifacts for that
+   thread. The first time such a thread makes a Canvas, Octant asks once
+   beneath it: **Use Claude artifacts for this thread instead?** Answer
+   **Use Claude artifacts** or **Keep Canvas**; it does not ask again. You
+   can switch either way at any time from the thread's composer: the task
+   actions menu in Work, or the document button beside the access picker in
+   Code. The change applies from the next turn. A paired device can switch a
+   thread back to Canvas but cannot turn artifacts on.
+
+In a thread that uses Claude artifacts:
+
+- Claude writes the document as a page in the folder and publishes it to your
+  claude.ai account. **The page is uploaded to claude.ai and leaves this
+  computer.**
+- That thread's turns run Claude Code with its usage telemetry to Anthropic
+  on. Every other thread keeps it off, as before.
+- Claude asks before each publish, even when the thread has Full access, and
+  an earlier answer never covers a later publish. It can only publish a file
+  inside the thread's folder. A replacement of a page already on your account
+  names that page in the request.
+- Plan never publishes, and Chat never does.
+- The thread shows a link card under the turn's steps that opens the page in
+  your browser, where you are signed in to claude.ai, and beside it a
+  snapshot of the file as it was when you approved publishing it. Edits made
+  later on claude.ai are not shown. In a Work thread the snapshot appears
+  when the turn finishes. A page with its own script waits for
+  **Run**, as an imported HTML page in a Canvas does. Octant never downloads,
+  displays, or signs in to the live page.
+- Ask for a Canvas and you still get one.
+
+Whether Claude offers its Artifact tool also depends on your Claude plan and
+organization. When it doesn't, documents stay Canvases. An account that uses an
+Anthropic API key has no claude.ai account to publish to, so the setting is
+unavailable there. If your computer exports
+`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, `DISABLE_TELEMETRY=1` or
+`DO_NOT_TRACK=1`, that opt-out keeps Claude Code's telemetry and Claude
+artifacts off, and the card says so. Turning the setting
+or a thread's choice off refuses Claude's next publish at once, and the
+thread's next turn runs with telemetry off again.
+
 ### Signing in with a subscription
 
 An **OpenAI-compatible** endpoint can sign in with a subscription instead of

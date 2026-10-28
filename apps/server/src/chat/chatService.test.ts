@@ -1,4 +1,5 @@
 import {
+  ThreadWorkItemId,
   EventActor,
   MAX_PROVIDER_TOOLS,
   THREAD_EXTERNAL_CONTENT_AGGREGATE,
@@ -4940,10 +4941,15 @@ describe("ChatService", () => {
         prompt: "Continue",
       });
       if (!canSwitch) {
-        await expect(followUp).rejects.toMatchObject({
-          failure: { message: expect.stringContaining("native session cannot be recovered") },
-        });
-        expect(fakeDriver.sentTurns).toHaveLength(1);
+        // The provider cannot carry the session on to another of its models,
+        // so the turn starts a fresh session with a handoff instead of
+        // refusing: no resume, a new session, and the handoff on the attempt.
+        await followUp;
+        expect(fakeDriver.startedSessionIds).toHaveLength(2);
+        expect(fakeDriver.resumeInputs).toEqual([]);
+        expect(fakeDriver.sentTurns[1]?.sessionId).not.toBe(fakeDriver.sentTurns[0]?.sessionId);
+        const next = service.read(created.thread.id).turns.at(-1)?.attempts.at(-1);
+        expect(next?.handoff).toMatchObject({ reason: "provider-switch" });
         return;
       }
       await followUp;
@@ -5913,7 +5919,7 @@ describe("ChatService", () => {
     expect(service.read(created.thread.id).turns[0]?.attempts[0]?.outcome).toBe("interrupted");
   });
 
-  it("advances replay across unrelated global journal pages", async () => {
+  it("keeps reading a thread's own aggregate pages until a short batch ends the stream", async () => {
     const { service, persistence } = openFixture();
     const created = await service.execute({
       kind: "create-chat-thread",
@@ -5927,22 +5933,36 @@ describe("ChatService", () => {
       (event) => event.eventName === "chat.thread-created@1",
     );
     if (targetEnvelope === undefined) throw new Error("Expected thread-created envelope.");
-    const unrelatedPage = Array.from({ length: 100 }, (_, index) => ({
-      ...targetEnvelope,
-      globalSequence: (index + 1) as GlobalSequence,
-      eventName: "fixture.unrelated@1",
-    }));
-    const replaySpy = vi.spyOn(persistence.journal, "replay").mockImplementation((cursor) => {
-      if (replaySpy.mock.calls.length === 1) return unrelatedPage as never;
-      if (cursor.afterSequence === 0) {
-        throw new Error("global replay cursor did not advance");
-      }
-      return [{ ...targetEnvelope, globalSequence: 101 as GlobalSequence }] as never;
-    });
+    const ownPage = (start: number, count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        ...targetEnvelope,
+        globalSequence: (start + index) as GlobalSequence,
+      }));
+    const realBySequence = persistence.journal.replayAggregateBySequence.bind(persistence.journal);
+    const bySequenceSpy = vi
+      .spyOn(persistence.journal, "replayAggregateBySequence")
+      .mockImplementation((cursor) => {
+        if (cursor.aggregateType !== "chat-thread") return realBySequence(cursor);
+        const ownCalls = bySequenceSpy.mock.calls.filter(
+          ([call]) => call.aggregateType === "chat-thread",
+        ).length;
+        if (ownCalls === 1) return ownPage(1, 100) as never;
+        if (cursor.afterSequence !== 100) {
+          throw new Error("aggregate replay cursor did not advance past the full page");
+        }
+        return ownPage(101, 1) as never;
+      });
 
-    const first = await service.subscribe(created.thread.id, 0).next();
-    expect(first).toMatchObject({ done: false, value: { event: { kind: "thread-created" } } });
-    expect(replaySpy.mock.calls[1]?.[0].afterSequence).toBe(100);
+    const frames = [];
+    for await (const frame of service.subscribe(created.thread.id, 0)) frames.push(frame);
+    expect(frames.map((frame) => frame.event.kind)).toEqual(
+      Array.from({ length: 101 }, () => "thread-created"),
+    );
+    expect(
+      bySequenceSpy.mock.calls.some(
+        ([call]) => call.aggregateType === "chat-thread" && call.afterSequence === 100,
+      ),
+    ).toBe(true);
   });
 
   it("keeps per-thread replay free of global settings and other-thread citations", async () => {
@@ -9742,6 +9762,136 @@ describe("completing and snoozing a Chat thread", () => {
   });
 });
 
+/**
+ * A driver whose one reply streams the given deltas and then completes, so
+ * the journal holds the first delta's `attempt-updated` and one appended
+ * event per further delta — the shape a long streamed reply leaves for a
+ * subscriber that replays it.
+ */
+function streamedReplyDriver(deltas: ReadonlyArray<string>): ProviderDriver {
+  return {
+    acquire: () =>
+      Effect.sync(() => {
+        const queue = Effect.runSync(Queue.unbounded<never>());
+        let sessionId = "";
+        const emit = (event: Record<string, unknown>) =>
+          Queue.offer(queue, { sessionId, ...event } as never);
+        return {
+          subscribe: Effect.succeed(Stream.fromQueue(queue)),
+          start: (input: { readonly sessionId: string }) =>
+            Effect.sync(() => {
+              sessionId = input.sessionId;
+              return { sessionId: input.sessionId };
+            }),
+          send: () =>
+            Effect.gen(function* () {
+              for (const text of deltas) {
+                yield* emit({ kind: "text-delta", text });
+              }
+              yield* emit({ kind: "usage", inputTokens: 10, outputTokens: 5 });
+              yield* emit({ kind: "completed" });
+            }),
+          interrupt: () => Effect.void,
+          stop: () => Effect.void,
+          answerApproval: () => Effect.void,
+          answerUserInput: () => Effect.void,
+          answerTool: () => Effect.void,
+        };
+      }),
+  } as unknown as ProviderDriver;
+}
+
+/** Journal appends that carry at least one streamed appended-delta event. */
+function appendedCommits(append: {
+  readonly mock: { readonly calls: ReadonlyArray<ReadonlyArray<unknown>> };
+}): Array<{ events?: ReadonlyArray<{ eventName: string }> }> {
+  return append.mock.calls
+    .map(([request]) => request as { events?: ReadonlyArray<{ eventName: string }> })
+    .filter((request) =>
+      (request.events ?? []).some(
+        (event) => event.eventName === "chat.attempt-response-appended@1",
+      ),
+    );
+}
+
+describe("ChatService streamed delta batches", () => {
+  it("folds a reply's streamed deltas into the burst's journal commits, ahead of the attempt's own event", async () => {
+    const deltas = ["one ", "two ", "three ", "four ", "five ", "six."];
+    // The fixture's clock never advances, so the whole reply is one burst and
+    // every appended delta shares the terminal attempt persist's commit.
+    const { service, persistence } = openFixture({ driver: streamedReplyDriver(deltas) });
+    const append = vi.spyOn(persistence.journal, "append");
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Batched burst",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const sent = await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Hello",
+    });
+    if (sent.kind !== "turn-created") throw new Error("Expected turn-created result.");
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts[0]?.outcome === "completed",
+    );
+
+    const commits = appendedCommits(append);
+    expect(commits).toHaveLength(1);
+    expect(
+      commits[0]?.events?.filter((event) => event.eventName === "chat.attempt-response-appended@1"),
+    ).toHaveLength(deltas.length - 1);
+    // The batch journals ahead of the attempt's own event in the same commit,
+    // so the projection sees each reference appended before a whole attempt
+    // carries it.
+    const names = commits[0]?.events?.map((event) => event.eventName);
+    expect(names?.at(-1)).toBe("chat.attempt-updated@1");
+    const attempt = service.read(created.thread.id).turns[0]?.attempts[0];
+    expect(attempt?.responseRefs).toHaveLength(deltas.length);
+    expect(attempt?.outcome).toBe("completed");
+  });
+
+  it("commits a burst on its own once the batch window has passed", async () => {
+    const deltas = ["one ", "two ", "three ", "four ", "five "];
+    let ticks = 0;
+    const { service, persistence } = openFixture({
+      driver: streamedReplyDriver(deltas),
+      // Any two deltas sit further apart than the window, so each pair of
+      // appended deltas commits on its own instead of folding into the end.
+      clock: () => new Date(Date.parse("2026-10-27T12:00:00.000Z") + 1_000 * ticks++).toISOString(),
+    });
+    const append = vi.spyOn(persistence.journal, "append");
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Windowed burst",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const sent = await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Hello",
+    });
+    if (sent.kind !== "turn-created") throw new Error("Expected turn-created result.");
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts[0]?.outcome === "completed",
+    );
+
+    const commits = appendedCommits(append);
+    expect(commits.map((commit) => commit.events?.length ?? 0)).toEqual([2, 2]);
+    expect(
+      commits
+        .flatMap((commit) => commit.events ?? [])
+        .filter((event) => event.eventName === "chat.attempt-response-appended@1"),
+    ).toHaveLength(deltas.length - 1);
+    const attempt = service.read(created.thread.id).turns[0]?.attempts[0];
+    expect(attempt?.responseRefs).toHaveLength(deltas.length);
+  });
+});
+
 describe("ChatService streamed delta bodies", () => {
   it("puts the body a delta appended on its frame, and only for subscribers that asked", async () => {
     const { service } = openFixture();
@@ -9786,6 +9936,105 @@ describe("ChatService streamed delta bodies", () => {
     for await (const frame of service.subscribe(created.thread.id, 0)) plain.push(frame);
     expect(plain.length).toBe(asked.length);
     expect(plain.every((frame) => frame.contents === undefined)).toBe(true);
+  });
+
+  it("replays a run of streamed deltas to a strict reader as one frame, not one per delta", async () => {
+    const deltas = ["one ", "two ", "three ", "four ", "five."];
+    const { service } = openFixture({ driver: streamedReplyDriver(deltas) });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Streamed burst",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const sent = await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Hello",
+    });
+    if (sent.kind !== "turn-created") throw new Error("Expected turn-created result.");
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts[0]?.outcome === "completed",
+    );
+
+    const strict = [];
+    for await (const frame of service.subscribe(created.thread.id, 0, undefined, {
+      contents: true,
+    })) {
+      strict.push(frame);
+    }
+    expect(strict.filter((frame) => frame.event.kind === "attempt-response-appended")).toEqual([]);
+    const attempts = strict.flatMap((frame) =>
+      frame.event.kind === "attempt-updated" ? [frame.event.attempt] : [],
+    );
+    expect(attempts.map((attempt) => attempt.outcome)).toEqual([
+      "streaming",
+      "completed",
+      "completed",
+    ]);
+    expect(attempts.map((attempt) => attempt.responseRefs.length)).toEqual([
+      1,
+      deltas.length,
+      deltas.length,
+    ]);
+
+    const optedIn = [];
+    for await (const frame of service.subscribe(created.thread.id, 0, undefined, {
+      contents: true,
+      appended: true,
+    })) {
+      optedIn.push(frame);
+    }
+    expect(
+      optedIn.flatMap((frame) =>
+        frame.event.kind === "attempt-response-appended" ? [frame.contents?.[0]?.body] : [],
+      ),
+    ).toEqual(deltas.slice(1));
+  });
+});
+
+describe("ChatService event stream slices", () => {
+  it("streams the work and follow-up frames that journal on their own aggregates, in journal order", async () => {
+    const { service } = openFixture();
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Slices",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const thread = created.thread;
+    await service.execute({
+      kind: "add-chat-work-item",
+      threadId: thread.id,
+      expectedVersion: 0 as AggregateVersion,
+      itemId: "84000000-0000-4000-8000-0000000000e1" as ThreadWorkItemId,
+      title: "Review the handoff",
+      status: "pending",
+      position: 0,
+      origin: "user",
+    });
+    await service.execute({
+      kind: "open-chat-follow-up",
+      threadId: thread.id,
+      expectedVersion: 0 as AggregateVersion,
+      triggerSequence: 1,
+      reason: "Review the handoff",
+      origin: "manual",
+    });
+
+    const frames = [];
+    for await (const frame of service.subscribe(thread.id, 0)) frames.push(frame);
+    const kinds = frames.map((frame) => frame.event.kind);
+    expect(kinds).toContain("work-updated");
+    expect(kinds).toContain("follow-up-updated");
+    const sequences = frames.map((frame) => frame.sequence);
+    expect([...sequences].sort((left, right) => left - right)).toEqual(sequences);
+    const workItemFrame = frames.find((frame) => frame.event.kind === "work-updated");
+    expect(workItemFrame?.event).toMatchObject({
+      kind: "work-updated",
+      workItem: expect.objectContaining({ id: "84000000-0000-4000-8000-0000000000e1" }),
+    });
   });
 });
 

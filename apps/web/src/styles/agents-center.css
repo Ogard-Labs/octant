@@ -36,7 +36,7 @@
 
 .agents-center__messaging > span:first-child {
   color: var(--oct-fg);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 /* Refused messages under the bounds line: one quiet row each, sender then the

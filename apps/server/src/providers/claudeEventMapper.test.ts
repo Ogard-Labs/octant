@@ -564,6 +564,72 @@ describe("mapClaudeMessage", () => {
     ]);
   });
 
+  it("treats claude.ai's answer to an artifact publish as outside content and carries the page it names", () => {
+    const ctx = context();
+    const started = mapped(ctx, {
+      kind: "stream-event",
+      sessionId: claudeSessionId,
+      event: {
+        kind: "content-start",
+        index: 0,
+        content: {
+          kind: "tool-use",
+          toolUseId: "sdk-artifact",
+          toolName: "Artifact",
+          input: { file_path: "/repo/report.html", favicon: "📊" },
+        },
+      },
+    });
+    expect(eventValues(started).map((next) => next.kind)).toEqual([
+      "tool-start",
+      "outside-content-read",
+    ]);
+    expect(eventValues(started)[1]).toMatchObject({ source: "hosted-tool", toolName: "Artifact" });
+
+    const page = { url: "https://claude.ai/artifact/abc123", title: "Quarterly report" };
+    const published = mapped(ctx, {
+      kind: "tool-results",
+      sessionId: claudeSessionId,
+      results: [{ toolUseId: "sdk-artifact", isError: false, publishedPage: page }],
+    });
+    expect(published).toMatchObject([
+      {
+        kind: "event",
+        event: { kind: "tool-success", summary: "Published to claude.ai.", published: page },
+      },
+    ]);
+  });
+
+  it("links a page only for an artifact publish, never for another tool's result", () => {
+    const ctx = context();
+    mapped(ctx, {
+      kind: "stream-event",
+      sessionId: claudeSessionId,
+      event: {
+        kind: "content-start",
+        index: 0,
+        content: {
+          kind: "tool-use",
+          toolUseId: "sdk-read",
+          toolName: "Read",
+          input: { file_path: "/repo/README.md" },
+        },
+      },
+    });
+    const read = mapped(ctx, {
+      kind: "tool-results",
+      sessionId: claudeSessionId,
+      results: [
+        {
+          toolUseId: "sdk-read",
+          isError: false,
+          publishedPage: { url: "https://claude.ai/artifact/planted" },
+        },
+      ],
+    });
+    expect(JSON.stringify(read)).not.toContain("planted");
+  });
+
   it("uses one Unicode-safe bounded tool label across streamed and authoritative tool-use", () => {
     const ctx = context();
     const toolName = `${"T".repeat(255)}😀private-suffix`;
@@ -2299,6 +2365,44 @@ describe("mapClaudeToolRequest", () => {
       request: { event: { description: "Claude requests permission to use Write." } },
     });
     expect(JSON.stringify(outside)).not.toContain("private-must-not-cross");
+  });
+
+  it("says an artifact publish leaves the computer, and names the page it would replace", () => {
+    const fresh = mapClaudeToolRequest(
+      context(),
+      toolRequest({
+        toolName: "Artifact",
+        input: { file_path: `${projectRoot}/report.html`, favicon: "📊" },
+      }),
+    );
+    expect(fresh).toMatchObject({
+      request: {
+        event: {
+          description: "Publish report.html to your claude.ai account. It leaves this computer.",
+        },
+      },
+    });
+    const replacing = mapClaudeToolRequest(
+      context(),
+      toolRequest({
+        toolName: "Artifact",
+        toolUseId: "sdk-tool-replace",
+        input: {
+          file_path: `${projectRoot}/report.html`,
+          favicon: "📊",
+          url: "https://claude.ai/artifact/shared-team-page",
+          force: true,
+        },
+      }),
+    );
+    expect(replacing).toMatchObject({
+      request: {
+        event: {
+          description:
+            "Publish report.html to your claude.ai account, replacing the page at https://claude.ai/artifact/shared-team-page even if it changed since. It leaves this computer.",
+        },
+      },
+    });
   });
 
   it("keeps a token-shaped literal out of the prompt while still naming the command", () => {

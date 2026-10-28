@@ -1,4 +1,5 @@
 import { MAX_PROVIDER_TOOLS } from "./providers";
+import { MAX_THREAD_PUBLISHED_SNAPSHOT_BYTES } from "./threadToolSteps";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
@@ -3209,6 +3210,44 @@ describe("provider runtime contracts", () => {
     expect(() =>
       decodeProviderRuntimeEvent({ ...common, ...event, providerPayload: { private: true } }),
     ).toThrow();
+  });
+
+  it("carries a published page only as a plain https address, never a script or credentialed link", () => {
+    const success = {
+      ...common,
+      kind: "tool-success",
+      toolCallId: "tool-1",
+      summary: "Published to claude.ai.",
+    } as const;
+    const page = { url: "https://claude.ai/artifact/abc123", title: "Quarterly report" };
+    expect(decodeProviderRuntimeEvent({ ...success, published: page })).toMatchObject({
+      published: page,
+    });
+    for (const url of [
+      "javascript:alert(1)",
+      "http://claude.ai/artifact/abc123",
+      "https://person:secret@claude.ai/artifact/abc123",
+      `https://claude.ai/${"a".repeat(2_048)}`,
+    ]) {
+      expect(() => decodeProviderRuntimeEvent({ ...success, published: { url } })).toThrow();
+    }
+    expect(() =>
+      decodeProviderRuntimeEvent({ ...success, published: { ...page, html: "<script>" } }),
+    ).toThrow();
+    // The host's snapshot of the published file is bounded and only HTML or Markdown.
+    const snapshot = { format: "html", content: "<h1>Report</h1>" } as const;
+    expect(
+      decodeProviderRuntimeEvent({ ...success, published: { ...page, snapshot } }),
+    ).toMatchObject({ published: { snapshot } });
+    for (const refused of [
+      { format: "html", content: "a".repeat(MAX_THREAD_PUBLISHED_SNAPSHOT_BYTES + 1) },
+      { format: "pdf", content: "%PDF" },
+      { format: "markdown", content: "" },
+    ]) {
+      expect(() =>
+        decodeProviderRuntimeEvent({ ...success, published: { ...page, snapshot: refused } }),
+      ).toThrow();
+    }
   });
 
   it("refuses an outside-content read of an unknown source or with an unbounded target", () => {

@@ -71,13 +71,75 @@ umbrella and names each channel it keeps off, as
 [Architecture: security and authority](../architecture.md#security-and-authority)
 lists them (maintainer decision, 2026-10-20: the blanket block was stricter
 than Octant needs); a person's own `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`
-in the host environment still passes through. The decision changes no
+in the host environment still passes through, and a host that exports a
+truthy `DISABLE_TELEMETRY` or `DO_NOT_TRACK` keeps it as `DO_NOT_TRACK=1`, a
+switch the Claude artifacts launch never removes (maintainer decision,
+2026-10-28: the person's own opt-out always wins over the artifacts setting). The decision changes no
 session's tool list. Measured with the Agent SDK (`query({ tools: ["Read",
 "Artifact"] })`, reading the `system/init` message's `tools`) on Claude Code
 2.1.211 (bundled) and 2.1.304 (on `PATH`), 2026-10-20, the runtime offers its
 `Artifact` tool only when launched by Anthropic's own desktop app (it keys on
 the launching entrypoint), so a query from Octant lists `["Read"]` with the
-umbrella and without it alike. The same probe showed that
+umbrella and without it alike. Reading the bundled 2.1.211 binary
+(2026-10-27) found the opt-in that measurement did not set: an Agent SDK
+launch lists `Artifact` once `CLAUDE_CODE_ARTIFACT` is set, and then only for
+a claude.ai sign-in on a Pro, Max, Team, or Enterprise plan whose
+organization allows it, on the first-party API, with nonessential traffic
+allowed, and while claude.ai's own feature switch is on.
+
+Which launch variables gate that feature switch was measured from the bundled
+2.1.211 binary (2026-10-28) by evaluating its own gate functions, copied
+verbatim from the binary, under each launch environment. The switch is read by
+`et("tengu_cobalt_plinth")` through `rRc`, which returns the shipped default
+(off) when `!Yee() && !$Fh()`. `Yee()` is `!DISABLE_GROWTHBOOK && !lY()`, and
+`lY()` is true when the provider is not first-party, a gateway sign-in is in
+use, or `wve()` is true; `wve()` is true when `kol()` reads
+`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DISABLE_TELEMETRY`, or a truthy
+`DO_NOT_TRACK`. (`$Fh()`, a disk-cache path for telemetry-off launches, needs
+`CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF`, which Octant never sets.) Of
+Octant's guards only `DISABLE_TELEMETRY` is read on that path: removing any
+other one from the full set leaves the service off, and removing
+`DISABLE_TELEMETRY` alone turns it on. `DISABLE_ERROR_REPORTING` gates error
+reports (`xe()`) and the issue explainer on its own, not the flag service, so
+it stays set. `Yee()` also gates the runtime's usage telemetry (first-party
+event logging, its metrics exporter, and Datadog batches), which is why the
+one lifted guard turns telemetry on; the feedback survey keeps its own switch.
+The umbrella keeps the service off and, through `V7c()`, the tool too.
+
+So Octant lifts exactly `DISABLE_TELEMETRY` (`CLAUDE_ARTIFACT_LIFTED_GUARD`)
+and sets `CLAUDE_CODE_ARTIFACT=1` and adds `Artifact` to the tool list, all
+three only for a launch that offers the tool: a Work or Code session outside
+Plan, on a claude.ai sign-in, on an account whose person enabled
+[Claude artifacts](model-endpoints.md#claude-artifacts), for a thread that
+chose them, on a host that does not export the umbrella. Every other launch
+of every account keeps the full guard set, and a host's umbrella is never
+removed. The decision rests with the person, because that launch sends the
+runtime's usage telemetry to Anthropic
+([Architecture: security and authority](../architecture.md#security-and-authority)).
+The launch environment is fixed when the runtime starts, and Octant starts
+it once per turn (start or resume, then stop when the turn ends), reading
+the account setting and the thread's choice at each start, so turning either
+off reaches the next turn with every guard; nothing restarts a running turn,
+and its next publish is refused at once. `CLAUDE_CODE_ARTIFACT` is an internal
+switch of the runtime, not a documented interface: a runtime that ignores or
+renames it leaves the tool out, and Octant never admits a tool its own list
+did not request.
+
+The account reports `nativeArtifacts` per mode from the setting and the
+probe's launch: supported in Work and Code once enabled on a claude.ai
+sign-in, otherwise unsupported with `unsupportedReason` (`turned-off`,
+`no-publishing-account` for an API key, `host-traffic-disabled` for the
+host's own umbrella or telemetry opt-out), and unsupported in Chat everywhere; the provider service reports a
+change of the setting at once, without a probe. No probe can read claude.ai's
+own plan checks without a turn, so a session whose runtime still leaves the
+tool out delivers as a Canvas. The tool publishes a local `.html` or `.md`
+file and answers with the page's claude.ai address; the decoder keeps that
+address and title from the structured result (an `https` claude.ai address
+only), the driver adds the snapshot it read when the person approved the
+publish, the mapper attaches both to the call's `tool-success` as
+`published`, and the call is reported as outside
+content (`hosted-tool`), because claude.ai's answer reaches the model. The
+same probe showed that
 `strictMcpConfig: true`, which every Octant query sets, keeps the account's
 claude.ai connectors (listed by 2.1.304 with `settingSources: []` when the
 option is absent) out of the session. The decoder tolerates the narrower list

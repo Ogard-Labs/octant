@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { BundledWhatsNewView, OctantHostBridge } from "../shell/hostBridge";
+import type { BundledWhatsNew, OctantHostBridge } from "../shell/hostBridge";
 import { WhatsNewDialog } from "./WhatsNewDialog";
 
 export interface WhatsNewAfterUpdateProps {
@@ -14,7 +14,7 @@ export interface WhatsNewAfterUpdateProps {
 export function WhatsNewAfterUpdate(props: WhatsNewAfterUpdateProps) {
   const read = props.hostBridge?.readBundledWhatsNew;
   const acknowledge = props.hostBridge?.acknowledgeWhatsNew;
-  const [document, setDocument] = useState<BundledWhatsNewView>();
+  const [document, setDocument] = useState<BundledWhatsNew>();
   const [open, setOpen] = useState(false);
 
   useEffect(() => {

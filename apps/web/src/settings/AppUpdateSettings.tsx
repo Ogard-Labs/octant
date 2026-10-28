@@ -10,7 +10,7 @@ import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import type {
   AppUpdateInstallOutcome,
-  BundledWhatsNewView,
+  BundledWhatsNew,
   OctantHostBridge,
 } from "../shell/hostBridge";
 import { SettingRow, SettingsDisclosure } from "./primitives";
@@ -41,7 +41,7 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
   const [waiting, setWaiting] = useState<Extract<AppUpdateInstallOutcome, { kind: "wait" }>>();
   const [failure, setFailure] = useState<string>();
   const [whatsNewOpen, setWhatsNewOpen] = useState(false);
-  const [whatsNew, setWhatsNew] = useState<BundledWhatsNewView>();
+  const [whatsNew, setWhatsNew] = useState<BundledWhatsNew>();
 
   useEffect(() => {
     if (bridge?.subscribeAppUpdateState === undefined) return;

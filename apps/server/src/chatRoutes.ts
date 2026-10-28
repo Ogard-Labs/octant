@@ -311,16 +311,19 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
         // `attempt-response-appended` frame; without it the delta still
         // arrives as a full `attempt-updated` for strict event readers.
         const appendedParam = url.searchParams.get("appended");
+        // Opt-in flags are validated individually, but an unknown one is
+        // ignored rather than refused: a newer client talking to an older
+        // host asks for frames this host does not know yet, and the compat
+        // path already answers those without the new kind — the full attempt
+        // for an appended delta, no frame for a future opt-in. Refusing
+        // would break the stream on every version skew.
         if (
           afterSequenceParam === null ||
-          url.searchParams.size !==
-            1 +
-              (contentsParam === null ? 0 : 1) +
-              (compactionParam === null ? 0 : 1) +
-              (appendedParam === null ? 0 : 1) ||
-          (contentsParam !== null && contentsParam !== "1") ||
-          (compactionParam !== null && compactionParam !== "1") ||
-          (appendedParam !== null && appendedParam !== "1")
+          url.searchParams.getAll("afterSequence").length > 1 ||
+          ["contents", "compaction", "appended"].some((name) => {
+            const values = url.searchParams.getAll(name);
+            return values.length > 1 || (values.length === 1 && values[0] !== "1");
+          })
         ) {
           return failureResponse(
             { category: "invalid", message: "Chat replay cursor is invalid." },

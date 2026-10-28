@@ -584,6 +584,7 @@ function controller(): CodeController {
     startThreadTurn: vi.fn(async () => true),
     status: "ready",
     turnError: undefined,
+    turnErrorCategory: undefined,
     turnStatus: "idle",
     turnUsageLimit: undefined,
     latestProviderTurnOperationId: undefined,
