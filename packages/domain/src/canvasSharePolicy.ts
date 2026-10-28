@@ -264,6 +264,13 @@ function sanitizeBlock(block: CanvasBlock, markupAcknowledged: boolean): CanvasS
         );
       }
       return sharedDesign(block);
+    case "deck": {
+      // A deck's notes are the presenter's, which never leave the host.
+      const slides = block.slides.map(({ notes: _notes, ...slide }) => slide);
+      const shared = { ...block, slides };
+      assertNoSecretShape(shared, `block.${block.blockId}`);
+      return shared as CanvasStaticExportBlock;
+    }
     case "mockup": {
       // A mockup's declared images name a Project file or an image job, which
       // resolve only under this host's authority, so they stay behind like a

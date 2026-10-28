@@ -410,7 +410,7 @@ links across the exported pages. Supersedes D-6.
 | 2     | Click-through Play over the flow; flow HTML export as one linked, script-free page set (D-9: one self-contained site)                                                                                                  | FR-2, FR-7 (flow part), NFR-4, NFR-6   | In review (#1832); rendered QA pending |
 | 3     | Mockup catalog: new components, image fills, reusable definitions — schema 24, share v13                                                                                                                               | FR-4, FR-5, FR-6, NFR-5                | In review (#1839); rendered QA pending |
 | 4     | Per-variant mockup HTML and TSX export; describe guidance and recipes for everything above                                                                                                                             | FR-7 (rest), FR-9                      | In review (#1840); rendered QA pending |
-| 5     | `deck` block: schema 25, share v14, player integration, deck recipes                                                                                                                                                   | FR-8, FR-9                             | Planned                                |
+| 5     | `deck` block: schema 25, share v14, player integration, deck recipes                                                                                                                                                   | FR-8, FR-9                             | In review (#1841); rendered QA pending |
 
 Each slice rides its own `feature/*` branch and PR to `main`, updates the
 owning specifications in the same PR, and runs the verification the AGENTS
@@ -845,3 +845,11 @@ governs over any number written earlier.
   escaper so both forms render the same text. A person-facing "export one
   mockup as files" button stays Later: the site and the HTML file carry the
   HTML form today. Delivered for review as #1840.
+- 2026-10-28: Slice 5 implemented: the `deck` block at Canvas 25 (share 14)
+  — slides reference the document's own designs, mockups, and data blocks,
+  placed once, walked by a deck player in the design player's anatomy with
+  the presenter's notes, which a share never carries. ASM-1 held: the deck
+  got its own player rather than a generalized design player, so a plain
+  design's Present is untouched. The `data-deck` recipe and describe guidance
+  ship with it. Delivered for review as #1841. All five slices are now in
+  review; rendered QA remains named-pending across the stack.

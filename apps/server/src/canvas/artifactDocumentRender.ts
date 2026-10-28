@@ -458,10 +458,15 @@ function renderDocument(
         ? format === "html" && options.pictures !== "reading"
           ? flowSitePieces(item.flow, definition.blocks, options)
           : flowPieces(item.flow, definition.blocks)
-        : [
-            { kind: "heading", level: 2, text: reading(item.dashboard.title) },
-            ...item.cells.flatMap((cell) => read(cell.block)),
-          ];
+        : item.kind === "deck"
+          ? [
+              { kind: "heading", level: 2, text: reading(item.deck.title) },
+              ...item.slides.flatMap((slide) => read(slide)),
+            ]
+          : [
+              { kind: "heading", level: 2, text: reading(item.dashboard.title) },
+              ...item.cells.flatMap((cell) => read(cell.block)),
+            ];
   for (const item of canvasReadingOrder(definition.blocks)) {
     if (item.kind !== "group") {
       pieces.push(...placedPieces(item));
@@ -1074,6 +1079,7 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
     case "dashboard":
     case "tabs":
     case "columns":
+    case "deck":
       // Drawn by the reading order with what it places; one met alone has nothing to say.
       return [];
     case "flow":

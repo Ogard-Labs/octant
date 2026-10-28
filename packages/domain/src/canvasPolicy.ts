@@ -30,6 +30,9 @@ import {
   CANVAS_MAX_MOCKUP_DEFINITIONS,
   CANVAS_MAX_MOCKUP_DEFINITION_NODES,
   CANVAS_MOCKUP_LIBRARY_SCHEMA_VERSION,
+  CANVAS_DECK_SCHEMA_VERSION,
+  CANVAS_MAX_DECK_SLIDES,
+  CANVAS_DECK_SLIDE_KINDS,
   CANVAS_MAX_MOCKUP_TEXT_LENGTH,
   CANVAS_MAX_PAYLOAD_BYTES,
   CANVAS_MAX_SERIES,
@@ -136,6 +139,7 @@ const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
   CANVAS_CHART_CALLOUTS_SCHEMA_VERSION,
   CANVAS_FLOW_SCHEMA_VERSION,
   CANVAS_MOCKUP_LIBRARY_SCHEMA_VERSION,
+  CANVAS_DECK_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
 ];
 // A block kind that a document may only carry from the version that
@@ -157,6 +161,7 @@ const VERSION_GATED_BLOCK_KINDS: ReadonlyArray<{ readonly kind: string; readonly
     { kind: "tabs", since: CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION },
     { kind: "columns", since: CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION },
     { kind: "flow", since: CANVAS_FLOW_SCHEMA_VERSION },
+    { kind: "deck", since: CANVAS_DECK_SCHEMA_VERSION },
   ];
 
 export type CanvasPolicyRejectionCode =
@@ -292,6 +297,12 @@ export type CanvasPolicyRejectionCode =
   | "duplicate-mockup-definition"
   | "dangling-mockup-definition"
   | "mockup-definition-nested"
+  | "deck-slides-budget-exceeded"
+  | "dangling-deck-slide"
+  | "deck-slide-kind-refused"
+  | "duplicate-deck-slide"
+  | "deck-slide-frame-missing"
+  | "deck-slide-variant-missing"
   | "block-placed-twice";
 
 export class CanvasPolicyRejected extends Error {
@@ -1138,6 +1149,7 @@ function validateCrossReferences(definition: CanvasDefinition): void {
       validateMockup(block, definition.schemaVersion, definition.provenance.mode);
     if (block.kind === "design") validateDesign(block, definition.provenance.mode);
     if (block.kind === "flow") validateFlow(block, definition.blocks);
+    if (block.kind === "deck") validateDeck(block, definition.blocks);
     if (block.kind === "treemap") validateTreemap(block);
     if (block.kind === "heatmap") validateHeatmap(block);
     if (block.kind === "bar-list") validateBarList(block);
@@ -1263,7 +1275,9 @@ function validatePlacedOnce(definition: CanvasDefinition): void {
           ? canvasLayoutGroupChildIds(block)
           : block.kind === "flow"
             ? block.screens.map((screen) => screen.blockId)
-            : [];
+            : block.kind === "deck"
+              ? block.slides.map((slide) => slide.blockId)
+              : [];
     for (const childId of childIds) {
       const id = String(childId);
       const first = placedBy.get(id);
@@ -1448,6 +1462,83 @@ const FLOW_HOTSPOT_COMPONENTS: ReadonlySet<string> = new Set(CANVAS_FLOW_HOTSPOT
  * interactive list: a design screen has no hotspots, and an inert part of a
  * mockup is not a link.
  */
+/**
+ * A deck presents the document's own blocks, in the order the author chose.
+ * Every slide names a block the document holds, of a kind a deck can show;
+ * a design slide names its frame, a mockup slide its variant when there are
+ * variants. A block is placed once, exactly as a dashboard or flow places
+ * its own, so a slide keeps one definition and one comment home.
+ */
+function validateDeck(
+  block: Extract<CanvasBlock, { readonly kind: "deck" }>,
+  blocks: ReadonlyArray<CanvasBlock>,
+): void {
+  const name = `Canvas deck ${block.blockId}`;
+  if (block.slides.length > CANVAS_MAX_DECK_SLIDES) {
+    reject(
+      "deck-slides-budget-exceeded",
+      `${name} holds more than ${String(CANVAS_MAX_DECK_SLIDES)} slides.`,
+    );
+  }
+  const kinds = new Map(blocks.map((candidate) => [String(candidate.blockId), candidate.kind]));
+  const slideIds = new Set<string>();
+  for (const slide of block.slides) {
+    const slideId = String(slide.slideId);
+    if (slideIds.has(slideId)) {
+      reject("duplicate-deck-slide", `${name} has two slides with the id ${slideId}.`);
+    }
+    slideIds.add(slideId);
+    const kind = kinds.get(String(slide.blockId));
+    if (kind === undefined) {
+      reject(
+        "dangling-deck-slide",
+        `${name} shows block ${String(slide.blockId)}, which the Canvas does not hold.`,
+      );
+    }
+    if (!(kind === undefined || (CANVAS_DECK_SLIDE_KINDS as readonly string[]).includes(kind))) {
+      reject(
+        "deck-slide-kind-refused",
+        `${name} cannot show a ${String(kind)} block; a slide is a design, mockup, chart, table, metric, progress, status, or dashboard.`,
+      );
+    }
+    const placed = blocks.find((candidate) => String(candidate.blockId) === String(slide.blockId));
+    if (placed?.kind === "design") {
+      if (slide.frameId === undefined) {
+        reject(
+          "deck-slide-frame-missing",
+          `${name} shows design ${String(slide.blockId)} without naming one of its frames.`,
+        );
+      }
+      if (
+        slide.frameId !== undefined &&
+        !placed.frames.some((frame) => String(frame.frameId) === String(slide.frameId))
+      ) {
+        reject(
+          "deck-slide-frame-missing",
+          `${name} shows frame ${String(slide.frameId)}, which design ${String(slide.blockId)} does not hold.`,
+        );
+      }
+    }
+    if (placed?.kind === "mockup") {
+      if (placed.variants !== undefined && slide.variantId === undefined) {
+        reject(
+          "deck-slide-variant-missing",
+          `${name} shows mockup ${String(slide.blockId)} without naming one of its variants.`,
+        );
+      }
+      if (
+        slide.variantId !== undefined &&
+        !placed.variants?.some((variant) => String(variant.variantId) === String(slide.variantId))
+      ) {
+        reject(
+          "deck-slide-variant-missing",
+          `${name} shows variant ${String(slide.variantId)}, which mockup ${String(slide.blockId)} does not declare.`,
+        );
+      }
+    }
+  }
+}
+
 function validateFlow(
   block: Extract<CanvasBlock, { readonly kind: "flow" }>,
   blocks: ReadonlyArray<CanvasBlock>,

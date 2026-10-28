@@ -19,6 +19,7 @@ import {
   CANVAS_CHART_CALLOUTS_SCHEMA_VERSION,
   CANVAS_FLOW_SCHEMA_VERSION,
   CANVAS_MOCKUP_LIBRARY_SCHEMA_VERSION,
+  CANVAS_DECK_SCHEMA_VERSION,
   CANVAS_DESIGN_FIELDS_SCHEMA_VERSION,
   CANVAS_MAX_DESIGN_BRAND_TOKENS,
   CANVAS_MAX_DESIGN_NOTES_LENGTH,
@@ -2305,11 +2306,11 @@ describe("tabs and columns layout groups", () => {
     expect(CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION).toBe(19);
     expect(CANVAS_THREAD_OWNED_SCHEMA_VERSION).toBe(20);
     expect(CANVAS_DESIGN_FIELDS_SCHEMA_VERSION).toBe(21);
-    expect(CANVAS_SCHEMA_VERSION).toBe(CANVAS_MOCKUP_LIBRARY_SCHEMA_VERSION);
+    expect(CANVAS_SCHEMA_VERSION).toBe(CANVAS_DECK_SCHEMA_VERSION);
   });
 
   it("keeps every version through the current one decodable when it gates nothing new", () => {
-    for (const schemaVersion of [15, 16, 17, 18, 19, 20, 21, 22, 23, 24]) {
+    for (const schemaVersion of [15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]) {
       const decoded = decodeCanvasDefinition({
         ...definition,
         schemaVersion,

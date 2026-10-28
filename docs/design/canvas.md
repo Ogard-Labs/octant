@@ -219,9 +219,9 @@ diagram styles, and the plan's `gantt` view at version 19, and a Chat
 Canvas owned by its thread (a chat provenance with no Project) at version
 20, the design and diagram fields below at version 21, a chart's
 `title`, `subtitle`, and point `note` and `emphasis` at version 22, the
-`flow` block at version 23, and the mockup library at version 24 (its new
+`flow` block at version 23, the mockup library at version 24 (its new
 components, a node's `progress`, `assetId`, and `defId` fields, and a block's
-`definitions`), so a document that
+`definitions`), and the `deck` block at version 25, so a document that
 declares an earlier version and carries one is refused as a declared future
 version. Version 20 adds no block or field a share carries, so a share names a
 block authored at 20 as 19 under share version 10. Version 21 adds the
@@ -699,6 +699,33 @@ blocks authored up to Canvas version 23; the flow holds references and typed
 values, so no new markup acknowledgement exists. The `app-flow` recipe starts
 from typed screens: a mockup slot and a flow slot that names them.
 
+## Deck blocks
+
+A `deck` block (Canvas schema version 25) presents the document's own blocks
+as one ordered set of 2 to 24 slides: a design's frame (named by `frameId`),
+a mockup's screen (named by `variantId` when the mockup declares variants), or
+a chart, table, metric, progress, status, or dashboard block, each with
+optional presenter notes of at most 2,000 characters. A slide references
+rather than copies, so a block keeps its one definition, comments, and
+identity, and a block is placed once — a slide is never also a dashboard
+cell, a tab child, or a flow screen (`block-placed-twice`). The domain policy
+names each refusal (`dangling-deck-slide`, `deck-slide-kind-refused`,
+`duplicate-deck-slide`, `deck-slide-frame-missing`,
+`deck-slide-variant-missing`, and the slides budget). The reading order
+places a deck's slides inside it, so a placed block never reads twice.
+
+The deck lists its slides with their notes, and **Present** walks the set
+across blocks in the design player's anatomy: arrows and Page keys move, the
+position reads in tabular numerals, fullscreen is offered where the browser
+has it, and the Notes toggle (off by default, remembered for the browser
+session, absent when no slide has notes) shows the current slide's notes —
+which, like a design's frame notes, are the presenter's and never leave the
+host. A design frame slide draws its live page; a mockup slide its frame
+drawing; a data block the surface it already is. Present on a plain design
+block keeps today's behavior. A share carries the deck whole at share
+version 14 except its notes, which a shared deck walks without; the
+`data-deck` recipe starts from the document's own numbers.
+
 ## Shares
 
 A share names the Project it is taken from, and a reader's access is judged
@@ -737,8 +764,10 @@ with share version 8, and tabs, columns, a diagram's edge styles and tones,
 its group tones, and a plan's `gantt` view with share version 9, and a
 design's frames with share version 10, and a brand and the richer diagram
 fields with share version 11 (frame notes never leave), the flow block
-with share version 12, and the mockup library with share version 13 (a
-mockup's declared images stay behind, like a design's), so a share
+with share version 12, the mockup library with share version 13 (a
+mockup's declared images stay behind, like a design's), and the deck block
+with share version 14 (a deck's presenter notes stay behind, as a design's
+frame notes do), so a share
 that declares an older version
 and carries one is refused as a future version.
 A `tabs` block has 2 to 12 panes, each a short label and the block ids it

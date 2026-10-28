@@ -47,6 +47,12 @@ interface FlowShape extends BlockShape {
   readonly screens: ReadonlyArray<{ readonly blockId: string }>;
 }
 
+/** A deck, as a live definition or a sanitized share carries it. */
+interface DeckShape extends BlockShape {
+  readonly kind: "deck";
+  readonly slides: ReadonlyArray<{ readonly blockId: string }>;
+}
+
 /** One placed block with the columns it takes on a wide grid. */
 export interface CanvasDashboardPlacedCell<B> {
   readonly block: B;
@@ -66,6 +72,11 @@ export type CanvasPlacedReadingItem<B> =
       readonly kind: "flow";
       readonly flow: B & FlowShape;
       readonly screens: ReadonlyArray<B>;
+    }
+  | {
+      readonly kind: "deck";
+      readonly deck: B & DeckShape;
+      readonly slides: ReadonlyArray<B>;
     };
 
 export type CanvasReadingItem<B> =
@@ -92,9 +103,27 @@ function isFlow<B extends BlockShape>(block: B): block is B & FlowShape {
   return block.kind === "flow";
 }
 
+function isDeck<B extends BlockShape>(block: B): block is B & DeckShape {
+  return block.kind === "deck";
+}
+
 /** Whether a flow may place the block: its screens are mockups and designs. */
 export function isCanvasFlowScreenKind(kind: string): boolean {
   return kind === "mockup" || kind === "design";
+}
+
+/** Whether a deck may show the block. */
+export function isCanvasDeckSlideKind(kind: string): boolean {
+  return [
+    "design",
+    "mockup",
+    "chart",
+    "table",
+    "metric",
+    "progress",
+    "status",
+    "dashboard",
+  ].includes(kind);
 }
 
 function isGroup<B extends BlockShape>(block: B): block is B & (TabsShape | ColumnsShape) {
@@ -145,6 +174,7 @@ export function canvasReadingOrder<B extends BlockShape>(
   const placedInDashboard = new Set<string>();
   const placedInGroup = new Set<string>();
   const placedInFlow = new Set<string>();
+  const placedInDeck = new Set<string>();
   for (const block of blocks) {
     if (isDashboard(block)) {
       for (const cell of block.cells) {
@@ -162,6 +192,14 @@ export function canvasReadingOrder<B extends BlockShape>(
         }
       }
     }
+    if (isDeck(block)) {
+      for (const slide of block.slides) {
+        const target = byId.get(String(slide.blockId));
+        if (target !== undefined && isCanvasDeckSlideKind(target.kind)) {
+          placedInDeck.add(String(slide.blockId));
+        }
+      }
+    }
     if (isGroup(block)) {
       for (const childId of groupSections(block).flat()) {
         const target = byId.get(String(childId));
@@ -173,7 +211,18 @@ export function canvasReadingOrder<B extends BlockShape>(
   const drawn = new Set<string>();
   const placedItem = (block: B): CanvasPlacedReadingItem<B> => {
     drawn.add(String(block.blockId));
-    if (!isDashboard(block) && !isFlow(block)) return { kind: "block", block };
+    if (!isDashboard(block) && !isFlow(block) && !isDeck(block)) return { kind: "block", block };
+    if (isDeck(block)) {
+      const slides: Array<B> = [];
+      for (const slide of block.slides) {
+        const id = String(slide.blockId);
+        const target = byId.get(id);
+        if (target === undefined || !placedInDeck.has(id) || drawn.has(id)) continue;
+        drawn.add(id);
+        slides.push(target);
+      }
+      return { kind: "deck", deck: block, slides };
+    }
     if (isFlow(block)) {
       const screens: Array<B> = [];
       for (const screen of block.screens) {
@@ -200,7 +249,13 @@ export function canvasReadingOrder<B extends BlockShape>(
   const items: Array<CanvasReadingItem<B>> = [];
   for (const block of blocks) {
     const id = String(block.blockId);
-    if (placedInDashboard.has(id) || placedInGroup.has(id) || placedInFlow.has(id)) continue;
+    if (
+      placedInDashboard.has(id) ||
+      placedInGroup.has(id) ||
+      placedInFlow.has(id) ||
+      placedInDeck.has(id)
+    )
+      continue;
     if (!isGroup(block)) {
       items.push(placedItem(block));
       continue;

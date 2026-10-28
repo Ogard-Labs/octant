@@ -179,9 +179,11 @@ export function renderArtifactSvg(
         ? dashboardGrid(item, y, palette, width, height - PADDING)
         : item.kind === "flow"
           ? flowBoard(item, y, palette, width, definition.blocks)
-          : DRAWN_KINDS.has(item.block.kind)
-            ? drawBlock(item.block, y, palette, width)
-            : undefined;
+          : item.kind === "deck"
+            ? undefined
+            : DRAWN_KINDS.has(item.block.kind)
+              ? drawBlock(item.block, y, palette, width)
+              : undefined;
     if (drawn === undefined) continue;
     parts.push(drawn.markup);
     y += drawn.height + ROW_GAP;
