@@ -103,11 +103,23 @@ export function renderArtifactMarkdown(
   return finish(renderDocument(definition, "markdown", {}), CANVAS_EXPORT_BODY_MAX_BYTES);
 }
 
+/**
+ * The HTML a destination receives, under the approval card's limit. Pictures
+ * make the file larger than the reading it carried before they were drawn, so
+ * a Canvas that fit then must not be refused now: when the drawn file passes
+ * the limit, each picture the reading under it already carries in full is
+ * written as that reading alone, and styled blocks as their text.
+ */
 export function renderArtifactHtml(
   definition: Pick<CanvasDefinition, "title" | "blocks">,
   options: ArtifactDocumentOptions = {},
 ): ArtifactDocumentRender {
-  return finish(renderDocument(definition, "html", options), CANVAS_EXPORT_BODY_MAX_BYTES);
+  const drawn = finish(renderDocument(definition, "html", options), CANVAS_EXPORT_BODY_MAX_BYTES);
+  if (drawn.kind === "rendered") return drawn;
+  return finish(
+    renderDocument(definition, "html", { ...options, pictures: "reading" }),
+    CANVAS_EXPORT_BODY_MAX_BYTES,
+  );
 }
 
 /**
@@ -138,8 +150,13 @@ export function renderCanvasHtmlFile(
     Math.ceil(CANVAS_HTML_FILE_IMAGES_MAX_BYTES / 3) * 4,
   );
   const document = renderDocument(definition, "html", { ...options, images });
-  const rendered = finish(document, CANVAS_HTML_FILE_MAX_BYTES);
-  return rendered.kind === "rendered" ? { ...rendered, imagesLeftOut: images.leftOut } : rendered;
+  // The cap bounds the answer a window or paired device reads, where the file
+  // is a JSON string: a newline, backslash, quote, or control character the
+  // file holds as one byte takes two to six there, so the cap counts it so.
+  if (canvasExportBodyByteLength(JSON.stringify(document.body)) > CANVAS_HTML_FILE_MAX_BYTES) {
+    return { kind: "too-large" };
+  }
+  return { kind: "rendered", ...document, imagesLeftOut: images.leftOut };
 }
 
 export function renderArtifactDocument(
@@ -152,8 +169,14 @@ export function renderArtifactDocument(
     : renderArtifactMarkdown(definition);
 }
 
-/** What the internal render takes: the public options plus the file's image budget. */
-type RenderOptions = ArtifactDocumentOptions & { readonly images?: CanvasExportImages };
+/**
+ * What the internal render takes: the public options, the file's image
+ * budget, and whether pictures are written as their readings alone.
+ */
+type RenderOptions = ArtifactDocumentOptions & {
+  readonly images?: CanvasExportImages;
+  readonly pictures?: "reading";
+};
 
 type Piece =
   | { readonly kind: "heading"; readonly level: number; readonly text: string }
@@ -211,6 +234,12 @@ type Piece =
       readonly height: number;
       readonly markup: string;
       readonly legend?: ReadonlyArray<CanvasExportLegendEntry>;
+      /**
+       * The reading under it carries everything it shows, so a destination
+       * export near its limit writes only that reading. The node-edge diagram,
+       * drawn before any other picture, is always drawn.
+       */
+      readonly yieldsToReading?: true;
     }
   | {
       /**
@@ -420,7 +449,8 @@ function renderDocument(
     });
   }
   const title = reading(definition.title) || "Canvas";
-  const body = format === "html" ? htmlDocument(title, pieces) : markdownDocument(title, pieces);
+  const written = options.pictures === "reading" ? asReading(pieces) : pieces;
+  const body = format === "html" ? htmlDocument(title, written) : markdownDocument(title, written);
   return { title, body, writesDesignMarkup: pieces.some((piece) => piece.kind === "frame") };
 }
 
@@ -559,29 +589,33 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
                 label: reading,
               }),
             };
-      return pictured(drawing, [
-        {
-          kind: "list",
-          items: [
-            ...layout.nodes.map((node) => {
-              const named =
-                node.shape === "plain"
-                  ? reading(node.label)
-                  : `${reading(node.label)} (${node.shape})`;
-              return node.detail === undefined ? named : `${named} — ${reading(node.detail)}`;
-            }),
-            ...block.edges.map((edge) => {
-              const from = names.get(String(edge.source)) ?? "node";
-              const to = names.get(String(edge.target)) ?? "node";
-              const label = edge.label === undefined ? "" : reading(edge.label);
-              const arrow = edge.style === "dashed" ? "⇢" : "→";
-              return label.length === 0
-                ? `${from} ${arrow} ${to}`
-                : `${from} ${arrow} ${to}: ${label}`;
-            }),
-          ],
-        },
-      ]);
+      return pictured(
+        drawing,
+        [
+          {
+            kind: "list",
+            items: [
+              ...layout.nodes.map((node) => {
+                const named =
+                  node.shape === "plain"
+                    ? reading(node.label)
+                    : `${reading(node.label)} (${node.shape})`;
+                return node.detail === undefined ? named : `${named} — ${reading(node.detail)}`;
+              }),
+              ...block.edges.map((edge) => {
+                const from = names.get(String(edge.source)) ?? "node";
+                const to = names.get(String(edge.target)) ?? "node";
+                const label = edge.label === undefined ? "" : reading(edge.label);
+                const arrow = edge.style === "dashed" ? "⇢" : "→";
+                return label.length === 0
+                  ? `${from} ${arrow} ${to}`
+                  : `${from} ${arrow} ${to}: ${label}`;
+              }),
+            ],
+          },
+        ],
+        "always",
+      );
     }
     case "sequence": {
       const names = new Map(
@@ -983,16 +1017,41 @@ function paragraph(text: string): ReadonlyArray<Piece> {
   return text.length === 0 ? [] : [{ kind: "paragraph", text }];
 }
 
-/** A picture with its reading folded under it, or the reading alone when there is no picture. */
+/**
+ * A picture with its reading folded under it, or the reading alone when there
+ * is no picture. A picture `"always"` drawn stays even when a destination
+ * export writes the others as their readings.
+ */
 function pictured(
   drawing: CanvasExportDrawing | undefined,
   reading: ReadonlyArray<Piece>,
+  drawn: "always" | "within-limit" = "within-limit",
 ): ReadonlyArray<Piece> {
   if (drawing === undefined) return reading;
   return [
-    { kind: "drawing", ...drawing },
+    { kind: "drawing", ...drawing, ...(drawn === "within-limit" ? { yieldsToReading: true } : {}) },
     { kind: "data", pieces: reading },
   ];
+}
+
+/**
+ * The document as a destination received it before pictures were drawn: each
+ * picture that yields to its reading is left out and that reading written in
+ * its place, unfolded, and a styled block is its text as a paragraph.
+ */
+function asReading(pieces: ReadonlyArray<Piece>): ReadonlyArray<Piece> {
+  return pieces.flatMap((piece): ReadonlyArray<Piece> => {
+    switch (piece.kind) {
+      case "drawing":
+        return piece.yieldsToReading === true ? [] : [piece];
+      case "data":
+        return asReading(piece.pieces);
+      case "styled":
+        return [{ kind: "paragraph", text: piece.text }];
+      default:
+        return [piece];
+    }
+  });
 }
 
 /** `html` is built here from filtered, escaped text; `text` is what Markdown writes. */

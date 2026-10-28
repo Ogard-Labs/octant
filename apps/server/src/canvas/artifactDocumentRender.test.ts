@@ -13,6 +13,7 @@ import {
   opsDashboardExampleBlocks,
   settingsScreenExampleBlock,
 } from "@octant/domain";
+import { CANVAS_EXPORT_BODY_MAX_BYTES } from "@octant/contracts/canvas-export";
 import { describe, expect, it } from "vitest";
 import {
   renderArtifactDocument,
@@ -1296,5 +1297,53 @@ describe("a Canvas as one HTML file", () => {
         { frames: "as-written", designAssets: new Map() },
       ),
     ).toEqual({ kind: "too-large" });
+  });
+
+  it("refuses a file whose answer would pass the size cap once it is written as JSON", () => {
+    // A control character is one byte in the file and six in the JSON answer
+    // a window or paired device reads, so the raw size alone undercounts.
+    const control = {
+      ...prototype,
+      runsScript: undefined,
+      frames: [
+        {
+          frameId: "control",
+          title: "Control",
+          html: `<p>${"\u0001".repeat(Math.ceil(1.25 * 1024 * 1024))}</p>`,
+        },
+      ],
+    } as unknown as CanvasBlock;
+    expect(
+      renderCanvasHtmlFile(
+        { title: "Control", blocks: [control] },
+        { frames: "as-written", designAssets: new Map() },
+      ),
+    ).toEqual({ kind: "too-large" });
+  });
+});
+
+describe("a destination export near the approval card's limit", () => {
+  const sankey = chartExampleBlocks.find((candidate) => candidate.chartType === "sankey");
+  if (sankey === undefined) throw new Error("missing sankey example");
+  const charts = Array.from({ length: 120 }, (_, index) =>
+    decodeCanvasBlock({ ...sankey, blockId: `flows-${String(index)}` }),
+  );
+
+  it("still exports a Canvas whose drawn file would pass the limit, writing its pictures as readings", () => {
+    const drawn = renderCanvasHtmlFile(definition(charts), { designAssets: new Map() });
+    if (drawn.kind !== "rendered") throw new Error("expected a file");
+    expect(drawn.body.length).toBeGreaterThan(CANVAS_EXPORT_BODY_MAX_BYTES);
+
+    const exported = renderArtifactHtml(definition(charts));
+    if (exported.kind !== "rendered") throw new Error("expected a rendered document");
+    expect(exported.body).not.toContain("<svg");
+    expect(exported.body).not.toContain("<details");
+    expect(exported.body.split("Search → Docs = 5.2K")).toHaveLength(charts.length + 1);
+  });
+
+  it("draws the pictures when the file fits", () => {
+    const exported = renderArtifactHtml(definition(charts.slice(0, 2)));
+    if (exported.kind !== "rendered") throw new Error("expected a rendered document");
+    expect(exported.body.split("<svg")).toHaveLength(3);
   });
 });

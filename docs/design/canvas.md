@@ -926,7 +926,14 @@ axis, gridlines, series hues (the theme's palette roles) and legend; the
 sequence, state, entity-relationship, swimlane, mind-map, and node-edge
 diagrams; the treemap, heatmap, and bar list. The reading the Markdown form
 writes follows each picture under a **Data** disclosure, so no value is only in
-a picture. Math is MathML, which needs no font. Design frames are written as in
+a picture. A destination's HTML export draws the same document under the
+approval card's body limit (`CANVAS_EXPORT_BODY_MAX_BYTES`, 256 KiB). Pictures
+make it larger than the reading a destination received before they were
+drawn, so a Canvas that exported then must still export: when the drawn
+document would pass the limit, each picture but the node-edge diagram (drawn
+before the others) is written as its reading alone, unfolded, and each styled
+block as its text. The stylesheet and no-load policy every HTML document now
+carries add about 3 KB that this does not take back. Math is MathML, which needs no font. Design frames are written as in
 the HTML export above, under the same sandbox and page policy; a running
 prototype runs there and reaches nothing (the frame threat model, F11). The
 file names only system and generic font families and loads nothing: the
@@ -945,8 +952,10 @@ reader draws the design, and are written in as `data:` images up to 4 MiB of
 images for the whole file (`CANVAS_HTML_FILE_IMAGES_MAX_BYTES`, charged once per
 reference); an image past that draws the labelled placeholder, the file says how
 many were left out, and so does the result (`imagesLeftOut`). The whole file is
-at most 7 MiB (`CANVAS_HTML_FILE_MAX_BYTES`), so the answer fits what a paired
-device is served after JSON escaping; past that it is refused as `too-large`.
+at most 7 MiB (`CANVAS_HTML_FILE_MAX_BYTES`) measured as the JSON string the
+answer carries it in, where a newline, quote, backslash, or control character
+takes two to six bytes, so the answer fits the 8 MiB a paired device is served;
+past that it is refused as `too-large`.
 The surface's status line says what happened, and when the file holds design
 markup, that the markup is included as written. An image block names a source,
 not bytes, and draws as its description, as on screen. The agent's

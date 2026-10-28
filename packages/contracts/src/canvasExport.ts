@@ -625,8 +625,9 @@ export type CanvasExportPrepareResult = typeof CanvasExportPrepareResult.Type;
  *
  * The file may carry the declared images of each design that resolve for the
  * reader, written in as `data:` images. Together they stay inside the image
- * budget, and the whole file inside the size cap, so the answer fits what a
- * paired device is served (8 MiB) after JSON escaping; an image past the
+ * budget, and the whole file inside the size cap, which the host counts as
+ * the JSON string the answer carries it in, so the answer fits what a paired
+ * device is served (8 MiB); an image past the
  * budget is drawn as a placeholder and counted, and a file past the cap is
  * refused as `too-large`.
  */

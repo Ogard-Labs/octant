@@ -81,6 +81,10 @@ written. The card carries the rendered payload and the exact file it will write,
 including the folder and the file name. Nothing is written until you approve it,
 and declining writes nothing at all.
 
+An HTML export draws charts and diagrams as pictures, as Save as HTML file
+does. A Canvas too large to fit the card with its pictures is written with each
+picture's numbers in its place instead, rather than refused.
+
 The receipt after a folder export is the path of the file that was written.
 
 ### File names, and when a file is already there
