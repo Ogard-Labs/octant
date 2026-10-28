@@ -158,7 +158,7 @@ export function OutsideDriverConfigurationForm(props: {
         description="HTTPS, or HTTP on this computer. Octant sends the driver's requests only here."
         label="Address"
         scope="host"
-        settingId={`${id}-address-setting`}
+        settingId={`provider-${props.instance.id}-base-url`}
       >
         <OctantInput
           aria-label={`Address for ${name}`}
@@ -174,7 +174,7 @@ export function OutsideDriverConfigurationForm(props: {
         htmlFor={`${id}-key-choice`}
         label="How the key is sent"
         scope="host"
-        settingId={`${id}-key-choice-setting`}
+        settingId={`provider-${props.instance.id}-authentication`}
       >
         <OctantSelectField
           aria-label={`How the key is sent for ${name}`}
@@ -196,7 +196,7 @@ export function OutsideDriverConfigurationForm(props: {
           htmlFor={`${id}-header`}
           label="Key header"
           scope="host"
-          settingId={`${id}-header-setting`}
+          settingId={`provider-${props.instance.id}-key-header`}
         >
           <OctantInput
             aria-label={`Key header for ${name}`}
@@ -218,7 +218,7 @@ export function OutsideDriverConfigurationForm(props: {
           }
           label="API key"
           scope="host"
-          settingId={`${id}-key-setting`}
+          settingId={`provider-${props.instance.id}-api-key`}
         >
           <OctantInput
             aria-label={`API key for ${name}`}
@@ -241,7 +241,7 @@ export function OutsideDriverConfigurationForm(props: {
         description="Separated by commas or spaces. Octant offers only the ones the driver also reports."
         label="Model IDs"
         scope="host"
-        settingId={`${id}-models-setting`}
+        settingId={`provider-${props.instance.id}-manual-model-ids`}
       >
         <OctantTextarea
           aria-label={`Model IDs for ${name}`}
