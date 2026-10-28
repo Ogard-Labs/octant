@@ -37,7 +37,10 @@ import {
   type FollowUpSuggestionActionDependencies,
 } from "../followUps/followUpSuggestionRoutes";
 import { createSideTaskRouteHandler } from "../sideTasks/sideTaskRoutes";
-import { createNativeHarnessSessionRouteHandler } from "../harness/nativeHarnessSessionRoutes";
+import {
+  createNativeHarnessSessionRouteHandler,
+  type NativeHarnessSessionRouteDependencies,
+} from "../harness/nativeHarnessSessionRoutes";
 import { createNativeHarnessEgressRouteHandler } from "../harness/nativeHarnessEgressRoutes";
 import { NativeHarnessTurnObserver } from "../harness/nativeHarnessTurnObserver";
 import { toTurnMetricsRecord, type TurnEndSummary } from "../metrics/turnEnd";
@@ -298,8 +301,8 @@ export function wireHarness(deps: HarnessDependencies) {
   ): void => {
     pausedByPersonListeners.push(listener);
   };
-  // Lifting a session out of recovery lets the area that cut the thread's
-  // turns off settle them (the Code runtime), which subscribes here.
+  // Recovery lets the Code runtime settle its orphaned turns. A continuation
+  // does this while the session still holds dispatch, before queueing its next turn.
   const recoveryLiftedListeners: Array<
     (input: { readonly threadId: string; readonly mode: OctantMode }) => void
   > = [];
@@ -308,6 +311,9 @@ export function wireHarness(deps: HarnessDependencies) {
   ): void => {
     recoveryLiftedListeners.push(listener);
   };
+  const restartContinuation: {
+    current: NativeHarnessSessionRouteDependencies["continueRecovery"];
+  } = { current: undefined };
   const nativeHarnessSessionRoutes = createNativeHarnessSessionRouteHandler({
     windowAuthorityStore,
     store: {
@@ -331,9 +337,15 @@ export function wireHarness(deps: HarnessDependencies) {
     onPaused: (input) => {
       for (const listener of pausedByPersonListeners) listener(input);
     },
-    onRecoveryLifted: (input) => {
+    settleInterruptedTurns: (input) => {
       for (const listener of recoveryLiftedListeners) listener(input);
     },
+    continueRecovery: (input) =>
+      restartContinuation.current?.(input) ??
+      Promise.resolve({
+        kind: "refused",
+        message: "Restart continuation is unavailable on this host.",
+      }),
     recoveryBlockers: async ({ threadId }) => {
       const view = nativeHarnessSessions.read(threadId);
       if (view === undefined) return [];
@@ -604,6 +616,7 @@ export function wireHarness(deps: HarnessDependencies) {
   contributeChildTools((input) => nativeHarnessComposition.forAgentRun(input));
   return {
     followUpCreation,
+    restartContinuation,
     followUpSuggestionRoutes,
     nativeHarnessComposition,
     nativeHarnessEgressRoutes,

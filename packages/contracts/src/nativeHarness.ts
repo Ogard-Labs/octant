@@ -1312,6 +1312,8 @@ export const NativeHarnessSessionCommand = Schema.Union(
   Schema.Struct({
     ...SessionCommandFields,
     kind: Schema.Literal("resume-native-harness-session"),
+    /** Explicitly continue a restart-interrupted turn, not just lift a pause. */
+    continueInterrupted: Schema.optional(Schema.Literal(true)),
   }).annotations(strict),
   Schema.Struct({
     ...SessionCommandFields,

@@ -600,6 +600,35 @@ describe("Chat lifecycle integration", () => {
     fixture.close();
   });
 
+  it("settles a restored waiting attempt before a restart continuation without delivering an old answer", async () => {
+    const fixture = createFixture({ providerA: ["question"] });
+    const created = await fixture.service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Restart continuation",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected a created Chat thread.");
+    const pending = fixture.service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Ask the question.",
+    });
+    void pending.catch(() => undefined);
+    await until(
+      () => fixture.service.read(created.thread.id).turns[0]?.attempts[0]?.outcome === "waiting",
+    );
+    // A live question belongs to its running turn and cannot be expired by recovery.
+    fixture.service.settleCutOffTurns(created.thread.id);
+    expect(fixture.service.read(created.thread.id).turns[0]?.attempts[0]?.outcome).toBe("waiting");
+    await fixture.restart();
+    fixture.service.settleCutOffTurns(created.thread.id);
+    const attempt = fixture.service.read(created.thread.id).turns[0]?.attempts[0];
+    expect(attempt?.outcome).toBe("interrupted");
+    expect(attempt?.pendingQuestion).toBeUndefined();
+    fixture.close();
+  });
+
   it("settles a restored waiting attempt interrupted when its question outlived the provider session", async () => {
     const fixture = createFixture({ providerA: ["question"] });
     const created = await fixture.service.execute({

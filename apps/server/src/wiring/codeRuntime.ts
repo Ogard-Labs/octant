@@ -1144,7 +1144,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     });
     // Settled anywhere (another surface, expiry, cancellation): the inline
     // copy goes too, so Code never lists or accepts an answer to it.
-    // Lifting a harness session out of recovery settles the turns it cut off.
+    // Recovery settles its orphaned turns before a continuation can be queued.
     onHarnessRecoveryLifted(({ threadId, mode }) => {
       if (mode === "code") codeOperationRuntime?.settleCutOffTurns?.(threadId);
     });
