@@ -178,6 +178,11 @@ const capabilities = {
   taskProgress: "supported",
   nativeChildAgents: "unsupported",
   harnessAutoReview: "unsupported",
+  // A follow-up on another model of this instance resumes the same native
+  // session: the driver resolves the resumed prompt's model from the thread's
+  // current model first (then the cursor's binding, then the session record),
+  // and every prompt names it, so the session never silently runs the old one.
+  modelSwitch: "supported",
   ...unsupportedChatCapabilities,
   appManagedTools: "unsupported",
 } as const;
@@ -1836,17 +1841,18 @@ function makeConnection(
         input.resumeCursor.driverKind !== "opencode"
           ? Effect.fail(fail("stale-resume", "Provider resume cursor does not belong to OpenCode."))
           : Effect.suspend(() => {
-              // The session id alone names no Octant session, folder, mode, or
-              // model; the binding recorded at start does. OpenCode sessions
-              // keep the model they were opened with, so a cursor carried to
-              // another one is refused before anything is retired or started.
+              // The session id alone names no Octant session, folder, or mode;
+              // the binding recorded at start decides those. The binding's
+              // model is not a refusal: this driver carries the session onto
+              // another of the instance's models (modelSwitch), and the
+              // resumed prompt below names the thread's current model, so the
+              // session never silently runs the model it was opened with.
               if (
                 resumeBindingRefuses(input.resumeCursor, {
                   instanceId: options.instanceId,
                   sessionId: input.sessionId,
                   projectRoot,
                   mode,
-                  fixedModelId: input.modelId,
                 })
               ) {
                 return Effect.fail(

@@ -168,10 +168,16 @@ export function renderArtifactSvg(
 
   let y = PADDING + 26;
   // A tab's or column's children, a dashboard among them, draw in the group's
-  // order as they would at the top level.
-  const items = canvasReadingOrder(definition.blocks).flatMap((item) =>
-    item.kind === "group" ? item.sections.flat() : [item],
-  );
+  // order as they would at the top level, and a deck's slides draw as the
+  // blocks they show, so a Canvas whose numbers sit in a deck still has a
+  // picture.
+  const items = canvasReadingOrder(definition.blocks)
+    .flatMap((item) => (item.kind === "group" ? item.sections.flat() : [item]))
+    .flatMap((item) =>
+      item.kind === "deck"
+        ? item.slides.map((block) => ({ kind: "block" as const, block }))
+        : [item],
+    );
   for (const item of items) {
     if (y > height - PADDING) break;
     const drawn =
@@ -179,11 +185,9 @@ export function renderArtifactSvg(
         ? dashboardGrid(item, y, palette, width, height - PADDING)
         : item.kind === "flow"
           ? flowBoard(item, y, palette, width, definition.blocks)
-          : item.kind === "deck"
-            ? undefined
-            : DRAWN_KINDS.has(item.block.kind)
-              ? drawBlock(item.block, y, palette, width)
-              : undefined;
+          : DRAWN_KINDS.has(item.block.kind)
+            ? drawBlock(item.block, y, palette, width)
+            : undefined;
     if (drawn === undefined) continue;
     parts.push(drawn.markup);
     y += drawn.height + ROW_GAP;

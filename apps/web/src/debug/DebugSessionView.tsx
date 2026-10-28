@@ -1,6 +1,8 @@
 import type { CodeDebugClient } from "@octant/client-runtime/code-debug-client";
 import type { CodeCheckoutId, CodeRelativePath, CodeThreadId } from "@octant/contracts/code";
 import type {
+  CodeDebugChildId,
+  CodeDebugChildSummary,
   CodeDebugSessionId,
   CodeDebugSessionState,
   CodeDebugStackFrame,
@@ -59,11 +61,14 @@ export function DebugSessionView(props: DebugSessionViewProps) {
   const store = props.store ?? codeDebugWindowState;
   const key = codeDebugThreadKey(String(props.threadId), String(props.checkoutId));
   const { onShowLocation } = props;
+  const [child, setChild] = useState<CodeDebugChildId>();
   const [view, controls] = useCodeDebugSession({
     client: props.client,
     threadId: props.threadId,
     checkoutId: props.checkoutId,
     sessionId: props.sessionId,
+    ...(child === undefined ? {} : { child }),
+    onChildGone: () => setChild(undefined),
     onStoppedAt: (frame) => {
       const location = frame?.location;
       if (location?.kind === "checkout") {
@@ -144,7 +149,7 @@ export function DebugSessionView(props: DebugSessionViewProps) {
         <OctantIconButton
           disabled={view.pending === "stop"}
           focusableWhenDisabled
-          label="Stop"
+          label={child === undefined ? "Stop" : "Stop child process"}
           onClick={controls.stop}
           type="button"
         >
@@ -160,6 +165,15 @@ export function DebugSessionView(props: DebugSessionViewProps) {
         </OctantAlert>
       )}
       <div className="run-debug__panes">
+        {view.childProcesses === undefined ? null : (
+          <Processes
+            programName={props.name}
+            selected={child}
+            onSelect={setChild}
+            processes={view.childProcesses}
+            undebugged={view.undebuggedChildren}
+          />
+        )}
         <CallStack
           controls={controls}
           onShowLocation={onShowLocation}
@@ -171,6 +185,74 @@ export function DebugSessionView(props: DebugSessionViewProps) {
       </div>
     </div>
   );
+}
+
+/**
+ * The program and each child process the session debugs, listed under the
+ * session; the one selected is the one the toolbar, stack, and variables are
+ * for. Present only when the adapter declares children.
+ */
+function Processes(props: {
+  readonly programName: string;
+  readonly processes: ReadonlyArray<CodeDebugChildSummary>;
+  readonly selected: CodeDebugChildId | undefined;
+  readonly onSelect: (child: CodeDebugChildId | undefined) => void;
+  readonly undebugged: number;
+}) {
+  const headingId = useId();
+  return (
+    <section aria-labelledby={headingId} className="run-debug__section run-debug__processes">
+      <h3 className="run-debug__heading" id={headingId}>
+        Processes
+      </h3>
+      <ol className="run-debug__frames">
+        <li>
+          <OctantButton
+            aria-current={props.selected === undefined ? "true" : undefined}
+            className="run-debug__frame"
+            onClick={() => props.onSelect(undefined)}
+            type="button"
+            variant="bare"
+          >
+            <span className="run-debug__frame-name">{props.programName}</span>
+            <span className="run-debug__frame-place">Program</span>
+          </OctantButton>
+        </li>
+        {props.processes.map((entry) => (
+          <li key={entry.child}>
+            <OctantButton
+              aria-current={entry.child === props.selected ? "true" : undefined}
+              className="run-debug__frame"
+              onClick={() => props.onSelect(entry.child)}
+              type="button"
+              variant="bare"
+            >
+              <span className="run-debug__frame-name">{entry.name}</span>
+              <span className="run-debug__frame-place">{childStatusText(entry.status)}</span>
+            </OctantButton>
+          </li>
+        ))}
+      </ol>
+      {props.undebugged === 0 ? null : (
+        <p className="run-debug__empty">
+          {props.undebugged === 1
+            ? "One child process ran undebugged."
+            : `${String(props.undebugged)} child processes ran undebugged.`}
+        </p>
+      )}
+    </section>
+  );
+}
+
+function childStatusText(status: CodeDebugChildSummary["status"]): string {
+  switch (status) {
+    case "starting":
+      return "Attaching…";
+    case "running":
+      return "Child · running";
+    case "stopped":
+      return "Child · paused";
+  }
 }
 
 function stateText(state: CodeDebugSessionState | undefined): string {

@@ -43,13 +43,19 @@ function scopes() {
   }));
   const validateAppleDeviceLease = vi.fn(async () => true);
   const validateAppleDeviceAction = vi.fn(async () => true);
+  const validateAppleDistributionUpload = vi.fn(async () => true);
   return {
     resolveThread,
     validateAppleDeviceLease,
+    validateAppleDistributionUpload,
     ...createAppleDeviceScopes({
       resolveThread,
       effectiveThread: (_windowId, current) => current,
-      approvals: { validateAppleDeviceLease, validateAppleDeviceAction },
+      approvals: {
+        validateAppleDeviceLease,
+        validateAppleDeviceAction,
+        validateAppleDistributionUpload,
+      },
     }),
   };
 }
@@ -86,6 +92,41 @@ describe("the agent's physical device scope", () => {
     expect(validateAppleDeviceLease).toHaveBeenCalledWith(windowId, request);
 
     validateAppleDeviceLease.mockResolvedValueOnce(false);
+    const unconfirmed = await resolveAppleDeviceAgentScope(windowId, request);
+    expect(unconfirmed).toMatchObject({ approvalValid: false });
+    expect(unconfirmed).not.toHaveProperty("approvedBy");
+  });
+
+  it("counts the agent's upload as confirmed only with the receipt a person at the Mac minted for that build", async () => {
+    const { resolveAppleDeviceAgentScope, validateAppleDistributionUpload } = scopes();
+    const request = decodeAppleDeviceRequest({
+      actionId: "50000000-0000-4000-8000-000000000032",
+      correlationId: "50000000-0000-4000-8000-000000000033",
+      authority,
+      threadId,
+      checkoutId,
+      kind: "upload",
+      requestedBy: agent,
+      projectPath: "App.xcodeproj",
+      teamId: "A1B2C3D4E5",
+      upload: {
+        bundleIdentifier: "sh.octant.Fixture",
+        version: "1.0",
+        buildNumber: "7",
+        signing: { teamId: "A1B2C3D4E5", identity: "3".repeat(40) },
+        profileId: "50000000-0000-4000-8000-000000000070",
+      },
+      timeoutMs: 60_000,
+      approval: { kind: "approved", approvalId: "50000000-0000-4000-8000-000000000051" },
+    });
+
+    await expect(resolveAppleDeviceAgentScope(windowId, request)).resolves.toMatchObject({
+      approvalValid: true,
+      approvedBy: { kind: "local-user" },
+    });
+    expect(validateAppleDistributionUpload).toHaveBeenCalledWith(windowId, request);
+
+    validateAppleDistributionUpload.mockResolvedValueOnce(false);
     const unconfirmed = await resolveAppleDeviceAgentScope(windowId, request);
     expect(unconfirmed).toMatchObject({ approvalValid: false });
     expect(unconfirmed).not.toHaveProperty("approvedBy");

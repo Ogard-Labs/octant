@@ -3827,6 +3827,33 @@ describe("flow screens and transitions", () => {
     expect(rejected.message).toContain("tabs brief");
   });
 
+  it("walks between two frames of one design and two variants of one mockup", () => {
+    expect(() =>
+      validateCanvasDefinition(
+        withBlocks([
+          flowMockup("form", [
+            { variantId: "empty", label: "Empty" },
+            { variantId: "filled", label: "Filled" },
+          ]),
+          flowDesign,
+          flow(
+            [
+              { screenId: "home", blockId: "site", frameId: "home" },
+              { screenId: "results", blockId: "site", frameId: "results" },
+              { screenId: "empty", blockId: "form", variantId: "empty" },
+              { screenId: "filled", blockId: "form", variantId: "filled" },
+            ],
+            [
+              { edgeId: "e1", fromScreenId: "home", toScreenId: "results" },
+              { edgeId: "e2", fromScreenId: "results", toScreenId: "empty" },
+              { edgeId: "e3", fromScreenId: "empty", toScreenId: "filled" },
+            ],
+          ),
+        ]),
+      ),
+    ).not.toThrow();
+  });
+
   it("refuses a flow in a document that declares the version before it", () => {
     const earlier = CANVAS_FLOW_SCHEMA_VERSION - 1;
     const gated = flow([{ screenId: "s1", blockId: "search" }]);
@@ -3880,58 +3907,126 @@ describe("mockup library", () => {
     );
   });
 
-  it("refuses an image on a non-image component, an undeclared asset, and a Chat Project file", () => {
+  it("admits a search query and a hero lede as values, and refuses an image reference", () => {
+    expect(() =>
+      validateCanvasDefinition(
+        withBlocks([
+          libraryMockup({
+            nodes: [
+              { nodeId: "window", component: "window", label: "S" },
+              { nodeId: "q", parentId: "window", component: "search", label: "Find", value: "Ada" },
+              { nodeId: "h", parentId: "window", component: "hero", label: "Hi", value: "Lede" },
+            ],
+          }),
+        ]),
+      ),
+    ).not.toThrow();
+    // A mockup holds no image: the node field and the block's asset list are
+    // not part of the contract.
+    expect(() =>
+      validateCanvasDefinition(
+        withBlocks([
+          libraryMockup({
+            nodes: [{ nodeId: "window", component: "media", label: "S", assetId: "shot" }],
+          }),
+        ]),
+      ),
+    ).toThrow();
+  });
+
+  it("refuses a definition that reuses a node id, has no single top, or nests outside itself", () => {
+    const definition = (nodes: ReadonlyArray<Record<string, unknown>>) =>
+      validateCanvasDefinition(
+        withBlocks([
+          libraryMockup({
+            definitions: [{ defId: "row", label: "Row", nodes }],
+            nodes: [
+              { nodeId: "window", component: "window", label: "S" },
+              {
+                nodeId: "i1",
+                parentId: "window",
+                component: "instance",
+                label: "Row",
+                defId: "row",
+              },
+            ],
+          }),
+        ]),
+      );
+    expectPolicyCode(
+      () => definition([{ nodeId: "window", component: "list-row", label: "One" }]),
+      "duplicate-node-id",
+    );
     expectPolicyCode(
       () =>
-        validateCanvasDefinition(
-          withBlocks([
-            libraryMockup({
-              nodes: [{ nodeId: "window", component: "window", label: "S", assetId: "shot" }],
-            }),
-          ]),
-        ),
+        definition([
+          { nodeId: "r1", component: "list-row", label: "One" },
+          { nodeId: "r2", component: "list-row", label: "Two" },
+        ]),
+      "mockup-definition-shape",
+    );
+    expectPolicyCode(
+      () =>
+        definition([
+          { nodeId: "r1", component: "card", label: "Card" },
+          { nodeId: "r2", parentId: "window", component: "text", label: "Out" },
+        ]),
+      "dangling-mockup-parent",
+    );
+    expectPolicyCode(
+      () =>
+        definition([
+          { nodeId: "r1", component: "card", label: "Card" },
+          { nodeId: "r2", parentId: "r1", component: "text", label: "Hi", value: "x" },
+        ]),
       "mockup-field-refused",
     );
+  });
+
+  it("refuses an instance that names no component or holds children of its own", () => {
+    const definitions = [
+      {
+        defId: "row",
+        label: "Row",
+        nodes: [{ nodeId: "r1", component: "list-row", label: "One" }],
+      },
+    ];
     expectPolicyCode(
       () =>
         validateCanvasDefinition(
           withBlocks([
             libraryMockup({
+              definitions,
               nodes: [
                 { nodeId: "window", component: "window", label: "S" },
-                {
-                  nodeId: "m",
-                  parentId: "window",
-                  component: "media",
-                  label: "Photo",
-                  assetId: "shot",
-                },
+                { nodeId: "i1", parentId: "window", component: "instance", label: "Row" },
               ],
             }),
           ]),
         ),
-      "design-asset-refused",
+      "dangling-mockup-definition",
     );
     expectPolicyCode(
       () =>
         validateCanvasDefinition(
           withBlocks([
             libraryMockup({
-              assets: [{ assetId: "shot", source: { kind: "project-file", path: "a.png" } }],
+              definitions,
               nodes: [
                 { nodeId: "window", component: "window", label: "S" },
                 {
-                  nodeId: "m",
+                  nodeId: "i1",
                   parentId: "window",
-                  component: "media",
-                  label: "Photo",
-                  assetId: "shot",
+                  component: "instance",
+                  label: "Row",
+                  defId: "row",
                 },
+                { nodeId: "extra", parentId: "i1", component: "text", label: "Extra" },
               ],
             }),
           ]),
         ),
-      "design-asset-refused",
+      "mockup-definition-shape",
     );
   });
 
@@ -4157,8 +4252,54 @@ describe("deck slides", () => {
             ]),
           ]),
         ),
+      "duplicate-deck-slide",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            chart,
+            mockupBlock("screen"),
+            {
+              blockId: "board",
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              kind: "dashboard",
+              title: "Board",
+              cells: [{ blockId: "signups" }],
+            },
+            deck([
+              { slideId: "a", blockId: "signups" },
+              { slideId: "b", blockId: "screen" },
+            ]),
+          ]),
+        ),
       "block-placed-twice",
     );
+  });
+
+  it("shows several frames of one design as several slides", () => {
+    const design = {
+      blockId: "site",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "design" as const,
+      title: "Site",
+      size: "slide" as const,
+      frames: [
+        { frameId: "intro", title: "Intro", html: "<h1>Intro</h1>" },
+        { frameId: "plan", title: "Plan", html: "<h1>Plan</h1>" },
+      ],
+    };
+    expect(() =>
+      validateCanvasDefinition(
+        withBlocks([
+          design,
+          deck([
+            { slideId: "a", blockId: "site", frameId: "intro" },
+            { slideId: "b", blockId: "site", frameId: "plan" },
+          ]),
+        ]),
+      ),
+    ).not.toThrow();
   });
 
   it("refuses a deck in a document that declares the version before it", () => {

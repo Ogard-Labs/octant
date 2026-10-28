@@ -100,7 +100,12 @@ function refreshInterval(
     readonly every?: number;
   },
 ): number | undefined {
-  if (input.waiting || leadApproval(view) !== undefined || workLeadQuestion(view) !== undefined) {
+  if (
+    input.waiting ||
+    view?.session.status === "recovery-required" ||
+    leadApproval(view) !== undefined ||
+    workLeadQuestion(view) !== undefined
+  ) {
     return input.every ?? 1_500;
   }
   if (view === null) return undefined;

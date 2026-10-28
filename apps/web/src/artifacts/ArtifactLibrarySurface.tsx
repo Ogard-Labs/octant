@@ -1,15 +1,24 @@
 import type { ArtifactLibraryEntry } from "@octant/contracts/artifact-library";
 import type { CanvasExportOfferList } from "@octant/contracts/canvas-export";
+import type { CanvasTagCommand } from "@octant/contracts/canvas-tags";
+import { decodeUtcTimestamp } from "@octant/contracts";
 import { createCanvasClient, type CanvasClient } from "@octant/client-runtime/canvas-client";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CanvasExportPanel } from "../canvas/CanvasExportPanel";
 import { withWorkspaceFrameTheme } from "../canvas/blocks/designDocument";
 import { useCanvasExportFolder } from "../canvas/useCanvasExportFolder";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { Surface } from "../surface/SurfaceHeader";
+import {
+  ARTIFACT_LIBRARY_VIEW_GALLERY,
+  readArtifactLibraryView,
+  writeArtifactLibraryView,
+  type ArtifactLibraryView as LibraryViewMode,
+} from "./artifactLibraryViewPreference";
 import { ArtifactLibraryView } from "./ArtifactLibraryView";
 import { ArtifactMirrorSettings } from "./ArtifactMirrorSettings";
 import { useArtifactLibrary } from "./useArtifactLibrary";
+import { useArtifactTags } from "./useArtifactTags";
 import { useArtifactMirror } from "./useArtifactMirror";
 import { SyncedArtifactDialog } from "./SyncedArtifactDialog";
 import { useSyncedArtifacts } from "./useSyncedArtifacts";
@@ -24,6 +33,8 @@ export interface ArtifactLibrarySurfaceProps {
   readonly onCreate?: () => void;
   /** Injected in tests; the host's synced-artifact commands otherwise. */
   readonly execute?: typeof executeSyncedArtifactCommand;
+  /** Injected in tests; the renderer's local storage otherwise. */
+  readonly storage?: Pick<Storage, "getItem" | "setItem">;
 }
 
 /**
@@ -35,6 +46,7 @@ export interface ArtifactLibrarySurfaceProps {
  * skew.
  */
 export function ArtifactLibrarySurface(props: ArtifactLibrarySurfaceProps) {
+  const storage = props.storage ?? globalThis.localStorage;
   const mirror = useArtifactMirror({
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
@@ -42,6 +54,19 @@ export function ArtifactLibrarySurface(props: ArtifactLibrarySurfaceProps) {
   const library = useArtifactLibrary({
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
+  });
+  const [view, setView] = useState<LibraryViewMode>(
+    () => readArtifactLibraryView(storage) ?? ARTIFACT_LIBRARY_VIEW_GALLERY,
+  );
+  useEffect(() => {
+    // The storage prop is a test seam; a window keeps one storage for its
+    // life, so this only re-reads when a test hands the surface another one.
+    setView(readArtifactLibraryView(storage) ?? ARTIFACT_LIBRARY_VIEW_GALLERY);
+  }, [storage]);
+  const tags = useArtifactTags({
+    ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
+    ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
+    onChanged: library.refresh,
   });
   const exportClient = useMemo(
     () => exportClientFor(props),
@@ -86,7 +111,18 @@ export function ArtifactLibrarySurface(props: ArtifactLibrarySurfaceProps) {
     onOpened: props.onOpen,
   });
   const observedAt = String(library.listing?.generatedAt ?? "");
-  const viewMessage = synced.notice ?? library.message;
+  const viewMessage = tags.message ?? synced.notice ?? library.message;
+
+  // The command's timestamp is this window's clock; the host stamps the
+  // journaled fact with its own, so a wrong window clock files nothing wrong.
+  const tagCommand =
+    (kind: "canvas-tag-add" | "canvas-tag-remove") =>
+    (canvasId: ArtifactLibraryEntry["canvasId"], tag: string): CanvasTagCommand => ({
+      kind,
+      canvasId,
+      tag,
+      issuedAt: decodeUtcTimestamp(new Date().toISOString()),
+    });
 
   return (
     <Surface ariaLabel="Artifact library">
@@ -102,6 +138,11 @@ export function ArtifactLibrarySurface(props: ArtifactLibrarySurfaceProps) {
             }
           : {})}
         observedAt={observedAt}
+        view={view}
+        onViewChange={(next) => {
+          setView(next);
+          writeArtifactLibraryView(next, storage);
+        }}
         onClose={props.onClose}
         onFiltersChange={library.setFilters}
         onOpen={props.onOpen}
@@ -109,6 +150,14 @@ export function ArtifactLibrarySurface(props: ArtifactLibrarySurfaceProps) {
         {...(exportClient?.exportOffers === undefined
           ? {}
           : { onExport: (entry) => void openExport(entry) })}
+        {...(props.serverUrl === undefined || props.windowCapability === undefined
+          ? {}
+          : {
+              onTagAdd: (canvasId, tag) =>
+                void tags.change(tagCommand("canvas-tag-add")(canvasId, tag)),
+              onTagRemove: (canvasId, tag) =>
+                void tags.change(tagCommand("canvas-tag-remove")(canvasId, tag)),
+            })}
       />
       <ArtifactMirrorSettings
         busy={mirror.busy}

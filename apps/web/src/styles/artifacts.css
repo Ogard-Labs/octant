@@ -84,6 +84,12 @@
   font-size: var(--oct-text-sm);
 }
 
+/* The gallery/list choice sits at the end of the toolbar as a two-item
+   toggle, sized to the toolbar's other controls. */
+.artifact-library__view {
+  min-height: var(--oct-control-height-sm);
+}
+
 .artifact-library__grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
@@ -100,6 +106,152 @@
 
 .artifact-library__grid--grouped {
   padding-top: 0.75rem;
+}
+
+/* The list answer to the card grid: one compact row per artifact, its facts
+   on one line, the tags it carries beside them. */
+.artifact-library__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.artifact-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.artifact-row__open {
+  display: flex;
+  flex: 1 1 16rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  height: auto;
+  white-space: normal;
+  padding: 0.375rem 0.5rem;
+  border-radius: var(--oct-radius-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.artifact-row__open:hover {
+  background: var(--oct-surface);
+}
+
+.artifact-row__title {
+  overflow: hidden;
+  min-width: 8rem;
+  flex: 0 1 auto;
+  color: var(--oct-fg);
+  font-weight: var(--oct-weight-display);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-row__meta,
+.artifact-row__facts {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.artifact-row__facts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.artifact-row__share {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.artifact-row__aside {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* The person's own tags, on a card or a row: a quiet chip each, its remove
+   control inside the chip, and the add control that opens a small input. */
+.artifact-tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+/* The tags sit beside the open control — a chip's remove button cannot live
+   inside another button — so they carry the card's and row's own padding. */
+.artifact-card > .artifact-tags {
+  margin: 0.25rem 0.25rem 0;
+}
+
+.artifact-row .artifact-tags {
+  flex: 0 1 auto;
+}
+
+.artifact-tags__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.125rem;
+  padding: 0.05rem 0.375rem;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  line-height: 1.4;
+}
+
+.artifact-tags__chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.9rem;
+  height: 0.9rem;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.artifact-tags__chip-remove:hover {
+  background: var(--oct-surface);
+  color: var(--oct-fg);
+}
+
+.artifact-tags__add {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.05rem 0.25rem;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+}
+
+.artifact-tags__input {
+  width: 7.5rem;
+  min-height: 0;
+  border: none;
+  background: transparent;
+  color: var(--oct-fg);
+  font: inherit;
+  font-size: var(--oct-text-xs);
+  outline: none;
 }
 
 .artifact-card {

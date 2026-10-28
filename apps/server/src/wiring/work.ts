@@ -81,6 +81,7 @@ import type { CodeWiring } from "./code";
 import type { BrowserWiring } from "./browser";
 import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { HarnessWiring } from "./harness";
+import { queueRestartContinuation } from "../harness/restartContinuation";
 import type { ChatWiring } from "./chat";
 import type { CanvasWiring } from "./canvas";
 import type { HarnessStateWiring } from "./harnessState";
@@ -107,7 +108,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "spendCeiling"
     | "threadAwaitsHarnessApproval"
   > &
-  Pick<HarnessStateWiring, "threadAwaitsHarnessQuestion"> &
+  Pick<HarnessStateWiring, "threadAwaitsHarnessQuestion" | "nativeHarnessSessions"> &
   Pick<WorkRequestStateWiring, "runningWorkTurns" | "workRequestRuntime" | "workRequestService"> &
   Pick<
     IntegrationsWiring,
@@ -153,6 +154,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
   Pick<
     HarnessWiring,
     | "followUpCreation"
+    | "restartContinuation"
     | "nativeHarnessComposition"
     | "nativeHarnessHooks"
     | "onHarnessPausedByPerson"
@@ -196,6 +198,7 @@ export function wireWork(deps: WorkDependencies) {
     contextHarness,
     externalContentIngestionStore,
     followUpCreation,
+    restartContinuation,
     githubIssueContextService,
     goalService,
     imageJobService,
@@ -204,6 +207,7 @@ export function wireWork(deps: WorkDependencies) {
     managedWorktreeReceipts,
     nativeHarnessComposition,
     nativeHarnessHooks,
+    nativeHarnessSessions,
     onHarnessPausedByPerson,
     onWindowRevoked,
     peekCreateFromIssueFramed,
@@ -1074,10 +1078,27 @@ export function wireWork(deps: WorkDependencies) {
         },
         effectiveCodeThread: (windowId, thread) =>
           codeSessionAuthority.effectiveThread(windowId, thread),
+        recoveryRequired: (threadId) =>
+          nativeHarnessSessions.read(threadId)?.session.status === "recovery-required",
         attachments: queueAttachments,
       }),
     });
     yield* Effect.promise(() => threadMessageQueue.recover());
+    restartContinuation.current = async ({ threadId, windowId, mode }) => {
+      if (mode === "chat") chatService.settleCutOffTurns(decodeChatThreadId(threadId));
+      const recoveryIdentity = nativeHarnessSessions.recoveryIdentity(threadId);
+      return recoveryIdentity === undefined
+        ? {
+            kind: "refused",
+            message: "This thread no longer needs restart recovery. Refresh it before continuing.",
+          }
+        : queueRestartContinuation(threadMessageQueue, {
+            threadId,
+            windowId: decodeWindowId(windowId),
+            mode,
+            recoveryIdentity,
+          });
+    };
     onWindowRevoked((windowId) => {
       void threadMessageQueue
         .revokeWindow(windowId)

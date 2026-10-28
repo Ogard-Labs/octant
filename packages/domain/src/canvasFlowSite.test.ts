@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { canvasFlowSite } from "./canvasFlowSite";
 import { canvasMockupHtml } from "./canvasMockupHtml";
-import { decodeCanvasBlock, type CanvasMockupBlock } from "@octant/contracts/canvas";
+import {
+  CANVAS_FLOW_HOTSPOT_COMPONENTS,
+  decodeCanvasBlock,
+  type CanvasMockupBlock,
+} from "@octant/contracts/canvas";
 
 const decodedSearch = decodeCanvasBlock({
   blockId: "search",
@@ -48,6 +52,8 @@ describe("flow site", () => {
     // Navigation is CSS alone: no script anywhere in the site.
     expect(site.toLowerCase()).not.toContain("<script");
     expect(site).toContain(".oct-flow-screen:target");
+    // The generated mockup pages carry their own stylesheet.
+    expect(site).toContain(".oct-mockup-page {");
     // The first screen opens the site before any anchor is followed.
     expect(site).toContain(".oct-flow-screen[data-start] { display: block; }");
   });
@@ -97,7 +103,114 @@ describe("flow site", () => {
   });
 });
 
+describe("flow site navigation", () => {
+  it("scopes each flow's anchors and start screen, so two flows on one page never blank each other", () => {
+    const one = canvasFlowSite({ flow, blocks: [search, results], scope: "first" });
+    const two = canvasFlowSite({ flow, blocks: [search, results], scope: "second" });
+    expect(one).toContain('id="oct-flow-first~s1"');
+    expect(two).toContain('id="oct-flow-second~s1"');
+    expect(two).toContain('href="#oct-flow-second~s2"');
+    // The start screen shows until an anchor in its own site is followed.
+    expect(one).toContain(
+      ".oct-flow-site:not(:has(.oct-flow-screen:target, .oct-flow-screen :target)) > .oct-flow-screen[data-start]",
+    );
+    expect(one).not.toContain("body:not(");
+  });
+
+  it("lists a hotspot transition the screen's page cannot draw, so its target stays reachable", () => {
+    const decoded = decodeCanvasBlock({
+      blockId: "settings",
+      schemaVersion: 23,
+      kind: "mockup",
+      device: "phone",
+      title: "Settings",
+      nodes: [
+        { nodeId: "window", component: "window", label: "Settings" },
+        { nodeId: "tabs", parentId: "window", component: "tabs", label: "Sections" },
+        { nodeId: "general", parentId: "tabs", component: "card", label: "General" },
+        { nodeId: "advanced", parentId: "tabs", component: "card", label: "Advanced" },
+        { nodeId: "reset", parentId: "advanced", component: "button", label: "Reset" },
+      ],
+    });
+    if (decoded.kind !== "mockup") throw new Error("expected a mockup");
+    const site = canvasFlowSite({
+      flow: {
+        title: "Settings flow",
+        screens: [
+          { screenId: "s1", blockId: "settings" },
+          { screenId: "s2", blockId: "results" },
+        ],
+        edges: [
+          {
+            edgeId: "reset",
+            fromScreenId: "s1",
+            toScreenId: "s2",
+            fromNodeId: "reset",
+            label: "Reset",
+          },
+        ],
+      },
+      blocks: [decoded, results],
+    });
+    // The button sits on the second tab, which the page does not show.
+    expect(site).not.toContain('class="oct-mockup-hotspot"');
+    expect(site).toContain('<a href="#oct-flow-s2">Reset →</a>');
+  });
+});
+
 describe("mockup page generator", () => {
+  it("draws an anchor for every component a flow may start a transition from", () => {
+    for (const component of CANVAS_FLOW_HOTSPOT_COMPONENTS) {
+      const decoded = decodeCanvasBlock({
+        blockId: "screen",
+        schemaVersion: 23,
+        kind: "mockup",
+        device: "phone",
+        title: "Screen",
+        nodes: [
+          { nodeId: "window", component: "window", label: "Screen" },
+          { nodeId: "hotspot", parentId: "window", component, label: "Next" },
+        ],
+      });
+      if (decoded.kind !== "mockup") throw new Error("expected a mockup");
+      const page = canvasMockupHtml(decoded, { hotspots: new Map([["hotspot", "#next"]]) });
+      expect(page, component).toContain('<a class="oct-mockup-hotspot" href="#next">Next</a>');
+    }
+  });
+
+  it("draws a placed component's subtree at every instance, and the library components inert", () => {
+    const decoded = decodeCanvasBlock({
+      blockId: "inbox",
+      schemaVersion: 24,
+      kind: "mockup",
+      device: "phone",
+      title: "Inbox",
+      definitions: [
+        {
+          defId: "row",
+          label: "Message row",
+          nodes: [
+            { nodeId: "row-card", component: "card", label: "Message" },
+            { nodeId: "row-text", parentId: "row-card", component: "text", label: "From Ada" },
+          ],
+        },
+      ],
+      nodes: [
+        { nodeId: "window", component: "window", label: "Inbox" },
+        { nodeId: "hero", parentId: "window", component: "hero", label: "Hello", value: "Lede" },
+        { nodeId: "load", parentId: "window", component: "progress", label: "Sync", progress: 40 },
+        { nodeId: "first", parentId: "window", component: "instance", label: "Row", defId: "row" },
+        { nodeId: "second", parentId: "window", component: "instance", label: "Row", defId: "row" },
+      ],
+    });
+    if (decoded.kind !== "mockup") throw new Error("expected a mockup");
+    const page = canvasMockupHtml(decoded);
+    expect(page.split("From Ada")).toHaveLength(3);
+    expect(page).toContain('<p class="oct-mockup-hero-title">Hello</p><p>Lede</p>');
+    expect(page).toContain('<progress value="40" max="100"></progress>');
+    expect(page).not.toContain("<script");
+  });
+
   it("renders the catalog semantically and inert, with values and states", () => {
     const page = canvasMockupHtml(search);
     expect(page).toContain("<h2>Search</h2>");

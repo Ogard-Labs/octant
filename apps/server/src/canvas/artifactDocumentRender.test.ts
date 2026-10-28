@@ -1382,11 +1382,38 @@ describe("a destination export near the approval card's limit", () => {
     expect(exported.body).toContain('class="oct-mockup-window"');
     expect(exported.body).toContain("disabled>Go</button>");
     expect(exported.body).not.toContain("<script");
+    // The page carries the generated stylesheet it is written against.
+    expect(exported.body).toContain(".oct-mockup-page {");
     // The Markdown form keeps the outline reading alone.
     const markdown = renderArtifactMarkdown(definition([mockup]));
     if (markdown.kind !== "rendered") throw new Error("expected a rendered document");
     expect(markdown.body).toContain("- Window, Search");
     expect(markdown.body).not.toContain("oct-mockup-window");
+  });
+
+  it("redacts secret-shaped text in a mockup's generated page, every variant included", () => {
+    const secret = "token sk-proj-abcdefghij0123456789";
+    const mockup = {
+      blockId: "screen",
+      schemaVersion: 24,
+      kind: "mockup",
+      device: "phone",
+      title: "Settings",
+      variants: [
+        { variantId: "empty", label: "Empty" },
+        { variantId: "filled", label: secret },
+      ],
+      nodes: [
+        { nodeId: "a", component: "window", label: "Empty", variantId: "empty" },
+        { nodeId: "b", component: "window", label: "Filled", variantId: "filled" },
+        { nodeId: "key", parentId: "b", component: "form-field", label: "Key", value: secret },
+      ],
+    } as unknown as CanvasBlock;
+    const exported = renderArtifactHtml(definition([mockup]));
+    if (exported.kind !== "rendered") throw new Error("expected a rendered document");
+    expect(exported.body).toContain('aria-label="Empty: Settings"');
+    expect(exported.body).toContain("[redacted]");
+    expect(exported.body).not.toContain("sk-proj-");
   });
 
   it("renders a flow as a script-free site whose transitions are real anchors", () => {
@@ -1417,8 +1444,10 @@ describe("a destination export near the approval card's limit", () => {
     if (exported.kind !== "rendered") throw new Error("expected a rendered document");
     // The site's screens move by :target, its transitions are anchors, and
     // nothing it holds is a script.
-    expect(exported.body).toContain('id="oct-flow-s1" data-start=""');
-    expect(exported.body).toContain('<a class="oct-mockup-hotspot" href="#oct-flow-s2">Go</a>');
+    expect(exported.body).toContain('id="oct-flow-app-flow~s1" data-start=""');
+    expect(exported.body).toContain(
+      '<a class="oct-mockup-hotspot" href="#oct-flow-app-flow~s2">Go</a>',
+    );
     expect(exported.body).toContain(".oct-flow-screen:target");
     expect(exported.body).not.toContain("<script");
     expect(exported.writesDesignMarkup).toBe(false);
@@ -1429,5 +1458,57 @@ describe("a destination export near the approval card's limit", () => {
     if (markdown.kind !== "rendered") throw new Error("expected a rendered document");
     expect(markdown.body).toContain("search → results");
     expect(markdown.body).not.toContain("oct-flow-s1");
+  });
+
+  it("redacts secret-shaped text and host paths before a flow becomes a site", () => {
+    const secret = "token sk-proj-abcdefghij0123456789";
+    const mockup = {
+      blockId: "search",
+      schemaVersion: 24,
+      kind: "mockup",
+      device: "phone",
+      title: "/Users/someone/private/plan.md",
+      definitions: [
+        {
+          defId: "row",
+          label: "Row",
+          nodes: [{ nodeId: "row-text", component: "text", label: secret }],
+        },
+      ],
+      nodes: [
+        { nodeId: "window", component: "window", label: "Search" },
+        { nodeId: "placed", parentId: "window", component: "instance", label: "Row", defId: "row" },
+        { nodeId: "key", parentId: "window", component: "form-field", label: "Key", value: secret },
+        { nodeId: "go", parentId: "window", component: "button", label: secret },
+      ],
+    } as unknown as CanvasBlock;
+    const results = {
+      blockId: "results",
+      schemaVersion: 23,
+      kind: "mockup",
+      device: "phone",
+      title: "Results",
+      nodes: [{ nodeId: "window", component: "window", label: "Results" }],
+    } as unknown as CanvasBlock;
+    const flow = {
+      blockId: "app-flow",
+      schemaVersion: 23,
+      kind: "flow",
+      title: secret,
+      screens: [
+        { screenId: "s1", blockId: "search" },
+        { screenId: "s2", blockId: "results" },
+      ],
+      edges: [
+        { edgeId: "go", fromScreenId: "s1", toScreenId: "s2", fromNodeId: "go" },
+        { edgeId: "back", fromScreenId: "s2", toScreenId: "s1", label: secret },
+      ],
+    } as unknown as CanvasBlock;
+    const exported = renderArtifactHtml(definition([mockup, results, flow]));
+    if (exported.kind !== "rendered") throw new Error("expected a rendered document");
+    expect(exported.body).toContain('id="oct-flow-app-flow~s1"');
+    expect(exported.body).not.toContain("sk-proj-");
+    expect(exported.body).not.toContain("/Users/someone");
+    expect(exported.body).toContain("[redacted]");
   });
 });

@@ -95,6 +95,23 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "apps/server/src/persistence/sqlitePort.conformance.ts",
     "Conformance kit that sqlitePort.test.ts and sqlitePort.smoke.ts run against the SQLite port; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the port's last conformance test is retired.",
   ],
+  // ── Delivered ahead of its first caller by a staged design ──
+  [
+    "packages/domain/src/hostedRelayProtocol.ts",
+    "Hosted relay route id derivation, registration message, and frame reader, delivered as the contracts-and-policy slice of docs/design/hosted-relay.md before the relay service and host connector that call it. Remove once the relay service reads frames with it.",
+  ],
+  [
+    "packages/domain/src/remoteSourceAdmission.ts",
+    "Admission table for the `relayed` source class, delivered as the contracts-and-policy slice of docs/design/hosted-relay.md; no transport produces `relayed` until the host connector does. Remove once the listener's source-class gates consult it.",
+  ],
+  [
+    "packages/domain/src/hostedRelayPathPolicy.ts",
+    "Client direct-or-relay path choice, delivered as the contracts-and-policy slice of docs/design/hosted-relay.md before the desktop and phone relay transports that call it. Remove once the desktop client chooses its path with it.",
+  ],
+  [
+    "packages/contracts/src/hostedRelay.ts",
+    "Hosted relay frame and grant schemas, reached only through hostedRelayProtocol.ts and hostedRelayPathPolicy.ts until the relay service and host connector decode frames with them. Remove once those policies' entries are removed.",
+  ],
   // ── Reached only through another island, so an island with it ──
   [
     "packages/contracts/src/auditEvents.ts",

@@ -140,6 +140,33 @@ describe("flow board", () => {
     expect(call?.[1]?.[0]?.x).toBe(10);
     expect(call?.[1]?.[0]?.y).toBe(0);
   });
+
+  it("gives a phone design screen its portrait shape instead of a landscape box", () => {
+    const phoneDesign = decodeCanvasBlock({
+      ...base,
+      blockId: "phone-site",
+      kind: "design",
+      title: "Phone site",
+      size: "phone",
+      frames: [{ frameId: "home", title: "Home", html: "<h1>Home</h1>" }],
+    });
+    const decoded = decodeCanvasBlock({
+      ...base,
+      blockId: "phone-flow",
+      kind: "flow",
+      title: "Phone flow",
+      screens: [{ screenId: "home", blockId: "phone-site", frameId: "home" }],
+      edges: [],
+    });
+    if (decoded.kind !== "flow") throw new Error("expected a flow block");
+    const { container } = render(<FlowBoard block={decoded} blocks={[phoneDesign]} />);
+    const wrapper = container.querySelector<HTMLElement>(".canvas-flow-board__design-frame");
+    const [width, height] = (wrapper?.style.aspectRatio ?? "")
+      .split("/")
+      .map((part) => Number(part.trim()));
+    expect(width).toBeGreaterThan(0);
+    expect(height).toBeGreaterThan(width ?? 0);
+  });
 });
 
 describe("flow click-through Play", () => {

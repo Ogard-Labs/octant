@@ -68,6 +68,8 @@ import { useAppleSimulatorScreen } from "../apple/useAppleSimulatorScreen";
 import { useAppleSimulatorLiveScreen } from "../apple/useAppleSimulatorLiveScreen";
 import { useAppleWorkbench } from "../apple/useAppleWorkbench";
 import { ApplePhysicalDevices } from "../apple/ApplePhysicalDevices";
+import { AppleUpload } from "../apple/AppleUpload";
+import { useAppleUpload } from "../apple/useAppleUpload";
 import { REMOTE_CODE_THREAD_OPERATION_UNAVAILABLE } from "@octant/domain/ssh-target-recovery";
 import { useAppleDevices } from "../apple/useAppleDevices";
 
@@ -113,6 +115,12 @@ export interface CodeWorkspaceApprovals {
    * the person declined.
    */
   readonly appleDeviceLease?: (request: AppleDeviceRequest) => Promise<string | undefined>;
+  /**
+   * The desktop app's confirmation of one upload to App Store Connect, naming
+   * the exact build. Returns the approval the host minted, or undefined when
+   * the person declined.
+   */
+  readonly appleUpload?: (request: AppleDeviceRequest) => Promise<string | undefined>;
   /**
    * Native confirmation for one Android emulator action. Clicks never use this;
    * Allow input does.
@@ -430,6 +438,9 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
           {...(props.approvals?.appleDeviceLease === undefined
             ? {}
             : { requestDeviceLease: props.approvals.appleDeviceLease })}
+          {...(props.approvals?.appleUpload === undefined
+            ? {}
+            : { requestUpload: props.approvals.appleUpload })}
           client={props.appleToolchainClient}
           {...(props.appleDeviceClient === undefined
             ? {}
@@ -451,6 +462,7 @@ function AppleWorkbenchSurface(props: {
   readonly hostBridge?: OctantHostBridge;
   readonly requestApproval?: (request: AppleActionRequest) => Promise<string | undefined>;
   readonly requestDeviceLease?: (request: AppleDeviceRequest) => Promise<string | undefined>;
+  readonly requestUpload?: (request: AppleDeviceRequest) => Promise<string | undefined>;
   readonly tab: Extract<CodeTab, { readonly kind: "apple-workbench" }>;
   readonly thread: NonNullable<CodeController["activeView"]>["thread"];
   readonly checkoutId: NonNullable<CodeController["activeView"]>["checkout"]["id"];
@@ -856,6 +868,13 @@ function AppleWorkbenchSurface(props: {
                   : { requestLease: props.requestDeviceLease })}
                 scope={{ authority, threadId: props.thread.id, checkoutId: props.checkoutId }}
                 teamKey={`octant.apple-device-team.${String(props.thread.projectId)}`}
+                {...(props.requestUpload === undefined
+                  ? {}
+                  : { requestUpload: props.requestUpload })}
+                {...(props.tab.projectPath === undefined
+                  ? {}
+                  : { projectPath: props.tab.projectPath })}
+                {...(scheme === undefined ? {} : { scheme })}
               />
             ),
           })}
@@ -867,8 +886,45 @@ function AppleWorkbenchSurface(props: {
  * The workbench's paired iPhones and iPads. The dock's Simulator pane does
  * not show them: a physical device has no live view to stream.
  */
-function ApplePhysicalDevicesSurface(props: Parameters<typeof useAppleDevices>[0]) {
+function ApplePhysicalDevicesSurface(
+  props: Parameters<typeof useAppleDevices>[0] & {
+    readonly requestUpload?: (request: AppleDeviceRequest) => Promise<string | undefined>;
+    readonly projectPath?: string;
+    readonly scheme?: string;
+  },
+) {
   const devices = useAppleDevices(props);
+  const upload = useAppleUpload({
+    client: props.client,
+    scope: props.scope,
+    createUuid: props.createUuid,
+    ...(props.requestUpload === undefined ? {} : { requestConfirmation: props.requestUpload }),
+    ...(props.projectPath === undefined ? {} : { projectPath: props.projectPath }),
+    ...(props.scheme === undefined ? {} : { scheme: props.scheme }),
+    team: devices.team,
+  });
+  return (
+    <>
+      <ApplePhysicalDevicesView devices={devices} />
+      {upload.offered ? (
+        <AppleUpload
+          onTeamChange={devices.setTeam}
+          onUpload={() => void upload.upload()}
+          {...(props.projectPath === undefined ? {} : { projectPath: props.projectPath })}
+          ready={upload.ready}
+          state={upload.state}
+          team={devices.team}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function ApplePhysicalDevicesView({
+  devices,
+}: {
+  readonly devices: ReturnType<typeof useAppleDevices>;
+}) {
   return (
     <ApplePhysicalDevices
       busy={devices.busy}

@@ -559,6 +559,31 @@ describe("drawing a preview of an artifact", () => {
     expect(plainMarkup).not.toContain("<polyline");
   });
 
+  it("draws a deck's slides as the blocks they show, so the picture is not blank", () => {
+    const metric = {
+      blockId: "signups",
+      schemaVersion: 6,
+      kind: "metric",
+      label: "Weekly signups",
+      value: 1_200,
+    } as unknown as CanvasBlock;
+    const deck = {
+      blockId: "talk",
+      schemaVersion: 25,
+      kind: "deck",
+      title: "Review",
+      slides: [
+        { slideId: "one", blockId: "signups", notes: "Say the number." },
+        { slideId: "two", blockId: "chart-1" },
+      ],
+    } as unknown as CanvasBlock;
+    const markup = renderArtifactSidecarSvg(definition([metric, chart, deck]));
+    expect(markup).toContain(">Weekly signups<");
+    expect(markup).toContain("<rect");
+    expect(markup.split(">Weekly signups<")).toHaveLength(2);
+    expect(markup).not.toContain("Say the number");
+  });
+
   it("draws a dashboard as a grid of its cells, side by side, each placed block once", () => {
     const markup = renderArtifactSidecarSvg(definition(opsDashboardExampleBlocks));
     // Each cell is a nested viewport, so a label's place is its cell's.

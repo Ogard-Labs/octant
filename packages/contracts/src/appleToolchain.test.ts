@@ -773,14 +773,85 @@ describe("Apple physical device contracts", () => {
     }
   });
 
+  const uploadBuild = {
+    bundleIdentifier: "sh.octant.Fixture",
+    version: "1.2.0",
+    buildNumber: "42",
+    signing: { teamId: "A1B2C3D4E5", identity: "A".repeat(40) },
+    profileId: "30000000-0000-4000-8000-000000000030",
+  };
+  const uploadFields = {
+    projectPath: "App.xcodeproj",
+    teamId: "A1B2C3D4E5",
+    upload: uploadBuild,
+  };
+
   it("names a device for every operation but discovery and distribution", () => {
     const { deviceId: _deviceId, ...noDevice } = request;
     for (const kind of ["discover", "upload", "submit-for-review", "release-version"] as const) {
-      expect(AppleContracts.decodeAppleDeviceRequest({ ...noDevice, kind }).kind).toBe(kind);
-      expect(() => AppleContracts.decodeAppleDeviceRequest({ ...request, kind })).toThrow();
+      const fields = kind === "upload" ? uploadFields : {};
+      expect(AppleContracts.decodeAppleDeviceRequest({ ...noDevice, kind, ...fields }).kind).toBe(
+        kind,
+      );
+      expect(() =>
+        AppleContracts.decodeAppleDeviceRequest({ ...request, kind, ...fields }),
+      ).toThrow();
     }
     expect(() =>
       AppleContracts.decodeAppleDeviceRequest({ ...noDevice, kind: "use-device" }),
+    ).toThrow();
+  });
+
+  it("binds an upload to the project, team, and exact build the person confirms", () => {
+    const { deviceId: _deviceId, ...noDevice } = request;
+    const upload = { ...noDevice, kind: "upload", ...uploadFields };
+    expect(AppleContracts.decodeAppleDeviceRequest(upload).upload?.buildNumber).toBe("42");
+    for (const field of ["projectPath", "teamId", "upload"] as const) {
+      const { [field]: _dropped, ...missing } = upload;
+      expect(() => AppleContracts.decodeAppleDeviceRequest(missing)).toThrow();
+    }
+    // The signature the person saw is for the team the upload names.
+    expect(() =>
+      AppleContracts.decodeAppleDeviceRequest({ ...upload, teamId: "Z9Y8X7W6V5" }),
+    ).toThrow();
+    for (const version of ["1.2.3.4", "v1", "1..2", ""]) {
+      expect(() =>
+        AppleContracts.decodeAppleDeviceRequest({
+          ...upload,
+          upload: { ...uploadBuild, version },
+        }),
+      ).toThrow();
+    }
+    // Only an upload carries build facts.
+    expect(() =>
+      AppleContracts.decodeAppleDeviceRequest({ ...request, kind: "status", upload: uploadBuild }),
+    ).toThrow();
+  });
+
+  it("records an upload's delivery identifier only when App Store Connect took it", () => {
+    const evidence = {
+      actionId: request.actionId,
+      correlationId: request.correlationId,
+      authority: request.authority,
+      kind: "upload",
+      requestedBy: { kind: "local-user", actorId: "30000000-0000-4000-8000-000000000012" },
+      outcome: "succeeded",
+      upload: uploadBuild,
+      deliveryId: "30000000-0000-4000-8000-000000000031",
+      diagnostics: [],
+      artifacts: [],
+      cleanup: "complete",
+      durationMs: 1_000,
+      completedAt: "2026-10-28T12:00:00.000Z",
+    };
+    expect(AppleContracts.decodeAppleUploadEvidence(evidence).deliveryId).toBe(evidence.deliveryId);
+    const { deliveryId: _deliveryId, ...undelivered } = evidence;
+    expect(() => AppleContracts.decodeAppleUploadEvidence(undelivered)).toThrow();
+    expect(
+      AppleContracts.decodeAppleUploadEvidence({ ...undelivered, outcome: "failed" }).outcome,
+    ).toBe("failed");
+    expect(() =>
+      AppleContracts.decodeAppleUploadEvidence({ ...evidence, privateKey: "-----BEGIN" }),
     ).toThrow();
   });
 

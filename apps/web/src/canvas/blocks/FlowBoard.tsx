@@ -433,7 +433,9 @@ export function FlowBoard(props: FlowBoardProps) {
                   blockId={screen.blockId}
                   blocks={props.blocks}
                   {...(screen.frameId === undefined ? {} : { frameId: screen.frameId })}
+                  height={screen.height}
                   scale={screen.scale}
+                  width={screen.width}
                 />
               )}
               <span className="canvas-flow-board__screen-label">{screen.label}</span>
@@ -771,20 +773,30 @@ function DesignScreen({
   blockId,
   blocks,
   frameId,
+  height,
   scale,
+  width,
 }: {
   readonly assetRuntime?: DesignAssetRuntime;
   readonly blockId: string;
   readonly blocks: ReadonlyArray<CanvasBlock>;
   readonly frameId?: string | undefined;
+  readonly height: number;
   readonly scale: number;
+  readonly width: number;
 }) {
   const block = blocks.find(
     (candidate) => candidate.kind === "design" && String(candidate.blockId) === blockId,
   );
   if (block === undefined || block.kind !== "design" || frameId === undefined) return null;
   return (
-    <div className="canvas-flow-board__design-frame">
+    // The wrapper takes the frame's own viewport ratio, so a phone or tablet
+    // page is not cropped to a landscape box around its scaled iframe.
+    <div
+      className="canvas-flow-board__design-frame"
+      data-canvas-design={blockId}
+      style={{ aspectRatio: `${String(width)} / ${String(height)}` }}
+    >
       <DesignFrameView
         {...(assetRuntime === undefined ? {} : { assetRuntime })}
         block={block}

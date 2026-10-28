@@ -1,5 +1,7 @@
 import { decodeArtifactLibraryQuery } from "@octant/contracts/artifact-library";
+import { decodeCanvasTagCommandResult } from "@octant/contracts";
 import type { ArtifactLibraryService } from "./canvas/artifactLibraryService";
+import type { CanvasTagService } from "./canvas/canvasTagService";
 import type { ClientPrincipal } from "./clientPrincipal";
 import { authenticateRouteWindowId, readPrincipalRouteContext } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
@@ -11,6 +13,8 @@ const HEADERS = "content-type, x-octant-window-capability";
 export interface ArtifactLibraryRouteDependencies {
   readonly library: ArtifactLibraryService;
   readonly windowAuthorityStore: WindowAuthorityStore;
+  /** Filing tags onto a Canvas from the library. Absent on hosts without it. */
+  readonly tags?: CanvasTagService;
   readonly now?: () => number;
 }
 
@@ -26,10 +30,18 @@ export function createArtifactLibraryRouteHandler(deps: ArtifactLibraryRouteDepe
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
     const origin = request.headers.get("origin");
-    if (url.pathname !== "/api/artifacts/library") return undefined;
+    if (url.pathname !== "/api/artifacts/library" && url.pathname !== "/api/artifacts/tag") {
+      return undefined;
+    }
 
     if (!isLoopbackHostname(url.hostname)) {
-      return failure("Artifact library requests must use loopback.", 400, null);
+      return failure(
+        url.pathname === "/api/artifacts/tag"
+          ? "Artifact tag requests must use loopback."
+          : "Artifact library requests must use loopback.",
+        400,
+        null,
+      );
     }
     if (origin !== null && !isAllowedOrigin(origin)) {
       return failure("Renderer origin is not allowed.", 400, null);
@@ -57,15 +69,52 @@ export function createArtifactLibraryRouteHandler(deps: ArtifactLibraryRouteDepe
       }
     } catch (error) {
       return error instanceof WindowAuthorityError
-        ? failure("Artifact library read is unauthorized.", 401, origin)
-        : failure("Artifact library read is invalid.", 400, origin);
+        ? failure(
+            url.pathname === "/api/artifacts/tag"
+              ? "Artifact tag change is unauthorized."
+              : "Artifact library read is unauthorized.",
+            401,
+            origin,
+          )
+        : failure(
+            url.pathname === "/api/artifacts/tag"
+              ? "Artifact tag change is invalid."
+              : "Artifact library read is invalid.",
+            400,
+            origin,
+          );
     }
 
     let body: unknown;
     try {
       body = await request.json();
     } catch {
-      return failure("Artifact library query is invalid.", 400, origin);
+      return failure(
+        url.pathname === "/api/artifacts/tag"
+          ? "Artifact tag command is invalid."
+          : "Artifact library query is invalid.",
+        400,
+        origin,
+      );
+    }
+    if (url.pathname === "/api/artifacts/tag") {
+      const tags = deps.tags;
+      if (tags === undefined) {
+        return json(
+          decodeCanvasTagCommandResult({
+            kind: "denied",
+            denialCode: "unavailable",
+            message: "Artifact tags are unavailable on this host.",
+          }),
+          origin,
+        );
+      }
+      return json(
+        decodeCanvasTagCommandResult(
+          tags.change(body, principal.kind === "local-window" ? "local-window" : "remote-device"),
+        ),
+        origin,
+      );
     }
     try {
       const query = decodeArtifactLibraryQuery(body);

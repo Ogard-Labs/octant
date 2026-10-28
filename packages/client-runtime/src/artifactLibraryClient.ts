@@ -4,6 +4,7 @@ import {
   type ArtifactSyncedCommand,
   ArtifactSyncedResult,
 } from "@octant/contracts/artifact-library";
+import { CanvasTagCommandResult, type CanvasTagCommand } from "@octant/contracts/canvas-tags";
 import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -109,6 +110,48 @@ export async function executeSyncedArtifactCommand(
     );
   }
   return decodeHostAnswer(ArtifactSyncedResult)(body);
+}
+
+/**
+ * Sends one tag change to the host: add or remove a tag on a Canvas. The host
+ * decides it; a refusal comes back as a result, not an error, so the library
+ * can say why without looking like the request failed to arrive.
+ */
+export async function changeArtifactTag(
+  options: ArtifactLibraryClientOptions,
+  command: CanvasTagCommand,
+): Promise<CanvasTagCommandResult> {
+  let url: URL;
+  try {
+    url = new URL("/api/artifacts/tag", options.baseUrl);
+  } catch {
+    throw new ArtifactLibraryClientFailure("Artifact library base URL is invalid.", 0);
+  }
+  if (!["127.0.0.1", "localhost", "::1"].includes(url.hostname)) {
+    throw new ArtifactLibraryClientFailure("Artifact library base URL must be loopback.", 0);
+  }
+  const fetch = bindFetchPort(options.fetch);
+  let response: Response;
+  try {
+    response = await fetch(url.toString(), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-octant-window-capability": options.windowCapability,
+      },
+      body: JSON.stringify(command),
+    });
+  } catch {
+    throw new ArtifactLibraryClientFailure("Artifact tags are unavailable.", 0);
+  }
+  const body: unknown = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new ArtifactLibraryClientFailure(
+      readString(body, "error") ?? "Artifact tags are unavailable.",
+      response.status,
+    );
+  }
+  return decodeHostAnswer(CanvasTagCommandResult)(body);
 }
 
 function readString(body: unknown, key: string): string | undefined {
