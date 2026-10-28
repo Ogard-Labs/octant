@@ -406,7 +406,7 @@ links across the exported pages. Supersedes D-6.
 
 | Slice | What it delivers                                                                                                                                                                                                       | Requirement IDs                        | Status  |
 | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | ------- |
-| 1     | `flow` block: schema 23, policies, pure layout, board drawing (mockup frames and design frames as live nodes), comment anchors, reading order, MD/HTML/SVG export parity, share v12, preview warnings, journaled drags | FR-1, FR-3, NFR-1, NFR-2, NFR-3, NFR-5 | Planned |
+| 1     | `flow` block: schema 23, policies, pure layout, board drawing (mockup frames and design frames as live nodes), comment anchors, reading order, MD/HTML/SVG export parity, share v12, preview warnings, journaled drags | FR-1, FR-3, NFR-1, NFR-2, NFR-3, NFR-5 | In review (#1830); rendered QA pending |
 | 2     | Click-through Play over the flow; flow HTML export as one linked, script-free page set                                                                                                                                 | FR-2, FR-7 (flow part), NFR-4, NFR-6   | Planned |
 | 3     | Mockup catalog: new components, image fills, reusable definitions — schema 24, share v13                                                                                                                               | FR-4, FR-5, FR-6, NFR-5                | Planned |
 | 4     | Per-variant mockup HTML and TSX export; describe guidance and recipes for everything above                                                                                                                             | FR-7 (rest), FR-9                      | Planned |
@@ -710,6 +710,19 @@ Choice: the flow block is version 23, share 12; the catalog slice is 24, the
 deck 25, each assigned finally when its slice starts. The next free version
 governs over any number written earlier.
 
+### Codebase deltas
+
+- The flow's declared-version gate on `CanvasDefinition` was merged into the
+  tabs/columns filter's `Schema.filter` step rather than adding its own: one
+  more pipe step crossed Effect's inference-depth cliff, which degraded the
+  whole definition type in consumer typechecks. The merged message names both
+  rules with their versions. Later Canvas gates should watch the same cliff
+  and merge rather than append.
+- The first CSS draft drew the screen node its own focus ring; the
+  visual-language contract (one neutral focus edge no surface repaints)
+  refused it, so the node keeps the browser's own outline, as a diagram
+  node's does.
+
 ### Change log
 
 - 2026-10-28: Phase 1 written; approved by Henrik same day. Q-1 ruled
@@ -729,3 +742,9 @@ governs over any number written earlier.
   focus ring the first CSS draft drew was removed: the visual-language
   contract holds that the workspace draws one neutral focus edge no surface
   repaints.
+- 2026-10-28: Slice 1 delivered for review as #1830 (forced workspace
+  typecheck, per-package suites, and repo checks green; rendered QA named as
+  pending there). The turbo typecheck cache had hidden the inference-depth
+  cliff and two fixture typings from earlier runs; the cache was cleared by
+  an environment restart and both were fixed at the source, and the delta is
+  recorded above.
