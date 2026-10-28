@@ -568,7 +568,9 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
             mode: entry.mode,
             title: entry.title,
             canvasId: entry.canvasId,
-            projectId: entry.projectId,
+            // An entry that names no Project is a Chat Canvas owned by its
+            // thread; its tab opens under the same rule the shell restores it.
+            projectId: entry.projectId ?? null,
           });
         }}
         serverUrl={serverUrl}
