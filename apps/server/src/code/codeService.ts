@@ -106,6 +106,7 @@ import {
 } from "@octant/domain/agent-profile-policy";
 import { ACCESS_POSTURE_RANK, authorizeCodeOperation } from "@octant/domain/code-policy";
 import { defaultDeliveryBranchIntent } from "@octant/domain/code-worktree-source-policy";
+import { remoteCodeThreadPostureRefusal } from "@octant/domain/ssh-target-recovery";
 import { evaluateCodeDeliveryOutcomeProposal } from "@octant/domain/delivery-target-policy";
 import {
   completedThreadArchiveDue,
@@ -1643,6 +1644,15 @@ export class CodeService {
       }
       if (command.kind === "create-code-thread") {
         await this.#authorizeThread(authenticatedWindowId, command.thread);
+        // Choosing Claude artifacts turns on the runtime's telemetry, so only
+        // the change command, which a paired device cannot send with it, may
+        // make that choice; a create carrying it would skip that refusal.
+        if (command.thread.documentDelivery === "native-artifacts") {
+          throw this.#failure(
+            "unauthorized",
+            "A new Code thread starts with Canvas; choose Claude artifacts for it afterwards.",
+          );
+        }
         if (this.#persistence.readCodeThread(command.thread.id) !== undefined) {
           throw this.#failure("conflict", "Code thread already exists.");
         }
@@ -1696,13 +1706,16 @@ export class CodeService {
         });
         const thread = this.#threadWithProfiledAuthority(command.thread, profiled);
         // Full access on a target needs it remembered for the Project, and a
-        // remote-bound Project has nowhere to remember it yet, so no thread
-        // there is created holding it, even for this session.
-        if (checkout.kind === "remote-root" && thread.executionPolicy === "full-access") {
-          throw this.#failure(
-            "unauthorized",
-            "Full access is not available for a Project on an SSH target. Choose a narrower posture.",
-          );
+        // remote-bound Project has nowhere to remember it yet; Auto-accept
+        // edits would write on the target with no checkpoint to return to,
+        // since a remote turn takes none. No thread there is created holding
+        // either, even for this session.
+        const remotePostureRefusal =
+          checkout.kind === "remote-root"
+            ? remoteCodeThreadPostureRefusal(thread.executionPolicy)
+            : undefined;
+        if (remotePostureRefusal !== undefined) {
+          throw this.#failure("unauthorized", remotePostureRefusal);
         }
         const project = this.#persistence.readProject?.(thread.projectId);
         if (
@@ -1951,6 +1964,17 @@ export class CodeService {
           throw this.#failure("invalid", "Code working directory is unavailable.");
         }
       }
+      // The rule a thread on an SSH target is created under holds for its
+      // whole life: raising it is refused before any approval is consulted.
+      if (command.kind === "change-code-thread-access") {
+        const remotePostureRefusal =
+          this.#persistence.readCodeCheckout(current.checkoutId)?.kind === "remote-root"
+            ? remoteCodeThreadPostureRefusal(command.executionPolicy)
+            : undefined;
+        if (remotePostureRefusal !== undefined) {
+          throw this.#failure("unauthorized", remotePostureRefusal);
+        }
+      }
       if (
         command.kind === "change-code-thread-access" &&
         command.executionPolicy === "full-access" &&
@@ -2005,6 +2029,17 @@ export class CodeService {
             "This provider or model is not allowed by this Code Project's provider policy.",
           );
         }
+      }
+      // The choice takes effect when the next turn launches its provider; a
+      // running turn keeps the launch it started with.
+      if (
+        command.kind === "change-code-thread-document-delivery" &&
+        current.lifecycle === "archived"
+      ) {
+        throw this.#failure(
+          "invalid",
+          "An archived Code thread cannot change how it delivers documents.",
+        );
       }
       if (command.kind === "propose-code-delivery-outcome") {
         // An agent proposal is advisory: it records a pending proposal but must
@@ -2192,12 +2227,19 @@ export class CodeService {
                                 version: command.expectedVersion + 1,
                                 updatedAt,
                               }
-                            : {
-                                ...current,
-                                workingDirectory: command.workingDirectory,
-                                version: command.expectedVersion + 1,
-                                updatedAt,
-                              },
+                            : command.kind === "change-code-thread-document-delivery"
+                              ? {
+                                  ...current,
+                                  documentDelivery: command.documentDelivery,
+                                  version: command.expectedVersion + 1,
+                                  updatedAt,
+                                }
+                              : {
+                                  ...current,
+                                  workingDirectory: command.workingDirectory,
+                                  version: command.expectedVersion + 1,
+                                  updatedAt,
+                                },
       );
       const next =
         command.kind === "change-code-thread-access" &&

@@ -7,6 +7,7 @@ import type {
   ExtensionProcessHandle,
   ExtensionRuntimeStartInput,
   ExtensionSupervisor,
+  OutsideDriverRuntime,
 } from "../extensions/extensionSupervisor";
 import type { OutsideDriverChannel } from "./outsideHarnessEndpointProxy";
 
@@ -21,16 +22,17 @@ import type { OutsideDriverChannel } from "./outsideHarnessEndpointProxy";
  *
  * A process that exits on its own is a crash. The next use may start it again,
  * up to the supervisor's limit of two restarts a minute; a third crash in that
- * window quarantines the instance's driver at that digest, and every later
- * start is refused until the instance binds another digest or the host
- * restarts.
+ * window quarantines the instance's driver at that digest. The hold is
+ * journaled on the instance, so a host restart does not give a crash-looping
+ * driver a fresh budget, and every later start is refused until the instance
+ * binds another digest.
  */
 
 /** Why no process was started. Each is Octant's; nothing a driver wrote. */
 export type OutsideDriverProcessRefusal =
   /** This platform has no confinement for a driver process (Linux, Windows). */
   | "host-prohibited"
-  /** The server does not run on Bun, the only runtime a driver runs on. */
+  /** The server runs on neither Bun nor Electron's Node, the runtimes a driver runs on. */
   | "runtime-unavailable"
   /** This instance's driver already has its process. */
   | "already-running"
@@ -54,6 +56,32 @@ export interface OutsideDriverProcessStartInput {
   readonly signal?: AbortSignal;
 }
 
+/** What the server knows of the runtime it runs on. */
+export interface OutsideDriverRuntimeHost {
+  readonly versions: Readonly<Record<string, string | undefined>>;
+  readonly execPath: string;
+  /** Electron's process type; absent when Electron runs as Node. */
+  readonly type?: string | undefined;
+}
+
+/**
+ * A driver runs on the runtime that runs this server and on nothing else, so
+ * the host ships no second runtime: the server's own Bun in development, and
+ * in the packaged app the Electron executable the server already runs on as
+ * Node. Electron's own main process, plain Node, or anything unrecognised
+ * gives no runtime, and every driver start is refused as `runtime-unavailable`.
+ */
+export function resolveOutsideDriverRuntime(
+  host: OutsideDriverRuntimeHost,
+): OutsideDriverRuntime | undefined {
+  if (!isAbsolute(host.execPath)) return undefined;
+  if (host.versions.bun !== undefined) return { kind: "bun", path: host.execPath };
+  if (host.versions.electron !== undefined && host.type === undefined) {
+    return { kind: "electron-node", path: host.execPath };
+  }
+  return undefined;
+}
+
 export interface OutsideDriverProcessLimits {
   /** The largest line the host reads before handing it to the proxy to refuse. */
   readonly messageBytes: number;
@@ -70,12 +98,28 @@ const DEFAULT_LIMITS: OutsideDriverProcessLimits = {
 export interface OutsideDriverProcessesOptions {
   readonly supervisor: Pick<ExtensionSupervisor, "startInteractive" | "stopInteractive">;
   readonly platform: NodeJS.Platform;
-  /** The Bun that runs this server, or nothing when the server runs on another runtime. */
-  readonly runtime: string | undefined;
+  /** The runtime that runs this server, or nothing when no driver may run on it. */
+  readonly runtime: OutsideDriverRuntime | undefined;
   /** Where each process's private temporary folder is made and removed. */
   readonly temporaryRoot: string;
   readonly now?: () => number;
   readonly limits?: Partial<OutsideDriverProcessLimits>;
+  /**
+   * The crash-limit holds the journal keeps. Without it a hold lasts only as
+   * long as this owner, which is what a host restart used to lift.
+   */
+  readonly quarantine?: {
+    /** Whether the journal holds the instance's driver at this digest. */
+    readonly holds: (
+      instanceId: ProviderInstanceId,
+      digest: OutsideProviderDriverReference["digest"],
+    ) => boolean;
+    /** Journals the hold the moment a driver crosses the limit. */
+    readonly record: (
+      instanceId: ProviderInstanceId,
+      driver: OutsideProviderDriverReference,
+    ) => void;
+  };
 }
 
 interface RunningDriver {
@@ -87,10 +131,11 @@ interface RunningDriver {
 export class OutsideDriverProcesses {
   readonly #supervisor: OutsideDriverProcessesOptions["supervisor"];
   readonly #platform: NodeJS.Platform;
-  readonly #runtime: string | undefined;
+  readonly #runtime: OutsideDriverRuntime | undefined;
   readonly #temporaryRoot: string;
   readonly #now: () => number;
   readonly #limits: OutsideDriverProcessLimits;
+  readonly #quarantine: OutsideDriverProcessesOptions["quarantine"];
   readonly #running = new Map<string, RunningDriver>();
   /** Crash times per instance and digest; a digest past the limit is quarantined. */
   readonly #crashes = new Map<string, ReadonlyArray<number>>();
@@ -103,6 +148,7 @@ export class OutsideDriverProcesses {
     this.#temporaryRoot = options.temporaryRoot;
     this.#now = options.now ?? Date.now;
     this.#limits = { ...DEFAULT_LIMITS, ...options.limits };
+    this.#quarantine = options.quarantine;
   }
 
   async start(input: OutsideDriverProcessStartInput): Promise<OutsideDriverProcessStart> {
@@ -110,14 +156,21 @@ export class OutsideDriverProcesses {
     // never starts a driver, rather than starting it unconfined.
     if (!isOutsideDriverHostConfined(this.#platform)) return refused("host-prohibited");
     const runtime = this.#runtime;
-    if (runtime === undefined || !isAbsolute(runtime)) return refused("runtime-unavailable");
+    if (runtime === undefined || !isAbsolute(runtime.path)) return refused("runtime-unavailable");
     const instanceKey = String(input.instanceId);
     // A process on its way out is waited for, so its successor never overlaps it.
     const previous = this.#running.get(instanceKey);
     if (previous?.ending() === true) await previous.stop();
     if (this.#running.has(instanceKey)) return refused("already-running");
     const crashKey = `${instanceKey}\u0000${String(input.driver.digest)}`;
-    if (this.#quarantined.has(crashKey)) return refused("quarantined");
+    // The in-memory hold refuses even when journaling it failed; the journal's
+    // refuses after a restart, before this owner has seen any crash.
+    if (
+      this.#quarantined.has(crashKey) ||
+      this.#quarantine?.holds(input.instanceId, input.driver.digest) === true
+    ) {
+      return refused("quarantined");
+    }
     if (!isInside(input.packageRoot, input.entryPoint)) return refused("start-failed");
 
     // Claimed before the next await, so a second start for this instance
@@ -166,7 +219,7 @@ export class OutsideDriverProcesses {
         version: input.driver.version,
         digest: input.driver.digest,
         entryPoint: input.entryPoint,
-        command: runtime,
+        command: runtime.path,
         args: [input.entryPoint],
         cwd: input.packageRoot,
         // The process port replaces this with the driver's fixed environment.
@@ -179,6 +232,7 @@ export class OutsideDriverProcesses {
         authority: { kind: "trusted-extension", extensionId: input.driver.extensionId },
         sandbox: {
           kind: "outside-driver",
+          runtime: runtime.kind,
           instanceId: instanceKey,
           packageRoot: input.packageRoot,
           temporaryDirectory,
@@ -209,7 +263,7 @@ export class OutsideDriverProcesses {
     void driverProcess.wait.then(() => {
       if (stopRequested) return;
       exited = true;
-      this.#recordCrash(crashKey);
+      this.#recordCrash(crashKey, input);
       void release();
       for (const listener of closedListeners) listener();
     });
@@ -235,7 +289,7 @@ export class OutsideDriverProcesses {
     await this.#running.get(String(instanceId))?.stop();
   }
 
-  #recordCrash(crashKey: string): void {
+  #recordCrash(crashKey: string, input: OutsideDriverProcessStartInput): void {
     const now = this.#now();
     const recent = [
       ...(this.#crashes.get(crashKey) ?? []).filter(
@@ -244,7 +298,9 @@ export class OutsideDriverProcesses {
       now,
     ];
     this.#crashes.set(crashKey, recent);
-    if (recent.length > this.#limits.maxCrashRestarts) this.#quarantined.add(crashKey);
+    if (recent.length <= this.#limits.maxCrashRestarts || this.#quarantined.has(crashKey)) return;
+    this.#quarantined.add(crashKey);
+    this.#quarantine?.record(input.instanceId, input.driver);
   }
 }
 

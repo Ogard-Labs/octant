@@ -14,9 +14,15 @@ import type {
   ExtensionProcessHandle,
   ExtensionRuntimeStartInput,
   ExtensionSupervisor,
+  OutsideDriverRuntime,
 } from "../extensions/extensionSupervisor";
 import { serveFixtureDriver, type InMemoryDriverEnd } from "./outsideDriverFixture.test-support";
-import { OutsideDriverProcesses, type OutsideDriverProcessStart } from "./outsideDriverProcess";
+import {
+  OutsideDriverProcesses,
+  resolveOutsideDriverRuntime,
+  type OutsideDriverProcessesOptions,
+  type OutsideDriverProcessStart,
+} from "./outsideDriverProcess";
 import { makeOutsideHarnessEndpointProxy } from "./outsideHarnessEndpointProxy";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
@@ -29,7 +35,7 @@ const driver = {
   version: "0.1.0",
   digest: `sha256:${"a".repeat(64)}`,
 } as OutsideProviderDriverReference;
-const runtime = "/opt/octant/bin/bun";
+const runtime: OutsideDriverRuntime = { kind: "bun", path: "/opt/octant/bin/bun" };
 const packageRoot = "/data/extensions/versions/driver/content";
 const entryPoint = `${packageRoot}/driver/main.mjs`;
 const temporaryRoots: Array<string> = [];
@@ -110,11 +116,12 @@ async function temporaryRoot(): Promise<string> {
 async function processes(
   options: {
     readonly platform?: NodeJS.Platform;
-    readonly runtime?: string | undefined;
+    readonly runtime?: OutsideDriverRuntime | undefined;
     readonly refuse?: boolean;
     readonly exitAtStart?: boolean;
     readonly now?: () => number;
     readonly messageBytes?: number;
+    readonly quarantine?: OutsideDriverProcessesOptions["quarantine"];
   } = {},
 ) {
   const fake = fakeSupervisor({
@@ -131,6 +138,7 @@ async function processes(
     ...(options.messageBytes === undefined
       ? {}
       : { limits: { messageBytes: options.messageBytes } }),
+    ...(options.quarantine === undefined ? {} : { quarantine: options.quarantine }),
   });
   const start = (instanceId = instanceA, reference = driver) =>
     owner.start({ instanceId, driver: reference, packageRoot, entryPoint });
@@ -179,7 +187,56 @@ describe("outside driver processes", () => {
     },
   );
 
-  it("starts no driver when the server does not run on Bun", async () => {
+  it("finds a driver's runtime only in the server's own Bun or Electron run as Node", () => {
+    const electron = "/Applications/Octant.app/Contents/MacOS/Octant";
+    expect(
+      resolveOutsideDriverRuntime({
+        versions: { node: "24.3.0", bun: "1.4.4" },
+        execPath: "/opt/octant/bin/bun",
+      }),
+    ).toEqual({ kind: "bun", path: "/opt/octant/bin/bun" });
+    expect(
+      resolveOutsideDriverRuntime({
+        versions: { node: "24.21.0", electron: "43.7.11" },
+        execPath: electron,
+      }),
+    ).toEqual({ kind: "electron-node", path: electron });
+    // Electron's own main process is not Node; the packaged server never runs there.
+    expect(
+      resolveOutsideDriverRuntime({
+        versions: { node: "24.21.0", electron: "43.7.11" },
+        type: "browser",
+        execPath: electron,
+      }),
+    ).toBeUndefined();
+    expect(
+      resolveOutsideDriverRuntime({
+        versions: { node: "24.21.0" },
+        execPath: "/usr/local/bin/node",
+      }),
+    ).toBeUndefined();
+    expect(
+      resolveOutsideDriverRuntime({ versions: { node: "24.3.0", bun: "1.4.4" }, execPath: "bun" }),
+    ).toBeUndefined();
+  });
+
+  it("launches a driver on Electron's Node as that runtime, so the process port sets its environment", async () => {
+    const electron: OutsideDriverRuntime = {
+      kind: "electron-node",
+      path: "/Applications/Octant.app/Contents/MacOS/Octant",
+    };
+    const context = await processes({ runtime: electron });
+    channelOf(await context.start());
+
+    expect(context.processes[0]?.input).toMatchObject({
+      command: electron.path,
+      args: [entryPoint],
+      cwd: packageRoot,
+      sandbox: { kind: "outside-driver", runtime: "electron-node", packageRoot },
+    });
+  });
+
+  it("starts no driver when the server runs on neither Bun nor Electron's Node", async () => {
     const context = await processes({ runtime: undefined });
 
     expect(await context.start()).toEqual({ status: "refused", reason: "runtime-unavailable" });
@@ -199,11 +256,16 @@ describe("outside driver processes", () => {
     expect(first?.input).toMatchObject({
       ...driver,
       entryPoint,
-      command: runtime,
+      command: runtime.path,
       args: [entryPoint],
       cwd: packageRoot,
       env: {},
-      sandbox: { kind: "outside-driver", instanceId: String(instanceA), packageRoot },
+      sandbox: {
+        kind: "outside-driver",
+        runtime: "bun",
+        instanceId: String(instanceA),
+        packageRoot,
+      },
     });
     expect(second?.input.sandbox).toMatchObject({ instanceId: String(instanceB) });
     const folders = [first, second].map((process) =>
@@ -256,7 +318,11 @@ describe("outside driver processes", () => {
 
   it("allows two restarts a minute and quarantines the driver at that digest on the third crash", async () => {
     let now = 0;
-    const context = await processes({ now: () => now });
+    const record = vi.fn();
+    const context = await processes({
+      now: () => now,
+      quarantine: { holds: () => false, record },
+    });
     for (let crash = 1; crash <= 3; crash += 1) {
       const closed = vi.fn();
       channelOf(await context.start()).onClosed(closed);
@@ -264,7 +330,10 @@ describe("outside driver processes", () => {
       context.processes.at(-1)?.exit();
       await vi.waitFor(() => expect(closed).toHaveBeenCalledOnce());
       await vi.waitFor(async () => expect(await readdir(context.root)).toEqual([]));
+      // The hold is journaled the moment the limit is crossed, and only then.
+      expect(record).toHaveBeenCalledTimes(crash === 3 ? 1 : 0);
     }
+    expect(record).toHaveBeenCalledWith(instanceA, driver);
 
     expect(await context.start()).toEqual({ status: "refused", reason: "quarantined" });
     expect(context.processes).toHaveLength(3);
@@ -273,6 +342,28 @@ describe("outside driver processes", () => {
       digest: `sha256:${"b".repeat(64)}`,
     } as OutsideProviderDriverReference;
     channelOf(await context.start(instanceA, updated));
+    channelOf(await context.start(instanceB));
+  });
+
+  it("refuses a driver the journal holds at that digest, as after a restart, before any folder or process exists", async () => {
+    const context = await processes({
+      quarantine: {
+        holds: (instanceId, digest) =>
+          String(instanceId) === String(instanceA) && String(digest) === String(driver.digest),
+        record: () => undefined,
+      },
+    });
+
+    expect(await context.start()).toEqual({ status: "refused", reason: "quarantined" });
+    expect(context.processes).toHaveLength(0);
+    expect(await readdir(context.root)).toEqual([]);
+    // The hold is the instance's at that digest, not the driver's everywhere.
+    channelOf(
+      await context.start(instanceA, {
+        ...driver,
+        digest: `sha256:${"b".repeat(64)}`,
+      } as OutsideProviderDriverReference),
+    );
     channelOf(await context.start(instanceB));
   });
 

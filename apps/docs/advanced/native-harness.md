@@ -63,7 +63,8 @@ also gets one line per tool saying what it is for.
 
 Parity means a thread on the harness behaves like one on Claude Code or Codex
 where you can see it: the same tools for the mode, a pending approval or
-question asking for your attention the way a provider's question does, a task
+question asking for your attention the way a provider's question does and
+answerable in the thread itself, a task
 list that shows progress as
 the lead works, and the same session on web, terminal, and phone. Each release
 checks these before it says the harness is at parity. The checklist is in the
@@ -427,9 +428,11 @@ neither forks nor checkpoints yet, and the terminal says so.
 
 When the lead needs a decision it cannot make alone, it asks. The question
 appears inline on the thread — on the harness card in the app, on the phone
-panel, as a numbered prompt in the CLI, and in a Chat thread's own transcript
-as a card on the turn that asked — with any options it offered, each with the
-meaning the lead wrote for it, and a field for an answer no option covers.
+panel, as a numbered prompt in the CLI, in a Work thread as a question card
+above its composer, in a Code thread as its own inline question, and in a
+Chat thread's own transcript as a card on the turn that asked — with any
+options it offered, each with the meaning the lead wrote for it, and a field
+for an answer no option covers.
 Pick one or type an answer; the turn continues the moment it lands, and the
 same question can be answered from any surface. The terminal
 shows a Chat thread's question too, read from the turn that asked, and closes
@@ -438,8 +441,11 @@ within ten minutes expires and the lead is told to continue with its best
 judgment; interrupting the turn cancels it. While it waits, the thread says
 it needs you the way a provider's question does: its sidebar mark and the
 pane header say **Needs you** rather than running, the Inbox lists it as
-waiting for your answer, and a Work task files under Waiting on the board.
-Answering, interrupting, or the question expiring clears all of them. Every
+waiting for your answer, and a Work task files under Waiting on the board. A
+Work thread's question is also listed in Home's **Needs you** card, the menu
+bar, and the command palette; there **Review request** (or the row) opens the
+thread, and you answer on its question card. Answering, interrupting, or the
+question expiring clears all of them. Every
 question and answer is journaled with the session (in Chat, with the turn that
 asked).
 

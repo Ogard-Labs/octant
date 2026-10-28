@@ -13,7 +13,7 @@ import { SettingsSection } from "../settings/primitives";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
-import { thisComputerName } from "../platform";
+import { thisComputerName, useHostPlatform } from "../platform";
 import { McpServerSignInControl } from "./McpServerSignInControl";
 
 const HIDDEN_KEY = "octant.connectors.hidden";
@@ -45,6 +45,7 @@ interface Connected {
  */
 export function ConnectorsView(props: ConnectorsViewProps) {
   const ids = useId();
+  const hostPlatform = useHostPlatform();
   const [query, setQuery] = useState("");
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => readHidden());
   const [showHidden, setShowHidden] = useState(false);
@@ -240,7 +241,7 @@ export function ConnectorsView(props: ConnectorsViewProps) {
                               <a href={entry.auth.keyPage} rel="noreferrer" target="_blank">
                                 {new URL(entry.auth.keyPage).host}
                               </a>
-                              . Kept in {thisComputerName()}&apos;s credential store.
+                              . Kept in {thisComputerName(hostPlatform)}&apos;s credential store.
                             </span>
                           </form>
                         ) : null}

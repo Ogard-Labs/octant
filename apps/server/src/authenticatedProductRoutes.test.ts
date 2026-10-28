@@ -426,6 +426,19 @@ describe("authenticated product route dispatch", () => {
     expect(dispatch).toHaveBeenCalledOnce();
   });
 
+  it("refuses a paired device an HTML import exactly as it refuses creating a Canvas", async () => {
+    const dispatch = vi.fn(async () => Response.json({ ok: true }));
+    const product = createAuthenticatedProductDispatch({ dispatch });
+
+    for (const path of ["/api/canvas/create", "/api/canvas/import-html"]) {
+      expect(
+        classifyProductAction(new Request(`https://octant.example${path}`, { method: "POST" })),
+      ).toBeUndefined();
+      expect((await product(handoff(path, "POST")))?.status).toBe(403);
+    }
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
   it("dispatches a Canvas share read for a paired device but not a share mutation", async () => {
     const dispatch = vi.fn(async () => Response.json({ ok: true }));
     const product = createAuthenticatedProductDispatch({ dispatch });
@@ -434,6 +447,19 @@ describe("authenticated product route dispatch", () => {
     expect(dispatch).toHaveBeenCalledOnce();
 
     for (const path of ["/api/canvas/share", "/api/canvas/share-revoke"]) {
+      expect((await product(handoff(path, "POST")))?.status).toBe(403);
+    }
+    expect(dispatch).toHaveBeenCalledOnce();
+  });
+
+  it("lets a paired device take a Canvas HTML file under its read grant but not send an export", async () => {
+    const dispatch = vi.fn(async () => Response.json({ ok: true }));
+    const product = createAuthenticatedProductDispatch({ dispatch });
+
+    expect((await product(handoff("/api/canvas/html-file", "POST")))?.status).toBe(200);
+    expect(dispatch).toHaveBeenCalledOnce();
+
+    for (const path of ["/api/canvas/export-prepare", "/api/canvas/export-decide"]) {
       expect((await product(handoff(path, "POST")))?.status).toBe(403);
     }
     expect(dispatch).toHaveBeenCalledOnce();

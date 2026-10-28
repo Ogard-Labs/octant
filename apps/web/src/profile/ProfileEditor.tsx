@@ -8,6 +8,7 @@ import {
 } from "@octant/contracts/user-profile";
 import { canImportGravatar } from "@octant/domain";
 import { useId, useRef, useState, type ChangeEvent, type RefObject } from "react";
+import { thisComputerName, useHostPlatform } from "../platform";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { UserAvatar } from "./UserAvatar";
@@ -66,7 +67,7 @@ const ACCENT_NAMES: Record<AvatarAccent, string> = {
 /**
  * Name, address, and avatar for the person using this host.
  *
- * Everything here is optional by default and stays on this Mac. A flow that
+ * Everything here is optional by default and stays on the host. A flow that
  * cannot continue unnamed may require the shared name field without changing
  * the profile contract. The one external action is the Gravatar button, which
  * says that it contacts gravatar.com, is offered only once an address has been
@@ -74,6 +75,8 @@ const ACCENT_NAMES: Record<AvatarAccent, string> = {
  * alone and reports why, rather than quietly falling back to initials.
  */
 export function ProfileEditor(props: ProfileEditorProps) {
+  // The profile is saved on the host, so the host names its computer.
+  const computer = thisComputerName(useHostPlatform());
   const nameId = useId();
   const emailId = useId();
   const fileInput = useRef<HTMLInputElement>(null);
@@ -207,7 +210,7 @@ export function ProfileEditor(props: ProfileEditorProps) {
     props.onBusyChange?.(false);
     setNotice(
       kind === "gravatar"
-        ? { tone: "info", message: "Gravatar imported and saved on this Mac." }
+        ? { tone: "info", message: `Gravatar imported and saved on ${computer}.` }
         : undefined,
     );
   }
@@ -329,7 +332,7 @@ export function ProfileEditor(props: ProfileEditorProps) {
         />
         <p className="profile-editor__hint" id={`${emailId}-hint`} role="status">
           {emailProblem ??
-            "Kept on this Mac. Gravatar sends a one-time email hash to gravatar.com to fetch your picture."}
+            `Kept on ${computer}. Gravatar sends a one-time email hash to gravatar.com to fetch your picture.`}
         </p>
       </div>
 

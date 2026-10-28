@@ -7,7 +7,11 @@ import type {
   ProviderModelId,
 } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
-import { commandReloadsThread, totalTurnUsage } from "./codeControllerState";
+import {
+  commandReloadsThread,
+  providerRequestFromEvent,
+  totalTurnUsage,
+} from "./codeControllerState";
 
 const threadId = "00000000-0000-4000-8000-000000000001" as CodeThreadId;
 const expectedVersion = 1 as AggregateVersion;
@@ -91,5 +95,22 @@ describe("totalTurnUsage", () => {
       ),
     ).toMatchObject({ contextBreakdown: settled });
     expect(totalTurnUsage(new Map([["a", running]]))).not.toHaveProperty("contextBreakdown");
+  });
+});
+
+describe("providerRequestFromEvent", () => {
+  const asked = {
+    kind: "approval-requested",
+    approvalId: "30000000-0000-4000-8000-000000000003",
+    action: "provider-tool",
+    summary: "Let this thread use Henrik's iPhone?",
+  } as const;
+
+  it("keeps the host's mark that only a window on its own computer may answer", () => {
+    expect(providerRequestFromEvent({ ...asked, localPersonOnly: true } as never)).toMatchObject({
+      kind: "approval",
+      localPersonOnly: true,
+    });
+    expect(providerRequestFromEvent(asked as never)).not.toHaveProperty("localPersonOnly");
   });
 });

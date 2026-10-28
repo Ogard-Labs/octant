@@ -82,6 +82,16 @@ but they do not own a second palette or visual language.
   still asks before writes and commands."
 - **One sentence of help.** A subtitle or row description is one sentence
   that says what the thing does. Longer explanations move to the docs.
+- **Name the host's computer from the host.** Copy about where something is
+  kept or runs on the host says "this Mac" and "Keychain" only when the host
+  reports macOS, and "this computer" and "credential store" otherwise. The
+  window's own platform never decides it: a browser on a Mac can drive a Linux
+  host. Until the host has reported, the neutral words show. Steps that
+  differ by platform, such as a browser's key setup, show only the host's
+  own platform's steps once it has reported, and every platform's before
+  then. The platform is
+  a host fact (see "Host platform in copy" under
+  [Security and authority](docs/architecture.md#security-and-authority)).
 - **Vocabulary.** `Project`, `thread`, `checkout`, `worktree`, `base branch`,
   `Environment`, `access` (Plan / Approval / Auto-accept edits / Full access),
   `delivery` (Investigation / Local implementation / Pull request / Merged).
@@ -909,6 +919,30 @@ from the workspace. Every hairline registers on the surface it separates
 so an edge is never guessed. The renderer fallback in
 `apps/web/src/styles.css` mirrors these values exactly.
 
+The code editor and its diff draw from the same resolved roles through the
+editor projection in `packages/theme/src/editorColors.ts`: the workspace
+ground, primary ink, muted line numbers, the selection role, and floating
+widgets. Under increased contrast it takes the same high-contrast ink as the
+rest of the window. Syntax colours come from the editor's own light or dark
+base, because the palette roles are checked only for interface contrast. A
+theme, mode, contrast, or system appearance change repaints open editors in
+place.
+
+The terminal draws from the terminal projection in
+`packages/theme/src/terminalColors.ts`: the workspace ground (the Glass plate
+under translucency), primary ink, the selection role, and the palette roles
+as its ANSI hues, with ANSI black and white kept dark and light in either
+mode and bright black as the muted ink. Because the palette roles are only
+checked as interface marks, the projection also sets a contrast floor the
+terminal engine enforces per cell against the background it is drawn on:
+4.5:1 normally and 7:1 under increased contrast, half that for dim text.
+Increased contrast also swaps in the same high-contrast ink as the rest of the
+window. A theme, mode, contrast, or system appearance change repaints an open
+terminal in place, keeping its scrollback, and so does a change in the sidebar
+material (opaque or Glass, including Glass the host resolves after the terminal
+opened) or in reduced transparency, which moves the cells onto or off the Glass
+plate.
+
 Status roles are paired to the surface where they render. Use the text role
 for labels and the surface role for a background; never rely on hue alone:
 
@@ -1186,9 +1220,12 @@ and New Project from GitHub repository. Choosing GitHub swaps the menu's body
 for the managed-clone flow in place, so there is no second repository control
 beside the Project. In a desktop window's Code composer, Projects bound to a
 folder on an SSH target follow the saved Projects under "On SSH targets",
-each with its `destination:folder` and, until threads run there, disabled with
-the reason in the row; New Project on an SSH target… opens Settings › SSH
-targets at binding. Access is
+each with its `destination:folder`; choosing one turns the branch chip into
+that folder and narrows Access to Plan and Ask for approvals, with no
+Workspace control, and a sentence under the prompt says why Start is
+unavailable while the target is not connected
+([Remote SSH environments](docs/design/remote-ssh-environments.md#in-a-local-window)).
+New Project on an SSH target… opens Settings › SSH targets at binding. Access is
 a titled menu on the prompt card, next to the model picker, and carries the
 "Remember for this Project" switch.
 Every composer's control row is two groups with the row's free space between
@@ -2014,6 +2051,10 @@ Project, each with Revoke, beside Remembered websites. A Browser request from a
 CLI in a Code thread's terminal names the origin and the thread and says a
 program in the terminal asked, not the thread's agent
 ([Terminal Browser grant](docs/design/terminal-browser-grant.md#the-window)).
+A request the host marks as answerable only at its own windows shows on a
+paired device with no action row: its detail line says to answer it on the
+computer running Octant
+([Apple devices: remote clients](docs/design/apple-devices.md#remote-clients)).
 
 Ordinary usage reset/retention, Git discard, and remote administration
 confirmations use the shared `OctantConfirmDialog` over `OctantDialog`. The

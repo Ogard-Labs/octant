@@ -29,14 +29,20 @@ set (`forRemoteCode` in `apps/server/src/harness/nativeHarnessComposition.ts`,
 `apps/server/src/sshTarget/sshRemoteHarness.ts`) and the executor's launches,
 file tools, and streams. Since 5b a Code thread can be created in a
 remote-bound Project through the Code commands, and the Code turn runtime
-composes that tool set for a native-harness thread there, refusing every
-other provider before anything launches
+composes that tool set for a native-harness thread there, and since 6d's
+prerequisites a placed ACP agent's thread, refusing every other provider
+before anything launches
 ([Remote-bound Code threads](#remote-bound-code-threads),
-`apps/server/src/sshTarget/sshRemoteCodeThreads.ts`). The composer does not
-offer a remote-bound Project yet, and a local window's workspace cannot name
-one, so a local window starts no such thread until that surface lands; a
-paired device can, under the Project's authority. Reconnecting on its own
-and restart recovery of remote turns are not built. Slice 6 is built in part:
+`apps/server/src/sshTarget/sshRemoteCodeThreads.ts`). A local desktop window
+lists remote-bound Projects in the Code sidebar and the composer, binds to
+one, and starts and uses its threads
+([In a local window](#in-a-local-window)); a paired device reaches them
+under the Project's authority. A restart interrupts a remote turn it cut
+off as `target-disconnected`, and a target is not removed while a thread on
+it holds a turn. When an attested session drops, the host reconnects on its
+own with bounded backoff and re-attests
+([Disconnect, reconnect, and restart](#disconnect-reconnect-and-restart)).
+Slice 6 is built in part:
 the provider-sdk process-placement seam, its conformance harness, and this
 host's admission of a placed runtime from its driver's declaration
 ([Provider runtimes on a target](#provider-runtimes-on-a-target)), and
@@ -53,9 +59,13 @@ person set for that provider instance on the target, and runs its client
 file and terminal requests through the executor
 (`apps/server/src/providers/acpPlacement.ts`, `createRemoteCodeAcpClientTools`
 in `apps/server/src/code/codeAcpClientTools.ts`,
-[As built in 6c](#as-built-in-6c)). No shipped ACP profile can be stated
-there yet, so no provider's runtime runs on a target in the product; the
-real-provider smoke (6d) is next. Slice 7 is
+[As built in 6c](#as-built-in-6c)). Since 6d's prerequisites a placed
+launch also carries the profile's fixed variables and the Project entries
+it denies, GitHub Copilot's profile is placed, and the Code turn runtime
+starts a remote-bound thread's ACP agent through the placement
+([Before 6d](#before-6d)), which a local window's composer offers where
+the target's status lists the agent placeable and the person set its path
+there; the real-provider smoke (6d) is next. Slice 7 is
 built: a person's terminals and managed worktrees on a remote-bound Project,
 under the same admission
 ([Terminals and managed worktrees](#terminals-and-managed-worktrees)),
@@ -243,8 +253,10 @@ for the target's key; `ControlMaster=no` and `ControlPath=none` keep a shared
 master, checked under other rules, from carrying the session;
 `RemoteCommand=none` keeps a configured command from replacing the executor;
 `ForwardX11Trusted=no` and `Tunnel=no` close the remaining forwarding paths;
-`EscapeChar=none` keeps frame bytes from controlling the client; and
-`ServerAliveInterval=15` with `ServerAliveCountMax=3` turns a silent session
+`EscapeChar=none` keeps frame bytes from controlling the client;
+`LogLevel=ERROR` keeps a configured `LogLevel QUIET` from silencing the lines
+that tell a changed key or a refused sign-in from an unreachable host
+([Why a session failed](#transport)); and `ServerAliveInterval=15` with `ServerAliveCountMax=3` turns a silent session
 into a lost one. The known-hosts path is quoted, with `%` doubled, because
 OpenSSH splits that option's value on whitespace into several files and expands
 `%` tokens in it: unquoted, a data directory under macOS's `Application
@@ -339,20 +351,26 @@ leaves open:
   the dialed ones when no proxied launch is left.
 - **Why a session failed.** The client's own message is the only evidence of a
   refused key, so "host key verification failed" or "remote host identification
-  has changed" reads as `host-key-changed`. The remote shell's 126 or 127 reads
-  as `executor-missing`. The client's 255, a session killed, or no introduction
+  has changed" reads as `host-key-changed`. Under `BatchMode` a key or agent
+  that no longer signs in is the client's "Permission denied (…)" and 255,
+  which reads as `authentication-refused`; the remote shell's own permission
+  error exits 126 instead. Both lines print at `LogLevel=ERROR`, which the
+  client is always given: under a configured `LogLevel QUIET` neither printed,
+  so a changed key read as unreachable and was retried as one, which the
+  loopback smoke, whose client configuration is quiet, now refuses. The remote shell's 126 or 127 reads
+  as `executor-missing`. Any other 255 from the client, a session killed, or no introduction
   within a minute (or no attestation within three) reads as `target-unreachable`.
   Any other exit before an introduction means the program at the executor path
   is not an executor this host can speak to, and reads as
   `executor-version-mismatch`. An exit after a matching introduction is a lost
   session and reads as `target-unreachable`.
 - **When it connects.** The host connects on registration, re-pin, and an
-  explicit connect, and a connection that ends is held as `target-unreachable`
-  with no attestation. Reconnecting on its own, with bounded backoff, is not
-  built yet, though remote threads now exist to give it a reason (5b). Until
-  it is, a remote-bound Project whose session was lost refuses reads and new
-  turns `target-unreachable`, and the person connects again
-  (`octant ssh-target connect`); nothing reconnects unasked.
+  explicit connect, and a connection that ends takes its attestation with it.
+  An attested session that drops is reconnected by the host on its own, with
+  bounded backoff, under the rules in
+  [Disconnect, reconnect, and restart](#disconnect-reconnect-and-restart);
+  a connection that never attested, and one this host ended itself (a
+  connect, re-pin, removal, or shutdown), is not.
 
 **Rationale: an executor, not plain `ssh` commands.** Running each operation as
 `ssh target <command>` was rejected. Each call would be a command string parsed
@@ -443,6 +461,8 @@ any effect with one of these reasons, each with the recovery the person sees:
 | `runtime-not-attestable`      | Choose a runtime Octant confines on remote targets (below)                          |
 | `full-access-not-remembered`  | Remember Full access for this Project from a local window, or choose a narrower one |
 | `target-unreachable`          | Reconnect when the target is reachable                                              |
+| `target-reconnecting`         | None needed: names the attempt and when the next starts; connect to try at once     |
+| `authentication-refused`      | Make `ssh` to the target sign in without a prompt from this Mac, then connect       |
 | `target-removed`              | None for new work; the Project's threads stay readable on this host                 |
 
 The attestation result, its facts digest, and the postures it covers are
@@ -561,9 +581,9 @@ direction:
   `ssh-remote-project` aggregate, apart from local Projects, so no local
   Files, Git, terminal, or provider path can read a remote root as a folder
   on this Mac. Its threads are ordinary Code threads on a `remote-root`
-  checkout ([Remote-bound Code threads](#remote-bound-code-threads)). The
-  composer's Project picker lists it (slice 7) but does not offer it for a
-  thread yet.
+  checkout ([Remote-bound Code threads](#remote-bound-code-threads)), which
+  a local window starts from the composer
+  ([In a local window](#in-a-local-window)).
 - **Reads outside a turn run in Plan.** Binding, listing, and reading a file
   are file operations, and Git status and diff are Octant's own launches; each
   is admitted only when this connection holds a passing Plan attestation, the
@@ -674,7 +694,9 @@ which bounds its throughput by the session's.
 
 Since 5b a remote-bound Project holds Code threads, and the Code turn
 runtime (`apps/server/src/code/codeOperationRuntime.ts`) runs their turns
-with the tool set above (`apps/server/src/sshTarget/sshRemoteCodeThreads.ts`).
+with the tool set above (`apps/server/src/sshTarget/sshRemoteCodeThreads.ts`),
+or, since 6d's prerequisites, with a placed ACP agent's client tools over
+the same hands.
 These rules settle what the step needs, each in the fail-closed direction:
 
 - **A remote thread is an ordinary Code thread on a `remote-root` checkout.**
@@ -693,7 +715,11 @@ These rules settle what the step needs, each in the fail-closed direction:
   checkpoint and records no changed files, and no Git process of this host
   observes the path, which on a target names nothing here (and on a loopback
   target would name the very folder).
-- **The remote tool set is the turn's whole tool set.** Browser, Computer,
+- **The remote tool set is the turn's whole tool set.** For a placed ACP
+  agent that set is its client file and terminal tools over the same remote
+  hands (`remoteHandsForCode` in
+  `apps/server/src/harness/nativeHarnessComposition.ts`); the agent's own
+  tools are its own. Browser, Computer,
   Canvas, Apple and Android tools, repository tests and Git through the Code
   service, language tools, delegation, and extensions' tools each read or act
   on this host, so none joins a remote turn. A send that selects Browser or
@@ -701,18 +727,40 @@ These rules settle what the step needs, each in the fail-closed direction:
   session seeding acts here. Nor is a remote thread forked: a fork starts
   from files this host's Git captures, so its fork point is refused
   `unavailable` before any capture.
-- **Only the native harness runs, checked before anything launches.** A turn
-  whose provider is not the native harness is refused before its runtime is
-  acquired: one whose driver declares no placement in the turn's posture with
-  admission's `runtime-not-attestable` and its recovery, and one that
-  declares it with `unsupported`, because the turn runtime does not start a
-  placed runtime yet (6d's prerequisite). Nothing runs on this host against
-  the remote path instead. A remote-bound Project has no provider policy of
-  its own, so this check is its policy.
-- **No Full access yet.** Full access on a target must be remembered for the
-  Project, and a remote-bound Project has nowhere to remember it, so a thread
-  is not created holding it, even for this session; a turn widened to it
-  later is refused `full-access-not-remembered` by admission.
+- **The native harness or a placed ACP agent runs, checked before anything
+  launches.** A turn whose provider is not the native harness is refused
+  before its runtime is acquired when its driver declares no placement in
+  the turn's posture (admission's `runtime-not-attestable` and its
+  recovery), when it declares one but is not an ACP agent (the client tools
+  admit a write or a terminal without asking, and only an ACP agent asks the
+  person first through its own permission requests), or when the person has
+  set no runtime path for the provider instance on that target (with the
+  `octant ssh-target runtime` sentence). Otherwise the turn binds the
+  agent's client tools to the target's session and takes a placement on
+  that same session, in the thread's posture, at that path; the turn
+  acquires its provider with that placement and no other, so the agent
+  starts only on the target. Nothing runs on this host against the remote
+  path instead. A remote-bound Project has no provider policy of its own, so
+  this check is its policy.
+- **No Full access yet, and no Auto-accept edits.** Full access on a target
+  must be remembered for the Project, and a remote-bound Project has nowhere
+  to remember it, so a thread is not created holding it, even for this
+  session; Auto-accept edits would write with no checkpoint to return to
+  ([rationale](#in-a-local-window)). The host refuses either posture when a
+  thread is created, when its access is raised, and at turn time. A start,
+  or an answer that continues a turn, that would run in either posture is
+  refused `unauthorized` before anything binds to the target or is
+  journaled, with the same sentence telling the person to choose a narrower
+  posture. That posture is the thread's as the asking window holds it, its
+  session grant included, narrowed by the turn's own request; a retried
+  start is narrowed by the posture its durable start recorded instead, since
+  that is the one it runs in. A thread created before the create-time rule
+  can still hold Auto-accept edits; its turns run only when they ask for Ask
+  for approvals or Plan, and a turn's closing decision is not offered on it,
+  because answering one starts a turn in the thread's own posture. Lowering
+  the thread's access lets any of these run. Admission's
+  `full-access-not-remembered` stays the target's own refusal behind this
+  one.
 - **Project authority is a local Project's.** A local window reaches a
   remote-bound Project's threads only while its workspace names that Project,
   and a paired device under the Project's authority, as for a local Project.
@@ -724,16 +772,114 @@ These rules settle what the step needs, each in the fail-closed direction:
   bound to ends, the runtime stops the turn as interrupted with
   `target-disconnected`, aborting its calls; a session lost before the turn
   is taken on refuses the start. A new turn binds only to a session that
+  attested anew; while the host reconnects one is refused
+  `target-reconnecting` before anything launches, naming the attempt.
+- **A connector or plugin is refused, not dropped.** Its tools run on this
+  host, so a send that selects one on a remote thread is refused before any
+  extension is resolved or started, and no pinned extension starts for a
+  remote turn.
+- **A restart interrupts a remote turn.** A restart ends every session, so
+  restart reconciliation (`reconcileCodeRestart` in
+  `apps/server/src/persistence/codeProjection.ts`) marks a remote-bound
+  thread's running or waiting provider turn interrupted with
+  `target-disconnected`, where a local one is left waiting for a resume. A
+  restart starts every target at `not-connected` and starts no reconnect, so
+  the next turn binds only to a session the person connected and that
   attested anew.
-- **Not built in 5b.** Reconnecting on its own; restart recovery of remote
-  turns (a restart ends every session and leaves an in-flight provider turn
-  waiting as for any turn, so a resumed turn binds again only to a session
-  the person connected and that attested anew, and nothing reconnects
-  unasked); the composer offering a remote-bound Project and a local
-  window's workspace naming one, so no local window starts such a thread
-  yet; refusing a target's removal while one of its threads runs (removal
-  today ends the turn `target-disconnected`); and the turn runtime composing
-  a placed ACP thread.
+- **A restart withdraws what the turn waited on.** A native-harness
+  approval or question a remote thread's lead left pending is settled
+  `expired` and journaled when the harness session store replays at
+  start-up, the step that already settles a subagent's parked requests
+  (`NativeHarnessSessionStore`, told which threads run on a target by their
+  remote-root checkout). An answer that comes later is refused
+  `already-settled`, so nothing is decided against the interrupted turn, and
+  a second start finds nothing left to settle. A local thread's lead
+  approval still waits for the person's resume, which settles it.
+- **A remote thread's session is not compacted.** Its runtime starts on the
+  target only through the placement a turn binds on the target's session,
+  and a compaction binds none, so a compaction of a remote-bound thread is
+  refused `runs-on-ssh-target` before anything is journaled or reserved, and
+  the Code runtime's compaction session opens nothing for a remote root
+  rather than hand out the target's path with no placement. The context
+  popover says so in place of the button. Rejected for now: compacting
+  through a turn's placement, which would bind the target's session for a
+  request that runs no tool.
+- **A target in use is not removed.** Removal ends the target's session, so
+  the administration route refuses it `target-in-use` while a thread on one
+  of the target's Projects holds a turn (prepared, running, or waiting on
+  the person), checked in the same step as the removal.
+- **Not built.** Compacting a remote thread's session; observing a remote
+  thread's delivery target, so nothing marks one Done from Git evidence; and
+  listing remote threads in the sidebar's activity and status arrangements,
+  which show the Project tree's local Projects only.
+
+#### In a local window
+
+A desktop window reads its remote-bound Projects and their targets' status
+through its main process (the local administration routes), every five
+seconds while it has any and every thirty while it has none, and every
+surface below shows only what that read and the Code bootstrap report. The
+host binds the window, creates the thread, and admits each turn and call
+itself; the window grants nothing. These rules settle what the step needs,
+each in the fail-closed direction:
+
+- **A window binds with no folder of this host.** The shell service reads
+  remote-bound Projects from the SSH target store. A Code draft that names
+  one binds the window's Code context to it with `boundRoot` null, so Files,
+  Browser, and every other root-backed surface fail closed, and the binding
+  survives bootstrap. A remote thread opens only its own view (`code-overview`):
+  its terminal, Git, test, file, pull-request, Apple, and Browser tabs do not
+  resolve, and a Project tab stays local-only, since the Project overview
+  reads the local catalog.
+- **The sidebar lists them apart.** In Code, the sidebar shows "On SSH
+  targets" under the local Projects: each Project's name, its
+  `destination:folder`, whether its target is connected, and its threads.
+  Choosing a Project opens a new thread's composer in it, which is the
+  binding; its threads are no longer listed as unfiled.
+- **The composer offers only what the host runs.** The Project picker
+  offers remote-bound Projects under "On SSH targets". For one, the
+  composer names the folder on the target and offers the bound folder only
+  (no branch, worktree, or Start from origin); Plan and Ask for approvals
+  only, with nothing remembered for the Project; the native harness's
+  models, and a placed agent's where the target's status offers it
+  ([Before 6d](#before-6d)), with every other
+  provider listed unavailable with the reason; and no Browser, Computer, or
+  connector, each shown blocked if typed. It offers no Start while the
+  host's status of the target refuses the chosen posture
+  (`remoteCodeTurnReadiness` in `packages/domain/src/sshTargetRecovery.ts`
+  reads the connection and the admission the host reported), or, for a
+  placed agent, refuses that agent's runtime in it
+  (`remotePlacedAgentReadiness`), and says why.
+  The thread is created through `prepare-code-project-checkout` and
+  `create-code-thread` on the `remote-root` checkout; the planner refuses a
+  managed worktree there.
+- **The thread view keeps only the turn.** A remote thread names
+  `destination:folder` where a local one names its branch, and offers no
+  fork, merge-back, checkpoint, rewind, restore, `@` path mention, scaffold,
+  workspace preset, changed-files count, or pull request. Raising its access
+  stops at Ask for approvals. While the host reports its target unable to take
+  the next turn's posture, the thread says why and offers no send until the
+  host reports it back. Its other tabs say the operation is not available on
+  an SSH target (the host's own refusal sentence), and the dock keeps only
+  Side Chat, Document, Canvas, Plan, and Agents. The board names its
+  checkout "On an SSH target".
+- **A window that cannot read SSH targets decides nothing.** Only a desktop
+  window reads them. Any other window lists no remote-bound Project and gates
+  no send on a target's status; the host refuses what it must.
+
+**Rationale: Ask for approvals, not Auto-accept edits.** Admission would
+admit Auto-accept edits on a target that attests it, but a remote turn takes
+no checkpoint, so an edit accepted without review has no way back on the
+target. The window offers Plan and Ask for approvals, and each write there is
+approved. The host enforces the same rule: `create-code-thread` on a
+`remote-root` checkout refuses Auto-accept edits and Full access, and
+`change-code-thread-access` on such a thread refuses raising it to either,
+before any approval is consulted, and a turn, or an answer that continues
+one, in either posture is refused before anything binds to the target
+(`remoteCodeThreadPostureRefusal` in
+`packages/domain/src/sshTargetRecovery.ts`, applied in
+`apps/server/src/code/codeService.ts` and
+`apps/server/src/code/codeOperationService.ts`).
 
 ### Terminals and managed worktrees
 
@@ -826,10 +972,10 @@ remove` without force: a worktree holding a change, an untracked file, or a
   than leave a shell nothing can reach again. A key is pinned only after the
   person confirms the fingerprint in a dialog that also says what the pin and
   the attestation do not prove. Any other window shows where to do it.
-- **The Project picker lists a remote-bound Project without offering it.**
-  In Code, the composer's picker lists remote-bound Projects under "On SSH
-  targets" with their `destination:folder`, disabled with the reason that
-  threads on SSH targets are not available yet, and offers "New Project on an
+- **The Project picker lists remote-bound Projects.** In Code, the
+  composer's picker lists them under "On SSH targets" with their
+  `destination:folder` and offers them for a thread
+  ([In a local window](#in-a-local-window)), and offers "New Project on an
   SSH target…", which opens Settings › SSH targets at binding. A thread is
   never started in a local Project in their place.
 
@@ -890,11 +1036,17 @@ These rules settle what the seam needs, each in the fail-closed direction:
   is the path the person set for the provider instance on that target
   (R2); a driver launches exactly it, the host refuses a launch of any other
   path, and conformance fails a driver that names one of its own.
-- **A placed launch names a program and its arguments, nothing more.** The
-  driver gives the runtime's absolute path on the target and its arguments.
-  The working directory is the bound root and the environment is built on the
-  target, so the seam has no field through which a folder or a credential of
-  this host could cross. A placed process is its standard streams and how it
+- **A placed launch names a program and its arguments, and what its profile
+  fixes.** The driver gives the runtime's absolute path on the target, its
+  arguments, its home-relative account state, variables set to the driver's
+  own constants (a value holds no `/`, and no name the target sets itself,
+  the loader's, the proxy's, Octant's, or an account-state path's), and the
+  bound root's entries the runtime may neither read nor write. The working
+  directory is the bound root and the environment is built on the target, so
+  the seam has no field through which a folder of this host could cross, and
+  none is for a credential. A driver asks `placedLaunchExpressible`
+  (`packages/provider-sdk/src/processPlacement.ts`) whether a target accepts
+  what it would declare. A placed process is its standard streams and how it
   ended (exited, or lost with its session); it stops when the scope it was
   launched in closes.
 - **Conformance holds the claim.** A driver that declares nothing must be
@@ -1023,7 +1175,9 @@ the writing postures' otherwise), with these differences, which match what
 - **Seam.** `ProviderPlacedLaunch` gains `accountState`, at most four
   home-relative paths (no `..`, never absolute) each with its access and an
   optional variable name. A home-relative path cannot name a folder of this
-  host, so the seam keeps its rule that nothing of this host crosses.
+  host, so the seam keeps its rule that nothing of this host crosses. Since
+  6d's prerequisites it also carries `fixedVariables` and
+  `deniedRootEntries` ([Before 6d](#before-6d)).
 - **Attested.** Two canary rows join the attestation, run with the runtime
   grant shape against a scratch home and a scratch account-state folder:
   a placed runtime in Plan must fail to write the root or its account state
@@ -1237,13 +1391,11 @@ Each is its own reviewable change with this section updated in place.
     host's proxy and is journaled, and a reconnect resumes or rebuilds its
     session. The result is recorded here with the agent, the versions, and the
     target's distribution.
-  - _Before it can run:_ no shipped ACP profile is placeable after 6c (each
-    sets guards or variables a placed launch cannot carry;
-    [As built in 6c](#as-built-in-6c)), and the Code turn runtime does not yet
-    compose a remote-bound Project's ACP thread. Both are container work that
-    precedes the maintainer's run: one real profile made placeable, with any
-    seam change its launch needs reviewed as its own step, and the turn
-    runtime composing the placed thread.
+  - _Before it can run:_ GitHub Copilot's profile is placeable and the Code
+    turn runtime composes a remote-bound Project's ACP thread
+    ([Before 6d](#before-6d)), and a local window's composer offers the
+    agent for a remote Project once its path is set on the target
+    (`octant ssh-target runtime`). What remains is the maintainer's run.
 
 #### As built in 6b
 
@@ -1341,13 +1493,12 @@ fail-closed direction:
   path, denies a path in its sign-in folder or the root, or refuses
   Projects by their files: each would be silently left behind on the
   target. Postures the profile refuses, and Plan for an agent that forks a
-  child server, are left out. Every shipped profile sets guards or
-  variables today, so none is placed; 6d makes the first real profile
-  placeable, with whatever seam change its launch then needs (a fixed guard
-  variable, say) as its own reviewed step. Rejected: dropping what the seam
-  cannot carry, which would run an agent on a target with its own project
-  configuration, auto-update, or extension loading that Octant turns off
-  here.
+  child server, are left out. In 6c every shipped profile set guards or
+  variables, so none was placed; [Before 6d](#before-6d) carries guards and
+  denied root entries and places the first real profile. Rejected: dropping
+  what the seam cannot carry, which would run an agent on a target with its
+  own project configuration, auto-update, or extension loading that Octant
+  turns off here.
 - **Account state is the sign-in folder one variable names.** The profile's
   `hostAuthentication` folder, at the same path under the target user's
   home, read-write as the local launch grants it, and named by the one
@@ -1403,9 +1554,140 @@ fail-closed direction:
   launch's own release hung against the loopback target.
 
 Not built in 6c, and named here so a later change owns it: the Code turn
-runtime composing a remote-bound Project's ACP thread (it waits for remote
-threads, as the native harness does), a Settings › SSH targets control for
-the runtime path, and clearing a path short of removing the target.
+runtime composing a remote-bound Project's ACP thread (built before 6d,
+below), a Settings › SSH targets control for the runtime path, and clearing
+a path short of removing the target.
+
+#### Before 6d
+
+6d needs one real profile that can be placed, a Code turn that starts it,
+and a composer that offers it. Every shipped profile's local launch fixes
+guard variables and denies Project entries a placed launch could not carry
+after 6c, so the seam carries both first, as its own step. These rules
+settle each, in the fail-closed direction:
+
+- **Fixed variables are the driver's constants.** `ProviderPlacedLaunch`
+  gains `fixedVariables`, at most 32, and `start-process` carries them. A
+  value holds no `/` and no control character, so it names no folder of this
+  host; a name follows the account-state variable's rules (no `OCTANT_`,
+  `SSH_`, `LD_`, or `DYLD_` prefix, nothing with `PROXY`, and not `PATH`,
+  `HOME`, `TMPDIR`, `SHELL`, `USER`, or `LOGNAME`), and a name an
+  account-state path's variable already takes is refused by this host
+  before any frame and by the executor. The executor sets them first, so
+  every variable it sets itself (`LANG` included) wins over one of the same
+  name. The protocol version is unchanged: the executor's build must equal
+  this host's, and a start without the fields reads as before.
+- **Denied root entries are covered on the target.** `deniedRootEntries`,
+  at most 32, each relative to the bound root and never climbing out of it
+  (no absolute path, empty segment, `.`, or `..`). The executor covers each
+  one that exists when the runtime starts, for reading and writing, with the
+  same Linux deny cover a local launch uses (`additionalDenyReadPaths` and
+  `additionalDenyWritePaths`). A missing entry is skipped, as a local Linux
+  launch skips it, because Bubblewrap would make it as its mount point in
+  the person's root; one made mid-session is covered from the next launch.
+- **A profile's guards and denied Project entries travel as both.** The ACP
+  driver states a profile's guards as `fixedVariables` and its
+  `forbiddenRootEntries` as `deniedRootEntries`, checked with
+  `placedLaunchExpressible`; a guard the target would refuse (a value
+  holding `/`, a name the target sets itself) declares nothing. Denials
+  inside the sign-in folder (`hostDeniedEntries`, `forbiddenEntries`) and
+  host reads still declare nothing.
+- **The home and its default folders are the target's.** The target sets
+  `HOME` to the runtime's home and no XDG folder, so a local launch that sets
+  `HOME`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME`, or
+  `XDG_STATE_HOME` to the managed home or its default folder under it
+  (`.config`, `.cache`, `.local/share`, `.local/state`) names the same folders
+  there and is left to the target. Any other variable still declares
+  nothing.
+- **GitHub Copilot is the first placed profile.** Its local launch is a
+  guard (`NO_COLOR`), `HOME` and `XDG_CONFIG_HOME` under its home, its sign-in
+  folder `~/.copilot` named by `COPILOT_HOME`, and Project entries it would
+  otherwise load (skills, settings, hooks, MCP and language-server files), so
+  its whole launch carries over in Plan, Ask for approvals, and Auto-accept
+  edits. Rejected: Grok Build, whose `initialize` answer reports no version
+  for a placed start to compare; Goose and GLM Agent, whose sign-in variable
+  names the folder's parent; and Gemini CLI and Qwen Code, which refuse
+  Projects by reading the root's files here.
+- **The Code turn places the thread's agent.** See
+  [Remote-bound Code threads](#remote-bound-code-threads): the turn binds
+  the agent's client tools and a placement on one session and acquires its
+  provider with that placement alone.
+- **The window offers what the turn would place.** A target's status
+  (`SshTargetStatus`, the answer a window already polls) gains
+  `placeableRuntimes`, at most 64: each enabled provider instance whose
+  driver, built as the Code turn runtime builds it, passes the turn's own
+  check (an ACP agent that declares placement), with that runtime's
+  admission now in each confined posture (the turn's
+  `admitProviderRuntime` call, so a macOS target, an undeclared posture,
+  and an unproven runtime canary refuse there as in the turn) and whether
+  the person set its path on the target (`runtimePath`, read from the same
+  runtime paths the placement reads). `placeableRuntimesOn` in
+  `apps/server/src/sshTarget/sshRemoteCodeThreads.ts` computes it beside
+  `bindPlacedAcpTurn`. The composer offers such an agent's models beside the
+  harness's only when the status lists it, its runtime is attestable in a
+  posture a remote thread offers, and its path is set; an agent listed
+  without a path is shown unavailable with the command that sets it
+  (`octant ssh-target runtime <target> <provider instance> <path>`, the
+  ids filled in), which is also the sentence the turn's placement refuses
+  with, spelled out above the agent's models in the picker. Every other
+  provider stays unavailable. Start is offered only while the runtime's
+  admission in the chosen posture is admitted, and a remote thread's own
+  view reads the same for its agent. Postures are unchanged: Plan and Ask
+  for approvals. Rejected: a separate endpoint for placeable agents, which
+  a window would have to poll beside the status it already reads, and
+  offering every ACP agent with the host deciding at Start, which would
+  offer what the turn refuses.
+- **Evidence.** For the seam: `executorProcesses.test.ts` (fixed variables
+  set beside the executor's own and never over them, only existing denied
+  entries covered, and a fixed variable naming an account-state variable
+  refused), `sshTargetConnectionService.test.ts` (both carried in the
+  request, and a path value, a target-set name, an account-state name, or an
+  entry above the root refused before any frame),
+  `sshExecutorProtocol.test.ts` (the wire bounds), and
+  `processPlacementConformance.test.ts` (`placedLaunchExpressible` agreeing
+  with them). For the profile and the turn: `sshTargetLoopback.smoke.test.ts`
+  (a Code thread on a remote-bound Project whose turns run a fixture ACP
+  agent through the Code turn runtime against the loopback target: acquired
+  only through the placement, nothing started here, the agent signed in with
+  the target's account state, its guard set, its Project's denied
+  `.mcp.json` empty to it while the rest of the root reads, its client read
+  and write on the target as the target's user, a Plan turn's write refused
+  and nothing written, and no thread created holding Full access or
+  Auto-accept edits; without the cover the denied file was read),
+  `acpPlacement.test.ts` (Copilot alone among shipped profiles placed, guards
+  and denied entries carried, home defaults left to the target, and other
+  variables still refused), `acpConformance.test.ts` (Copilot passing
+  placement conformance with its guard, denied entries, and sign-in folder),
+  `sshRemoteCodeThreads.test.ts` (a placed ACP turn bound to its client
+  tools and a placement in the thread's posture, Plan offered only the read,
+  a missing runtime path refused with the tools released, a placed runtime
+  that is not an ACP agent refused before binding, and a target
+  in use found only from a thread on its binding), `codeProjection.test.ts`
+  (a remote turn running or waiting at a restart interrupted
+  `target-disconnected`, a settled one untouched, and a second
+  reconciliation adding nothing), and `sshTargetAdministrationRoutes.test.ts`
+  (removal refused `target-in-use` while a thread runs, then allowed). For
+  the window: `sshTargetConnectionService.test.ts` (a status lists an ACP
+  agent with its path set and one without, each admitted in every posture,
+  and no provider that declares no placement or is not an ACP agent; a
+  closed connection's agents refused `target-unreachable`; a macOS target's
+  agent refused `runtime-not-attestable` in every posture; and the turn's
+  placement refusing the pathless agent with the window's sentence),
+  `sshTargetRecovery.test.ts` (the offer and the readiness from a status),
+  and `CodeComposerAdapter.test.tsx` (the agent offered beside the harness
+  and a thread started on it, a pathless agent disabled with the command
+  spelled out, and no Start while its runtime is refused in the posture),
+  and `CodeThreadWorkspace.test.tsx` (a thread on the agent offers no send
+  while its runtime is refused in the posture or its path is missing).
+  The restart withdrawal and the compaction refusal are proved by
+  `leadApprovalAttention.test.ts` (a remote lead's approval and question
+  settled `expired` and journaled at start-up, an answer to either refused,
+  and a second start settling nothing more), `sessionCompaction.test.ts` (a
+  remote thread refused `runs-on-ssh-target` with nothing journaled and no
+  session opened), `codeOperationRuntime.test.ts` (no compaction session
+  opened for a remote root), `contextCompaction.test.ts`, and
+  `ComposerContextMeter.test.tsx` (the popover's line in place of the
+  button).
 
 ### Credential custody
 
@@ -1483,14 +1765,72 @@ This host owns the connection and every process on the target.
   with the reason `target-disconnected`; pending approvals and questions are
   withdrawn; nothing is queued for later delivery. The thread shows the
   interruption, and the person resumes it.
-- **Reconnect is the host's.** The service reconnects with bounded backoff while a
-  remote-bound Project is open or has a thread waiting to resume, and re-attests
-  before admitting anything. A new attestation never inherits the last one.
+- **Reconnect is the host's.** When an attested session drops (the client
+  exits, the network is lost, a request goes unanswered, or the executor
+  breaks the protocol), the connection service reconnects on its own and
+  re-attests before admitting anything. A new attestation never inherits the
+  last one. Built in `apps/server/src/sshTarget/sshTargetConnectionService.ts`,
+  paced by `packages/domain/src/sshTargetReconnectPolicy.ts`. These rules
+  settle it, each in the fail-closed direction:
+  - **Each attempt is a first connection.** It writes the pin file again from
+    the journal's key, starts the same fixed client with
+    `StrictHostKeyChecking=yes`, waits for a matching introduction, and asks
+    for the whole attestation. Nothing of the dropped session (its
+    attestation, its turns' tools, its terminals, a placed runtime) is
+    carried to the new one, and no attempt is made with a weaker pin or
+    fewer probes.
+  - **Bounded, with jitter.** At most eight attempts after one drop, the
+    first after one second and each later wait doubled up to a minute, each
+    varied by up to a fifth either way; about three minutes in all.
+  - **A count survives a flapping target.** A reconnected session must hold a
+    minute before a later drop starts a fresh count; one that drops sooner
+    continues the count that opened it, so a target that attests and drops
+    again and again still stops after eight attempts.
+  - **Honest while it lasts.** The target's status reads `reconnecting` with
+    the attempt and the next attempt's time (`reconnect` in
+    `SshTargetStatus`). Every request on the target, every posture, is
+    refused `target-reconnecting` with the attempt and that time, so a new
+    turn, a tool call, a read, a terminal, or a worktree change is refused
+    before any frame instead of waiting. Turns that were running stopped as
+    interrupted when the session dropped (above). Settings › SSH targets,
+    which reads the targets every five seconds while it lists any (showing
+    no answer to a read sent before a later action or a later shown read, so
+    a removed target never reappears), the
+    sidebar, the composer, and `octant ssh-target list` show the state and
+    the next attempt's time on the reader's clock.
+  - **Stops where only the person can help.** A changed host key, a refused
+    sign-in (`authentication-refused`), or a missing or mismatched executor
+    stops after that attempt, as does a target still unreachable after the
+    last, and an attempt that breaks before it ends in a state (the pin file
+    cannot be written), which also ends any session it opened. The status then reads that state with `reconnect` stopped and the
+    attempts made, and nothing tries again until the person connects. A
+    reconnected session whose attestation refuses (an escaped canary, a
+    missing backend) is a session: it is held, admits nothing its
+    attestation does not prove, and nothing reconnects it.
+  - **The person's action wins.** A connect, re-pin, or removal cancels a
+    reconnect under way or stopped, and its own outcome stands; a connect
+    starts a fresh count. Shutting the server down cancels every reconnect.
+
+  **Rationale.** Reconnecting after any attested session's drop, rather than
+  only while a remote-bound Project is open or a thread waits to resume,
+  needs no knowledge of windows in the connection service, which owns the
+  session; the bound on attempts caps what an idle target costs. A changed
+  key is never retried in the hope that the pinned one returns, which would
+  turn a refused man in the middle into a polling loop. No existing backoff
+  helper fit: the provider endpoint retry is shaped by `Retry-After` and
+  streamed output, the cache backoff starts at thirty seconds with no
+  jitter or bound on attempts, and the service restart backoff has no
+  jitter.
+
 - **Resume.** A provider session with a resume cursor resumes when the runtime's
   own session files survived on the target; otherwise the host rebuilds history in
   a fresh session, as for any host-owned resume.
 - **Host restart** is a disconnect: recovery marks in-flight remote turns
-  interrupted from the journal.
+  interrupted from the journal and withdraws the native-harness approvals
+  and questions they left pending (built; see
+  [Remote-bound Code threads](#remote-bound-code-threads)). Connection state
+  is not journaled, so a restarted host starts no reconnect; the person
+  connects the target.
 
 ## Different from a paired host and from a hosted relay
 
@@ -1622,9 +1962,32 @@ agent can implement and verify it in a Linux container with OpenSSH installed an
    the executor's side of it, and on 2026-10-27 (5b) as thread creation in a
    remote-bound Project and the Code turn runtime composing the tool set for
    a native-harness thread there
-   ([Remote-bound Code threads](#remote-bound-code-threads)); reconnecting on
-   its own, restart recovery of remote turns, and the composer offering a
-   remote-bound Project remain (see the delivery state). 5b's evidence is
+   ([Remote-bound Code threads](#remote-bound-code-threads)), and the same
+   day as a local window's binding, sidebar, composer, and thread view
+   ([In a local window](#in-a-local-window)); restart recovery of remote
+   turns and refusing a target's removal while one runs were built before
+   6d ([Before 6d](#before-6d)), and reconnecting on its own after that
+   ([Disconnect, reconnect, and restart](#disconnect-reconnect-and-restart)),
+   whose evidence is `sshTargetConnectionService.test.ts` (against the
+   stand-in client with an injected clock: a dropped session reconnected,
+   re-attested from the journal's pin, and a turn bound to the new session
+   while the old one's calls stay refused; a turn started while reconnecting
+   refused with the attempt; a changed host key, a refused sign-in, and a
+   reconnected session whose canary escaped each stopping at once; the waits
+   and the stop after eight attempts; a flapping target stopping; and no
+   reconnect after removal or shutdown), `sshTargetReconnectPolicy.test.ts`,
+   `sshTargetAdmissionPolicy.test.ts`, `sshTargetRecovery.test.ts`, the web
+   `SshTargetsSettingsSection.test.tsx`, and `sshTargetLoopback.smoke.test.ts`
+   (a turn stopped when the executor dies, the next refused while the host
+   reconnects, and, once the host reconnected on its own to the loopback
+   `sshd`, the thread's next turn running on the new session). The
+   window step's evidence is `shellService.test.ts` (a Code draft binds the
+   window with `boundRoot` null, the binding survives bootstrap with Files
+   unavailable, a remote thread's view opens and its terminal is refused),
+   `codeOperationService.test.ts` (a connector refused before any extension
+   resolves), `codeThreadCreate.test.ts`, and the web tests of the sidebar
+   group, Project picker, composer, thread view, Code workspace tabs, dock,
+   and board. 5b's evidence is
    `sshTargetLoopback.smoke.test.ts` (a Code thread created in a
    remote-bound Project through the Code service and its harness turn run
    through the Code turn runtime over a model stub: a read, an edit, a test,

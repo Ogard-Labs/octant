@@ -369,11 +369,29 @@ function* styleElementContents(markup: string): Generator<string> {
  * its `=`. A single pattern that paired every quote in the markup took time
  * that grew with the square of the number of unclosed tags, about a second for
  * one 30 KB frame, and every renderer validates a Canvas when it draws one. A
- * tag still open at the end of the markup draws nothing, so the scan stops.
+ * tag with no `>` after it draws nothing, so the scan stops.
+ *
+ * A quoted value that never closes is not a reason to stop. This scan reads
+ * the text of a `textarea`, `xmp`, or CDATA section as markup, where a browser
+ * reads it as text, so `<textarea><x a="</textarea>` opened a value here that
+ * swallowed every tag after it, and a `<meta>` refresh or an SVG `<set>` that
+ * rewrites a link drew unchecked. The `<` is read as text instead and the scan
+ * goes on inside, so it checks more, never less. Once one quote character is
+ * known to have no closing match, later searches for it are answered without
+ * reading on, so a run of such tags still costs one pass.
  */
 function* startTags(
   markup: string,
 ): Generator<{ readonly name: string; readonly attributes: string }> {
+  // For each quote character, the earliest index from which it never occurs again.
+  const unmatchedFrom = new Map<string, number>();
+  const closingQuote = (char: string, from: number): number => {
+    const known = unmatchedFrom.get(char);
+    if (known !== undefined && from >= known) return -1;
+    const end = markup.indexOf(char, from);
+    if (end === -1) unmatchedFrom.set(char, Math.min(from, known ?? from));
+    return end;
+  };
   let cursor = 0;
   while (cursor < markup.length) {
     const open = markup.indexOf("<", cursor);
@@ -386,6 +404,7 @@ function* startTags(
     const attributesStart = cursor;
     let awaitingValue = false;
     let closed = false;
+    let unmatchedQuote = false;
     while (cursor < markup.length) {
       const char = markup.charAt(cursor);
       if (char === ">") {
@@ -393,8 +412,11 @@ function* startTags(
         break;
       }
       if (awaitingValue && (char === '"' || char === "'")) {
-        const end = markup.indexOf(char, cursor + 1);
-        if (end === -1) return;
+        const end = closingQuote(char, cursor + 1);
+        if (end === -1) {
+          unmatchedQuote = true;
+          break;
+        }
         cursor = end + 1;
         awaitingValue = false;
         continue;
@@ -402,6 +424,10 @@ function* startTags(
       if (char === "=") awaitingValue = true;
       else if (!/\s/.test(char)) awaitingValue = false;
       cursor += 1;
+    }
+    if (unmatchedQuote) {
+      cursor = open + 1;
+      continue;
     }
     if (!closed) return;
     yield { name, attributes: markup.slice(attributesStart, cursor) };

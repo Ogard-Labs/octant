@@ -2,6 +2,7 @@ import type { CanvasDesignBrand } from "@octant/contracts/canvas";
 import type { DesktopRecipe, LeasableDesktopProvider } from "@octant/contracts/desktop-lease";
 import type { AggregateVersion, UtcTimestamp } from "@octant/contracts/events";
 import { designBrandTokenRefusal } from "./canvasDesignFrameKit";
+import { desktopNetworkAllowed } from "./desktopLeasePolicy";
 import {
   decodeProjectRank,
   type BindingRevisionId,
@@ -341,10 +342,10 @@ export function changeProjectBrandKit(
  * Set, replace, or (with `null`) remove a Code Project's disposable desktop
  * recipe. A recipe names a provider this host offers for leasing now, so the
  * Project never stores a provider nothing could lease from; removing one is
- * always allowed. A host-local desktop gets network only by sharing the host's
- * namespace, which would reach the Octant server, so its recipe cannot allow
- * network until it has egress of its own. A no-op is refused so the journal
- * never carries an event that changed nothing.
+ * always allowed. Network follows {@link desktopNetworkAllowed}. A placement
+ * that runs on one of the person's machines names the machine, so the person
+ * sees which computer a desktop uses. A no-op is refused so the journal never
+ * carries an event that changed nothing.
  */
 export function changeCodeProjectDesktopRecipe(
   project: Project,
@@ -373,8 +374,23 @@ export function changeCodeProjectDesktopRecipe(
       reject("invalid-desktop-recipe", "That desktop placement isn't available on this host");
     }
     const locality = placement?.locality ?? provider.locality;
-    if (locality === "host-local" && recipe.network === "allow") {
-      reject("invalid-desktop-recipe", "A desktop on this host cannot have network access yet");
+    if (
+      recipe.network === "allow" &&
+      !desktopNetworkAllowed({ locality, placed: placement !== undefined })
+    ) {
+      reject("invalid-desktop-recipe", "A desktop there cannot have network access yet");
+    }
+    if (
+      placement?.choosesMachine === true
+        ? recipe.machine === undefined
+        : recipe.machine !== undefined
+    ) {
+      reject(
+        "invalid-desktop-recipe",
+        placement?.choosesMachine === true
+          ? "Choose which of your computers the desktop runs on"
+          : "That desktop placement doesn't run on a computer you choose",
+      );
     }
     // A daemon-run provider holds the person's own sign-in. Octant stores no
     // key for it, so a recipe that names one is refused rather than kept.
@@ -383,10 +399,22 @@ export function changeCodeProjectDesktopRecipe(
     }
     // A cloud desktop runs on the person's own account: through a key Octant
     // holds, or through the placement a provider's daemon is signed in to.
-    // With neither the lease service refuses every acquire, so the recipe is
-    // refused here.
+    // With neither the lease service refuses every acquire, so a new recipe,
+    // or one moving to this provider or placement, is refused here. A recipe
+    // already on it may go without one: that is a person removing its key,
+    // and it starts nothing until they enter another.
     const daemonPlacement = provider.daemon === true && placement !== undefined;
-    if (locality === "cloud" && recipe.credentialRef === undefined && !daemonPlacement) {
+    const saved = project.desktopRecipe;
+    const keyRemovedInPlace =
+      saved !== undefined &&
+      String(saved.providerId) === String(recipe.providerId) &&
+      String(saved.placementId ?? "") === String(recipe.placementId ?? "");
+    if (
+      locality === "cloud" &&
+      recipe.credentialRef === undefined &&
+      !daemonPlacement &&
+      !keyRemovedInPlace
+    ) {
       reject("invalid-desktop-recipe", "A cloud desktop needs a saved key for its account");
     }
   }
@@ -414,6 +442,8 @@ function sameDesktopRecipe(
     left.screen.height === right.screen.height &&
     String(left.credentialRef ?? "") === String(right.credentialRef ?? "") &&
     String(left.placementId ?? "") === String(right.placementId ?? "") &&
+    String(left.machine?.machineId ?? "") === String(right.machine?.machineId ?? "") &&
+    left.machine?.displayName === right.machine?.displayName &&
     left.network === right.network &&
     left.leaseMinutes === right.leaseMinutes &&
     left.maximumLeaseMinutes === right.maximumLeaseMinutes &&

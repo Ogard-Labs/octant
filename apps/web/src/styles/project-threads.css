@@ -18,7 +18,7 @@
 .project-overview__threads-header h2 {
   margin: 0;
   font-size: var(--oct-text-sm);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .project-overview__threads-header p {
@@ -82,7 +82,7 @@
 
 .project-nav__empty-title {
   color: var(--octant-text-secondary);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .project-nav__status button {
@@ -240,7 +240,7 @@
   color: var(--octant-text-muted);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-detail);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   letter-spacing: 0;
   text-transform: none;
 }
@@ -386,7 +386,7 @@
   background: color-mix(in oklab, var(--octant-project-view-color) 80%, black);
   color: white;
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   line-height: 1;
   user-select: none;
 }
@@ -432,7 +432,7 @@
   overflow: hidden;
   font-family: var(--oct-font-display);
   font-size: var(--octant-ui-font-size);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -492,6 +492,20 @@
 /* The folder that tells two same-named Projects apart, quieter than the name. */
 .project-row__where {
   color: var(--oct-meta);
+}
+
+/* A Project on an SSH target: whether its target is connected, as a dot the
+   row's label also states for assistive technology. */
+.remote-project-section__connection {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-inline: var(--oct-space-1);
+  border-radius: 50%;
+  background: var(--oct-meta);
+}
+.remote-project-section__connection[data-connected="true"] {
+  background: var(--oct-success-fg);
 }
 
 .project-row__action {
@@ -558,7 +572,7 @@
   color: var(--oct-meta);
   cursor: pointer;
   font-size: var(--oct-text-detail);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   list-style: none;
 }
 
@@ -624,7 +638,7 @@
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   letter-spacing: 0;
   text-transform: none;
 }
@@ -786,7 +800,7 @@
   padding: 0 var(--oct-space-3);
   cursor: pointer;
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .project-button:disabled {
@@ -897,7 +911,7 @@
   color: var(--oct-meta);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   letter-spacing: 0;
   text-transform: none;
 }
@@ -949,7 +963,7 @@
   color: var(--oct-meta);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   letter-spacing: 0;
   text-transform: none;
 }
@@ -1010,7 +1024,7 @@
 .project-overview-inspector__row h2 {
   color: var(--octant-text-primary);
   font-size: var(--oct-text-sm);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .project-overview-inspector__row p {
@@ -1081,7 +1095,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   margin: 0;
   color: var(--octant-text-primary);
   font-size: var(--oct-text-sm);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .project-provider-policy__header p,
@@ -1390,7 +1404,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 .project-overview__prompt h2 {
   margin: 8px 0 0;
   font-size: var(--oct-text-xl);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   letter-spacing: -0.02em;
 }
 
@@ -1452,7 +1466,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 .project-overview:has(.chat-project-overview--home) .project-overview__name {
   width: min(48vw, 420px);
   font-size: var(--oct-text-xl);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   letter-spacing: -0.03em;
 }
 

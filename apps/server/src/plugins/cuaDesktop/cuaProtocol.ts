@@ -292,8 +292,8 @@ export interface CuaHost {
 /**
  * `ListHostsResponse`: hosts (1), each with id (1), name (2), via (3), and
  * online (4). Every host is kept, as the response's byte bound allows: a
- * listing cut short could hide a second machine that answers, and the driver
- * would then choose one for a person who confirmed only "your other machine".
+ * listing cut short could hide the machine a recipe names, or leave it out of
+ * the machines a person chooses among.
  */
 export function readCuaListHosts(bytes: Uint8Array): ReadonlyArray<CuaHost> | undefined {
   const fields = parse(bytes);

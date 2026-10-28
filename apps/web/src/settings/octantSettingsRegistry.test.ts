@@ -158,6 +158,7 @@ describe("octantSettingsRegistry", () => {
       "provider-manual-model-ids",
       "provider-deployment-ids",
       "provider-claude-account",
+      "provider-claude-artifacts",
     ]);
     const code = octantSettingsRegistry.sections.find((section) => section.id === "code");
     expect(code?.settings.map((setting) => setting.id)).toEqual([
@@ -301,12 +302,15 @@ const COMPUTED_SETTING_ROWS: Readonly<Record<string, string>> = {
   "provider-*-directory-device-code": "provider-authentication",
   "provider-*-directory-issuer": "provider-authentication",
   "provider-*-directory-scope": "provider-authentication",
+  "provider-*-bedrock-*": "provider-authentication",
+  "provider-*-bedrock-models": "provider-manual-model-ids",
   "provider-*-api-key": "provider-api-key",
   "provider-*-base-url": "provider-base-url",
   "provider-*-protocol": "provider-protocol",
   "provider-*-protocol-version": "provider-protocol",
   "provider-*-manual-model-ids": "provider-manual-model-ids",
   "provider-*-deployment-ids": "provider-deployment-ids",
+  "provider-*-claude-artifacts": "provider-claude-artifacts",
   "*-config-directory": "provider-claude-account",
   "*-accent": "provider-claude-account",
   "*-auth-login": "provider-claude-account",

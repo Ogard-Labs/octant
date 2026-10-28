@@ -4,6 +4,7 @@ import {
   type AgentEligibleModelRef,
   type HiddenProviderModelRef,
   type AnthropicCompatibleProviderConfiguration,
+  type AmazonBedrockProviderConfiguration,
   type AzureFoundryProviderConfiguration,
   type BflImageProviderConfiguration,
   type ClaudeProviderConfiguration,
@@ -98,6 +99,11 @@ export interface ProviderSettingsViewProps {
     configuration: AzureFoundryProviderConfiguration,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
+  /** Amazon Bedrock takes no key: it signs in from the host's terminal once added. */
+  readonly onCreateAmazonBedrock: (
+    displayName: string,
+    configuration: AmazonBedrockProviderConfiguration,
+  ) => Promise<boolean>;
   readonly onCreateOpenAiImage: (
     displayName: string,
     configuration: OpenAiImageProviderConfiguration,
@@ -157,6 +163,10 @@ export interface ProviderSettingsViewProps {
     instanceId: ProviderInstanceId,
     configuration: AzureFoundryProviderConfiguration,
     credential: TransientProviderCredential,
+  ) => Promise<boolean>;
+  readonly onChangeAmazonBedrockConfiguration: (
+    instanceId: ProviderInstanceId,
+    configuration: AmazonBedrockProviderConfiguration,
   ) => Promise<boolean>;
   readonly onChangeOpenAiImageConfiguration: (
     instanceId: ProviderInstanceId,
@@ -223,6 +233,11 @@ export interface ProviderSettingsViewProps {
     command: import("./ProviderOAuthSignIn").ProviderOAuthCommand,
   ) => Promise<import("./ProviderOAuthSignIn").ProviderOAuthCommandResult | undefined>;
   readonly onSetEnabled: (instanceId: ProviderInstanceId, enabled: boolean) => Promise<boolean>;
+  /** Turns delivering documents as Claude artifacts on or off for one Claude account. */
+  readonly onSetClaudeArtifactDelivery?: (
+    instanceId: ProviderInstanceId,
+    enabled: boolean,
+  ) => Promise<boolean>;
   readonly onDataTagsChange: (
     instanceId: ProviderInstanceId,
     dataTags: ProviderDataTags,
@@ -454,6 +469,9 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onRemove={props.onRemove}
         onRename={props.onRename}
         onSetEnabled={props.onSetEnabled}
+        {...(props.onSetClaudeArtifactDelivery === undefined
+          ? {}
+          : { onSetClaudeArtifactDelivery: props.onSetClaudeArtifactDelivery })}
         onDataTagsChange={props.onDataTagsChange}
         onModelDataTagsChange={props.onModelDataTagsChange}
         {...(props.onModelContextWindowChange === undefined

@@ -53,10 +53,14 @@ export function canvasDesignPageHeaders(contentType: string): Record<string, str
   };
 }
 
-/** What one ticket opens: a design in one Canvas version, from one frame. */
+/**
+ * What one ticket opens: a design in one Canvas version, or in the host's
+ * snapshot of a page a thread published (which is no Canvas, so it names no
+ * Canvas or version), from one frame.
+ */
 export interface CanvasDesignRunGrant {
-  readonly canvasId: CanvasId;
-  readonly versionId: CanvasVersionId;
+  readonly canvasId?: CanvasId;
+  readonly versionId?: CanvasVersionId;
   readonly blockId: CanvasBlockId;
   readonly startFrameId: string;
   /** The version is immutable, so the design is kept as it was authorized. */
@@ -305,13 +309,16 @@ export interface CanvasDesignExportFrame {
  * its script is one program. A design in the workspace theme gets the tokens
  * the person's window drew it with and the frame kit, ahead of its own styles,
  * as in the app; only the tokens a frame receives are written, and each value
- * is checked again here. Neither names an image: a declared image resolves
- * only under this host's authority, so its place draws a placeholder. The
- * bridge is left out; an exported page has no host to report to.
+ * is checked again here. A declared image resolves only under this host's
+ * authority, so its place draws a placeholder unless the caller resolved it
+ * for the reader and hands over `images`, which writes it in as a `data:`
+ * image within the file's budget. The bridge is left out; an exported page
+ * has no host to report to.
  */
 export function renderCanvasDesignExportFrames(
   block: CanvasDesignBlock,
   theme?: DesignFrameThemeValues,
+  images?: CanvasExportImages,
 ): ReadonlyArray<CanvasDesignExportFrame> | undefined {
   const chosen = block.theme ?? (block.size === "document" ? "workspace" : "none");
   const themed = chosen === "workspace";
@@ -343,7 +350,7 @@ export function renderCanvasDesignExportFrames(
   const viewport = block.size === "document" ? undefined : CANVAS_DESIGN_VIEWPORT[block.size];
   const running = block.runsScript === true;
   const page = (frames: CanvasDesignBlock["frames"], startFrameId: string): string => {
-    const budget = new PageAssetBudget(new Map());
+    const budget = images?.forDesign(block) ?? new PageAssetBudget(new Map());
     const body = frames
       .map((frame) => {
         const id = String(frame.frameId);
@@ -459,7 +466,65 @@ class PageAssetBudget {
   }
 }
 
-function withAssets(markup: string, budget: PageAssetBudget): string {
+/** Where each reference to a declared image is drawn from. */
+interface AssetAddresses {
+  address(id: string): string;
+}
+
+/**
+ * The declared images one exported file writes in, across every design it
+ * holds. Each reference is charged against one budget for the whole file, so
+ * an image named on several screens counts each time it is written; a
+ * reference past the budget, or to an image the host could not resolve,
+ * draws the labelled placeholder instead. `leftOut` counts the images that
+ * resolved but did not fit, which the file and the person are told about.
+ */
+export class CanvasExportImages {
+  readonly #resolved: ReadonlyMap<string, ReadonlyArray<CanvasDesignAssetResolution>>;
+  readonly #leftOut = new Set<string>();
+  #remaining: number;
+
+  constructor(
+    resolved: ReadonlyMap<string, ReadonlyArray<CanvasDesignAssetResolution>>,
+    budgetCharacters: number,
+  ) {
+    this.#resolved = resolved;
+    this.#remaining = budgetCharacters;
+  }
+
+  get leftOut(): number {
+    return this.#leftOut.size;
+  }
+
+  /** How many of this design's resolved images were left out so far. */
+  leftOutOf(block: CanvasDesignBlock): number {
+    const prefix = `${String(block.blockId)}\u0000`;
+    return [...this.#leftOut].filter((key) => key.startsWith(prefix)).length;
+  }
+
+  forDesign(block: CanvasDesignBlock): AssetAddresses {
+    const blockId = String(block.blockId);
+    const outcomes = this.#resolved.get(blockId) ?? [];
+    const declared = new Set((block.assets ?? []).map((asset) => String(asset.assetId)));
+    return {
+      address: (id: string): string => {
+        const outcome = declared.has(id)
+          ? outcomes.find((entry) => String(entry.assetId) === id)
+          : undefined;
+        if (outcome?.status !== "resolved") return assetPlaceholder(id);
+        const url = `data:${outcome.mediaType};base64,${outcome.data}`;
+        if (url.length > this.#remaining) {
+          this.#leftOut.add(`${blockId}\u0000${id}`);
+          return assetPlaceholder(id);
+        }
+        this.#remaining -= url.length;
+        return url;
+      },
+    };
+  }
+}
+
+function withAssets(markup: string, budget: AssetAddresses): string {
   if (!markup.includes(CANVAS_DESIGN_ASSET_SCHEME)) return markup;
   return markup.replace(ASSET_REFERENCE, (reference: string, id: string) =>
     reference.startsWith(CANVAS_DESIGN_ASSET_SCHEME) ? budget.address(id) : reference,

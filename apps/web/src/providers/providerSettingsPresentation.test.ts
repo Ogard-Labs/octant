@@ -72,7 +72,7 @@ describe("provider Settings presentation", () => {
     expect(providerRefusalGuidance(instance, blocked)).toEqual({
       reason: "This provider's driver package is not admitted, so it offers no models.",
       nextStep:
-        "Octant runs this provider only once its driver package is installed, trusted, and enabled.",
+        "Octant runs this provider only once its driver package is installed, trusted, and enabled. After an update, trusting the new version moves this provider to it.",
     });
     expect(
       providerRefusalGuidance(instance, {
@@ -85,6 +85,38 @@ describe("provider Settings presentation", () => {
       nextStep:
         "Octant stopped the driver. Install a version of the package built for this Octant, then check the connection again.",
     });
+    // A driver has no binary path a person could fix; Octant starts it itself.
+    expect(
+      providerRefusalGuidance(instance, {
+        ...blocked,
+        reason: "runtime-unavailable",
+      }),
+    ).toEqual({
+      reason: "Octant could not start this provider's driver, or the driver stopped.",
+      nextStep:
+        "Check the connection again. If the driver keeps stopping, Octant holds this version until you trust another version.",
+    });
+    // A journaled crash-limit hold says why, and that only another trusted
+    // version lifts it; a restart does not.
+    const held = decodeProviderInstance({
+      ...instance,
+      driverQuarantine: {
+        reason: "crash-limit",
+        digest: `sha256:${"a".repeat(64)}`,
+        quarantinedAt: "2026-07-15T10:05:00.000Z",
+      },
+    });
+    const heldGuidance = {
+      reason:
+        "This provider's driver stopped three times within a minute, so Octant holds this version of it.",
+      nextStep:
+        "Restarting Octant does not lift the hold. Install another version of the driver package and trust it; this provider moves to it.",
+    };
+    expect(providerRefusalGuidance(held, { ...blocked, reason: "runtime-unavailable" })).toEqual(
+      heldGuidance,
+    );
+    // Shown from the provider's own record, even before any check has run.
+    expect(providerRefusalGuidance(held, undefined)).toEqual(heldGuidance);
   });
 
   it("turns technical readiness states into compact next-action labels", () => {

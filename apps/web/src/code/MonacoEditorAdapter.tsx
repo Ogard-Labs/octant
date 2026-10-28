@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { EditorColorProjection } from "@octant/theme/editor-colors";
 import type { EditorTypographyProjection } from "@octant/theme/typography";
+import { useEditorColorProjection } from "../theme/ThemeSettingsProvider";
 import { useTypographyProjection } from "../theme/TypographyProvider";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
@@ -58,6 +60,8 @@ export interface MonacoAdapterSession {
   readonly focus: () => void;
   readonly setReadOnly: (readOnly: boolean) => void;
   readonly setTypography?: (typography: EditorTypographyProjection) => void;
+  /** Repaints in the app's current theme while the editor stays mounted. */
+  readonly setColors?: (colors: EditorColorProjection) => void;
   readonly setValue: (value: string) => void;
   /**
    * The host's diagnostics for this model, or undefined when no language
@@ -74,6 +78,7 @@ export interface MonacoAdapterRuntime {
   readonly mount: (
     element: HTMLElement,
     options: {
+      readonly colors?: EditorColorProjection;
       readonly language: string;
       /** Answers definitions while a language server serves this model. */
       readonly languageBridge?: MonacoLanguageBridge;
@@ -94,6 +99,7 @@ export interface MonacoAdapterRuntime {
 export interface MonacoDiffSession {
   readonly dispose: () => void;
   readonly setRenderSideBySide: (sideBySide: boolean) => void;
+  readonly setColors?: (colors: EditorColorProjection) => void;
   readonly setTypography?: (typography: EditorTypographyProjection) => void;
   readonly setValues: (values: { readonly original: string; readonly modified: string }) => void;
 }
@@ -102,6 +108,7 @@ export interface MonacoDiffRuntime {
   readonly mountDiff: (
     element: HTMLElement,
     options: {
+      readonly colors?: EditorColorProjection;
       readonly language: string;
       readonly modelUriBase: string;
       readonly original: string;
@@ -134,10 +141,12 @@ export interface MonacoEditorAdapterProps {
 export function MonacoEditorAdapter(props: MonacoEditorAdapterProps) {
   const contextualTypography = useTypographyProjection("editor");
   const typography = props.typography ?? contextualTypography;
+  const colors = useEditorColorProjection();
   const [runtimeUnavailable, setRuntimeUnavailable] = useState(false);
   const element = useRef<HTMLDivElement>(null);
   const latestProps = useRef(props);
   const latestTypography = useRef(typography);
+  const latestColors = useRef(colors);
   const session = useRef<MonacoAdapterSession | undefined>(undefined);
   const loader = props.loadRuntime ?? loadMonacoRuntime;
 
@@ -149,6 +158,10 @@ export function MonacoEditorAdapter(props: MonacoEditorAdapterProps) {
     latestTypography.current = typography;
   }, [typography]);
 
+  useLayoutEffect(() => {
+    latestColors.current = colors;
+  }, [colors]);
+
   useEffect(() => {
     let disposed = false;
     setRuntimeUnavailable(false);
@@ -156,6 +169,7 @@ export function MonacoEditorAdapter(props: MonacoEditorAdapterProps) {
       .then((runtime) => {
         if (disposed || element.current === null) return;
         const mounted = runtime.mount(element.current, {
+          colors: latestColors.current,
           language: props.language,
           // Read through the latest props, so a bridge that changes with the
           // pane's state never remounts the editor.
@@ -205,6 +219,7 @@ export function MonacoEditorAdapter(props: MonacoEditorAdapterProps) {
   useEffect(() => session.current?.setValue(props.value), [props.value]);
   useEffect(() => session.current?.setReadOnly(props.readOnly), [props.readOnly]);
   useEffect(() => session.current?.setTypography?.(typography), [typography]);
+  useEffect(() => session.current?.setColors?.(colors), [colors]);
   useEffect(
     () => session.current?.setLanguageMarkers?.(props.languageMarkers),
     [props.languageMarkers],

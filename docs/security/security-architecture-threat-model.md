@@ -223,15 +223,16 @@ and flood the host. The rules live in
 | Capability ceiling   | Probe claims are clamped to the bundled harness endpoints' column; tools reach only models the host verified with its own echo-tool request; `admitTurn`, cancel, and release are answered by the host                                                                                | `apps/server/src/providers/outsideDriverCeiling.ts`, `outsideHarnessEndpointProxy.ts`, `outsideDriverAdmission.ts`                                              | Exists today  |
 | Brokered egress      | The host leases this instance's key, sends it only to the configured origin and only in the header the person chose (both checked before the key is read), follows no redirect, and strips the key header from the reply                                                              | `outsideHarnessEndpointProxy.ts`, `providerApiKeyPool.ts`                                                                                                       | Exists today  |
 | Confined process     | One deny-default Seatbelt process per instance with no network, no exec, and a minimal environment; Linux never launches one                                                                                                                                                          | `apps/server/src/providers/outsideDriverProcess.ts`, `extensions/nodeExtensionProcessPort.ts`                                                                   | Exists today  |
-| Provenance           | Digest-bound trust and records exist today; a publisher key pinned at first trust and quarantined updates that clear Verify tools are newly specified                                                                                                                                 | Extension lifecycle and package store                                                                                                                           | Partly exists |
+| Crash-loop hold      | A third crash within a minute holds the instance's driver at that digest; the hold is journaled, refuses every start after a restart too, and lifts only when the instance binds another trusted digest                                                                               | `outsideDriverProcess.ts`, `providers/providerService.ts`, `packages/domain/src/providerPolicy.ts`                                                              | Exists today  |
+| Provenance           | Digest-bound trust and records; an update or rollback is held and moves an instance only once its source is trusted at the new digest, clearing its Verify tools record; a publisher key pinned at first trust is specified, with its signature rules still open                      | `persistence/extensionProjection.ts`, `plugin-host/src/activation.ts`, `providers/providerService.ts`                                                           | Partly exists |
 
 The proxy's tests run the harness endpoint conformance kit against it with a misbehaving fixture
 driver, and cover hostile failure text, over-claims, protocol violations, and the brokered call's
 origin, lease, header, and redirect negatives. The confined process's escape tests
 (`outsideDriverProcess.escape.test.ts`) try the network, files outside the package and its folder,
 the home folder and its keychains, another program, and the host's environment from a real Seatbelt
-process; they run on macOS only, and until they pass there the process control is built but not
-accepted.
+process; they run on macOS only, in the `macos-15` CI job, and passed there on 2026-10-27
+([job](https://github.com/Ogard-Labs/octant/actions/runs/40537495871/job/122306586053)).
 
 ## Server-Side Tool-Call Policy Engine
 
@@ -708,7 +709,7 @@ crosses a server authority or sandbox boundary without additional local compromi
 | Extension quarantine, activation ladder, supervised processes        | Exists          | `packages/plugin-host/src/activation.ts`, `apps/server/src/extensions/`                        |
 | Declared-capability ceiling enforced at call resolution              | Newly specified | policy engine + extension manifest data                                                        |
 | Outside driver proxy: strict decoding, closed failures, brokered key | Exists          | `apps/server/src/providers/outsideHarnessEndpointProxy.ts`, `outsideDriverCeiling.ts`          |
-| Outside driver process confinement                                   | Exists          | `outsideDriverProcess.ts`, `nodeExtensionProcessPort.ts` (macOS escape acceptance pending)     |
+| Outside driver process confinement                                   | Exists          | `outsideDriverProcess.ts`, `nodeExtensionProcessPort.ts` (escape tests pass on macOS CI)       |
 | Remote principal separation, closed action catalog, clamps           | Exists          | `remoteAccessPolicy.ts`, `clientPrincipal.ts`, `remoteRoutePolicy.ts`, `codePolicy.ts`         |
 | Consolidated audit taxonomy with principal attribution               | Newly specified | `packages/contracts/src/events.ts` or audit payload schemas + owning services                  |
 | Escape suite fixtures and exit gate                                  | Newly specified | `apps/server/src/security/escapeSuite/` (new) + domain policy tests                            |

@@ -351,15 +351,19 @@ them ([authority](../architecture.md#security-and-authority)). Its notice says
 what the source offers once the host names the source's mode. Document shows the
 Markdown or text file the Code thread's turn most recently wrote, read through
 the host-authorized file open; the renderer offers a written document, or a
-Canvas the thread's agent authored in Work or Code and did not ask to show
-inline, in the dock once per document, never after the person closed its tab,
+Canvas the thread's agent authored in Work or Code that the thread does not
+draw inline, in the dock once per document, never after the person closed its tab,
 and never by moving focus. Every Canvas a thread wrote appears at the end of
 the turn that wrote it, on the reply's card face. One the agent asked to show
 inline is drawn there read-only, within a fixed height that fades out instead
 of scrolling, and is never offered in the dock, because it is already in front
-of the person; any other is a single row (a live miniature, its title, one
-line of facts) that opens it. The person may expand any Canvas in place,
-including one shown as a row: **Expand in thread** on the frame or the row, or
+of the person. One the agent asked to show inline that holds a plan, a mockup,
+or a device-size design is a sidebar Canvas, shown as a preview card (the live
+miniature across the column, its title and facts beneath) that opens it; any
+other is a single row (a live miniature, its title, one line of facts) that
+opens it ([Canvas: Presentation](canvas.md#presentation-and-schema-versions)).
+The person may expand any Canvas in place,
+including one shown as a row: **Expand in thread** on the frame, the card, or the row, or
 **Show the whole Canvas** under a faded one. Expanded, the frame grows with
 its content up to about the thread viewport instead of fading. The thread
 keeps the wheel until the person focuses the region inside the frame (a click
@@ -469,16 +473,18 @@ input, and evidence safety under the [device transport contract](../architecture
 **Desktop** is a Code thread's disposable desktops
 ([Disposable desktops](disposable-desktops.md)), always offered on Code. It
 uses the device pane's toolbar, line, and cards. The toolbar names the
-provider, the state in words with elapsed minutes and the end time (never a
+provider and, for a provider with placements, where the desktop runs (the
+computer its recipe names, or the placement), the state in words with elapsed minutes and the end time (never a
 cost), a switch between the thread's two desktops when it has two, **Add 30
 minutes** while the recipe maximum allows, and Release, which asks first. The
 states are setup (what the thread lacks to start one, in one sentence, or
 **Start desktop**), starting, live, not shown (a running desktop this tab is
 not showing, with **Show desktop**), interrupted (the view stopped; **Reconnect**),
-ending, still running (release not verified, with the provider and **Retry**),
+not shown because the connection could be read on its way (the host refused
+the view; the desktop keeps running; **Try again**), ending, still running (release not verified, with the provider and **Retry**),
 and ended (why, and **Start a new desktop** when one may start). A tab shows a
-screen only after the person starts a desktop in it or presses Show desktop
-or Reconnect: a restored or reloaded tab never reconnects on its own, and the
+screen only after the person starts a desktop in it or presses Show desktop,
+Reconnect, or Try again: a restored or reloaded tab never reconnects on its own, and the
 host holds no view across a restart. The live screen is a focusable region:
 clicks, the wheel, and keys go to the desktop while it has focus, printable
 characters cross as typed text, and `Mod+Escape` moves focus out without
@@ -581,7 +587,8 @@ The board reads the same host list as the Needs you card (the
 [pending-requests read](host-reads-and-commands.md#pending-requests)) once for the whole board, only while the board is mounted, on the same
 change-feed, settings, and workspace signals, and never on a timer. A card is
 matched to its request by thread and mode. A thread whose live turn waits on an
-approval or a question, or on the agent's own harness approval, files under
+approval or a question, or on the agent's own harness approval or Work
+question, files under
 Waiting with the awaiting-input reason, not In progress: the provider session stays open while it waits, so the host
 reads the wait from the running turn's open approvals and questions (Code) or
 the open request (Work) rather than from the turn's running record. Those are

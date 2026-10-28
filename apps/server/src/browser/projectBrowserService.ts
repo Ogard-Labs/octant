@@ -141,7 +141,10 @@ export class ProjectBrowserService {
     // context keeps creation local for the same reason; a Project's page has
     // no thread whose approval could stand in for the person being here.
     if (caller !== "local-window") {
-      return refused("unauthorized", "A Project browser opens only from this Mac's own window.");
+      return refused(
+        "unauthorized",
+        "A Project browser opens only from this computer's own window.",
+      );
     }
     const authority = this.#authority(windowId, command.projectId);
     const owned = this.#pages.get(key(windowId, command.projectId));

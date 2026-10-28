@@ -42,6 +42,8 @@ const mocks = vi.hoisted(() => ({
   modeConfigurations: [] as Array<readonly [string, unknown]>,
   workerDefinitions: [] as ReadonlyArray<unknown>,
   decorationsSet: vi.fn(),
+  defineTheme: vi.fn(),
+  setTheme: vi.fn(),
   mouseDownListeners: [] as Array<
     (event: { target: { type: number; position?: { lineNumber: number } } }) => void
   >,
@@ -105,6 +107,8 @@ vi.mock("monaco-editor", () => ({
       return mocks.editor;
     }),
     createModel: mocks.createModel,
+    defineTheme: mocks.defineTheme,
+    setTheme: mocks.setTheme,
     getModel: mocks.getModel,
     getModelMarkers: ({ owner }: { owner: string }) => mocks.markers.get(owner) ?? [],
     setModelMarkers: mocks.setModelMarkers.mockImplementation(
@@ -153,6 +157,8 @@ vi.mock("./monacoEnvironment", () => ({
   installMonacoEnvironment: mocks.installEnvironment,
 }));
 
+import { DEFAULT_DARK_TOKENS, DEFAULT_LIGHT_TOKENS } from "@octant/theme/tokens";
+import { resolveEditorColorProjection } from "@octant/theme/editor-colors";
 import { mount } from "./monacoRuntime";
 
 describe("Monaco runtime", () => {
@@ -226,13 +232,36 @@ describe("Monaco runtime", () => {
     session.dispose();
   });
 
-  it("mounts the editor with the Octant dark presentation", () => {
-    const session = mount(document.createElement("div"), options());
+  it("paints the editor in the app's light or dark theme and repaints it on a live switch", () => {
+    const light = resolveEditorColorProjection({ mode: "light", tokens: DEFAULT_LIGHT_TOKENS });
+    const dark = resolveEditorColorProjection({ mode: "dark", tokens: DEFAULT_DARK_TOKENS });
+    const session = mount(document.createElement("div"), options({ colors: light }));
 
+    expect(mocks.defineTheme).toHaveBeenLastCalledWith(
+      "octant",
+      expect.objectContaining({
+        base: "vs",
+        inherit: true,
+        colors: expect.objectContaining({
+          "editor.background": "#ffffff",
+          "editor.foreground": "#141414",
+        }),
+      }),
+    );
     expect(mocks.editorCreate).toHaveBeenCalledWith(
       expect.any(HTMLElement),
-      expect.objectContaining({ theme: "vs-dark", renderValidationDecorations: "on" }),
+      expect.objectContaining({ theme: "octant", renderValidationDecorations: "on" }),
     );
+
+    session.setColors?.(dark);
+    expect(mocks.defineTheme).toHaveBeenLastCalledWith(
+      "octant",
+      expect.objectContaining({
+        base: "vs-dark",
+        colors: expect.objectContaining({ "editor.background": "#1a1a1a" }),
+      }),
+    );
+    expect(mocks.setTheme).toHaveBeenLastCalledWith("octant");
     session.dispose();
   });
 

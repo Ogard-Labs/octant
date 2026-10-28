@@ -35,7 +35,16 @@ or Cua for leasing yet, so a recipe can name only the host-local provider
 [Built in slice 4](#built-in-slice-4),
 [Built in slice 5](#built-in-slice-5),
 [Built in slice 6](#built-in-slice-6), and
-[Built: recipe storage](#built-recipe-storage)). Slice 4's real-provider smoke,
+[Built: recipe storage](#built-recipe-storage)). Sub-slice 3's follow-ups are
+built as well: a recipe names the computer a Space on another of the person's
+computers runs on, the pane says when a view is refused because the session
+could be read on its way, and the host refuses network where a placement
+cannot have it ([Built: Cua follow-ups](#built-cua-follow-ups)). Recipe key
+entry is built too: a local window enters, replaces, and removes the key a
+cloud recipe's provider reads, kept only in the host credential store
+([Built: recipe key entry](#built-recipe-key-entry)); it shows only for a
+provider the host offers, so no running host shows it until E2B is offered.
+Slice 4's real-provider smoke,
 slice 6's E2B live smoke, and Cua sub-slices 2 and 3's live smokes are still
 owed by the maintainer.
 
@@ -222,7 +231,7 @@ lease anyway.
   acquires a host-local desktop has already decided and is not asked again;
   Plan still refuses them, and a billed or off-machine lease still asks. The
   host re-checks authority after the answer, and an answer given for one
-  provider, placement, or posture never covers another.
+  provider, placement, machine, or posture never covers another.
 - **Reading** the screen (a frame, a screenshot, a window list) needs no
   approval. **Agent input** follows the existing computer-use rules unchanged:
   `@Computer`-style per-send selection, per-application approval, sensitive-field
@@ -966,17 +975,26 @@ Rules this delivery resolved:
 - **Set from a local window; read anywhere the Project is.** Setting or
   removing a recipe chooses what this host runs, so only a local window may:
   the Project route refuses the command from a paired device, which the
-  remote route policy already denies a Project command. A paired device sees
-  the recipe with the Project, and still watches and operates its desktops
-  ([decision 3](#maintainer-decisions)). An agent has no command that
-  reaches it.
+  remote route policy already denies a Project command. A paired device may
+  read the recipe with the Project, and still watches and operates its
+  desktops ([decision 3](#maintainer-decisions)). An agent has no command
+  that reaches it.
+- **The editor is a local window's.** No paired client mounts it: the paired
+  browser (`RemoteWorkspace`) serves thread lists and threads but no Project
+  settings, and the phone shows none. A paired surface that later shows a
+  Project's settings renders the recipe read-only, with no Save or Remove
+  controls, and says changes are made on the computer running Octant,
+  because the route would refuse every change it sent.
 - **The host validates every save.** The command decodes against
   `DesktopRecipe`, so the screen, lease limits, and provider id are bounded
   and a lease cannot start longer than its maximum. The recipe must name a
   provider the host offers for leasing now (the same list destination
   reporting gives); a host-local recipe cannot allow network
-  ([slice 2](#built-in-slice-2)), while a cloud recipe may, and must name a
-  credential reference ([slice 6](#built-in-slice-6)). A save that changes
+  ([slice 2](#built-in-slice-2)), nor can one on any placement
+  ([Built: Cua follow-ups](#built-cua-follow-ups)), while a cloud recipe
+  with no placement may, and must name a credential reference when it is
+  set or moved onto its provider ([slice 6](#built-in-slice-6),
+  [recipe key entry](#built-recipe-key-entry)). A save that changes
   nothing, and any change to an archived Project, is refused. Removing is
   always allowed.
 - **Read afresh on every lease command.** The lease service asks for the
@@ -995,10 +1013,11 @@ Rules this delivery resolved:
   four-hour bound, and a saved value off a list is offered too, so opening
   the editor never changes a recipe by itself. A new recipe starts from
   decision 4's limits: a 30-minute lease, four hours at most, idle after
-  15 minutes. Network is always none. Image and credential reference are for
-  a cloud provider and are not editable until a host offers one (slice 6
-  builds E2B but offers it nowhere yet); a save keeps the ones already stored
-  for the same provider. Remove asks first,
+  15 minutes. Network is always none. Image is for a cloud provider and is
+  not editable yet; a save keeps the one already stored for the same
+  provider. A cloud provider's key is entered in the editor, which never
+  shows or edits the credential reference itself
+  ([Built: recipe key entry](#built-recipe-key-entry)). Remove asks first,
   because it destroys running desktops.
 
 Evidence: `projectDesktopRecipe.test.ts` saves a recipe through
@@ -1075,13 +1094,15 @@ Rules this slice resolved:
 - **Desktop keys have their own broker namespace.** A recipe's credential
   reference names a key in `/v1/desktop-provider-credentials/*`, apart from
   model providers' keys, so neither can stand in for the other. A host with
-  no broker attaches no key. No editor enters a key yet; that arrives with
-  the person's opt-in to a billed provider.
+  no broker attaches no key. A person enters one in the recipe editor
+  ([Built: recipe key entry](#built-recipe-key-entry)).
 - **A cloud recipe must name a credential.** A recipe for a cloud provider
   with no credential reference configures nothing that could run: the lease
   service refuses it `no-provider-configured` before any provider call, and
-  the recipe store refuses to save it
-  ([recipe storage](#built-recipe-storage)). Since
+  the recipe store refuses to set one, or move one onto the provider, without
+  a key ([recipe storage](#built-recipe-storage)). A recipe whose key the
+  person removed stays on its provider with none and starts nothing until
+  they enter another ([Built: recipe key entry](#built-recipe-key-entry)). Since
   [Cua sub-slice 2](#built-in-cua-sub-slice-2) a placement of a provider
   whose daemon holds the person's sign-in stands in for the credential (C4).
 - **Restart lists account by account.** Reconciliation lists each provider
@@ -1099,8 +1120,9 @@ Rules this slice resolved:
   is loaded on every host, so teardown and restart reconciliation reach any
   E2B lease a host ever journaled. It is not effective: no host offers it for
   leasing, reports it as a destination, or lets a recipe name it until the
-  person can choose it and enter its key. A billed provider is never on by
-  default.
+  maintainer's live smoke passes and the person opts in. The key entry the
+  person needs for it is built ([Built: recipe key entry](#built-recipe-key-entry)).
+  A billed provider is never on by default.
 - **E2B.** The control plane is `api.e2b.app` with the key in `X-API-Key`.
   A desktop is a sandbox created from the recipe's template (E2B's public
   `desktop` template when it names none) through `POST /v2/sandboxes` with the
@@ -1684,15 +1706,23 @@ requests over 4 MiB; responses over the driver's bound, the host's bound,
 and a stream that claims a huge message; a time-out; cancellation before,
 during the socket checks, and while waiting; seven malformed answers; a
 `HOME` pointing at a home with a live test daemon, and no `HOME` at all,
-both leaving the walk at the recorded home (under Bun the call runs in a Bun
-launched with that environment, since Bun reads `HOME` only at launch; this
-case failed under Bun before the home came from the user database); and a
-uid the user database has no record of. Removing each socket check in turn
+both leaving the walk at the recorded home, where the declared socket's
+folder is missing, so both fail as an unreachable daemon rather than refuse
+as a failed lookup would (under Bun the call runs in a Bun launched with that
+environment, since Bun reads `HOME` only at launch; this case failed under
+Bun before the home came from the user database); the lookup's answer held
+against Node's `os.userInfo().homedir`, which reads the user database
+itself (under Node only, since Bun answers that with `$HOME`); and a uid the
+user database has no record of. These tests read the real home and write
+nothing in it; the walk case skips, saying why, on a host whose home the
+port would refuse as not the user's alone. Removing each socket check in turn
 fails at least one of these tests. The same file passes under Bun 1.4.4,
 which runs the development and headless servers
 (`bun --bun x vitest run --project unit src/computerUse/desktopDaemonPort.test.ts`
 in `apps/server`), as well as under Node, which runs the packaged desktop's
-server, through `bun run test`. It also covers a whole stream, its shared
+server, through `bun run test`. The `macos-15` CI job runs the file under
+Node as well, which is the evidence that `/usr/bin/id -P` finds the home on
+macOS; it passed there on 2026-10-27 ([job](https://github.com/Ogard-Labs/octant/actions/runs/40537495871/job/122306586053)). It also covers a whole stream, its shared
 bound, a unary call refusing two messages, a `stream` that is not a boolean,
 and a stream that never ends.
 `protobufWire.test.ts` covers protobuf's documented encodings, a negative
@@ -1842,7 +1872,8 @@ recipe is refused). Until it passes, the driver is offered on no host.
 ### Built in Cua sub-slice 3
 
 - **Driver.** The `cua` provider declares a second placement,
-  `other-machine` ("Your other machine", locality `cloud`, not billed), and
+  `other-machine` ("Your other computer" since the
+  [follow-ups](#built-cua-follow-ups), locality `cloud`, not billed), and
   two more methods, `SpaceService/ListHosts` and `SpaceService/GetSpaceRoute`
   (`cuaDesktopProvider.ts`, `cuaProtocol.ts`). No seam change was needed.
 - **Policy.** `decideDesktopLeaseAcquire` takes the lease's locality and asks
@@ -1868,21 +1899,22 @@ Rules this sub-slice resolved:
   placement off this machine has locality `cloud`, the locality that already
   makes a transfer ask `off-machine`; a billed placement asks `billed`, whose
   confirmation also names where it runs.
-- **Which other machine.** A recipe names the placement, not a machine, so
-  the driver asks `ListHosts` and creates on `host:<id>` only when exactly
-  one of the person's machines that provide Spaces answers. None refuses
-  `no-other-machine`; more than one refuses `other-machine-ambiguous`
-  rather than choosing for a person who confirmed only "your other machine";
-  a host listing that cannot be read, a host Octant cannot name, or a `via`
-  other than `relay` or `direct` fails. Rejected: `on` `auto`, which picks
-  the least-loaded machine and, with a cloud linked, may be a billed pool
-  host; and a machine name in the recipe, a new person-entered field that
-  waits until the recipe editor can list the person's machines.
+- **Which other machine.** The recipe names the machine
+  ([Built: Cua follow-ups](#built-cua-follow-ups)), and the driver creates
+  on `host:<id>` only for that machine, listed by `ListHosts` and online. As
+  first built, a recipe named only the placement and the driver created only
+  when exactly one machine answered, refusing none and several rather than
+  choosing; naming the machine replaced that. A host listing that cannot be
+  read fails, and a host Octant cannot name or whose `via` is other than
+  `relay` or `direct` is never offered or used. Rejected: `on` `auto`, which
+  picks the least-loaded machine and, with a cloud linked, may be a billed
+  pool host.
 - **The same VM, wherever it runs.** A Space on another machine is the same
   QEMU VM with network `none` as one here (C7), verified from the create's
   answer. That machine's loopback holds the person's own services there,
   as this one's holds the Octant server, so a recipe with network is
-  refused for both placements.
+  refused for both placements, by the host before any call since the
+  [follow-ups](#built-cua-follow-ups) and by the driver as well.
 - **A Space reported elsewhere is destroyed.** One on this machine must
   report no `host`; one on another must report one, and for a relay host the
   relay machine id that was asked. Any other answer deletes the Space and
@@ -1893,15 +1925,18 @@ Rules this sub-slice resolved:
   again before each frame, input, sent file, and agent command on a Space on
   another machine. `mesh` (end to end, straight or relayed as ciphertext),
   `direct`, and `local` are accepted. `relay_https` refuses
-  `relay-reads-session`; `cloud`, an empty transport, any value the driver
+  `session-readable` (first `relay-reads-session`); `cloud`, an empty transport, any value the driver
   does not know, an error, or an unreadable answer refuses
   `route-unverified`; a daemon that does not answer is `not-connected`.
   The answer and the call after it are two steps, so a fallback between
   them reaches the next call, not that one. A Space on this machine is never
   asked: its route is `local`.
-- **A refused screen reaches the person as the provider being unavailable.**
-  The host passes no driver reason to a pane, so a view the route refuses
-  shows `provider-unavailable`, and the agent's command answers `refused`
+- **A refused screen reaches the person as what it is.** As first built,
+  the host passed no driver reason to a pane, so a view the route refused
+  showed `provider-unavailable`. The seam's one reason a person is told,
+  `session-readable`, now reaches the pane
+  ([Built: Cua follow-ups](#built-cua-follow-ups)); any other route refusal
+  still shows `provider-unavailable`. The agent's command answers `refused`
   with the route's reason.
 
 Evidence: `cuaDesktopProvider.test.ts` runs the conformance suite, restart
@@ -1944,6 +1979,217 @@ the id `ListHosts` reports, that a Space there reports `network` `none`, its
 a complete `ListSpaces` lists it. Until both smokes pass, the driver is
 offered on no host.
 
+### Built: Cua follow-ups
+
+The three follow-ups Cua sub-slice 3 named, none of which needs a smoke or a
+maintainer decision. No host offers Cua yet, so none is reachable in the
+running app until the live smokes pass.
+
+- **Contract.** `DesktopMachineId` and `DesktopMachine` (`machineId`,
+  `displayName`); `machine` on `DesktopRecipe`, `desktop.lease-requested@1`,
+  `DesktopLease`, and the pane's `start`; `choosesMachine` on
+  `LeasableDesktopPlacement`; `confirmedMachine` on the pane's `acquire`;
+  the pane request `recipe-machines` and its answer; and the view refusal
+  `session-readable` (`packages/contracts/src/desktopLease.ts`).
+- **Seam.** `DesktopPlacement.choosesMachine`, `DesktopProvider.listMachines`,
+  and `DESKTOP_SESSION_READABLE`, the one driver refusal reason the host
+  passes to a person (`packages/plugin-api/src/desktopProvider.ts`).
+- **Policy.** `desktopNetworkAllowed` (`packages/domain/src/desktopLeasePolicy.ts`),
+  applied by `changeCodeProjectDesktopRecipe` and by the lease service.
+- **Host.** The lease service's `recipeMachines`, the machine in a lease's
+  terms, and `session-readable` from a view, frame, or input
+  (`apps/server/src/computerUse/desktopLeaseService.ts`,
+  `apps/server/src/desktopPaneRoutes.ts`).
+- **Driver.** The `cua` placements are named "This computer" and "Your other
+  computer"; `other-machine` chooses a machine; `listMachines` reads
+  `ListHosts`; and an acquire creates only on the machine the recipe names
+  (`apps/server/src/plugins/cuaDesktop/cuaDesktopProvider.ts`).
+- **Editor and pane.** **Computer** in the recipe editor
+  (`ProjectDesktopRecipeSection.tsx`); the computer in the Desktop toolbar
+  and the off-machine confirmation, and the not-shown state for a session
+  that could be read (`apps/web/src/desktop/`).
+
+Rules this delivery resolved:
+
+- **The recipe names the computer.** A placement that runs on one of the
+  person's own machines declares `choosesMachine`, and a recipe on it must
+  name one (`machine`); a recipe on any other placement, or for a provider
+  with none, that names one is refused, at save and at acquire. The person
+  picks it in a local window from the machines the provider lists now,
+  offline ones marked; the editor never picks one. The recipe keeps the name
+  the person chose it by, so the pane, the Start confirmation, and a paired
+  device show which computer a desktop uses without asking the provider. The
+  lease journals the machine, a person's Start counts only with that machine
+  confirmed, an agent's question names it, and a recipe whose machine changed
+  counts as removed. The driver creates only on the named machine, refusing
+  `machine-not-found` when the daemon does not list it and `machine-offline`
+  when it does not answer, so it never chooses another.
+- **Listing machines is a local window's act.** Only a local window sets a
+  recipe, so only a person there is answered `recipe-machines`; a paired
+  device, an agent, and `system` are refused `not-permitted`. It asks only a
+  provider offered for leasing now, on a placement that chooses a machine,
+  bounded like a teardown call. The driver is untrusted: an id that is not
+  one is left out, names are cut to 128 characters, and at most 64 machines
+  are shown. Listing asks the person's daemon, so the editor asks only while
+  such a placement is chosen, never on opening.
+- **Names say "computer", never the host's platform.** The placement names
+  and the pane's copy say "this computer", as copy the host writes does
+  ([Architecture: host platform in copy](../architecture.md#security-and-authority)),
+  because a paired device reads them. A machine's name is the person's own,
+  as the provider lists it.
+- **One driver reason reaches the person.** A screen, frame, or input a
+  driver refuses with `DESKTOP_SESSION_READABLE`, because the route to the
+  desktop could let a third party read the session, answers the pane
+  `session-readable`. The pane says the desktop is not shown while the
+  connection could be read, that it is still running, and offers **Try
+  again**, which opens a view afresh; it never retries by itself. Every other
+  driver reason stays with the host: a view still refuses
+  `provider-unavailable`, a frame answers `no-frame`, and an input
+  `not-delivered`. A person's input is journaled before the driver refuses
+  it, as any input is.
+- **Network only where a desktop can have it.** A recipe may allow network
+  only for a provider with no placements whose desktops run off this
+  computer. A host-local desktop shares the host's namespace, and every
+  placement offered is a VM whose user networking reaches the loopback of
+  the machine it runs on, so neither may. The host refuses such a recipe at
+  save, and refuses its acquire `no-provider-configured` before it journals
+  anything or asks anyone, so a recipe saved before the rule cannot start a
+  desktop. A placement that can offer network will declare it when one
+  exists.
+
+Evidence: `desktopLeaseService.test.ts` covers a stored recipe allowing
+network on an off-machine placement refused at overview and acquire with
+nothing journaled, asked, or created; a desktop on the named machine, a Start refused without that
+machine or with another, and a machine change ending the desktop; a view
+refused `session-readable` while another route refusal stays
+`provider-unavailable`, and a route that turns readable mid-view refusing
+frames and input; and the machine listing answered to a local window only,
+bounded and checked, refused for a placement or provider that does not
+choose one, and `provider-unavailable` when the daemon does not answer.
+`desktopPaneRoutes.test.ts` covers the listing asked as the authenticated
+person; `cuaDesktopProvider.test.ts` covers the create on the named machine,
+never another online one, the named machine found in a long listing, a
+missing or offline machine refused after `ListHosts` alone, a recipe naming
+no machine or one for this computer refused before any call, the listing,
+and `session-readable` on `relay_https`, with the conformance suite and the
+person's confirmation through the lease service on the named machine;
+`projectPolicy.test.ts` covers the network and machine rules at save;
+`desktopLease.test.ts` covers the contract; and `DesktopPane.test.tsx` and
+`ProjectDesktopRecipeSection.test.tsx` cover the confirmation naming the
+computer, the toolbar, the not-shown state and Try again, and choosing and
+saving a computer. The new lease service, driver, policy, pane, and editor
+tests each failed against the code before this change.
+
+Nothing here is owed by the maintainer beyond Cua sub-slices 2 and 3's
+smokes; `cua-other-machine` now names the one machine its setup requires.
+
+### Built: recipe key entry
+
+A person enters, replaces, and removes the API key a cloud recipe's provider
+reads, in the recipe editor of a local window. Offering E2B still waits on
+the maintainer's live smoke, so the key field shows only for a provider the
+host offers for leasing and no running host shows it yet; its tests offer a
+fake cloud provider.
+
+- **Contract.** `DesktopRecipeKeyChange` (`enter` with the key, or `remove`)
+  as `key` on `change-code-project-desktop-recipe`; `DesktopRecipeKeyState`
+  and the pane request and answer `recipe-key`; `credentialRejected` on
+  `desktop.lease-transitioned@1` and `DesktopLease`
+  (`packages/contracts/src/desktopLease.ts`, `projects.ts`).
+- **Seam.** `DESKTOP_CREDENTIAL_REJECTED`, the reason a cloud driver gives
+  when its provider refuses the key; the E2B driver gives it for a 401 or 403
+  (`packages/plugin-api/src/desktopProvider.ts`).
+- **Policy.** `changeCodeProjectDesktopRecipe` lets a recipe on a cloud
+  provider go without a key only when it stays on the provider and placement
+  it was saved on (`packages/domain/src/projectPolicy.ts`).
+- **Host.** `ProjectService` stores an entered key and journals only its
+  reference; `desktopRecipeKeys.ts` keeps keys in the broker's
+  desktop-provider namespace, deletes the ones no recipe names once teardown
+  no longer needs them, and answers `recipe-key`; the lease service records a
+  refused key on the lease and says which keys teardown still needs
+  (`holdsCredential`).
+- **Editor.** **API key** in `ProjectDesktopRecipeSection.tsx`, with **Remove
+  key**, following Settings › Model endpoints: a password field whose value
+  is read once on save and cleared.
+
+Rules this delivery resolved:
+
+- **Entered only from a local window, through the Project route.** The key
+  travels with the recipe change, so the route that already refuses a paired
+  device's recipe change refuses it before the service runs and anything is
+  stored. An agent has no command that reaches it. Model endpoint keys are
+  saved from a desktop window over native IPC; a desktop recipe is set from
+  any local window, a browser on a headless host included, so its key takes
+  the Project route to the broker instead, as a sync bucket's key pair does.
+- **The key lives only in the credential store.** The host stores it in
+  `/v1/desktop-provider-credentials/*` under a reference it mints, then
+  journals the recipe with the reference alone; the journal, the Project, its
+  summary, logs, diagnostics, and exports never carry the key, and no answer
+  echoes it. A window never names a reference: a recipe may keep only the one
+  its Project already has, so it cannot point at another recipe's key. The
+  host judges the recipe before storing anything, deletes a stored key whose
+  change was not journaled, and refuses an entered key outright on a host with
+  no broker, for a removed recipe, and for any provider that is not a cloud
+  provider or that a signed-in daemon runs.
+- **A new key gets a new reference.** Replacing a key changes the recipe's
+  reference, which ends the recipe's running desktops as any reference change
+  does, and those desktops' teardown still reaches the account with the key
+  they were made with.
+- **An old key goes once teardown no longer needs it.** A key no recipe names
+  any more, replaced or removed with its recipe or by itself, is deleted from
+  the store as soon as no lease that recorded it may still hold a desktop and
+  no desktop made with it is waiting to be verified gone. Each sweep retries;
+  after a restart, every key a lease recorded or a journaled recipe change
+  ever named that no recipe names now is taken in again, so a deletion that
+  failed before the restart is retried even for a key no desktop used. Only
+  those references are deleted: the store is never listed, so nothing Octant
+  did not store for a recipe is touched. The removal confirmation says the key stays until those desktops are
+  gone; the editor shows no standing waiting state yet.
+- **Removing a key keeps the recipe.** The recipe stays on its provider with
+  no reference and starts nothing (`no-provider-configured`) until a key is
+  entered again; a new recipe, or one moved onto a cloud provider, still
+  needs a key.
+- **Honest states.** The editor asks `recipe-key` and says the key is not
+  saved, saved, no longer in the store, or refused by the provider when a
+  desktop last started, and says so when the host has no credential store to
+  keep one. "Refused" comes from the most recent lease that got the
+  provider's answer with that reference, which the lease journals as
+  `credentialRejected` with Octant-authored text alone; a new key has a new
+  reference, so entering one clears it. A paired device may ask, since the
+  answer carries nothing of the key.
+
+Evidence: `projectDesktopRecipe.test.ts`, over a journal on disk and a host
+offering a fake billed cloud provider, refuses a cloud recipe with no key,
+saves one with a key that lands only in the store, sees the provider refuse
+it and the editor's state say so, replaces it under a new reference with the
+old key deleted, leases with the new one, finds neither key anywhere under
+the data directory, and after a restart removes the key, keeps it while the
+running desktop needs it, and deletes it once the sweep ends that desktop;
+it also stores nothing for a refused recipe, a provider the host does not
+offer, a removed recipe, or a reference a window names, and none of those
+refusals carries the key; deletes an entered key whose change lost to another
+window's, with a conflict that does not carry it; and, after a restart,
+deletes a replaced key no lease recorded whose first deletion failed.
+`projectRoutes.test.ts` refuses a paired device's change carrying a key
+before the service runs, without echoing it; `desktopPaneRoutes.test.ts`
+answers `recipe-key`; `projectPolicy.test.ts` covers a key removed in place
+and a keyless move onto a cloud provider; `desktopLease.test.ts` covers the
+contract; `ProjectDesktopRecipeSection.test.tsx` sets a recipe only with a
+key, sends it once and clears the field, shows a refused key, replaces and
+removes it, and closes the field on a host with no store. The new policy,
+host, route, and editor tests each failed against the code before this
+change. Rendered QA ran the editor in a headless browser, light and dark, at
+1280 and 390 pixels wide, for no key, a saved key, a refused key, a missing
+key, a removed key, and a host with no store, with no console error, no
+horizontal overflow, and the typed key absent from the page after saving.
+
+Nothing here is owed by the maintainer beyond slice 6's E2B live smoke, which
+still gates offering E2B. Left for later: a key stored for a change that was
+not journaled stays in the store if deleting it fails too, since nothing
+names it and the store is never listed. The key field is a local window's
+like the rest of the editor, which no paired client mounts
+([recipe storage](#built-recipe-storage)).
+
 ## Rationale
 
 The original plan leaned on execution capsules for isolation and a cloud
@@ -1969,6 +2215,8 @@ host-local launch through `apps/server/src/process/linuxConfinement.ts`),
 `packages/plugin-api/src/desktopScreenshotControl.ts` (agent control of a
 screen-only desktop), `apps/server/src/computerUse/desktopHttpsPort.ts` and
 `apps/server/src/plugins/e2bDesktop/` (the cloud port and the E2B driver),
+`apps/server/src/computerUse/desktopRecipeKeys.ts` (a recipe's key in the
+credential store),
 `apps/server/src/computerUse/desktopDaemonPort.ts` and
 `packages/plugin-api/src/protobufWire.ts` (the local-daemon port and the
 seam's protobuf wire helper), `apps/server/src/plugins/cuaDesktop/` (the Cua

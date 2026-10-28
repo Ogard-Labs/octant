@@ -1,6 +1,7 @@
 import { createHmac, randomBytes } from "node:crypto";
 import type { CloudIamDescriptor } from "./cloudIam";
 import { sha256Hex, sigV4CanonicalRequest, sigV4SigningKey } from "./sigV4";
+import { stalledAnswer, type StalledAnswer } from "./stalledIssuer.test-support";
 
 /**
  * An in-memory stand-in for the cloud's single sign-on (the portal's OIDC
@@ -59,6 +60,9 @@ export type FakeRefreshAnswer =
   | "server-error"
   | "unreachable";
 
+/** A stalled answer ends only with the request's own abort signal; see {@link StalledAnswer}. */
+export type FakeDevicePollFailure = "server-error" | "throttled" | "unreachable" | StalledAnswer;
+
 export type FakeMintAnswer = "credentials" | "forbidden" | "unauthorized" | "server-error";
 
 interface MintedRole {
@@ -91,6 +95,7 @@ export class FakeCloud {
   #grantsRefreshToken = true;
   #reachable = true;
   #deviceAnswer: "issued" | "refused" | "unavailable" = "issued";
+  #devicePollFailures: FakeDevicePollFailure[] = [];
 
   constructor(now: () => number = Date.now) {
     this.#now = now;
@@ -107,7 +112,7 @@ export class FakeCloud {
     };
     this.#requests.push(request);
     if (!this.#reachable) throw new TypeError("fetch failed");
-    if (url.host === OIDC_HOST) return this.#oidc(url.pathname, body);
+    if (url.host === OIDC_HOST) return this.#oidc(url.pathname, body, init?.signal ?? undefined);
     if (url.host === PORTAL_HOST) return this.#portal(request);
     if (url.host === MODEL_HOST) return this.#model(request);
     throw new Error(`the fake cloud does not serve ${url.host}`);
@@ -178,6 +183,11 @@ export class FakeCloud {
 
   setDeviceAnswer(value: "issued" | "refused" | "unavailable"): void {
     this.#deviceAnswer = value;
+  }
+
+  /** The next device-code polls fail, in order, before the portal answers them again. */
+  failDevicePolls(...failures: FakeDevicePollFailure[]): void {
+    this.#devicePollFailures = failures;
   }
 
   /** Every session and refresh token stops working, as an administrator's revocation does. */
@@ -272,7 +282,7 @@ export class FakeCloud {
     return value;
   }
 
-  #oidc(path: string, body: string): Response {
+  #oidc(path: string, body: string, signal: AbortSignal | undefined): Response | Promise<Response> {
     const fields = JSON.parse(body === "" ? "{}" : body) as Record<string, unknown>;
     if (path === "/client/register") {
       const clientId = this.#issue("client-");
@@ -310,6 +320,14 @@ export class FakeCloud {
     }
     if (path === "/token") {
       if (fields.grantType === "urn:ietf:params:oauth:grant-type:device_code") {
+        const failure = this.#devicePollFailures.shift();
+        if (failure === "unreachable") throw new TypeError("fetch failed");
+        if (failure === "throttled") return new Response("", { status: 429 });
+        if (failure === "server-error") return new Response("", { status: 503 });
+        if (failure === "hangs" || failure === "stalls-mid-answer") {
+          // A pending poll is a 400, so the body is what would say so.
+          return stalledAnswer(failure, signal, 400);
+        }
         const entry = [...this.#devices].find(([key]) =>
           key.startsWith(`${String(fields.deviceCode)}|`),
         );

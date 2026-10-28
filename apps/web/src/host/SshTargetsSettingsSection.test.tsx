@@ -1,8 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { SshTargetAdministrationBridge, SshTargetOperation } from "../shell/hostBridge";
+import { HostPlatformContext } from "../platform";
 import { SshTargetsSettingsPage } from "./SshTargetsSettingsSection";
+import { SSH_TARGET_TIMES } from "./sshTargetClient";
 
 const fingerprint = `SHA256:${"Q".repeat(43)}`;
 const hostKey = {
@@ -29,6 +31,7 @@ const status = {
     },
   ],
   runtimeBinaries: [],
+  placeableRuntimes: [],
 };
 const project = {
   id: "66666666-6666-4666-8666-666666666666",
@@ -97,6 +100,130 @@ describe("Settings › SSH targets", () => {
     expect(row.textContent).toContain(
       "Ask for approvals: The target has no working bubblewrap. Install bubblewrap on the target.",
     );
+  });
+
+  it("follows a dropped session as the host reconnects, with the attempt and its time, and says when it stopped", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      const nextAttemptAt = Date.UTC(2026, 9, 28, 14, 5, 12);
+      const reconnecting = {
+        status: "refused",
+        reason: "target-reconnecting",
+        attempt: 2,
+        maxAttempts: 8,
+        nextAttemptAt,
+      };
+      const { administration } = bridge();
+      let listed: unknown = { targets: [status] };
+      vi.mocked(administration.sshTargetRequest).mockImplementation(async (operation) => {
+        if (operation === "list") return { status: 200, body: listed };
+        if (operation === "projects") return { status: 200, body: { projects: [project] } };
+        return { status: 200, body: { worktrees: [] } };
+      });
+      render(<SshTargetsSettingsPage bridge={administration} />);
+      const row = await screen.findByRole("group", { name: "build@devbox setting" });
+      expect(row.textContent).toContain("Connected as build on Linux");
+
+      // The page reads the host again on its own: the session dropped meanwhile.
+      listed = {
+        targets: [
+          {
+            target,
+            fingerprint,
+            connection: "reconnecting",
+            reconnect: { status: "waiting", attempt: 2, maxAttempts: 8, nextAttemptAt },
+            admission: [
+              { posture: "plan", decision: reconnecting },
+              { posture: "approval-gated", decision: reconnecting },
+            ],
+            runtimeBinaries: [],
+            placeableRuntimes: [],
+          },
+        ],
+      };
+      vi.advanceTimersByTime(5_000);
+      const time = SSH_TARGET_TIMES.formatTime(nextAttemptAt);
+      await waitFor(() =>
+        expect(row.textContent).toContain(
+          `Reconnecting · ${fingerprint}The session dropped. Reconnecting on its own: attempt 2 of 8 at ${time}.`,
+        ),
+      );
+      expect(row.textContent).toContain(
+        `Plan · read-only: The SSH target's session dropped, and Octant is reconnecting on its own (attempt 2 of 8, next at ${time}).`,
+      );
+
+      listed = {
+        targets: [
+          {
+            target,
+            fingerprint,
+            connection: "host-key-changed",
+            reconnect: { status: "stopped", attempts: 3 },
+            admission: [
+              { posture: "plan", decision: { status: "refused", reason: "host-key-changed" } },
+            ],
+            runtimeBinaries: [],
+            placeableRuntimes: [],
+          },
+        ],
+      };
+      vi.advanceTimersByTime(5_000);
+      await waitFor(() =>
+        expect(row.textContent).toContain(
+          "Host key changed · " +
+            `${fingerprint}Stopped reconnecting after 3 attempts. Connect it again once the reason below is fixed.`,
+        ),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a removed target gone when a status read sent before the removal answers after it", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      const user = userEvent.setup();
+      const { administration } = bridge();
+      let removed = false;
+      let answerHeldRead: (answer: { status: number; body: unknown }) => void = () => undefined;
+      vi.mocked(administration.sshTargetRequest).mockImplementation(async (operation) => {
+        if (operation === "remove") {
+          removed = true;
+          return { status: 204, body: null };
+        }
+        if (operation === "projects") return { status: 200, body: { projects: [] } };
+        if (operation === "worktrees") return { status: 200, body: { worktrees: [] } };
+        return { status: 200, body: { targets: removed ? [] : [status] } };
+      });
+      render(<SshTargetsSettingsPage bridge={administration} />);
+      await screen.findByRole("group", { name: "build@devbox setting" });
+
+      // The page's own status read goes out, and the host is slow to answer it.
+      vi.mocked(administration.sshTargetRequest).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            answerHeldRead = resolve;
+          }),
+      );
+      vi.advanceTimersByTime(5_000);
+
+      await user.click(screen.getByRole("button", { name: "Remove build@devbox" }));
+      await user.click(
+        within(await screen.findByRole("dialog")).getByRole("button", { name: "Remove target" }),
+      );
+      await screen.findByText("Removed build@devbox.");
+      await waitFor(() =>
+        expect(screen.queryByRole("group", { name: "build@devbox setting" })).toBeNull(),
+      );
+
+      // It answers with the target as it was before the removal.
+      answerHeldRead({ status: 200, body: { targets: [status] } });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(screen.queryByRole("group", { name: "build@devbox setting" })).toBeNull();
+      expect(screen.getByText("No SSH targets yet")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("pins a host key only after the person confirms the fingerprint, saying what the pin does not prove", async () => {
@@ -202,5 +329,41 @@ describe("Settings › SSH targets", () => {
         terminalId: second?.terminalId,
       }),
     );
+  });
+});
+
+// Each host is seen from a window on the other platform, so copy that read the
+// window's platform instead of the host's would name the wrong computer.
+const HOSTS = [
+  { hostPlatform: "linux", window: "MacIntel", computer: "this computer", elsewhere: /this Mac/ },
+  {
+    hostPlatform: "darwin",
+    window: "Linux x86_64",
+    computer: "this Mac",
+    elsewhere: /this computer/,
+  },
+] as const;
+
+describe.each(HOSTS)("Settings › SSH targets on a $hostPlatform host", (host) => {
+  beforeEach(() => {
+    Object.defineProperty(window.navigator, "platform", { value: host.window, configurable: true });
+  });
+  afterEach(() => Reflect.deleteProperty(window.navigator, "platform"));
+
+  it("names the host's computer as the one that reaches the targets and confines their work", async () => {
+    render(
+      <HostPlatformContext.Provider value={host.hostPlatform}>
+        <SshTargetsSettingsPage bridge={bridge().administration} />
+      </HostPlatformContext.Provider>,
+    );
+    await screen.findByRole("group", { name: "Service setting" });
+
+    expect(screen.getByText(/^Machines .* reaches with ssh\./)).toHaveTextContent(
+      `Machines ${host.computer} reaches with ssh. A Code Project can keep its folder on one; Octant admits work there only after the target proves it confines it as ${host.computer} would.`,
+    );
+    expect(screen.getByText(/^A Code Project whose folder is on a target\./)).toHaveTextContent(
+      `A Code Project whose folder is on a target. Its terminals and worktrees run there, under the same confinement as on ${host.computer}.`,
+    );
+    expect(document.body.textContent).not.toMatch(host.elsewhere);
   });
 });

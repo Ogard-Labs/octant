@@ -8,6 +8,7 @@ import {
   decodeMemoryCommand,
   decodeMemoryCommandResult,
   decodeProjectBootstrap,
+  decodeDesktopCredentialRef,
   decodeProjectCommand,
   decodeProjectCommandResult,
   decodeProjectFailure,
@@ -16,6 +17,8 @@ import {
   type ActiveMemoryEntry,
   type BoundProject,
   type ConnectedGitHubRepository,
+  type DesktopCredentialRef,
+  type DesktopRecipe,
   type LeasableDesktopProvider,
   type MemoryCommandResult,
   type MemoryEntry,
@@ -64,6 +67,7 @@ import { ConcurrencyConflict, JournalWriteFailed } from "./persistence/journalEr
 import type { PersistenceService } from "./persistence/persistenceService";
 import { ProjectionApplicationFailed } from "./persistence/projection";
 import type { ProjectRootPort } from "./projectRootPort";
+import type { DesktopRecipeKeys } from "./computerUse/desktopRecipeKeys";
 import { OCTANT_LOCAL_ACTOR_ID } from "./shellService";
 import {
   initializeGitRepository,
@@ -130,6 +134,12 @@ export interface ProjectServiceOptions {
    * refused.
    */
   readonly offeredDesktopProviders?: () => ReadonlyArray<LeasableDesktopProvider>;
+  /**
+   * Where a cloud recipe's key is kept: the credential broker's
+   * desktop-provider namespace. Absent on a host without a broker, where an
+   * entered key is refused and nothing is journaled.
+   */
+  readonly desktopRecipeKeys?: Pick<DesktopRecipeKeys, "save" | "discard" | "retire">;
 }
 
 /** What the host names the Project it provisions under the default folder. */
@@ -168,6 +178,7 @@ export class ProjectService implements ProjectServiceApi {
   readonly #ensureDirectory: (path: string) => Promise<void>;
   readonly #seedWorkProjectStatusFile: ProjectServiceOptions["seedWorkProjectStatusFile"];
   readonly #offeredDesktopProviders: () => ReadonlyArray<LeasableDesktopProvider>;
+  readonly #desktopRecipeKeys: ProjectServiceOptions["desktopRecipeKeys"];
   readonly #archiveListeners = new Set<
     (project: Extract<Project, { readonly type: "work" }>) => void
   >();
@@ -197,6 +208,7 @@ export class ProjectService implements ProjectServiceApi {
       });
     this.#seedWorkProjectStatusFile = options.seedWorkProjectStatusFile;
     this.#offeredDesktopProviders = options.offeredDesktopProviders ?? (() => []);
+    this.#desktopRecipeKeys = options.desktopRecipeKeys;
   }
 
   hasActiveProject(projectId: ProjectId, requiredType: ProjectType): boolean {
@@ -500,6 +512,11 @@ export class ProjectService implements ProjectServiceApi {
       let project: Project;
       let kind: ProjectCommandResult["kind"];
       let eventName: string;
+      // A desktop recipe key saved for this change, deleted again unless the
+      // change is journaled, and the key the recipe stops naming.
+      let enteredKey: DesktopCredentialRef | undefined;
+      let journaled = false;
+      let retiredKey: DesktopCredentialRef | undefined;
 
       if (command.kind === "ensure-default-project") {
         const type = command.projectType;
@@ -715,12 +732,33 @@ export class ProjectService implements ProjectServiceApi {
           kind = "project-brand-kit-changed";
           eventName = "project.brand-kit-changed@1";
         } else if (command.kind === "change-code-project-desktop-recipe") {
-          project = changeCodeProjectDesktopRecipe(
-            current,
-            command.recipe,
-            this.#offeredDesktopProviders(),
-            timestamp,
+          const offered = this.#offeredDesktopProviders();
+          const saved = current.type === "code" ? current.desktopRecipe : undefined;
+          const recipe = desktopRecipeWithKey(command, saved, offered, () =>
+            decodeDesktopCredentialRef(this.#uuid().toLowerCase()),
           );
+          // The policy judges the recipe before any key is stored, so a
+          // refused recipe leaves nothing in the credential store.
+          project = changeCodeProjectDesktopRecipe(current, recipe, offered, timestamp);
+          if (command.key?.action === "enter" && recipe?.credentialRef !== undefined) {
+            const stored = await this.#desktopRecipeKeys?.save(
+              recipe.credentialRef,
+              command.key.key,
+            );
+            if (stored?.status !== "saved") {
+              throw new ProjectServiceError({
+                category: "unavailable",
+                message: "The key could not be saved in this computer's credential store.",
+              });
+            }
+            enteredKey = recipe.credentialRef;
+          }
+          if (
+            saved?.credentialRef !== undefined &&
+            String(saved.credentialRef) !== String(recipe?.credentialRef ?? "")
+          ) {
+            retiredKey = saved.credentialRef;
+          }
           kind = "code-project-desktop-recipe-changed";
           eventName = "project.code-desktop-recipe-changed@1";
         } else {
@@ -757,11 +795,23 @@ export class ProjectService implements ProjectServiceApi {
         }
       }
 
-      this.#persistence.journal.append({
-        aggregate: { aggregateType: "project", aggregateId: project.id },
-        expectedVersion: command.expectedVersion,
-        events: [this.#pendingEvent(eventName, { project })],
-      });
+      try {
+        this.#persistence.journal.append({
+          aggregate: { aggregateType: "project", aggregateId: project.id },
+          expectedVersion: command.expectedVersion,
+          events: [this.#pendingEvent(eventName, { project })],
+        });
+        journaled = true;
+      } finally {
+        if (!journaled && enteredKey !== undefined) {
+          await this.#desktopRecipeKeys?.discard(enteredKey);
+        }
+      }
+      // The old key outlives the change only as long as a desktop made with
+      // it may still need it for teardown.
+      if (retiredKey !== undefined) {
+        void this.#desktopRecipeKeys?.retire(retiredKey).catch(() => undefined);
+      }
       const authoritative = this.#persistence.readProject(project.id);
       if (authoritative === undefined || authoritative.version !== project.version) {
         throw this.#unavailable();
@@ -918,6 +968,53 @@ export class ProjectService implements ProjectServiceApi {
       message: "Octant Project service is unavailable.",
     });
   }
+}
+
+/**
+ * The recipe a desktop recipe change journals. A window never names a key
+ * reference of its own: a recipe may keep only the one its Project already
+ * has. An entered key gets a fresh reference, and a removed one leaves the
+ * recipe naming none. Only a cloud provider that is not run by a signed-in
+ * daemon takes a key.
+ */
+function desktopRecipeWithKey(
+  command: Extract<
+    ReturnType<typeof decodeProjectCommand>,
+    { readonly kind: "change-code-project-desktop-recipe" }
+  >,
+  saved: DesktopRecipe | undefined,
+  offered: ReadonlyArray<LeasableDesktopProvider>,
+  mint: () => DesktopCredentialRef,
+): DesktopRecipe | null {
+  const recipe = command.recipe;
+  const invalid = (message: string) => new ProjectServiceError({ category: "invalid", message });
+  if (recipe === null) {
+    if (command.key !== undefined) throw invalid("A removed recipe has no key to change.");
+    return null;
+  }
+  if (
+    recipe.credentialRef !== undefined &&
+    String(recipe.credentialRef) !== String(saved?.credentialRef ?? "")
+  ) {
+    throw invalid("A recipe can keep only the key it already has.");
+  }
+  const { credentialRef: _kept, ...keyless } = recipe;
+  if (command.key?.action === "remove") return keyless;
+  if (command.key?.action !== "enter") return recipe;
+  const provider = offered.find(
+    (candidate) => String(candidate.providerId) === String(recipe.providerId),
+  );
+  const placement = provider?.placements?.find(
+    (candidate) => String(candidate.placementId) === String(recipe.placementId ?? ""),
+  );
+  if (
+    provider === undefined ||
+    provider.daemon === true ||
+    (placement?.locality ?? provider.locality) !== "cloud"
+  ) {
+    throw invalid("This desktop provider takes no key.");
+  }
+  return { ...keyless, credentialRef: mint() };
 }
 
 function toSummary(project: Project): ProjectSummary {

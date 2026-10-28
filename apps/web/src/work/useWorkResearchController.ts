@@ -7,6 +7,7 @@ import {
   type WorkArtifactId,
   type WorkResearchCommand,
   type WorkResearchCommandResult,
+  type HostPlatform,
   type ProjectId,
 } from "@octant/contracts";
 import type {
@@ -15,6 +16,7 @@ import type {
 } from "@octant/client-runtime/work-research-client";
 import { WorkResearchClientFailure } from "@octant/client-runtime/work-research-client";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
+import { thisComputerName, useHostPlatform } from "../platform";
 
 export type WorkResearchStatus =
   | "idle"
@@ -109,12 +111,13 @@ const FAILURE_COPY: Record<string, string> = {
  * actually hit instead of the generic sentence. The host is still the only
  * authority; this only renames the same typed denial.
  */
-const ADD_SOURCE_FAILURE_COPY: Record<string, string> = {
-  unsupported:
-    "The host could not read that file at the top level of the folder Work is bound to. Only a file that sits directly in that folder — not in a subfolder and not elsewhere on this Mac — can become a source.",
-  stale: "The file changed while it was being added. Nothing was recorded; try again.",
-  conflict: "That file is already a source on this brief, or the brief's source budget is full.",
-};
+function addSourceFailureCopy(hostPlatform: HostPlatform | undefined): Record<string, string> {
+  return {
+    unsupported: `The host could not read that file at the top level of the folder Work is bound to. Only a file that sits directly in that folder — not in a subfolder and not elsewhere on ${thisComputerName(hostPlatform)} — can become a source.`,
+    stale: "The file changed while it was being added. Nothing was recorded; try again.",
+    conflict: "That file is already a source on this brief, or the brief's source budget is full.",
+  };
+}
 
 const RECORD_EVIDENCE_FAILURE_COPY: Record<string, string> = {
   unsupported: "The host could not re-read the source file, so no evidence was recorded.",
@@ -311,6 +314,7 @@ async function removeReportArtifact(input: {
 export function useWorkResearchController(
   options: UseWorkResearchControllerOptions,
 ): WorkResearchController {
+  const hostPlatform = useHostPlatform();
   const [briefs, setBriefs] = useState<ReadonlyArray<WorkResearchBriefView>>([]);
   const [status, setStatus] = useState<WorkResearchStatus>("idle");
   const [reloadToken, setReloadToken] = useState(0);
@@ -502,9 +506,9 @@ export function useWorkResearchController(
             "The source excerpt cannot be empty or contain paths, links, addresses, or credentials.",
         };
       }
-      return await propose(command, ADD_SOURCE_FAILURE_COPY);
+      return await propose(command, addSourceFailureCopy(hostPlatform));
     },
-    [options.enabled, options.projectId, propose, resolveBrief],
+    [hostPlatform, options.enabled, options.projectId, propose, resolveBrief],
   );
 
   const revokeSource = useCallback(

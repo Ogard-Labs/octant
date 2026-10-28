@@ -8,6 +8,7 @@ import {
   decodeNativeHarnessSlotCandidate,
   decodeProviderModelId,
   EventActor,
+  NATIVE_HARNESS_SESSION_EVENT_NAMES,
   type NativeHarnessInteractionSource,
   type OctantMode,
 } from "@octant/contracts";
@@ -22,7 +23,9 @@ import {
   awaitsLeadQuestion,
   leadApprovalFor,
   listLeadApprovalRequests,
+  listLeadQuestionRequests,
   type LeadApprovalRowSources,
+  type LeadQuestionRowSources,
 } from "./leadApprovalAttention";
 import { NativeHarnessApprovalStore } from "./nativeHarnessApprovals";
 import { registerNativeHarnessEvents } from "./nativeHarnessEvents";
@@ -57,7 +60,13 @@ const child = {
 let counter = 0;
 const uuid = () => `aaaaaaaa-aaaa-4aaa-8aaa-${(++counter).toString(16).padStart(12, "0")}`;
 
-function openStores(connection: SqliteConnection, options: { readonly timeoutMs?: number } = {}) {
+function openStores(
+  connection: SqliteConnection,
+  options: {
+    readonly timeoutMs?: number;
+    readonly runsOnSshTarget?: (threadId: string) => boolean;
+  } = {},
+) {
   const sessions = new NativeHarnessSessionStore({
     journal: new Journal({
       connection,
@@ -68,6 +77,7 @@ function openStores(connection: SqliteConnection, options: { readonly timeoutMs?
     uuid,
     actor,
     clock: () => now,
+    ...(options.runsOnSshTarget === undefined ? {} : { runsOnSshTarget: options.runsOnSshTarget }),
   });
   const approvals = new NativeHarnessApprovalStore({
     sessions,
@@ -204,6 +214,51 @@ describe("a pending harness approval across a host restart", () => {
     expect(after.sessions.resume(thread)).toBe(true);
     expect(after.sessions.read(thread)?.approvals?.[0]?.status).toBe("expired");
     expect(awaitsLeadApproval(after, thread)).toBe(false);
+  });
+
+  it("withdraws what a lead on an SSH target left parked, so no answer reaches its ended turn", () => {
+    const before = fixture();
+    void before.ask({ mode: "code" });
+    // A local Code thread restarted beside it keeps its lead's approval for
+    // the person's resume.
+    void before.ask({ mode: "code", threadId: otherThread });
+    void before.questions.ask({
+      threadId: thread,
+      mode: "code",
+      lead,
+      prompt: "Which report should I update?",
+      options: ["Q3", "Q4"],
+    });
+    const approvalId = String(before.sessions.read(thread)?.approvals?.[0]?.id);
+    const questionId = String(before.sessions.read(thread)?.questions[0]?.id);
+    const settledEvents = () =>
+      before.connection
+        .prepare(
+          "SELECT COUNT(*) AS count FROM event_journal WHERE aggregate_id = ? AND event_name IN (?, ?)",
+        )
+        .get(
+          thread,
+          NATIVE_HARNESS_SESSION_EVENT_NAMES.approvalSettled,
+          NATIVE_HARNESS_SESSION_EVENT_NAMES.questionSettled,
+        ) as { readonly count: number };
+
+    const onTarget = { runsOnSshTarget: (id: string) => id === thread };
+    const after = openStores(before.connection, onTarget);
+    expect(after.sessions.read(thread)?.approvals?.[0]?.status).toBe("expired");
+    expect(after.sessions.read(thread)?.questions[0]?.status).toBe("expired");
+    expect(settledEvents().count).toBe(2);
+    expect(leadApprovalFor(after, thread)).toBeUndefined();
+    expect(awaitsLeadQuestion(after, thread)).toBe(false);
+    expect(after.approvals.decide(thread, approvalId, "approve")).toBe("already-settled");
+    expect(after.questions.answer(thread, questionId, "Q4")).toBe("already-settled");
+    expect(after.sessions.read(thread)?.approvals?.[0]?.status).toBe("expired");
+    expect(after.sessions.read(otherThread)?.approvals?.[0]?.status).toBe("pending");
+    expect(leadApprovalFor(after, otherThread)).toMatchObject({ lostInRestart: true });
+
+    // Replayed again, the withdrawal is already in the journal: nothing more is settled.
+    const again = openStores(before.connection, onTarget);
+    expect(again.sessions.read(thread)?.approvals?.[0]?.status).toBe("expired");
+    expect(settledEvents().count).toBe(2);
   });
 
   it("keeps a paused session's live approval needing the person until it is decided", async () => {
@@ -385,5 +440,131 @@ describe("the rows a window lists for a waiting harness approval", () => {
     const after = openStores(before.connection);
     const [request] = await listLeadApprovalRequests(rowSources(after), windowId);
     expect(request).toMatchObject({ kind: "lead-approval", mode: "chat", lostInRestart: true });
+  });
+});
+
+describe("the rows a window lists for a Work lead's waiting question", () => {
+  function askQuestion(
+    stores: ReturnType<typeof fixture>,
+    input: {
+      readonly mode?: OctantMode;
+      readonly child?: boolean;
+      readonly prompt?: string;
+      readonly signal?: AbortSignal;
+    } = {},
+  ) {
+    return stores.questions.ask({
+      threadId: thread,
+      mode: input.mode ?? "work",
+      projectId: projectId as never,
+      lead,
+      ...(input.child === true ? { source: child } : {}),
+      prompt: input.prompt ?? "Which report should I update?",
+      options: ["Q3", "Q4"],
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    });
+  }
+
+  function rowSources(
+    stores: ReturnType<typeof fixture> | ReturnType<typeof openStores>,
+    overrides: Partial<Pick<LeadQuestionRowSources, "threadFacts" | "authorizeThread">> = {},
+  ): LeadQuestionRowSources {
+    return {
+      questions: stores.questions,
+      sessions: stores.sessions,
+      threadFacts: () => ({ title: "Quarterly report", projectId: projectId as never }),
+      authorizeThread: ({ windowId: asked, mode }) => {
+        expect(asked).toBe(windowId);
+        expect(mode).toBe("work");
+        return true;
+      },
+      ...overrides,
+    };
+  }
+
+  it("lists the question with the thread's title and no way to answer it, until any surface answers", async () => {
+    const stores = fixture();
+    const outcome = askQuestion(stores);
+    const requests = await listLeadQuestionRequests(rowSources(stores), windowId);
+    expect(requests).toEqual([
+      {
+        mode: "work",
+        kind: "lead-question",
+        projectId,
+        threadId: thread,
+        threadTitle: "Quarterly report",
+        text: "Which report should I update?",
+        requestedAt: now,
+      },
+    ]);
+    expect(requests[0]).not.toHaveProperty("answer");
+    expect(requests[0]).not.toHaveProperty("options");
+    const pending = stores.sessions.read(thread)?.questions[0];
+    expect(stores.questions.answer(thread, String(pending?.id), "Q4")).toBe("answered");
+    await outcome;
+    expect(await listLeadQuestionRequests(rowSources(stores), windowId)).toEqual([]);
+  });
+
+  it("stops listing it when the turn is cancelled or the question expires", async () => {
+    const cancelled = fixture();
+    const controller = new AbortController();
+    const wait = askQuestion(cancelled, { signal: controller.signal });
+    expect(await listLeadQuestionRequests(rowSources(cancelled), windowId)).toHaveLength(1);
+    controller.abort();
+    await wait;
+    expect(await listLeadQuestionRequests(rowSources(cancelled), windowId)).toEqual([]);
+
+    const expired = fixture({ timeoutMs: 5 });
+    await askQuestion(expired);
+    expect(await listLeadQuestionRequests(rowSources(expired), windowId)).toEqual([]);
+  });
+
+  it("lists nothing for a subagent's question, which the subagent rows carry", async () => {
+    const stores = fixture();
+    void askQuestion(stores, { child: true });
+    expect(await listLeadQuestionRequests(rowSources(stores), windowId)).toEqual([]);
+  });
+
+  it("lists nothing for a question no turn waits on any more, as after a restart", async () => {
+    const before = fixture();
+    void askQuestion(before);
+    const after = openStores(before.connection);
+    expect(after.sessions.read(thread)?.questions[0]?.status).toBe("pending");
+    expect(await listLeadQuestionRequests(rowSources(after), windowId)).toEqual([]);
+  });
+
+  it("lists nothing for a Code or Chat lead's question, which those modes list with an answer", async () => {
+    const code = fixture();
+    void askQuestion(code, { mode: "code" });
+    expect(await listLeadQuestionRequests(rowSources(code), windowId)).toEqual([]);
+    const chat = fixture();
+    void askQuestion(chat, { mode: "chat" });
+    expect(await listLeadQuestionRequests(rowSources(chat), windowId)).toEqual([]);
+  });
+
+  it("lists nothing for a window that may not open the thread, or a thread with no title", async () => {
+    const stores = fixture();
+    void askQuestion(stores);
+    expect(
+      await listLeadQuestionRequests(
+        rowSources(stores, { authorizeThread: () => false }),
+        windowId,
+      ),
+    ).toEqual([]);
+    expect(
+      await listLeadQuestionRequests(
+        rowSources(stores, { threadFacts: () => undefined }),
+        windowId,
+      ),
+    ).toEqual([]);
+  });
+
+  it("redacts a path or URL from the question, as a Work request does", async () => {
+    const stores = fixture();
+    void askQuestion(stores, {
+      prompt: "Update /Users/me/report.md from https://example.com/x",
+    });
+    const [request] = await listLeadQuestionRequests(rowSources(stores), windowId);
+    expect(request?.text).toBe("Update [redacted path] from [redacted reference]");
   });
 });

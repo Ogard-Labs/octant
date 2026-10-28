@@ -2,6 +2,7 @@ import type {
   AgentEligibleModelRef,
   DiscoverySnapshot,
   HiddenProviderModelRef,
+  HostPlatform,
   ProviderInstance,
   ProviderInstanceId,
   ProviderDataTag,
@@ -24,7 +25,9 @@ import {
 import { CheckCircle2, ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ProviderToolVerification } from "./ProviderToolVerification";
+import { ClaudeArtifactDeliverySetting } from "./ClaudeArtifactDeliverySetting";
 import { ModelContextWindowField } from "./ModelContextWindowField";
+import { hostCredentialStore, useHostPlatform } from "../platform";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
@@ -55,6 +58,7 @@ import { ProviderApiKeyEditor, acceptsApiKeyPool } from "./ProviderApiKeyEditor"
 import {
   capabilityLabels,
   driverLabel,
+  outsideDriverHoldGuidance,
   providerRefusalGuidance,
   formatProbeTimestamp,
   incompatibleReadinessFacts,
@@ -104,6 +108,7 @@ export type ProviderSettingsListProps = Pick<
   | "onCompleteProviderAuthentication"
   | "onUpdateProviderCli"
   | "onSetEnabled"
+  | "onSetClaudeArtifactDelivery"
   | "onDataTagsChange"
   | "onModelDataTagsChange"
   | "onModelContextWindowChange"
@@ -312,6 +317,9 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         onRemove={props.onRemove}
         onRename={props.onRename}
         onSetEnabled={props.onSetEnabled}
+        {...(props.onSetClaudeArtifactDelivery === undefined
+          ? {}
+          : { onSetClaudeArtifactDelivery: props.onSetClaudeArtifactDelivery })}
         onDataTagsChange={props.onDataTagsChange}
         onModelDataTagsChange={props.onModelDataTagsChange}
         {...(props.onModelContextWindowChange === undefined
@@ -625,6 +633,7 @@ interface ProviderRowProps {
   readonly onCompleteProviderAuthentication: ProviderSettingsViewProps["onCompleteProviderAuthentication"];
   readonly onUpdateProviderCli?: ProviderSettingsViewProps["onUpdateProviderCli"];
   readonly onSetEnabled: ProviderSettingsViewProps["onSetEnabled"];
+  readonly onSetClaudeArtifactDelivery?: ProviderSettingsViewProps["onSetClaudeArtifactDelivery"];
   readonly onDataTagsChange: ProviderSettingsViewProps["onDataTagsChange"];
   readonly onModelDataTagsChange: ProviderSettingsViewProps["onModelDataTagsChange"];
   readonly onModelContextWindowChange?: ProviderSettingsViewProps["onModelContextWindowChange"];
@@ -637,6 +646,7 @@ interface ProviderRowProps {
 }
 
 function ProviderRow(props: ProviderRowProps) {
+  const hostPlatform = useHostPlatform();
   const [configurationOpen, setConfigurationOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(props.needsAttention);
   const [renameSaved, setRenameSaved] = useState(false);
@@ -730,6 +740,7 @@ function ProviderRow(props: ProviderRowProps) {
     props.instance,
     readiness,
     props.onUpdateProviderCli !== undefined && supportsProviderCliUpdate(props.instance.driverKind),
+    hostPlatform,
     props.observed,
   );
   const hasSetupGuidance =
@@ -876,7 +887,12 @@ function ProviderRow(props: ProviderRowProps) {
           checked={props.instance.enabled}
           disabled={disabled || enableBlocked}
           {...(enableBlocked
-            ? { disabledReason: providerDetectionBlockedReason(props.discoverySnapshot) }
+            ? {
+                disabledReason: providerDetectionBlockedReason(
+                  props.discoverySnapshot,
+                  hostPlatform,
+                ),
+              }
             : {})}
           label={`Enable ${name}`}
           onCheckedChange={() => void toggleEnabled()}
@@ -912,12 +928,20 @@ function ProviderRow(props: ProviderRowProps) {
                 ? setupGuidance
                 : null}
               {browserClaudeKeySetup ? (
+                // A host that has said which it is gets only its own route;
+                // one that has not yet gets both rather than a guess.
                 <p className="provider-card__guidance">
-                  On the Linux host, run{" "}
-                  <code>octant provider key set &quot;Profile name&quot;</code> using this
-                  profile&apos;s exact name, then check the connection. On macOS, open this profile
-                  in Octant desktop to add or replace its key. This browser cannot save or remove
-                  credentials.
+                  {hostPlatform === "darwin" ? null : (
+                    <>
+                      On the Linux host, run{" "}
+                      <code>octant provider key set &quot;Profile name&quot;</code> using this
+                      profile&apos;s exact name, then check the connection.{" "}
+                    </>
+                  )}
+                  {hostPlatform === "linux"
+                    ? null
+                    : "On macOS, open this profile in Octant desktop to add or replace its key. "}
+                  This browser cannot save or remove credentials.
                 </p>
               ) : null}
               {usesCredential && !props.credentialManagementAvailable && !browserClaudeKeySetup ? (
@@ -928,7 +952,8 @@ function ProviderRow(props: ProviderRowProps) {
               ) : null}
               {usesCredential ? (
                 <p className="provider-card__credential-status">
-                  Credential: <strong>{credentialStatusLabel(credential.status)}</strong>
+                  Credential:{" "}
+                  <strong>{credentialStatusLabel(credential.status, hostPlatform)}</strong>
                 </p>
               ) : null}
               {usesCredential && acceptsApiKeyPool(props.instance) && !browserClaudeKeySetup ? (
@@ -1572,6 +1597,18 @@ function ProviderRow(props: ProviderRowProps) {
                     )}
                   </div>
                 )}
+                {props.instance.driverKind !== "claude" ||
+                props.onSetClaudeArtifactDelivery === undefined ? null : (
+                  <ClaudeArtifactDeliverySetting
+                    disabled={disabled}
+                    instance={props.instance}
+                    {...(props.observed === undefined ? {} : { observed: props.observed })}
+                    onChange={(enabled) =>
+                      props.onSetClaudeArtifactDelivery?.(props.instance.id, enabled) ??
+                      Promise.resolve(false)
+                    }
+                  />
+                )}
                 {acpInstance === undefined ? null : (
                   <div
                     className={`provider-card__facts provider-card__facts--${acpInstance.driverKind}`}
@@ -1919,7 +1956,10 @@ function providerBinaryPath(instance: ProviderInstance): string | undefined {
   return "binaryPath" in instance.configuration ? instance.configuration.binaryPath : undefined;
 }
 
-function authenticationGuidance(instance: ProviderInstance): string {
+function authenticationGuidance(
+  instance: ProviderInstance,
+  hostPlatform: HostPlatform | undefined,
+): string {
   // An endpoint a sign-in created takes no key: telling its owner to add one
   // pointed at a field its configuration does not show.
   if (
@@ -1947,12 +1987,12 @@ function authenticationGuidance(instance: ProviderInstance): string {
       return "Install and authenticate Oh My Pi (`omp`), then check the connection again. Octant treats Oh My Pi as distinct from Pi.";
     case "claude":
       return instance.configuration.authentication === "api-key"
-        ? "Add or replace the Anthropic API key in the Octant host. It remains write-only and is stored in Keychain, then check the connection again."
+        ? `Add or replace the Anthropic API key in the Octant host. It remains write-only and is stored in ${hostCredentialStore(hostPlatform)}, then check the connection again.`
         : "Authenticate with the official Claude Code app or CLI, then check the connection again.";
     case "anthropic-compatible":
-      return "Add or replace the Anthropic API key in the Octant host. It remains write-only and is stored in Keychain, then check the connection again.";
+      return `Add or replace the Anthropic API key in the Octant host. It remains write-only and is stored in ${hostCredentialStore(hostPlatform)}, then check the connection again.`;
     case "azure-foundry":
-      return "Add or replace the Azure AI Foundry API key in the Octant host. It is stored in Keychain and sent as the api-key header, then check the connection again.";
+      return `Add or replace the Azure AI Foundry API key in the Octant host. It is stored in ${hostCredentialStore(hostPlatform)} and sent as the api-key header, then check the connection again.`;
     default:
       return "Add a bearer API key in the Octant host, then check the connection again.";
   }
@@ -1962,18 +2002,28 @@ function guidance(
   instance: ProviderInstance,
   readiness: ProviderObservedState["readiness"] | undefined,
   canUpdateCli: boolean,
+  hostPlatform: HostPlatform | undefined,
   observed?: ProviderObservedState,
 ) {
   const driverKind = instance.driverKind;
   const label = driverLabel(driverKind);
   const message = observed?.message;
+  const held = outsideDriverHoldGuidance(instance);
+  if (held !== undefined) {
+    return (
+      <>
+        <p className="provider-card__guidance">{held.reason}</p>
+        <p className="provider-card__guidance">{held.nextStep}</p>
+      </>
+    );
+  }
   if (readiness === "unauthenticated") {
     const refusal = providerRefusalGuidance(instance, observed);
     return (
       <>
         {refusal === undefined ? null : <p className="provider-card__guidance">{refusal.reason}</p>}
         <p className="provider-card__guidance">
-          {refusal?.nextStep ?? authenticationGuidance(instance)}
+          {refusal?.nextStep ?? authenticationGuidance(instance, hostPlatform)}
         </p>
       </>
     );

@@ -81,6 +81,7 @@ import type {
   OpenCodeProviderInstance,
   OutsideHarnessEndpointProviderConfiguration,
   OutsideHarnessEndpointProviderInstance,
+  OutsideProviderDriverReference,
 } from "@octant/contracts/providers";
 
 export type ProviderPolicyRejectionCode =
@@ -1137,6 +1138,73 @@ export function createOutsideHarnessEndpointProvider(
   };
 }
 
+/**
+ * Moves a provider to the digest its person trusted for the same driver. It is
+ * the one change an outside provider takes after it is added, and the host
+ * makes it only once the person has trusted the new selection; the address,
+ * key placement, listed models, and switch stay as the person set them. A
+ * reference to another package or component is refused: that is a different
+ * driver, which takes a new provider.
+ */
+export function rebindOutsideHarnessEndpointDriver(
+  provider: OutsideHarnessEndpointProviderInstance,
+  driver: OutsideProviderDriverReference,
+  updatedAt: UtcTimestamp,
+): OutsideHarnessEndpointProviderInstance {
+  const bound = provider.configuration.driver;
+  if (
+    String(bound.extensionId) !== String(driver.extensionId) ||
+    String(bound.packageId) !== String(driver.packageId) ||
+    String(bound.componentId) !== String(driver.componentId)
+  ) {
+    reject("invalid-configuration", "A provider moves only to another version of its own driver.");
+  }
+  // A crash-limit hold belongs to the bytes that crashed: it stays while the
+  // provider binds that digest and is left behind when it binds another.
+  const { driverQuarantine, ...rest } = provider;
+  return {
+    ...rest,
+    configuration: { ...provider.configuration, driver },
+    ...(driverQuarantine !== undefined && String(driverQuarantine.digest) === String(driver.digest)
+      ? { driverQuarantine }
+      : {}),
+    version: nextVersion(provider.version),
+    updatedAt,
+  };
+}
+
+/**
+ * Holds a provider's driver at the digest it binds because it crashed past
+ * its limit. Returns the provider unchanged when it is already held there, so
+ * a second report of the same crash loop journals nothing.
+ */
+export function quarantineOutsideHarnessEndpointDriver(
+  provider: OutsideHarnessEndpointProviderInstance,
+  quarantinedAt: UtcTimestamp,
+): OutsideHarnessEndpointProviderInstance {
+  if (isOutsideDriverQuarantined(provider)) return provider;
+  return {
+    ...provider,
+    driverQuarantine: {
+      reason: "crash-limit",
+      digest: provider.configuration.driver.digest,
+      quarantinedAt,
+    },
+    version: nextVersion(provider.version),
+    updatedAt: quarantinedAt,
+  };
+}
+
+/** Whether the provider's driver is held at the digest the provider binds now. */
+export function isOutsideDriverQuarantined(
+  provider: OutsideHarnessEndpointProviderInstance,
+): boolean {
+  return (
+    provider.driverQuarantine !== undefined &&
+    String(provider.driverQuarantine.digest) === String(provider.configuration.driver.digest)
+  );
+}
+
 interface CreateOpenAiCompatibleProviderInput {
   readonly id: ProviderInstanceId;
   readonly displayName: string;
@@ -1756,9 +1824,40 @@ export function changeClaudeConfiguration(
   ) {
     reject("active-sessions", "Stop active sessions before reconfiguring this provider.");
   }
+  const normalized = normalizeClaudeConfiguration(configuration);
+  // Artifact delivery is the person's own switch, never part of an account
+  // edit. It holds only for a claude.ai sign-in: an API key has no claude.ai
+  // account to publish to, so moving to one turns it off.
+  const keepsArtifactDelivery =
+    current.configuration.artifactDelivery === true && normalized.authentication === "subscription";
   return {
     ...current,
-    configuration: normalizeClaudeConfiguration(configuration),
+    configuration: keepsArtifactDelivery ? { ...normalized, artifactDelivery: true } : normalized,
+    version: nextVersion(current.version),
+    updatedAt: input.updatedAt,
+  };
+}
+
+/**
+ * Turns delivering documents as Claude artifacts on or off. Turning it on
+ * needs a claude.ai sign-in, the only account Claude's Artifact tool can
+ * publish to. It changes no process input, so a running session is kept: the
+ * driver reads the switch again at every Artifact call.
+ */
+export function setClaudeArtifactDelivery(
+  current: ClaudeProviderInstance,
+  input: { readonly enabled: boolean; readonly updatedAt: UtcTimestamp },
+): ClaudeProviderInstance {
+  if (input.enabled && current.configuration.authentication !== "subscription") {
+    reject(
+      "invalid-authentication",
+      "Claude artifacts need a claude.ai sign-in; an API-key account cannot publish them.",
+    );
+  }
+  const { artifactDelivery: _previous, ...rest } = current.configuration;
+  return {
+    ...current,
+    configuration: input.enabled ? { ...rest, artifactDelivery: true } : rest,
     version: nextVersion(current.version),
     updatedAt: input.updatedAt,
   };

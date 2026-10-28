@@ -50,39 +50,16 @@ vi.mock("@xterm/xterm", () => ({
   }),
 }));
 
+import { resolveTerminalColorProjection } from "@octant/theme/terminal-colors";
+import { DEFAULT_DARK_TOKENS, DEFAULT_LIGHT_TOKENS } from "@octant/theme/tokens";
 import { mount, withPromptIconFonts } from "./xtermRuntime";
 
-const THEME_ROLES: Readonly<Record<string, string>> = {
-  "text-primary": "#f2f1ed",
-  workspace: "#14130f",
-  "app-background": "#0e0d0a",
-  "text-muted": "#787773",
-  selection: "#353430",
-  "palette-red": "#d95778",
-  "palette-green": "#93cb58",
-  "palette-yellow": "#d9a441",
-  "palette-blue": "#74b0f3",
-  "palette-purple": "#ab98f2",
-  "palette-teal": "#45c8bc",
-};
-
-function publishThemeRoles(): void {
-  for (const [role, color] of Object.entries(THEME_ROLES)) {
-    document.documentElement.style.setProperty(`--octant-${role}`, color);
-  }
-}
-
-function clearThemeRoles(): void {
-  for (const role of Object.keys(THEME_ROLES)) {
-    document.documentElement.style.removeProperty(`--octant-${role}`);
-  }
-  delete document.documentElement.dataset.octantThemeMode;
-}
+const darkColors = resolveTerminalColorProjection({ mode: "dark", tokens: DEFAULT_DARK_TOKENS });
+const lightColors = resolveTerminalColorProjection({ mode: "light", tokens: DEFAULT_LIGHT_TOKENS });
 
 describe("Xterm runtime", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    clearThemeRoles();
   });
 
   it("paints on the GPU and releases it with the session", () => {
@@ -217,10 +194,9 @@ describe("Xterm runtime", () => {
     session.dispose();
   });
 
-  it("paints the terminal with the resolved theme roles instead of xterm's stock palette", () => {
-    publishThemeRoles();
-    document.documentElement.dataset.octantThemeMode = "dark";
+  it("paints the terminal from the theme's projection instead of xterm's stock palette", () => {
     const session = mount(document.createElement("div"), {
+      colors: darkColors,
       interactive: false,
       onData: vi.fn(),
       onResize: vi.fn(),
@@ -229,36 +205,139 @@ describe("Xterm runtime", () => {
 
     expect(mocks.terminal).toHaveBeenCalledWith(
       expect.objectContaining({
+        minimumContrastRatio: 4.5,
         theme: expect.objectContaining({
-          background: "#14130f",
-          foreground: "#f2f1ed",
-          cursor: "#f2f1ed",
-          selectionBackground: "#353430",
+          background: "#1a1a1a",
+          foreground: "#f5f5f7",
+          black: "#151515",
           red: "#d95778",
-          green: "#93cb58",
-          yellow: "#d9a441",
-          blue: "#74b0f3",
-          magenta: "#ab98f2",
-          cyan: "#45c8bc",
-          // Dark mode: black is the ground family, white the ink.
-          black: "#0e0d0a",
-          white: "#f2f1ed",
-          // No bright set is published, so bright variants reuse the hues.
-          brightRed: "#d95778",
-          brightBlack: "#787773",
+          brightBlack: "#949494",
         }),
       }),
     );
     session.dispose();
   });
 
-  it("keeps ANSI black dark and white light when the resolved mode is light", () => {
-    publishThemeRoles();
-    // In light mode the ink role resolves dark and the ground light, so the
-    // ANSI black/white pair must swap sources to keep black dark.
-    document.documentElement.style.setProperty("--octant-text-primary", "#26251e");
-    document.documentElement.style.setProperty("--octant-app-background", "#edece7");
-    document.documentElement.dataset.octantThemeMode = "light";
+  it("repaints an open terminal on a live light/dark or contrast switch", () => {
+    const session = mount(document.createElement("div"), {
+      colors: darkColors,
+      interactive: false,
+      onData: vi.fn(),
+      onResize: vi.fn(),
+      output: "",
+    });
+
+    session.setColors?.(
+      resolveTerminalColorProjection(
+        { mode: "light", tokens: DEFAULT_LIGHT_TOKENS },
+        { increasedContrast: true },
+      ),
+    );
+    expect(mocks.terminalOptions).toMatchObject({
+      minimumContrastRatio: 7,
+      theme: expect.objectContaining({
+        background: "#ffffff",
+        foreground: "#0e0f11",
+        black: "#0e0f11",
+        white: "#fafaf9",
+      }),
+    });
+    expect(mocks.terminal).toHaveBeenCalledOnce();
+    session.dispose();
+  });
+
+  it("keeps the Glass plate under the terminal when the theme switches live", () => {
+    const shell = document.createElement("div");
+    shell.className = "shell--material-translucent";
+    const element = document.createElement("div");
+    shell.append(element);
+    const session = mount(element, {
+      colors: darkColors,
+      interactive: false,
+      onData: vi.fn(),
+      onResize: vi.fn(),
+      output: "",
+    });
+
+    session.setColors?.(lightColors);
+    // The light ground with 12% of the light ink, not the bare ground.
+    expect(mocks.terminalOptions).toMatchObject({
+      theme: expect.objectContaining({ background: "#e3e3e3", cursorAccent: "#e3e3e3" }),
+    });
+    session.dispose();
+  });
+
+  it("moves an open terminal onto the Glass plate and back when the sidebar material changes", async () => {
+    const shell = document.createElement("div");
+    shell.className = "shell shell--material-opaque";
+    const element = document.createElement("div");
+    shell.append(element);
+    document.body.append(shell);
+    const session = mount(element, {
+      colors: darkColors,
+      interactive: false,
+      onData: vi.fn(),
+      onResize: vi.fn(),
+      output: "",
+    });
+    expect(mocks.terminal).toHaveBeenCalledWith(
+      expect.objectContaining({ theme: expect.objectContaining({ background: "#1a1a1a" }) }),
+    );
+
+    // The host answers after mount: the shell turns Glass with no theme change.
+    shell.className = "shell shell--material-translucent";
+    await Promise.resolve();
+    expect(mocks.terminalOptions).toMatchObject({
+      theme: expect.objectContaining({ background: "#343435", cursorAccent: "#343435" }),
+    });
+
+    // The live colours are kept: a later material switch does not bring back
+    // the theme the terminal was mounted with.
+    session.setColors?.(lightColors);
+    shell.className = "shell shell--material-opaque";
+    await Promise.resolve();
+    expect(mocks.terminalOptions).toMatchObject({
+      theme: expect.objectContaining({ background: "#ffffff", cursorAccent: "#ffffff" }),
+    });
+
+    session.dispose();
+    shell.className = "shell shell--material-translucent";
+    await Promise.resolve();
+    expect(mocks.terminalOptions).toMatchObject({
+      theme: expect.objectContaining({ background: "#ffffff" }),
+    });
+    shell.remove();
+  });
+
+  it("drops the Glass plate from an open terminal when reduced transparency is turned on", async () => {
+    const shell = document.createElement("div");
+    shell.className = "shell shell--material-translucent";
+    const element = document.createElement("div");
+    shell.append(element);
+    document.body.append(shell);
+    const session = mount(element, {
+      colors: darkColors,
+      interactive: false,
+      onData: vi.fn(),
+      onResize: vi.fn(),
+      output: "",
+    });
+    session.setColors?.(darkColors);
+    expect(mocks.terminalOptions).toMatchObject({
+      theme: expect.objectContaining({ background: "#343435" }),
+    });
+
+    document.documentElement.dataset.octantReducedTransparency = "true";
+    await Promise.resolve();
+    expect(mocks.terminalOptions).toMatchObject({
+      theme: expect.objectContaining({ background: "#1a1a1a" }),
+    });
+    session.dispose();
+    delete document.documentElement.dataset.octantReducedTransparency;
+    shell.remove();
+  });
+
+  it("paints the stylesheet's dark default when no theme reaches the terminal", () => {
     const session = mount(document.createElement("div"), {
       interactive: false,
       onData: vi.fn(),
@@ -268,23 +347,9 @@ describe("Xterm runtime", () => {
 
     expect(mocks.terminal).toHaveBeenCalledWith(
       expect.objectContaining({
-        theme: expect.objectContaining({ black: "#26251e", white: "#edece7" }),
+        theme: expect.objectContaining({ background: "#1a1a1a", foreground: "#f5f5f7" }),
       }),
     );
-    session.dispose();
-  });
-
-  it("leaves xterm's own palette in place when the document resolves no theme roles", () => {
-    const session = mount(document.createElement("div"), {
-      interactive: false,
-      onData: vi.fn(),
-      onResize: vi.fn(),
-      output: "",
-    });
-
-    const options: unknown = mocks.terminal.mock.calls[0]?.[0];
-    expect(options).toBeDefined();
-    expect(options).not.toHaveProperty("theme");
     session.dispose();
   });
 });

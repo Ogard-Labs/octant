@@ -1159,7 +1159,12 @@ describe("Compact session", () => {
     expect(screen.queryByRole("dialog", { name: "Compact this session?" })).not.toBeInTheDocument();
   });
 
-  it.each(["runtime-cannot-compact", "runtime-version-unsupported", "remote-client"] as const)(
+  it.each([
+    "runtime-cannot-compact",
+    "runtime-version-unsupported",
+    "runs-on-ssh-target",
+    "remote-client",
+  ] as const)(
     "leaves the button out when the host will never compact for this window (%s)",
     async (reason) => {
       const user = userEvent.setup();
@@ -1189,6 +1194,24 @@ describe("Compact session", () => {
     expect(
       screen.getByText(
         "This runtime keeps its own history and Octant has no compaction request for it, so this session can't be compacted.",
+      ),
+    ).toBeVisible();
+  });
+
+  it("says a thread on an SSH target cannot be compacted there yet", async () => {
+    const user = userEvent.setup();
+    render(
+      <CompactionHarness
+        controller={controllerFor({
+          compaction: { status: "refused", reason: "runs-on-ssh-target" },
+        })}
+      />,
+    );
+    await openPopover(user);
+
+    expect(
+      screen.getByText(
+        "This thread runs on an SSH target, and Octant doesn't compact a session there yet.",
       ),
     ).toBeVisible();
   });

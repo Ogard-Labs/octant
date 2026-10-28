@@ -9917,6 +9917,61 @@ describe("ChatService streamed delta bodies", () => {
     expect(plain.length).toBe(asked.length);
     expect(plain.every((frame) => frame.contents === undefined)).toBe(true);
   });
+
+  it("replays a run of streamed deltas to a strict reader as one frame, not one per delta", async () => {
+    const deltas = ["one ", "two ", "three ", "four ", "five."];
+    const { service } = openFixture({ driver: streamedReplyDriver(deltas) });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Streamed burst",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const sent = await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Hello",
+    });
+    if (sent.kind !== "turn-created") throw new Error("Expected turn-created result.");
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts[0]?.outcome === "completed",
+    );
+
+    const strict = [];
+    for await (const frame of service.subscribe(created.thread.id, 0, undefined, {
+      contents: true,
+    })) {
+      strict.push(frame);
+    }
+    expect(strict.filter((frame) => frame.event.kind === "attempt-response-appended")).toEqual([]);
+    const attempts = strict.flatMap((frame) =>
+      frame.event.kind === "attempt-updated" ? [frame.event.attempt] : [],
+    );
+    expect(attempts.map((attempt) => attempt.outcome)).toEqual([
+      "streaming",
+      "completed",
+      "completed",
+    ]);
+    expect(attempts.map((attempt) => attempt.responseRefs.length)).toEqual([
+      1,
+      deltas.length,
+      deltas.length,
+    ]);
+
+    const optedIn = [];
+    for await (const frame of service.subscribe(created.thread.id, 0, undefined, {
+      contents: true,
+      appended: true,
+    })) {
+      optedIn.push(frame);
+    }
+    expect(
+      optedIn.flatMap((frame) =>
+        frame.event.kind === "attempt-response-appended" ? [frame.contents?.[0]?.body] : [],
+      ),
+    ).toEqual(deltas.slice(1));
+  });
 });
 
 describe("compacting a Chat session", () => {

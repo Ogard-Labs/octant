@@ -473,7 +473,7 @@
   height: 24px;
   padding: 0 var(--oct-space-2);
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   white-space: nowrap;
 }
 

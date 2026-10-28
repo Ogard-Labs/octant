@@ -17,6 +17,7 @@ import {
   ThreadProviderHandoff,
 } from "./providers";
 import { UsageResumeThreadState } from "./usageResume";
+import { ThreadDocumentDelivery } from "./threadToolSteps";
 import { ThreadBoardPullRequestSummaries } from "./threadBoardPullRequests";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -285,6 +286,13 @@ export const CodeThread = Schema.Struct({
    * this thread's own stream; absent means no recovery is pending.
    */
   usageResume: Schema.optional(UsageResumeThreadState),
+  /**
+   * How this thread delivers documents: absent until the person chooses (it
+   * delivers Canvases meanwhile). `native-artifacts` is the person's choice to
+   * publish with the provider's own artifact tool instead; see
+   * {@link ThreadDocumentDelivery}.
+   */
+  documentDelivery: Schema.optional(ThreadDocumentDelivery),
   /** Completed and snoozed rest, shared with Chat and Work; see {@link ThreadRestFields}. */
   ...ThreadRestFields,
   lifecycle: CodeThreadLifecycle,
@@ -707,6 +715,17 @@ export const CodeCommand = Schema.Union(
     providerInstanceId: ProviderInstanceId,
     modelId: ProviderModelId,
     modelOptionValues: Schema.optional(ProviderModelOptionValues),
+  }).annotations(strict),
+  /**
+   * Chooses how this thread delivers documents. Turning on `native-artifacts`
+   * enables the provider runtime's usage telemetry for the thread's turns, so
+   * only a person at a window on this host may choose it; a paired device may
+   * choose Canvas.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("change-code-thread-document-delivery"),
+    ...CodeThreadCommandFields,
+    documentDelivery: ThreadDocumentDelivery,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-code-thread-working-directory"),

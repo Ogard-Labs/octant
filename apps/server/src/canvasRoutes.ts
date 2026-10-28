@@ -1,4 +1,5 @@
 import { decodeCanvasDocumentRecipeCatalog } from "@octant/contracts/canvas-skill";
+import { importCanvasHtmlPage } from "@octant/domain";
 import {
   type CanvasId,
   decodeCanvasActionResult,
@@ -6,6 +7,11 @@ import {
   decodeCanvasDesignAssetsOutcome,
   decodeCanvasDesignRunOutcome,
   decodeCanvasDesignRunRequest,
+  decodePublishedSnapshotRunOutcome,
+  decodePublishedSnapshotRunRequest,
+  type PublishedSnapshotRunOutcome,
+  type PublishedSnapshotRunRequest,
+  type ThreadPublishedSnapshot,
   decodeCanvasGetOutcome,
   decodeCanvasHistoryOutcome,
   decodeCanvasId,
@@ -13,6 +19,8 @@ import {
   decodeCanvasOriginThreadId,
   decodeCanvasThreadReferenceCardsOutcome,
   decodeCanvasCreateResult,
+  decodeCanvasHtmlImportResult,
+  CANVAS_HTML_IMPORT_MAX_BYTES,
   decodeCanvasCommentCommandResult,
   decodeCanvasCommentsOutcome,
   decodeCanvasDiagramLayoutReviseResult,
@@ -43,6 +51,13 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import {
+  CANVAS_HTML_FILE_MAX_BYTES,
+  decodeCanvasHtmlFileRequest,
+  decodeCanvasHtmlFileResult,
+  type CanvasHtmlFileRequest,
+  type CanvasHtmlFileResult,
+} from "@octant/contracts/canvas-export";
+import {
   decodeCanvasExportFolderCommand,
   decodeCanvasExportFolderResult,
   decodeCanvasExportFolderView,
@@ -51,9 +66,11 @@ import {
 } from "@octant/contracts/canvas-export-folder";
 import {
   authorizeCanvasInventoryAccess,
+  canvasExportPlannedName,
   filterCanvasInventoryEntries,
   projectInventoryEntryFromProjection,
 } from "@octant/domain";
+import { renderCanvasHtmlFile } from "./canvas/artifactDocumentRender";
 import type { CanvasService } from "./canvas/canvasService";
 import type { CanvasCommentService } from "./canvas/canvasCommentService";
 import type { CanvasShareService } from "./canvas/canvasShareService";
@@ -139,6 +156,14 @@ export interface CanvasRouteDependencies {
    * not serve them, and a running design then answers that it cannot run here.
    */
   readonly designRunTickets?: CanvasDesignRunTickets;
+  /**
+   * The host's snapshot of a page a Work or Code thread published, when the
+   * window may read that thread. Absent leaves published pages unrunnable.
+   */
+  readonly findPublishedSnapshot?: (
+    windowId: WindowId,
+    request: PublishedSnapshotRunRequest,
+  ) => Promise<ThreadPublishedSnapshot | undefined>;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly projects: Pick<ProjectService, "bootstrap">;
   readonly activeContextResolver: (
@@ -198,6 +223,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
       route !== "get" &&
       route !== "design-assets" &&
       route !== "design-run" &&
+      route !== "published-snapshot-run" &&
       route !== "design-page" &&
       route !== "history" &&
       route !== "revise" &&
@@ -210,6 +236,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
       route !== "action" &&
       route !== "action-cancel" &&
       route !== "create" &&
+      route !== "import-html" &&
       route !== "recipes" &&
       route !== "share" &&
       route !== "share-revoke" &&
@@ -218,6 +245,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
       route !== "export-prepare" &&
       route !== "export-decide" &&
       route !== "export-folder" &&
+      route !== "html-file" &&
       route !== "public-shares" &&
       route !== "public-share-revoke" &&
       route !== "public-link-settings" &&
@@ -357,6 +385,23 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         }
         const outcome = await issueDesignRun(dependencies, authenticatedWindowId, parsed);
         return jsonResponse(decodeCanvasDesignRunOutcome(outcome), 200, origin);
+      }
+
+      if (route === "published-snapshot-run" && request.method === "POST") {
+        const body = await readJson(request);
+        let parsed: PublishedSnapshotRunRequest;
+        try {
+          if (body.kind !== "ok") throw new Error("invalid");
+          parsed = decodePublishedSnapshotRunRequest(body.value);
+        } catch {
+          return failureResponse("Published page run request is invalid.", 400, origin);
+        }
+        const outcome = await issuePublishedSnapshotRun(
+          dependencies,
+          authenticatedWindowId,
+          parsed,
+        );
+        return jsonResponse(decodePublishedSnapshotRunOutcome(outcome), 200, origin);
       }
 
       if (route === "history" && request.method === "GET") {
@@ -872,6 +917,63 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         return jsonResponse(decodeCanvasCreateResult(result), 200, origin);
       }
 
+      // A person's page, imported into a new Canvas. It is a create in every
+      // respect the window's authority sees: the same context, the same Project
+      // check, and no route a create does not have. The page is read and
+      // bounded on the host before anything is journaled.
+      if (route === "import-html" && request.method === "POST") {
+        const body = await readJson(request);
+        if (body.kind === "too-large") {
+          return jsonResponse(
+            decodeCanvasHtmlImportResult({
+              kind: "refused",
+              reason: "too-large",
+              message: `This page is larger than ${String(CANVAS_HTML_IMPORT_MAX_BYTES / 1024)} KB, the most Octant imports.`,
+            }),
+            200,
+            origin,
+          );
+        }
+        if (body.kind === "invalid") {
+          return jsonResponse(
+            decodeCanvasHtmlImportResult({
+              kind: "denied",
+              denialCode: "malformed-request",
+              message: "Canvas import request is malformed.",
+            }),
+            200,
+            origin,
+          );
+        }
+        const context = await resolveCreateContext(dependencies, authenticatedWindowId);
+        if (context.kind !== "ok") {
+          return jsonResponse(
+            decodeCanvasHtmlImportResult({
+              kind: "denied",
+              denialCode: context.kind,
+              message:
+                context.kind === "unavailable"
+                  ? context.reason
+                  : "Canvas create is not authorized in this workspace.",
+            }),
+            200,
+            origin,
+          );
+        }
+        const result = dependencies.canvasService.importHtml(
+          body.value,
+          {
+            mode: context.activeContext.mode,
+            projectId:
+              context.activeContext.projectId === null
+                ? null
+                : String(context.activeContext.projectId),
+          },
+          context.project,
+        );
+        return jsonResponse(decodeCanvasHtmlImportResult(result), 200, origin);
+      }
+
       if (route === "share" && request.method === "GET") {
         const shareService = dependencies.canvasShareService;
         if (shareService === undefined) {
@@ -1041,6 +1143,32 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         );
       }
 
+      if (route === "html-file" && request.method === "POST") {
+        const body = await readJson(request);
+        let parsed: CanvasHtmlFileRequest;
+        try {
+          if (body.kind !== "ok") throw new Error("invalid");
+          parsed = decodeCanvasHtmlFileRequest(body.value);
+        } catch {
+          return jsonResponse(
+            decodeCanvasHtmlFileResult({
+              kind: "refused",
+              code: "malformed",
+              message: "Canvas HTML file request is malformed.",
+            }),
+            200,
+            origin,
+          );
+        }
+        return jsonResponse(
+          decodeCanvasHtmlFileResult(
+            await renderCanvasHtmlFileForWindow(dependencies, authenticatedWindowId, parsed),
+          ),
+          200,
+          origin,
+        );
+      }
+
       if (route === "export-targets" && request.method === "GET") {
         const exportService = dependencies.canvasExportService;
         if (exportService === undefined) {
@@ -1186,7 +1314,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
               decodeCanvasPublicLinkSettingsResult({
                 kind: "canvas-public-link-settings-refused",
                 reason: "unauthorized",
-                message: "Public link settings can be changed only from a window on this Mac.",
+                message: "Public link settings can be changed only from a window on this computer.",
               }),
               200,
               origin,
@@ -1245,7 +1373,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
           if (principal.kind !== "local-window") {
             return refusedRevoke(
               "unauthorized",
-              "A public link can be revoked only from a window on this Mac.",
+              "A public link can be revoked only from a window on this computer.",
             );
           }
           const body = await readJson(request);
@@ -1745,6 +1873,65 @@ async function resolveDesignAssetsForWindow(
 }
 
 /**
+ * The Canvas as one HTML file for this reader. It is a read: the same window
+ * authorization `get` runs, for the version the reader is drawing, and each
+ * design's declared images resolve under that version's own provenance, as
+ * they do when the reader draws the design. Nothing is sent anywhere and
+ * nothing is journaled; the file goes back to the window that asked.
+ */
+async function renderCanvasHtmlFileForWindow(
+  dependencies: CanvasRouteDependencies,
+  windowId: WindowId,
+  input: CanvasHtmlFileRequest,
+): Promise<CanvasHtmlFileResult> {
+  const read = await resolveCanvasGet(dependencies, windowId, input.canvasId, input.versionId);
+  if (read.kind === "unauthorized") {
+    return {
+      kind: "refused",
+      code: "unauthorized",
+      message: "This Canvas is not available to this window.",
+    };
+  }
+  if (read.kind !== "ready") {
+    return {
+      kind: "refused",
+      code: "unavailable",
+      message: "Canvas is unavailable. Reopen it from the Project.",
+    };
+  }
+  const definition = read.version.definition;
+  const designAssets = new Map<string, ReadonlyArray<CanvasDesignAssetResolution>>();
+  const resolve = dependencies.resolveDesignAssets;
+  if (resolve !== undefined) {
+    for (const block of definition.blocks) {
+      if (block.kind !== "design" || (block.assets ?? []).length === 0) continue;
+      designAssets.set(String(block.blockId), await resolve(block, definition.provenance));
+    }
+  }
+  const rendered = renderCanvasHtmlFile(definition, {
+    frames: "as-written",
+    ...(input.frameTheme === undefined ? {} : { frameTheme: input.frameTheme }),
+    designAssets,
+  });
+  if (rendered.kind === "too-large") {
+    return {
+      kind: "refused",
+      code: "too-large",
+      message: `This Canvas is too large for one HTML file (over ${String(CANVAS_HTML_FILE_MAX_BYTES / (1024 * 1024))} MB).`,
+    };
+  }
+  return {
+    kind: "ready",
+    canvasId: input.canvasId,
+    versionId: read.version.versionId,
+    fileName: canvasExportPlannedName(rendered.title, "html"),
+    html: rendered.body,
+    writesDesignMarkup: rendered.writesDesignMarkup,
+    imagesLeftOut: rendered.imagesLeftOut,
+  };
+}
+
+/**
  * A ticket for one running design's page. Issuing one runs the same read
  * check `get` does, for the version the reader is drawing, so a window or a
  * paired device can run only a design it could already read. The design must
@@ -1796,6 +1983,48 @@ async function issueDesignRun(
     blockId: block.blockId,
     page: canvasDesignPagePath(ticket),
   };
+}
+
+/**
+ * A running page for the snapshot of a page a thread published. The snapshot
+ * is read from the thread's own journal under the window's read authority,
+ * and drawn through the same importer and design policy an HTML page brought
+ * into a Canvas goes through, so it runs under the running tier's page,
+ * sandbox, and policy. Nothing the request carries becomes the page.
+ */
+async function issuePublishedSnapshotRun(
+  dependencies: CanvasRouteDependencies,
+  windowId: WindowId,
+  input: PublishedSnapshotRunRequest,
+): Promise<PublishedSnapshotRunOutcome> {
+  const unavailable = (reason: string): PublishedSnapshotRunOutcome => ({
+    kind: "unavailable",
+    reason,
+  });
+  const tickets = dependencies.designRunTickets;
+  const find = dependencies.findPublishedSnapshot;
+  if (tickets === undefined || find === undefined) {
+    return unavailable("This host does not run published pages.");
+  }
+  let snapshot: ThreadPublishedSnapshot | undefined;
+  try {
+    snapshot = await find(windowId, input);
+  } catch {
+    snapshot = undefined;
+  }
+  if (snapshot?.format !== "html") return unavailable("That published page is not in this thread.");
+  const imported = importCanvasHtmlPage(snapshot.content);
+  if (imported.status !== "imported" || imported.block.runsScript !== true) {
+    return unavailable("That published page has no script to run.");
+  }
+  const startFrameId = imported.block.frames[0]?.frameId;
+  if (startFrameId === undefined) return unavailable("That published page has nothing to run.");
+  const ticket = tickets.issue({
+    blockId: imported.block.blockId,
+    startFrameId: String(startFrameId),
+    block: imported.block,
+  });
+  return { kind: "ready", page: canvasDesignPagePath(ticket) };
 }
 
 /** The prototype a share access asked to run, when it asked for one. */

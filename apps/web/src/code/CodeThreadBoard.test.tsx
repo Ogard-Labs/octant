@@ -566,6 +566,30 @@ describe("CodeThreadBoard", () => {
     );
   });
 
+  it("says a thread on an SSH target runs there, never in the current checkout", async () => {
+    const loadBoard = vi.fn(async () =>
+      view([
+        {
+          ...card({ id: "01", status: "ready", title: "Remote thread" }),
+          checkoutKind: "remote-root",
+        } as CodeBoardCard,
+      ]),
+    );
+    render(
+      <CodeThreadBoard
+        isNarrow
+        loadBoard={loadBoard}
+        projects={projects}
+        storage={memoryStorage()}
+      />,
+    );
+
+    const row = (await screen.findByText("Remote thread")).closest(".issuerow");
+    if (row === null) throw new Error("Expected the list row");
+    expect(row).toHaveTextContent("On an SSH target");
+    expect(row).not.toHaveTextContent("Current checkout");
+  });
+
   it("preserves the last useful view while refreshing and after a later failure", async () => {
     let resolveBoard: ((value: CodeBoardView) => void) | undefined;
     const loadBoard = vi

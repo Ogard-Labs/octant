@@ -6,6 +6,7 @@ import {
   isExtensionComponentModeSafe,
   resolveExtensionActivation,
   resolveOutsideDriverActivation,
+  resolveOutsideDriverRebind,
 } from "./activation";
 
 const effective: ExtensionActivationState = {
@@ -318,6 +319,45 @@ describe("outside driver activation for a provider instance", () => {
     expect(resolve(packageState(), { compatible: false })).toEqual({
       kind: "blocked",
       reason: "incompatible",
+    });
+  });
+  describe("rebinding an instance to the digest its person trusted", () => {
+    const newer = { version: "0.2.0", digest: `sha256:${"f".repeat(64)}` } as const;
+    const rebind = (state: ExtensionPackageState | undefined) =>
+      resolveOutsideDriverRebind({ packageState: state, driver });
+
+    it("moves the instance to the selection its source is trusted at, whatever the switches say", () => {
+      expect(rebind(packageState({ pluginDesired: false }, newer))).toEqual({
+        ...driver,
+        ...newer,
+      });
+    });
+
+    it("never moves it to a selection that is still held, untrusted, or quarantined", () => {
+      expect(rebind(packageState({ trusted: false }, newer))).toBeUndefined();
+      expect(rebind(packageState({ quarantined: true }, newer))).toBeUndefined();
+      expect(rebind(packageState({ installed: false }, newer))).toBeUndefined();
+      expect(rebind(undefined)).toBeUndefined();
+    });
+
+    it("leaves an instance that already binds the selection where it is", () => {
+      expect(rebind(packageState())).toBeUndefined();
+    });
+
+    it("never moves it to another package or another component", () => {
+      expect(
+        rebind(packageState({}, { ...newer, packageId: "00000000-0000-4000-8000-000000000913" })),
+      ).toBeUndefined();
+      const renamed = packageState({}, newer);
+      expect(
+        rebind({
+          ...renamed,
+          components: renamed.components.map((entry) => ({
+            ...entry,
+            component: { ...entry.component, id: "other-driver" as never },
+          })),
+        }),
+      ).toBeUndefined();
     });
   });
 });

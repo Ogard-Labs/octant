@@ -3,6 +3,7 @@ import type { ProjectId } from "@octant/contracts/projects";
 import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
 import { Check } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useHostPlatform } from "../platform";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantDialog } from "../ui/base/OctantDialog";
@@ -106,6 +107,7 @@ export interface FirstRunOnboardingProps {
  */
 export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   const titleId = useId();
+  const hostPlatform = useHostPlatform();
   const { controller } = props;
   const [step, setStep] = useState<FirstRunStepId>("providers");
   const [handoffOpen, setHandoffOpen] = useState(false);
@@ -172,6 +174,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
 
   const steps = buildFirstRunSteps({
     current: step,
+    hostPlatform,
     providersReady: props.readiness.overall === "ready",
     projectReady: handoff.project !== undefined,
     modelChosen: modeModel !== undefined,

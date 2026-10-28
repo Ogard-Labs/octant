@@ -7,6 +7,7 @@ import {
   MAX_CODE_CONVERSATION_PAGE_SIZE,
   MAX_CODE_TURN_CHANGED_PATHS,
   decodeCodeOperationCommand,
+  CodeOperationStreamFrame,
   decodeCodeOperationEventFrame,
   decodeCodeEvidenceBatchRequest,
   decodeCodeOperationStreamFrame,
@@ -36,6 +37,7 @@ import {
   MAX_CODE_EVIDENCE_BATCH_ITEMS,
   MAX_CODE_TERMINAL_LIVE_FRAME_BYTES,
 } from "./codeOperations";
+import { decodeHostAnswer } from "./hostAnswer";
 import { MAX_THREAD_MENTIONS_PER_TURN } from "./threadMentionIdentity";
 
 const ids = {
@@ -919,6 +921,33 @@ describe("Code operation contracts", () => {
         },
       }).event,
     ).toMatchObject({ kind: "terminal-state-changed", state: "exited", exitCode: 0 });
+  });
+
+  it("marks an approval only a person at the host's own windows may answer, and still replays one journaled before the mark", () => {
+    const asked = {
+      threadId: ids.thread,
+      operationId: ids.operation,
+      cursor: 7,
+      occurredAt: "2026-10-27T12:00:00.000Z",
+      event: {
+        kind: "approval-requested",
+        approvalId: ids.approval,
+        action: "provider-tool",
+        summary: "Let this thread use Henrik's iPhone?",
+      },
+    } as const;
+    expect(decodeCodeOperationEventFrame(asked)).toEqual(asked);
+    const localOnly = { ...asked, event: { ...asked.event, localPersonOnly: true } } as const;
+    expect(decodeCodeOperationEventFrame(localOnly)).toEqual(localOnly);
+    // A paired client reads the mark from the host's answer, never drops it.
+    expect(decodeHostAnswer(CodeOperationStreamFrame)(localOnly)).toEqual(localOnly);
+    // The mark is present or absent; it never says "anyone may answer".
+    expect(() =>
+      decodeCodeOperationEventFrame({
+        ...asked,
+        event: { ...asked.event, localPersonOnly: false },
+      }),
+    ).toThrow();
   });
 
   it("decodes a versioned conversation page without raw provider payloads", () => {

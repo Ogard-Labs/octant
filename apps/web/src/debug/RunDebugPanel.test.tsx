@@ -32,10 +32,18 @@ const configuration = decodeCodeDebugConfiguration({
   stopOnEntry: false,
 });
 
-function listed(approved: boolean) {
+const fixtureAdapter = {
+  adapter,
+  displayName: "Fixture adapter",
+  runtimes: ["node"],
+  packageName: "Fixture tools",
+  packageVersion: "1.0.0",
+};
+
+function listed(approved: boolean, adapters: ReadonlyArray<unknown> = [fixtureAdapter]) {
   return decodeCodeDebugConfigurationsResult({
     status: "listed",
-    adapters: [{ adapter, displayName: "Fixture adapter", runtimes: ["node"] }],
+    adapters,
     approved: approved
       ? [{ configurationDigest: `sha256:${"a".repeat(64)}`, configuration, scope: "checkout" }]
       : [],
@@ -302,6 +310,82 @@ describe("Run and debug panel", () => {
 
     await user.click(screen.getByRole("button", { name: "Stop" }));
     expect(await screen.findByText("You stopped the session.")).toHaveFocus();
+  });
+
+  it("names which adapter a configuration uses when two installed adapters share a name", async () => {
+    const user = userEvent.setup();
+    const { client } = fakeHost();
+    const other = "10000000-0000-4000-8000-000000000002/adapter";
+    vi.mocked(client.configurations).mockResolvedValue(
+      listed(false, [
+        fixtureAdapter,
+        { ...fixtureAdapter, adapter: other, packageName: "Other tools", packageVersion: "2.1.0" },
+      ]),
+    );
+    render(
+      <RunDebugPanel
+        checkoutId={checkoutId}
+        client={client}
+        store={new CodeDebugWindowState()}
+        threadId={threadId}
+      />,
+    );
+    expect(
+      await screen.findByText("Fixture adapter (Fixture tools 1.0.0) · src/main.js"),
+    ).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Review Run the fixture" }));
+    const card = screen.getByRole("region", { name: "Confirm “Run the fixture”" });
+    expect(within(card).getByText("Fixture adapter, from Fixture tools 1.0.0")).toBeVisible();
+  });
+
+  it("clears the editor's stopped line when the tool closes, and marks it again when it reopens", async () => {
+    const user = userEvent.setup();
+    const store = new CodeDebugWindowState();
+    const { client } = fakeHost();
+    vi.mocked(client.configurations).mockResolvedValue(listed(true));
+    const panel = () => (
+      <RunDebugPanel
+        checkoutId={checkoutId}
+        client={client}
+        pollMs={fast}
+        store={store}
+        threadId={threadId}
+      />
+    );
+    const first = render(panel());
+    await user.click(await screen.findByRole("button", { name: "Start Run the fixture" }));
+    await waitFor(() => expect(store.read(key).stopped).toEqual({ path: "src/main.js", line: 3 }));
+
+    // Closed, nothing follows the program, so the editor marks no line.
+    first.unmount();
+    expect(store.read(key).stopped).toBeUndefined();
+    expect(store.read(key).session).toBeDefined();
+
+    render(panel());
+    await waitFor(() => expect(store.read(key).stopped).toEqual({ path: "src/main.js", line: 3 }));
+  });
+
+  it("drops the unreachable-host notice once the session answers again", async () => {
+    const user = userEvent.setup();
+    const { client, session } = fakeHost();
+    vi.mocked(client.configurations).mockResolvedValue(listed(true));
+    render(
+      <RunDebugPanel
+        checkoutId={checkoutId}
+        client={client}
+        pollMs={{ running: 5, stopped: 150 }}
+        store={new CodeDebugWindowState()}
+        threadId={threadId}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Start Run the fixture" }));
+    expect(await screen.findByText("Paused · breakpoint")).toBeVisible();
+    session.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    await screen.findByText("The host could not be reached.");
+    await waitFor(() =>
+      expect(screen.queryByText("The host could not be reached.")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("Paused · breakpoint")).toBeVisible();
   });
 
   it("shows the host's Plan refusal when Start is pressed in a Plan thread", async () => {

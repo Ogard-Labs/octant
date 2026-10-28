@@ -26,14 +26,21 @@ authenticated session with a per-request device proof. A paired browser can:
 - read Chat, Work, and Code threads and follow them live;
 - create a Chat thread and send a Chat turn;
 - send a follow-up on an existing Work thread;
-- send a Plan-mode turn on an existing Code thread.
+- send a Plan-mode turn on an existing Code thread;
+- approve or deny a Code thread's waiting request once, except one only the
+  person at the host may answer.
 
-It cannot bind or relink a project folder, approve tool use, remember Full
-access, manage provider credentials, or administer the listener and other
-devices; those stay with the person at the host, and the server refuses them
-for a remote principal regardless of what the browser shows. While the
-connection is stale the thread stays readable, the composer keeps its draft on
-the device, and sending is refused rather than queued.
+It cannot bind or relink a project folder, remember a tool approval for a
+Project, remember Full access, manage provider credentials, or administer the
+listener and other devices; those stay with the person at the host, and the
+server refuses them for a remote principal regardless of what the browser
+shows. A Code request that only the person at the host may answer, such as an
+agent asking to use a paired iPhone, shows without **Approve** or **Deny** and
+says to answer it on the computer running Octant. A phone notification for
+such a request says it is waiting for you at that computer and offers no
+way to answer it from the phone. While the connection is stale the thread
+stays readable, the composer keeps its draft on the device, and sending is
+refused rather than queued.
 
 ## How pairing works
 
@@ -277,6 +284,23 @@ Each phone may send thirty clips an hour, one at a time; after that the
 phone says when it can dictate again. Reading replies aloud stays on the
 computer. Without a transcription endpoint, or while the computer is
 unreachable, the phone shows no microphone.
+
+## Screen privacy and keys on the phone
+
+**Computers › Privacy & security** in the phone app says what this phone
+protects:
+
+- On Android, screenshots, screen recordings, and the recents preview show no
+  Octant content.
+- On iPhone, the app switcher shows a blank preview, and Octant hides itself
+  while the screen is recorded or mirrored, saying why. iOS cannot block a
+  screenshot, so avoid taking one of a thread you would not share.
+- Choose **Use standard capture** to turn this protection off until you next
+  open the app; every launch starts protected again.
+- The phone's keys for each paired computer stay on that phone: a backup or
+  phone transfer never gives another phone a usable copy, so a new phone pairs
+  again. On iPhone
+  they are kept in the Keychain, readable only while the phone is unlocked.
 
 ## Device management
 

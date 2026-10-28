@@ -474,7 +474,7 @@
   padding: var(--oct-space-1) var(--oct-space-2);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 /* Scroll and padding come from .dock-body. */
@@ -784,8 +784,11 @@ html[data-octant-reduced-motion="true"] :is(.octant-dialog__popup, .octant-dialo
   overflow-wrap: anywhere;
 }
 
+/* Details carry unbroken words: an SSH host key's SHA256 fingerprint ran
+   past the popup's edge at 390 px and was cut off mid-key. */
 .octant-confirmation__details {
   margin-bottom: var(--oct-space-3);
+  overflow-wrap: anywhere;
 }
 
 /* With a Canvas open, the narrow dock sheet stands at its full height, as the

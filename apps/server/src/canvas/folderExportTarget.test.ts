@@ -91,7 +91,37 @@ function folderTarget(folder: () => FolderExportAvailability) {
   });
 }
 
+/**
+ * Runs `read` as if the server ran on `platform`, then restores the real one.
+ * Copy the server writes reaches signed-in paired devices, so it must not
+ * follow the host's platform.
+ */
+async function onHostPlatform<T>(
+  platform: NodeJS.Platform,
+  read: () => T | Promise<T>,
+): Promise<T> {
+  const real = Object.getOwnPropertyDescriptor(process, "platform");
+  Object.defineProperty(process, "platform", { value: platform, configurable: true });
+  try {
+    return await read();
+  } finally {
+    if (real !== undefined) Object.defineProperty(process, "platform", real);
+  }
+}
+
 describe("the folder export destination", () => {
+  it.each(["linux", "darwin"] as const)(
+    "names the folder's computer without disclosing the platform on a %s host",
+    async (platform) => {
+      const label = await onHostPlatform(
+        platform,
+        () => folderTarget(() => ({ kind: "not-chosen" })).contribution.label,
+      );
+
+      expect(label).toBe("A folder on this computer");
+    },
+  );
+
   it("writes the rendered document and reports the file it wrote", async () => {
     const folder = privateFolder();
     const target = folderTarget(() => ({ kind: "ready", folder }));

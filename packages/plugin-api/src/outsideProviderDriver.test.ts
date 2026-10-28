@@ -161,8 +161,19 @@ describe("outside provider driver entry", () => {
     ).toBe("bundled-kind-claim");
   });
 
-  it("refuses an entry point outside the package or one that is not a module", () => {
-    for (const entryPoint of ["dist/../../escape.mjs", "file:driver.mjs", "dist/driver", "a.cjs"]) {
+  it("refuses an entry point outside the package or one that is not a plain ES module", () => {
+    // Node reads a `.js` file as an ES module or CommonJS by the nearest
+    // package.json, and Bun and Node run TypeScript differently; only `.mjs`
+    // is plain JavaScript run as an ES module on both.
+    for (const entryPoint of [
+      "dist/../../escape.mjs",
+      "file:driver.mjs",
+      "dist/driver",
+      "a.cjs",
+      "dist/driver.js",
+      "dist/driver.ts",
+      "dist/driver.mts",
+    ]) {
       expect(
         refusal(
           entry({ manifest: manifest({ components: [{ ...driverComponent, entryPoint }] }) }),

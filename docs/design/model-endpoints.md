@@ -96,7 +96,7 @@ before profile creation; host-local credential authority is unchanged.
 
 ## Octant Harness model endpoints
 
-Octant Harness lists its model endpoints differently: as rows in one list, never two-up cards. A row is a single link named with its state ("Team gateway, not working, open details") and holds the source mark (the bundled mark keyed by the endpoint's sign-in, a monogram otherwise), the name, a sub-line (who is signed in, or the host and "API key" or "No key"), the state in words beside a dot whose shape carries it (filled for ready, a ring when it needs you, a dashed ring for off, a muted ring for not checked, a turning ring for checking that is a static dotted ring under reduced motion, and a diamond for failed), and the model count ("12 of 63 shown"). The states are Ready, Sign in to use, Sign in again, Signed out, Checking…, Can't connect, Key refused, Key needed, No access, Sign-in doesn't match, Not working, No models yet, Not checked yet, and Off. One that needs you adds one plain sentence and exactly one fix button under the link (Sign in, Sign in again, Try again, Replace key, Add key, Edit address, Add model IDs, Check now), announced through a polite live region on that row; a failed check never raises a page-level banner. The enable switch is the detail page's Use switch, and an endpoint that is off says "Off · kept, not offered" on its row.
+Octant Harness lists its model endpoints differently: as rows in one list, never two-up cards. A row is a single link named with its state ("Team gateway, not working, open details") and holds the source mark (the bundled mark keyed by the endpoint's sign-in, a monogram otherwise), the name, a sub-line (who is signed in, or the host and "API key" or "No key"), the state in words beside a dot whose shape carries it (filled for ready, a ring when it needs you, a dashed ring for off, a muted ring for not checked, a turning ring for checking that is a static dotted ring under reduced motion, and a diamond for failed), and the model count ("12 of 63 shown"). The states are Ready, Sign in to use, Sign in again, Signed out, Checking…, Can't connect, Key refused, Key needed, No access, Sign-in doesn't match, Not working, No models yet, Not checked yet, and Off. One that needs you adds one plain sentence and exactly one fix button under the link (Sign in, Sign in again, Try again, Replace key, Add key, Edit address, Add model IDs, Check now, Check again), announced through a polite live region on that row; a failed check never raises a page-level banner. The enable switch is the detail page's Use switch, and an endpoint that is off says "Off · kept, not offered" on its row.
 
 ### Endpoint detail
 
@@ -155,7 +155,13 @@ with "Your organization asks you to sign in again in person…" (multi-factor or
 a consent prompt; the sign-in is kept), Signed out (the sign-in ended), No
 access (signed in without a role on the resource; no fix, a sentence naming
 the role to ask for), and Sign-in doesn't match (the sign-in is for another
-tenant, client, or address; Sign in again). None offers a key.
+tenant, client, or address; Sign in again). None offers a key. The row's
+sub-line names the account ("Signed in as" the account the directory named)
+once the endpoint's page has read its sign-in in this window; the list never
+asks for it, because that status renews the token at the directory, so each
+row would cost a request to the organization's issuer. Until then, and
+whenever the last check found the sign-in gone, the sub-line is the host and
+"Organization sign-in".
 
 ### Organization sign-in (a gateway's own issuer)
 
@@ -181,6 +187,52 @@ way to become an organization one. Diagnostics' "Signed in for" names the
 issuer, client, and origin. Row states are those of the Foundry sign-in; No
 access says the gateway refused the account and names no Azure role.
 
+### Organization sign-in (Amazon Bedrock)
+
+An Amazon Bedrock endpoint signs in only at the organization's single sign-on
+portal ([Enterprise provider identity](enterprise-provider-identity.md) owns
+the authority and binding rules), and that sign-in begins only in a terminal
+on the host with `octant provider sign-in "<name>"`: a device code shown on a
+page someone else can reach is how device-code phishing works, so Settings
+never begins one or shows a code. Add endpoint's Amazon Bedrock card opens its
+own Connect: Name, Region (where the models run), Access portal, Portal
+region, Account ID, Role (the permission set), and Model IDs (1 to 64, since
+Bedrock lists none a role may use), each with a one-line hint, and no key or
+address. A pasted account written `1234-5678-9012` and a portal address with
+the address bar's trailing `/#/` are tidied; anything else the host refuses
+gets one sentence naming every field. The strip of steps shows Kind and
+Connect only: the models are named on Connect and checking their tools needs
+the sign-in, so after Check and add the dialog offers Check again and Finish.
+
+Its row's sub-line names the role and account ("Signed in as <role> in
+account <id>") when the host holds a sign-in for the endpoint, and otherwise
+is the runtime host and "Organization sign-in". The row asks the host the
+same status question the detail page does, whose answer comes from the
+endpoint's stored sign-in and configuration with no broker call; as on the
+page, a last check refused for want of a sign-in (it ended, or the broker no
+longer holds it) keeps the host and "Organization sign-in". Row states
+read the host's reason: Sign in to use and Signed out each say, in one
+sentence, to run the command in a terminal on the host and enter the code at
+the organization's access portal, with Check again as the fix; Sign-in
+doesn't match (a sign-in for another portal, account, role, or region) says
+the same; No access (the portal does not give the role, or the role may not
+use the model) has no fix; and Can't connect shows the host's sentence about
+its sign-in service, since a check signs a request and sends nothing to
+Bedrock. The detail page's Sign-in section reads whether the host holds a
+sign-in: Signed in as the role and account with a Sign out that asks the
+portal to end the session and removes this computer's sign-in, or the
+command to run with Check again. The host's answer says only that the
+endpoint names a sign-in, so when the last check was refused for want of one
+(it ended, or the broker no longer holds it) the section says that sign-in no
+longer works and gives the command instead of Signed in as, keeping Sign out
+to clear what is left of it. It never offers
+Sign in, and the page's
+alert is left out for Sign in to use, whose guidance the section already
+gives. Name and address edits the region, portal, portal region, account,
+role, and models, and its note says changing anything but the models signs
+the endpoint out. Diagnostics names "Signs in for", the role, account, and
+portal.
+
 Octant Harness uses the existing `icons.svg#aperture` brand mark in provider lists
 and model pickers. The mark inherits the theme's text color; the surrounding
 control supplies its accessible name.
@@ -203,9 +255,46 @@ fields may share columns; account rows must not become cells in that row.
 When the Settings pane is narrow, controls stack below their labels and help,
 keeping every input and the submit action reachable without horizontal clipping.
 
+### Claude artifacts
+
+Every Claude Code card's details carry one host-scoped switch, **Enable
+Claude artifacts**, off for every account until the person enables it
+(maintainer requests, 2026-10-27 and 2026-10-28). It makes the choice
+available; it switches no thread. Its help says what it does: the account's
+Work and Code threads may publish documents, reports, and pages to the
+person's claude.ai account instead of making a Canvas; Canvas stays the
+default and each thread chooses for itself; a published page leaves this
+computer; Claude asks before every publish; Plan never publishes. Under the
+switch a standing warning (a warning-tone notice read with the switch, not an
+interrupting alert) says: "Enabling Claude artifacts also turns on Claude
+Code's usage telemetry to Anthropic for this account's Work and Code threads
+that use them. Error reports and conversation uploads stay off." The wording
+states only what the setting changes. Turning the switch on opens a
+confirmation that repeats the warning, with Cancel focused; cancelling leaves
+it off. Turning it off needs no confirmation. An API-key account cannot
+enable it ("Claude artifacts need a claude.ai sign-in"), nor can a host that
+exports its own opt-out: `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, or a
+truthy `DISABLE_TELEMETRY` or `DO_NOT_TRACK` (the card says the computer's own
+telemetry opt-out keeps Claude Code's telemetry and Claude artifacts off).
+
+The switch is the account's `artifactDelivery` field, changed only by the
+`set-claude-artifact-delivery` provider command and journaled as an ordinary
+`provider.instance-configuration-changed@1`. Creating an account or saving
+its configuration never sets it; a saved change to API-key authentication
+clears it. The provider route refuses the command from anything but this
+host's own window, and remote forwarding never admits provider commands. The
+command keeps the running runtime, its readiness, and its models, and reports
+the account's `nativeArtifacts` capability again at once; the driver reads
+the setting at every launch (one per turn) and every Artifact call. Each
+thread's own choice, its offer, and its controls are in [Canvas](canvas.md);
+the runtime and its launch in
+[Provider runtimes](provider-runtimes.md#claude-code); the authority and the
+telemetry exception in
+[Architecture: security and authority](../architecture.md#security-and-authority).
+
 ### Add endpoint
 
-Add endpoint opens a dialog: the sign-ins first, then the presets, then a guided flow with a numbered strip of steps. A preset is a named service added with a pasted key (OpenCode Go, OpenCode Zen, Mistral, Requesty): its row sits in the same list as the sign-ins with a one-line description and Add with key, which opens Connect with the name, address and protocol filled in and the key hint naming the page where the key is made, as a link; the address stays editable, and the result is an ordinary endpoint of its kind. On the first-run page the same row opens the dialog on Connect. Kind is four cards (Azure AI Foundry, OpenAI-compatible, Anthropic-compatible, Local (Ollama)). Connect asks for a name, the address, and the key, each with a one-line hint, and no control is greyed out without a sentence saying why; protocol, how the key is sent, and "It takes no key" sit under Advanced, and an Azure address entered as OpenAI-compatible offers Switch to Azure AI Foundry. Azure also names at least one deployment, as chips, because the host cannot add it without one. Check and add adds the endpoint and shows its row state in the dialog, with its fix; from then on the endpoint exists, and closing the dialog keeps it. Models lists a short catalogue whole and chosen; a long one is searched, lists at most eight matches with a count of the rest, starts with nothing chosen, and has an Add by ID row; models left unchosen are hidden from the model picker. Azure edits its deployment chips; Local lists the models installed in Ollama, with no Add by ID. Verify tools checks each chosen model, one request at a time, after a button that says how many requests it sends; each model reads Checking…, Verified, or "Chat only" with the reason and Retry, and a failed check never stops the endpoint being added. Ollama models are checked the same way on this computer: the button says the requests run locally rather than that the service may bill, and a model Ollama says takes no tools reads Chat only without a generating request, with that reason. Ollama stays a loopback-only endpoint; a cloud, LAN, or tunnelled Ollama address is refused. When the endpoint lists a voice model (a preset's known transcription or speech model, or an id that reads as one), the last step and the endpoint's Voice section (after Models) say so in one line and offer Use for Transcription, which makes that model Voice's choice at once and then reads "Transcription uses <model> on <endpoint>"; a speech model is named with what it still needs, a voice from the provider, and Open Voice settings. Agents is optional: only verified models can be offered to helper agents or given an Octant Harness role (a Chat only model is listed with its checkbox off and a sentence saying why; role choices list verified models only, and Reading images only those that read images). A chosen role makes the model its first choice and keeps what it had as backups, saved with the roles' version; a stale version reloads the roles and asks again. In a browser, a kind that needs a key is added without one and reads Needs key, sending the person to the desktop app; Local works fully. "Chat only · Verify tools" is the one label for an unverified model on the endpoint row (when no shown model is verified), the endpoint's Models, the model pickers, and Add endpoint. Targets are 44px tall at phone width.
+Add endpoint opens a dialog: the sign-ins first, then the presets, then a guided flow with a numbered strip of steps. A preset is a named service added with a pasted key (OpenCode Go, OpenCode Zen, Mistral, Requesty): its row sits in the same list as the sign-ins with a one-line description and Add with key, which opens Connect with the name, address and protocol filled in and the key hint naming the page where the key is made, as a link; the address stays editable, and the result is an ordinary endpoint of its kind. On the first-run page the same row opens the dialog on Connect. Kind is five cards (Azure AI Foundry, Amazon Bedrock, OpenAI-compatible, Anthropic-compatible, Local (Ollama)); Amazon Bedrock has its own Connect and ends there (below). Connect asks for a name, the address, and the key, each with a one-line hint, and no control is greyed out without a sentence saying why; protocol, how the key is sent, and "It takes no key" sit under Advanced, and an Azure address entered as OpenAI-compatible offers Switch to Azure AI Foundry. Azure also names at least one deployment, as chips, because the host cannot add it without one. Check and add adds the endpoint and shows its row state in the dialog, with its fix; from then on the endpoint exists, and closing the dialog keeps it. Models lists a short catalogue whole and chosen; a long one is searched, lists at most eight matches with a count of the rest, starts with nothing chosen, and has an Add by ID row; models left unchosen are hidden from the model picker. Azure edits its deployment chips; Local lists the models installed in Ollama, with no Add by ID. Verify tools checks each chosen model, one request at a time, after a button that says how many requests it sends; each model reads Checking…, Verified, or "Chat only" with the reason and Retry, and a failed check never stops the endpoint being added. Ollama models are checked the same way on this computer: the button says the requests run locally rather than that the service may bill, and a model Ollama says takes no tools reads Chat only without a generating request, with that reason. Ollama stays a loopback-only endpoint; a cloud, LAN, or tunnelled Ollama address is refused. When the endpoint lists a voice model (a preset's known transcription or speech model, or an id that reads as one), the last step and the endpoint's Voice section (after Models) say so in one line and offer Use for Transcription, which makes that model Voice's choice at once and then reads "Transcription uses <model> on <endpoint>"; a speech model is named with what it still needs, a voice from the provider, and Open Voice settings. Agents is optional: only verified models can be offered to helper agents or given an Octant Harness role (a Chat only model is listed with its checkbox off and a sentence saying why; role choices list verified models only, and Reading images only those that read images). A chosen role makes the model its first choice and keeps what it had as backups, saved with the roles' version; a stale version reloads the roles and asks again. In a browser, a kind that needs a key is added without one and reads Needs key, sending the person to the desktop app; Local works fully. "Chat only · Verify tools" is the one label for an unverified model on the endpoint row (when no shown model is verified), the endpoint's Models, the model pickers, and Add endpoint. Targets are 44px tall at phone width.
 
 ## Endpoint address and stored key
 

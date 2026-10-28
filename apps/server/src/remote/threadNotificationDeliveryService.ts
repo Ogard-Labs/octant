@@ -64,6 +64,8 @@ interface ThreadNotificationFact {
   readonly threadId: string;
   readonly kind: RemotePushNotificationKind;
   readonly runId: string;
+  /** The host's mark on an approval only a person at one of its windows answers. */
+  readonly localPersonOnly?: true;
 }
 
 interface CommittedFact {
@@ -97,7 +99,11 @@ const RequestId = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255));
 const CodeOperationEventRecorded = Schema.Struct({
   threadId: Id,
   event: Schema.Union(
-    Schema.Struct({ kind: Schema.Literal("approval-requested"), approvalId: Id }),
+    Schema.Struct({
+      kind: Schema.Literal("approval-requested"),
+      approvalId: Id,
+      localPersonOnly: Schema.optional(Schema.Literal(true)),
+    }),
     Schema.Struct({ kind: Schema.Literal("input-requested"), requestId: RequestId }),
   ),
 });
@@ -161,9 +167,17 @@ function threadNotificationFactOf(event: CommittedFact): ThreadNotificationFact 
     case "code.operation-event-recorded@1": {
       const frame = read(CodeOperationEventRecorded, event.payload);
       if (frame === undefined) return undefined;
-      return frame.event.kind === "approval-requested"
-        ? fact(frame.threadId, "approval-needed", frame.event.approvalId)
-        : fact(frame.threadId, "waiting", frame.event.requestId);
+      if (frame.event.kind === "input-requested") {
+        return fact(frame.threadId, "waiting", frame.event.requestId);
+      }
+      // A local-only approval stays an approval for the phone's preference,
+      // dedupe, and receipt; only what the phone is shown changes.
+      return {
+        threadId: frame.threadId,
+        kind: "approval-needed",
+        runId: frame.event.approvalId,
+        ...(frame.event.localPersonOnly === true ? { localPersonOnly: true as const } : {}),
+      };
     }
     // The harness session aggregate is keyed by its thread.
     case "native-harness-approval-asked@1": {
@@ -287,6 +301,7 @@ export class ThreadNotificationDeliveryService {
         computerLabel: this.#computerLabel(),
         threadTitle: thread.title,
         threadTitles: destination.preferences.threadTitles,
+        ...(observed.localPersonOnly === true ? { localPersonOnly: true as const } : {}),
       }),
     });
     if (sealed.status === "refused") {

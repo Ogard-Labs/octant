@@ -1,29 +1,29 @@
 ---
-description: Keep a Code Project's folder on a machine you reach with ssh, and open terminals and managed worktrees there under the same confinement as on your Mac.
+description: Keep a Code Project's folder on a machine you reach with ssh, and open terminals and managed worktrees there under the same confinement as on your computer.
 ---
 
 # Code on an SSH target
 
-An SSH target is a machine this Mac reaches with `ssh`: a Linux build box, a
+An SSH target is a machine this computer reaches with `ssh`: a Linux build box, a
 cloud VM, a workstation under your desk. A Code Project can keep its folder on
-one. Octant on your Mac keeps the Project's record and every decision; the
+one. Octant on your computer keeps the Project's record and every decision; the
 target is only where the files are and where commands run, and only after it
-proves it confines them as your Mac would.
+proves it confines them as your computer would.
 
 In this technical preview you can register targets, bind a folder on one as a
-Code Project, read its files, Git status, and diff, open terminals there, and
-create managed worktrees. **The composer does not offer remote Projects for
-a new task yet**: its Project picker lists them so you can see them. Octant
-on your Mac can already run a remote Project's thread, and the composer step
-is next. Such a thread runs only on Octant's own harness (a model you reach
-through an endpoint, such as an OpenAI-compatible one), whose inference
-stays on your Mac while its file tools and commands act on the target with
-the usual approvals; any other provider is refused for it, and Full access
-is not offered there. macOS targets are not admitted yet either.
+Code Project, read its files, Git status, and diff, open terminals there,
+create managed worktrees, and start Code tasks in it from the desktop app.
+Such a task runs on Octant's own harness (a model you reach through an
+endpoint, such as an OpenAI-compatible one), whose inference stays on your
+computer while its file tools and commands act on the target with the usual
+approvals, or on GitHub Copilot running on the target itself
+([Where a provider runs on the target](#where-a-provider-runs-on-the-target)).
+Any other provider is refused for it, and Full access is not offered there.
+macOS targets are not admitted yet.
 
 ## What the target needs
 
-- Linux on an x64 or arm64 CPU, reachable with `ssh` from this Mac as you
+- Linux on an x64 or arm64 CPU, reachable with `ssh` from this computer as you
   already set it up (aliases, `ProxyJump`, and hardware keys in your SSH
   configuration all work).
 - A user other than root. Octant refuses a root login.
@@ -47,7 +47,7 @@ to your own `~/.ssh/known_hosts` never re-trusts a target. If the key ever
 changes, the target shows **Host key changed** until you choose **Check host
 key…** and confirm the new one.
 
-The same steps work from a terminal on this Mac:
+The same steps work from a terminal on this computer:
 
 ```sh
 octant ssh-target add build@devbox --executor /home/build/.local/octant/bin/octant
@@ -77,6 +77,78 @@ the folder on the target and refuses `/` and any folder that holds or sits in
 your `~/.ssh`. From the composer, **New Project on an SSH target…** in the
 Project picker opens this page.
 
+## Start a task on a target
+
+1. Connect the target in **Settings › SSH targets** and check that **Ask for
+   approvals** (or **Plan**) is admitted on its row.
+2. In Code, find the Project under **On SSH targets** in the sidebar, beside a
+   dot that is green while the target is connected, and choose it; or pick it
+   under **On SSH targets** in the composer's Project menu.
+3. The composer shows the folder on the target where it would show a branch.
+   Choose a model under **Octant**, or GitHub Copilot once its path is set on
+   the target ([below](#where-a-provider-runs-on-the-target)). Models of other
+   providers are listed as unavailable, with the reason.
+   **Access** offers **Plan** and **Ask for approvals**. Full access
+   is not offered on a target, and neither is Auto-accept edits, because
+   Octant keeps no checkpoint of the target's files to go back to, so you
+   approve each write.
+4. Type the task and send it.
+
+The task works in the bound folder itself, not a new worktree. Each command
+and edit it makes waits for your approval as on your computer, and its network
+reaches only what the task's egress rules allow.
+
+A task on a target keeps to its conversation. The Git, terminal, tests,
+files, and pull-request tools of a local task are not offered for it, and
+neither are forks, checkpoints, rewind, `@` file mentions, Browser, Computer,
+or connectors; use the Project's terminal in Settings › SSH targets for
+anything you want to do on the target yourself.
+
+If the connection drops (the network goes away, the target's `sshd`
+restarts, or the target stops answering), the running turn stops as
+interrupted, and nothing it was doing is replayed. See
+[When the connection drops](#when-the-connection-drops) for what Octant does
+next. A restart of Octant on this computer ends the target's session too, so
+a turn it cut off reads as interrupted afterwards, and an approval or
+question it was waiting on is withdrawn rather than left for an answer that
+could no longer run anything; after a restart, connect the target again
+yourself. A task on a target is not compacted yet; its context popover says
+so in place of **Compact session**.
+
+## When the connection drops
+
+Octant reconnects on its own. It waits about a second, then tries again
+with longer waits between attempts, up to a minute, for at most eight
+attempts (about three minutes). Each attempt is a new connection that checks
+the pinned host key and runs the probes again from the start; nothing the
+lost connection proved is reused.
+
+While it reconnects, the target's row in **Settings › SSH targets**, the
+sidebar, and the composer say **Reconnecting**, with the attempt and when the
+next one starts. Tasks on the target offer no send, and a message, a file
+read, a terminal, or a worktree change is refused with that reason rather
+than waiting. Once a new connection is admitted, the task offers send again;
+send the message again yourself.
+
+Octant stops and waits for you when another attempt cannot help:
+
+- **Host key changed.** Check the new key with the target's administrator,
+  then choose **Check host key…**. Octant never relaxes the pin to get
+  through.
+- **This Mac's SSH key or agent is refused.** Make sure `ssh` to the target
+  signs in from this computer without a prompt (for example, add your key to
+  the agent again), then choose **Connect**.
+- **Octant not found, or another version, on the target.** Install the
+  matching headless Octant there, then choose **Connect**.
+- **Still not reachable after the last attempt.** Choose **Connect** once the
+  target is back.
+
+The row then says how many attempts Octant made. If the new connection's
+probes refuse a posture that was admitted before, the target stays connected
+and that posture stays refused with the reason; Octant does not retry it. To
+try at once instead of waiting, choose **Connect**, or run
+`octant ssh-target connect <target-id>`.
+
 ## Terminals
 
 **Open terminal** on a remote Project, or on one of its worktrees, opens a
@@ -89,8 +161,9 @@ are not read. The page shows one terminal at a time: opening another, or
 leaving the page, stops the one it showed.
 
 If the connection drops, the shell and everything it started end with it, and
-the terminal says it was interrupted. Nothing reconnects it or replays what
-you typed; connect the target again and open a new terminal.
+the terminal says it was interrupted. Octant reconnects the target on its own,
+but not the shell, and nothing replays what you typed; open a new terminal
+once the target is connected again.
 
 ## Managed worktrees
 
@@ -114,7 +187,7 @@ octant ssh-target worktree remove <worktree-id>
 
 A provider's own runtime runs on a target only from the path you set for it
 there, never from one the model, the repository, or the target suggests. Set
-it from a terminal on this Mac, naming the target, the provider instance's
+it from a terminal on this computer, naming the target, the provider instance's
 id, and the program's path on the target:
 
 ```sh
@@ -124,18 +197,29 @@ octant ssh-target runtime <target-id> <provider-id> /home/build/.local/bin/agent
 Octant checks the file on the target before every launch: it must be an
 executable that only you or root can change, outside the Project's folder
 and your `~/.ssh`. Setting another path takes effect the next time the
-runtime starts. A remote Project's thread does not start a provider's own
-runtime yet, so nothing runs from this path until it does, and no provider
-Octant ships can run on a target yet.
+runtime starts. GitHub Copilot is the first provider Octant can run there:
+it signs in with the target's own `~/.copilot` (run `copilot login` on the
+target), never with a key from this computer, and the Project files it would
+otherwise load by itself are hidden from it there as on this computer.
+
+The composer offers GitHub Copilot for a task on a target once you set its
+path there. Until then its models are listed as unavailable, and the picker
+shows the `octant ssh-target runtime` command above with the target's and the
+provider's ids already filled in; replace `<path>` with where `copilot` is on
+the target (for example what `command -v copilot` prints there). Copilot then
+runs on the target in **Plan** or **Ask for approvals**: each file it writes
+and each command it runs on the target asks you first, and the task offers no
+send while the target has not proven it confines the agent in that posture.
 
 ## Removing a target
 
-**Remove…** on a target ends its session, which stops any turn running in
-one of its Projects, and forgets its pinned key. Its
-Projects stay listed on this Mac and take no new work. Nothing on the target
+**Remove…** on a target ends its session and forgets its pinned key. While a
+task in one of its Projects is running, Octant refuses to remove it; stop the
+task, or wait for it to end, first. Its
+Projects stay listed on this computer and take no new work. Nothing on the target
 is deleted: not the folder, not its worktrees.
 
-## What stays on this Mac
+## What stays on this computer
 
 Octant journals each target, its pinned key, a digest of each connection's
 attestation, the Projects bound to it, each worktree's folder, and when each

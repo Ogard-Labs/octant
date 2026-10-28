@@ -28,7 +28,12 @@ const stateIcons: Record<ShellStateKind, LucideIcon> = {
 };
 
 export interface ShellStateProps {
-  readonly action?: { readonly label: string; readonly onClick: () => void };
+  readonly action?: {
+    readonly label: string;
+    readonly onClick: () => void;
+    /** The action's own glyph; a retry is the default, not the only meaning. */
+    readonly glyph?: LucideIcon;
+  };
   readonly eyebrow?: string;
   /** One sentence under the title; a loading line is the title alone. */
   readonly message?: string;
@@ -77,7 +82,11 @@ export function ShellState(props: ShellStateProps) {
       {props.action === undefined ? null : (
         <OctantEmptyContent>
           <OctantButton onClick={props.action.onClick} type="button" variant="secondary">
-            <RefreshCcw aria-hidden="true" size={14} strokeWidth={1.9} />
+            {props.action.glyph === undefined ? (
+              <RefreshCcw aria-hidden="true" size={14} strokeWidth={1.9} />
+            ) : (
+              <props.action.glyph aria-hidden="true" size={14} strokeWidth={1.9} />
+            )}
             <span>{props.action.label}</span>
           </OctantButton>
         </OctantEmptyContent>

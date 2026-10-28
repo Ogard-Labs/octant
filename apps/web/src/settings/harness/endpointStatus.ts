@@ -1,8 +1,11 @@
 import type {
   HiddenProviderModelRef,
+  HostPlatform,
   ProviderInstance,
   ProviderObservedState,
 } from "@octant/contracts";
+import { amazonBedrockRuntimeHost } from "@octant/domain";
+import { thisComputerName } from "../../platform";
 import type { ProviderProbeFailure } from "../../providers/useProviderController";
 import type { ModelEndpointDriverKind } from "../../providers/providerSettingsPresentation";
 
@@ -36,6 +39,11 @@ export interface EndpointStatus {
   /** What happened and what to do, in one or two plain sentences. */
   readonly sentence?: string;
   readonly fix?: { readonly kind: EndpointFixKind; readonly label: string };
+  /**
+   * The endpoint's Sign-in section already says what to do (an Amazon
+   * Bedrock endpoint not yet signed in), so the detail page adds no alert.
+   */
+  readonly guidedBySignIn?: true;
 }
 
 /** What the host last said about the endpoint's sign-in; absent for keyed endpoints. */
@@ -61,6 +69,8 @@ export interface EndpointStatusInput {
    * missing key there is added in the desktop app rather than by a fix.
    */
   readonly keysHere?: boolean;
+  /** The platform the host reports, which names the computer a key is added on. */
+  readonly hostPlatform?: HostPlatform | undefined;
   /**
    * The host's credential store has no key for it and no check has run since,
    * as after an address change deleted the key. The endpoint then reads as
@@ -105,6 +115,10 @@ export function endpointStatus(input: EndpointStatusInput): EndpointStatus {
   }
   if (isDirectorySignInEndpoint(instance)) {
     const signedIn = directorySignInStatus(instance, observed, failure);
+    if (signedIn !== undefined) return signedIn;
+  }
+  if (instance.driverKind === "amazon-bedrock") {
+    const signedIn = cloudSignInStatus(instance, input.hostPlatform, observed, failure);
     if (signedIn !== undefined) return signedIn;
   }
   if (failure !== undefined) return failureStatus(input, failure);
@@ -243,7 +257,7 @@ function keyNeeded(input: EndpointStatusInput): EndpointStatus {
     return {
       tone: "needs-you",
       label: NEEDS_KEY_LABEL,
-      sentence: "Add its API key in the Octant desktop app on this Mac.",
+      sentence: `Add its API key in the Octant desktop app on ${thisComputerName(input.hostPlatform)}.`,
     };
   }
   return {
@@ -292,6 +306,10 @@ function noModels(message: string | undefined): EndpointStatus {
 
 /** The host and port an endpoint's address names, or the address itself when it cannot be read. */
 export function endpointHost(instance: ModelEndpointInstance): string {
+  // Amazon Bedrock's address is built from its region alone.
+  if (instance.driverKind === "amazon-bedrock") {
+    return amazonBedrockRuntimeHost(instance.configuration.region);
+  }
   const baseUrl = instance.configuration.baseUrl;
   try {
     return new URL(baseUrl).host;
@@ -375,19 +393,103 @@ function directorySignInStatus(
   }
 }
 
+/**
+ * An Amazon Bedrock sign-in's state from the host's own reason. The sign-in
+ * begins only in a terminal on the host, so the one fix is to check again
+ * once the person has run the command the sentence names; undefined leaves
+ * the ordinary reading (ready, cannot connect) in place.
+ */
+function cloudSignInStatus(
+  instance: Extract<ModelEndpointInstance, { driverKind: "amazon-bedrock" }>,
+  hostPlatform: HostPlatform | undefined,
+  observed: ProviderObservedState | undefined,
+  failure: ProviderProbeFailure | undefined,
+): EndpointStatus | undefined {
+  const signIn = `Sign in from a terminal on ${thisComputerName(hostPlatform)}: run octant provider sign-in "${instance.displayName}" and enter the code it shows at your organization's access portal, then check again.`;
+  const checkAgain = { kind: "check-now", label: "Check again" } as const;
+  if (observed?.readiness === "incompatible") {
+    return {
+      tone: "needs-you",
+      label: "Sign-in doesn't match",
+      sentence: `The sign-in is for another portal, account, role, or region. ${signIn}`,
+      fix: checkAgain,
+    };
+  }
+  // A check signs a request and sends nothing, so an unavailable answer is
+  // the host's sign-in service, not Bedrock; the host's sentence says so.
+  if (observed?.readiness === "unavailable" && observed.message !== undefined) {
+    return cannotConnect(observed.message);
+  }
+  if (
+    observed?.readiness !== "unauthenticated" &&
+    failure?.category !== "unauthenticated" &&
+    failure?.reason !== "authentication-required"
+  ) {
+    return undefined;
+  }
+  switch (observed?.unauthenticatedReason) {
+    case "not-authorized":
+      return {
+        tone: "failed",
+        label: "No access",
+        sentence:
+          "You're signed in, but your organization's portal doesn't give your account this role, or the role may not use this model. Ask an administrator for access.",
+      };
+    case "expired":
+    case "revoked":
+      return {
+        tone: "needs-you",
+        label: "Signed out",
+        sentence: `Your organization sign-in ended. ${signIn}`,
+        fix: checkAgain,
+      };
+    default:
+      return {
+        tone: "needs-you",
+        label: "Sign in to use",
+        sentence: signIn,
+        fix: checkAgain,
+        guidedBySignIn: true,
+      };
+  }
+}
+
 /** Whether the endpoint sends a key at all; one that sends none has no key line anywhere. */
 export function endpointTakesKey(instance: ModelEndpointInstance): boolean {
-  if (instance.driverKind === "ollama" || isDirectorySignInEndpoint(instance)) return false;
+  if (
+    instance.driverKind === "ollama" ||
+    instance.driverKind === "amazon-bedrock" ||
+    isDirectorySignInEndpoint(instance)
+  ) {
+    return false;
+  }
   return (
     instance.driverKind === "azure-foundry" || instance.configuration.authentication !== "none"
   );
 }
 
-/** The line under a row's name: who is signed in, or where it is and whether it sends a key. */
+/**
+ * Whether the host's last check of an organization sign-in endpoint was
+ * refused for want of a sign-in (it ended, or the broker no longer holds it).
+ * The host's sign-in status reads only whether the endpoint names a sign-in,
+ * so while this holds nothing may say who is signed in.
+ */
+export function lastCheckFoundSignInGone(observed: ProviderObservedState | undefined): boolean {
+  return (
+    observed?.readiness === "unauthenticated" && observed.unauthenticatedReason !== "not-authorized"
+  );
+}
+
+/**
+ * The line under a row's name: who is signed in, or where it is and whether
+ * it sends a key. `observed` is the host's last check, which an organization
+ * sign-in's status cannot overrule.
+ */
 export function endpointSubLine(
   instance: ModelEndpointInstance,
   signIn: EndpointSignIn | undefined,
   offer: { readonly accountLabel: string } | undefined,
+  observed?: ProviderObservedState,
 ): string {
   if (offer !== undefined) {
     if (signIn?.kind === "signed-in") return `Signed in as ${signIn.accountLabel}`;
@@ -397,7 +499,11 @@ export function endpointSubLine(
   }
   const host = endpointHost(instance);
   if (instance.driverKind === "ollama") return `Ollama · ${host}`;
-  if (isDirectorySignInEndpoint(instance)) return `${host} · Organization sign-in`;
+  if (isDirectorySignInEndpoint(instance) || instance.driverKind === "amazon-bedrock") {
+    return signIn?.kind === "signed-in" && !lastCheckFoundSignInGone(observed)
+      ? `Signed in as ${signIn.accountLabel}`
+      : `${host} · Organization sign-in`;
+  }
   return `${host} · ${endpointTakesKey(instance) ? "API key" : "No key"}`;
 }
 

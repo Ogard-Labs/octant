@@ -89,6 +89,23 @@ export type DesktopFrameResult =
   | { readonly status: "frame"; readonly frame: DesktopFrame }
   | Unavailable;
 
+/**
+ * The one refusal reason the host passes to a person: a screen, frame, or
+ * input refused with it because the provider's route to the desktop right now
+ * would let a third party read the session in transit, such as a relay that
+ * can read what it carries. The Desktop tab says so and offers to try again.
+ * Every other reason a driver gives stays with the host.
+ */
+export const DESKTOP_SESSION_READABLE = "session-readable" as const;
+
+/**
+ * The refusal reason a cloud driver gives when its provider answers that the
+ * key the host attached is not accepted. The host records it on the lease, so
+ * the recipe editor can tell the person the key was refused; the key itself
+ * never reaches the driver.
+ */
+export const DESKTOP_CREDENTIAL_REJECTED = "credential-rejected" as const;
+
 export type DesktopInputResult = { readonly status: "delivered" } | Unavailable;
 
 /** A bounded frame source and an input sink the host streams on its own channel. */
@@ -131,13 +148,28 @@ export type DesktopListOwnedResult =
  * this machine leaves nothing off it, one on another machine leaves through
  * the provider's relay, and one in the person's cloud bills. A recipe names
  * one, and the host takes the lease's locality and billing from it.
+ * `choosesMachine` marks a placement that runs on one of the person's own
+ * machines: its provider lists them through `listMachines`, and a recipe
+ * names the one it runs on, which the driver receives as `recipe.machine`.
  */
 export interface DesktopPlacement {
   readonly id: DesktopPlacementId;
   readonly displayName: string;
   readonly locality: DesktopProviderLocality;
   readonly billed: boolean;
+  readonly choosesMachine?: boolean;
 }
+
+/** One of the person's machines a placement can run a desktop on, as the provider reports it. */
+export interface DesktopMachineEntry {
+  readonly id: string;
+  readonly name: string;
+  readonly online: boolean;
+}
+
+export type DesktopListMachinesResult =
+  | { readonly status: "listed"; readonly machines: ReadonlyArray<DesktopMachineEntry> }
+  | Unavailable;
 
 export interface DesktopProvider {
   readonly kind: DesktopProviderContributionKind;
@@ -165,6 +197,15 @@ export interface DesktopProvider {
    * other method.
    */
   readonly daemon?: DesktopDaemonDeclaration;
+  /**
+   * The person's machines a placement that `choosesMachine` can run a
+   * desktop on, for a person choosing one in a recipe. It reads and creates
+   * nothing.
+   */
+  readonly listMachines?: (
+    placementId: DesktopPlacementId,
+    signal: AbortSignal,
+  ) => Promise<DesktopListMachinesResult>;
   /** Whether the provider can be used on this host now. Performs no work. */
   readonly status: () => Promise<DesktopProviderStatusResult>;
   /** Creates one desktop tagged with the lease id and host tag. */

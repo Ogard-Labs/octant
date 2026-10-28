@@ -377,10 +377,11 @@ describe("Canvas share policy", () => {
     });
     // The snapshot record and the share panel both read a shared document
     // through this decode, so an example it refuses is one nobody can share.
-    // Each block names at most the newest Canvas version share version 6 represents.
+    // Each block names at most the newest Canvas version this share version
+    // represents, and a chart leaves without the callouts a share predates.
     expect(decodeCanvasStaticExportDocument(receipt.document).blocks).toEqual(
       examples.map((block) => ({
-        ...block,
+        ...withoutChartCallouts(block),
         schemaVersion: Math.min(block.schemaVersion, CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION),
       })),
     );
@@ -478,11 +479,15 @@ describe("Canvas share policy", () => {
     const receipt = share([design, diagram]);
     expect(receipt.document.schemaVersion).toBe(CANVAS_SHARE_SCHEMA_VERSION);
     expect(CANVAS_SHARE_SCHEMA_VERSION).toBe(11);
-    expect(CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION).toBe(CANVAS_SCHEMA_VERSION);
+    expect(CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION).toBe(21);
     const { assets: _assets, ...withoutAssets } = design;
     expect(receipt.document.blocks).toEqual([
-      { ...withoutAssets, frames: [onboardingFlowExample.frames[0]] },
-      diagram,
+      {
+        ...withoutAssets,
+        schemaVersion: CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION,
+        frames: [onboardingFlowExample.frames[0]],
+      },
+      { ...diagram, schemaVersion: CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION },
     ]);
     expect(JSON.stringify(receipt.document)).not.toContain(captureId);
     expect(JSON.stringify(receipt.document)).not.toContain("Open with the demo.");
@@ -1154,3 +1159,24 @@ describe("a public link's payload", () => {
     expect(payload.summary).toBe("We ship on Friday.");
   });
 });
+
+/** A chart as share version 11 carries it: its readings, without title or callouts. */
+function withoutChartCallouts(block: {
+  readonly kind: string;
+  readonly schemaVersion: number;
+}): Record<string, unknown> {
+  if (block.kind !== "chart" || !("series" in block) || !Array.isArray(block.series)) {
+    return block;
+  }
+  const { title: _title, subtitle: _subtitle, ...chart } = block as Record<string, unknown>;
+  return {
+    ...chart,
+    series: block.series.map((series: { readonly points: ReadonlyArray<object> }) => ({
+      ...series,
+      points: series.points.map((point) => {
+        const { note: _note, emphasis: _emphasis, ...reading } = point as Record<string, unknown>;
+        return reading;
+      }),
+    })),
+  };
+}

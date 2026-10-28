@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { CredentialStoreFailure, type CredentialStore } from "./credentialStore";
+import { issuerRequestDeadline } from "./issuerRequest";
 import { sigV4Date, signSigV4 } from "./sigV4";
 
 /**
@@ -28,6 +29,14 @@ const CLIENT_SCOPES = ["sso:account:access"] as const;
 const DEVICE_MAX_SECONDS = 15 * 60;
 const DEFAULT_DEVICE_INTERVAL_SECONDS = 5;
 const SLOW_DOWN_MS = 5_000;
+// A poll the portal could not answer (no answer, a 429, or a 5xx) is retried
+// after a wait that doubles with each one in a row, up to this, and never
+// past the code's own expiry.
+const TRANSIENT_POLL_MAX_MS = 60_000;
+// A settled attempt stays readable this long past its code's expiry, longer
+// than the server follows one, so a late status read still learns how it
+// ended; after that the broker forgets it, so abandoned attempts do not pile up.
+const ATTEMPT_RETENTION_MS = 5 * 60_000;
 // Role credentials this close to their expiry are renewed before signing, so
 // a signature never rides credentials that end while the request is in flight.
 const ROLE_RENEW_SKEW_MS = 5 * 60_000;
@@ -209,6 +218,8 @@ interface StoredGrant {
 interface Attempt {
   status: CloudIamPublicState;
   closed: boolean;
+  /** When the attempt's device code runs out, in epoch milliseconds. */
+  readonly expiresAt: number;
 }
 
 /** Whether a stored value is a cloud grant, which no raw resolve may release. */
@@ -286,7 +297,8 @@ export function createCloudIamRuntime(options: {
       userCode: device.userCode,
       expiresAt: new Date(expiresAt).toISOString(),
     };
-    const attempt: Attempt = { status: awaiting, closed: false };
+    const attempt: Attempt = { status: awaiting, closed: false, expiresAt };
+    pruneSettledAttempts(attempts, now());
     attempts.set(attemptId, attempt);
     void poll({
       attempt,
@@ -316,11 +328,20 @@ export function createCloudIamRuntime(options: {
     };
     const refuse = (reason: CloudIamRefusalReason) =>
       settle({ kind: "refused", attemptId, descriptorId: descriptor.descriptorId, reason });
+    // Consecutive polls the portal could not answer. A code that runs out
+    // while the portal is still failing reads `unavailable`, not `timeout`:
+    // the person may never have been able to enter it.
+    let transientPolls = 0;
+    const expired = () => refuse(transientPolls > 0 ? "unavailable" : "timeout");
     while (!closed && !attempt.closed) {
-      if (now() >= session.expiresAt) return refuse("timeout");
-      await sleep(session.intervalMs);
+      if (now() >= session.expiresAt) return expired();
+      await sleep(
+        transientPolls === 0
+          ? session.intervalMs
+          : Math.min(session.intervalMs * 2 ** transientPolls, TRANSIENT_POLL_MAX_MS),
+      );
       if (closed || attempt.closed) return;
-      if (now() >= session.expiresAt) return refuse("timeout");
+      if (now() >= session.expiresAt) return expired();
       const answered = await postJson(
         fetchImpl,
         oidcEndpoint(descriptor.source.ssoRegion, "/token"),
@@ -331,6 +352,11 @@ export function createCloudIamRuntime(options: {
           deviceCode: session.deviceCode,
         },
       );
+      if (answered.kind === "unavailable") {
+        transientPolls += 1;
+        continue;
+      }
+      transientPolls = 0;
       if (answered.kind === "refused") {
         if (answered.error === "authorization_pending") continue;
         if (answered.error === "slow_down") {
@@ -341,7 +367,6 @@ export function createCloudIamRuntime(options: {
         if (answered.error === "expired_token") return refuse("timeout");
         return refuse("exchange-refused");
       }
-      if (answered.kind !== "json") return refuse("unavailable");
       const issued = readSession(answered.value, now());
       if (issued === undefined) return refuse("exchange-refused");
       // The role is minted before anything is stored: a person the portal
@@ -590,6 +615,7 @@ export function createCloudIamRuntime(options: {
           method: "POST",
           redirect: "error",
           headers: { "x-amz-sso_bearer_token": read.grant.session.accessToken },
+          signal: issuerRequestDeadline(),
         });
         await response.body?.cancel().catch(() => undefined);
       } catch {
@@ -689,6 +715,7 @@ async function mintRoleCredentials(
         method: "GET",
         redirect: "error",
         headers: { "x-amz-sso_bearer_token": sessionToken },
+        signal: issuerRequestDeadline(),
       },
     );
   } catch {
@@ -706,7 +733,12 @@ async function mintRoleCredentials(
     await response.body?.cancel().catch(() => undefined);
     return { kind: "unavailable" };
   }
-  const body = await readResponseJson(response);
+  let body: Record<string, unknown> | undefined;
+  try {
+    body = await readResponseJson(response);
+  } catch {
+    return { kind: "unavailable" };
+  }
   const role = body === undefined ? undefined : body.roleCredentials;
   if (!isRecord(role)) return { kind: "unavailable" };
   const accessKeyId = role.accessKeyId;
@@ -880,6 +912,7 @@ async function postJson(
       redirect: "error",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
+      signal: issuerRequestDeadline(),
     });
   } catch {
     return { kind: "unavailable" };
@@ -888,7 +921,12 @@ async function postJson(
     await response.body?.cancel().catch(() => undefined);
     return { kind: "unavailable" };
   }
-  const value = await readResponseJson(response);
+  let value: Record<string, unknown> | undefined;
+  try {
+    value = await readResponseJson(response);
+  } catch {
+    return { kind: "unavailable" };
+  }
   if (response.ok)
     return value === undefined ? { kind: "refused", error: undefined } : { kind: "json", value };
   const error = value?.error;
@@ -915,6 +953,21 @@ function errorTypeCode(header: string | null): string | undefined {
   if (header === null) return undefined;
   const name = header.split(":", 1)[0]?.trim() ?? "";
   return Object.hasOwn(ERROR_TYPES, name) ? ERROR_TYPES[name] : undefined;
+}
+
+/**
+ * Forget settled attempts well past their code's expiry. One still polling is
+ * kept: its poll may yet store a grant, which must stay named by its attempt.
+ */
+function pruneSettledAttempts(attempts: Map<string, Attempt>, now: number): void {
+  for (const [attemptId, attempt] of attempts) {
+    if (
+      attempt.status.kind !== "awaiting-consent" &&
+      now > attempt.expiresAt + ATTEMPT_RETENTION_MS
+    ) {
+      attempts.delete(attemptId);
+    }
+  }
 }
 
 function refusalOf(outcome: PostOutcome): CloudIamRefusalReason {
@@ -1193,18 +1246,19 @@ async function readObject(
   }
 }
 
+/**
+ * An answer's JSON object, or `undefined` for one too long or not an object.
+ * A body that stops arriving (the request's deadline passed, or the
+ * connection dropped) throws, so the caller reads it as no answer rather
+ * than as an answer it could not understand.
+ */
 async function readResponseJson(response: Response): Promise<Record<string, unknown> | undefined> {
   const declared = response.headers.get("content-length");
   if (declared !== null && /^\d+$/.test(declared) && Number(declared) > MAX_RESPONSE_CHARS) {
     await response.body?.cancel().catch(() => undefined);
     return undefined;
   }
-  let text: string;
-  try {
-    text = await response.text();
-  } catch {
-    return undefined;
-  }
+  const text = await response.text();
   if (text.length > MAX_RESPONSE_CHARS) return undefined;
   try {
     const value: unknown = JSON.parse(text);

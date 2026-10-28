@@ -400,6 +400,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       appleToolchainRoutes,
       resolveAndroidContext,
       resolveAppleContext,
+      resolveAppleDeviceAgentScope,
+      resolveAppleDeviceThread,
     } = bindDeviceApprovals({
       validateAppleApproval: (windowId, request) =>
         codeOperationRuntime?.validateAppleApproval(windowId, request),
@@ -638,6 +640,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               store: sshTargetStore,
               connections: sshTargetConnections,
               composition: nativeHarnessComposition,
+              uuid: randomUUID,
             },
             input,
           ),
@@ -797,6 +800,36 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               threadId: String(threadId),
               simulatorId: String(simulatorId),
             }),
+          // The person's paired devices, through the same device service and
+          // policy the workbench's device routes use. The agent's requests
+          // name the agent, so a lease or an effect it asks for counts only
+          // with the receipt a person at the Mac minted by answering it.
+          devices: {
+            request: async (windowId, request, signal) => {
+              const context = await resolveAppleDeviceAgentScope(windowId, request);
+              return context === undefined
+                ? undefined
+                : await appleDeviceService.request(request, context, signal);
+            },
+            check: async (windowId, request, signal) => {
+              const context = await resolveAppleDeviceAgentScope(windowId, request);
+              return context === undefined
+                ? undefined
+                : await appleDeviceService.check(request, context, signal);
+            },
+            readScreenshot: async (windowId, scope, reference) => {
+              const thread = await resolveAppleDeviceThread(windowId, scope);
+              if (thread === undefined) return undefined;
+              const read = await appleDeviceService.readScreenshot(reference, thread);
+              return read.kind === "found" ? read.bytes : undefined;
+            },
+            readConsole: async (windowId, scope, reference) => {
+              const thread = await resolveAppleDeviceThread(windowId, scope);
+              if (thread === undefined) return undefined;
+              const read = await appleDeviceService.readConsole(reference, thread);
+              return read.kind === "found" ? read.bytes : undefined;
+            },
+          },
         },
         androidToolchain: {
           resolveAuthority: (_windowId, thread) => ({

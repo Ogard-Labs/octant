@@ -77,7 +77,7 @@ export function runtimeErrorReason(error: unknown): string | undefined {
     return "the Claude runtime binary was not found";
   if (/\bEACCES\b|permission denied/i.test(text)) return "the Claude runtime could not be started";
   if (/\b401\b|unauthori[sz]ed|not logged in|please log in|authentication/i.test(text)) {
-    return "Claude is not signed in on this Mac";
+    return "Claude is not signed in on this computer";
   }
   if (/\b429\b|rate.?limit/i.test(text)) return "Claude is rate limited";
   if (/\bECONNREFUSED\b|\bETIMEDOUT\b|\bENOTFOUND\b|fetch failed|network/i.test(text)) {
@@ -407,7 +407,54 @@ function decodeToolResults(message: Record<string, unknown>): ClaudeDecodedMessa
     return { toolUseId: block.tool_use_id, isError: block.is_error === true };
   });
   if (results.length === 0) throw protocol("Claude returned an unsupported runtime message.");
-  return { kind: "tool-results", sessionId: message.session_id, results };
+  // `tool_use_result` is the structured output of the one call a message
+  // settles; with several results it cannot be told apart, so it is ignored.
+  const only = results.length === 1 ? results[0] : undefined;
+  const publishedPage =
+    only === undefined || only.isError ? undefined : claudePublishedPage(message.tool_use_result);
+  return {
+    kind: "tool-results",
+    sessionId: message.session_id,
+    results:
+      only === undefined || publishedPage === undefined ? results : [{ ...only, publishedPage }],
+  };
+}
+
+const MAX_PUBLISHED_URL_CHARACTERS = 2_048;
+const MAX_PUBLISHED_TITLE_CHARACTERS = 256;
+
+/**
+ * The page a Claude artifact publish names: an `https` address on claude.ai
+ * and its title, from the tool's structured output (`{ url, path, title }` in
+ * Claude Code 2.1.211's `ArtifactOutput`). Anything else is read as no page,
+ * so a malformed or foreign address never becomes a link in the transcript.
+ */
+function claudePublishedPage(
+  value: unknown,
+): { readonly url: string; readonly title?: string } | undefined {
+  const output = object(value);
+  if (output === undefined || typeof output.url !== "string") return undefined;
+  let url: URL;
+  try {
+    url = new URL(output.url);
+  } catch {
+    return undefined;
+  }
+  if (
+    url.protocol !== "https:" ||
+    // ASCII once parsed, so characters are bytes for the contract's bound.
+    url.href.length > MAX_PUBLISHED_URL_CHARACTERS ||
+    url.username !== "" ||
+    url.password !== "" ||
+    (url.hostname !== "claude.ai" && !url.hostname.endsWith(".claude.ai"))
+  ) {
+    return undefined;
+  }
+  const title =
+    typeof output.title === "string"
+      ? output.title.replace(/\s+/g, " ").trim().slice(0, MAX_PUBLISHED_TITLE_CHARACTERS).trim()
+      : "";
+  return { url: url.href, ...(title === "" ? {} : { title }) };
 }
 
 // Claude Code 2.1.258 omits `container` and `stop_details` from assistant

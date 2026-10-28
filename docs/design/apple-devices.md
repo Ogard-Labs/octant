@@ -9,11 +9,12 @@ person asks for it. Architecture owns the device authority rules this
 extends ([Architecture: device transport and evidence](../architecture.md#device-transport-and-evidence));
 [Device workbench](device-workbench.md) owns the Simulator and emulator panes.
 
-**Status: accepted 2026-10-26; slices 1 (contracts and policy) and 2
-(discovery, identity, and lease on the host) are built, slices 3
-(development-signed build, install, launch, terminate, and console logs) and
-4 (device pane and screenshots) are built and wait on their native smoke on a
-Mac with a paired device, and slice 5 is next.** The maintainer
+**Status: accepted 2026-10-26; slices 1 (contracts and policy), 2
+(discovery, identity, and lease on the host), and 5 (agent operations) are
+built, slices 3 (development-signed build, install, launch, terminate, and
+console logs) and 4 (device pane and screenshots) are built and wait on their
+native smoke on a Mac with a paired device, and slices 6 to 8 wait on the
+distribution gate of decision 7.** The maintainer
 authorized this scope as post-preview work and accepted the decisions below on
 2026-10-26. That authorizes this design and its slices; it does not by itself
 authorize spending, creating developer accounts,
@@ -66,7 +67,12 @@ TestFlight track for its mobile client is a separate operator runbook
   thread's latest screenshot. The Apple workbench's **Physical devices**
   section ([`ApplePhysicalDevices.tsx`](../../apps/web/src/apple/ApplePhysicalDevices.tsx))
   is the device picker, setup checklist, lease confirmation, and latest
-  screenshot; `octant_apple` has no device operation yet.
+  screenshot. The agent's `octant_apple` reaches the same device service and
+  policy with requests that name the agent
+  ([`codeAppManagedTools.ts`](../../apps/server/src/code/codeAppManagedTools.ts)):
+  `discover` (with `destination: "device"`), `status`, `use-device`,
+  `release-device`, `screenshot`, `logs`, `build`, `run`, `install`,
+  `launch`, and `terminate`.
 - Every build passes `CODE_SIGNING_ALLOWED=NO`, Simulator and device alike
   ([`appleToolchainService.ts`](../../apps/server/src/apple/appleToolchainService.ts),
   `xcodebuildArguments`), so no build launch touches a signing identity, and
@@ -207,6 +213,19 @@ access covers neither the device lease nor any distribution step.
   holding thread. The host counts it as a local person's answer only when the
   request that carries it comes from a local window and the receipt validates
   for that window; the dialog is never shown to a paired device.
+- The agent's `use-device` raises the same confirmation in the thread: an
+  `approval-requested` turn event worded as the lease dialog (device name,
+  model, OS version, cable or network, and the thread), asked under every
+  posture, Plan included. Only an answer from a window on the Mac settles it;
+  a paired device's answer, or one no window vouched for, is refused with the
+  card still waiting. The event carries `localPersonOnly: true`, so every
+  client reads that rule from the ask itself (see
+  [Remote clients](#remote-clients)). The answer mints the host's one-use `apple-device-lease`
+  receipt for the turn's window, bound to exactly the agent's request and the
+  thread's checkout, and the host counts it as a local person's confirmation
+  only for a request that names the agent and carries that receipt. _Reason:_
+  the agent's request reaches the host through no window principal, so the
+  local-only rule is enforced where the answer arrives instead.
 - Only a discovery sees a disconnect, so the five minutes run from the first
   discovery that finds a leased device gone, unavailable, or unlistable. Until
   the lease ends, a leased device that went away stays listed as
@@ -233,7 +252,19 @@ access covers neither the device lease nor any distribution step.
   the existing mechanism: an `approval-requested` turn event whose
   approval mints the host's one-use, five-minute receipt bound to exactly that
   request, device, and checkout, validated by the same Apple policy. A denial,
-  expiry, lost lease, or thread gone stale or into Plan refuses the call.
+  expiry, lost lease, or thread gone stale or into Plan refuses the call. For
+  a device effect the agent asks for, only a person at a window on the Mac may
+  answer that event, as for a lease: decision 4 keeps a paired device's
+  person from starting a device effect, and approving one is starting it.
+- Before the agent's lease or effect is put to anyone, its tool asks the host
+  what the policy would answer the request as it stands, carrying nothing
+  out; only a call whose sole remaining refusal is the missing confirmation
+  (`confirmation-required`) or approval (`approval-required`) is asked, and
+  any other refusal is returned as it is. A lease the thread already holds is
+  used without asking. An effect in a turn that runs below the thread's Full
+  access is still asked, though the host would run it unasked: the turn's
+  posture decides, as for a Simulator effect. The request is decided again
+  when it arrives.
 - `install` takes only the product an Octant build or run produced in that
   thread's private derived-data directory; any other path or archive is refused
   (`invalid-artifact`). `launch`, `terminate`, and `uninstall` take only the
@@ -269,7 +300,13 @@ access covers neither the device lease nor any distribution step.
   through it keeps the host's reach to exactly the process it started.
 - `logs` keeps the console output as host-private evidence by reference; only
   its size enters the journal, since an app's own prints can carry the
-  person's data and the journal reaches the provider.
+  person's data and the journal reaches the provider. The agent's `logs` call
+  receives the text itself (its latest 32 KiB) as that call's answer, inside
+  the lease whose confirmation said the thread may read the app's console, and
+  its `screenshot` call receives the pixels as an image the same way. The host
+  hands back a console read or a screenshot only to the thread, on the
+  checkout, that took it. Both are outside content: like every successful
+  `octant_apple` result, each marks the thread before the model reads it.
 - The host checks the lease again just before it installs or launches: a
   `run`'s build can outlast the lease it started under, and a device whose
   lease has ended is not touched.
@@ -447,7 +484,18 @@ find-identity -v -p codesigning` lists and the profiles Xcode installed in
   other device or distribution request from one, `release-device` included.
 - Starting or moving a lease, signing setup, provisioning updates, the App Store
   Connect key, upload, submission, and release are local-only, never
-  remote-approvable.
+  remote-approvable. So are the agent's lease and device effects: their
+  `approval-requested` event carries `localPersonOnly: true`, and a paired
+  client shows that card read-only, with the line "Answer this on the
+  computer running Octant." and no Approve or Deny. A phone notification for
+  it says it is waiting at that computer and is not sealed as an approval
+  ([Mobile maturity: When the host sends](mobile-maturity.md#when-the-host-sends)).
+  The host still refuses a paired device's answer, whatever a client shows. _Reason:_ the card is
+  journaled once for every client, so the mark rides on the ask rather than
+  on a client's guess from its wording. The mark is optional so journals
+  written before it still replay; a request waits only on a live turn, so no
+  waiting card lacks it. The phone app lists no Code approval card at all; it
+  already sends every Code approval to the computer.
 - The private listener forwards `POST /api/apple/devices` (admitted as a
   Project read) and never `/api/apple/device-leases`,
   `/api/apple/device-actions`, or `/api/apple/device-screenshots`, which are
@@ -635,6 +683,26 @@ accounts or hardware; its real-hardware acceptance is separate where noted.
    `use-device`, help text, harness and provider conformance. _Accept:_ the
    agent cannot start a lease without the person's answer, and Plan refuses
    effects. _Verify:_ tool tests and provider-sdk conformance.
+   _State:_ built from fakes. `octant_apple` routes a call to the device layer
+   when it names a `deviceId`, `destination: "device"`, or a device-only
+   operation, and its help text covers the device operations; Simulator input,
+   `boot`, `open`, and `test` are refused on a device (`not-offered-on-device`),
+   and uninstall, provisioning, and distribution are not offered to the agent.
+   On the host, `AppleDeviceService.check` answers the policy without carrying
+   anything out and `readConsole` hands a thread back its own console read; the
+   Code runtime asks a device lease or effect in the thread and accepts only a
+   local window's answer. Its evidence is the Apple tool's paired-device suite
+   in `codeAppManagedTools.test.ts` (a lease asked under Full access,
+   approval-gated, and Plan and never taken on a denial, a held lease not asked
+   again, a refusal returned before anyone is asked, effects refused in Plan
+   and asked for under approval-gated, the screenshot image and console text),
+   the Code runtime's paired-device cases (a paired device's answer refused,
+   the minted receipt one-use, under a Full-access and a Plan turn), the
+   agent-scope cases in `apps/server/src/wiring/devices.test.ts` (a request
+   that names a person or a paired device is refused before any receipt is
+   read), and the `AppleDeviceService` `check` and console tests. Provider conformance is
+   unchanged: the tool travels the existing app-managed tool seam, whose
+   provider-sdk conformance suites still pass.
 6. **App Store Connect key custody** (container; needs the distribution
    gate of decision 7). Broker family, desktop and CLI entry, local-only routes.
    _Accept:_ the key is never in a response, argument, environment, or the

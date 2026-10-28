@@ -56,7 +56,16 @@ import {
 } from "@octant/domain/code-worktree-source-policy";
 import { suggestCodeDeliveryOutcome } from "@octant/domain/delivery-target-policy";
 import type { CodeDeliveryOutcomeKind } from "@octant/contracts/code";
-import { FolderOpen } from "lucide-react";
+import { FolderOpen, Network } from "lucide-react";
+import type { SshTargetStatus } from "@octant/contracts/ssh-target";
+import {
+  REMOTE_CODE_THREAD_CONNECTORS_UNAVAILABLE,
+  REMOTE_CODE_THREAD_POSTURES,
+  remoteCodeTurnReadiness,
+  remotePlacedAgentReadiness,
+} from "@octant/domain/ssh-target-recovery";
+import { SSH_TARGET_TIMES } from "../../host/sshTargetClient";
+import { remoteCodeSelection, remoteCodeThreadProviderGroups } from "./remoteCodeComposer";
 import {
   useCallback,
   useContext,
@@ -196,6 +205,20 @@ export interface CodeComposerAdapterProps {
   readonly hostBridge?: OctantHostBridge;
   readonly extensionClient?: ExtensionClient;
   readonly browserAvailable?: boolean;
+  /**
+   * The selected Project is bound to a folder on an SSH target. The composer
+   * then offers what the host runs there: Octant's own harness and the
+   * agents the host's status lists placeable with a path set, Plan or Ask
+   * for approvals, the bound folder alone, and no Browser, Computer, or
+   * connector; and no Start while the host's status of the target refuses
+   * the posture. The host still decides each of these itself.
+   */
+  readonly remote?: {
+    /** `destination:folder`, as the target names it. */
+    readonly location: string;
+    /** The host's status of the target, absent once it was removed. */
+    readonly target?: SshTargetStatus;
+  };
 }
 
 export interface CodeComposerSuggestion {
@@ -241,6 +264,16 @@ const LAST_RESORT_BASE_BRANCH = "development";
 
 export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const suggestionDescriptionId = useId();
+  const remote = props.remote;
+  const isRemote = remote !== undefined;
+  const remoteTarget = remote?.target;
+  const providerGroups = useMemo(
+    () =>
+      isRemote
+        ? remoteCodeThreadProviderGroups(props.providerGroups, remoteTarget)
+        : props.providerGroups,
+    [props.providerGroups, isRemote, remoteTarget],
+  );
   const [prompt, setPrompt] = useNewTaskPrompt();
   const drafts = useContext(NewTaskDraftsContext);
   const draftScope = useContext(NewTaskDraftScopeContext);
@@ -256,20 +289,24 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const storedComputerSelection =
     draftScope === undefined ? undefined : drafts?.readComputerSelection(draftScope);
   const { modelKey, modelOptionValues, setModelChoice } = useDraftModelOptions(
-    props.providerGroups ?? [],
+    providerGroups,
     props.selectedProviderInstanceId,
     props.selectedModelId,
   );
 
-  const runtimeCarriesTools = pickerGroupCarriesAppManagedTools(
-    props.providerGroups,
-    props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
-      ? undefined
-      : {
-          providerInstanceId: props.selectedProviderInstanceId,
-          modelId: props.selectedModelId,
-        },
-  );
+  // A thread on an SSH target carries none of Octant's tools that act on this
+  // host: Browser and Computer are not offered there.
+  const runtimeCarriesTools =
+    remote === undefined &&
+    pickerGroupCarriesAppManagedTools(
+      providerGroups,
+      props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
+        ? undefined
+        : {
+            providerInstanceId: props.selectedProviderInstanceId,
+            modelId: props.selectedModelId,
+          },
+    );
   const computer = useComputerUseMention({
     textarea: () => textareaRef.current,
     draft: prompt,
@@ -278,16 +315,16 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     providerCarriesTools: runtimeCarriesTools,
     ...(storedComputerSelection === undefined ? {} : { initialSelection: storedComputerSelection }),
   });
-  const selectedFamily = providerFamilyForThread(
-    props.providerGroups,
-    props.selectedProviderInstanceId,
-  );
+  const selectedFamily = providerFamilyForThread(providerGroups, props.selectedProviderInstanceId);
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
     mode: "code",
     providerCarriesTools: runtimeCarriesTools,
     projectId: props.projectId ?? null,
     ...(selectedFamily === undefined ? {} : { providerFamily: selectedFamily }),
+    ...(remote === undefined
+      ? {}
+      : { toolsRefusedReason: REMOTE_CODE_THREAD_CONNECTORS_UNAVAILABLE }),
     ...(storedExtensionReceipts.length === 0 ? {} : { initialReceipts: storedExtensionReceipts }),
   });
   const browser = useBrowserUseMention({
@@ -359,7 +396,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   };
   const mentionListId = "code-new-thread-mentions";
   const images = useWorkComposerImages();
-  const imageSupport = selectedModelReadsImages(props.providerGroups, {
+  const imageSupport = selectedModelReadsImages(providerGroups, {
     ...(props.selectedProviderInstanceId === undefined
       ? {}
       : { providerInstanceId: props.selectedProviderInstanceId }),
@@ -389,6 +426,15 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const [permissionPersistence, setPermissionPersistence] = useState(
     storedCheckout?.permissionPersistence ?? props.defaultPermissionPersistence,
   );
+  // On a target a thread starts only in a posture the host would create it
+  // holding, and nothing about it is remembered for the Project.
+  const submittedPolicy: ProviderExecutionPolicy =
+    remote === undefined ||
+    REMOTE_CODE_THREAD_POSTURES.some((posture) => posture === executionPolicy)
+      ? executionPolicy
+      : "approval-gated";
+  const submittedPersistence: PermissionPersistence =
+    remote === undefined ? permissionPersistence : "current-session";
   // F2: the default delivery branch must never collide with the base branch
   // (e.g. `development`), which normally exists. Derive a unique
   // `octant/<short-id>` default once from a stable short id.
@@ -442,8 +488,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const [workspaceOverride, setWorkspaceOverride] = useState<CodeNewThreadWorkspace | undefined>(
     storedCheckout?.workspaceOverride ?? handedWorkspace,
   );
-  const workspace =
-    workspaceOverride ?? props.newThreadWorkspace ?? DEFAULT_CODE_NEW_THREAD_WORKSPACE;
+  // A thread on a target works in the bound folder: a managed worktree would
+  // be made by this host's Git in a folder of its own.
+  const workspace: CodeNewThreadWorkspace = isRemote
+    ? "current-checkout"
+    : (workspaceOverride ?? props.newThreadWorkspace ?? DEFAULT_CODE_NEW_THREAD_WORKSPACE);
   const startFromOrigin = startFromOriginOverride ?? defaultStartFromOrigin(worktreeRemoteFacts);
   const [worktreeRemote, setWorktreeRemote] = useState<string | undefined>(
     storedCheckout?.worktreeRemote ??
@@ -484,6 +533,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     startFromOrigin,
     remoteName: resolvedWorktreeRemote,
     enabled:
+      !isRemote &&
       props.projectId !== undefined &&
       props.execute !== undefined &&
       resolvedBaseBranch !== undefined,
@@ -503,12 +553,47 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   // A send refused before the host saw it explains itself beside the composer,
   // since no thread exists to carry a reason.
   const [sendNotice, setSendNotice] = useState<string>();
+  // What the host's status of the target says before anyone presses Start,
+  // and whether the chosen model is one the target runs. Neither grants
+  // anything: the host admits the turn itself.
+  const remoteSelection =
+    remote === undefined
+      ? undefined
+      : remoteCodeSelection(
+          providerGroups,
+          props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
+            ? undefined
+            : {
+                providerInstanceId: props.selectedProviderInstanceId,
+                modelId: props.selectedModelId,
+              },
+        );
+  // A placed agent's turn also needs its runtime admitted in the posture,
+  // which asks runtime canaries a harness command does not.
+  const remoteReadiness =
+    remote === undefined
+      ? undefined
+      : remoteSelection?.status === "placed-agent"
+        ? remotePlacedAgentReadiness(
+            remote.target,
+            String(remoteSelection.providerInstanceId),
+            submittedPolicy,
+            SSH_TARGET_TIMES,
+          )
+        : remoteCodeTurnReadiness(remote.target, submittedPolicy, SSH_TARGET_TIMES);
+  const remoteRefusal =
+    remoteReadiness?.status === "unavailable"
+      ? remoteReadiness.message
+      : remoteSelection?.status === "unavailable"
+        ? remoteSelection.message
+        : undefined;
   const canSubmit =
     trimmed.length > 0 &&
     !props.creating &&
     !submitting &&
     !slash.resolving &&
-    props.projectId !== undefined;
+    props.projectId !== undefined &&
+    remoteRefusal === undefined;
 
   // Server-authoritative ref catalog for the branch selector, fetched lazily
   // the first time the selector opens.
@@ -606,9 +691,10 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   // before the reader opens the picker. Loaded only on open, the tray showed
   // its fallback until someone happened to look at the list.
   useEffect(() => {
-    if (projectId === undefined) return;
+    // A remote root's branches are on the target; this host lists none.
+    if (projectId === undefined || isRemote) return;
     loadWorktreeRefs();
-  }, [loadWorktreeRefs, projectId]);
+  }, [loadWorktreeRefs, projectId, isRemote]);
   useEffect(() => {
     if (baseBranchChosen.current || worktreeRefs === undefined) return;
     const current =
@@ -637,7 +723,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
-    const computerUseSelection = computer.selection;
+    const computerUseSelection = isRemote ? undefined : computer.selection;
     const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
       receipt.selection === undefined ? [] : [receipt.selection],
     );
@@ -660,8 +746,8 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           modelOptionValues,
           ...(computerUseSelection === undefined ? {} : { computerUseSelection }),
           ...(extensionSelections.length === 0 ? {} : { extensionSelections }),
-          executionPolicy,
-          permissionPersistence,
+          executionPolicy: submittedPolicy,
+          permissionPersistence: submittedPersistence,
           deliveryTarget: {
             branchIntent: defaultDeliveryBranchIntent(submittedBaseBranch, shortId),
             remoteName: resolvedWorktreeRemote,
@@ -693,8 +779,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     canSubmit,
     trimmed,
     modelOptionValues,
-    executionPolicy,
-    permissionPersistence,
+    submittedPolicy,
+    submittedPersistence,
+    isRemote,
     workspace,
     baseRepository,
     baseBranch,
@@ -749,23 +836,29 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   // A branch names a Project's checkout. With no Project chosen, a static
   // "Default branch" chip named a branch of nothing and sat between the
   // person and the prompt.
-  const branchControl = hasProject ? (
-    <CodeBranchSelector
-      key={String(props.projectId)}
-      branch={resolvedBaseBranch ?? "Default branch"}
-      loading={refsLoading}
-      onOpen={loadWorktreeRefs}
-      onSelectRef={handleSelectRef}
-      onStartFromOriginChange={setStartFromOriginOverride}
-      remoteName={resolvedWorktreeRemote}
-      startFromOrigin={startFromOrigin}
-      startFromOriginAvailable={
-        preferredRemote.status === "selected" || worktreeRemote !== undefined
-      }
-      {...(worktreeRefs === undefined ? {} : { refs: worktreeRefs })}
-      {...(props.creating === true ? { disabled: true } : {})}
-    />
-  ) : null;
+  const branchControl =
+    hasProject && remote !== undefined ? (
+      <span className="composer-tray__item" title={`On an SSH target: ${remote.location}`}>
+        <Network aria-hidden="true" size={12} strokeWidth={1.8} />
+        <span>{remote.location}</span>
+      </span>
+    ) : hasProject ? (
+      <CodeBranchSelector
+        key={String(props.projectId)}
+        branch={resolvedBaseBranch ?? "Default branch"}
+        loading={refsLoading}
+        onOpen={loadWorktreeRefs}
+        onSelectRef={handleSelectRef}
+        onStartFromOriginChange={setStartFromOriginOverride}
+        remoteName={resolvedWorktreeRemote}
+        startFromOrigin={startFromOrigin}
+        startFromOriginAvailable={
+          preferredRemote.status === "selected" || worktreeRemote !== undefined
+        }
+        {...(worktreeRefs === undefined ? {} : { refs: worktreeRefs })}
+        {...(props.creating === true ? { disabled: true } : {})}
+      />
+    ) : null;
   const environmentControl = (
     <HostSelector
       presentation="environment"
@@ -808,7 +901,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                   {environmentControl}
                 </div>
                 <div className="composer-tray__trailing">
-                  {hasProject ? (
+                  {hasProject && !isRemote ? (
                     <CodeWorkspaceSelector
                       onChange={setWorkspaceOverride}
                       value={workspace}
@@ -951,8 +1044,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                       setPermissionPersistence(nextPersistence);
                       props.onExecutionPolicyChange?.(executionPolicy, nextPersistence);
                     }}
-                    persistence={permissionPersistence}
-                    value={executionPolicy}
+                    persistence={submittedPersistence}
+                    value={submittedPolicy}
+                    {...(isRemote ? { offered: REMOTE_CODE_THREAD_POSTURES } : {})}
                     {...(props.creating === true ? { disabled: true } : {})}
                   />
                 </>
@@ -962,7 +1056,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                   <span className="code-composer-adapter__context-picker">
                     <ComposerModelPicker
                       ariaLabel="Provider and model"
-                      groups={props.providerGroups}
+                      groups={providerGroups}
                       disabled={props.creating === true || submitting}
                       modelOptionValues={modelOptionValues}
                       onModelOptionChange={(id, value) => {
@@ -1061,6 +1155,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
         )}
         {props.beneath}
 
+        {remoteRefusal !== undefined && props.errorMessage === undefined ? (
+          <p className="code-composer-adapter__notice" role="status">
+            {remoteRefusal}
+          </p>
+        ) : null}
         {props.errorMessage !== undefined ? (
           <OctantAlert className="code-composer-adapter__error" tone="danger">
             {props.errorMessage}

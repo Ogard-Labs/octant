@@ -1,4 +1,5 @@
 import { MAX_PROVIDER_TOOLS } from "./providers";
+import { MAX_THREAD_PUBLISHED_SNAPSHOT_BYTES } from "./threadToolSteps";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
@@ -10,6 +11,8 @@ import {
   decodeProviderInstanceCreated,
   decodeProviderInstanceBinaryChanged,
   decodeProviderInstanceConfigurationChanged,
+  decodeProviderInstanceDriverQuarantined,
+  decodeProviderInstanceDriverRebound,
   decodeOllamaHistoryRecorded,
   decodeProviderModel,
   decodeProviderModelOptionValues,
@@ -38,6 +41,8 @@ describe("provider registry contracts", () => {
       "provider.instance-renamed@1",
       "provider.instance-binary-changed@1",
       "provider.instance-configuration-changed@1",
+      "provider.instance-driver-rebound@1",
+      "provider.instance-driver-quarantined@1",
       "provider.instance-data-tags-changed@1",
       "provider.instance-enabled-changed@1",
       "provider.instance-removed@1",
@@ -1782,6 +1787,47 @@ describe("provider registry contracts", () => {
     ).toThrow();
     // No command reconfigures one: its package, address, and models are fixed when it is added.
     expect(() => decodeProviderInstanceConfigurationChanged({ instance: outside })).toThrow();
+    // The host's move to a newly trusted digest has its own event, for outside instances only.
+    expect(decodeProviderInstanceDriverRebound({ instance: outside })).toEqual({
+      instance: outside,
+    });
+    expect(() =>
+      decodeProviderInstanceDriverRebound({
+        instance: {
+          ...outside,
+          driverKind: "ollama",
+          configuration: { kind: "ollama-native-http", baseUrl: "http://127.0.0.1:11434" },
+        },
+      }),
+    ).toThrow();
+    // A crash-limit hold is journaled on the instance at the digest that
+    // crashed, by its own event, and only an outside instance carries one.
+    const driverQuarantine = {
+      reason: "crash-limit",
+      digest: outside.configuration.driver.digest,
+      quarantinedAt: occurredAt,
+    } as const;
+    const held = { ...outside, driverQuarantine };
+    expect(decodeProviderInstance(held)).toEqual(held);
+    expect(decodeProviderInstanceDriverQuarantined({ instance: held })).toEqual({
+      instance: held,
+    });
+    expect(() => decodeProviderInstanceDriverQuarantined({ instance: outside })).toThrow();
+    for (const hold of [
+      { ...driverQuarantine, reason: "person" },
+      { ...driverQuarantine, digest: "sha256:abc" },
+      { ...driverQuarantine, stderr: "driver text" },
+    ]) {
+      expect(() => decodeProviderInstance({ ...outside, driverQuarantine: hold })).toThrow();
+    }
+    expect(() =>
+      decodeProviderInstance({
+        ...outside,
+        driverKind: "ollama",
+        configuration: { kind: "ollama-native-http", baseUrl: "http://127.0.0.1:11434" },
+        driverQuarantine,
+      }),
+    ).toThrow();
   });
 
   it("adds an outside driver provider off, with only the models listed and a key header the person chose", () => {
@@ -3164,6 +3210,44 @@ describe("provider runtime contracts", () => {
     expect(() =>
       decodeProviderRuntimeEvent({ ...common, ...event, providerPayload: { private: true } }),
     ).toThrow();
+  });
+
+  it("carries a published page only as a plain https address, never a script or credentialed link", () => {
+    const success = {
+      ...common,
+      kind: "tool-success",
+      toolCallId: "tool-1",
+      summary: "Published to claude.ai.",
+    } as const;
+    const page = { url: "https://claude.ai/artifact/abc123", title: "Quarterly report" };
+    expect(decodeProviderRuntimeEvent({ ...success, published: page })).toMatchObject({
+      published: page,
+    });
+    for (const url of [
+      "javascript:alert(1)",
+      "http://claude.ai/artifact/abc123",
+      "https://person:secret@claude.ai/artifact/abc123",
+      `https://claude.ai/${"a".repeat(2_048)}`,
+    ]) {
+      expect(() => decodeProviderRuntimeEvent({ ...success, published: { url } })).toThrow();
+    }
+    expect(() =>
+      decodeProviderRuntimeEvent({ ...success, published: { ...page, html: "<script>" } }),
+    ).toThrow();
+    // The host's snapshot of the published file is bounded and only HTML or Markdown.
+    const snapshot = { format: "html", content: "<h1>Report</h1>" } as const;
+    expect(
+      decodeProviderRuntimeEvent({ ...success, published: { ...page, snapshot } }),
+    ).toMatchObject({ published: { snapshot } });
+    for (const refused of [
+      { format: "html", content: "a".repeat(MAX_THREAD_PUBLISHED_SNAPSHOT_BYTES + 1) },
+      { format: "pdf", content: "%PDF" },
+      { format: "markdown", content: "" },
+    ]) {
+      expect(() =>
+        decodeProviderRuntimeEvent({ ...success, published: { ...page, snapshot: refused } }),
+      ).toThrow();
+    }
   });
 
   it("refuses an outside-content read of an unknown source or with an unbounded target", () => {

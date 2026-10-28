@@ -512,6 +512,44 @@
   filter: brightness(1.12);
 }
 
+/* A series that emphasizes a reading draws its other bars in the neutral ink,
+   so the hue is left on the one the chart is about. */
+.canvas-chart__bar[data-muted="true"] {
+  fill: color-mix(in oklab, var(--oct-fg) 24%, transparent);
+}
+
+/* The chart's own finding and what it measures, above the plot. */
+.canvas-chart__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 0 var(--oct-space-3);
+}
+
+.canvas-chart__title {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-base);
+  font-weight: var(--oct-weight-strong);
+}
+
+.canvas-chart__subtitle {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
+}
+
+/* An author's callout on one reading, in the text ink rather than the hue. */
+.canvas-chart__note {
+  fill: var(--oct-fg);
+  font-family: inherit;
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--oct-weight-strong);
+  paint-order: stroke;
+  stroke: var(--octant-card, var(--oct-surface));
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
 /* Funnel, radar, and sankey charts. A stage, an axis, or a node is named in
    text ink beside its mark, never in the mark's hue; its reading follows in
    the meta ink so the name leads. */
@@ -2189,7 +2227,7 @@
 .canvas-comments__title {
   margin: 0;
   font-size: var(--oct-text-sm);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .canvas-comments__note {
@@ -2783,6 +2821,16 @@
   flex: 1;
 }
 
+/* What Save as HTML file or Copy HTML did, on its own line under the tools. */
+.canvas-workspace-tab__notice {
+  flex-basis: 100%;
+  margin: 0;
+  padding-bottom: var(--oct-space-1);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  overflow-wrap: anywhere;
+}
+
 .canvas-workspace-tab__older,
 .canvas-workspace-tab__count {
   font-family: var(--oct-font-mono);
@@ -2874,7 +2922,7 @@
 .canvas-workspace-tab__drawer-header h2 {
   margin: 0;
   font-size: var(--oct-text-sm);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .canvas-workspace-tab__share-dialog {
@@ -3113,6 +3161,65 @@
   font-size: var(--oct-text-sm);
 }
 
+/* Import HTML sits under the create form as its own small section. A long
+   address in the summary wraps rather than widening the thread column. */
+.canvas-html-import {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-3);
+  min-width: 0;
+}
+
+.canvas-html-import > [data-testid="canvas-import-html-open"] {
+  align-self: flex-start;
+}
+
+.canvas-html-import__heading {
+  margin: 0;
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+}
+
+.canvas-html-import__label {
+  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
+}
+
+.canvas-html-import__paste {
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-html-import__actions {
+  display: flex;
+  gap: var(--oct-space-2);
+}
+
+.canvas-html-import__line {
+  margin: 0;
+}
+
+.canvas-html-import__drop-list {
+  margin: var(--oct-space-1) 0 0;
+  padding-left: var(--oct-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-1);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-html-import__drop-count {
+  font-weight: 600;
+}
+
+.canvas-html-import__drop-examples {
+  display: block;
+  color: var(--oct-muted);
+  overflow-wrap: anywhere;
+}
+
 .canvas-version-history__title {
   font-size: var(--oct-text-sm);
   margin: 0 0 var(--oct-space-2);
@@ -3245,7 +3352,7 @@
 }
 
 .canvas-action__spinner {
-  animation: canvas-action-spin 1s linear infinite;
+  animation: canvas-action-spin var(--oct-motion-spin) linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3310,7 +3417,7 @@
 }
 
 .canvas-refresh__spinner {
-  animation: canvas-action-spin 1s linear infinite;
+  animation: canvas-action-spin var(--oct-motion-spin) linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -4789,6 +4896,8 @@
   position: absolute;
   inset: auto 0 var(--oct-space-3);
   display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
   justify-content: center;
 }
 
@@ -4876,6 +4985,35 @@
   width: 320px;
   transform: scale(0.325);
   transform-origin: top left;
+}
+
+/* A Canvas the author asked to show inline that holds a plan, a mockup, or a
+   device-size design: the row becomes a card whose miniature spans the
+   column above its title. The page is laid out at twice the card's width and
+   drawn at half size, so it fits the column at any width without a measured
+   scale; the card's height is bounded and its foot fades like the tile's. */
+.canvas-ref[data-shown-as="preview"] {
+  flex-wrap: wrap;
+}
+
+.canvas-ref[data-shown-as="preview"] .canvas-ref__preview {
+  flex: 1 0 100%;
+  width: 100%;
+  height: auto;
+  max-height: 280px;
+  aspect-ratio: 16 / 9;
+  mask-image: linear-gradient(to bottom, var(--oct-fg) 80%, transparent);
+}
+
+/* The title shares the line under the miniature with the expand control and
+   the chevron, however long its facts run, rather than wrapping them below. */
+.canvas-ref[data-shown-as="preview"] .canvas-ref__text {
+  flex-basis: 0;
+}
+
+.canvas-ref[data-shown-as="preview"] .canvas-ref__preview-page {
+  width: 200%;
+  transform: scale(0.5);
 }
 
 .canvas-ref__progress {
@@ -4982,6 +5120,15 @@
   }
 
   .canvas-chart__dot {
+    fill: CanvasText;
+    stroke: Canvas;
+  }
+
+  .canvas-chart__bar[data-muted="true"] {
+    fill: GrayText;
+  }
+
+  .canvas-chart__note {
     fill: CanvasText;
     stroke: Canvas;
   }

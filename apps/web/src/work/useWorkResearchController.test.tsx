@@ -1,5 +1,6 @@
 import { renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MAX_WORK_RESEARCH_SOURCE_BYTES, decodeProjectId } from "@octant/contracts";
 import {
   WorkResearchClientFailure,
@@ -7,6 +8,7 @@ import {
   type WorkResearchClient,
 } from "@octant/client-runtime/work-research-client";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
+import { HostPlatformContext } from "../platform";
 import { useWorkResearchController } from "./useWorkResearchController";
 
 const projectId = decodeProjectId("20000000-0000-4000-8000-000000000001");
@@ -658,6 +660,52 @@ describe("useWorkResearchController", () => {
     });
     await waitFor(() => {
       expect(client.listBriefs).toHaveBeenCalledTimes(2);
+    });
+  });
+});
+
+// Each host is seen from a window on the other platform, so copy that read the
+// window's platform instead of the host's would name the wrong computer.
+const HOSTS = [
+  { hostPlatform: "linux", window: "MacIntel", computer: "this computer", elsewhere: /this Mac/ },
+  {
+    hostPlatform: "darwin",
+    window: "Linux x86_64",
+    computer: "this Mac",
+    elsewhere: /this computer/,
+  },
+] as const;
+
+describe.each(HOSTS)("useWorkResearchController on a $hostPlatform host", (host) => {
+  beforeEach(() => {
+    Object.defineProperty(window.navigator, "platform", { value: host.window, configurable: true });
+  });
+  afterEach(() => Reflect.deleteProperty(window.navigator, "platform"));
+
+  it("names the host's computer when the host cannot read a picked file as a source", async () => {
+    const client = stubClient({ execute: vi.fn().mockResolvedValue({ kind: "unsupported" }) });
+    const wrapper = (props: { readonly children: ReactNode }) => (
+      <HostPlatformContext.Provider value={host.hostPlatform}>
+        {props.children}
+      </HostPlatformContext.Provider>
+    );
+    const { result } = renderHook(
+      () => useWorkResearchController({ client, enabled: true, projectId }),
+      { wrapper },
+    );
+    await waitFor(() => {
+      expect(result.current.status).toBe("ready");
+    });
+
+    const outcome = await result.current.addSource({
+      briefId,
+      file: new File(["hello"], "notes.md"),
+      excerpt: "Revenue grew",
+    });
+
+    expect(outcome).toEqual({
+      kind: "rejected",
+      message: `The host could not read that file at the top level of the folder Work is bound to. Only a file that sits directly in that folder — not in a subfolder and not elsewhere on ${host.computer} — can become a source.`,
     });
   });
 });

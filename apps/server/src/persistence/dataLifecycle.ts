@@ -30,6 +30,11 @@ export type { CredentialPurgeAttempt } from "@octant/domain";
 // stays confined to the resolved data directory, and names the OS-keychain
 // credential residual it cannot itself clear.
 
+// A signed-in paired device reads this guidance and may run on another
+// platform than the host, so the server's own copy names no platform.
+const CREDENTIAL_BROKER_UNAVAILABLE =
+  "The credential broker for this computer's credential store is unavailable. No local data was changed; retry from the native desktop host.";
+
 export type RetainedScope =
   | "host-identity"
   | "store-schema"
@@ -335,9 +340,7 @@ export function removeAllLocalData(input: {
         | "partial"
         | "indeterminate"
         | "failed",
-      recoveryGuidance:
-        credentialCleanup.recoveryGuidance ??
-        "The macOS Keychain credential broker is unavailable. No local data was changed; retry from the native desktop host.",
+      recoveryGuidance: credentialCleanup.recoveryGuidance ?? CREDENTIAL_BROKER_UNAVAILABLE,
     });
   }
 
@@ -419,9 +422,7 @@ export async function removeAllLocalDataWithCredentialPurge(input: {
           | "partial"
           | "indeterminate"
           | "failed",
-        recoveryGuidance:
-          cleanup.recoveryGuidance ??
-          "The macOS Keychain credential broker is unavailable. No local data was changed; retry from the native desktop host.",
+        recoveryGuidance: cleanup.recoveryGuidance ?? CREDENTIAL_BROKER_UNAVAILABLE,
       });
     }
   }
@@ -482,7 +483,7 @@ export async function removeAllLocalDataWithCredentialPurge(input: {
             | "partial"
             | "failed"),
       recoveryGuidance: stagedOutcomeIsUncertain
-        ? "The Keychain cleanup outcome could not be confirmed. Local store files remain staged; retry complete local-data removal to reconcile before using this store."
+        ? "The credential cleanup outcome could not be confirmed. Local store files remain staged; retry complete local-data removal to reconcile before using this store."
         : (credentialCleanup.recoveryGuidance ?? "Retry complete local-data removal."),
     });
   }

@@ -314,6 +314,136 @@ describe("ShellService", () => {
     });
   });
 
+  describe("a Code Project bound to a folder on an SSH target", () => {
+    // Its record is the SSH target store's, so `readProject` never names it.
+    // The window used to drop any binding to it, so no local window could
+    // create a thread there.
+    const remoteThreadId = "00000000-0000-4000-8000-000000000241";
+    const remoteCodeProjects = {
+      has: (id: unknown) => String(id) === String(projectId),
+      holdsThread: (thread: { readonly id: unknown }) => String(thread.id) === remoteThreadId,
+    };
+    const codePane = () => {
+      const code = defaultWindowWorkspace(ids.window).layouts.code;
+      if (code.kind !== "pane") throw new Error("expected pane");
+      return code.paneId;
+    };
+
+    it("binds the window a Code draft names it in, with no folder of this host", () => {
+      const fixture = persistenceStub();
+      const service = new ShellService({
+        persistence: fixture.persistence,
+        remoteCodeProjects,
+        uuid: uuidSequence(),
+        clock: () => now,
+      });
+      service.bootstrap(ids.window);
+
+      const result = service.execute({
+        kind: "apply-workspace-operation",
+        windowId: ids.window,
+        expectedVersion: 0,
+        operation: {
+          kind: "open-surface",
+          mode: "code",
+          paneId: codePane(),
+          surface: {
+            kind: "draft-thread",
+            id: "00000000-0000-4000-8000-000000000242" as never,
+            projectId,
+            mode: "code",
+            title: "New Code thread",
+          },
+        },
+      });
+
+      expect(result).toMatchObject({
+        kind: "workspace-replaced",
+        workspace: { contextByMode: { code: { projectId, boundRoot: null } } },
+      });
+    });
+
+    it("keeps that binding when the window bootstraps again, and offers no Files there", () => {
+      const base = { ...defaultWindowWorkspace(ids.window), activeMode: "code" as const };
+      const bound = {
+        ...base,
+        contextByMode: {
+          ...base.contextByMode,
+          code: {
+            host: base.contextByMode.code.host,
+            mode: "code" as const,
+            projectId,
+            boundRoot: null,
+          },
+        },
+      } as never;
+      const fixture = persistenceStub({
+        workspace: { workspace: bound, aggregateVersion: 2 as never },
+      });
+      const bootstrap = new ShellService({
+        persistence: fixture.persistence,
+        remoteCodeProjects,
+        uuid: uuidSequence(),
+        clock: () => now,
+      }).bootstrap(ids.window);
+
+      expect(bootstrap.workspace.contextByMode.code).toMatchObject({ projectId, boundRoot: null });
+      expect(bootstrap.availableSurfaces.code.find((d) => d.kind === "files")?.available).toBe(
+        false,
+      );
+    });
+
+    it("opens a remote thread's own view but refuses its terminal", () => {
+      const fixture = persistenceStub({
+        codeThread: { id: remoteThreadId, projectId } as never,
+      });
+      const service = new ShellService({
+        persistence: fixture.persistence,
+        remoteCodeProjects,
+        uuid: uuidSequence(),
+        clock: () => now,
+      });
+      service.bootstrap(ids.window);
+      const surface = (kind: "code-overview" | "code-terminal", id: string) => ({
+        kind,
+        id: id as never,
+        threadId: remoteThreadId as never,
+        mode: "code" as const,
+        title: "Remote thread",
+      });
+
+      expect(
+        service.execute({
+          kind: "apply-workspace-operation",
+          windowId: ids.window,
+          expectedVersion: 0,
+          operation: {
+            kind: "open-surface",
+            mode: "code",
+            paneId: codePane(),
+            surface: surface("code-overview", "00000000-0000-4000-8000-000000000243"),
+          },
+        }),
+      ).toMatchObject({
+        kind: "workspace-replaced",
+        workspace: { contextByMode: { code: { projectId, boundRoot: null } } },
+      });
+      expect(() =>
+        service.execute({
+          kind: "apply-workspace-operation",
+          windowId: ids.window,
+          expectedVersion: 1,
+          operation: {
+            kind: "open-surface",
+            mode: "code",
+            paneId: codePane(),
+            surface: surface("code-terminal", "00000000-0000-4000-8000-000000000244"),
+          },
+        }),
+      ).toThrowError(expect.objectContaining({ failure: expect.objectContaining({}) }));
+    });
+  });
+
   it("leaves the window unbound for a draft thread that names no Project", () => {
     const base = { ...defaultWindowWorkspace(ids.window), activeMode: "code" as const };
     const code = base.layouts.code;
@@ -2310,6 +2440,7 @@ function persistenceStub(
       projectId: Parameters<PersistenceService["readProject"]>[0],
     ) => ReturnType<PersistenceService["readProject"]>;
     readonly chatThread?: ReturnType<PersistenceService["readChatThread"]>;
+    readonly codeThread?: ReturnType<PersistenceService["readCodeThread"]>;
     readonly canvasProjection?: CanvasProjection;
     readonly appendError?: Error;
     readonly statusState?: "current" | "recovery-required";
@@ -2330,7 +2461,7 @@ function persistenceStub(
     readProject: (projectId: Parameters<PersistenceService["readProject"]>[0]) =>
       options.projectFor === undefined ? options.project : options.projectFor(projectId),
     readChatThread: () => options.chatThread,
-    readCodeThread: () => undefined,
+    readCodeThread: () => options.codeThread,
     canvasProjection: options.canvasProjection ?? new CanvasProjection(),
     status: () => ({
       state: options.statusState ?? "current",

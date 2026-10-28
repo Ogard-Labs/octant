@@ -1,10 +1,12 @@
 import type {
   DiscoverySnapshot,
+  HostPlatform,
   ProviderInstance,
   ProviderInstanceId,
   ProviderObservedState,
 } from "@octant/contracts";
 import { providerCanServeAnyModel } from "@octant/domain";
+import { thisComputerName } from "../platform";
 
 /**
  * How one configured provider looks to a user completing first run.
@@ -55,7 +57,7 @@ export interface FirstRunReadinessSummary {
    * which Chat accepts (see {@link providerCanServeAnyModel}).
    */
   readonly usableCount: number;
-  /** Runtimes detected on this Mac that are not configured as providers yet. */
+  /** Runtimes detected on the host that are not configured as providers yet. */
   readonly detectedCount: number;
 }
 
@@ -64,11 +66,13 @@ export interface FirstRunReadinessInput {
   readonly instances: ReadonlyArray<ProviderInstance>;
   readonly observedByInstance: ReadonlyMap<ProviderInstanceId, ProviderObservedState>;
   /**
-   * What the host's search of this Mac has produced so far. Required, because
-   * an empty registry means "nothing is configured" only once that search has
-   * answered; before then it means the search has not run yet.
+   * What the host's search of its computer has produced so far. Required,
+   * because an empty registry means "nothing is configured" only once that
+   * search has answered; before then it means the search has not run yet.
    */
   readonly discovery: FirstRunDiscoveryInput;
+  /** The platform the host reports, which names the computer it searched. */
+  readonly hostPlatform?: HostPlatform | undefined;
 }
 
 export interface FirstRunDiscoveryInput {
@@ -78,11 +82,12 @@ export interface FirstRunDiscoveryInput {
 }
 
 /**
- * How far the host has got in searching this Mac for installed providers.
+ * How far the host has got in searching its computer for installed providers.
  *
  * `searched` is deliberately narrow: only a scan that ran to completion has
- * answered. A cancelled, partial, or failed scan looked at some of this Mac
- * and stopped, so it cannot support a claim about what is not installed.
+ * answered. A cancelled, partial, or failed scan looked at some of the
+ * computer and stopped, so it cannot support a claim about what is not
+ * installed.
  */
 export type FirstRunDiscoveryProgress = "unsearched" | "scanning" | "searched";
 
@@ -111,8 +116,7 @@ const DETAILS: Record<FirstRunProviderState, string> = {
   ready: "Verified by the host and reporting usable models.",
   "no-models": "The host reached this provider, but it offered no usable models.",
   "authentication-required": "This provider must be signed in before it can answer.",
-  "credential-unavailable":
-    "Octant cannot read this provider's stored credential. Unlock the login keychain or sign in again.",
+  "credential-unavailable": "Octant cannot read this provider's stored credential.",
   unreachable: "The host could not reach this provider.",
   incompatible: "The installed version of this provider is not supported.",
   degraded: "This provider answered, but reported reduced capability.",
@@ -133,6 +137,7 @@ const DETAILS: Record<FirstRunProviderState, string> = {
 export function describeProviderReadiness(
   instance: ProviderInstance,
   observed: ProviderObservedState | undefined,
+  hostPlatform: HostPlatform | undefined,
 ): FirstRunProviderReadiness {
   const state = resolveProviderState(instance, observed);
   const hostMessage = observed?.message;
@@ -141,8 +146,22 @@ export function describeProviderReadiness(
     displayName: instance.displayName,
     state,
     label: LABELS[state],
-    detail: state === "ready" || hostMessage === undefined ? DETAILS[state] : hostMessage,
+    detail:
+      state === "ready" || hostMessage === undefined
+        ? stateDetail(state, hostPlatform)
+        : hostMessage,
   };
+}
+
+function stateDetail(state: FirstRunProviderState, hostPlatform: HostPlatform | undefined): string {
+  if (state !== "credential-unavailable") return DETAILS[state];
+  // The remedy is the host's own store: the login keychain on a Mac, the
+  // Secret Service collection elsewhere.
+  const unlock =
+    hostPlatform === "darwin"
+      ? "Unlock the login keychain or sign in again."
+      : `Unlock ${thisComputerName(hostPlatform)}'s credential store or sign in again.`;
+  return `${DETAILS[state]} ${unlock}`;
 }
 
 function resolveProviderState(
@@ -182,7 +201,10 @@ export function summarizeFirstRunReadiness(
 ): FirstRunReadinessSummary {
   const described = input.instances.map((instance) => {
     const observed = input.observedByInstance.get(instance.id);
-    return { readiness: describeProviderReadiness(instance, observed), observed };
+    return {
+      readiness: describeProviderReadiness(instance, observed, input.hostPlatform),
+      observed,
+    };
   });
   const providers = described.map((entry) => entry.readiness);
   const readyCount = providers.filter((provider) => provider.state === "ready").length;
@@ -237,8 +259,9 @@ export function summarizeFirstRunReadiness(
           : "You can start a Chat message now. A provider marked degraded still answers, with reduced capability.",
     };
   }
+  const computer = thisComputerName(input.hostPlatform);
   if (providers.length === 0) {
-    // Discovery, not the registry, is what knows whether this Mac has a
+    // Discovery, not the registry, is what knows whether the host has a
     // provider on it. Until it has answered, an empty registry is a missing
     // answer, and first run names it as one rather than converting it into
     // "nothing is configured".
@@ -247,11 +270,11 @@ export function summarizeFirstRunReadiness(
       return {
         ...base,
         overall: "checking",
-        headline: "Octant has not finished checking this Mac",
+        headline: `Octant has not finished checking ${computer}`,
         detail:
           progress === "scanning"
-            ? "The search for installed providers is still running. Octant claims nothing about this Mac until it finishes."
-            : "The search for installed providers has not completed, so Octant cannot say whether one is installed. Check this Mac again to finish it.",
+            ? `The search for installed providers is still running. Octant claims nothing about ${computer} until it finishes.`
+            : `The search for installed providers has not completed, so Octant cannot say whether one is installed. Check ${computer} again to finish it.`,
       };
     }
     return {
@@ -262,7 +285,7 @@ export function summarizeFirstRunReadiness(
         detectedCount > 0
           ? `Octant detected ${detectedCount} installed runtime${
               detectedCount === 1 ? "" : "s"
-            } on this Mac. Enable one in provider settings to send a message.`
+            } on ${computer}. Enable one in provider settings to send a message.`
           : "Add a provider in settings to send a message. Octant does not configure one for you.",
     };
   }
@@ -285,7 +308,7 @@ export interface FirstRunDiscoveryNotice {
  * Report an incomplete provider scan honestly.
  *
  * A cancelled, partial, or failed scan still produces a candidate list, and
- * presenting that list silently would imply the Mac was fully searched. Each
+ * presenting that list silently would imply the host was fully searched. Each
  * incomplete outcome is named and offered a retry so the user can act on it;
  * none of them changes what the host will let a provider do.
  *
@@ -295,11 +318,12 @@ export interface FirstRunDiscoveryNotice {
  */
 export function describeDiscoveryNotice(
   input: FirstRunDiscoveryInput,
+  hostPlatform: HostPlatform | undefined,
 ): FirstRunDiscoveryNotice | undefined {
   if (input.scanning) {
     return {
       tone: "info",
-      message: "Checking this Mac for installed providers…",
+      message: `Checking ${thisComputerName(hostPlatform)} for installed providers…`,
       retryable: false,
     };
   }

@@ -14,9 +14,11 @@ import {
   decodeWindowId,
   type DiscoveryCandidate,
   LOCAL_HOST_ID,
+  type OutsideProviderDriverReference,
   type PermissionPersistence,
   type ProviderDriverKind,
   type ProviderInstance,
+  type ProviderInstanceId,
   type ProviderProbeResult,
   type ProviderRuntimeEvent,
   type UtcTimestamp,
@@ -49,7 +51,11 @@ import { makeAnthropicCompatibleDriver } from "../providers/anthropicCompatibleD
 import { makeAzureFoundryDriver } from "../providers/azureFoundryDriver";
 import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
 import { OutsideDriverAdmission } from "../providers/outsideDriverAdmission";
-import { OutsideDriverProcesses } from "../providers/outsideDriverProcess";
+import {
+  OutsideDriverProcesses,
+  resolveOutsideDriverRuntime,
+  type OutsideDriverProcessesOptions,
+} from "../providers/outsideDriverProcess";
 import {
   makeCredentialBrokerClient,
   makeMcpServerCredentialBrokerClient,
@@ -344,6 +350,16 @@ export function makeConfiguredProviderDriver(
       ...(options.claudeInstances === undefined
         ? {}
         : { claudeInstances: options.claudeInstances }),
+      // `claudeInstances` is a getter over the journal on the host's options;
+      // reading it here at every call keeps a running session on the
+      // person's current switch.
+      claudeArtifactDelivery: (instanceId) =>
+        options.claudeInstances?.some(
+          (candidate) =>
+            String(candidate.id) === String(instanceId) &&
+            candidate.driverKind === "claude" &&
+            candidate.configuration.artifactDelivery === true,
+        ) === true,
       ...(options.codexInstances === undefined ? {} : { codexInstances: options.codexInstances }),
       ...(options.credentialResolver === undefined
         ? {}
@@ -430,6 +446,39 @@ function isPathWithin(root: string, candidate: string): boolean {
     confined === "" ||
     (confined !== ".." && !confined.startsWith(`..${sep}`) && !isAbsolute(confined))
   );
+}
+
+/**
+ * How the host keeps an outside driver's crash-limit hold for the process
+ * owner: read from the instance the journal holds, so a start at a held
+ * digest is refused after a restart too, and journaled through the provider
+ * service. That service is built after the owner it depends on, so the owner
+ * asks for it when a driver crosses the limit, not when the owner is built.
+ */
+export function journaledOutsideDriverHold(input: {
+  readonly readProviderInstance: (instanceId: ProviderInstanceId) => ProviderInstance | undefined;
+  readonly journalHold: () =>
+    | ((
+        instanceId: ProviderInstanceId,
+        digest: OutsideProviderDriverReference["digest"],
+      ) => Promise<void>)
+    | undefined;
+}): NonNullable<OutsideDriverProcessesOptions["quarantine"]> {
+  return {
+    holds: (instanceId, digest) => {
+      const instance = input.readProviderInstance(instanceId);
+      const hold =
+        instance?.driverKind === "outside-harness-endpoint" ? instance.driverQuarantine : undefined;
+      return hold !== undefined && String(hold.digest) === String(digest);
+    },
+    // The owner's own hold refuses until this host stops even if the journal
+    // write fails.
+    record: (instanceId, driver) => {
+      void input
+        .journalHold()?.(instanceId, driver.digest)
+        .catch(() => undefined);
+    },
+  };
 }
 
 export type ProvidersDependencies = Pick<
@@ -519,13 +568,18 @@ export function wireProviders(deps: ProvidersDependencies) {
     const acpProcess = options.acpProcess ?? makeAcpProcessLive();
     const piProcess = options.piProcess ?? makePiProcessLive();
     const ohMyPiProcess = options.ohMyPiProcess ?? makeOhMyPiProcessLive();
+    // An outside driver runs on the runtime that runs this server and on
+    // nothing else: Bun in development, Electron's Node in the packaged app.
+    // A server on any other runtime authorizes and starts no driver.
+    const outsideDriverRuntime = resolveOutsideDriverRuntime({
+      versions: process.versions,
+      execPath: process.execPath,
+      type: "type" in process && typeof process.type === "string" ? process.type : undefined,
+    });
     const extensionPackageStore = new ExtensionPackageStore({
       dataDirectory: providerDataDirectory,
       uuid: randomUUID,
-      // An outside driver runs on the Bun that runs this server and on nothing
-      // else. A server on another runtime (the packaged app's Electron Node)
-      // authorizes no driver launch.
-      ...(process.versions.bun === undefined ? {} : { outsideDriverRuntime: process.execPath }),
+      ...(outsideDriverRuntime === undefined ? {} : { outsideDriverRuntime }),
     });
     let recordExtensionRuntimeEvidence: ((event: ExtensionRuntimeEvidence) => void) | undefined;
     const extensionSupervisor =
@@ -1100,6 +1154,13 @@ export function wireProviders(deps: ProvidersDependencies) {
           });
     const credentialResolver =
       credentialBroker === undefined ? undefined : makeProviderApiKeyPool(credentialBroker);
+    // Set once the provider service exists, which journals a crash-limit hold.
+    let quarantineOutsideDriver:
+      | ((
+          instanceId: ProviderInstanceId,
+          digest: OutsideProviderDriverReference["digest"],
+        ) => Promise<void>)
+      | undefined;
     // An outside driver runs only under the supervisor this host owns, which
     // builds the driver profile; an injected supervisor starts none.
     const outsideDriverProcesses =
@@ -1107,8 +1168,12 @@ export function wireProviders(deps: ProvidersDependencies) {
         ? new OutsideDriverProcesses({
             supervisor: extensionSupervisor,
             platform: process.platform,
-            runtime: process.versions.bun === undefined ? undefined : process.execPath,
+            runtime: outsideDriverRuntime,
             temporaryRoot: tmpdir(),
+            quarantine: journaledOutsideDriverHold({
+              readProviderInstance: (instanceId) => persistence.readProviderInstance(instanceId),
+              journalHold: () => quarantineOutsideDriver,
+            }),
           })
         : {
             start: async () => ({ status: "refused" as const, reason: "start-failed" as const }),
@@ -1226,6 +1291,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       runtimeRegistry: providerRuntimeRegistry,
       isProviderExecutableAvailable,
       isOutsideDriverAdmitted: (instance) => outsideDriverAdmission.isAdmitted(instance),
+      outsideDriverRebindTarget: (instance) => outsideDriverAdmission.rebindTarget(instance),
       outsideDriverListings: () => outsideDriverAdmission.listings(),
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
@@ -1262,7 +1328,9 @@ export function wireProviders(deps: ProvidersDependencies) {
             claudeSdk,
             claudeResumeIdentityPort: claudeResumeIdentityStore,
             isProjectConfinedPath,
-            claudeInstances: persistence.readProviderInstances(),
+            get claudeInstances() {
+              return persistence.readProviderInstances();
+            },
             codexInstances: persistence.readProviderInstances(),
             runtimeRegistry: providerRuntimeRegistry,
             permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
@@ -1276,12 +1344,21 @@ export function wireProviders(deps: ProvidersDependencies) {
           () => workRequestRuntime,
         ),
     });
-    // Processes first: a stopped driver leaves its own closed observation,
-    // which the provider service then replaces with the block it reports.
-    reconcileOutsideDrivers = async () => {
+    // A newly trusted digest moves its instances first, so the processes
+    // still bound to the old one stop next. Processes before the provider
+    // service: a stopped driver leaves its own closed observation, which the
+    // provider service then replaces with the block it reports.
+    const reconcileOutsideDriverState = async () => {
+      await providerService.rebindOutsideDrivers();
       await outsideDriverAdmission.reconcile(persistence.readProviderInstances());
       providerService.reconcileConfiguredProviders();
     };
+    reconcileOutsideDrivers = reconcileOutsideDriverState;
+    quarantineOutsideDriver = (instanceId, digest) =>
+      providerService.quarantineOutsideDriver(instanceId, digest);
+    // A host that stopped between a trust and the move it causes makes the
+    // move now; with nothing to move this journals nothing and starts nothing.
+    yield* Effect.promise(() => reconcileOutsideDriverState().catch(() => undefined));
     const probeProviderForThreads: (
       providerInstanceId: ProviderInstance["id"],
     ) => Promise<ProviderProbeResult> = (providerInstanceId) =>
@@ -1302,12 +1379,24 @@ export function wireProviders(deps: ProvidersDependencies) {
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
       packagedProviderSmokeControl: options.packagedProviderSmokeControl === true,
     });
+    // A cloud sign-in shares the host's terms record and sign-in journal.
+    const cloudIamSignIn: CloudIamSignInDependencies | undefined =
+      cloudIamBroker === undefined || hostOAuth === undefined || oauthJournal === undefined
+        ? undefined
+        : {
+            broker: cloudIamBroker,
+            terms: hostOAuth,
+            journal: oauthJournal,
+            ...(credentialResolver === undefined ? {} : { credentials: credentialResolver }),
+            readInstance: (instanceId) => persistence.readProviderInstance(instanceId),
+          };
     const providerSignInDependencies: ProviderOAuthRouteDependencies | undefined =
       hostOAuth === undefined
         ? undefined
         : {
             service: hostOAuth,
             windowAuthorityStore,
+            cloudIam: cloudIamSignIn,
             ...(credentialResolver === undefined ? {} : { credentials: credentialResolver }),
             ...(options.allowedRendererHttpOrigin === undefined
               ? {}
@@ -1345,17 +1434,6 @@ export function wireProviders(deps: ProvidersDependencies) {
     // The host-local device-code sign-in shares the organization sign-in's
     // dependencies; it answers only the bridge-secret caller `octant provider
     // sign-in` is, and says so even when no broker is running.
-    // A cloud sign-in shares the host's terms record and sign-in journal.
-    const cloudIamSignIn: CloudIamSignInDependencies | undefined =
-      cloudIamBroker === undefined || hostOAuth === undefined || oauthJournal === undefined
-        ? undefined
-        : {
-            broker: cloudIamBroker,
-            terms: hostOAuth,
-            journal: oauthJournal,
-            ...(credentialResolver === undefined ? {} : { credentials: credentialResolver }),
-            readInstance: (instanceId) => persistence.readProviderInstance(instanceId),
-          };
     const deviceSignInRoutes = createProviderDeviceSignInRouteHandler({
       desktopBridgeSecret: options.desktopBridgeSecret,
       windowAuthorityStore,

@@ -293,6 +293,8 @@ export class CodeDebugService {
         adapter: adapter.adapter,
         displayName: adapter.displayName,
         runtimes: adapter.declaration.runtimes,
+        packageName: adapter.packageName,
+        packageVersion: adapter.packageVersion,
       })),
       approved,
       launchFile,

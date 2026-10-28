@@ -1548,6 +1548,11 @@ describe("CodeOperationRuntime", () => {
       expect(await sessions.open(String(threadId), undefined)).toBeUndefined();
       accessible = false;
       expect(await sessions.open(String(threadId), windowId)).toBeUndefined();
+      // A root on an SSH target names the target's folder, and a runtime
+      // started from it with no placement would run on this host.
+      accessible = true;
+      fixture.bindCheckoutToSshTarget();
+      expect(await sessions.open(String(threadId), windowId)).toBeUndefined();
       // A session on another provider is not the one the next turn resumes.
       fixture.setThread({
         ...thread(),
@@ -1673,6 +1678,7 @@ describe("CodeOperationRuntime", () => {
         });
         expect(create).not.toHaveBeenCalled();
         if (approval === undefined) throw new Error("Expected browser approval");
+        expect(approval).not.toHaveProperty("localPersonOnly");
         if (decision === "cancelled") request.abort();
         await fixture.runtime.execute(windowId, {
           kind: "answer-provider-approval",
@@ -1826,6 +1832,8 @@ describe("CodeOperationRuntime", () => {
         });
         if (approval === undefined) throw new Error("Expected a device approval");
         expect(approval.summary).toContain("Allow Apple boot?");
+        // A Simulator effect may be answered from a paired device too.
+        expect(approval).not.toHaveProperty("localPersonOnly");
         expect(execute).not.toHaveBeenCalled();
 
         await fixture.runtime.execute(windowId, {
@@ -1855,6 +1863,236 @@ describe("CodeOperationRuntime", () => {
       }
     },
   );
+
+  it.each([
+    ["a Full-access turn", "full-access", undefined],
+    ["a Plan turn", "approval-gated", "plan"],
+  ] as const)(
+    "lets the agent use a paired device in %s only once a person at the Mac answers",
+    async (_name, threadPolicy, turnPolicy) => {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const provider = providerConnection(queue);
+      const deviceId = "90000000-0000-4000-8000-000000000021";
+      const authority = decodeToolActionAuthority({
+        hostId: "90000000-0000-4000-8000-000000000001",
+        mode: "code",
+        projectId: thread().projectId,
+        providerInstanceId: thread().providerInstanceId,
+        extension: { kind: "core" },
+      });
+      const received: unknown[] = [];
+      const request = vi.fn(async (_windowId: WindowId, sent: unknown) => {
+        received.push(sent);
+        return undefined;
+      });
+      const fixture = runtimeFixture({
+        provider: providerDriver(provider),
+        approvalValidator: false,
+        supportsAppManagedTools: true,
+        describeAppleDevice: (id) =>
+          String(id) === deviceId
+            ? {
+                name: "Henrik's iPhone",
+                model: "iPhone 16 Pro",
+                osVersion: "26.1",
+                connection: "wired",
+              }
+            : undefined,
+        appleToolchain: {
+          resolveAuthority: () => authority,
+          discover: vi.fn(),
+          execute: vi.fn(),
+          snapshot: vi.fn(),
+          requestPaneOpen: vi.fn(async () => undefined),
+          readScreenshot: vi.fn(),
+          inputGrantIsOpen: () => false,
+          devices: {
+            request,
+            check: vi.fn(async () => ({
+              kind: "refused" as const,
+              reason: "confirmation-required" as const,
+            })),
+            readScreenshot: vi.fn(),
+            readConsole: vi.fn(),
+          },
+        } as never,
+      });
+      fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: threadPolicy }));
+      try {
+        const operation = operationId(92);
+        await fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operation,
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+          ...(turnPolicy === undefined ? {} : { executionPolicy: turnPolicy }),
+        });
+        await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+        await Effect.runPromise(
+          Queue.offer(
+            queue,
+            providerEvent({
+              kind: "tool-request",
+              requestId: "apple-use-device",
+              toolName: "octant_apple",
+              inputJson: JSON.stringify({ operation: "use-device", deviceId }),
+            }),
+          ),
+        );
+        let approval: Extract<OperationFrame["event"], { kind: "approval-requested" }> | undefined;
+        await vi.waitFor(async () => {
+          const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 30);
+          approval = frames
+            .map((frame) => frame.event)
+            .find((event) => event.kind === "approval-requested");
+          expect(approval).toBeDefined();
+        });
+        if (approval === undefined) throw new Error("Expected a device lease confirmation");
+        // The card names the device and the thread, as the desktop's lease
+        // confirmation does.
+        expect(approval.summary).toContain("Let this thread use Henrik's iPhone?");
+        expect(approval.summary).toContain("iPhone 16 Pro");
+        // The card itself says only a window on the Mac may answer it, so a
+        // paired client can show it without answer controls.
+        expect(approval.localPersonOnly).toBe(true);
+
+        // A paired device's answer, or one no window vouched for, settles nothing.
+        const remote = await fixture.runtime.execute(windowId, {
+          kind: "answer-provider-approval",
+          operationId: operationId(93),
+          threadId,
+          checkoutId,
+          approvalId: approval.approvalId,
+          decision: "approved",
+        });
+        expect(JSON.stringify(remote)).toContain("Only a person at the Mac");
+        expect(request).not.toHaveBeenCalled();
+
+        await fixture.runtime.execute(
+          windowId,
+          {
+            kind: "answer-provider-approval",
+            operationId: operationId(94),
+            threadId,
+            checkoutId,
+            approvalId: approval.approvalId,
+            decision: "approved",
+          },
+          { initiator: "user" },
+        );
+        await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
+        const sent = received[0] as Parameters<
+          NonNullable<typeof fixture.runtime.validateAppleDeviceLease>
+        >[1];
+        expect(sent).toMatchObject({
+          kind: "use-device",
+          deviceId,
+          requestedBy: { kind: "agent" },
+          approval: { kind: "approved" },
+        });
+        // The receipt the person's answer minted is one-use and bound to this request.
+        await expect(fixture.runtime.validateAppleDeviceLease?.(windowId, sent)).resolves.toBe(
+          true,
+        );
+        await expect(fixture.runtime.validateAppleDeviceLease?.(windowId, sent)).resolves.toBe(
+          false,
+        );
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    },
+  );
+
+  it("marks the agent's device launch as answerable only by a person at the Mac", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const provider = providerConnection(queue);
+    const deviceId = "90000000-0000-4000-8000-000000000021";
+    const authority = decodeToolActionAuthority({
+      hostId: "90000000-0000-4000-8000-000000000001",
+      mode: "code",
+      projectId: thread().projectId,
+      providerInstanceId: thread().providerInstanceId,
+      extension: { kind: "core" },
+    });
+    const request = vi.fn(async () => undefined);
+    const fixture = runtimeFixture({
+      provider: providerDriver(provider),
+      approvalValidator: false,
+      supportsAppManagedTools: true,
+      describeAppleDevice: (id) =>
+        String(id) === deviceId
+          ? {
+              name: "Henrik's iPhone",
+              model: "iPhone 16 Pro",
+              osVersion: "26.1",
+              connection: "wired",
+            }
+          : undefined,
+      appleToolchain: {
+        resolveAuthority: () => authority,
+        discover: vi.fn(),
+        execute: vi.fn(),
+        snapshot: vi.fn(),
+        requestPaneOpen: vi.fn(async () => undefined),
+        readScreenshot: vi.fn(),
+        inputGrantIsOpen: () => false,
+        devices: {
+          request,
+          check: vi.fn(async () => ({
+            kind: "refused" as const,
+            reason: "approval-required" as const,
+          })),
+          readScreenshot: vi.fn(),
+          readConsole: vi.fn(),
+        },
+      } as never,
+    });
+    fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "approval-gated" }));
+    try {
+      const operation = operationId(95);
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-request",
+            requestId: "apple-launch",
+            toolName: "octant_apple",
+            inputJson: JSON.stringify({
+              operation: "launch",
+              deviceId,
+              bundleIdentifier: "com.example.fixture",
+            }),
+          }),
+        ),
+      );
+      let approval: Extract<OperationFrame["event"], { kind: "approval-requested" }> | undefined;
+      await vi.waitFor(async () => {
+        const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 30);
+        approval = frames
+          .map((frame) => frame.event)
+          .find((event) => event.kind === "approval-requested");
+        expect(approval).toBeDefined();
+      });
+      expect(approval?.summary).toContain("Launch com.example.fixture on Henrik's iPhone?");
+      expect(approval?.localPersonOnly).toBe(true);
+      expect(request).not.toHaveBeenCalled();
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
 
   it.each([
     ["full-access", "plan"],
@@ -2298,10 +2536,21 @@ describe("CodeOperationRuntime", () => {
   });
 
   it("tells the model to deliver kept work as a Canvas only when Code offers the Canvas tool", async () => {
-    const sentContext = async (canvas: boolean) => {
-      const provider = providerConnection(Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>()));
+    const turn = async (
+      canvas: boolean,
+      artifactTool?: string,
+      documentDelivery?: "canvas" | "native-artifacts",
+    ) => {
+      const starts: ProviderSessionStart[] = [];
+      const provider = providerConnection(
+        Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>()),
+        starts,
+      );
       const fixture = runtimeFixture({
-        provider: providerDriver(provider),
+        provider:
+          artifactTool === undefined
+            ? providerDriver(provider)
+            : { ...providerDriver(provider), nativeArtifactTool: () => artifactTool },
         supportsAppManagedTools: true,
         ...(canvas
           ? {
@@ -2312,6 +2561,8 @@ describe("CodeOperationRuntime", () => {
             }
           : {}),
       });
+      if (documentDelivery !== undefined)
+        fixture.setThread(decodeCodeThread({ ...thread(), documentDelivery }));
       try {
         await fixture.runtime.execute(windowId, {
           kind: "start-provider-turn",
@@ -2322,19 +2573,45 @@ describe("CodeOperationRuntime", () => {
           prompt: fixture.prompt,
         });
         await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
-        return vi.mocked(provider.send).mock.calls[0]?.[0]?.context ?? [];
+        return {
+          context: vi.mocked(provider.send).mock.calls[0]?.[0]?.context ?? [],
+          start: starts[0],
+        };
       } finally {
         fixture.close();
       }
     };
-    const withCanvas = await sentContext(true);
+    const canvasRule = (context: ReadonlyArray<{ readonly text?: string }>) =>
+      context.filter((block) =>
+        block.text?.includes("as a Canvas with the octant_canvas tool, not as a file"),
+      );
+    const withCanvas = (await turn(true)).context;
     expect(withCanvas).toContainEqual({
       kind: "instructions",
       text: expect.stringContaining("as a Canvas with the octant_canvas"),
     });
     expect(withCanvas.filter((block) => block.text.includes("as a Canvas"))).toHaveLength(1);
-    const withoutCanvas = await sentContext(false);
+    const withoutCanvas = (await turn(false)).context;
     expect(JSON.stringify(withoutCanvas)).not.toContain("octant_canvas");
+
+    // An account that enabled Claude artifacts still delivers Canvases in a
+    // thread that has not chosen them, and its session is not offered the tool.
+    for (const unchosen of [undefined, "canvas"] as const) {
+      const kept = await turn(true, "Artifact", unchosen);
+      expect(canvasRule(kept.context)).toHaveLength(1);
+      expect(JSON.stringify(kept.context)).not.toContain("publish that file with Artifact");
+      expect(kept.start).not.toHaveProperty("nativeArtifacts");
+    }
+
+    // A thread that chose them gets the artifact rule in the Canvas rule's
+    // place, and its session is started with the choice.
+    const chosen = await turn(true, "Artifact", "native-artifacts");
+    expect(chosen.context).toContainEqual({
+      kind: "instructions",
+      text: expect.stringContaining("publish that file with Artifact"),
+    });
+    expect(canvasRule(chosen.context)).toHaveLength(0);
+    expect(chosen.start).toMatchObject({ nativeArtifacts: true });
   });
 
   it("runs a provider turn asynchronously and owns exact input, approval, and cancellation", async () => {
@@ -6250,7 +6527,7 @@ function runtimeFixture(options: {
   let activeThread = thread();
   const snapshotPolicies: Array<string | undefined> = [];
   let restoredTrees = 0;
-  const checkout = decodeCodeCheckoutIdentity({
+  let checkout = decodeCodeCheckoutIdentity({
     id: checkoutId,
     repositoryId: activeThread.repositoryId,
     kind: "existing-worktree",
@@ -6606,6 +6883,17 @@ function runtimeFixture(options: {
       conversationReader.conversation({ threadId: of, afterCursor: 0, limit: 100 }),
     setThread: (next: CodeThread) => {
       activeThread = next;
+    },
+    /** Make the thread's checkout a remote-bound Project's root on an SSH target. */
+    bindCheckoutToSshTarget: () => {
+      checkout = decodeCodeCheckoutIdentity({
+        id: checkoutId,
+        repositoryId: activeThread.repositoryId,
+        kind: "remote-root",
+        availability: "available",
+        head: { kind: "none" },
+        observedAt: now,
+      });
     },
     /** Hold another thread beside the one under test, replacing any with its id. */
     setOtherThread: (next: CodeThread) => {

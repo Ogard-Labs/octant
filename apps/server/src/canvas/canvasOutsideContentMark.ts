@@ -84,6 +84,17 @@ export function replicaVersionAuthor(versionId: CanvasVersionId): CanvasActor {
   return decodeCanvasActor({ kind: "agent", actorId: String(versionId) });
 }
 
+/**
+ * The writer recorded for a page a person imported into a new Canvas. The
+ * page came from outside Octant, so the Canvas carries outside content from
+ * its first version. The id is never a thread's, so every reader is marked,
+ * the thread it was imported into included, and a person's Clear on that
+ * thread does not exempt it from reading the page.
+ */
+export function importedPageWriter(versionId: CanvasVersionId): string {
+  return `imported-page:${String(versionId)}`;
+}
+
 /** Whether the writer id names a synced version's own author rather than a thread. */
 export function isReplicaWriter(version: CanvasVersion, writerId: string): boolean {
   return writerId === String(version.versionId);

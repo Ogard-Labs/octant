@@ -301,6 +301,11 @@ import { projectPullRequestKey } from "./code/CodeProjectPullRequests";
 import { OctantToast } from "./ui/base/OctantToast";
 import { useProjectController } from "./projects/useProjectController";
 import { ProjectThreadsProvider } from "./projects/ProjectThreadsSection";
+import {
+  RemoteCodeProjectsContext,
+  remoteCodeProjectFor,
+  useRemoteCodeProjectsSource,
+} from "./projects/sshRemoteProjectEntries";
 import { useProviderController } from "./providers/useProviderController";
 import { ModelToolVerificationContext } from "./providers/ModelToolVerificationContext";
 import { useDiscoveryController } from "./providers/useDiscoveryController";
@@ -453,6 +458,7 @@ import {
 import { usePendingRequests } from "./palette/usePendingRequests";
 import { usePendingRequests as usePendingRequestRead } from "./pendingRequests/usePendingRequests";
 import { useCommandExtensions } from "./palette/useCommandSkills";
+import { HostPlatformContext } from "./platform";
 
 export type { ShellLaunch } from "./shell/shellLaunch";
 export { launchFromLocation } from "./shell/shellLaunch";
@@ -911,6 +917,9 @@ function LaunchedShell(
    * exists to remove.
    */
   const draftProjectBinding = useRef<Promise<void> | undefined>(undefined);
+  // Remote-bound Code Projects live in the SSH target store, not the Project
+  // catalog, and only a desktop window reads them.
+  const remoteCodeProjects = useRemoteCodeProjectsSource(props.hostBridge);
   const [draftProjectSelection, setDraftProjectSelection] = useState<
     Partial<Readonly<Record<OctantMode, ProjectId>>>
   >({});
@@ -1817,6 +1826,12 @@ function LaunchedShell(
     [hostFederationLifecycle, federationRevision],
   );
   const hosts = lifecycleHostIdentities.length > 0 ? lifecycleHostIdentities : observedHosts;
+  // Copy that names the host's computer reads the platform the window's own
+  // host reports. The federation registry's entries are the client's records of
+  // hosts and carry no platform, so this reads the host's answer directly.
+  const hostPlatform = observedHosts.find(
+    (host) => String(host.hostId) === String(LOCAL_HOST_ID),
+  )?.platform;
   const environmentNames = useMemo(
     () => new Map(hosts.map((host) => [String(host.hostId), host.displayName] as const)),
     [hosts],
@@ -2511,8 +2526,19 @@ function LaunchedShell(
     hasWrittenDocument: dockHasWrittenDocument,
   } = observedDockToolCapabilities;
   const writtenCanvasKind = writtenCanvasForDock?.kind;
+  // A thread on an SSH target keeps only the dock tools that act on nothing
+  // of this host; the host refuses the rest for it.
+  const dockRemoteCheckout =
+    dockCheckoutId !== undefined &&
+    (codeController.activeView?.checkout.id === dockCheckoutId
+      ? codeController.activeView.checkout.kind === "remote-root"
+      : codeController.bootstrap?.checkouts.some(
+          (checkout) =>
+            String(checkout.id) === String(dockCheckoutId) && checkout.kind === "remote-root",
+        ) === true);
   const dockToolCapabilities = useMemo<DockToolCapabilities>(
     () => ({
+      ...(dockRemoteCheckout ? { remoteCheckout: true } : {}),
       addAgentInvoked: dockAddAgentInvoked,
       hasAppleSimulator: dockHasAppleSimulator,
       hasCanvasDocument: writtenCanvasKind === "canvas" ? true : dockHasCanvasDocument,
@@ -2531,6 +2557,7 @@ function LaunchedShell(
       dockHasExistingThread,
       dockHasPlanArtifact,
       dockHasWrittenDocument,
+      dockRemoteCheckout,
       writtenCanvasKind,
     ],
   );
@@ -3096,15 +3123,17 @@ function LaunchedShell(
         instances: providerController.instances,
         observedByInstance: providerController.observedByInstance,
         discovery: firstRunDiscovery,
+        hostPlatform,
       }),
     [
       providerController.status,
       providerController.instances,
       providerController.observedByInstance,
       firstRunDiscovery,
+      hostPlatform,
     ],
   );
-  const firstRunDiscoveryNotice = describeDiscoveryNotice(firstRunDiscovery);
+  const firstRunDiscoveryNotice = describeDiscoveryNotice(firstRunDiscovery, hostPlatform);
   const recordFirstRunOutcome = useCallback(
     (outcome: FirstRunOnboardingOutcome) =>
       controller.updateSettings({ firstRunOnboarding: outcome }),
@@ -5335,6 +5364,11 @@ function LaunchedShell(
   }
 
   async function openDraftInProject(projectId: ProjectId) {
+    const remoteProject = remoteCodeProjectFor(remoteCodeProjects.projects, projectId);
+    if (remoteProject !== undefined) {
+      await openDraftInKnownProject(remoteProject.projectId, "code", remoteProject.name);
+      return;
+    }
     const project = projectController.allProjects.find((candidate) => candidate.id === projectId);
     if (project === undefined || project.lifecycle !== "active") return;
     await openDraftInKnownProject(project.id, project.type, project.name);
@@ -5757,17 +5791,39 @@ function LaunchedShell(
         onRefuse: (reason) => setDraftError(reason),
       });
       if (destinationHostId === undefined) return false;
-      const resolution = resolveDraftProject({
-        draftProjectId,
-        candidates: projectController.projects,
-        activeProject: projectController.activeProject,
-      });
-      if (resolution.kind === "unresolved-selection") {
+      // A remote-bound Project is not in the Project catalog. The host
+      // prepares its checkout and creates its thread through the same Code
+      // commands, and refuses whatever the composer should not have offered.
+      const remoteProject = remoteCodeProjectFor(remoteCodeProjects.projects, draftProjectId);
+      const resolution =
+        remoteProject === undefined
+          ? resolveDraftProject({
+              draftProjectId,
+              candidates: projectController.projects,
+              activeProject: projectController.activeProject,
+            })
+          : undefined;
+      if (resolution?.kind === "unresolved-selection") {
         setDraftError(UNRESOLVED_DRAFT_PROJECT_MESSAGE);
         return false;
       }
-      const project = resolution.project;
-      if (project?.type !== "code") {
+      const localProject = resolution?.project;
+      const project =
+        remoteProject !== undefined
+          ? {
+              id: remoteProject.projectId,
+              name: remoteProject.name,
+              // Full access is never remembered for a Project on a target.
+              remembersFullAccess: false,
+            }
+          : localProject?.type === "code"
+            ? {
+                id: localProject.id,
+                name: localProject.name,
+                remembersFullAccess: localProject.codeAccessPersistence === "project-default",
+              }
+            : undefined;
+      if (project === undefined) {
         setDraftError("Choose a Code Project before starting a thread.");
         return false;
       }
@@ -5841,8 +5897,7 @@ function LaunchedShell(
       const projectRemembersFullAccess =
         input.executionPolicy === "full-access" &&
         input.permissionPersistence === "project-default" &&
-        project.type === "code" &&
-        project.codeAccessPersistence === "project-default";
+        project.remembersFullAccess;
       if (input.executionPolicy === "full-access" && !projectRemembersFullAccess) {
         const requestApproval = props.hostBridge?.requestCodeOperationApproval;
         const presentation = input.presentation;
@@ -7137,7 +7192,13 @@ function LaunchedShell(
                                       barStyle={controller.settings?.usageBars ?? "smooth"}
                                       client={launchedClients.providerUsageLimitsClient}
                                     >
-                                      {shell}
+                                      <HostPlatformContext.Provider value={hostPlatform}>
+                                        <RemoteCodeProjectsContext.Provider
+                                          value={remoteCodeProjects}
+                                        >
+                                          {shell}
+                                        </RemoteCodeProjectsContext.Provider>
+                                      </HostPlatformContext.Provider>
                                     </PlanUsageProvider>
                                   </HostFederationStackContext.Provider>
                                 </ModelToolVerificationContext.Provider>

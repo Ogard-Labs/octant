@@ -11,7 +11,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative } from "node:path";
-import type { ExtensionProcessSandbox } from "./extensionSupervisor";
+import type { ExtensionProcessSandbox, OutsideDriverRuntime } from "./extensionSupervisor";
 import type { InspectedExtensionPackage } from "./packageInspector";
 import { calculateExtensionPackageDigest, type ExtensionArchiveEntry } from "./packageInspector";
 
@@ -70,16 +70,16 @@ export class ExtensionPackageStore {
   readonly #quarantine: string;
   readonly #metadata: string;
   readonly #pluginData: string;
-  readonly #outsideDriverRuntime: string | undefined;
+  readonly #outsideDriverRuntime: OutsideDriverRuntime | undefined;
 
   constructor(options: {
     readonly dataDirectory: string;
     readonly uuid: () => string;
     /**
-     * The runtime an outside provider driver's entry runs on: the Bun that
+     * The runtime an outside provider driver's entry runs on: the one that
      * runs this server. Without one, no driver launch is authorized.
      */
-    readonly outsideDriverRuntime?: string;
+    readonly outsideDriverRuntime?: OutsideDriverRuntime;
   }) {
     this.#uuid = options.uuid;
     this.#outsideDriverRuntime = options.outsideDriverRuntime;
@@ -380,7 +380,10 @@ export class ExtensionPackageStore {
         // under the driver profile bound to that root: the same entry launched
         // with no sandbox, or the MCP server's, would run unconfined or with
         // network, on Linux as well.
-        if (relativeEntryPoint === undefined || this.#outsideDriverRuntime === undefined) {
+        // The launch names its runtime too, because the process port sets
+        // that runtime's environment: it must be the host's own.
+        const runtime = this.#outsideDriverRuntime;
+        if (relativeEntryPoint === undefined || runtime === undefined) {
           return false;
         }
         const entry = receipt.files.find((file) => file.path === relativeEntryPoint);
@@ -388,11 +391,12 @@ export class ExtensionPackageStore {
         return (
           entry?.executable === false &&
           input.entryPoint === expectedEntryPoint &&
-          input.command === this.#outsideDriverRuntime &&
+          input.command === runtime.path &&
           input.args?.length === 1 &&
           input.args[0] === expectedEntryPoint &&
           input.cwd === contentRoot &&
           input.sandbox?.kind === "outside-driver" &&
+          input.sandbox.runtime === runtime.kind &&
           input.sandbox.packageRoot === contentRoot
         );
       }

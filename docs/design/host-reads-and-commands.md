@@ -46,7 +46,12 @@ harness session route. The agent's own harness approval is listed the same way
 the thread, whose approval card above the composer decides it through the same
 session route, with the host checking the window and principal first. After a
 restart it stays listed, marked `lostInRestart`, until the session is resumed;
-the card then offers only **Resume**.
+the card then offers only **Resume**. A Work agent's own harness question is
+listed as `lead-question`, also with no answer handle: **Review request** opens
+the thread, whose question card above the composer answers it through the
+session's question route (`POST /api/native-harness/sessions/:thread/questions`),
+the one the Agents tab uses. It leaves the list once it is answered, cancelled,
+or expired, and a question a restart left behind is never listed.
 
 The command palette's **Approve** and **Deny** commands use
 `resolve-work-request` and `answer-provider-approval` without opening the

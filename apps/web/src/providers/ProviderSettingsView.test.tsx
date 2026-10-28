@@ -9,26 +9,39 @@ import {
   type ProviderRegistrySnapshot,
 } from "@octant/contracts";
 import type { ProviderClient } from "@octant/client-runtime/provider-client";
+import type { HostPlatform } from "@octant/contracts/host";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderCreateForm } from "./ProviderSettingsConfiguration";
 import { ProviderSettingsList } from "./ProviderSettingsList";
 import { ProviderSettingsView, type ProviderSettingsViewProps } from "./ProviderSettingsView";
 import { ModelEndpointSettingsView } from "../settings/ModelEndpointSettingsView";
 import { useProviderController } from "./useProviderController";
+import { HostPlatformContext } from "../platform";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
 
 const id = decodeProviderInstanceId("80000000-0000-4000-8000-000000000092");
 
-const renderProviderSettings = render;
+// Settings here run against a macOS host, which keeps keys in its Keychain,
+// unless a test names another host platform.
+function renderProviderSettings(ui: ReactElement, hostPlatform: HostPlatform = "darwin") {
+  function OnHost(props: { readonly children: ReactNode }) {
+    return (
+      <HostPlatformContext.Provider value={hostPlatform}>
+        {props.children}
+      </HostPlatformContext.Provider>
+    );
+  }
+  return render(ui, { wrapper: OnHost });
+}
 
-function renderExpanded(ui: ReactElement) {
-  const result = renderProviderSettings(ui);
+function renderExpanded(ui: ReactElement, hostPlatform: HostPlatform = "darwin") {
+  const result = renderProviderSettings(ui, hostPlatform);
   // Octant Harness: a single endpoint opens on its detail page, where its
   // configuration is always shown; with none, Add endpoint opens the form.
   const endpointLinks = screen.queryAllByRole("link", { name: /Open details$/ });
@@ -49,20 +62,27 @@ function renderExpanded(ui: ReactElement) {
 }
 
 /** Opens Add endpoint, whose dialog holds the endpoint-by-address form. */
-function renderAdding(ui: ReactElement) {
-  const result = renderProviderSettings(ui);
+function renderAdding(ui: ReactElement, hostPlatform: HostPlatform = "darwin") {
+  const result = renderProviderSettings(ui, hostPlatform);
   fireEvent.click(screen.getByRole("button", { name: "Add endpoint" }));
   return result;
 }
 
-function renderProviderListExpanded(props: ProviderSettingsViewProps) {
+function renderProviderListExpanded(
+  props: ProviderSettingsViewProps,
+  hostPlatform: HostPlatform = "darwin",
+) {
   return renderExpanded(
     <ProviderSettingsList {...props} discoverySnapshot={props.discoverySnapshot} />,
+    hostPlatform,
   );
 }
 
-function renderImageProviderCreation(props: ProviderSettingsViewProps) {
-  const result = render(
+function renderImageProviderCreation(
+  props: ProviderSettingsViewProps,
+  hostPlatform: HostPlatform = "darwin",
+) {
+  const result = renderProviderSettings(
     <ProviderCreateForm
       {...props}
       allowedProviderTypes={[
@@ -75,6 +95,7 @@ function renderImageProviderCreation(props: ProviderSettingsViewProps) {
       initialProviderType="openai-image"
       triggerLabel="Add image provider"
     />,
+    hostPlatform,
   );
   fireEvent.click(screen.getByRole("button", { name: "Add image provider" }));
   return result;
@@ -534,6 +555,44 @@ describe("ProviderSettingsView", () => {
     expect(screen.queryByText(/binary path/i)).not.toBeInTheDocument();
   });
 
+  it("shows a journaled crash-loop hold on an outside driver's card, with what lifts it, even while it is off", () => {
+    const held = decodeProviderInstance({
+      ...provider(),
+      displayName: "Local chat server",
+      driverKind: "outside-harness-endpoint",
+      configuration: {
+        kind: "outside-harness-endpoint",
+        driver: {
+          extensionId: "00000000-0000-4000-8000-000000000911",
+          packageId: "00000000-0000-4000-8000-000000000912",
+          componentId: "provider-driver",
+          version: "1.2.0",
+          digest: `sha256:${"a".repeat(64)}`,
+        },
+        baseUrl: "http://127.0.0.1:8080/",
+        modelIds: ["local-model"],
+      },
+      enabled: false,
+      driverQuarantine: {
+        reason: "crash-limit",
+        digest: `sha256:${"a".repeat(64)}`,
+        quarantinedAt: "2026-07-15T10:05:00.000Z",
+      },
+    });
+    renderProviderListExpanded(fixture({ instance: held }));
+
+    expect(
+      screen.getByText(
+        "This provider's driver stopped three times within a minute, so Octant holds this version of it.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "Restarting Octant does not lift the hold. Install another version of the driver package and trust it; this provider moves to it.",
+      ),
+    ).toBeVisible();
+  });
+
   it("creates Claude with explicit subscription or write-only API-key authentication", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: claudeProvider() });
@@ -918,7 +977,7 @@ describe("ProviderSettingsView", () => {
 
     expect(within(create).getByLabelText("Anthropic API key")).toBeDisabled();
     expect(submit).toBeEnabled();
-    expect(within(create).getByText(/octant provider key set/)).toBeVisible();
+    expect(within(create).getByText(/On macOS, open this profile in Octant desktop/)).toBeVisible();
     await user.type(within(create).getByLabelText("Provider name"), "Claude API");
     await user.type(within(create).getByLabelText("Claude binary"), "/usr/local/bin/claude");
     await user.click(submit);
@@ -1366,8 +1425,6 @@ describe("ProviderSettingsView", () => {
       />,
     );
     const card = screen.getByRole("article", { name: "Claude local" });
-    expect(within(card).getByText(/octant provider key set/)).toBeVisible();
-    expect(within(card).getByText(/using this profile.s exact name/)).toBeVisible();
     expect(within(card).getByText(/On macOS, open this profile in Octant desktop/)).toBeVisible();
     expect(within(card).queryByText(/Manage API keys in the Octant host app/)).toBeNull();
     expect(within(card).getByLabelText("Anthropic API key for Claude local")).toBeDisabled();
@@ -1384,7 +1441,7 @@ describe("ProviderSettingsView", () => {
       />,
     );
     const card = screen.getByRole("article", { name: "Claude local" });
-    expect(within(card).getByText(/octant provider key set/)).toBeVisible();
+    expect(within(card).getByText(/On macOS, open this profile in Octant desktop/)).toBeVisible();
     expect(within(card).getByLabelText("Incompatibility details")).toBeVisible();
   });
 
@@ -1518,7 +1575,7 @@ describe("ProviderSettingsView", () => {
     card = screen.getByRole("article", { name: "Claude local" });
     expect(within(card).getByLabelText("Anthropic API key for Claude local")).toBeDisabled();
     expect(within(card).getByRole("button", { name: "Remove Claude local" })).toBeDisabled();
-    expect(within(card).getByText(/octant provider key set/)).toBeVisible();
+    expect(within(card).getByText(/On macOS, open this profile in Octant desktop/)).toBeVisible();
   });
 
   it("shows semantic provider state and never renders runtime secrets or addresses", async () => {
@@ -2039,6 +2096,222 @@ describe("ProviderSettingsView", () => {
     expect(credential.value).toBe("");
   });
 
+  it("shows who an Amazon Bedrock endpoint is signed in as, signs it out, and saves its role with no key", async () => {
+    const user = userEvent.setup();
+    const onProviderOAuth = vi.fn(async (command: { readonly kind: string }) =>
+      command.kind === "sign-out"
+        ? { kind: "signed-out" as const, termsRequired: false }
+        : { kind: "signed-in" as const, accountLabel: "BedrockUser in account 123456789012" },
+    );
+    const props = {
+      ...fixture({ instance: bedrockProvider(), observed: observation({ models: [] }) }),
+      onProviderOAuth,
+    };
+    renderExpanded(<ModelEndpointSettingsView {...props} />);
+
+    expect(await screen.findByText("BedrockUser in account 123456789012")).toBeVisible();
+    expect(onProviderOAuth).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "status", descriptorId: "amazon-bedrock-cloud-iam" }),
+    );
+    const card = screen.getByLabelText("Contoso Bedrock");
+    expect(within(card).queryByRole("heading", { name: "API key" })).not.toBeInTheDocument();
+    expect(within(card).queryByRole("button", { name: /^Sign in/ })).not.toBeInTheDocument();
+    expect(
+      within(card).getByText(/Role BedrockUser · account 123456789012 · https:\/\/contoso/),
+    ).toBeInTheDocument();
+
+    const role = within(card).getByLabelText("Role for Contoso Bedrock");
+    await user.clear(role);
+    await user.type(role, "BedrockAdmin");
+    await user.click(
+      within(card).getByRole("button", {
+        name: "Save Amazon Bedrock settings for Contoso Bedrock",
+      }),
+    );
+    expect(props.onChangeAmazonBedrockConfiguration).toHaveBeenCalledWith(id, {
+      ...bedrockProvider().configuration,
+      cloudIam: { ...bedrockCloudIam, roleName: "BedrockAdmin" },
+    });
+
+    await user.click(within(card).getByRole("button", { name: "Sign out" }));
+    expect(onProviderOAuth).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "sign-out", descriptorId: "amazon-bedrock-cloud-iam" }),
+    );
+    expect(await within(card).findByText(/no longer holds a sign-in/)).toBeVisible();
+    // Signing in again happens in the host's terminal; Settings names the command.
+    expect(within(card).getByText('octant provider sign-in "Contoso Bedrock"')).toBeVisible();
+    expect(props.onProbe).toHaveBeenCalledWith(id, { quiet: true });
+  });
+
+  it("tells an Amazon Bedrock endpoint that is not signed in to sign in from the host's terminal, offering only Check again", async () => {
+    const props = {
+      ...fixture({
+        instance: bedrockProvider(),
+        observed: observation({
+          readiness: "unauthenticated",
+          unauthenticatedReason: "missing",
+          credentialStatus: "missing",
+          models: [],
+        }),
+      }),
+      onProviderOAuth: vi.fn(async () => ({
+        kind: "signed-out" as const,
+        termsRequired: true,
+        accountLabel: "BedrockUser in account 123456789012",
+      })),
+    };
+    renderProviderSettings(<ModelEndpointSettingsView {...props} />);
+
+    const row = within(screen.getByRole("list", { name: "Model endpoints" })).getByRole("listitem");
+    expect(within(row).getByText("Sign in to use")).toBeVisible();
+    expect(
+      within(row).getByText("bedrock-runtime.us-west-2.amazonaws.com · Organization sign-in"),
+    ).toBeVisible();
+    expect(within(row).getByText(/run octant provider sign-in "Contoso Bedrock"/)).toBeVisible();
+    fireEvent.click(within(row).getByRole("button", { name: /Check again/ }));
+    expect(props.onProbe).toHaveBeenCalledWith(id, { quiet: true });
+    expect(within(row).queryByRole("button", { name: /Sign in/ })).not.toBeInTheDocument();
+  });
+
+  it("does not say an Amazon Bedrock endpoint is signed in when the host's last check found its sign-in gone", async () => {
+    // The host's status names the sign-in this endpoint points at; only a
+    // check learns that the broker no longer holds it.
+    const props = {
+      ...fixture({
+        instance: bedrockProvider(),
+        observed: observation({
+          readiness: "unauthenticated",
+          unauthenticatedReason: "expired",
+          credentialStatus: "missing",
+          models: [],
+        }),
+      }),
+      onProviderOAuth: vi.fn(async () => ({
+        kind: "signed-in" as const,
+        accountLabel: "BedrockUser in account 123456789012",
+      })),
+    };
+    renderExpanded(<ModelEndpointSettingsView {...props} />);
+
+    const card = screen.getByLabelText("Contoso Bedrock");
+    expect(await within(card).findByText(/no longer works/)).toBeVisible();
+    expect(within(card).queryByText(/^Signed in as/)).not.toBeInTheDocument();
+    // Sign out still clears what is left of it; Sign in stays the terminal's.
+    expect(within(card).getByRole("button", { name: "Sign out" })).toBeEnabled();
+    expect(within(card).queryByRole("button", { name: /^Sign in/ })).not.toBeInTheDocument();
+    expect(within(card).getAllByText('octant provider sign-in "Contoso Bedrock"')).not.toHaveLength(
+      0,
+    );
+  });
+
+  it("names the role and account on an Amazon Bedrock row the host holds a sign-in for", async () => {
+    const onProviderOAuth = vi.fn(async () => ({
+      kind: "signed-in" as const,
+      accountLabel: "BedrockUser in account 123456789012",
+    }));
+    renderProviderSettings(
+      <ModelEndpointSettingsView
+        {...fixture({ instance: bedrockProvider(), observed: observation() })}
+        onProviderOAuth={onProviderOAuth}
+      />,
+    );
+
+    const row = within(screen.getByRole("list", { name: "Model endpoints" })).getByRole("listitem");
+    expect(
+      await within(row).findByText("Signed in as BedrockUser in account 123456789012"),
+    ).toBeVisible();
+    expect(onProviderOAuth).toHaveBeenCalledTimes(1);
+    expect(onProviderOAuth).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "status", descriptorId: "amazon-bedrock-cloud-iam" }),
+    );
+  });
+
+  it("does not name who an Amazon Bedrock row is signed in as once the host's last check found the sign-in gone", async () => {
+    const onProviderOAuth = vi.fn(async () => ({
+      kind: "signed-in" as const,
+      accountLabel: "BedrockUser in account 123456789012",
+    }));
+    renderProviderSettings(
+      <ModelEndpointSettingsView
+        {...fixture({
+          instance: bedrockProvider(),
+          observed: observation({
+            readiness: "unauthenticated",
+            unauthenticatedReason: "expired",
+            credentialStatus: "missing",
+            models: [],
+          }),
+        })}
+        onProviderOAuth={onProviderOAuth}
+      />,
+    );
+
+    await waitFor(() => expect(onProviderOAuth).toHaveBeenCalled());
+    const row = within(screen.getByRole("list", { name: "Model endpoints" })).getByRole("listitem");
+    expect(within(row).getByText("Signed out")).toBeVisible();
+    expect(
+      within(row).getByText("bedrock-runtime.us-west-2.amazonaws.com · Organization sign-in"),
+    ).toBeVisible();
+    expect(within(row).queryByText(/Signed in as/)).not.toBeInTheDocument();
+  });
+
+  it("names a Foundry row's organization account once its page has read it, without asking per row", async () => {
+    const user = userEvent.setup();
+    const onProviderOAuth = vi.fn(async () => ({
+      kind: "signed-in" as const,
+      accountLabel: "person@contoso.example",
+    }));
+    renderProviderSettings(
+      <ModelEndpointSettingsView
+        {...fixture({
+          instance: directoryFoundryProvider(),
+          observed: observation({ directoryBinding: foundryBinding }),
+        })}
+        onProviderOAuth={onProviderOAuth}
+      />,
+    );
+
+    const list = screen.getByRole("list", { name: "Model endpoints" });
+    expect(within(list).getByText("contoso.openai.azure.com · Organization sign-in")).toBeVisible();
+    // Its status renews the token at the directory, so the list asks nothing.
+    expect(onProviderOAuth).not.toHaveBeenCalled();
+
+    await user.click(within(list).getByRole("link", { name: /Open details$/ }));
+    expect(await screen.findByText("person@contoso.example")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Back to Octant Harness" }));
+
+    const row = within(screen.getByRole("list", { name: "Model endpoints" })).getByRole("listitem");
+    expect(within(row).getByText("Signed in as person@contoso.example")).toBeVisible();
+    expect(onProviderOAuth).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves an Amazon Bedrock endpoint's first sign-in to its Sign-in section, with no page alert", async () => {
+    const props = {
+      ...fixture({
+        instance: bedrockProvider(),
+        observed: observation({
+          readiness: "unauthenticated",
+          unauthenticatedReason: "missing",
+          credentialStatus: "missing",
+          models: [],
+        }),
+      }),
+      onProviderOAuth: vi.fn(async () => ({
+        kind: "signed-out" as const,
+        termsRequired: true,
+        accountLabel: "BedrockUser in account 123456789012",
+      })),
+    };
+    renderExpanded(<ModelEndpointSettingsView {...props} />);
+
+    const card = screen.getByLabelText("Contoso Bedrock");
+    expect(
+      await within(card).findByText('octant provider sign-in "Contoso Bedrock"'),
+    ).toBeVisible();
+    // The state beside the name, and no alert repeating the section's guidance.
+    expect(within(card).getAllByText("Sign in to use")).toHaveLength(1);
+  });
+
   it("says when the organization wants a Foundry sign-in repeated in person", async () => {
     const onProviderOAuth = vi.fn(async () => ({
       kind: "expired" as const,
@@ -2146,7 +2419,7 @@ describe("ProviderSettingsView", () => {
   it("shows stored Keychain status and omits a connection check for an OpenAI image profile", async () => {
     renderProviderListExpanded(fixture({ instance: openAiImageProvider() }));
     const stored = screen.getByRole("article", { name: "GPT Image" });
-    expect(await within(stored).findByText("Stored in Keychain")).toBeVisible();
+    expect(await within(stored).findByText("Stored in this Mac's Keychain")).toBeVisible();
     expect(
       within(stored).queryByRole("button", { name: /check connection/i }),
     ).not.toBeInTheDocument();
@@ -2169,7 +2442,7 @@ describe("ProviderSettingsView", () => {
     const props = fixture({ instance: bflImageProvider() });
     renderProviderListExpanded(props);
     const card = screen.getByRole("article", { name: "FLUX" });
-    expect(await within(card).findByText("Stored in Keychain")).toBeVisible();
+    expect(await within(card).findByText("Stored in this Mac's Keychain")).toBeVisible();
     await user.type(
       within(card).getByLabelText("Base URL for FLUX"),
       "https://proxy.example.test/bfl",
@@ -2179,7 +2452,7 @@ describe("ProviderSettingsView", () => {
     );
 
     expect(await within(card).findByText("Not configured")).toBeVisible();
-    expect(within(card).queryByText("Stored in Keychain")).not.toBeInTheDocument();
+    expect(within(card).queryByText("Stored in this Mac's Keychain")).not.toBeInTheDocument();
   });
 
   it("shows unavailable credential status for an image profile on a remote client", () => {
@@ -2436,6 +2709,46 @@ describe("ProviderSettingsView", () => {
     );
     expect(props.onClearProviderCredential).toHaveBeenCalledWith(id);
     expect(await within(card).findByText("No key is saved for it yet.")).toBeVisible();
+  });
+
+  it("names a Linux host's credential store, not the Keychain, for a saved key", async () => {
+    const pending = deferred<ProviderCredentialStatus>();
+    const props = {
+      ...fixture({ instance: httpProvider() }),
+      onProviderCredentialStatus: vi.fn(() => pending.promise),
+    };
+    renderExpanded(<ModelEndpointSettingsView {...props} />, "linux");
+    const card = screen.getByRole("region", { name: "Private gateway" });
+    expect(within(card).getByText("Checking the credential store…")).toBeVisible();
+    await act(async () => pending.resolve("stored"));
+    expect(
+      await within(card).findByText(
+        "Saved in this computer's credential store. Octant can't show it.",
+      ),
+    ).toBeVisible();
+    expect(within(card).queryByText(/Keychain|this Mac/)).not.toBeInTheDocument();
+  });
+
+  it("sends a browser on a Linux host to the Octant app on this computer to remove a keyed endpoint", () => {
+    renderExpanded(
+      <ModelEndpointSettingsView
+        {...fixture({ instance: httpProvider(), credentialManagementAvailable: false })}
+      />,
+      "linux",
+    );
+    const card = screen.getByRole("region", { name: "Private gateway" });
+    expect(within(card).getByText("Remove it from the Octant app on this computer.")).toBeVisible();
+    expect(within(card).queryByText(/this Mac/)).not.toBeInTheDocument();
+  });
+
+  it("says a Linux host's Ollama needs no key because it answers only on this computer", () => {
+    renderExpanded(
+      <ModelEndpointSettingsView {...fixture({ instance: ollamaProvider() })} />,
+      "linux",
+    );
+    const card = screen.getByRole("region", { name: "Ollama local" });
+    expect(within(card).getByText(/None \(this computer only\)/)).toBeInTheDocument();
+    expect(within(card).queryByText(/this Mac/)).not.toBeInTheDocument();
   });
 
   it("shows a pending credential check without claiming the key is missing", async () => {
@@ -3495,6 +3808,17 @@ describe("ProviderSettingsView", () => {
     expect(control).toHaveAccessibleDescription(/has not been scanned/i);
   });
 
+  it("names the host's computer when a Linux host has not been scanned yet", () => {
+    renderProviderSettings(
+      <ProviderSettingsView {...fixture({ instance: provider({ enabled: false }) })} />,
+      "linux",
+    );
+    const card = screen.getByRole("article", { name: "Existing CLI" });
+    expect(
+      within(card).getByRole("switch", { name: "Enable Existing CLI" }),
+    ).toHaveAccessibleDescription(/^This computer has not been scanned for it yet\./);
+  });
+
   it("keeps a manual endpoint enable-able and out of any detection group", () => {
     renderProviderSettings(
       <ModelEndpointSettingsView
@@ -3894,6 +4218,219 @@ describe("ProviderSettingsView", () => {
     expect(
       screen.getByText(/does not currently expose the full Bedrock Converse API/i),
     ).toBeVisible();
+  });
+});
+
+// Each host is seen from a window on the other platform, so copy that read the
+// window's platform instead of the host's would name the wrong computer.
+describe.each([
+  {
+    host: "linux",
+    window: "MacIntel",
+    computer: "this computer",
+    store: "this computer's credential store",
+    storeName: "credential store",
+    elsewhere: /Keychain|this Mac/,
+    keySetup: "On the Linux host, run octant provider key set",
+    otherKeySetup: /On macOS/,
+  },
+  {
+    host: "darwin",
+    window: "Linux x86_64",
+    computer: "this Mac",
+    store: "this Mac's Keychain",
+    storeName: "Keychain",
+    elsewhere: /credential store|this computer/,
+    keySetup: "On macOS, open this profile in Octant desktop",
+    otherKeySetup: /Linux host|octant provider key set/,
+  },
+] as const)("provider forms on a $host host", (platform) => {
+  beforeEach(() => {
+    Object.defineProperty(window.navigator, "platform", {
+      value: platform.window,
+      configurable: true,
+    });
+  });
+  afterEach(() => Reflect.deleteProperty(window.navigator, "platform"));
+
+  it("says where each image profile's key is kept and that a proxy may use HTTP only on the host's computer", async () => {
+    const user = userEvent.setup();
+    renderImageProviderCreation(fixture({ instance: openAiImageProvider() }), platform.host);
+    for (const type of [
+      "OpenAI Image",
+      "Gemini Image",
+      "Black Forest Labs Image",
+      "Ideogram Image",
+    ]) {
+      await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), type);
+      const guidance = screen.getByText(/The API key is stored write-only in/);
+      expect(guidance).toHaveTextContent(`The API key is stored write-only in ${platform.store}.`);
+      if (type === "Black Forest Labs Image" || type === "Ideogram Image") {
+        expect(guidance).toHaveTextContent(`(HTTPS, or HTTP on ${platform.computer})`);
+      }
+      expect(guidance.textContent).not.toMatch(platform.elsewhere);
+    }
+  });
+
+  it("says where an Azure AI Foundry endpoint's key is kept when its settings are edited", () => {
+    renderExpanded(
+      <ModelEndpointSettingsView {...fixture({ instance: foundryProvider() })} />,
+      platform.host,
+    );
+    const guidance = within(screen.getByLabelText("Foundry relay")).getByText(
+      /API keys are stored write-only in/,
+    );
+    expect(guidance).toHaveTextContent(
+      `API keys are stored write-only in ${platform.store} and sent as the api-key header.`,
+    );
+    expect(guidance.textContent).not.toMatch(platform.elsewhere);
+  });
+
+  it("says where an Azure AI Foundry endpoint's key is kept when it is created", () => {
+    renderProviderSettings(
+      <ProviderCreateForm
+        {...fixture()}
+        allowedProviderTypes={["azure-foundry"]}
+        initialProviderType="azure-foundry"
+        triggerLabel="Add Foundry endpoint"
+      />,
+      platform.host,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add Foundry endpoint" }));
+    const guidance = screen.getByText(/API keys are stored write-only in/);
+    expect(guidance).toHaveTextContent(
+      `API keys are stored write-only in ${platform.store} and sent as the api-key header.`,
+    );
+    expect(guidance.textContent).not.toMatch(platform.elsewhere);
+  });
+
+  it("says where a Bedrock Mantle key is kept in the setup guide", async () => {
+    const user = userEvent.setup();
+    renderAdding(<ModelEndpointSettingsView {...fixture()} />, platform.host);
+    await user.click(screen.getByRole("button", { name: /^OpenAI-compatible/ }));
+    await user.click(screen.getByText("Connecting Amazon Bedrock?"));
+    const step = screen.getByText(/Create a Bedrock API key/);
+    expect(step).toHaveTextContent(platform.store);
+    expect(step.textContent).not.toMatch(platform.elsewhere);
+  });
+
+  it("says where a missing Claude API key is kept in its repair guidance", () => {
+    renderExpanded(
+      <ProviderSettingsView
+        {...fixture({
+          instance: claudeProvider("api-key"),
+          observed: observation({ readiness: "unauthenticated", credentialStatus: "missing" }),
+        })}
+      />,
+      platform.host,
+    );
+    const guidance = within(screen.getByRole("article", { name: "Claude local" })).getByText(
+      /replace.*Anthropic API key/i,
+    );
+    expect(guidance).toHaveTextContent(
+      `It remains write-only and is stored in ${platform.store}, then check the connection again.`,
+    );
+    expect(guidance.textContent).not.toMatch(platform.elsewhere);
+  });
+
+  it("gives a browser only the key setup for the host's own platform on a Claude card", () => {
+    renderExpanded(
+      <ProviderSettingsView
+        {...fixture({
+          instance: claudeProvider("api-key"),
+          credentialManagementAvailable: false,
+          observed: observation({ readiness: "unauthenticated", credentialStatus: "missing" }),
+        })}
+      />,
+      platform.host,
+    );
+    const note = within(screen.getByRole("article", { name: "Claude local" })).getByText(
+      /This browser cannot save or remove credentials\./,
+    );
+    expect(note).toHaveTextContent(platform.keySetup);
+    expect(note.textContent).not.toMatch(platform.otherKeySetup);
+  });
+
+  it("gives a browser only the key setup for the host's own platform when adding Claude", async () => {
+    const user = userEvent.setup();
+    renderExpanded(
+      <ProviderSettingsView {...fixture({ credentialManagementAvailable: false })} />,
+      platform.host,
+    );
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Claude Agent SDK");
+    const create = screen.getByRole("form", { name: "Add Claude provider" });
+    await chooseSelectFieldOption(
+      user,
+      within(create).getByLabelText("Claude authentication"),
+      "Anthropic API key",
+    );
+    const note = within(create).getByText(/This browser cannot save API keys\./);
+    expect(note).toHaveTextContent(platform.keySetup);
+    expect(note.textContent).not.toMatch(platform.otherKeySetup);
+  });
+
+  it("names the host's store while checking a saved key and once it is found", async () => {
+    const pending = deferred<ProviderCredentialStatus>();
+    renderProviderListExpanded(
+      {
+        ...fixture({ instance: openAiImageProvider() }),
+        onProviderCredentialStatus: vi.fn(() => pending.promise),
+      },
+      platform.host,
+    );
+    const card = screen.getByRole("article", { name: "GPT Image" });
+    expect(within(card).getByText(`Checking the ${platform.storeName}…`)).toBeVisible();
+    await act(async () => pending.resolve("stored"));
+    expect(await within(card).findByText(`Stored in ${platform.store}`)).toBeVisible();
+  });
+});
+
+describe("browser key setup before the host reports its platform", () => {
+  it("gives both the Linux command and the macOS route while the host's platform is unknown", () => {
+    render(
+      <HostPlatformContext.Provider value={undefined}>
+        <ProviderSettingsView
+          {...fixture({
+            instance: claudeProvider("api-key"),
+            credentialManagementAvailable: false,
+            observed: observation({ readiness: "unauthenticated", credentialStatus: "missing" }),
+          })}
+        />
+      </HostPlatformContext.Provider>,
+    );
+    for (const details of screen.queryAllByRole("button", { name: /^Details for / })) {
+      if (details.getAttribute("aria-expanded") === "false") fireEvent.click(details);
+    }
+    const note = within(screen.getByRole("article", { name: "Claude local" })).getByText(
+      /This browser cannot save or remove credentials\./,
+    );
+    expect(note).toHaveTextContent("On the Linux host, run octant provider key set");
+    expect(note).toHaveTextContent("On macOS, open this profile in Octant desktop");
+  });
+});
+
+describe("a Claude account's artifact setting", () => {
+  it("sits in the Claude card's details, off, and is enabled for that account only after the person confirms", async () => {
+    const onSetClaudeArtifactDelivery = vi.fn(async () => true);
+    renderProviderListExpanded({
+      ...fixture({ instance: claudeProvider() }),
+      onSetClaudeArtifactDelivery,
+    });
+    const toggle = screen.getByRole("switch", {
+      name: "Enable Claude artifacts for Claude local",
+    });
+    expect(toggle).not.toBeChecked();
+    await userEvent.click(toggle);
+    await userEvent.click(await screen.findByRole("button", { name: "Enable Claude artifacts" }));
+    expect(onSetClaudeArtifactDelivery).toHaveBeenCalledWith(id, true);
+  });
+
+  it("is not offered on a card for another provider", () => {
+    renderProviderListExpanded({
+      ...fixture(),
+      onSetClaudeArtifactDelivery: vi.fn(async () => true),
+    });
+    expect(screen.queryByRole("switch", { name: /Claude artifacts/ })).toBeNull();
   });
 });
 
@@ -4543,6 +5080,7 @@ function ControllerBackedProviderSettings(props: {
       onChangeOpenAiCompatibleConfiguration={controller.changeOpenAiCompatibleConfiguration}
       onChangeAnthropicCompatibleConfiguration={controller.changeAnthropicCompatibleConfiguration}
       onChangeAzureFoundryConfiguration={controller.changeAzureFoundryConfiguration}
+      onChangeAmazonBedrockConfiguration={controller.changeAmazonBedrockConfiguration}
       onChangeOpenAiImageConfiguration={controller.changeOpenAiImageConfiguration}
       onChangeGeminiImageConfiguration={controller.changeGeminiImageConfiguration}
       onChangeBflImageConfiguration={controller.changeBflImageConfiguration}
@@ -4557,6 +5095,7 @@ function ControllerBackedProviderSettings(props: {
       onCreateOpenAiCompatible={controller.createOpenAiCompatible}
       onCreateAnthropicCompatible={controller.createAnthropicCompatible}
       onCreateAzureFoundry={controller.createAzureFoundry}
+      onCreateAmazonBedrock={controller.createAmazonBedrock}
       onCreateOpenAiImage={controller.createOpenAiImage}
       onCreateGeminiImage={controller.createGeminiImage}
       onCreateBflImage={controller.createBflImage}
@@ -4731,6 +5270,8 @@ function fixture(
       credential.clear();
       return true;
     }),
+    onChangeAmazonBedrockConfiguration: vi.fn(async () => true),
+    onCreateAmazonBedrock: vi.fn(async () => true),
     onChangeOpenAiImageConfiguration: vi.fn(async (_id, _configuration, credential) => {
       credential.clear();
       return true;
@@ -5043,6 +5584,33 @@ function directoryGatewayProvider(): ProviderInstance {
         clientId: "0oa1octantDesktop" as never,
         scope: "gateway.models" as never,
       },
+    },
+  };
+}
+
+const bedrockCloudIam = {
+  startUrl: "https://contoso.awsapps.com/start" as never,
+  ssoRegion: "us-east-1" as never,
+  accountId: "123456789012" as never,
+  roleName: "BedrockUser" as never,
+};
+
+function bedrockProvider(): Extract<ProviderInstance, { driverKind: "amazon-bedrock" }> {
+  return {
+    id,
+    displayName: "Contoso Bedrock",
+    driverKind: "amazon-bedrock",
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1 as never,
+    createdAt: "2026-07-19T10:00:00.000Z" as never,
+    updatedAt: "2026-07-19T10:00:00.000Z" as never,
+    configuration: {
+      kind: "amazon-bedrock-converse-http",
+      region: "us-west-2" as never,
+      authentication: "cloud-iam",
+      cloudIam: bedrockCloudIam,
+      manualModelIds: ["anthropic.claude-sonnet-4-20250514-v1:0" as never],
     },
   };
 }

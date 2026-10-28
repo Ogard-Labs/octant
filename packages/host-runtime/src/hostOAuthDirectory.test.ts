@@ -18,6 +18,11 @@ import {
   type FakeIdTokenFlaw,
 } from "./fakeDirectory.test-support";
 import { createHostOAuthRuntime, type HostOAuthRuntime } from "./hostOAuth";
+import {
+  controlIssuerDeadlines,
+  stalledAnswer,
+  type StalledAnswer,
+} from "./stalledIssuer.test-support";
 
 function memoryStore(): CredentialStore & { readonly values: Map<string, string> } {
   const values = new Map<string, string>();
@@ -592,6 +597,164 @@ describe("directory device-code sign-in", () => {
     });
 
     expect(started).toEqual({ kind: "refused", reason });
+  });
+
+  /**
+   * A runtime whose polls of the device code fail as `failures` says, in
+   * order (or every one, with `"always"`), before reaching the directory.
+   */
+  function flakyDeviceRuntime(
+    store: CredentialStore,
+    fake: FakeDirectory,
+    failures:
+      | ReadonlyArray<"server-error" | "throttled" | "unreachable" | "slow-down" | StalledAnswer>
+      | "always",
+    clock?: { now: number },
+  ) {
+    const queue = failures === "always" ? [] : [...failures];
+    const waits: number[] = [];
+    let failedPolls = 0;
+    const fetchWithOutage: typeof fetch = async (input, init) => {
+      if (typeof init?.body === "string" && init.body.includes("device_code=")) {
+        const failure = failures === "always" ? "server-error" : queue.shift();
+        if (failure === "slow-down") {
+          return Response.json({ error: "slow_down", error_codes: [70016] }, { status: 400 });
+        }
+        if (failure !== undefined) failedPolls += 1;
+        if (failure === "unreachable") throw new TypeError("fetch failed");
+        if (failure === "throttled") return new Response("", { status: 429 });
+        if (failure === "server-error") return new Response("", { status: 503 });
+        if (failure === "hangs" || failure === "stalls-mid-answer") {
+          return stalledAnswer(failure, init?.signal, 400);
+        }
+      }
+      return fake.fetch(input, init);
+    };
+    const runtime = createHostOAuthRuntime({
+      store,
+      fetch: fetchWithOutage,
+      timeoutMs: 5_000,
+      ...(clock === undefined ? {} : { now: () => clock.now }),
+      sleep: (ms) => {
+        waits.push(ms);
+        return new Promise((resolve) => setTimeout(resolve, 1));
+      },
+    });
+    open.push(runtime);
+    return { runtime, waits, failedPolls: () => failedPolls };
+  }
+
+  it("keeps polling through a directory outage with a growing wait and signs in once the code is entered", async () => {
+    const fake = await fakeDirectory();
+    const store = memoryStore();
+    const { runtime, waits } = flakyDeviceRuntime(store, fake, [
+      "server-error",
+      "throttled",
+      "unreachable",
+    ]);
+    const started = await beginDevice(runtime);
+
+    fake.settleDeviceCode(started.userCode, "approved");
+
+    expect(await waitForSettled(runtime, started.attemptId)).toMatchObject({
+      kind: "signed-in",
+      accountLabel: ACCOUNT_LABEL,
+    });
+    // The directory asks for a poll every five seconds; each failure in a row
+    // doubles the wait, and the first answer after the outage resets it.
+    expect(waits.slice(0, 4)).toEqual([5_000, 10_000, 20_000, 40_000]);
+    expect(waits.slice(4).every((wait) => wait === 5_000)).toBe(true);
+    expect(store.values.size).toBe(1);
+  });
+
+  it.each([
+    ["never answers", "hangs"],
+    ["stops partway through its answer", "stalls-mid-answer"],
+  ] as const)(
+    "polls again after a directory poll that %s, so a stalled connection cannot hold the attempt open",
+    async (_, stall) => {
+      const deadlines = controlIssuerDeadlines();
+      try {
+        const fake = await fakeDirectory();
+        const store = memoryStore();
+        const { runtime, waits } = flakyDeviceRuntime(store, fake, [stall]);
+        const started = await beginDevice(runtime);
+
+        fake.settleDeviceCode(started.userCode, "approved");
+
+        expect(await waitForSettled(runtime, started.attemptId)).toMatchObject({
+          kind: "signed-in",
+        });
+        expect(waits.slice(0, 2)).toEqual([5_000, 10_000]);
+        expect(deadlines.bounds().every((ms) => ms === 30_000)).toBe(true);
+        expect(store.values.size).toBe(1);
+      } finally {
+        deadlines.restore();
+      }
+    },
+  );
+
+  it("keeps a slow_down's longer interval through a later outage and after it, as RFC 8628 asks", async () => {
+    const fake = await fakeDirectory();
+    const { runtime, waits } = flakyDeviceRuntime(memoryStore(), fake, [
+      "slow-down",
+      "server-error",
+    ]);
+    const started = await beginDevice(runtime);
+    // The code is entered only after the outage, so a pending answer follows it.
+    const deadline = Date.now() + 2_000;
+    while (waits.length < 4 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+    fake.settleDeviceCode(started.userCode, "approved");
+
+    expect(await waitForSettled(runtime, started.attemptId)).toMatchObject({ kind: "signed-in" });
+    // slow_down adds five seconds for this and every later poll; the outage
+    // doubles that interval once; the next real answer returns to it.
+    expect(waits.slice(0, 4)).toEqual([5_000, 10_000, 20_000, 10_000]);
+  });
+
+  it("ends an attempt whose code ran out while the directory was failing as unavailable, storing nothing", async () => {
+    const fake = await fakeDirectory();
+    const store = memoryStore();
+    const clock = { now: Date.parse("2026-10-27T09:00:00.000Z") };
+    const { runtime, waits, failedPolls } = flakyDeviceRuntime(store, fake, "always", clock);
+    const started = await beginDevice(runtime);
+    const deadline = Date.now() + 2_000;
+    while (failedPolls() < 2 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+    expect(failedPolls()).toBeGreaterThanOrEqual(2);
+
+    clock.now += 16 * 60_000;
+
+    expect(await waitForSettled(runtime, started.attemptId)).toMatchObject({
+      kind: "refused",
+      reason: "unavailable",
+    });
+    expect(store.values.size).toBe(0);
+    expect(Math.max(...waits)).toBeLessThanOrEqual(60_000);
+  });
+
+  it("forgets a settled attempt a while after its code ran out", async () => {
+    const fake = await fakeDirectory();
+    const clock = { now: Date.parse("2026-10-27T09:00:00.000Z") };
+    const { runtime } = flakyDeviceRuntime(memoryStore(), fake, [], clock);
+    const first = await beginDevice(runtime);
+    fake.settleDeviceCode(first.userCode, "declined");
+    expect(await waitForSettled(runtime, first.attemptId)).toMatchObject({
+      kind: "refused",
+      reason: "denied",
+    });
+
+    // Still readable just past expiry, for a command that polls late.
+    clock.now += 16 * 60_000;
+    await beginDevice(runtime);
+    expect(runtime.status(first.attemptId)).toMatchObject({ kind: "refused", reason: "denied" });
+
+    clock.now += 5 * 60_000;
+    await beginDevice(runtime);
+    expect(runtime.status(first.attemptId)).toEqual({ kind: "unknown" });
   });
 });
 

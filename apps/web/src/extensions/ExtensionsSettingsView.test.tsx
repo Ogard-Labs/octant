@@ -866,6 +866,22 @@ describe("ExtensionsSettingsView", () => {
     expect(viewButton(/installed/i)).toHaveAttribute("aria-pressed", "false");
   });
 
+  it("keeps each marketplace search hint short enough to read whole at phone width", async () => {
+    render(<ExtensionsSettingsView client={client()} scope={scope} />);
+    await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
+    fireEvent.click(viewButton(/marketplace/i));
+
+    // Observed at 390px: a field beside Run search has room for about 27
+    // characters, and "Search the extension catalog" (28) was cut off. The
+    // section title already says which catalog the field searches.
+    const hints = [
+      await screen.findByRole("searchbox", { name: /search marketplace/i }),
+      screen.getByRole("searchbox", { name: /search skills\.sh and npm/i }),
+    ].map((field) => field.getAttribute("placeholder") ?? "");
+    expect(hints).toEqual(["Search the catalog", "Search skills.sh and npm"]);
+    for (const hint of hints) expect(hint.length).toBeLessThanOrEqual(24);
+  });
+
   it("searches the marketplace, inspects a package, then requires explicit confirmation before install", async () => {
     const c = client();
     render(<ExtensionsSettingsView client={c} scope={scope} />);
@@ -2202,6 +2218,41 @@ describe("Installed cards at phone width", () => {
     ).replace(/\s+/g, " ");
     expect(styles).toMatch(
       /@media \(max-width: 640px\) \{ \.extensions-settings__cards \.extcard > \.extcard-right \{[^}]*grid-column: 2 \/ -1;[^}]*grid-row: 3;/,
+    );
+  });
+});
+
+describe("Install review at phone width", () => {
+  const styles = () =>
+    readFileSync(resolve(process.cwd(), "src/styles/extensions-settings.css"), "utf8").replace(
+      /\s+/g,
+      " ",
+    );
+
+  it("keeps each review label in its own column so a long digest wraps beside it", () => {
+    // Observed at 390px: the digest's value column took the whole row, the
+    // label column was 0px wide, and "Binary digest" was drawn over the digest.
+    expect(styles()).toMatch(
+      /\.extensions-settings__compatibility > div \{[^}]*grid-template-columns: auto minmax\(0, 1fr\);/,
+    );
+  });
+
+  it("bounds only a package's own text, never what trusting a language server grants", () => {
+    // Observed at 390px: the whole language-server review scrolled inside a
+    // 42vh box, so its grant sentence was cut off above Confirm install.
+    const css = styles();
+    const review = /\.extensions-settings__instruction-review \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(review).not.toMatch(/max-height|overflow/);
+    expect(css).toMatch(
+      /\.extensions-settings__instruction-review pre \{[^}]*max-height: min\(42vh, 420px\);[^}]*overflow: auto;/,
+    );
+  });
+
+  it("puts a reviewed component's kind under its name on a phone", () => {
+    // Observed at 390px: the kind line kept its column beside the name and the
+    // two were drawn over each other.
+    expect(styles()).toMatch(
+      /@media \(max-width: 640px\) \{ \.extensions-settings__preview \.extensions-settings__component \{[^}]*grid-template-columns: minmax\(0, 1fr\);/,
     );
   });
 });

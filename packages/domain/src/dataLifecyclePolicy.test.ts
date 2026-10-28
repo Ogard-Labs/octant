@@ -55,7 +55,7 @@ describe("planMigrationBackup", () => {
 });
 
 describe("classifyCredentialCleanupOutcome", () => {
-  it("names the macOS Keychain residual when no host credential boundary is available", () => {
+  it("names the unfinished credential cleanup when no host credential boundary is available", () => {
     const boundary = classifyCredentialCleanupOutcome({
       platform: "darwin",
       attempt: { kind: "not-integrated" },
@@ -63,7 +63,9 @@ describe("classifyCredentialCleanupOutcome", () => {
     expect(boundary.store).toBe("os-keychain");
     expect(boundary.performed).toBe(false);
     expect(boundary.status).toBe("not-integrated");
-    expect(boundary.residualReason).toContain("Keychain");
+    expect(boundary.residualReason).toBe(
+      "no host credential broker was reachable in this session; the native desktop host must complete credential cleanup",
+    );
     expect(boundary.recoveryGuidance).toBeNull();
   });
 
@@ -127,7 +129,9 @@ describe("classifyCredentialCleanupOutcome", () => {
     expect(boundary.recoveryGuidance).toBeTruthy();
     expect(boundary.recoveryGuidance).toContain("already removed");
     expect(boundary.recoveryGuidance).toContain("1");
-    expect(boundary.recoveryGuidance).toContain("Keychain cleanup is incomplete");
+    expect(boundary.recoveryGuidance).toContain(
+      "Credential cleanup is incomplete; unlock this computer's credential store",
+    );
     expect(boundary.recoveryGuidance).not.toMatch(/[0-9a-f-]{36}/); // no credential/UUID leakage
   });
 
@@ -145,6 +149,33 @@ describe("classifyCredentialCleanupOutcome", () => {
       expect(boundary.residualReason).toBeNull();
     },
   );
+
+  // A signed-in paired device reads this guidance and may run on another
+  // platform than the host, so it names this computer's credential store
+  // rather than the Mac or its Keychain, even though only a macOS host purges.
+  it.each([
+    { kind: "locked" },
+    { kind: "unavailable" },
+    { kind: "failed" },
+    { kind: "indeterminate" },
+    { kind: "partial", deletedCount: 1, failedCount: 1 },
+    { kind: "not-integrated" },
+  ] as const)("words the $kind outcome without naming a Mac or its Keychain", (attempt) => {
+    const boundary = classifyCredentialCleanupOutcome({ platform: "darwin", attempt });
+    const copy = `${boundary.recoveryGuidance ?? ""} ${boundary.residualReason ?? ""}`;
+    expect(copy.trim()).not.toBe("");
+    expect(copy).not.toMatch(/macOS|Mac\b|Keychain/);
+  });
+
+  it("tells a person to unlock this computer's credential store when it is locked", () => {
+    const boundary = classifyCredentialCleanupOutcome({
+      platform: "darwin",
+      attempt: { kind: "locked" },
+    });
+    expect(boundary.recoveryGuidance).toBe(
+      "This computer's credential store is locked or requires interaction. No local data was changed; unlock this computer's credential store (or re-authenticate) and retry.",
+    );
+  });
 
   it("requires reconciliation when a destructive Keychain purge outcome is indeterminate", () => {
     const boundary = classifyCredentialCleanupOutcome({

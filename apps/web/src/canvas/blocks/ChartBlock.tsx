@@ -2,6 +2,7 @@ import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
 import { useId, useLayoutEffect, useRef, useState, type SVGAttributes } from "react";
 import type {
   CanvasChartBlock,
+  CanvasChartPoint,
   CanvasChartSeries,
   CanvasChartType,
   CanvasNumberFormat,
@@ -106,6 +107,7 @@ export function ChartBlock({ block }: { readonly block: CanvasChartBlock }) {
       className={`canvas-block__chart canvas-block__chart--${block.chartType}`}
       ref={figureRef}
     >
+      <ChartHeading block={block} />
       {isCartesian(block.chartType) ? (
         <CartesianChart block={block} hidden={hidden} width={width} />
       ) : isFlowChart(block.chartType) ? (
@@ -133,6 +135,37 @@ export function ChartBlock({ block }: { readonly block: CanvasChartBlock }) {
       <ChartData block={block} />
     </figure>
   );
+}
+
+/**
+ * The finding the chart shows and what it measures. The title states the
+ * reading a person should take away; the subtitle says what was counted and
+ * over which span, so the axis does not have to.
+ */
+function ChartHeading({ block }: { readonly block: CanvasChartBlock }) {
+  if (block.title === undefined && block.subtitle === undefined) return null;
+  return (
+    <figcaption className="canvas-chart__heading">
+      {block.title === undefined ? null : (
+        <span className="canvas-chart__title">{block.title}</span>
+      )}
+      {block.subtitle === undefined ? null : (
+        <span className="canvas-chart__subtitle">{block.subtitle}</span>
+      )}
+    </figcaption>
+  );
+}
+
+/** What a mark reads out: its value, then the author's callout and emphasis. */
+function pointReading(
+  seriesLabel: string,
+  point: CanvasChartPoint,
+  format: CanvasNumberFormat | undefined,
+): string {
+  const parts = [`${seriesLabel}: ${formatCanvasValue(point.y, format)}`];
+  if (point.note !== undefined) parts.push(point.note);
+  if (point.emphasis === true) parts.push("highlighted");
+  return parts.join(", ");
 }
 
 function markCount(block: CanvasChartBlock): number {
@@ -359,9 +392,13 @@ function CartesianChart({
               x: xAt(index),
               y: yAt(point.y),
               value: point.y,
+              point,
             }));
             const mark = `canvas-block__chart-mark ${seriesClass(item.index)}`;
             const series = String(item.index % 6);
+            // Once a series emphasizes a reading, its other bars fall to the
+            // neutral ink so the one the chart is about keeps the hue.
+            const emphasized = item.series.points.some((point) => point.emphasis === true);
             if (barLike) {
               const groupWidth = Math.min(slot * 0.64, 48);
               const barWidth = Math.max(2, groupWidth / Math.max(1, visible.length));
@@ -369,10 +406,12 @@ function CartesianChart({
                 <g className={mark} data-series={series} key={item.series.seriesId}>
                   {coords.map((coord, index) => {
                     const zero = yAt(Math.max(frame.domain.min, Math.min(0, frame.domain.max)));
+                    const point = item.series.points[index];
                     return (
                       <rect
                         className="canvas-block__chart-mark canvas-chart__bar"
                         data-active={hover === index ? "true" : undefined}
+                        data-muted={emphasized && point?.emphasis !== true ? "true" : undefined}
                         height={Math.max(1, Math.abs(zero - coord.y))}
                         key={index}
                         rx={2}
@@ -381,7 +420,9 @@ function CartesianChart({
                         y={Math.min(zero, coord.y)}
                         {...markProps(
                           index,
-                          `${item.series.label}: ${formatCanvasValue(coord.value, block.format)}`,
+                          point === undefined
+                            ? `${item.series.label}: ${formatCanvasValue(coord.value, block.format)}`
+                            : pointReading(item.series.label, point, block.format),
                         )}
                       />
                     );
@@ -431,7 +472,9 @@ function CartesianChart({
                 {coords.map((coord, index) =>
                   block.chartType === "scatter" ||
                   hover === index ||
-                  index === coords.length - 1 ? (
+                  index === coords.length - 1 ||
+                  item.series.points[index]?.note !== undefined ||
+                  item.series.points[index]?.emphasis === true ? (
                     <circle
                       className={`canvas-chart__dot ${seriesClass(item.index)}`}
                       cx={coord.x}
@@ -442,7 +485,7 @@ function CartesianChart({
                       r={block.chartType === "scatter" ? 3 : 4}
                       {...markProps(
                         index,
-                        `${item.series.label}: ${formatCanvasValue(coord.value, block.format)}`,
+                        pointReading(item.series.label, coord.point, block.format),
                       )}
                     />
                   ) : null,
@@ -450,10 +493,70 @@ function CartesianChart({
               </g>
             );
           })}
+          <ChartNotes
+            notes={visible.flatMap((item) =>
+              item.series.points.flatMap((point, index) =>
+                point.note === undefined
+                  ? []
+                  : [
+                      {
+                        key: `${String(item.series.seriesId)}:${String(index)}`,
+                        x: xAt(index),
+                        y: yAt(barLike ? Math.max(point.y, 0) : point.y),
+                        text: point.note,
+                      },
+                    ],
+              ),
+            )}
+            frame={frame}
+          />
         </svg>
         <ChartTooltip anchor={anchor} />
       </div>
     </div>
+  );
+}
+
+/** Room a callout keeps above its point, past the dot's ring. */
+const NOTE_RISE = 10;
+
+/**
+ * The author's callouts, set just above the point they name in the text ink,
+ * never the series hue. They sit inside the plot's width so a note on the last
+ * point reads toward the line rather than past the edge. The marks already
+ * read the note aloud, so the drawn text is hidden from assistive technology.
+ */
+function ChartNotes({
+  notes,
+  frame,
+}: {
+  readonly notes: ReadonlyArray<{
+    readonly key: string;
+    readonly x: number;
+    readonly y: number;
+    readonly text: string;
+  }>;
+  readonly frame: CartesianFrame;
+}) {
+  if (notes.length === 0) return null;
+  return (
+    <g aria-hidden="true">
+      {notes.map((note) => {
+        const nearRight = note.x > frame.right - 48;
+        const nearLeft = note.x < frame.left + 48;
+        return (
+          <text
+            className="canvas-chart__note"
+            key={note.key}
+            textAnchor={nearRight ? "end" : nearLeft ? "start" : "middle"}
+            x={note.x}
+            y={Math.max(frame.top + 8, note.y - NOTE_RISE)}
+          >
+            {note.text}
+          </text>
+        );
+      })}
+    </g>
   );
 }
 
@@ -1031,6 +1134,9 @@ function SeriesTable({ block }: { readonly block: CanvasChartBlock }) {
   // Scatter, line, area, bar, and distribution can repeat or skip categories,
   // so the disclosed table lists every reading instead of a matrix that would
   // collapse duplicates to their first y.
+  const called = block.series.some((series) =>
+    series.points.some((point) => point.note !== undefined || point.emphasis === true),
+  );
   return (
     <table aria-label="Chart readings" className="ds-table">
       <thead>
@@ -1038,6 +1144,7 @@ function SeriesTable({ block }: { readonly block: CanvasChartBlock }) {
           <th scope="col">Series</th>
           <th scope="col">X</th>
           <th scope="col">Y</th>
+          {called ? <th scope="col">Note</th> : null}
         </tr>
       </thead>
       <tbody>
@@ -1047,6 +1154,13 @@ function SeriesTable({ block }: { readonly block: CanvasChartBlock }) {
               <th scope="row">{series.label}</th>
               <td>{formatCanvasValue(point.x, block.format)}</td>
               <td>{formatCanvasValue(point.y, block.format)}</td>
+              {called ? (
+                <td>
+                  {[point.note, point.emphasis === true ? "Highlighted" : undefined]
+                    .filter((part) => part !== undefined)
+                    .join(" · ")}
+                </td>
+              ) : null}
             </tr>
           )),
         )}

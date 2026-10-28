@@ -1,6 +1,6 @@
 import type { CodeDiffLayout, CodeSettings } from "@octant/contracts/code";
 import type { SettingsSettingId } from "@octant/contracts";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { SettingRow, SettingsSection } from "../settings/primitives";
 import { OctantFieldError } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -31,6 +31,22 @@ export interface CodeSettingsViewProps {
   readonly focusedSetting?: SettingsSettingId | undefined;
   readonly onUpdate: (input: CodeSettingsUpdate) => Promise<boolean>;
   readonly settings: CodeSettings;
+}
+
+/** The section holding the control a change came from. */
+type CodeSettingsSectionId = "thread-defaults" | "editor" | "external-editor";
+
+/**
+ * Why the last change was not kept. A refusal is said in the section whose
+ * control made the change: one message under External editor answered a
+ * Language services switch two sections up, out of sight (observed in
+ * rendered QA). An unfinished external editor field is said at that field,
+ * whichever control sent the change, because that is what needs fixing. A
+ * later change replaces it wherever it is.
+ */
+interface CodeSettingsFeedback {
+  readonly section: CodeSettingsSectionId;
+  readonly message: string;
 }
 
 const ACCESS_OPTIONS: ReadonlyArray<{
@@ -100,7 +116,39 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
         : current,
     );
   }
-  const [message, setMessage] = useState<string>();
+  const [feedback, setFeedback] = useState<CodeSettingsFeedback>();
+  // A save can resolve after later renders: when the host refuses a change as
+  // stale, its reloaded settings arrive first, so a refused pick returns to
+  // what the host holds now, not what it held when the pick was made.
+  const hostSettings = useRef(props.settings);
+  hostSettings.current = props.settings;
+
+  /**
+   * A switch or pick that was not saved goes back to what the host kept: left
+   * as chosen, the Language services switch read off while the host still ran
+   * the server, and no later change carried it. Typed text stays so the person
+   * can correct it.
+   */
+  function restoreUnsavedPicks(
+    change: Partial<CodeSettingsDraft> & { readonly bundledLanguageServer?: boolean },
+  ) {
+    const host = hostSettings.current;
+    if (change.executionPolicy !== undefined) {
+      setExecutionPolicy(host.defaultExecutionPolicy);
+    }
+    if (change.permissionPersistence !== undefined) {
+      setPermissionPersistence(host.defaultPermissionPersistence);
+    }
+    if (change.requireGitRepository !== undefined) {
+      setRequireGitRepository(host.requireGitRepository);
+    }
+    if (change.defaultDiffLayout !== undefined) {
+      setDefaultDiffLayout(host.defaultDiffLayout ?? "unified");
+    }
+    if (change.bundledLanguageServer !== undefined) {
+      setBundledLanguageServer(host.bundledLanguageServer !== false);
+    }
+  }
 
   /**
    * Every page in Settings keeps what you change; a Save button here meant a
@@ -109,6 +157,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
    * through typing it.
    */
   async function commit(
+    section: CodeSettingsSectionId,
     change: Partial<CodeSettingsDraft> & { readonly bundledLanguageServer?: boolean },
   ) {
     const draft: CodeSettingsDraft = {
@@ -126,11 +175,19 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
       .filter((argument) => argument.length > 0);
     const trimmedExecutable = draft.executable.trim();
     if (trimmedExecutable !== "" && !trimmedExecutable.startsWith("/")) {
-      setMessage("External editor executable must be an absolute path.");
+      restoreUnsavedPicks(change);
+      setFeedback({
+        section: "external-editor",
+        message: "External editor executable must be an absolute path.",
+      });
       return;
     }
     if (arguments_.length > 32) {
-      setMessage("External editor arguments are limited to 32 entries.");
+      restoreUnsavedPicks(change);
+      setFeedback({
+        section: "external-editor",
+        message: "External editor arguments are limited to 32 entries.",
+      });
       return;
     }
     let updated = false;
@@ -157,7 +214,8 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     } catch {
       updated = false;
     }
-    setMessage(updated ? undefined : "Code defaults could not be saved.");
+    if (!updated) restoreUnsavedPicks(change);
+    setFeedback(updated ? undefined : { section, message: "Code defaults could not be saved." });
   }
 
   return (
@@ -181,7 +239,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
                 const option = ACCESS_OPTIONS.find((candidate) => candidate.id === value);
                 if (option === undefined) return;
                 setExecutionPolicy(option.id);
-                void commit({ executionPolicy: option.id });
+                void commit("thread-defaults", { executionPolicy: option.id });
               }}
               options={ACCESS_OPTIONS}
               value={executionPolicy}
@@ -199,7 +257,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
                 const selected = value[0];
                 if (selected === undefined) return;
                 setPermissionPersistence(selected);
-                void commit({ permissionPersistence: selected });
+                void commit("thread-defaults", { permissionPersistence: selected });
               }}
               value={[permissionPersistence]}
             >
@@ -219,7 +277,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
               label="Code needs a Git repository"
               onCheckedChange={(checked) => {
                 setRequireGitRepository(checked);
-                void commit({ requireGitRepository: checked });
+                void commit("thread-defaults", { requireGitRepository: checked });
               }}
             />
           </SettingRow>
@@ -236,7 +294,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
                 const selected = value[0];
                 if (selected === undefined) return;
                 setDefaultDiffLayout(selected);
-                void commit({ defaultDiffLayout: selected });
+                void commit("thread-defaults", { defaultDiffLayout: selected });
               }}
               value={[defaultDiffLayout]}
             >
@@ -245,6 +303,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
             </OctantToggleGroup>
           </SettingRow>
         </div>
+        <CodeSettingsFeedbackSlot feedback={feedback} section="thread-defaults" />
       </SettingsSection>
       <SettingsSection title="Editor">
         <div className="setgroup">
@@ -260,11 +319,12 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
               label="Language services"
               onCheckedChange={(checked) => {
                 setBundledLanguageServer(checked);
-                void commit({ bundledLanguageServer: checked });
+                void commit("editor", { bundledLanguageServer: checked });
               }}
             />
           </SettingRow>
         </div>
+        <CodeSettingsFeedbackSlot feedback={feedback} section="editor" />
       </SettingsSection>
       <SettingsSection title="External editor">
         <div className="setgroup">
@@ -278,7 +338,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
               aria-label="External editor executable"
               className="settings-view__text-input"
               id="code-editor-executable"
-              onBlur={() => void commit({})}
+              onBlur={() => void commit("external-editor", {})}
               onChange={(event) => setExecutable(event.currentTarget.value)}
               placeholder="/usr/local/bin/code"
               type="text"
@@ -299,19 +359,29 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
               aria-label="External editor arguments"
               className="settings-view__text-input"
               id="code-editor-arguments"
-              onBlur={() => void commit({})}
+              onBlur={() => void commit("external-editor", {})}
               onChange={(event) => setArgumentsText(event.currentTarget.value)}
               placeholder={"--goto\n{file}:{line}:{column}"}
               value={argumentsText}
             />
           </SettingRow>
         </div>
-        <div className="settings-feedback-slot" aria-live="polite">
-          {message === undefined ? null : (
-            <OctantFieldError className="settings-section-line">{message}</OctantFieldError>
-          )}
-        </div>
+        <CodeSettingsFeedbackSlot feedback={feedback} section="external-editor" />
       </SettingsSection>
     </section>
+  );
+}
+
+function CodeSettingsFeedbackSlot(props: {
+  readonly feedback: CodeSettingsFeedback | undefined;
+  readonly section: CodeSettingsSectionId;
+}) {
+  const message = props.feedback?.section === props.section ? props.feedback.message : undefined;
+  return (
+    <div className="settings-feedback-slot" aria-live="polite">
+      {message === undefined ? null : (
+        <OctantFieldError className="settings-section-line">{message}</OctantFieldError>
+      )}
+    </div>
   );
 }

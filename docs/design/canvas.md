@@ -2,7 +2,8 @@
 
 This topic specification owns the Canvas agent tool's `describe`, `read`, and
 `preview` operations, document recipes, thread presentation, the closed block catalogue,
-diagram boards and comments, and the `design` block. Architecture owns the
+diagram boards and comments, the `design` block, and a person's HTML import.
+Architecture owns the
 Canvas boundary and authority rules
 ([Architecture: process topology](../architecture.md#process-topology)) and the
 approved direction for documents, designs, and prototypes
@@ -159,6 +160,47 @@ runtime with its own file tools read the tool description and still wrote the
 memo as a Markdown file, then pasted it into the reply after the write was
 denied.
 
+Canvas stays the default delivery everywhere. On a Claude Code account whose
+person enabled **Claude artifacts** (off by default; see
+[Providers and model endpoints](model-endpoints.md#claude-artifacts)), each
+Work or Code thread may choose them instead, and only a thread that chose them
+gets a different rule in that place for its turns outside Plan: write the
+document as one `.html` or `.md` file in the working folder and publish it
+with Claude's own `Artifact` tool, which puts it on the person's claude.ai
+account. The rule keeps a Canvas as the answer when the person asks for one or
+when the runtime leaves the tool out of its session, and `octant_canvas` stays
+offered. The driver names its artifact tool through the provider-neutral
+`nativeArtifactTool` seam and the turn starts its session with the thread's
+`nativeArtifacts` choice, so the host chooses the rule without naming a
+provider; every other thread, every other provider, Chat, and Plan keep the
+Canvas rule. Naming the tool grants nothing: the driver's gate decides each
+call (see [Architecture: security and authority](../architecture.md#security-and-authority)).
+
+The choice is the thread's `documentDelivery`, absent until the person
+decides. The first time a thread that may choose artifacts shows a Canvas, a
+one-time offer sits beneath that first Canvas: "Use Claude artifacts for this
+thread instead?", repeating that it turns on Claude Code's usage telemetry to
+Anthropic for the thread's turns, with **Use Claude artifacts** and **Keep
+Canvas**. Either answer is journaled, so the offer never returns. The thread's
+composer menu (Work's task actions; Code's document control beside the access
+picker) switches it either way at any time; turning artifacts on there asks
+in a confirmation that repeats the warning. A change applies from the next
+turn. A paired device may choose Canvas but not artifacts.
+
+A published page appears in the thread under the turn's tool rows as a link
+card that opens in the person's browser, beside the host's snapshot of the
+file the person approved publishing, labelled as the published snapshot
+(later edits on claude.ai are not reflected). An HTML snapshot is drawn
+through the same importer and design policy as an
+[imported HTML page](#html-import): a static design frame with no
+network, and a page with script waits for Run, whose single-use page the host
+builds from that thread's own journal under the window's read check (never
+from what the request carries). A Markdown snapshot is read as Markdown. A running Work turn shows the link card at once and the
+snapshot once the turn settles. A
+file that is neither, too large, or unreadable keeps only the link card.
+Octant never fetches, frames, or signs in to claude.ai, and the card and
+snapshot stay visible when the settled toolchain folds.
+
 ## Presentation and schema versions
 
 `create` and `revise` take an optional thread `presentation`: `inline` or
@@ -174,7 +216,8 @@ version 16, a design's image `assets` at version 17, a design's
 `runsScript` at version 18, the `tabs` and `columns` layout groups,
 diagram styles, and the plan's `gantt` view at version 19, and a Chat
 Canvas owned by its thread (a chat provenance with no Project) at version
-20, and the design and diagram fields below at version 21, so a document that
+20, the design and diagram fields below at version 21, and a chart's
+`title`, `subtitle`, and point `note` and `emphasis` at version 22, so a document that
 declares an earlier version and carries one is refused as a declared future
 version. Version 20 adds no block or field a share carries, so a share names a
 block authored at 20 as 19 under share version 10. Version 21 adds the
@@ -249,12 +292,29 @@ version, but the strict definition schema refuses an unknown field, so a
 runtime rolled back past them refuses a document that uses them rather than
 drawing it as plain text.
 The pure `canvasInlineRefusal` policy admits an author's `inline` request for
-reading blocks at any length within the ordinary block budget, and for a
-`design` of the `document` size that runs no script, which is an article or
-spec and reads like one. It refuses a request that holds a `diagram`, `plan`,
-`mockup`, a device-size `design` (phone, tablet, desktop, or slide), or a
-`design` that runs script. When an author asks for `inline` with such a block,
-the host records `sidebar` and returns the reason as `presentationNote`. The refusal bounds only the author's unprompted request: a
+visualizations and reading blocks at any length within the ordinary block
+budget: every chart type, dashboards, tables, math, diagrams (a `diagram`
+board included, drawn read-only), and a `design` of the `document` size,
+including one that runs script. A document-size design is a page as wide as
+the column, so an article, a spec, or an HTML page brought into a Canvas as a
+document reads in the thread; a running one is drawn in the same sandboxed
+frame, under the same page policy and bridge limits, as in the sidebar, and
+waits for the person's **Run**. It refuses a request that holds a `plan`, a
+`mockup`, or a device-size `design` (phone, tablet, desktop, or slide), which
+are worked on or reviewed at their own size. When an author asks for `inline`
+with such a block, the host records the request as asked, the Canvas is a
+sidebar Canvas (`effectiveCanvasPresentation`, and the card and the tool result
+say `sidebar`), the reason returns as `presentationNote`, and the thread shows
+it as a preview card that opens it. A definition's `presentation` is therefore
+the request, not the placement: every reader (the card projection, the agent's
+result, `preview`, the dock offer, and the thread) places a Canvas by
+`effectiveCanvasPresentation`, and only the preview-card choice reads the
+recorded request. The agent is told to put a visualization
+that answers the current question inline and to leave longer documents in the
+sidebar. Recording the request rather than `sidebar` is what lets the thread
+tell a refused inline request from a Canvas the author placed in the sidebar,
+which stays a row; a host that predates this recorded `sidebar`, so such a
+Canvas stays a row there. The refusal bounds only the author's unprompted request: a
 person may expand any Canvas in its thread, and that view preference never
 reaches the server
 (see [Canvas documents, designs, and prototypes](../architecture.md#canvas-documents-designs-and-prototypes)).
@@ -352,7 +412,13 @@ revision or a person's edit, is listed as `sidebar`.
 The renderer places every Canvas after the last row of the turn the person
 opened at or before `canvasCreatedAt`. An inline one is drawn there read-only:
 it gets no layout, plan, comment or action runtime, so nothing drawn inline can
-journal a version. Any other is a row that opens it. A card from an older host,
+journal a version; a board pans and zooms but its nodes do not move, and a
+running design's bridge can only resize its frame, report an error, or keep it
+alive, as in the sidebar. A sidebar Canvas whose definition records an inline
+request is a preview card: its live miniature, inert, drawn across the column
+above its title, and the whole card opens it. Any other is a row that opens it.
+Sizing in the column is in [Canvas visuals](canvas-visuals.md#data-visualisation).
+A card from an older host,
 or one no loaded turn can place, stays in the thread's card list.
 
 ## Charts and dashboards
@@ -377,6 +443,13 @@ layout is pure and deterministic in `packages/domain`
 feeds it, every ending lines up in the last column, and one scale sizes every
 band, so the screen and the artifact preview SVG draw the same picture. The
 three types arrive together with Canvas schema version 14.
+From Canvas schema version 22 any chart may carry a `title` (the finding, as a
+sentence) and a `subtitle` (what was measured and over which span), each at
+most 160 characters. On a line, area, scatter, bar, or distribution chart a
+point may also carry a `note` of at most 40 characters, drawn as a callout
+beside it, and `emphasis: true` on the reading the chart is about; a chart
+holds at most 12 notes. Other chart types refuse both, since a slice, stage,
+axis spoke, or stacked segment has no single point to label.
 A `dashboard` block is a KPI layout: a title that names its region, an
 optional `columns` of 1 to 4 (four when absent), and 1 to 24 `cells`, each
 naming the `blockId` of a metric, progress, status, chart, or table block in the
@@ -563,7 +636,11 @@ version 8 carries the version-15 dashboard, so it named blocks up to version
 view, so it names blocks up to version 19. Share version 10 carries a design's
 frames and accompanies no Canvas version, and share version 11 carries the
 version-21 design and diagram fields, so it names blocks up to version 21
-(`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`).
+(`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`). Version 22 adds only a chart's title,
+subtitle, and point callouts, which share version 11 does not carry: a shared
+chart leaves as its readings and is named as version 21. Carrying them is a
+share format bump, which the share service must learn before a desktop
+release publishes it.
 Share documents version independently of Canvas documents: a treemap, a
 heatmap, a bar list, a chart's or a table column's number format, a table
 column's display, and a board's layout arrive with share version 3, and a
@@ -847,9 +924,10 @@ ahead of everything else in it: a static design as one page per screen with
 an empty `sandbox`, and a running design as one page of every screen with
 `sandbox="allow-scripts"` and the served page's policy without `sandbox`,
 which a page cannot declare for itself. No frame has `allow-same-origin`, and
-the bridge is left out, since an exported page has no host to report to. The
-document that draws frames carries a policy of its own with `frame-src
-'none'`: a frame's page forbids its script every request but not leaving, and
+the bridge is left out, since an exported page has no host to report to. Every
+exported HTML document carries a policy of its own, first in its head, with
+`default-src 'none'`, `connect-src 'none'`, and `frame-src 'none'`, so the file
+loads nothing wherever it is opened: a frame's page forbids its script every request but not leaving, and
 a prototype that set its own address loaded another page, which reached a
 local listener; the document's policy refuses that navigation, and a `srcdoc`
 frame, which is not one, still draws. A `srcdoc` page inherits the document's
@@ -876,7 +954,8 @@ markup, so their card sets `drawsDesignFrames` for the person to acknowledge,
 and a themed design needs the window's `frameTheme` as in HTML export.
 The export approval card says when the document writes design markup
 (`writesDesignMarkup`), so approving it is the person's acknowledgement that
-markup leaves as written. A declared image draws a placeholder. A design in
+markup leaves as written. In a destination export a declared image draws a
+placeholder; the HTML file below writes in those that resolve for its reader. A design in
 the workspace theme is exported in the theme the person's window draws it
 with: an HTML export of a Canvas that holds a design carries `frameTheme`, the
 scheme and the frame's token values, because an exported file has no Octant
@@ -888,13 +967,61 @@ the host writes only the tokens a frame receives
 frame kit, which lives in `packages/domain` so the app and the export share
 one copy. An export handed no theme writes a themed design as its titles. An
 exported document frame cannot be measured, so it scrolls at a fixed height,
-and it does not carry Octant's fonts; the tokens' own fallbacks apply. A share refuses an action block, whose
+and it does not carry Octant's fonts; the tokens' own fallbacks apply.
+
+**HTML file.** The Canvas surface's More menu offers **Save as HTML file** and
+**Copy HTML**: the version on screen as one self-contained file a person can
+open offline in any browser or paste into another tool. It is the HTML export's
+document, drawn on the light scheme with Octant's own anatomy written into one
+inline stylesheet (callouts with their tone edge, metric tiles in a row, a
+progress bar, a status badge, tables that scroll in their own box), and every
+picture inline as SVG from the layout the board draws: each chart type with its
+axis, gridlines, series hues (the theme's palette roles) and legend; the
+sequence, state, entity-relationship, swimlane, mind-map, and node-edge
+diagrams; the treemap, heatmap, and bar list. The reading the Markdown form
+writes follows each picture under a **Data** disclosure, so no value is only in
+a picture. A destination's HTML export draws the same document under the
+approval card's body limit (`CANVAS_EXPORT_BODY_MAX_BYTES`, 256 KiB). Pictures
+make it larger than the reading a destination received before they were
+drawn, so a Canvas that exported then must still export: when the drawn
+document would pass the limit, each picture but the node-edge diagram (drawn
+before the others) is written as its reading alone, unfolded, and each styled
+block as its text. The stylesheet and no-load policy every HTML document now
+carries add about 3 KB that this does not take back. Math is MathML, which needs no font. Design frames are written as in
+the HTML export above, under the same sandbox and page policy; a running
+prototype runs there and reaches nothing (the frame threat model, F11). The
+file names only system and generic font families and loads nothing: the
+document's policy refuses every load, and the only address outside it is a link
+block's own `http(s)` link, which a reader follows by choice. `POST
+/api/canvas/html-file` renders it under the window authorization `get` runs
+(a paired device's Canvas read grant included) for the version the window
+names, with the window's `frameTheme`. It names no destination, so it holds no
+approval card, calls no plugin, journals nothing, and sends nothing anywhere: the
+file goes back to the window that asked, which downloads it or writes it to the
+clipboard. Text passes the same share filter as every export, so a host path,
+a credential-shaped value, and a source's opaque reference are redacted, and no
+host, Project, thread, Canvas, version, image, or source id is written. Each
+design's declared images resolve under the version's provenance, as when the
+reader draws the design, and are written in as `data:` images up to 4 MiB of
+images for the whole file (`CANVAS_HTML_FILE_IMAGES_MAX_BYTES`, charged once per
+reference); an image past that draws the labelled placeholder, the file says how
+many were left out, and so does the result (`imagesLeftOut`). The whole file is
+at most 7 MiB (`CANVAS_HTML_FILE_MAX_BYTES`) measured as the JSON string the
+answer carries it in, where a newline, quote, backslash, or control character
+takes two to six bytes, so the answer fits the 8 MiB a paired device is served;
+past that it is refused as `too-large`.
+The surface's status line says what happened, and when the file holds design
+markup, that the markup is included as written. An image block names a source,
+not bytes, and draws as its description, as on screen. The agent's
+`octant_canvas` tool has no export operation, and this adds none.
+
+A share refuses an action block, whose
 command runs only on this host. That refusal, and any block or field the share
 contract does not carry, are checked before the snapshot is journaled and
 reach the owner as an `unsafe-payload` denial: the Canvas cannot be shared, not
-a malformed request. A device-size design, and any design that runs script, is
-always a sidebar Canvas for the author's own request; a `document` design that
-runs none may be asked for `inline`. An authored
+a malformed request. A device-size design is always a sidebar Canvas for the
+author's own request (a preview card in the thread); a `document` design, with
+or without script, may be asked for `inline`. An authored
 revision declares the current schema version on the version and its
 definition, so a Canvas written under an earlier version moves forward and can
 gain a design; a version append never moves a Canvas back. Agents writing
@@ -1073,6 +1200,86 @@ listener and asks the resolver for none of its names (`dns-prefetch` and
 `preconnect` links, STUN and TURN servers named by host name), while the same
 page in a frame of the app's own process does look them up.
 
+## HTML import
+
+A person can bring a single HTML page they already have, such as a page an AI
+assistant made for them, into a new Canvas. **Import HTML…** sits under the
+Create Canvas form wherever a person can create a Canvas (today the Chat
+thread's Canvas tools), and takes a file the person chooses or markup they
+paste. It opens a new Canvas in the same thread and Project a create there
+would, and nothing else: the page is the whole document, one `design` block.
+The feature and its copy say "HTML page"; Octant reads no assistant's own
+artifact format and copies no other product's identifiers.
+
+- **Authority.** `POST /api/canvas/import-html` carries the scope a create
+  carries (host, mode, workspace, origin thread, requested authority) and runs
+  the create route's window context and Project check, then the create
+  policy's request authorization, before the page is read. The server builds
+  the create request itself (blank intent, no sources) and writes the Canvas
+  through the same create path, so an import can reach no Project, thread, or
+  mode a create could not. The remote gateway admits neither create nor import
+  for a paired device; both stay local-window actions.
+- **Bounds and refusals.** The page is at most 256 KiB of UTF-8
+  (`CANVAS_HTML_IMPORT_MAX_BYTES`), checked on the host; a body past the
+  route's 1 MiB read is answered as too large too. What survives the import
+  must fit one design frame and one stylesheet (65,536 characters each).
+  Anything else is a discriminated refusal, never a partial Canvas:
+  `too-large`, `not-html` (no element at all, or binary content holding NUL),
+  `unparseable` (a tag, attribute value, comment, or script, style, or title
+  element that never ends), `empty` (nothing left to draw), and `unsupported`
+  (the design policy still refuses what is left, with its reason). A create
+  the window may not make is the create's own `denied` result.
+- **Shape.** The pure `importCanvasHtmlPage` (domain) makes one
+  `document`-size design with `theme: "none"`, so the page keeps its own look
+  and is as wide as the Canvas and as tall as its content. Head and body
+  `style` elements become the design's stylesheet (a `media` other than
+  `all` or `screen` is kept as an `@media` block); the body's markup is the
+  frame; inline script from the head goes first; the body's own attributes
+  move to an element wrapping the page, and a body event handler such as
+  `onload` becomes a listener on the window, which is what it listened to.
+  Comments are dropped.
+- **Tier.** The tier is read exactly as the design policy reads any design:
+  a page that still holds an inline `<script>` or an event handler declares
+  `runsScript` and is a running design, under the served page, `sandbox
+allow-scripts`, page policy, bridge, prototype host, and Run rules above;
+  every other page is a static frame. A page whose only script was a file
+  is static once the file is taken out. No import chooses a looser tier, and
+  the result is checked by `canvasDesignMarkupRefusal` and
+  `canvasDesignStylesheetRefusal` before it is written, as an agent's design
+  is.
+- **No new egress.** A frame loads nothing and leaves nothing, so the import
+  takes out what the page would fetch or where it would go, and the window
+  lists each kind with its count and up to three examples (an address, a
+  `rel`, or a setting name, shown as text): script files, stylesheets and
+  `@import`s, images, fonts, and media that are not inline `data:` images
+  (a CSS `url()` becomes `none`), links that are not a fragment (an empty,
+  bare `#`, or `javascript:` link is removed without a report), embedded
+  pages, form destinations (`action`, `formaction`, `ping`), page settings
+  (`meta` other than charset and viewport, which the host writes itself,
+  `base`, and `link` elements other than stylesheets), and SVG `set` and
+  `animate`. Nothing is fetched on the page's behalf.
+- **Outside content.** The page came from outside Octant. The Canvas's first
+  version commits together with a `canvas.outside-content-carried@1` record
+  naming the writer `imported-page:<versionId>`, which is never a thread, so
+  every agent that later reads or previews the Canvas is marked under the
+  harness's taint rules, the thread it was imported into included, and a
+  person's Clear on that thread does not exempt it. A record that cannot be
+  written refuses the import. The Canvas title is what the person typed or
+  the file's name, never the page's `<title>`: the agent tool's `list` hands
+  titles to an agent without reading the Canvas, so outside text stays in the
+  design, whose title is the page's own.
+- **Window.** The renderer reads the chosen file as text (and refuses one
+  past the bound without sending it, as the host would), then shows the new
+  Canvas's name, its tier (a running page says it starts on open in the
+  sidebar or on **Run** in the thread), and what was taken out. The panel
+  stays open on that summary; the thread lists the Canvas meanwhile.
+
+Rationale: a separate "imported" tier, or a looser policy for a page the
+person chose, was rejected because it would give outside markup more than an
+agent's design gets; fetching the page's stylesheets or images at import was
+rejected as new egress from the host on a page's behalf. The Canvas title rule
+keeps an import from adding an unmarked channel to an agent's context.
+
 ## Verification
 
 - Block policies and layouts: `packages/domain/src/canvas*.ts` and their tests
@@ -1088,6 +1295,13 @@ page in a frame of the app's own process does look them up.
   `apps/server/src/shellService.test.ts`.
 - Preview: `apps/server/src/canvas/canvasPreviewService.test.ts`,
   `canvasPreviewWarnings.test.ts`, and `canvasPreviewBrowser.smoke.ts`.
+- HTML import: the tier, what is taken out, and each refusal in
+  `packages/domain/src/canvasHtmlImport.test.ts`; the route, its refusals,
+  the create scope check, and a script-bearing page served only under the
+  running page's sandbox in `apps/server/src/canvasRoutes.test.ts`; the
+  outside-content record in `canvasOutsideContentMark.test.ts`; the paired
+  device refusal in `apps/server/src/authenticatedProductRoutes.test.ts`; and
+  the panel in `apps/web/src/canvas/CanvasCards.test.tsx`.
 
 ## Renderer loading
 

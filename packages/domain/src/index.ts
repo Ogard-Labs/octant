@@ -31,6 +31,7 @@ export * from "./canvasDiagramIcons";
 export * from "./canvasDiagramLayout";
 export * from "./canvasPlanGanttLayout";
 export * from "./canvasMermaidImport";
+export * from "./canvasHtmlImport";
 export * from "./canvasKindLayout";
 export * from "./canvasTreemapLayout";
 export * from "./canvasHeatmapLayout";

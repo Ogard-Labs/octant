@@ -5,6 +5,7 @@ import type { SshRemoteProject, SshRemoteWorktree } from "@octant/contracts/ssh-
 import type { SshHostKeyProbe, SshTargetStatus } from "@octant/contracts/ssh-target";
 import { describeSshAdmissionRefusal } from "@octant/domain/ssh-target-recovery";
 import type { XtermAdapterRuntime } from "../code/XtermTerminalAdapter";
+import { thisComputerName, useHostPlatform } from "../platform";
 import { SettingRow, SettingsPanel, SettingsSection, SettingsState } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
@@ -14,13 +15,14 @@ import { OctantSelectField } from "../ui/base/OctantSelect";
 import { ZenProjectTerminalCard } from "../zen/ZenProjectTerminalCard";
 import type { SshTargetAdministrationBridge } from "../shell/hostBridge";
 import {
+  SSH_TARGET_TIMES,
   createSshTargetClient,
   type SshTargetAnswer,
   type SshTargetClient,
 } from "./sshTargetClient";
 
 /**
- * Settings › SSH targets: the machines this Mac reaches with `ssh`, the Code
+ * Settings › SSH targets: the machines the host reaches with `ssh`, the Code
  * Projects bound to folders on them, their managed worktrees, and a terminal
  * in either. Canonical: docs/design/remote-ssh-environments.md and DESIGN.md
  * § Page shell.
@@ -51,12 +53,21 @@ const POSTURE_LABELS: Readonly<Record<string, string>> = {
 
 const CONNECTION_LABELS: Readonly<Record<SshTargetStatus["connection"], string>> = {
   "not-connected": "Not connected",
+  reconnecting: "Reconnecting",
   unreachable: "Not reachable",
+  "authentication-refused": "This Mac's SSH key or agent is refused",
   "host-key-changed": "Host key changed",
   "executor-missing": "Octant not found on the target",
   "executor-version-mismatch": "Another Octant version on the target",
   connected: "Connected",
 };
+
+/**
+ * A dropped session's target reconnects on its own, which no request of this
+ * page starts, so the page reads the targets again on this cadence while it
+ * lists any, as a window's remote Projects do.
+ */
+const TARGET_REFRESH_MS = 5_000;
 
 export const PIN_LIMITS_NOTICE =
   "The pin proves only that later sessions reach this key. Whoever administers the target can read its files and alter the Octant there, whose attestation is its own report.";
@@ -79,6 +90,7 @@ export function SshTargetsSettingsSection({
   /** Replaces the terminal renderer; only tests do. */
   readonly loadTerminalRuntime?: () => Promise<XtermAdapterRuntime>;
 }) {
+  const computer = thisComputerName(useHostPlatform());
   const destinationId = useId();
   const executorId = useId();
   const bindTargetId = useId();
@@ -122,15 +134,28 @@ export function SshTargetsSettingsSection({
     [client],
   );
 
+  // Reads answer out of order: a status read sent before a removal could land
+  // after the read that followed it and show the removed target again until
+  // the next poll. Every read and every action takes the next number, and an
+  // answer is shown only if no action, and no answer shown, began after it.
+  const issued = useRef(0);
+  const shownFrom = useRef<ShownFrom>({ targets: 0, lists: 0 });
+
   const refresh = useCallback(async () => {
+    issued.current += 1;
+    const sent = issued.current;
     const [listed, bound, made] = await Promise.all([
       client.list(),
       client.projects(),
       client.worktrees(),
     ]);
-    if (listed.status === "ok") setTargets(listed.value);
-    if (bound.status === "ok") setProjects(bound.value);
-    if (made.status === "ok") setWorktrees(made.value);
+    if (listed.status === "ok" && answersNewest(shownFrom.current, "targets", sent)) {
+      setTargets(listed.value);
+    }
+    if (answersNewest(shownFrom.current, "lists", sent)) {
+      if (bound.status === "ok") setProjects(bound.value);
+      if (made.status === "ok") setWorktrees(made.value);
+    }
     const refused = [listed, bound, made].find((answer) => answer.status === "refused");
     if (refused?.status === "refused") setMessage({ kind: "error", text: refused.message });
   }, [client]);
@@ -139,6 +164,21 @@ export function SshTargetsSettingsSection({
     void refresh();
   }, [refresh]);
 
+  const listsTargets = targets.length > 0;
+  useEffect(() => {
+    if (!listsTargets) return;
+    const timer = setInterval(() => {
+      issued.current += 1;
+      const sent = issued.current;
+      void client.list().then((listed) => {
+        if (listed.status === "ok" && answersNewest(shownFrom.current, "targets", sent)) {
+          setTargets(listed.value);
+        }
+      });
+    }, TARGET_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [client, listsTargets]);
+
   /** Runs one request, says how it went, and reads the page's state again. */
   const act = async <T,>(
     request: () => Promise<SshTargetAnswer<T>>,
@@ -146,6 +186,8 @@ export function SshTargetsSettingsSection({
   ): Promise<T | undefined> => {
     setBusy(true);
     setMessage(undefined);
+    issued.current += 1;
+    shownFrom.current = { targets: issued.current, lists: issued.current };
     try {
       const answer = await request();
       if (answer.status === "refused") {
@@ -229,7 +271,7 @@ export function SshTargetsSettingsSection({
   return (
     <div className="settings-section-stack" id="settings-ssh-targets">
       <SettingsSection
-        description="Machines this Mac reaches with ssh. A Code Project can keep its folder on one; Octant admits work there only after the target proves it confines it as this Mac would."
+        description={`Machines ${computer} reaches with ssh. A Code Project can keep its folder on one; Octant admits work there only after the target proves it confines it as ${computer} would.`}
         title="Targets"
       >
         <div className="setgroup">
@@ -343,7 +385,7 @@ export function SshTargetsSettingsSection({
       </SettingsSection>
 
       <SettingsSection
-        description="A Code Project whose folder is on a target. Its terminals and worktrees run there, under the same confinement as on this Mac."
+        description={`A Code Project whose folder is on a target. Its terminals and worktrees run there, under the same confinement as on ${computer}.`}
         title="Remote Projects"
       >
         <div className="setgroup">
@@ -612,6 +654,19 @@ export function SshTargetsSettingsSection({
   );
 }
 
+/** The number of the newest action or shown read, for the targets and for the other lists. */
+interface ShownFrom {
+  targets: number;
+  lists: number;
+}
+
+/** Whether a read sent as `sent` is newer than what is shown, recording it as shown if so. */
+function answersNewest(shown: ShownFrom, part: keyof ShownFrom, sent: number): boolean {
+  if (sent <= shown[part]) return false;
+  shown[part] = sent;
+  return true;
+}
+
 /** The connection, who and what it reached, and what each posture would admit now. */
 function TargetDescription({ status }: { readonly status: SshTargetStatus }) {
   const platform =
@@ -623,17 +678,35 @@ function TargetDescription({ status }: { readonly status: SshTargetStatus }) {
     <>
       {CONNECTION_LABELS[status.connection]}
       {reached === "" ? "" : ` as ${reached}`} · {status.fingerprint}
+      {status.reconnect === undefined ? null : (
+        <>
+          <br />
+          {reconnectSentence(status.reconnect)}
+        </>
+      )}
       {status.admission.map((entry) => (
         <span key={entry.posture}>
           <br />
           {POSTURE_LABELS[entry.posture] ?? entry.posture}:{" "}
           {entry.decision.status === "admitted"
             ? "admitted"
-            : describeSshAdmissionRefusal(entry.decision)}
+            : describeSshAdmissionRefusal(entry.decision, SSH_TARGET_TIMES)}
         </span>
       ))}
     </>
   );
+}
+
+/** Where this host's own reconnect stands, as the host reported it. */
+function reconnectSentence(reconnect: NonNullable<SshTargetStatus["reconnect"]>): string {
+  switch (reconnect.status) {
+    case "waiting":
+      return `The session dropped. Reconnecting on its own: attempt ${String(reconnect.attempt)} of ${String(reconnect.maxAttempts)} at ${SSH_TARGET_TIMES.formatTime(reconnect.nextAttemptAt)}.`;
+    case "attempting":
+      return `The session dropped. Reconnecting on its own: attempt ${String(reconnect.attempt)} of ${String(reconnect.maxAttempts)} under way.`;
+    case "stopped":
+      return `Stopped reconnecting after ${String(reconnect.attempts)} ${reconnect.attempts === 1 ? "attempt" : "attempts"}. Connect it again once the reason below is fixed.`;
+  }
 }
 
 /** One sentence on what a target admits after a connection. */

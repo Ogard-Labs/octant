@@ -19,7 +19,7 @@ import {
   presentAppleSimulatorLiveFrame,
   type AppleSimulatorLiveFrameAttach,
 } from "@octant/domain";
-import { LoaderCircle } from "lucide-react";
+import { FolderGit2, LoaderCircle } from "lucide-react";
 import { documentIsVisible } from "../polling/documentVisibility";
 import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
@@ -68,6 +68,7 @@ import { useAppleSimulatorScreen } from "../apple/useAppleSimulatorScreen";
 import { useAppleSimulatorLiveScreen } from "../apple/useAppleSimulatorLiveScreen";
 import { useAppleWorkbench } from "../apple/useAppleWorkbench";
 import { ApplePhysicalDevices } from "../apple/ApplePhysicalDevices";
+import { REMOTE_CODE_THREAD_OPERATION_UNAVAILABLE } from "@octant/domain/ssh-target-recovery";
 import { useAppleDevices } from "../apple/useAppleDevices";
 
 const MonacoEditorPane = lazy(() =>
@@ -283,6 +284,19 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
     );
   }
 
+  // A remote thread's checkout is a folder on its SSH target. Its files,
+  // terminal, Git, tests, and pull request would act on this host, so the
+  // host refuses each and the tab says so instead of asking.
+  if (view.checkout.kind === "remote-root") {
+    return (
+      <ShellState
+        eyebrow="On an SSH target"
+        message={REMOTE_CODE_THREAD_OPERATION_UNAVAILABLE}
+        state="neutral"
+        title={`${props.tab.title} is not available here`}
+      />
+    );
+  }
   const scope = { checkoutId: view.checkout.id, threadId: view.thread.id } as const;
   switch (props.tab.kind) {
     case "code-file":
@@ -1473,7 +1487,11 @@ function TerminalWorkspaceSurface(
   if (props.checkoutAvailability === "unavailable") {
     return (
       <ShellState
-        action={{ label: "Use the Project's checkout", onClick: () => void rebindCheckout() }}
+        action={{
+          label: "Use the Project's checkout",
+          onClick: () => void rebindCheckout(),
+          glyph: FolderGit2,
+        }}
         eyebrow="Code terminal"
         message={
           rebindRefusal ??

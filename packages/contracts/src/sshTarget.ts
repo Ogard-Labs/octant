@@ -249,6 +249,7 @@ export type SshAttestation = typeof SshAttestation.Type;
 export const SshAdmissionPlainRefusalReason = Schema.Literal(
   "target-removed",
   "target-unreachable",
+  "authentication-refused",
   "host-key-changed",
   "executor-missing",
   "executor-version-mismatch",
@@ -267,6 +268,18 @@ export const SshAdmissionDecision = Schema.Union(
   Schema.Struct({
     status: Schema.Literal("refused"),
     reason: SshAdmissionPlainRefusalReason,
+  }).annotations(strict),
+  /**
+   * The session dropped and this host is reconnecting on its own. `attempt` is
+   * the attempt now running or next due, of `maxAttempts`; `nextAttemptAt`
+   * (epoch milliseconds) is absent while that attempt runs.
+   */
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    reason: Schema.Literal("target-reconnecting"),
+    attempt: Schema.Int.pipe(Schema.positive()),
+    maxAttempts: Schema.Int.pipe(Schema.positive()),
+    nextAttemptAt: Schema.optional(Schema.Number.pipe(Schema.nonNegative())),
   }).annotations(strict),
   /** Names the posture and the forbidden action that succeeded. */
   Schema.Struct({
@@ -362,10 +375,15 @@ export type SshRuntimeBinarySetRequest = typeof SshRuntimeBinarySetRequest.Type;
 /**
  * The connection as this host sees it now. It lives in memory only and is
  * never journaled: a restart begins every target at `not-connected`.
+ * `reconnecting` holds while this host reconnects on its own after an attested
+ * session dropped; `authentication-refused` is the SSH client's own report
+ * that this Mac's key or agent no longer signs in.
  */
 export const SshTargetConnectionState = Schema.Literal(
   "not-connected",
+  "reconnecting",
   "unreachable",
+  "authentication-refused",
   "host-key-changed",
   "executor-missing",
   "executor-version-mismatch",
@@ -373,11 +391,56 @@ export const SshTargetConnectionState = Schema.Literal(
 );
 export type SshTargetConnectionState = typeof SshTargetConnectionState.Type;
 
+/**
+ * This host reconnecting to a target on its own after an attested session
+ * dropped. `waiting` until `nextAttemptAt` (epoch milliseconds), `attempting`
+ * while attempt `attempt` of `maxAttempts` connects and attests, and
+ * `stopped` once it made `attempts` attempts and either ran out or met a
+ * refusal another attempt cannot heal, which the connection state names. A
+ * stopped reconnect waits for the person to connect the target again.
+ */
+export const SshTargetReconnect = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("waiting"),
+    attempt: Schema.Int.pipe(Schema.positive()),
+    maxAttempts: Schema.Int.pipe(Schema.positive()),
+    nextAttemptAt: Schema.Number.pipe(Schema.nonNegative()),
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("attempting"),
+    attempt: Schema.Int.pipe(Schema.positive()),
+    maxAttempts: Schema.Int.pipe(Schema.positive()),
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("stopped"),
+    attempts: Schema.Int.pipe(Schema.positive()),
+  }).annotations(strict),
+);
+export type SshTargetReconnect = typeof SshTargetReconnect.Type;
+
 export const SshTargetPostureAdmission = Schema.Struct({
   posture: SshConfinedPosture,
   decision: SshAdmissionDecision,
 }).annotations(strict);
 export type SshTargetPostureAdmission = typeof SshTargetPostureAdmission.Type;
+
+/** The most placeable runtimes one target's status lists. */
+export const SSH_TARGET_MAX_PLACEABLE_RUNTIMES = 64;
+
+/**
+ * A provider instance whose agent a remote-bound Project's turn could place on
+ * the target: its driver passes the check a turn makes before it binds (an ACP
+ * agent that declares placement). It carries the runtime's own admission now
+ * in each confined posture and whether the person set where it is there. A
+ * window offers the agent only where both allow; the host still decides
+ * every turn itself.
+ */
+export const SshPlaceableRuntime = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  runtimePath: Schema.Literal("set", "missing"),
+  admission: Schema.Array(SshTargetPostureAdmission).pipe(Schema.maxItems(8)),
+}).annotations(strict);
+export type SshPlaceableRuntime = typeof SshPlaceableRuntime.Type;
 
 /**
  * A target and what this host would admit on it now, for Octant's own launches
@@ -388,11 +451,16 @@ export const SshTargetStatus = Schema.Struct({
   target: SshTarget,
   fingerprint: SshHostKeyFingerprint,
   connection: SshTargetConnectionState,
+  /** Present while this host reconnects on its own, and once it stopped. */
+  reconnect: Schema.optional(SshTargetReconnect),
   remoteUser: Schema.optional(SshRemoteUser),
   platform: Schema.optional(SshTargetPlatform),
   admission: Schema.Array(SshTargetPostureAdmission).pipe(Schema.maxItems(8)),
   runtimeBinaries: Schema.Array(SshRuntimeBinary).pipe(
     Schema.maxItems(SSH_TARGET_MAX_RUNTIME_BINARIES),
+  ),
+  placeableRuntimes: Schema.Array(SshPlaceableRuntime).pipe(
+    Schema.maxItems(SSH_TARGET_MAX_PLACEABLE_RUNTIMES),
   ),
 }).annotations(strict);
 export type SshTargetStatus = typeof SshTargetStatus.Type;
@@ -415,6 +483,8 @@ export const SshTargetAdministrationRefusalReason = Schema.Literal(
   "destination-mismatch",
   /** The target already holds the most runtime paths it may. */
   "too-many-runtime-binaries",
+  /** A thread on one of the target's Projects is running a turn there. */
+  "target-in-use",
 );
 export type SshTargetAdministrationRefusalReason = typeof SshTargetAdministrationRefusalReason.Type;
 

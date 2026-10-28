@@ -394,7 +394,7 @@ describe("WindowChrome", () => {
     expect(projectName).toContain("font-family: var(--oct-font-display);");
     // A Project name is the 13px row label (DESIGN.md "Scale"), one step
     // heavier than the 400 thread titles filed under it.
-    expect(projectName).toContain("font-weight: 500;");
+    expect(projectName).toContain("font-weight: var(--oct-weight-medium);");
     expect(projectName).not.toMatch(/text-transform|letter-spacing|mono/);
     expect(cssRule('.sidebar-navigation__thread-status[data-activity="idle"]')).toContain(
       "opacity: 0;",

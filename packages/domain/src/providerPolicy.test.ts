@@ -35,6 +35,7 @@ import {
   assignedClaudeAccountConfigDirectory,
   effectiveClaudeAccountConfigDirectory,
   createClaudeProvider,
+  setClaudeArtifactDelivery,
   formatClaudeAuthLoginCommand,
   createGeminiImageProvider,
   createIdeogramImageProvider,
@@ -44,6 +45,9 @@ import {
   createOpenCodeProvider,
   createOutsideHarnessEndpointProvider,
   effectiveProviderAuthority,
+  rebindOutsideHarnessEndpointDriver,
+  isOutsideDriverQuarantined,
+  quarantineOutsideHarnessEndpointDriver,
   isImageProfileDriverKind,
   removeProvider,
   renameProvider,
@@ -2478,6 +2482,50 @@ describe("provider instance policy", () => {
     expect(changed.version).toBe(2);
   });
 
+  it("turns Claude artifacts on only by the person's own switch and only for a claude.ai sign-in", () => {
+    const subscription = changeClaudeConfiguration(claudeProvider(), {
+      configuration: { ...claudeProvider().configuration, authentication: "subscription" },
+      activeSessionCount: 0,
+      updatedAt,
+    });
+    // A running session is no reason to refuse: the switch changes no process input.
+    const on = setClaudeArtifactDelivery(subscription, { enabled: true, updatedAt });
+    expect(on.configuration.artifactDelivery).toBe(true);
+    expect(on.version).toBe(subscription.version + 1);
+
+    // An account edit keeps the person's switch and cannot set it itself.
+    const recoloured = changeClaudeConfiguration(on, {
+      configuration: { ...subscription.configuration, accent: "rose" },
+      activeSessionCount: 1,
+      updatedAt,
+    });
+    expect(recoloured.configuration.artifactDelivery).toBe(true);
+    const created = createClaudeProvider({
+      id: ids.other,
+      displayName: "Second Claude",
+      configuration: { ...on.configuration, configDirectory: "/Users/example/.claude-accounts/b" },
+      existingInstances: [],
+      expectedVersion: version(0),
+      createdAt,
+    });
+    expect(created.configuration).not.toHaveProperty("artifactDelivery");
+
+    // An API key has no claude.ai account: moving to one turns the switch off,
+    // and it cannot be turned on there.
+    const keyed = changeClaudeConfiguration(on, {
+      configuration: { ...subscription.configuration, authentication: "api-key" },
+      activeSessionCount: 0,
+      updatedAt,
+    });
+    expect(keyed.configuration).not.toHaveProperty("artifactDelivery");
+    expect(() => setClaudeArtifactDelivery(keyed, { enabled: true, updatedAt })).toThrow(
+      "Claude artifacts need a claude.ai sign-in",
+    );
+
+    const off = setClaudeArtifactDelivery(on, { enabled: false, updatedAt });
+    expect(off.configuration).not.toHaveProperty("artifactDelivery");
+  });
+
   it("rejects Claude reconfiguration before changing an instance with active sessions", () => {
     const original = claudeProvider();
 
@@ -2623,6 +2671,74 @@ describe("outside driver provider policy", () => {
     expect(create({ baseUrl: "http://127.0.0.1:8080", key: undefined }).configuration).toEqual(
       keyless,
     );
+  });
+
+  const reboundAt = "2026-10-28T09:00:00.000Z" as UtcTimestamp;
+
+  it("moves a provider to its driver's newly trusted digest and keeps everything else the person set", () => {
+    const instance = { ...create({}), enabled: true };
+    const newer = { ...driver, version: "0.2.0", digest: `sha256:${"d".repeat(64)}` };
+    const rebound = rebindOutsideHarnessEndpointDriver(instance, newer as never, reboundAt);
+    expect(decodeProviderInstance(rebound)).toEqual(rebound);
+    expect(rebound).toEqual({
+      ...instance,
+      configuration: { ...instance.configuration, driver: newer },
+      version: 2,
+      updatedAt: reboundAt,
+    });
+  });
+
+  it("refuses to move a provider to another package or another component", () => {
+    const instance = create({});
+    expect(() =>
+      rebindOutsideHarnessEndpointDriver(
+        instance,
+        { ...driver, packageId: "00000000-0000-4000-8000-000000000914" } as never,
+        reboundAt,
+      ),
+    ).toThrow(ProviderPolicyRejected);
+    expect(() =>
+      rebindOutsideHarnessEndpointDriver(
+        instance,
+        { ...driver, componentId: "other-driver" } as never,
+        reboundAt,
+      ),
+    ).toThrow(ProviderPolicyRejected);
+  });
+
+  it("holds a crash-looping driver at the digest the provider binds, once", () => {
+    const instance = { ...create({}), enabled: true };
+    expect(isOutsideDriverQuarantined(instance)).toBe(false);
+    const held = quarantineOutsideHarnessEndpointDriver(instance, reboundAt);
+    expect(decodeProviderInstance(held)).toEqual(held);
+    expect(held).toEqual({
+      ...instance,
+      driverQuarantine: { reason: "crash-limit", digest: driver.digest, quarantinedAt: reboundAt },
+      version: 2,
+      updatedAt: reboundAt,
+    });
+    expect(isOutsideDriverQuarantined(held)).toBe(true);
+    // Already held at this digest: nothing changes, so nothing is journaled again.
+    expect(quarantineOutsideHarnessEndpointDriver(held, createdAt)).toBe(held);
+  });
+
+  it("leaves the hold behind only when the provider moves to another digest", () => {
+    const held = quarantineOutsideHarnessEndpointDriver(create({}), reboundAt);
+    const newer = { ...driver, version: "0.2.0", digest: `sha256:${"d".repeat(64)}` };
+    const moved = rebindOutsideHarnessEndpointDriver(held, newer as never, reboundAt);
+    expect(moved.driverQuarantine).toBeUndefined();
+    expect(isOutsideDriverQuarantined(moved)).toBe(false);
+    // A hold recorded for a digest the provider no longer binds holds nothing.
+    expect(
+      isOutsideDriverQuarantined({ ...moved, driverQuarantine: held.driverQuarantine } as never),
+    ).toBe(false);
+    // A new version label over the same bytes is the same driver, still held.
+    const relabelled = rebindOutsideHarnessEndpointDriver(
+      held,
+      { ...driver, version: "0.1.1" } as never,
+      reboundAt,
+    );
+    expect(isOutsideDriverQuarantined(relabelled)).toBe(true);
   });
 });
 

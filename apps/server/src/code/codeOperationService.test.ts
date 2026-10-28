@@ -19,6 +19,10 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { turnBlocksInPlaceRestore } from "@octant/domain/code-policy";
+import {
+  REMOTE_CODE_THREAD_CONNECTORS_UNAVAILABLE,
+  remoteCodeThreadPostureRefusal,
+} from "@octant/domain/ssh-target-recovery";
 import { describe, expect, it, vi } from "vitest";
 import {
   CodeOperationService,
@@ -29,6 +33,7 @@ import {
 import { requireLinuxConfinement } from "../process/linuxConfinement";
 import { ReviewFindingServiceError } from "./reviewFindingService";
 import { TerminalService } from "./terminalService";
+import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
 import { Schema } from "effect";
 import { DeviceId, StableHostId, RemoteSessionId } from "@octant/contracts/remote-access";
 import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
@@ -2392,6 +2397,213 @@ describe("CodeOperationService", () => {
     expect(fixture.turns.start.mock.calls[0]?.[0].extensionTools).toBe(tools);
   });
 
+  it("refuses a connector selected for a thread on an SSH target before any extension starts", async () => {
+    // A connector's tools run on this host; a remote turn has only the
+    // harness's tools on the target, so a selection used to be started and
+    // then dropped from the turn without a word.
+    const resolveSelectedExtensions = vi.fn(async () => ({
+      kind: "resolved" as const,
+      context: [],
+      tools: { definitions: [], execute: async () => ({ result: "" }) },
+    }));
+    const fixture = providerTurnFixture({
+      resolveSelectedExtensions,
+      remoteRoot: true,
+      thread: decodeCodeThread({ ...thread(), executionPolicy: "approval-gated" }),
+    });
+    const result = await fixture.service.execute(ids.window, {
+      ...startProviderTurn,
+      extensionSelections: [
+        {
+          kind: "plugin",
+          extensionId: "94000000-0000-4000-8000-000000000011",
+          packageId: "94000000-0000-4000-8000-000000000012",
+          componentId: "notes-server",
+          packageVersion: "1.0.0",
+          packageDigest: `sha256:${"a".repeat(64)}`,
+          catalogEpoch: `sha256:${"b".repeat(64)}`,
+          origin: { kind: "draft", reference: "notes" },
+        },
+      ],
+    });
+    expect(result).toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "unavailable", message: REMOTE_CODE_THREAD_CONNECTORS_UNAVAILABLE },
+    });
+    expect(resolveSelectedExtensions).not.toHaveBeenCalled();
+    expect(fixture.turns.start).not.toHaveBeenCalled();
+  });
+
+  // A remote turn takes no checkpoint, so an edit made there without review
+  // has no way back. Creating or raising a thread to these postures is refused,
+  // but a thread created before that rule still holds one, and the turn itself
+  // must refuse to run in it.
+  it.each(["auto-accept-edits", "full-access"] as const)(
+    "refuses a turn on a thread on an SSH target that holds %s before anything starts or is journaled",
+    async (executionPolicy) => {
+      const fixture = providerTurnFixture({
+        remoteRoot: true,
+        thread: decodeCodeThread({
+          ...thread(),
+          executionPolicy,
+          permissionPersistence: "project-default",
+        }),
+      });
+      const result = await fixture.service.execute(ids.window, startProviderTurn);
+      expect(result).toMatchObject({
+        kind: "operation-failed",
+        admission: "refused",
+        failure: {
+          category: "unauthorized",
+          message: remoteCodeThreadPostureRefusal(executionPolicy),
+        },
+      });
+      expect(fixture.turns.start).not.toHaveBeenCalled();
+      expect(fixture.events.append).not.toHaveBeenCalled();
+    },
+  );
+
+  it("refuses a turn on a thread on an SSH target that this window holds in session Full access", async () => {
+    const sessions = new CodeSessionAuthorityStore();
+    sessions.grantFullAccess(ids.window, ids.thread);
+    const fixture = providerTurnFixture({
+      remoteRoot: true,
+      thread: decodeCodeThread({ ...thread(), executionPolicy: "approval-gated" }),
+      effectiveThread: (windowId, stored) => sessions.effectiveThread(windowId, stored),
+    });
+    const result = await fixture.service.execute(ids.window, startProviderTurn);
+    expect(result).toMatchObject({
+      kind: "operation-failed",
+      failure: { message: remoteCodeThreadPostureRefusal("full-access") },
+    });
+    expect(fixture.turns.start).not.toHaveBeenCalled();
+    expect(fixture.events.append).not.toHaveBeenCalled();
+  });
+
+  it("runs a turn that asks for approvals on a thread on an SSH target that holds Auto-accept edits", async () => {
+    // The turn runs in the narrower posture it asks for, so each edit is
+    // still approved; only a turn that would run unreviewed is refused.
+    const fixture = providerTurnFixture({
+      remoteRoot: true,
+      thread: decodeCodeThread({ ...thread(), executionPolicy: "auto-accept-edits" }),
+    });
+    const result = await fixture.service.execute(ids.window, {
+      ...startProviderTurn,
+      executionPolicy: "approval-gated",
+    });
+    expect(result).toMatchObject({ kind: "provider-turn-state", state: "running" });
+    expect(fixture.turns.start.mock.calls[0]?.[0].thread.executionPolicy).toBe("approval-gated");
+  });
+
+  // A retried start runs in the posture its durable start recorded, not the
+  // one the retry asks for. A start recorded in Auto-accept edits before the
+  // rule must not run again in it because the retry names Ask for approvals.
+  it.each([
+    ["before its result", false],
+    ["while its result still reads running", true],
+  ] as const)(
+    "refuses a retried turn on a thread on an SSH target whose start was recorded in Auto-accept edits %s",
+    async (_case, resultRecorded) => {
+      const fixture = providerTurnFixture({
+        remoteRoot: true,
+        recordEvents: true,
+        thread: decodeCodeThread({ ...thread(), executionPolicy: "auto-accept-edits" }),
+      });
+      fixture.events.append({
+        threadId: ids.thread,
+        operationId: startProviderTurn.operationId,
+        expectedCursor: 0,
+        event: {
+          kind: "conversation-turn-started",
+          providerInstanceId: thread().providerInstanceId,
+          modelId: thread().modelId,
+          sessionId: decodeProviderSessionId(startProviderTurn.sessionId),
+          prompt: startProviderTurn.prompt,
+          executionPolicy: "auto-accept-edits",
+        },
+      });
+      if (resultRecorded)
+        fixture.events.append({
+          threadId: ids.thread,
+          operationId: startProviderTurn.operationId,
+          expectedCursor: 1,
+          event: {
+            kind: "operation-result",
+            result: {
+              kind: "provider-turn-state",
+              operationId: startProviderTurn.operationId,
+              state: "running",
+            },
+          },
+        });
+      fixture.events.append.mockClear();
+
+      const result = await fixture.service.execute(ids.window, {
+        ...startProviderTurn,
+        executionPolicy: "approval-gated",
+      });
+
+      expect(result).toMatchObject({
+        kind: "operation-failed",
+        failure: { message: remoteCodeThreadPostureRefusal("auto-accept-edits") },
+      });
+      expect(fixture.turns.start).not.toHaveBeenCalled();
+      expect(fixture.events.append).not.toHaveBeenCalled();
+    },
+  );
+
+  it("refuses an answer that would continue a turn on a thread on an SSH target holding Auto-accept edits, and still lets it be stopped", async () => {
+    const fixture = providerTurnFixture({
+      remoteRoot: true,
+      thread: decodeCodeThread({ ...thread(), executionPolicy: "auto-accept-edits" }),
+    });
+    fixture.turns.cancel.mockResolvedValue({ state: "interrupted" });
+    const result = await fixture.service.execute(ids.window, {
+      kind: "answer-provider-approval",
+      operationId: decodeCodeOperationId("49494949-4949-4494-8494-494949494949"),
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+      approvalId: "50505050-5050-4050-8050-505050505050",
+      decision: "approved",
+    });
+    expect(result).toMatchObject({
+      kind: "operation-failed",
+      failure: { message: remoteCodeThreadPostureRefusal("auto-accept-edits") },
+    });
+    expect(fixture.turns.answerApproval).not.toHaveBeenCalled();
+    expect(fixture.events.append).not.toHaveBeenCalled();
+
+    // Stopping only narrows what runs, so the posture rule never stands in its way.
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "cancel-provider-turn",
+        operationId: decodeCodeOperationId("51515151-5151-4515-8515-515151515151"),
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+    expect(fixture.turns.cancel).toHaveBeenCalledOnce();
+  });
+
+  // A decision's answer starts a turn in the thread's own posture, so one is
+  // offered only where that turn would not be refused.
+  it.each([
+    ["approval-gated", true],
+    ["auto-accept-edits", false],
+    ["full-access", false],
+  ] as const)(
+    "offers a decision on a thread on an SSH target holding %s only where its answer could start",
+    async (executionPolicy, admitted) => {
+      const fixture = providerTurnFixture({
+        remoteRoot: true,
+        thread: decodeCodeThread({ ...thread(), executionPolicy }),
+      });
+      await expect(
+        fixture.service.admitsTurn(ids.window, { id: ids.thread, checkoutId: ids.checkout }),
+      ).resolves.toBe(admitted);
+    },
+  );
+
   it("refuses a selected skill before Code provider execution when no material resolver exists", async () => {
     const fixture = providerTurnFixture();
     const result = await fixture.service.execute(ids.window, {
@@ -2891,9 +3103,22 @@ function providerTurnFixture(
       | "confirmAgentMessagesDelivered"
       | "takeProductFeedbackForTurn"
     >
-  > & { readonly thread?: CodeThread; readonly recordEvents?: boolean } = {},
+  > & {
+    readonly thread?: CodeThread;
+    readonly recordEvents?: boolean;
+    /** The thread's checkout is a remote root on an SSH target. */
+    readonly remoteRoot?: boolean;
+    /** The thread as the asking window holds it, with its session grants. */
+    readonly effectiveThread?: (windowId: WindowId, thread: CodeThread) => CodeThread;
+  } = {},
 ) {
-  const { thread: threadOverride, recordEvents, ...serviceOptions } = options;
+  const {
+    thread: threadOverride,
+    recordEvents,
+    remoteRoot,
+    effectiveThread,
+    ...serviceOptions
+  } = options;
   const activeThread = threadOverride ?? thread();
   const turns = {
     start: vi.fn<CodeOperationServiceOptions["turns"]["start"]>(async () => ({ state: "running" })),
@@ -2930,14 +3155,19 @@ function providerTurnFixture(
   const service = new CodeOperationService({
     authority: {
       readThread: vi.fn(() => activeThread),
+      ...(effectiveThread === undefined ? {} : { effectiveThread }),
       readCheckout: vi.fn(() =>
         decodeCodeCheckoutIdentity({
           id: ids.checkout,
           repositoryId: activeThread.repositoryId,
-          kind: "existing-worktree",
           availability: "available",
-          head: { kind: "branch", name: "feature/exact", oid: "b".repeat(40) },
           observedAt: "2026-07-21T10:00:00.000Z",
+          ...(remoteRoot === true
+            ? { kind: "remote-root", head: { kind: "none" } }
+            : {
+                kind: "existing-worktree",
+                head: { kind: "branch", name: "feature/exact", oid: "b".repeat(40) },
+              }),
         }),
       ),
       canAccessProject: vi.fn(async () => true),

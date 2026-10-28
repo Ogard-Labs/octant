@@ -1,3 +1,6 @@
+import type { HostPlatform } from "@octant/contracts/host";
+import { createContext, useContext } from "react";
+
 /**
  * The platform fields this renderer reads, typed structurally rather than taken
  * from `Navigator`: `userAgentData` is not in the DOM lib, and a plain object
@@ -27,16 +30,45 @@ export function isApplePlatform(
 }
 
 /**
- * How copy names the computer this window runs on: "this Mac" on Apple
- * hardware, "this computer" anywhere else. The host reports no platform of its
- * own to the renderer, so this answers for the host only where the window is
- * on the host itself (a loopback client, the only one that can keep a secret);
- * a paired device's platform says nothing about the host's.
+ * The platform the host this window drives reports for itself, or undefined
+ * until the host's identity has been read (or when a host too old to report
+ * one answered). Provided once at the shell root from the host's own report.
+ */
+export const HostPlatformContext = createContext<HostPlatform | undefined>(undefined);
+
+export function useHostPlatform(): HostPlatform | undefined {
+  return useContext(HostPlatformContext);
+}
+
+/**
+ * How copy names the host's computer: "this Mac" when the host reports macOS,
+ * "this computer" otherwise.
+ *
+ * It reads the host's platform, never the window's: a browser on a Mac can
+ * drive a Linux host, and a phone runs on neither. Until the host has said,
+ * copy uses the neutral name, which is never wrong, rather than borrowing the
+ * window's platform, which is wrong exactly for a remote window.
  */
 export function thisComputerName(
-  navigatorLike: PlatformNavigator | undefined = globalThis.navigator,
+  hostPlatform: HostPlatform | undefined,
 ): "this Mac" | "this computer" {
-  return isApplePlatform(navigatorLike) ? "this Mac" : "this computer";
+  return hostPlatform === "darwin" ? "this Mac" : "this computer";
+}
+
+/**
+ * How copy names where the host keeps a secret: the Keychain on macOS, and the
+ * neutral "credential store" elsewhere (Secret Service on Linux) or before the
+ * host has reported its platform.
+ */
+export function credentialStoreName(
+  hostPlatform: HostPlatform | undefined,
+): "Keychain" | "credential store" {
+  return hostPlatform === "darwin" ? "Keychain" : "credential store";
+}
+
+/** "this Mac's Keychain" or "this computer's credential store". */
+export function hostCredentialStore(hostPlatform: HostPlatform | undefined): string {
+  return `${thisComputerName(hostPlatform)}'s ${credentialStoreName(hostPlatform)}`;
 }
 
 function reportedPlatform(navigatorLike: PlatformNavigator | undefined): string {

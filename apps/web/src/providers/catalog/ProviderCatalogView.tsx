@@ -26,6 +26,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
+import { hostCredentialStore, useHostPlatform } from "../../platform";
 import { SettingsSection } from "../../settings/primitives";
 import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantButton } from "../../ui/base/OctantButton";
@@ -644,6 +645,7 @@ function CurrentStep(
   const { entry, discovery } = props;
   const { state, name } = entry;
   const next = state.next;
+  const keyStore = hostCredentialStore(useHostPlatform());
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<string>();
   const run = async (action: () => Promise<unknown>, fallback: string) => {
@@ -660,7 +662,7 @@ function CurrentStep(
   };
   const disabled = pending || props.busy || props.status !== "ready";
   // Amazon Bedrock signs in only at the organization's single sign-on portal,
-  // from a terminal on the host, and Add endpoint does not offer it yet.
+  // from a terminal on the host; Settings adds it but never begins its sign-in.
   const signsInFromHostTerminal = entry.driverKind === "amazon-bedrock";
   const retryLabel = (label: string) => (failure === undefined ? label : "Try again");
 
@@ -732,7 +734,8 @@ function CurrentStep(
     }
     case "add-endpoint":
       if (signsInFromHostTerminal) {
-        sentence = `Settings cannot add ${name} with your organization's single sign-on yet. Until it can, use a Bedrock API key with an OpenAI-compatible endpoint.`;
+        sentence = `Add it under Octant Harness › Model endpoints: choose ${name} in Add endpoint and give your organization's access portal, account, role, and models. It takes no key; you sign in from a terminal on this host.`;
+        action = openEndpoints;
         break;
       }
       if (entry.source.kind === "outside") {
@@ -756,7 +759,7 @@ function CurrentStep(
           );
         break;
       }
-      sentence = `Add it under Octant Harness › Model endpoints: choose ${name} in Add endpoint and give its address. A key you enter is stored in the system keychain.`;
+      sentence = `Add it under Octant Harness › Model endpoints: choose ${name} in Add endpoint and give its address. A key you enter is stored in ${keyStore}.`;
       action = openEndpoints;
       break;
     case "turn-on":
@@ -789,10 +792,10 @@ function CurrentStep(
       }
       sentence =
         entry.source.kind === "outside"
-          ? "Its last check says the service refused the key or has none. Add or replace it on its card below, then check again. The key is stored in the system keychain and never reaches the driver."
+          ? `Its last check says the service refused the key or has none. Add or replace it on its card below, then check again. The key is stored in ${keyStore} and never reaches the driver.`
           : state.setup === "endpoint"
-            ? "Its last check says it needs a sign-in or a key. Add it on its Model endpoints page; a key is stored in the system keychain, never in the catalog."
-            : "Its last check says it needs a sign-in. Sign in from its card below, then check again. A key you enter there is stored in the system keychain, never in the catalog.";
+            ? `Its last check says it needs a sign-in or a key. Add it on its Model endpoints page; a key is stored in ${keyStore}, never in the catalog.`
+            : `Its last check says it needs a sign-in. Sign in from its card below, then check again. A key you enter there is stored in ${keyStore}, never in the catalog.`;
       action =
         state.setup === "endpoint" && entry.source.kind === "bundled" ? (
           openEndpoints

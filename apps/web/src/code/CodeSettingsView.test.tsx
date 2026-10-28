@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
@@ -187,5 +187,92 @@ describe("CodeSettingsView", () => {
       />,
     );
     expect(screen.getByRole("switch", { name: "Language services" })).not.toBeChecked();
+  });
+
+  it("shows the host's choice again when it refuses a switch or pick, and keeps typed text", async () => {
+    const update = vi.fn(async () => false);
+    const user = userEvent.setup();
+    render(<CodeSettingsView onUpdate={update} settings={settings as never} />);
+
+    const editorSection = screen.getByRole("region", { name: "Editor" });
+    const externalSection = screen.getByRole("region", { name: "External editor" });
+    const threadSection = screen.getByRole("region", { name: "Thread defaults" });
+    const services = screen.getByRole("switch", { name: "Language services" });
+    await user.click(services);
+    // The refusal is said beside the switch that asked, not two sections down.
+    expect(
+      await within(editorSection).findByText("Code defaults could not be saved."),
+    ).toBeVisible();
+    expect(within(externalSection).queryByText("Code defaults could not be saved.")).toBeNull();
+    expect(services).toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: "Side by side" }));
+    expect(screen.getByRole("button", { name: "Unified" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(threadSection).getByText("Code defaults could not be saved.")).toBeVisible();
+    expect(screen.getAllByText("Code defaults could not be saved.")).toHaveLength(1);
+
+    const field = screen.getByRole("textbox", { name: "External editor executable" });
+    await user.type(field, "/opt/editor");
+    fireEvent.blur(field);
+    expect(
+      await within(externalSection).findByText("Code defaults could not be saved."),
+    ).toBeVisible();
+    expect(screen.getAllByText("Code defaults could not be saved.")).toHaveLength(1);
+    expect(field).toHaveValue("/opt/editor");
+  });
+
+  it("shows what the host holds when a quick second change is refused after the first was saved", async () => {
+    let saveFirst: (saved: boolean) => void = () => undefined;
+    let refuseSecond: (saved: boolean) => void = () => undefined;
+    const update = vi
+      .fn<(input: unknown) => Promise<boolean>>()
+      .mockImplementationOnce(() => new Promise((resolve) => (saveFirst = resolve)))
+      .mockImplementationOnce(() => new Promise((resolve) => (refuseSecond = resolve)));
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <CodeSettingsView onUpdate={update} settings={settings as never} />,
+    );
+
+    const services = screen.getByRole("switch", { name: "Language services" });
+    await user.click(services);
+    await user.click(services);
+    // The host saved the first change and refused the second as stale; the
+    // reloaded settings arrive before the refusal does.
+    rerender(
+      <CodeSettingsView
+        onUpdate={update}
+        settings={{ ...settings, version: 2, bundledLanguageServer: false } as never}
+      />,
+    );
+    await act(async () => saveFirst(true));
+    await act(async () => refuseSecond(false));
+
+    expect(await screen.findByText("Code defaults could not be saved.")).toBeVisible();
+    expect(services).not.toBeChecked();
+  });
+
+  it("puts a switch back when an unfinished editor path keeps the change from being sent", async () => {
+    const update = vi.fn(async () => true);
+    const user = userEvent.setup();
+    render(<CodeSettingsView onUpdate={update} settings={settings as never} />);
+
+    const field = screen.getByRole("textbox", { name: "External editor executable" });
+    await user.type(field, "editor");
+    fireEvent.blur(field);
+    await user.click(screen.getByRole("switch", { name: "Language services" }));
+
+    expect(update).not.toHaveBeenCalled();
+    // Said at the field that needs finishing, not beside the switch that
+    // happened to send the change.
+    expect(
+      within(screen.getByRole("region", { name: "External editor" })).getByText(
+        "External editor executable must be an absolute path.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getAllByText("External editor executable must be an absolute path."),
+    ).toHaveLength(1);
+    expect(screen.getByRole("switch", { name: "Language services" })).toBeChecked();
+    expect(field).toHaveValue("editor");
   });
 });

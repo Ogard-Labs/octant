@@ -13,7 +13,7 @@ import {
   NativeHarnessClientFailure,
   type NativeHarnessClient,
 } from "@octant/client-runtime/native-harness-client";
-import { Globe, MessagesSquare, X } from "lucide-react";
+import { Cloud, Globe, MessagesSquare, X } from "lucide-react";
 import {
   useEffect,
   useId,
@@ -23,8 +23,10 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { hostCredentialStore, thisComputerName, useHostPlatform } from "../../platform";
 import { ProviderGlyph } from "../../providers/ProviderGlyph";
 import {
+  bedrockConfigurationFrom,
   directoryGuid,
   gatewayDirectoryFrom,
   isDirectoryGuid,
@@ -35,6 +37,10 @@ import {
   DIRECTORY_IDS_PROBLEM,
   GATEWAY_DIRECTORY_PROBLEM,
 } from "../../providers/configuration/HttpConfigurationForms";
+import {
+  BEDROCK_FIELDS_PROBLEM,
+  bedrockSignInCommand,
+} from "../../providers/configuration/BedrockConfigurationForms";
 import { BedrockMantleGuide } from "../../providers/configuration/ProviderCreateForm";
 import type { ProviderSettingsViewProps } from "../../providers/ProviderSettingsView";
 import type {
@@ -47,6 +53,7 @@ import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantCheckbox } from "../../ui/base/OctantCheckbox";
 import { OctantInput } from "../../ui/base/OctantInput";
 import { OctantSelectField } from "../../ui/base/OctantSelect";
+import { OctantTextarea } from "../../ui/base/OctantTextarea";
 import { SettingsDisclosure } from "../primitives";
 import {
   ASSIGNABLE_ROLES,
@@ -93,6 +100,7 @@ export type AddEndpointFlowProps = Pick<
   | "onCreateOpenAiCompatible"
   | "onCreateAnthropicCompatible"
   | "onCreateAzureFoundry"
+  | "onCreateAmazonBedrock"
   | "onCreateOllama"
   | "onChangeOpenAiCompatibleConfiguration"
   | "onChangeAnthropicCompatibleConfiguration"
@@ -186,7 +194,10 @@ export function AddEndpointFlow(props: AddEndpointFlowProps) {
         headingRef={headingRef}
         kind={kind}
         onBack={() => setStep("kind")}
-        onContinue={() => setStep("models")}
+        // Bedrock's models are named on Connect, and checking their tools
+        // needs the sign-in that begins in the host's terminal, so the flow
+        // ends once the endpoint is added.
+        onContinue={() => setStep(kind === "amazon-bedrock" ? "done" : "models")}
         onKindChange={setKind}
         {...(preset === undefined ? {} : { preset })}
       />
@@ -247,17 +258,26 @@ export function AddEndpointFlow(props: AddEndpointFlowProps) {
 
   return (
     <div className="endpoint-flow">
-      {step === "done" ? null : <FlowSteps current={step} />}
+      {step === "done" ? null : (
+        <FlowSteps
+          current={step}
+          steps={kind === "amazon-bedrock" ? STEP_NAMES.slice(0, 2) : STEP_NAMES}
+        />
+      )}
       {body}
     </div>
   );
 }
 
-function FlowSteps(props: { readonly current: AddEndpointStep }) {
-  const index = STEP_NAMES.findIndex((entry) => entry.step === props.current);
+function FlowSteps(props: {
+  readonly current: AddEndpointStep;
+  /** Amazon Bedrock ends at Connect, where its models are named. */
+  readonly steps: typeof STEP_NAMES;
+}) {
+  const index = props.steps.findIndex((entry) => entry.step === props.current);
   return (
     <ol aria-label="Steps" className="endpoint-flow__steps">
-      {STEP_NAMES.map((entry, position) => (
+      {props.steps.map((entry, position) => (
         <li
           {...(position === index ? { "aria-current": "step" as const } : {})}
           className="endpoint-flow__step"
@@ -296,6 +316,8 @@ function KindMark(props: { readonly kind: EndpointKind }) {
     <span aria-hidden="true" className="endpoint-mark">
       {props.kind === "openai-compatible" ? (
         <Globe size={16} />
+      ) : props.kind === "amazon-bedrock" ? (
+        <Cloud size={16} />
       ) : props.kind === "anthropic-compatible" ? (
         <MessagesSquare size={16} />
       ) : (
@@ -363,6 +385,8 @@ type ConnectStepProps = AddEndpointFlowProps & {
 
 function ConnectStep(props: ConnectStepProps) {
   const presentation = endpointKindPresentation(props.kind);
+  const hostPlatform = useHostPlatform();
+  const keyStore = hostCredentialStore(hostPlatform);
   const preset = props.preset;
   const [name, setName] = useState(preset?.displayName ?? presentation.defaultName ?? "");
   const [url, setUrl] = useState(preset?.baseUrl ?? presentation.defaultUrl ?? "");
@@ -394,6 +418,7 @@ function ConnectStep(props: ConnectStepProps) {
     // A row that needs the person (a missing key, say) has a fix to offer
     // just as a failed one does.
     const failing = status.tone === "failed" || status.tone === "needs-you";
+    const bedrock = added.instance.driverKind === "amazon-bedrock";
     return (
       <>
         <StepHeading headingRef={props.headingRef}>Added {added.instance.displayName}</StepHeading>
@@ -404,21 +429,25 @@ function ConnectStep(props: ConnectStepProps) {
           {status.sentence === undefined ? null : <p>{status.sentence}</p>}
           {status.tone === "checking" ? null : (
             <p className="endpoint-flow__detail">
-              {failing
-                ? "It's added, and you can fix it now or later from its page. You can still choose its models."
-                : "Next, choose the models you want to use."}
+              {bedrock
+                ? failing
+                  ? "It's added. Once you've signed in, check it again here or from its page."
+                  : "It's added and signed in."
+                : failing
+                  ? "It's added, and you can fix it now or later from its page. You can still choose its models."
+                  : "Next, choose the models you want to use."}
             </p>
           )}
         </div>
         <div className="endpoint-flow__actions">
-          {status.fix?.kind === "try-again" ? (
+          {status.fix?.kind === "try-again" || (bedrock && status.fix?.kind === "check-now") ? (
             <OctantButton
               onClick={() => void props.onProbe(added.instance.id, { quiet: true })}
               size="sm"
               type="button"
               variant="outline"
             >
-              Try again
+              {status.fix.label}
             </OctantButton>
           ) : failing && status.fix !== undefined ? (
             <OctantButton
@@ -436,12 +465,13 @@ function ConnectStep(props: ConnectStepProps) {
             size="sm"
             type="button"
           >
-            Continue
+            {bedrock ? "Finish" : "Continue"}
           </OctantButton>
         </div>
       </>
     );
   }
+  if (props.kind === "amazon-bedrock") return <BedrockConnectForm {...props} />;
 
   const keysHere = props.credentialManagementAvailable;
   const organizationSignIn = props.kind === "azure-foundry" && foundrySignIn === "directory-oauth";
@@ -783,12 +813,12 @@ function ConnectStep(props: ConnectStepProps) {
                 <a href={preset.keyPage.url} rel="noreferrer" target="_blank">
                   {preset.keyPage.label}
                 </a>
-                . Saved in this Mac's Keychain. Octant can't show it again.
+                . Saved in {keyStore}. Octant can't show it again.
               </>
             ) : presentation.key === "required" ? (
-              "Saved in this Mac's Keychain. Octant can't show it again."
+              `Saved in ${keyStore}. Octant can't show it again.`
             ) : (
-              "Saved in this Mac's Keychain. For a server that takes no key, choose that under Advanced."
+              `Saved in ${keyStore}. For a server that takes no key, choose that under Advanced.`
             )}
           </span>
         </div>
@@ -797,7 +827,7 @@ function ConnectStep(props: ConnectStepProps) {
           <span>API key</span>
           <p className="endpoint-flow__note" data-testid="endpoint-key-later">
             This browser can't store keys. Add it now and it shows Needs key; then add the key in
-            the Octant desktop app on this Mac.
+            the Octant desktop app on {thisComputerName(hostPlatform)}.
             {preset !== undefined ? (
               <>
                 {" "}
@@ -895,6 +925,144 @@ function ConnectStep(props: ConnectStepProps) {
           <BedrockMantleGuide />
         </SettingsDisclosure>
       ) : null}
+      {problem === undefined ? null : (
+        <OctantAlert className="provider-settings__alert" tone="warning">
+          {problem}
+        </OctantAlert>
+      )}
+      <div className="endpoint-flow__actions">
+        <OctantButton onClick={props.onBack} size="sm" type="button" variant="ghost">
+          Back
+        </OctantButton>
+        <OctantButton disabled={props.busy || submitting} size="sm" type="submit">
+          {submitting ? "Adding…" : "Check and add"}
+        </OctantButton>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * Connect for Amazon Bedrock: the region its models run in, the
+ * organization's access portal and the portal's region, and the account,
+ * role, and models the sign-in is for. It takes no key and no address: the
+ * endpoint is built from the region, and the sign-in begins in a terminal on
+ * the host once the endpoint is added, never here.
+ */
+function BedrockConnectForm(props: ConnectStepProps) {
+  const presentation = endpointKindPresentation("amazon-bedrock");
+  const computer = thisComputerName(useHostPlatform());
+  const [name, setName] = useState(presentation.defaultName ?? "");
+  const [problem, setProblem] = useState<string>();
+  const [submitting, setSubmitting] = useState(false);
+  const ids = useId();
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmedName = name.trim();
+    if (trimmedName.length === 0) return setProblem("Give it a name.");
+    const configuration = bedrockConfigurationFrom(new FormData(event.currentTarget));
+    if (configuration === undefined) return setProblem(BEDROCK_FIELDS_PROBLEM);
+    setProblem(undefined);
+    setSubmitting(true);
+    void props
+      .onCreateAmazonBedrock(trimmedName, configuration)
+      .finally(() => setSubmitting(false));
+  };
+  const field = (
+    label: string,
+    fieldName: string,
+    hint: string,
+    placeholder: string,
+    inputMode?: "url" | "numeric",
+  ) => (
+    <div className="endpoint-flow__field">
+      <label htmlFor={`${ids}-${fieldName}-input`}>{label}</label>
+      <OctantInput
+        aria-describedby={`${ids}-${fieldName}`}
+        autoComplete="off"
+        className="settings-view__text-input"
+        id={`${ids}-${fieldName}-input`}
+        {...(inputMode === undefined ? {} : { inputMode })}
+        name={fieldName}
+        placeholder={placeholder}
+        spellCheck={false}
+      />
+      <span className="endpoint-flow__hint" id={`${ids}-${fieldName}`}>
+        {hint}
+      </span>
+    </div>
+  );
+  return (
+    <form
+      aria-label={`Connect ${presentation.title}`}
+      className="endpoint-flow__form"
+      noValidate
+      onSubmit={submit}
+    >
+      <StepHeading detail={presentation.detail} headingRef={props.headingRef}>
+        <KindMark kind="amazon-bedrock" /> {presentation.title}
+      </StepHeading>
+      <div className="endpoint-flow__field">
+        <label htmlFor={`${ids}-name-input`}>Name</label>
+        <OctantInput
+          aria-describedby={`${ids}-name`}
+          className="settings-view__text-input"
+          id={`${ids}-name-input`}
+          name="displayName"
+          onChange={(event) => setName(event.currentTarget.value)}
+          value={name}
+        />
+        <span className="endpoint-flow__hint" id={`${ids}-name`}>
+          How it appears in the model picker, and the name you sign in with.
+        </span>
+      </div>
+      {field(
+        "Region",
+        "region",
+        "The AWS region your models run in. Only commercial regions are supported.",
+        "us-west-2",
+      )}
+      {field("Access portal", "startUrl", presentation.urlHint, presentation.urlPlaceholder, "url")}
+      {field(
+        "Portal region",
+        "ssoRegion",
+        "The region your organization's IAM Identity Center runs in.",
+        "us-east-1",
+      )}
+      {field(
+        "Account ID",
+        "accountId",
+        "The 12-digit AWS account the role is in.",
+        "123456789012",
+        "numeric",
+      )}
+      {field(
+        "Role",
+        "roleName",
+        "The permission set your organization assigns you in that account.",
+        "BedrockUser",
+      )}
+      <div className="endpoint-flow__field">
+        <label htmlFor={`${ids}-models-input`}>Model IDs</label>
+        <OctantTextarea
+          aria-describedby={`${ids}-models`}
+          className="settings-view__text-input"
+          id={`${ids}-models-input`}
+          name="manualModelIds"
+          placeholder="anthropic.claude-sonnet-4-20250514-v1:0"
+          rows={2}
+          spellCheck={false}
+        />
+        <span className="endpoint-flow__hint" id={`${ids}-models`}>
+          Bedrock doesn't list the models a role may use, so name each one, separated by commas or
+          new lines. The first is listed first in the model picker.
+        </span>
+      </div>
+      <p className="endpoint-flow__note">
+        It takes no key. Once it's added, sign in from a terminal on {computer} with{" "}
+        <code>{bedrockSignInCommand(name.trim() || "<name>")}</code>; Settings never shows the
+        sign-in code.
+      </p>
       {problem === undefined ? null : (
         <OctantAlert className="provider-settings__alert" tone="warning">
           {problem}

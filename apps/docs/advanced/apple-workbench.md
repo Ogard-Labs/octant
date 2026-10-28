@@ -266,8 +266,24 @@ is using it, the pane says so without naming that thread.
 The screenshot is kept as evidence on the Mac. Physical devices are listed
 only in Octant on that Mac for now: a paired phone or a browser on another
 computer cannot list them, see the screenshot, let a thread use a device, or
-capture its screen. Building and running your app on the device from the workbench, and
-the agent's own device operations, are not offered yet.
+capture its screen. Building and running your app on the device from the
+workbench is not offered yet.
+
+A Code thread's agent can use a paired device too, through `octant_apple`.
+It lists the devices, then asks to use one; the thread shows a request that
+names the device and the thread, under every access setting, Full access and
+Plan included. Only you, in Octant on this Mac, can answer it. A paired
+browser, on a phone or another computer, shows the request without **Approve**
+or **Deny** and says to answer it on the computer running Octant; the request
+stays waiting until you do. Once you allow it, the agent can capture the
+device's screen and read the console output of the app it launched without
+asking again. Building the thread's app for the
+device (signed for development with your own identity for the Team ID it
+names), installing, launching, and stopping it follow the thread's access
+setting: Plan refuses them, Full access runs them, and otherwise each one asks
+you first, again only on this Mac. The agent can launch, stop, or read only
+the app it installed, never your other apps, and it cannot remove an app,
+change provisioning, or upload anything.
 
 ## Honest verification
 

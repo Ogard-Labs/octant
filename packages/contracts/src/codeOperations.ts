@@ -2,6 +2,7 @@ import { personDecides } from "./hostAnswer";
 import { HarnessRetryEventFields } from "./harnessRetry";
 import { ContextHandoffOmissions } from "./contextHandoff";
 import { ProviderChildActivityEvent } from "./providers";
+import { ThreadPublishedPage } from "./threadToolSteps";
 import { Schema } from "effect";
 import { AgentRunResultDeliveryMark, MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS } from "./agentRun";
 import { ExtensionSelection } from "./extensions";
@@ -1264,6 +1265,8 @@ const ToolEvent = Schema.Struct({
   toolName: boundedNonEmptyText(255),
   state: Schema.Literal("started", "running", "completed", "failed"),
   summary: Schema.optional(boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES)),
+  /** A page the call published outside this host; the transcript links to it. */
+  published: Schema.optional(ThreadPublishedPage),
 }).annotations(strict);
 /**
  * The bounds a Code approval or question is journaled under. Exported so a
@@ -1289,6 +1292,14 @@ const ApprovalEvent = Schema.Struct({
     "provider-tool",
   ),
   summary: CodeApprovalSummaryText,
+  /**
+   * Set when only a person at a window on the host's own computer may answer:
+   * the host refuses anyone else's answer and the request keeps waiting. A
+   * paired client shows such a card without answer controls instead of
+   * offering an answer that settles nothing. Absent on every other approval,
+   * and on any journaled before the host recorded the mark.
+   */
+  localPersonOnly: Schema.optional(Schema.Literal(true)),
 }).annotations({ ...strict, ...personDecides });
 const QuestionEvent = Schema.Struct({
   kind: Schema.Literal("input-requested"),
@@ -1663,6 +1674,7 @@ export const CodeConversationStep = Schema.Union(
     toolName: boundedNonEmptyText(255),
     state: Schema.Literal("started", "running", "completed", "failed"),
     summary: Schema.optional(boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES)),
+    published: Schema.optional(ThreadPublishedPage),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("reasoning"),

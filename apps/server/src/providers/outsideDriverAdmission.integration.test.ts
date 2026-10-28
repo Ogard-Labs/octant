@@ -2,15 +2,18 @@ import { randomUUID } from "node:crypto";
 import { chmod, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { PassThrough } from "node:stream";
 import {
   decodeProviderInstanceId,
   decodeProviderModelId,
   decodeWindowId,
+  type OutsideProviderDriverReference,
   type ProviderInstance,
+  type ProviderInstanceId,
 } from "@octant/contracts";
 import type { ExtensionCommand, ExtensionCommandResult } from "@octant/contracts/extension-rpc";
 import { Effect, ManagedRuntime } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CodexPluginPackageResolver } from "../extensions/codexPluginResolver";
 import { ExtensionApiService } from "../extensions/extensionApiService";
 import {
@@ -18,9 +21,15 @@ import {
   NOOP_EXTENSION_SUPERVISOR,
 } from "../extensions/extensionLifecycleService";
 import { ExtensionPackageStore } from "../extensions/extensionPackageStore";
+import type {
+  ExtensionProcessExit,
+  ExtensionRuntimeStartInput,
+  ExtensionSupervisor,
+} from "../extensions/extensionSupervisor";
 import { LocalPluginFolderRegistry } from "../extensions/localPluginFolderRegistry";
 import { Persistence, makePersistenceLive } from "../persistence/persistenceService";
-import { makeConfiguredProviderDriver } from "../wiring/providers";
+import { rebuildAll } from "../persistence/recovery";
+import { journaledOutsideDriverHold, makeConfiguredProviderDriver } from "../wiring/providers";
 import { OutsideDriverAdmission } from "./outsideDriverAdmission";
 import {
   makeInMemoryOutsideDriverChannel,
@@ -29,7 +38,10 @@ import {
   type FixtureDriverHandler,
   type InMemoryDriverEnd,
 } from "./outsideDriverFixture.test-support";
-import type { OutsideDriverProcessStartInput } from "./outsideDriverProcess";
+import {
+  OutsideDriverProcesses,
+  type OutsideDriverProcessStartInput,
+} from "./outsideDriverProcess";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 import { ProviderService } from "./providerService";
 
@@ -40,7 +52,8 @@ import { ProviderService } from "./providerService";
  * real driver factory; and the driver's process held to its instance. The
  * confined process itself is the macOS escape suite's; here each start is an
  * in-memory channel to the fixture driver, recorded so the test can see when
- * a process would start and stop.
+ * a process would start and stop, or, for the crash limit, the host's own
+ * process owner over a supervisor whose every process exits as it starts.
  */
 
 const now = "2026-10-27T12:00:00.000Z";
@@ -122,10 +135,44 @@ const echoToolCall = {
   argumentsJson: '{"echo":"ready"}',
 };
 
+/**
+ * A supervisor whose every process exits the moment it starts, as a driver
+ * that throws on import does. Each launch is recorded.
+ */
+function crashingSupervisor(launches: Array<ExtensionRuntimeStartInput>) {
+  const supervisor: Pick<ExtensionSupervisor, "startInteractive" | "stopInteractive"> = {
+    startInteractive: async (input) => {
+      launches.push(input);
+      const exit: ExtensionProcessExit = { code: 1, signal: null };
+      return {
+        receipt: {
+          extensionId: input.extensionId,
+          packageId: input.packageId,
+          componentId: input.componentId,
+          state: "ready",
+        },
+        process: {
+          pid: 5_000 + launches.length,
+          ready: Promise.resolve(),
+          wait: Promise.resolve(exit),
+          stop: async () => undefined,
+          stdin: new PassThrough(),
+          stdout: new PassThrough(),
+          once: (_event, listener) => queueMicrotask(() => listener(exit)),
+        },
+      };
+    },
+    stopInteractive: async () => undefined,
+  };
+  return supervisor;
+}
+
 async function host(
   options: {
     readonly platform?: string;
     readonly handlers?: Readonly<Record<string, FixtureDriverHandler>>;
+    /** Start drivers through the host's process owner, each crashing as it starts. */
+    readonly crashingDriver?: boolean;
   } = {},
 ) {
   const dataDirectory = await mkdtemp(join(tmpdir(), "octant-outside-admission-"));
@@ -169,6 +216,30 @@ async function host(
   const stops: Array<string> = [];
   const drivers: Array<{ readonly end: InMemoryDriverEnd; readonly fixture: FixtureDriver }> = [];
   const registry = new ProviderRuntimeRegistry();
+  // As the server wires it: the provider service journals a crash-limit
+  // hold, and is built after the process owner, which reaches it late.
+  let quarantineOutsideDriver:
+    | ((
+        instanceId: ProviderInstanceId,
+        digest: OutsideProviderDriverReference["digest"],
+      ) => Promise<void>)
+    | undefined;
+  const crashHold = journaledOutsideDriverHold({
+    readProviderInstance: (id) => persistence.readProviderInstance(id),
+    journalHold: () => quarantineOutsideDriver,
+  });
+  const launches: Array<ExtensionRuntimeStartInput> = [];
+  const temporaryRoot = await mkdtemp(join(tmpdir(), "octant-outside-admission-tmp-"));
+  directories.push(temporaryRoot);
+  /** The host's process owner, as made at startup. */
+  const processOwner = () =>
+    new OutsideDriverProcesses({
+      supervisor: crashingSupervisor(launches),
+      platform: "darwin",
+      runtime: { kind: "bun", path: process.execPath },
+      temporaryRoot,
+      quarantine: crashHold,
+    });
   const admission = new OutsideDriverAdmission({
     platform: options.platform ?? "darwin",
     packages: () => lifecycle.snapshot().packages,
@@ -183,20 +254,23 @@ async function host(
         },
         String(driver.componentId),
       ),
-    processes: {
-      start: async (input) => {
-        starts.push(input);
-        const channel = makeInMemoryOutsideDriverChannel();
-        drivers.push({
-          end: channel.driver,
-          fixture: serveFixtureDriver(channel.driver, options.handlers),
-        });
-        return { status: "started", channel: channel.host };
-      },
-      stop: async (stopped) => {
-        stops.push(String(stopped));
-      },
-    },
+    processes:
+      options.crashingDriver === true
+        ? processOwner()
+        : {
+            start: async (input) => {
+              starts.push(input);
+              const channel = makeInMemoryOutsideDriverChannel();
+              drivers.push({
+                end: channel.driver,
+                fixture: serveFixtureDriver(channel.driver, options.handlers),
+              });
+              return { status: "started", channel: channel.host };
+            },
+            stop: async (stopped) => {
+              stops.push(String(stopped));
+            },
+          },
     runtimeRegistry: registry,
     limits: { callTimeoutMs: 2_000, sendTimeoutMs: 2_000 },
     clock: () => now,
@@ -206,6 +280,7 @@ async function host(
     persistence,
     runtimeRegistry: registry,
     isOutsideDriverAdmitted: (instance) => admission.isAdmitted(instance),
+    outsideDriverRebindTarget: (instance) => admission.rebindTarget(instance),
     outsideDriverListings: () => admission.listings(),
     driver: (instance) =>
       makeConfiguredProviderDriver(instance, {
@@ -218,7 +293,11 @@ async function host(
     uuid: randomUUID,
     clock: () => now,
   });
+  quarantineOutsideDriver = (id, digest) => providers.quarantineOutsideDriver(id, digest);
+  // As the server wires it: a newly trusted digest moves its instances
+  // first, then processes that no longer match stop.
   reconcile = async () => {
+    await providers.rebindOutsideDrivers();
     await admission.reconcile(persistence.readProviderInstances());
     providers.reconcileConfiguredProviders();
   };
@@ -313,6 +392,9 @@ async function host(
     registry,
     providers,
     admission,
+    launches,
+    temporaryRoot,
+    processOwner,
     starts,
     stops,
     drivers,
@@ -446,7 +528,7 @@ describe("outside driver admission end to end", () => {
     expect((await context.observed())?.verifiedToolModelIds ?? []).toEqual([]);
   });
 
-  it("blocks the instance at another digest, keeps it and its records, and stops its process", async () => {
+  it("holds an update until the person trusts it, then moves the provider to the new digest and clears its records", async () => {
     const context = await host({
       handlers: { "session/send": () => ({ text: "", toolCalls: [echoToolCall] }) },
     });
@@ -457,9 +539,9 @@ describe("outside driver admission end to end", () => {
     await context.providers.probe(windowId, instanceId);
     await context.providers.verifyModelTools(windowId, instanceId, localModel);
 
-    // An update selects another digest: the package is held again, and even
-    // once the person trusts and switches on the new version, the instance
-    // bound to the old digest stays blocked.
+    // An update selects another digest: the package is held again and the
+    // instance, still bound to the old digest, is blocked and its process
+    // stopped. Nothing moves it until the person trusts the new version.
     await writeDriverFolder(context.driverRoot, "0.2.0");
     const updated = await context.inspect();
     expect(updated.digest).not.toBe(entry.digest);
@@ -472,7 +554,6 @@ describe("outside driver admission end to end", () => {
     });
     expect(context.stops).toEqual([String(instanceId)]);
     expect(context.drivers[0]?.end.stopped()).toBe(true);
-    await context.admit(entry.extensionId);
     expect(context.admission.activation(outside(context.instance()))).toEqual({
       kind: "blocked",
       reason: "superseded",
@@ -487,14 +568,109 @@ describe("outside driver admission end to end", () => {
       context.providers.verifyModelTools(windowId, instanceId, localModel),
     ).rejects.toThrow(/not available/);
     expect(context.starts).toHaveLength(1);
-    // The instance, its binding, and its catalogue stay until the person removes them.
-    expect(context.instance()).toMatchObject({
+    // Held, the instance keeps its binding and its records.
+    const held = context.instance();
+    expect(held).toMatchObject({
       enabled: true,
       configuration: { driver: { digest: entry.digest } },
     });
     expect(context.persistence.readProviderCatalog?.(instanceId)?.verifiedToolModelIds).toEqual([
       localModel,
     ]);
+
+    // Trusting the new version moves the instance to it, as a journaled
+    // change, and clears what was learned at the old digest.
+    await context.mutate(entry.extensionId, { kind: "set-source-trust", trusted: true });
+    expect(context.instance()).toMatchObject({
+      enabled: true,
+      version: held.version + 1,
+      configuration: {
+        driver: { version: updated.version, digest: updated.digest },
+        baseUrl: "http://127.0.0.1:11434/",
+        modelIds: ["local-model", "unreported-model"],
+      },
+    });
+    expect(context.persistence.readProviderCatalog?.(instanceId)).toMatchObject({
+      invalidated: true,
+    });
+    expect(
+      context.persistence.readProviderCatalog?.(instanceId)?.verifiedToolModelIds,
+    ).toBeUndefined();
+    // The switches decide whether the new digest runs; until they are on, it does not.
+    expect(await context.observed()).toMatchObject({ reason: "driver-not-admitted", models: [] });
+    expect(context.starts).toHaveLength(1);
+
+    await context.mutate(entry.extensionId, { kind: "set-plugin-desired", desired: true });
+    const checked = await context.providers.probe(windowId, instanceId);
+    expect(checked).toMatchObject({ readiness: "ready" });
+    expect(checked.verifiedToolModelIds ?? []).toEqual([]);
+    expect(context.starts).toHaveLength(2);
+    expect(context.starts[1]).toMatchObject({
+      instanceId,
+      driver: { version: updated.version, digest: updated.digest },
+    });
+
+    // The pass a host start runs finds nothing left to move and journals nothing.
+    const head = context.persistence.journal.headSequence();
+    expect(await context.providers.rebindOutsideDrivers()).toEqual([]);
+    expect(context.persistence.journal.headSequence()).toBe(head);
+
+    // The journal holds the move: a rebuild from it reads back the same
+    // provider and the same cleared catalogue.
+    const moved = context.instance();
+    const catalog = context.persistence.readProviderCatalog?.(instanceId);
+    rebuildAll({
+      connection: context.persistence.connection,
+      journal: context.persistence.journal,
+      projections: context.persistence.projections,
+      clock: () => now,
+    });
+    expect(context.instance()).toEqual(moved);
+    expect(context.persistence.readProviderCatalog?.(instanceId)).toEqual(catalog);
+    expect(context.admission.activation(outside(context.instance()))).toEqual({
+      kind: "effective",
+    });
+  });
+
+  it("moves the provider back on a trusted rollback, and never on withdrawn trust", async () => {
+    const context = await host();
+    const entry = await context.install();
+    await context.admit(entry.extensionId);
+    await context.addProvider(entry);
+    await writeDriverFolder(context.driverRoot, "0.2.0");
+    const updated = await context.inspect();
+    await context.extension({
+      kind: "update-package",
+      extensionId: entry.extensionId,
+      packageId: updated.packageId,
+      version: updated.version,
+      digest: updated.digest,
+    });
+    await context.mutate(entry.extensionId, { kind: "set-source-trust", trusted: true });
+    expect(context.instance()).toMatchObject({
+      configuration: { driver: { digest: updated.digest } },
+    });
+
+    await context.extension({
+      kind: "rollback-package",
+      extensionId: entry.extensionId,
+      packageId: entry.packageId,
+      version: entry.version,
+      digest: entry.digest,
+    });
+    // A rollback is held like an update: the instance stays where it is.
+    expect(context.instance()).toMatchObject({
+      configuration: { driver: { digest: updated.digest } },
+    });
+    await context.mutate(entry.extensionId, { kind: "set-source-trust", trusted: true });
+    expect(context.instance()).toMatchObject({
+      configuration: { driver: { digest: entry.digest } },
+    });
+    const version = context.instance().version;
+    await context.mutate(entry.extensionId, { kind: "set-source-trust", trusted: false });
+    await context.mutate(entry.extensionId, { kind: "set-source-trust", trusted: true });
+    // Trusting the digest it already binds changes nothing.
+    expect(context.instance().version).toBe(version);
   });
 
   it("stops the process when the plugin or the provider is turned off, and on uninstall, keeping the provider", async () => {
@@ -528,6 +704,144 @@ describe("outside driver admission end to end", () => {
     expect(context.drivers[2]?.end.stopped()).toBe(true);
     expect(await context.observed()).toMatchObject({ reason: "driver-not-admitted", models: [] });
     expect(context.instance()).toMatchObject({ enabled: true });
+  });
+
+  it("journals a crash-loop hold once, keeps it across a restart, and lifts it only when another version is trusted", async () => {
+    const context = await host();
+    const entry = await context.install();
+    await context.admit(entry.extensionId);
+    await context.addProvider(entry);
+    await context.turnOn();
+    await context.providers.probe(windowId, instanceId);
+    const before = context.instance();
+
+    // The process owner reports the crash loop and the host journals the
+    // hold on the instance, at the digest that crashed.
+    const head = context.persistence.journal.headSequence();
+    await context.providers.quarantineOutsideDriver(
+      instanceId,
+      outside(before).configuration.driver.digest,
+    );
+    const held = context.instance();
+    expect(held).toEqual({
+      ...before,
+      driverQuarantine: { reason: "crash-limit", digest: entry.digest, quarantinedAt: now },
+      version: before.version + 1,
+      updatedAt: now,
+    });
+    expect(context.persistence.journal.headSequence()).toBe(head + 1);
+    // Settings sees the hold, with no models, and a check refuses before
+    // any process starts.
+    expect(await context.observed()).toMatchObject({
+      readiness: "unavailable",
+      reason: "runtime-unavailable",
+      models: [],
+      message: expect.stringMatching(/stopped too often/),
+    });
+    await expect(context.providers.probe(windowId, instanceId)).rejects.toThrow(
+      /stopped too often/,
+    );
+    expect(context.starts).toHaveLength(1);
+
+    // The same crash loop reported again journals nothing.
+    await context.providers.quarantineOutsideDriver(
+      instanceId,
+      outside(held).configuration.driver.digest,
+    );
+    expect(context.persistence.journal.headSequence()).toBe(head + 1);
+
+    // A restart forgets every observation and rebuilds from the journal; the
+    // hold is still there and still reported.
+    rebuildAll({
+      connection: context.persistence.connection,
+      journal: context.persistence.journal,
+      projections: context.persistence.projections,
+      clock: () => now,
+    });
+    context.registry.clearObservedState(instanceId);
+    expect(context.instance()).toEqual(held);
+    expect(await context.observed()).toMatchObject({ reason: "runtime-unavailable", models: [] });
+
+    // Trusting the digest it already binds lifts nothing.
+    await context.mutate(entry.extensionId, { kind: "set-source-trust", trusted: false });
+    await context.mutate(entry.extensionId, { kind: "set-source-trust", trusted: true });
+    await context.mutate(entry.extensionId, { kind: "set-plugin-desired", desired: true });
+    expect(context.instance()).toEqual(held);
+    await expect(context.providers.probe(windowId, instanceId)).rejects.toThrow(
+      /stopped too often/,
+    );
+
+    // Trusting another version moves the provider, and the hold stays with
+    // the digest that crashed.
+    await writeDriverFolder(context.driverRoot, "0.2.0");
+    const updated = await context.inspect();
+    await context.extension({
+      kind: "update-package",
+      extensionId: entry.extensionId,
+      packageId: updated.packageId,
+      version: updated.version,
+      digest: updated.digest,
+    });
+    await context.mutate(entry.extensionId, { kind: "set-source-trust", trusted: true });
+    await context.mutate(entry.extensionId, { kind: "set-plugin-desired", desired: true });
+    const moved = context.instance();
+    expect(moved).toMatchObject({ configuration: { driver: { digest: updated.digest } } });
+    expect(moved).not.toHaveProperty("driverQuarantine");
+    expect(await context.providers.probe(windowId, instanceId)).toMatchObject({
+      readiness: "ready",
+    });
+    expect(context.starts).toHaveLength(2);
+    // A late report for the digest it no longer binds holds nothing.
+    await context.providers.quarantineOutsideDriver(instanceId, entry.digest as never);
+    expect(context.instance()).toEqual(moved);
+  });
+
+  it("journals the hold on the instance when its driver crashes on every start, and starts it no more, after a restart too", async () => {
+    const context = await host({ crashingDriver: true });
+    const entry = await context.install();
+    await context.admit(entry.extensionId);
+    await context.addProvider(entry);
+    await context.turnOn();
+    const head = context.persistence.journal.headSequence();
+
+    // Two restarts a minute are allowed; the third crash crosses the limit.
+    for (let check = 1; check <= 3; check += 1) {
+      await expect(context.providers.probe(windowId, instanceId)).rejects.toThrow();
+      expect(context.launches).toHaveLength(check);
+    }
+    await vi.waitFor(() =>
+      expect(context.instance()).toMatchObject({
+        driverQuarantine: { reason: "crash-limit", digest: entry.digest, quarantinedAt: now },
+      }),
+    );
+    expect(
+      context.persistence.journal
+        .replay({ afterSequence: head as never, limit: 1_000 })
+        .map((event) => event.eventName),
+    ).toEqual(["provider.instance-driver-quarantined@1"]);
+    expect(await context.observed()).toMatchObject({
+      readiness: "unavailable",
+      reason: "runtime-unavailable",
+      models: [],
+      message: expect.stringMatching(/stopped too often/),
+    });
+    await expect(context.providers.probe(windowId, instanceId)).rejects.toThrow(
+      /stopped too often/,
+    );
+    expect(context.launches).toHaveLength(3);
+    await vi.waitFor(async () => expect(await readdir(context.temporaryRoot)).toEqual([]));
+
+    // A restarted host's process owner has seen no crash, and still refuses.
+    const restarted = context.processOwner();
+    expect(
+      await restarted.start({
+        instanceId,
+        driver: outside(context.instance()).configuration.driver,
+        packageRoot: context.driverRoot,
+        entryPoint: join(context.driverRoot, "dist/driver.mjs"),
+      }),
+    ).toEqual({ status: "refused", reason: "quarantined" });
+    expect(context.launches).toHaveLength(3);
   });
 
   it("admits nothing on a host that cannot confine a driver", async () => {

@@ -11,7 +11,8 @@ export interface OctantApprovalCardProps {
    * controls in both layout and reading order.
    */
   readonly context?: ReactNode;
-  readonly actions: ReactNode;
+  /** Absent on a card this window may read but not answer. */
+  readonly actions?: ReactNode;
   readonly error?: string | undefined;
   readonly children?: ReactNode;
   readonly className?: string;
@@ -32,7 +33,9 @@ export function OctantApprovalCard(props: OctantApprovalCardProps) {
         )}
       </span>
       {props.context}
-      <div className="approval-row__actions">{props.actions}</div>
+      {props.actions === undefined ? null : (
+        <div className="approval-row__actions">{props.actions}</div>
+      )}
       {props.children}
       {props.error === undefined ? null : (
         <p className="approval-row__error" role="alert">

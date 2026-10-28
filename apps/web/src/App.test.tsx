@@ -7,6 +7,7 @@ import {
   decodeCodeProjectPullRequestView,
   decodeProviderInstanceId,
   decodeProviderModelId,
+  LOCAL_HOST_ID,
   type CodeBoardView,
   type NavigatorAssistantSnapshot,
   type ShellBootstrap,
@@ -4336,6 +4337,40 @@ describe("App", () => {
         "Native window bounds reset.",
       ),
     );
+  });
+
+  it("names the host's computer from the platform the host reports once it answers", async () => {
+    const user = userEvent.setup();
+    // The test window reports no Apple platform; only the host says macOS.
+    const macHost = {
+      list: vi.fn(async () => [
+        {
+          hostId: LOCAL_HOST_ID,
+          displayName: "Studio Mac",
+          health: "healthy" as const,
+          capabilities: ["chat", "work", "code"],
+          platform: "darwin" as const,
+        },
+      ]),
+    };
+    render(
+      <App
+        contextClient={contextClient()}
+        hostClient={macHost}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={client()}
+      />,
+    );
+    await waitFor(() => expect(macHost.list).toHaveBeenCalled());
+    await openSettingsFromSidebar(user);
+    fireEvent.click(await screen.findByRole("button", { name: "Profile" }));
+    expect(
+      await screen.findByText(
+        "Choose how you appear inside Octant. Everything is optional and kept on this Mac.",
+      ),
+    ).toBeVisible();
   });
 
   it("uses the CSS translucent sidebar fallback when no native host is available", async () => {

@@ -19,6 +19,7 @@ import {
   type ProviderModelOptionValues,
   type ProviderRuntimeEvent,
   type ProviderSessionId,
+  type ThreadPublishedSnapshot,
   type UtcTimestamp,
 } from "@octant/contracts";
 import type {
@@ -59,7 +60,11 @@ import {
   type ClaudePendingApproval,
   type ClaudePendingQuestion,
 } from "./claudeEventMapper";
-import { canonicalClaudeAccountDirectory } from "./claudeAccountIsolation";
+import {
+  canonicalClaudeAccountDirectory,
+  claudeArtifactLaunchEnvironment,
+  disablesNonessentialTraffic,
+} from "./claudeAccountIsolation";
 import {
   makeClaudeEnvironmentScope,
   type ClaudeEnvironmentScope,
@@ -72,6 +77,8 @@ import {
   type ClaudeProcessPort,
 } from "./claudeProcess";
 import { claudeProcessPlanUsageLimits, decodeClaudeProcessPlanUsage } from "./claudeProcessUsage";
+import { claudeNativeArtifactsSupport } from "./claudeNativeArtifacts";
+import { readClaudePublishedSnapshot } from "./claudePublishedSnapshot";
 import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 import { providerResumeBinding, resumeBindingRefuses } from "./resumeBinding";
 
@@ -86,6 +93,13 @@ const CLAUDE_TOOLS = [
   CLAUDE_CHECKLIST_TOOL,
 ];
 const CLAUDE_PLAN_TOOLS = ["Read", "Glob", "Grep"] as const;
+/**
+ * Claude's own tool that publishes an `.html` or `.md` file to the signed-in
+ * claude.ai account. Claude Code 2.1.211 lists it for an Agent SDK launch only
+ * when `CLAUDE_CODE_ARTIFACT` is set, and then only for a claude.ai plan its
+ * service admits (read from the bundled binary, 2026-10-27).
+ */
+export const CLAUDE_ARTIFACT_TOOL = "Artifact";
 const CLAUDE_READ_TOOLS = new Set<string>(CLAUDE_PLAN_TOOLS);
 /**
  * Tools that change only Claude's own session state: no file, shell, network,
@@ -146,6 +160,77 @@ export function claudeExecutionOptions(
     return { ...options, tools: [...options.tools, "Bash"] };
   }
   return options;
+}
+
+/**
+ * Whether a session is offered Claude's Artifact tool. Only a Work or Code
+ * session outside Plan, on a claude.ai sign-in, whose account the person
+ * enabled Claude artifacts for and whose thread chose them, on a host that
+ * does not turn the runtime's non-essential traffic off: publishing sends a
+ * Project file to claude.ai, an outward side effect Plan's read-only rule
+ * refuses, and Chat runs in Plan. Such a launch goes without the telemetry
+ * guard ({@link claudeArtifactLaunchEnvironment}); every other launch keeps
+ * every guard.
+ */
+export function claudeOffersArtifacts(input: {
+  readonly authentication: ClaudeAuthentication;
+  readonly artifactDelivery: boolean;
+  readonly threadChoseArtifacts: boolean;
+  readonly hostTrafficDisabled: boolean;
+  readonly mode: ProviderAcquireInput["mode"];
+  readonly executionPolicy: ProviderExecutionPolicy;
+}): boolean {
+  return (
+    input.threadChoseArtifacts &&
+    !input.hostTrafficDisabled &&
+    claudeArtifactsAvailable(input) &&
+    (input.mode === "work" || input.mode === "code") &&
+    input.executionPolicy !== "plan"
+  );
+}
+
+function claudeArtifactsAvailable(input: {
+  readonly authentication: ClaudeAuthentication;
+  readonly artifactDelivery: boolean;
+}): boolean {
+  return input.artifactDelivery && input.authentication === "subscription";
+}
+
+/**
+ * Why an Artifact call is refused, or undefined when it may go on to the
+ * thread's ordinary approval posture. Octant offers the tool to publish one
+ * Project file and nothing else: `list` reads titles other people chose from
+ * claude.ai into the conversation, and a file outside the Project would send
+ * something the thread was never bound to, in Full access too.
+ */
+export function claudeArtifactCallRefusal(input: {
+  readonly stillOn: boolean;
+  readonly input: Readonly<Record<string, unknown>>;
+  readonly projectRoot: string;
+  readonly isProjectConfinedPath: (projectRoot: string, absolutePath: string) => boolean;
+}): string | undefined {
+  if (!input.stillOn) return "Claude artifacts are turned off in Settings.";
+  const action = input.input.action;
+  if (action !== undefined && action !== "publish") {
+    return "Octant offers Claude's Artifact tool only to publish a page from the Project.";
+  }
+  const filePath = input.input.file_path;
+  if (typeof filePath !== "string") {
+    return "Claude tool request has no authoritative confined path.";
+  }
+  // A home folder opened as a Project contains the login keychain folder.
+  if (claudeToolPathIsInKeychainFolder(filePath)) {
+    return "Claude tool request is outside the Project.";
+  }
+  let confined = false;
+  try {
+    confined =
+      filePath !== input.projectRoot &&
+      input.isProjectConfinedPath(input.projectRoot, filePath) === true;
+  } catch {
+    confined = false;
+  }
+  return confined ? undefined : "Claude tool request is outside the Project.";
 }
 
 /** Whether this call is a Plan turn's shell command, which its sandbox confines. */
@@ -285,6 +370,12 @@ export interface ClaudeDriverOptions {
   readonly authentication: ClaudeAuthentication;
   /** Claude-owned directory for this account. */
   readonly configDirectory?: string;
+  /**
+   * The person's current "Deliver documents as Claude artifacts" switch for
+   * this account, read when a session opens and again at every Artifact call
+   * so turning it off holds for a session already running. Absent is off.
+   */
+  readonly artifactDelivery?: () => boolean;
   readonly process: ClaudeProcessPort;
   readonly sdk: ClaudeAgentSdkPort;
   readonly credentialResolver?: ProviderCredentialResolver;
@@ -381,6 +472,8 @@ interface SessionState {
   readonly pendingQuestions: Map<string, ClaudePendingQuestionState>;
   readonly preToolRequests: Map<string, ClaudePreToolGrant>;
   readonly approvalReuse: Set<string>;
+  /** What each approved publish sent, by tool use, until its result arrives. */
+  readonly publishedSnapshots: Map<string, ThreadPublishedSnapshot>;
   readonly observedToolUseIds: Set<string>;
   readonly settledToolUseIds: Set<string>;
   readonly turnToolUseIds: Set<string>;
@@ -666,6 +759,8 @@ function observation(
     readonly models?: readonly ProviderModel[];
     /** The runtime announced `compact` when the probe opened it. */
     readonly compactAnnounced?: boolean;
+    /** The probe's launch carried the host's own non-essential traffic switch. */
+    readonly hostTrafficDisabled?: boolean;
     readonly credentialStatus?: "stored" | "missing" | "unavailable";
     readonly message?: string;
   },
@@ -675,6 +770,14 @@ function observation(
   // Claude Code keeps every mode's session, so `/compact` reaches all of them
   // alike; an install that does not announce the command cannot be asked.
   const sessionCompaction = input.compactAnnounced === true ? "supported" : "unavailable";
+  // Whether the runtime then lists the tool rests on claude.ai's own plan
+  // checks, which no probe can read without a turn. The provider service
+  // reports a change of the person's setting at once, without a probe.
+  const nativeArtifacts = claudeNativeArtifactsSupport({
+    authentication: options.authentication,
+    artifactDelivery: options.artifactDelivery?.() === true,
+    hostTrafficDisabled: input.hostTrafficDisabled === true,
+  });
   const result = decodeProviderProbeResult({
     instanceId: options.instanceId,
     readiness: input.readiness,
@@ -691,6 +794,7 @@ function observation(
               work: sessionCompaction,
               code: sessionCompaction,
             },
+            nativeArtifacts,
           }
         : unavailableCapabilities,
     ...(input.message === undefined ? {} : { message: input.message }),
@@ -827,11 +931,13 @@ function makeProbe(
     return Effect.gen(function* () {
       const version = yield* options.process.probeVersion(options.binaryPath);
       let apiKey: string | undefined;
+      let hostTrafficDisabled = false;
       if (options.authentication === "subscription") {
         const environment = yield* environmentFactory(
           "subscription",
           options.configDirectory === undefined ? {} : { configDirectory: options.configDirectory },
         );
+        hostTrafficDisabled = disablesNonessentialTraffic(environment.environment);
         const status = yield* options.process.probeSubscription(
           options.binaryPath,
           environment.environment,
@@ -933,6 +1039,7 @@ function makeProbe(
           version,
           models: sdkResult.models,
           compactAnnounced: sdkResult.compactAnnounced,
+          hostTrafficDisabled,
           ...(options.authentication === "api-key" ? { credentialStatus: "stored" as const } : {}),
         },
         clock,
@@ -1007,6 +1114,21 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
   return {
     kind: "claude",
     conversationOwnership: "provider",
+    // The host switch is the one the last probe's launch carried; the
+    // session's own launch reads it again before offering the tool.
+    nativeArtifactTool: ({ mode, executionPolicy }) =>
+      claudeOffersArtifacts({
+        authentication: options.authentication,
+        artifactDelivery: options.artifactDelivery?.() === true,
+        threadChoseArtifacts: true,
+        hostTrafficDisabled:
+          options.runtimeRegistry.observedState(options.instanceId)?.capabilities.nativeArtifacts
+            ?.unsupportedReason === "host-traffic-disabled",
+        mode,
+        executionPolicy,
+      })
+        ? CLAUDE_ARTIFACT_TOOL
+        : undefined,
     probe: makeProbe(options, environmentFactory, factories.clock),
     contextFacts: makeClaudeContextFacts(options, environmentFactory, factories.clock),
     acquire: ({ instanceId, projectRoot, mode }) => {
@@ -1303,7 +1425,10 @@ function makeConnection(
         closeAfterPublishedTerminal(state);
         return;
       }
-      for (const mapped of mapClaudeMessage(state.context, message)) {
+      for (const mapped of mapClaudeMessage(
+        state.context,
+        withPublishedSnapshots(state, message),
+      )) {
         if (mapped.kind === "ignored") continue;
         if (mapped.kind === "failure") {
           terminal(state, { kind: "failed", failure: mapped.failure });
@@ -1406,6 +1531,7 @@ function makeConnection(
         readonly autoApprove?: boolean;
         readonly modelOptionValues?: ProviderModelOptionValues;
         readonly singleUse?: boolean;
+        readonly nativeArtifacts?: boolean;
       },
       signal: AbortSignal,
       resumeSessionId?: string,
@@ -1493,11 +1619,37 @@ function makeConnection(
             );
           }
         }
-        const executionOptions = claudeExecutionOptions(
+        const baseExecutionOptions = claudeExecutionOptions(
           input.executionPolicy,
           input.autoApprove,
           mode,
         );
+        // Read at each launch: one launch per turn means the next turn after
+        // the person turns the setting or the thread's choice off launches
+        // with every guard again.
+        const offersArtifacts = claudeOffersArtifacts({
+          authentication: options.authentication,
+          artifactDelivery: options.artifactDelivery?.() === true,
+          threadChoseArtifacts: input.nativeArtifacts === true,
+          hostTrafficDisabled: disablesNonessentialTraffic(environment.environment),
+          mode,
+          executionPolicy: input.executionPolicy,
+        });
+        const executionOptions: ClaudeExecutionOptions = offersArtifacts
+          ? {
+              ...baseExecutionOptions,
+              tools: [...baseExecutionOptions.tools, CLAUDE_ARTIFACT_TOOL],
+            }
+          : baseExecutionOptions;
+        // The switch is read again at every call: a session opened while it
+        // was on keeps the tool in its list after the person turns it off.
+        const artifactCallRefusal = (toolInput: Readonly<Record<string, unknown>>) =>
+          claudeArtifactCallRefusal({
+            stillOn: options.artifactDelivery?.() === true,
+            input: toolInput,
+            projectRoot,
+            isProjectConfinedPath: options.isProjectConfinedPath,
+          });
         const sandbox = claudeSandboxSettings(input.executionPolicy, projectRoot);
         let callbackState: SessionState | undefined;
         const canUseTool: ClaudeOpenQueryInput["canUseTool"] = async (request) => {
@@ -1528,8 +1680,14 @@ function makeConnection(
             return deny("Claude tool request did not pass the Octant authority gate.");
           }
           activeState.preToolRequests.delete(request.toolUseId);
+          if (request.toolName === CLAUDE_ARTIFACT_TOOL) {
+            const refusal = artifactCallRefusal(request.input);
+            if (refusal !== undefined) return deny(refusal);
+          }
           if (
-            (input.executionPolicy === "full-access" && request.toolName !== "AskUserQuestion") ||
+            (input.executionPolicy === "full-access" &&
+              request.toolName !== "AskUserQuestion" &&
+              request.toolName !== CLAUDE_ARTIFACT_TOOL) ||
             // Auto-accept edits covers exactly the file writes the gate above
             // already proved to be inside the Project. Shell, network, and
             // every other tool still ask.
@@ -1645,7 +1803,7 @@ function makeConnection(
           activeState.pendingApprovals.set(pending.requestId, pending);
           publish(pending.event);
           activeState.outputAccepted = true;
-          return waitForClaudeAuthorityValue({
+          const decision = await waitForClaudeAuthorityValue({
             promise: pending.decision.promise,
             signal: request.signal,
             cancelledValue: {
@@ -1659,6 +1817,25 @@ function makeConnection(
               activeState.settledToolUseIds.add(pending.providerToolUseId);
             },
           });
+          // The snapshot is read the moment the person approves, just before
+          // the runtime reads the same file to publish it, so the thread
+          // shows what they approved sending. The answer can come long after
+          // the gate read the setting and the path, so both are read again
+          // first: a setting turned off, or a folder swapped for a link out of
+          // the Project, while the person decided refuses the publish.
+          if (
+            decision.behavior === "allow" &&
+            request.toolName === CLAUDE_ARTIFACT_TOOL &&
+            typeof request.input.file_path === "string"
+          ) {
+            const refusal = artifactCallRefusal(request.input);
+            if (refusal !== undefined) return { behavior: "deny", message: refusal };
+            const snapshot = await readClaudePublishedSnapshot(request.input.file_path);
+            if (snapshot !== undefined) {
+              activeState.publishedSnapshots.set(request.toolUseId, snapshot);
+            }
+          }
+          return decision;
         };
         const preToolUse: ClaudeOpenQueryInput["preToolUse"] = async (request) => {
           const activeState = callbackState;
@@ -1693,6 +1870,12 @@ function makeConnection(
               : undefined;
           if (requestInput === undefined) {
             return deny("Claude tool request has invalid input.");
+          }
+          // Checked here, before any posture: Full access answers "allow" in
+          // this hook and Claude Code then never calls `canUseTool`.
+          if (request.toolName === CLAUDE_ARTIFACT_TOOL) {
+            const refusal = artifactCallRefusal(requestInput);
+            if (refusal !== undefined) return deny(refusal);
           }
           if (request.toolName === "AskUserQuestion" && Object.hasOwn(requestInput, "answers")) {
             return deny("Claude user question input was invalid.");
@@ -1738,8 +1921,13 @@ function makeConnection(
             });
             return { behavior: "ask" };
           };
+          // A publish asks under every posture, Full access included: like a
+          // Canvas public link, putting a Project file on an outside service
+          // is the person's own act, and each publish is asked afresh.
           const decide = (): ClaudePreToolDecision =>
-            (input.executionPolicy === "full-access" && request.toolName !== "AskUserQuestion") ||
+            (input.executionPolicy === "full-access" &&
+              request.toolName !== "AskUserQuestion" &&
+              request.toolName !== CLAUDE_ARTIFACT_TOOL) ||
             (input.executionPolicy === "auto-accept-edits" &&
               CLAUDE_EDIT_TOOLS.has(request.toolName)) ||
             (request.toolName !== "AskUserQuestion" && CLAUDE_READ_TOOLS.has(request.toolName)) ||
@@ -1797,7 +1985,9 @@ function makeConnection(
             .openQuery({
               binaryPath: options.binaryPath,
               projectRoot,
-              authEnvironment: environment.environment,
+              authEnvironment: offersArtifacts
+                ? claudeArtifactLaunchEnvironment(environment.environment)
+                : environment.environment,
               model: input.modelId,
               ...(effort === undefined ? {} : { effort }),
               executionPolicy: input.executionPolicy,
@@ -1849,6 +2039,7 @@ function makeConnection(
           pendingQuestions: new Map(),
           preToolRequests: new Map(),
           approvalReuse: new Set(),
+          publishedSnapshots: new Map(),
           observedToolUseIds: new Set(),
           settledToolUseIds: new Set(),
           turnToolUseIds: new Set(),
@@ -2049,6 +2240,7 @@ function makeConnection(
               ...(input.modelOptionValues === undefined
                 ? {}
                 : { modelOptionValues: input.modelOptionValues }),
+              ...(input.nativeArtifacts === true ? { nativeArtifacts: true } : {}),
             },
             signal,
             input.resumeCursor.value,
@@ -2282,7 +2474,9 @@ function makeConnection(
               } catch {
                 // An unreadable setting cannot broaden a one-shot answer into reuse.
               }
-              if (persistence === "current-session") {
+              // A publish is never reused: the same input republishes the
+              // file as it is now, which the person has not seen.
+              if (persistence === "current-session" && pending.toolName !== CLAUDE_ARTIFACT_TOOL) {
                 state.approvalReuse.add(pending.reuseKey);
               }
               pending.decision.resolve({ behavior: "allow" });
@@ -2389,4 +2583,23 @@ function promiseWithTimeout<A>(
       },
     );
   });
+}
+
+/** Puts each approved publish's snapshot beside the page its result names. */
+function withPublishedSnapshots(
+  state: SessionState,
+  message: ClaudeDecodedMessage,
+): ClaudeDecodedMessage {
+  if (message.kind !== "tool-results" || state.publishedSnapshots.size === 0) return message;
+  return {
+    ...message,
+    results: message.results.map((result) => {
+      const snapshot = state.publishedSnapshots.get(result.toolUseId);
+      if (snapshot === undefined) return result;
+      state.publishedSnapshots.delete(result.toolUseId);
+      return result.publishedPage === undefined
+        ? result
+        : { ...result, publishedPage: { ...result.publishedPage, snapshot } };
+    }),
+  };
 }

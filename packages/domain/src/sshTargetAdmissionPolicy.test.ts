@@ -113,6 +113,11 @@ describe("SSH target admission", () => {
         "target-unreachable",
       ],
       [
+        "this Mac's key or agent no longer signs in to the target",
+        { connection: { state: "authentication-refused" } },
+        "authentication-refused",
+      ],
+      [
         "the target presented a different host key",
         { connection: { state: "host-key-changed" } },
         "host-key-changed",
@@ -446,6 +451,41 @@ describe("SSH target admission", () => {
         posture,
       });
     }
+  });
+
+  it("refuses everything while the host reconnects, naming the attempt and when the next one starts, whatever the last session attested", () => {
+    const waiting = {
+      state: "reconnecting",
+      attempt: 2,
+      maxAttempts: 8,
+      nextAttemptAt: 1_700_000_004_000,
+    } as const;
+    for (const posture of [...CONFINED_POSTURES, "full-access"] as const) {
+      for (const subject of OCTANT_SUBJECTS) {
+        expect(
+          decideSshAdmission(
+            request({
+              connection: waiting,
+              posture,
+              permissionPersistence: "project-default",
+              subject,
+            }),
+          ),
+        ).toEqual({
+          status: "refused",
+          reason: "target-reconnecting",
+          attempt: 2,
+          maxAttempts: 8,
+          nextAttemptAt: 1_700_000_004_000,
+        });
+      }
+    }
+    // While the attempt runs there is no next time to name.
+    expect(
+      decideSshAdmission(
+        request({ connection: { state: "reconnecting", attempt: 3, maxAttempts: 8 } }),
+      ),
+    ).toEqual({ status: "refused", reason: "target-reconnecting", attempt: 3, maxAttempts: 8 });
   });
 
   it("refuses a connected target that holds no attestation yet, remembered Full access included", () => {

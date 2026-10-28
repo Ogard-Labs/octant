@@ -1172,6 +1172,26 @@ describe("design frames", () => {
     expect(performance.now() - started).toBeLessThan(250);
   });
 
+  it("still reads the markup after a quote that opens inside text a browser never reads as a tag", () => {
+    // A browser reads a textarea, an xmp, or a CDATA section as text, so the
+    // quote in each opens no value and the element after it is drawn.
+    for (const html of [
+      '<textarea><x a="</textarea><svg><style><meta http-equiv=refresh content=0;url=https://x.test/></style></svg>',
+      '<textarea><x a="</textarea><svg><a><set attributeName=href to=https://x.test/ /><text>Go</text></a></svg>',
+      "<xmp><x a='</xmp><script>alert(1)</script>",
+      '<svg><![CDATA[<x a="]]></svg><meta http-equiv=refresh content=0;url=https://x.test/>',
+    ]) {
+      expect(refusalOf(design([{ frameId: "home", html }]))).toMatch(
+        /^design-markup-refused: .*uses a <(meta|set|script)> element/,
+      );
+    }
+    const started = performance.now();
+    expect(refusalOf(design([{ frameId: "home", html: `<a x="${"<b y='".repeat(10_000)}` }]))).toBe(
+      "accepted",
+    );
+    expect(performance.now() - started).toBeLessThan(250);
+  });
+
   it("keeps links between frames and sections, and the attributes that only look like them", () => {
     expect(
       refusalOf(
@@ -1599,6 +1619,32 @@ describe("design frames", () => {
         theme: "workspace",
       }),
     ).toMatch(/^design-run-refused: /);
+  });
+
+  it("refuses a chart callout inside a document declaring version 21 as a future version", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: 21,
+          blocks: [
+            {
+              blockId: "growth",
+              schemaVersion: 21,
+              kind: "chart",
+              chartType: "bar",
+              series: [
+                {
+                  seriesId: "net",
+                  label: "Net new",
+                  points: [{ x: "Sep", y: 210, note: "+210", emphasis: true }],
+                },
+              ],
+            },
+          ],
+        }),
+      "unsupported-schema-version",
+    );
   });
 
   it("refuses a running design inside a document declaring version 17", () => {

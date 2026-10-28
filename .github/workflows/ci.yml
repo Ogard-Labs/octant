@@ -110,6 +110,10 @@ jobs:
       - run: bun run build --filter='@octant/server^...'
       - env:
           OCTANT_DATA_DIR: ${{ runner.temp }}/octant-ci-data
+          # The runner image ships kotlinc and java, so the pairing smoke test
+          # runs the phone's Android TLS exchange on a JVM. Required here so an
+          # image without them fails the shard instead of skipping it.
+          OCTANT_REQUIRE_KOTLINC: "1"
         # Process-spawning and browser-realm suites need a macOS host or a real network; run them locally.
         run: bun run --cwd apps/server test -- --exclude=src/bunServe.test.ts --exclude=src/providers/acpProcess.test.ts --exclude=src/remote/remoteExitEvidenceA.smoke.test.ts --shard=${{ matrix.shard }}/4
 
@@ -172,3 +176,19 @@ jobs:
           src/code/codeLanguageServiceProcess.test.ts
           src/code/installedLanguageServersProcess.test.ts
           src/code/codeDebugServiceProcess.test.ts
+      # The packaged app runs outside provider drivers on Electron's Node, so
+      # the escape tests below also run a driver on the Electron the desktop
+      # app pins. Electron's package downloads its binary only on demand, not
+      # at install, so it is fetched here; without it that case would skip.
+      - run: node node_modules/electron/install.js
+      # An outside provider driver runs under its own Seatbelt profile and
+      # Linux refuses to start one, so its escape tests (network, files
+      # outside its package, the home folder, exec, host variables) skip on
+      # the server shards and only run here. The Cua daemon port finds the
+      # home with `/usr/bin/id -P` on macOS and `getent` on Linux; its tests
+      # hold that answer against Node's own user-database lookup, so this is
+      # the evidence the macOS lookup returns the home.
+      - run: >-
+          bun run --cwd apps/server test --
+          src/providers/outsideDriverProcess.escape.test.ts
+          src/computerUse/desktopDaemonPort.test.ts

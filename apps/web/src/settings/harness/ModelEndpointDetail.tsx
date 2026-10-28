@@ -1,5 +1,6 @@
 import type {
   HiddenProviderModelRef,
+  HostPlatform,
   ProviderDataTag,
   ProviderDataTags,
   ProviderModelId,
@@ -10,6 +11,8 @@ import { ChevronLeft } from "lucide-react";
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
   AnthropicConfigurationForm,
+  BedrockConfigurationForm,
+  CloudEndpointSignIn,
   DirectoryEndpointSignIn,
   FoundryConfigurationForm,
   HttpConfigurationForm,
@@ -20,6 +23,12 @@ import {
   useCredentialStatus,
   type CredentialStatusController,
 } from "../../providers/ProviderSettingsCredentials";
+import {
+  credentialStoreName,
+  hostCredentialStore,
+  thisComputerName,
+  useHostPlatform,
+} from "../../platform";
 import { ChatOnlyVerify } from "../../providers/ChatOnlyVerify";
 import { ModelContextWindowField } from "../../providers/ModelContextWindowField";
 import type { ProviderOAuthSignInState } from "../../providers/ProviderOAuthSignIn";
@@ -51,6 +60,7 @@ import {
   endpointModelCount,
   endpointTakesKey,
   isDirectorySignInEndpoint,
+  lastCheckFoundSignInGone,
   type EndpointFixKind,
   type EndpointSignIn,
   type EndpointStatus,
@@ -68,6 +78,7 @@ export type ModelEndpointDetailProps = Pick<
   | "onChangeOpenAiCompatibleConfiguration"
   | "onChangeAnthropicCompatibleConfiguration"
   | "onChangeAzureFoundryConfiguration"
+  | "onChangeAmazonBedrockConfiguration"
   | "onChangeOllamaConfiguration"
   | "onProviderCredentialStatus"
   | "onClearProviderCredential"
@@ -175,7 +186,8 @@ export function ModelEndpointDetail(props: ModelEndpointDetailProps) {
     ((instance.driverKind === "openai-compatible" ||
       instance.driverKind === "anthropic-compatible") &&
       subscriptionDescriptorIdOf(instance.configuration) !== undefined) ||
-    isDirectorySignInEndpoint(instance);
+    isDirectorySignInEndpoint(instance) ||
+    instance.driverKind === "amazon-bedrock";
   const credential = useCredentialStatus(
     {
       instance,
@@ -245,9 +257,11 @@ export function ModelEndpointDetail(props: ModelEndpointDetailProps) {
           </span>
         </div>
       </header>
-      {/* A sign-in fix with nothing to explain is the Sign-in section itself. */}
-      {props.status.sentence === undefined &&
-      (fix === undefined || fix.kind === "sign-in") ? null : (
+      {/* A sign-in fix with nothing to explain is the Sign-in section itself,
+          as is a Bedrock endpoint's first sign-in, whose guidance that section
+          already gives. */}
+      {(props.status.sentence === undefined && (fix === undefined || fix.kind === "sign-in")) ||
+      props.status.guidedBySignIn === true ? null : (
         <div aria-live="polite">
           <OctantAlert
             action={
@@ -298,6 +312,9 @@ function AccessSection(
   },
 ) {
   const { instance, credential } = props;
+  // Keys and sign-ins live on the host, so the host names its computer.
+  const hostPlatform = useHostPlatform();
+  const computer = thisComputerName(hostPlatform);
   const takesKey = endpointTakesKey(instance);
   if (props.signInEndpoint) {
     return (
@@ -322,7 +339,19 @@ function AccessSection(
                 : { onOpenExternalUrl: props.onOpenExternalUrl })}
             />
           )}
-          {instance.driverKind !== "ollama" && (
+          {instance.driverKind === "amazon-bedrock" && (
+            <CloudEndpointSignIn
+              disabled={props.disabled}
+              instance={instance}
+              lastCheckRefusedSignIn={lastCheckFoundSignInGone(props.observed)}
+              onSignedOut={() => void props.onProbe(instance.id, { quiet: true })}
+              onStateChange={props.onSignInState}
+              {...(props.onProviderOAuth === undefined
+                ? {}
+                : { onProviderOAuth: props.onProviderOAuth })}
+            />
+          )}
+          {instance.driverKind !== "ollama" && instance.driverKind !== "amazon-bedrock" && (
             <DirectoryEndpointSignIn
               consentShown={props.signInConsentShown}
               disabled={props.disabled}
@@ -337,9 +366,10 @@ function AccessSection(
                 : { onOpenExternalUrl: props.onOpenExternalUrl })}
             />
           )}
-          {props.credentialManagementAvailable ? null : (
+          {props.credentialManagementAvailable ||
+          instance.driverKind === "amazon-bedrock" ? null : (
             <p className="endpoint-detail__note">
-              Sign-in starts from the Octant app or a browser on this Mac.
+              Sign-in starts from the Octant app or a browser on {computer}.
             </p>
           )}
         </div>
@@ -351,14 +381,14 @@ function AccessSection(
   if (!takesKey) return null;
   const status = credential.status;
   const detail = !props.credentialManagementAvailable
-    ? "Keys are added and replaced from the Octant app on this Mac."
+    ? `Keys are added and replaced from the Octant app on ${computer}.`
     : status === "stored"
-      ? "Saved in this Mac's Keychain. Octant can't show it."
+      ? `Saved in ${hostCredentialStore(hostPlatform)}. Octant can't show it.`
       : status === "missing"
         ? "No key is saved for it yet."
         : status === "checking"
-          ? "Checking the Keychain…"
-          : "Octant couldn't read the Keychain.";
+          ? `Checking the ${credentialStoreName(hostPlatform)}…`
+          : `Octant couldn't read the ${credentialStoreName(hostPlatform)}.`;
   return (
     <SettingsSection title="API key">
       <div className="setgroup">
@@ -446,7 +476,9 @@ function ModelsSection(props: ModelEndpointDetailProps & { readonly disabled: bo
           <p className="endpoint-detail__note">
             {observed === undefined
               ? "Octant lists its models after a check."
-              : "It lists no models. Add the model IDs you use under Name and address."}
+              : instance.driverKind === "amazon-bedrock"
+                ? "Its models are listed once it's signed in. Change them under Name and address."
+                : "It lists no models. Add the model IDs you use under Name and address."}
           </p>
         </div>
       ) : (
@@ -560,7 +592,13 @@ function toggleTag(tags: ReadonlyArray<ProviderDataTag>, tag: ProviderDataTag): 
  * click instead of by typing a model id there.
  */
 function VoiceSection(props: ModelEndpointDetailProps & { readonly disabled: boolean }) {
-  if (props.voice === undefined || !isSpeechUsable(props.instance)) return null;
+  if (
+    props.voice === undefined ||
+    props.instance.driverKind === "amazon-bedrock" ||
+    !isSpeechUsable(props.instance)
+  ) {
+    return null;
+  }
   const voiceModels = voiceModelsOf(
     props.observed?.models,
     endpointPresetForUrl(props.instance.configuration.baseUrl)?.voice,
@@ -703,6 +741,15 @@ function NameAndAddressSection(
         onClearCredential={props.onClearProviderCredential}
       />
     );
+  } else if (instance.driverKind === "amazon-bedrock") {
+    form = (
+      <BedrockConfigurationForm
+        disabled={props.disabled}
+        instance={instance}
+        key={`bedrock:${instance.version}`}
+        onChange={props.onChangeAmazonBedrockConfiguration}
+      />
+    );
   } else {
     form = (
       <OllamaConfigurationForm
@@ -770,9 +817,14 @@ function NameAndAddressSection(
 function authenticationFact(
   instance: ModelEndpointInstance,
   offer: { readonly accountLabel: string } | undefined,
+  hostPlatform: HostPlatform | undefined,
 ): string {
   if (offer !== undefined) return `${offer.accountLabel} sign-in (bearer token)`;
-  if (instance.driverKind === "ollama") return "None (this Mac only)";
+  // Ollama answers only on the host's loopback, so the host names its computer.
+  if (instance.driverKind === "ollama") return `None (${thisComputerName(hostPlatform)} only)`;
+  if (instance.driverKind === "amazon-bedrock") {
+    return "Organization single sign-on (IAM Identity Center role; the credential broker signs each request)";
+  }
   if (instance.driverKind === "azure-foundry") {
     return instance.configuration.authentication === "directory-oauth"
       ? "Organization account (Microsoft Entra ID bearer token)"
@@ -792,6 +844,7 @@ function protocolFact(
   observed: ProviderObservedState | undefined,
 ): string {
   if (instance.driverKind === "ollama") return "Ollama's own API";
+  if (instance.driverKind === "amazon-bedrock") return "Bedrock Converse (streaming)";
   const configured = `Set to ${protocolLabel(instance.configuration.protocol)}`;
   if (instance.driverKind === "anthropic-compatible") {
     return `${configured} · version ${instance.configuration.protocolVersion}`;
@@ -803,6 +856,7 @@ function protocolFact(
 
 function DiagnosticsSection(props: ModelEndpointDetailProps & { readonly failing: boolean }) {
   const { instance, observed, failure } = props;
+  const hostPlatform = useHostPlatform();
   const [copied, setCopied] = useState(false);
   const verified = observed?.verifiedToolModelIds?.length ?? 0;
   const supported =
@@ -814,10 +868,27 @@ function DiagnosticsSection(props: ModelEndpointDetailProps & { readonly failing
       ? []
       : capabilityLabels.filter(([key]) => observed.capabilities[key] !== "supported");
   const facts: ReadonlyArray<{ readonly label: string; readonly value: string }> = [
-    { label: "Address", value: instance.configuration.baseUrl },
+    {
+      label: "Address",
+      value:
+        instance.driverKind === "amazon-bedrock"
+          ? `https://${endpointHost(instance)}`
+          : instance.configuration.baseUrl,
+    },
     { label: "Kind", value: driverLabel(instance.driverKind) },
     { label: "Protocol", value: protocolFact(instance, observed) },
-    { label: "Authentication", value: authenticationFact(instance, props.signInOffer) },
+    {
+      label: "Authentication",
+      value: authenticationFact(instance, props.signInOffer, hostPlatform),
+    },
+    ...(instance.driverKind === "amazon-bedrock"
+      ? [
+          {
+            label: "Signs in for",
+            value: `Role ${String(instance.configuration.cloudIam.roleName)} · account ${String(instance.configuration.cloudIam.accountId)} · ${String(instance.configuration.cloudIam.startUrl)} (${String(instance.configuration.cloudIam.ssoRegion)})`,
+          },
+        ]
+      : []),
     ...(observed?.directoryBinding === undefined
       ? []
       : [
@@ -912,8 +983,9 @@ function RemoveSection(props: ModelEndpointDetailProps & { readonly disabled: bo
   const [roles, setRoles] = useState<ReadonlyArray<string> | "unknown" | undefined>(undefined);
   const [pending, setPending] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
-  // The host keeps credential removal to the app on this Mac; an endpoint
-  // that holds a key or a sign-in can't be removed from a browser.
+  // The host keeps credential removal to the Octant app on the host; an
+  // endpoint that holds a key or a sign-in can't be removed from a browser.
+  const computer = thisComputerName(useHostPlatform());
   const blocked = instance.driverKind !== "ollama" && !props.credentialManagementAvailable;
   const open = () => {
     setConfirming(true);
@@ -939,7 +1011,7 @@ function RemoveSection(props: ModelEndpointDetailProps & { readonly disabled: bo
         <SettingRow
           description={
             blocked
-              ? "Remove it from the Octant app on this Mac."
+              ? `Remove it from the Octant app on ${computer}.`
               : "Signs out and deletes its settings. Threads that used it keep their history."
           }
           label={`Remove ${instance.displayName}`}

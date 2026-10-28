@@ -65,6 +65,19 @@ export interface SshTargetClient {
   readonly terminal: (command: SshRemoteTerminalCommand) => Promise<ProjectTerminalResultValue>;
 }
 
+/**
+ * Renders a time the host reported (a reconnect's next attempt) on this
+ * window's clock, for the sentences `describeSshAdmissionRefusal` builds.
+ */
+export const SSH_TARGET_TIMES = {
+  formatTime: (epochMilliseconds: number) =>
+    new Date(epochMilliseconds).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }),
+} as const;
+
 const INVALID = "Octant refused that request. Check the values and try again.";
 const UNAVAILABLE = "SSH target administration is unavailable in this window.";
 
@@ -81,7 +94,7 @@ function refusalMessage(answer: { readonly status: number; readonly body: unknow
   const administration = decoded(SshTargetAdministrationRefusal, answer.body);
   if (administration !== undefined) return administration.message;
   const project = decoded(SshRemoteProjectRefusal, answer.body);
-  if (project !== undefined) return describeSshRemoteProjectRefusal(project);
+  if (project !== undefined) return describeSshRemoteProjectRefusal(project, SSH_TARGET_TIMES);
   return answer.status === 400 || answer.status === 413 ? INVALID : UNAVAILABLE;
 }
 

@@ -194,3 +194,47 @@ export function resolveOutsideDriverActivation(input: {
     catalogCurrent: true,
   });
 }
+
+/**
+ * The selection an outside driver instance moves to once its person has
+ * trusted it: the package's current version and digest, when the source is
+ * trusted at that selection and nothing holds it, the package and component
+ * are the ones the instance was added from, and the instance binds another
+ * digest. Anything else leaves the binding where it is.
+ *
+ * Trust is the only thing that can satisfy this: every install, update, and
+ * rollback clears it and holds the package for admission, so an update never
+ * moves an instance by itself. The switches are not consulted, since trusting
+ * is the review step and the switches only decide whether the bound digest
+ * runs; an instance moved while the plugin is off reports the block until it
+ * is switched on.
+ */
+export function resolveOutsideDriverRebind(input: {
+  readonly packageState: ExtensionPackageState | undefined;
+  readonly driver: OutsideDriverActivationTarget;
+}): OutsideDriverActivationTarget | undefined {
+  const { packageState, driver } = input;
+  if (
+    packageState === undefined ||
+    String(packageState.extensionId) !== driver.extensionId ||
+    String(packageState.packageId) !== driver.packageId
+  ) {
+    return undefined;
+  }
+  const componentState = packageState.components.find(
+    (candidate) => String(candidate.component.id) === driver.componentId,
+  );
+  if (
+    componentState === undefined ||
+    componentState.component.kind !== "provider-driver" ||
+    !componentState.activation.installed ||
+    !componentState.activation.trusted ||
+    componentState.activation.quarantined
+  ) {
+    return undefined;
+  }
+  const version = String(packageState.version);
+  const digest = String(packageState.digest);
+  if (version === driver.version && digest === driver.digest) return undefined;
+  return { ...driver, version, digest };
+}

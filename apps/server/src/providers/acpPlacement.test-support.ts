@@ -12,8 +12,7 @@ import type { AcpProviderProfile } from "./acpProfiles";
 /**
  * An ACP profile whose whole launch can be stated on a remote target: no
  * guard, variable, managed file, host read, or denied path, and a sign-in
- * folder one variable names. No shipped profile is like this yet, so the
- * placement tests run against it.
+ * folder one variable names, so the placement tests see only what they add.
  */
 export const placeableAcpProfile: AcpProviderProfile = {
   kind: "copilot",

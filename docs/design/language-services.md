@@ -1263,7 +1263,14 @@ the addendum left a choice open.
   and block comments and trailing commas, and maps it with the import
   policy. A comment between a trailing comma and its bracket reads as
   `unreadable` rather than guessed at.
-- **Not built yet.** Session counts and end reasons in Diagnostics exports.
+- **Diagnostics.** A diagnostics export carries `debugSessions`: over the
+  journal growth window, how many sessions started and how many ended for
+  each end reason, read by one grouped query on the journal's time index. It
+  names no session, configuration, thread, or Project, the contract admits
+  only the closed end reasons, and a packet that carries it is version 3. A
+  host where no session started or ended in the window exports no section,
+  so its packets stay version 2. A purged thread's or erased Project's
+  sessions are no longer counted, since their records are gone.
 
 ### Debugger panel rules
 
@@ -1281,8 +1288,9 @@ the addendum left a choice open.
   They are held in the renderer's memory for the thread on its checkout,
   shared by the editor and the panel and never persisted, so a reload
   starts with none. A toggle past 256 lines in a file or 64 files takes
-  none, since the host would refuse the Start. Start sends them all; while a
-  session runs, each file whose lines change is sent at once with
+  none, since the host would refuse the Start, and the editor says which
+  bound it reached until the next toggle it takes. Start sends them all;
+  while a session runs, each file whose lines change is sent at once with
   `set-breakpoints`. The panel offers no conditions, exception filters,
   watches, or hover evaluation yet: the adapter's default exception filters
   apply, as the host sends them.
@@ -1290,11 +1298,14 @@ the addendum left a choice open.
   from the editor file the person last opened or focused for the thread,
   and the panel lists again when it changes.
 - **Confirming.** A proposal or a written configuration opens the same card:
-  the adapter, program, each argument, the working folder, each environment
-  entry, whether it pauses at the first line, every field Octant does not
+  the adapter with the package and version it came from (the host lists
+  both, as Settings names the package), program, each argument, the
+  working folder, each environment entry, whether it pauses at the first line, every field Octant does not
   use, and that the values are kept in the Project's record. A written
   configuration is checked against the contract's shape before the card;
-  the host checks paths and everything else when it is confirmed.
+  the host checks paths and everything else when it is confirmed. Where two
+  effective adapters share a name, the list and the adapter picker name each
+  one's package and version too, and its id when even those match.
 - **One session per thread.** While a session runs, the panel shows it in
   place of the configuration list, so a person stops it before starting
   another. A `busy` answer for a session the panel does not hold (another
@@ -1307,10 +1318,15 @@ the addendum left a choice open.
   expensive scope is read when opened, and nested values open on demand to a
   depth of eight. What it read is dropped when the program runs again or
   the session ends; the console keeps its last 1,000 lines in the
-  renderer's memory for the session only.
+  renderer's memory for the session only. A notice that the host could not
+  be reached clears at the host's next answer, so a recovered poll leaves
+  no stale warning.
 - **The stopped place.** At each stop the top frame's checkout file opens
   through the ordinary file-open path at its line, and the editor marks the
-  line until the program runs or the session ends. A frame outside the
+  line until the program runs, the session ends, or the Run and debug tool
+  closes. With the tool closed nothing polls the session, so a kept mark
+  could name a line the program has left; the session keeps running, and
+  reopening the tool reads the stop and marks it again. A frame outside the
   checkout opens nothing; an `adapter-source` frame's text is fetched by
   reference and shown read-only in the panel.
 - **Evaluate.** The console sends what the person typed as `repl` in the
@@ -1393,8 +1409,9 @@ Each sub-slice is its own pull request with this addendum updated in place.
     stack, locals, `evaluate`, a step, continue, and exit all worked through
     the session host. It needs no `startDebugging` (above). `ptrace` works
     inside the capsule: the program attached to its own forked child with
-    `PTRACE_ATTACH`. Awaiting the maintainer: the `macos-15` CI run of the
-    same process test, and the Mac smoke of 8d.
+    `PTRACE_ATTACH`. The `macos-15` CI job ran the same process test under
+    Seatbelt and passed on 2026-10-27 ([job][macos-ci-2026-10-27]). Still to
+    run: the Mac smoke of 8d.
 - **8c. Run and debug panel.** Container: yes.
   - Gutter breakpoints, the configuration list with imported proposals and the
     confirmation card, the session toolbar, call stack, variables, the debug
@@ -1426,7 +1443,20 @@ Each sub-slice is its own pull request with this addendum updated in place.
     expression and an adapter error, a step to the next line, and Stop
     clearing the mark, with no horizontal overflow. The same run against a
     Plan thread showed the host's refusal on confirming, and against a
-    paired device's `403` showed that debugging stays on this computer. The
+    paired device's `403` showed that debugging stays on this computer.
+    Review follow-ups are built too: a gutter toggle past either breakpoint
+    bound says which one (`MonacoEditorPane.test.tsx`); two adapters that
+    share a name are told apart by package and version in the list and on
+    the card; closing the tool clears the editor's stopped line and
+    reopening it marks the line again; and the unreachable-host notice
+    clears once the session answers (`RunDebugPanel.test.tsx`). The listing
+    names each adapter's package and version
+    (`codeDebugServiceProcess.test.ts`), and a diagnostics export counts
+    sessions by end reason (`diagnosticsExportService.test.ts`). Rendered
+    QA of these on 2026-10-27 (the real Monaco editor and the panel against
+    a fake host, Chromium at 1280 and 390 px, light and dark) showed both
+    breakpoint notices, the shared-name list and card, and the unreachable
+    notice clearing, with no horizontal overflow or console errors. The
     rules are under [Debugger panel rules](#debugger-panel-rules).
 - **8d. macOS confined-program smoke.** Container: no; a Mac (the `macos-15`
   CI job where it can, otherwise the maintainer).
@@ -1556,7 +1586,8 @@ accounts or hardware.
      checkout mismatch or unavailable checkout, a symlink escape, a device
      without reach, another platform, and a missing `bwrap` are refused before
      anything launches. The `macos-15` CI job runs the same test for Seatbelt
-     evidence; it has not yet run on a Mac. The rules are under
+     evidence; it passed there on 2026-10-27 ([job][macos-ci-2026-10-27]).
+     The rules are under
      [Companion rules](#companion-rules).
 3. **Editor wiring.** Container: yes.
    - Monaco shows the companion's diagnostics as markers. Definition (F12 or
@@ -1586,7 +1617,16 @@ accounts or hardware.
      library name showed the outside-checkout notice, and the off state showed
      with the switch off. The same run as a paired device's caller served it
      too. The paired-device route's classification is the slice 2 route test;
-     a packaged app on a Mac is slice 4's. The rules are under
+     a packaged app on a Mac is slice 4's. Rendered QA of the Settings ›
+     Code switch on 2026-10-27 (from `46834576e`, Chromium at 1440 and
+     390 px, light and dark through the app's theme provider) showed it on,
+     off, and refused with no horizontal overflow or console errors. It found
+     that a refused change left the switch showing the refused position while
+     the host kept the old one, and no later change sent it. A switch or pick
+     that is not saved, whether the host refuses it, refuses it as stale after
+     another change, or the window holds it back for an unfinished editor
+     path, now returns to what the host holds, and typed text stays
+     (`CodeSettingsView.test.tsx`). The rules are under
      [Editor rules](#editor-rules).
 4. **Ship the binary.** Container: partly.
    - Include the per-architecture binary in the packaged desktop app and the
@@ -1630,9 +1670,21 @@ accounts or hardware.
      connect to a listener on the host's loopback or to an internet address,
      or write the checkout (`EROFS`); it wrote only its cache, and the host's
      listener saw no connection. The `macos-15` CI job runs the same test for
-     Seatbelt evidence; it has not yet run on a Mac. The inspection preview's
+     Seatbelt evidence; it passed there on 2026-10-27
+     ([job][macos-ci-2026-10-27]). The inspection preview's
      language-server review is covered in the server test and in Settings
-     (`ExtensionsSettingsView.test.tsx`). The rules are under
+     (`ExtensionsSettingsView.test.tsx`). Rendered QA on 2026-10-27 (from
+     `46834576e`, Chromium at 1440 and 390 px, light and dark) showed the
+     review card for a `static` and a `repo-tooling` server inside Settings,
+     and the installed card effective, blocked by mode, and awaiting review,
+     with no horizontal overflow or console errors. At 390 px it found the
+     digest drawn over its label, the component's kind over its name, and the
+     grant sentence cut off inside a scroll box above Confirm install. Now the
+     label keeps its column, the kind line goes under the name on a phone,
+     and only a package's own text is bounded. A debug adapter review and a
+     plugin's bundled skill instructions, rendered the same way, keep their
+     labels clear and their grant sentence and heading in view, with only
+     the launch request or instructions scrolling. The rules are under
      [User-added servers](#user-added-servers).
 6. **`repo-tooling` servers.** Container: yes.
    - Use the shell-command approval per checkout and component, rememberable
@@ -1660,7 +1712,12 @@ accounts or hardware.
      local window, and a paired device is refused before the service
      (`codeRoutes.test.ts`); the editor's approval and the review copy are
      covered in `MonacoEditorPane.test.tsx` and
-     `ExtensionsSettingsView.test.tsx`; a Project erase removes the
+     `ExtensionsSettingsView.test.tsx`. Rendered QA on 2026-10-27 (from
+     `46834576e`, the real Monaco editor in Chromium at 1440 and 390 px,
+     light and dark) showed the approval line with Allow in this checkout and
+     Allow in this Project, an approval that opened the file with one marker,
+     a host refusal naming the local window, and an approval not recorded,
+     with no horizontal overflow or console errors. A Project erase removes the
      approvals, from the running host too, and the egress records
      (`threadPurge.test.ts`). A revoked Project rule, or a thread taking in
      outside content, closes a server's idle tunnel at once,
@@ -1668,8 +1725,9 @@ accounts or hardware.
      (`nativeHarnessEgress.hostile.test.ts`), and a tainted thread in
      another Project bound to the same folder, to one holding it, or to one
      inside it (a child named `..cache` included) suspends the rules (`codeLanguageServiceProcess.test.ts`). The `macos-15` CI
-     job runs the same process test for Seatbelt evidence; it has not yet run
-     on a Mac. The rules are under [Repository tooling](#repository-tooling).
+     job runs the same process test for Seatbelt evidence; it passed there on
+     2026-10-27 ([job][macos-ci-2026-10-27]). The rules are under
+     [Repository tooling](#repository-tooling).
 7. **Agent read tools** (D5; after the editor slices ship). Container: yes.
    - Add read-only `code-diagnostics` and `code-definition` app-managed tools
      to the closed catalog, through the provider SDK's tool transport, for
@@ -1708,11 +1766,14 @@ accounts or hardware.
    - _Verify:_ set by the addendum, including a macOS confined-debuggee smoke
      on a Mac.
    - _State:_ the [Debugger addendum](#debugger-addendum) was accepted on
-     2026-10-27; its sub-slices 8a to 8d are the delivery plan, and 8a is
-     built.
+     2026-10-27; its sub-slices 8a to 8d are the delivery plan. 8a to 8c are
+     built; 8d needs a Mac. Debugging a program's child processes (debugpy's
+     `debugpyAttach`) needs its own rule and is not built.
 
 The extension host is not planned (D7). Each slice is reviewable and leaves
 the editor working when the companion is off or refused.
+
+[macos-ci-2026-10-27]: https://github.com/Ogard-Labs/octant/actions/runs/40518838249/job/122239890114
 
 ## Verification for this document
 

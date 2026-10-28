@@ -8,6 +8,7 @@ import {
 import {
   access,
   chmod,
+  lstat,
   mkdir,
   readdir,
   readFile,
@@ -16,7 +17,7 @@ import {
   unlink,
   writeFile,
 } from "node:fs/promises";
-import { dirname, isAbsolute, join } from "node:path";
+import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { promisify } from "node:util";
 import {
   makeProcessConfinementLive,
@@ -313,16 +314,44 @@ async function prepareProcessLaunch(
  * runtime reading to start, less what a driver has no use for: `/bin` and
  * `/sbin` hold only programs it may not exec, and `/dev` is narrowed to the
  * data devices, because the person's own terminals are devices there that
- * their user may read.
+ * their user may read. `/Library/Apple` holds Apple's add-ons outside the
+ * sealed system, Rosetta's translator among them, which only an Intel
+ * runtime on Apple Silicon loads. `/usr` is narrowed to the loader and
+ * libraries in `lib` and the ICU and zone data in `share`: the rest holds
+ * programs it may not exec and, in `local`, whatever the person installed.
+ * `/private/var/db` is narrowed to the zone data the time-zone link leads
+ * to. Each narrowing is listed in the
+ * outside driver specification, so a runtime that fails to start without one
+ * can have that one restored.
  */
 const OUTSIDE_DRIVER_SYSTEM_READ_ROOTS = [
   "/System",
-  "/usr",
-  "/private/etc",
-  "/private/var/db",
-  "/Library/Apple",
+  "/usr/lib",
+  "/usr/share",
+  "/private/var/db/timezone",
 ] as const;
+/**
+ * The data volume, beneath the `/System` read root. Since macOS 10.15 the
+ * person's files live on a volume mounted at `/System/Volumes/Data`, and every
+ * folder the sealed system volume links there (`/Users`, `/private`, `/opt`,
+ * `/Applications`, `/Library`, `/usr/local`) can be spelled beneath it too:
+ * `/System/Volumes/Data/Users/<name>/...` is the file `/Users/<name>/...`. The
+ * home and `/private` denials name only the short spelling, so the volume is
+ * denied whole after every grant. A runtime names nothing by that spelling
+ * to start: its loader, libraries, and ICU data sit on the system volume and
+ * its Preboot cryptex, and the zone data it reaches through `/private` is
+ * read by that short path. The other volumes under `/System/Volumes`
+ * (Preboot among them, which holds that cryptex) stay readable.
+ */
+const OUTSIDE_DRIVER_DENIED_SYSTEM_ROOTS = ["/System/Volumes/Data"];
 const OUTSIDE_DRIVER_DEVICE_READS = ["/dev/null", "/dev/zero", "/dev/random", "/dev/urandom"];
+/**
+ * Of `/private/etc`, only the link naming the host's time zone, which a
+ * runtime follows to give the driver local time. The rest (the host's user
+ * and group lists, its hosts and name-service files, its SSH and sudo
+ * configuration) is nothing a driver with no network or exec has a use for.
+ */
+const OUTSIDE_DRIVER_SYSTEM_FILE_READS = ["/private/etc/localtime"];
 
 /**
  * The whole environment an outside driver gets, whatever the caller passed:
@@ -330,7 +359,10 @@ const OUTSIDE_DRIVER_DEVICE_READS = ["/dev/null", "/dev/zero", "/dev/random", "/
  * `TMPDIR` and `HOME`, so a runtime that keeps a cache under its home writes
  * only into the folder removed at stop and learns no path of the person's.
  * Nothing is inherited: no provider or cloud key, no broker coordinates, no
- * Project or checkout path.
+ * Project or checkout path. Electron's executable runs as Node only with
+ * `ELECTRON_RUN_AS_NODE=1`, so that runtime gets that one switch and nothing
+ * else: no `NODE_OPTIONS`, which would reach its Node through the default
+ * fuses, and no flag, since the entry is the command line's one argument.
  */
 function outsideDriverEnvironment(
   sandbox: OutsideDriverProcessSandbox,
@@ -340,7 +372,77 @@ function outsideDriverEnvironment(
     LANG: "en_US.UTF-8",
     HOME: sandbox.temporaryDirectory,
     TMPDIR: sandbox.temporaryDirectory,
+    ...(sandbox.runtime === "electron-node" ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
   };
+}
+
+/**
+ * What a driver's runtime reads to start. Bun reads its own folder and
+ * nothing beside it: it is one self-contained executable linking only the
+ * system's libraries, so neither the folder above it (`~/.bun`, which holds
+ * its install cache) nor, for a Homebrew Bun, the prefix's other formulae
+ * and OpenSSL config are read. Those grants were the extension profile's,
+ * whose Node loads modules from beside its folder and Homebrew libraries.
+ * Electron's Node loads Electron's framework, ICU data, and V8 snapshot from
+ * the app bundle that holds its executable (`<name>.app/Contents/MacOS/<name>`),
+ * so that bundle is the read root, taken from the runtime's own path. An
+ * Electron outside an app bundle is not a layout this profile was measured
+ * for, so it is refused rather than guessed at.
+ */
+function outsideDriverRuntimeReadRoots(
+  runtime: string,
+  kind: OutsideDriverProcessSandbox["runtime"],
+): ReadonlyArray<string> {
+  if (kind === "bun") {
+    return [dirname(runtime)];
+  }
+  const executableFolder = dirname(runtime);
+  const contents = dirname(executableFolder);
+  const bundle = dirname(contents);
+  if (
+    basename(executableFolder) !== "MacOS" ||
+    basename(contents) !== "Contents" ||
+    !bundle.endsWith(".app")
+  ) {
+    throw new Error("Extension process sandbox is unavailable on this host.");
+  }
+  return [bundle];
+}
+
+/**
+ * The temporary folder is the one place a driver may write, and the profile
+ * grants it whole, so it is checked here rather than trusted to the caller:
+ * a real folder (not a link to somewhere else), owned by this user and
+ * closed to everyone else, empty, and apart from the package it may only
+ * read and from the home folder whose private paths the profile denies. The
+ * driver process owner makes exactly such a folder for every start.
+ */
+async function assertOwnTemporaryFolder(
+  sandbox: OutsideDriverProcessSandbox,
+  homeDirectory: string | undefined,
+): Promise<void> {
+  const folder = sandbox.temporaryDirectory;
+  const overlaps = (left: string, right: string) =>
+    isInsideOrEqual(left, right) || isInsideOrEqual(right, left);
+  const status = await lstat(folder).catch(() => undefined);
+  const owner = process.getuid?.();
+  if (
+    status === undefined ||
+    !status.isDirectory() ||
+    status.isSymbolicLink() ||
+    (owner !== undefined && status.uid !== owner) ||
+    (status.mode & 0o077) !== 0 ||
+    (await readdir(folder).catch(() => undefined))?.length !== 0 ||
+    overlaps(folder, sandbox.packageRoot) ||
+    (homeDirectory !== undefined && isInsideOrEqual(homeDirectory, folder))
+  ) {
+    throw new Error("Outside driver temporary folder is not its own.");
+  }
+}
+
+function isInsideOrEqual(path: string, root: string): boolean {
+  const fromRoot = relative(root, path);
+  return fromRoot === "" || (!isAbsolute(fromRoot) && !fromRoot.split(/[\\/]/).includes(".."));
 }
 
 /**
@@ -363,13 +465,11 @@ async function prepareOutsideDriverLaunch(
   if (!isAbsolute(sandbox.packageRoot) || !isAbsolute(sandbox.temporaryDirectory)) {
     throw new Error("Extension sandbox paths must be absolute.");
   }
+  await assertOwnTemporaryFolder(sandbox, homeDirectory);
   const runtime = await realpath(input.command).catch(() => input.command);
-  const runtimeFolder = dirname(runtime);
   const readRoots = uniqueAbsolutePaths([
     sandbox.packageRoot,
-    runtimeFolder,
-    dirname(runtimeFolder),
-    ...homebrewRuntimeRoots(runtime),
+    ...outsideDriverRuntimeReadRoots(runtime, sandbox.runtime),
     ...OUTSIDE_DRIVER_SYSTEM_READ_ROOTS,
   ]);
   // As for the extension profile: the runtime reads "/" and stats every parent
@@ -378,6 +478,7 @@ async function prepareOutsideDriverLaunch(
   const readLiterals = uniqueAbsolutePaths([
     "/",
     ...OUTSIDE_DRIVER_DEVICE_READS,
+    ...OUTSIDE_DRIVER_SYSTEM_FILE_READS,
     ...(runtime === input.command ? [] : [input.command]),
   ]);
   const metadataLiterals = uniqueAbsolutePaths(
@@ -397,6 +498,13 @@ async function prepareOutsideDriverLaunch(
     temporaryDirectory: sandbox.temporaryDirectory,
     readRoots,
     networkEgress: "none",
+    // The builder lets every launch read the system's public TLS files so
+    // that an offline one fails at the socket rather than before it. A
+    // driver never opens a socket, so it reads none of them.
+    additionalDenyReadPaths: ["/private/etc/ssl"],
+    // Denied after the read roots, not among the denials above: those come
+    // before the roots, and the `/System` grant would open the volume again.
+    isolatedRoots: OUTSIDE_DRIVER_DENIED_SYSTEM_ROOTS,
     allowProcessExec: false,
     allowProcessFork: false,
     interpreterSearchPath: SAFE_PATH,

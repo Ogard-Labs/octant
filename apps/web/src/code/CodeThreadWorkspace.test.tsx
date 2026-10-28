@@ -18,6 +18,7 @@ import { AgentProfileNamesProvider } from "../agentProfile/AgentProfileNames";
 import { ThreadPlanProvider } from "../plan/ThreadPlanContext";
 import { CompactingThread } from "../context/compactionTestSupport";
 import { CodeThreadWorkspace } from "./CodeThreadWorkspace";
+import { RemoteCodeProjectsContext } from "../projects/sshRemoteProjectEntries";
 import type { CodeAttachmentClient } from "./CodeThreadWorkspace";
 import type { CodeController } from "./useCodeController";
 import type { PickerGroup } from "@octant/domain";
@@ -2479,6 +2480,58 @@ describe("CodeThreadWorkspace", () => {
     });
   });
 
+  it("shows a paired device an approval only the host's own windows may answer, without answer controls", () => {
+    const providerRequests = [
+      {
+        kind: "approval" as const,
+        approvalId: "30000000-0000-4000-8000-000000000003" as never,
+        summary: "Let this thread use Henrik's iPhone?",
+        localPersonOnly: true as const,
+      },
+    ];
+    const { unmount } = render(
+      <CodeThreadWorkspace
+        controller={controller({ providerRequests })}
+        pairedDevice
+        threadId={threadId}
+      />,
+    );
+    const card = screen.getByRole("group", { name: "Provider approval" });
+    expect(card).toHaveTextContent("Let this thread use Henrik's iPhone?");
+    expect(card).toHaveTextContent("Answer this on the computer running Octant.");
+    expect(within(card).queryByRole("button")).not.toBeInTheDocument();
+    unmount();
+
+    // The same card at a window on that computer is answered as usual.
+    render(
+      <CodeThreadWorkspace controller={controller({ providerRequests })} threadId={threadId} />,
+    );
+    const local = screen.getByRole("group", { name: "Provider approval" });
+    expect(within(local).getByRole("button", { name: "Approve" })).toBeInTheDocument();
+    expect(local).not.toHaveTextContent("Answer this on the computer running Octant.");
+  });
+
+  it("lets a paired device answer an approval the host accepts from it", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          providerRequests: [
+            {
+              kind: "approval",
+              approvalId: "30000000-0000-4000-8000-000000000003" as never,
+              summary: "terminal: run bun test",
+            },
+          ],
+        })}
+        pairedDevice
+        threadId={threadId}
+      />,
+    );
+    const card = screen.getByRole("group", { name: "Provider approval" });
+    expect(within(card).getByRole("button", { name: "Approve" })).toBeInTheDocument();
+    expect(within(card).getByRole("button", { name: "Deny" })).toBeInTheDocument();
+  });
+
   it("keeps provider requests immediately above the composer", () => {
     render(
       <CodeThreadWorkspace
@@ -3882,3 +3935,164 @@ async function chooseTurnAction(
   await user.click(within(turnArticle(turnText)).getByRole("button", { name: "More actions" }));
   await user.click(await screen.findByRole("menuitem", { name }));
 }
+
+describe("a Code thread on an SSH target", () => {
+  const remoteCheckout = {
+    id: "20000000-0000-4000-8000-000000000002",
+    repositoryId: "repo_" + "a".repeat(64),
+    kind: "remote-root",
+    availability: "available",
+    head: { kind: "none" },
+    observedAt: "2026-07-27T09:00:00.000Z",
+  };
+  const remoteController = (overrides: Partial<CodeController> = {}): CodeController => {
+    const base = controller(overrides);
+    return { ...base, activeView: { ...base.activeView, checkout: remoteCheckout } } as never;
+  };
+  const remoteProjects = (connection: "connected" | "not-connected") => ({
+    projects: [
+      {
+        projectId,
+        name: "Service",
+        location: "build@devbox:/home/build/service",
+        destination: "build@devbox",
+        target: {
+          connection,
+          admission: [
+            { posture: "plan", decision: { status: "admitted" } },
+            { posture: "approval-gated", decision: { status: "admitted" } },
+          ],
+        },
+      },
+    ],
+    refresh: () => undefined,
+  });
+
+  it("names where it runs and offers no fork, checkpoint, restore, or pull request", async () => {
+    const user = userEvent.setup();
+    const conversation = [
+      { id: "turn-1:user", role: "user" as const, text: "rewrite the parser", checkpoint },
+      {
+        id: "turn-1:assistant",
+        role: "assistant" as const,
+        text: "done",
+        operationId: "50000000-0000-4000-8000-000000000001",
+        status: "completed" as const,
+      },
+    ];
+    render(
+      <RemoteCodeProjectsContext.Provider value={remoteProjects("connected") as never}>
+        <CodeThreadWorkspace
+          controller={remoteController({ conversation } as never)}
+          nextUuid={() => "30000000-0000-4000-8000-000000000001"}
+          onCreatePullRequest={vi.fn()}
+          onOpenCodeThread={vi.fn()}
+          operationClient={{ executeOperation: vi.fn() } as never}
+          requestApproval={vi.fn(async () => undefined)}
+          threadId={threadId}
+        />
+      </RemoteCodeProjectsContext.Provider>,
+    );
+
+    expect(screen.getByLabelText("Checkout")).toHaveTextContent("build@devbox:/home/build/service");
+    expect(screen.queryByRole("button", { name: "Create pull request" })).toBeNull();
+    for (const text of ["done", "rewrite the parser"]) {
+      const menu = within(turnArticle(text)).queryByRole("button", { name: "More actions" });
+      if (menu === null) continue;
+      await user.click(menu);
+      expect(screen.queryByRole("menuitem", { name: "Fork from here" })).toBeNull();
+      expect(screen.queryByRole("menuitem", { name: /checkpoint/i })).toBeNull();
+      expect(screen.queryByRole("menuitem", { name: "Restore files to this point" })).toBeNull();
+      await user.keyboard("{Escape}");
+    }
+  });
+
+  it("says its target is not connected and offers no send until the host reports it back", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <RemoteCodeProjectsContext.Provider value={remoteProjects("not-connected") as never}>
+        <CodeThreadWorkspace controller={remoteController()} threadId={threadId} />
+      </RemoteCodeProjectsContext.Provider>,
+    );
+    await user.type(screen.getByLabelText("Follow-up message"), "Run the tests");
+    expect(screen.getByRole("button", { name: "Send follow-up" })).toBeDisabled();
+    expect(
+      screen.getByText("The SSH target is not connected. Connect it again when it is reachable."),
+    ).toBeVisible();
+
+    rerender(
+      <RemoteCodeProjectsContext.Provider value={remoteProjects("connected") as never}>
+        <CodeThreadWorkspace controller={remoteController()} threadId={threadId} />
+      </RemoteCodeProjectsContext.Provider>,
+    );
+    expect(screen.getByRole("button", { name: "Send follow-up" })).toBeEnabled();
+  });
+
+  it("offers no send on its placed agent while the host refuses that agent's runtime or has no path for it", async () => {
+    const user = userEvent.setup();
+    const withAgent = (runtimePath: "set" | "missing", approvalGated: object) => {
+      const base = remoteProjects("connected");
+      const [project] = base.projects;
+      return {
+        ...base,
+        projects: [
+          {
+            ...project,
+            target: {
+              ...project?.target,
+              target: { id: "55555555-5555-4555-8555-555555555555" },
+              placeableRuntimes: [
+                {
+                  providerInstanceId: providerId,
+                  runtimePath,
+                  admission: [
+                    { posture: "plan", decision: { status: "admitted" } },
+                    { posture: "approval-gated", decision: approvalGated },
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+      };
+    };
+    const view = (projects: object) => (
+      <RemoteCodeProjectsContext.Provider value={projects as never}>
+        <CodeThreadWorkspace
+          controller={remoteController()}
+          providerGroups={[providerGroup()]}
+          threadId={threadId}
+        />
+      </RemoteCodeProjectsContext.Provider>
+    );
+    const { rerender } = render(
+      view(
+        withAgent("set", {
+          status: "refused",
+          reason: "not-attested",
+          posture: "approval-gated",
+          probe: "runtime-read-ssh-directory",
+        }),
+      ),
+    );
+    await user.type(screen.getByLabelText("Follow-up message"), "Run the tests");
+    // The target itself admits Ask for approvals; only the agent's runtime is refused.
+    expect(screen.getByRole("button", { name: "Send follow-up" })).toBeDisabled();
+    expect(
+      screen.getByText(
+        "The target could not show that approval-gated work is confined (runtime-read-ssh-directory). Connect it again to attest.",
+      ),
+    ).toBeVisible();
+
+    rerender(view(withAgent("missing", { status: "admitted" })));
+    expect(screen.getByRole("button", { name: "Send follow-up" })).toBeDisabled();
+    expect(
+      screen.getByText(
+        `Set where this provider's runtime is on the SSH target before it runs there: octant ssh-target runtime 55555555-5555-4555-8555-555555555555 ${String(providerId)} <path>.`,
+      ),
+    ).toBeVisible();
+
+    rerender(view(withAgent("set", { status: "admitted" })));
+    expect(screen.getByRole("button", { name: "Send follow-up" })).toBeEnabled();
+  });
+});

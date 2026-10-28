@@ -1,4 +1,5 @@
 import type { ZenThreadCatalogEntry, ZenThreadCatalogRef } from "@octant/contracts/zen";
+import { thisComputerName, useHostPlatform } from "../platform";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCard } from "../ui/base/OctantCard";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -15,6 +16,7 @@ export interface ZenThreadPickerProps {
 }
 
 export function ZenThreadPicker(props: ZenThreadPickerProps) {
+  const computer = thisComputerName(useHostPlatform());
   return (
     /* ui-boundary-exception: non-modal-panel */
     <OctantCard
@@ -26,7 +28,7 @@ export function ZenThreadPicker(props: ZenThreadPickerProps) {
       <header className="card-head">
         <div>
           <h2>Threads</h2>
-          <p>Authorized work on this Mac. A pinned card keeps its original authority.</p>
+          <p>Authorized work on {computer}. A pinned card keeps its original authority.</p>
         </div>
         <OctantButton onClick={props.onClose} type="button" variant="ghost">
           Close

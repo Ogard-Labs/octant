@@ -1,6 +1,6 @@
 import { threadCompactionSubject } from "../context/CompactionDivider";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
-import type { ProviderModelOptionValues } from "@octant/contracts";
+import type { ProviderModelOptionValues, ThreadDocumentDelivery } from "@octant/contracts";
 import {
   ApplicationMentionTypeahead,
   BrowserUseMention,
@@ -26,7 +26,8 @@ import {
   startedCodeThreadPickerGroups,
   type PickerGroup,
 } from "@octant/domain";
-import { CirclePause, X } from "lucide-react";
+import { CirclePause, FileOutput, X } from "lucide-react";
+import { OctantMenu } from "../ui/base/OctantMenu";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
@@ -67,6 +68,13 @@ import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
 import { ThreadCanvases } from "../canvas/InlineThreadCanvas";
+import {
+  ThreadArtifactsConfirm,
+  ThreadArtifactsOffer,
+  threadArtifactsOfferRow,
+  threadMayChooseArtifacts,
+} from "../canvas/ThreadArtifactsChoice";
+import { publishedSnapshotRunRuntimeFor } from "../canvas/blocks/designRunningFrame";
 import { placeThreadCanvases, threadTurnSpans } from "../canvas/threadCanvasPlacement";
 import { useThreadCanvasCards } from "../canvas/useThreadCanvasCards";
 import type { HostId } from "@octant/contracts/host";
@@ -125,6 +133,15 @@ import type { ExtensionProviderFamily } from "@octant/contracts/extensions";
 import { providerFamilyForThread } from "../providers/providerFamily";
 import { useExtensionDraftSelections } from "../chat/useExtensionDraftSelections";
 import {
+  REMOTE_CODE_THREAD_CONNECTORS_UNAVAILABLE,
+  remoteCodeThreadPostureRefusal,
+  remoteCodeTurnReadiness,
+  remotePlacedAgentReadiness,
+} from "@octant/domain/ssh-target-recovery";
+import { remoteCodeProjectFor, useRemoteCodeProjects } from "../projects/sshRemoteProjectEntries";
+import { SSH_TARGET_TIMES } from "../host/sshTargetClient";
+import { remoteCodeThreadProviderGroups } from "./composer/remoteCodeComposer";
+import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
 } from "../composer/useComposerSlashCommands";
@@ -151,6 +168,12 @@ const UNAVAILABLE_ATTACHMENT_CLIENT: CodeAttachmentClient = {
 
 export interface CodeThreadWorkspaceProps {
   readonly controller: CodeController;
+  /**
+   * Set where a paired device shows the thread. An approval the host takes
+   * only from a window on its own computer is then shown without answer
+   * controls; the host would refuse this device's answer.
+   */
+  readonly pairedDevice?: boolean;
   readonly holdAccessNotice?: CodeThreadControllers["holdAccessNotice"];
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
   /**
@@ -263,6 +286,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       ? props.controller.activeView
       : undefined;
   const profileName = useAgentProfileName(view?.thread.profileId);
+  // A thread whose checkout is a folder on an SSH target. The host runs only
+  // its turns; every control below that would act on a folder of this host
+  // (checkpoints, rewind, forks, changed files, path mentions, Browser,
+  // Computer, connectors) is left out, and the host refuses each anyway.
+  const remoteCheckout = view?.checkout.kind === "remote-root";
+  const remoteProjects = useRemoteCodeProjects().projects;
+  const remoteProject = remoteCheckout
+    ? remoteCodeProjectFor(remoteProjects, view?.thread.projectId)
+    : undefined;
   const displayReady = props.controller.conversationHistory === "loaded";
   const firstPromptInFlight = props.controller.firstPromptInFlight;
   // A thread whose first prompt is on its way is not empty: asking the host
@@ -277,7 +309,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // the count, and querying every open conversation would rescan every worktree.
   const changedFiles = useObservedChangedFiles({
     client: props.controller.client,
-    enabled: displayReady && view !== undefined && plan != null && plan.status !== "withdrawn",
+    enabled:
+      displayReady &&
+      view !== undefined &&
+      !remoteCheckout &&
+      plan != null &&
+      plan.status !== "withdrawn",
     projectId: view?.thread.projectId,
     threadId: props.threadId,
   });
@@ -292,12 +329,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // an acknowledged message leaves the composer, so an async mention lookup cannot
   // erase a newer draft typed while that lookup is pending.
   const draftRevisionRef = useRef(0);
-  const runtimeCarriesTools = pickerGroupCarriesAppManagedTools(
-    props.providerGroups ?? [],
-    view === undefined
-      ? undefined
-      : { providerInstanceId: view.thread.providerInstanceId, modelId: view.thread.modelId },
-  );
+  const runtimeCarriesTools =
+    !remoteCheckout &&
+    pickerGroupCarriesAppManagedTools(
+      props.providerGroups ?? [],
+      view === undefined
+        ? undefined
+        : { providerInstanceId: view.thread.providerInstanceId, modelId: view.thread.modelId },
+    );
   const computer = useComputerUseMention({
     textarea: () => textareaRef.current,
     draft,
@@ -323,6 +362,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     projectId: view?.thread.projectId ?? null,
     threadId: view === undefined ? props.threadId : view.thread.id,
     ...(providerFamily === undefined ? {} : { providerFamily }),
+    ...(remoteCheckout ? { toolsRefusedReason: REMOTE_CODE_THREAD_CONNECTORS_UNAVAILABLE } : {}),
   });
   const browser = useBrowserUseMention({
     textarea: () => textareaRef.current,
@@ -356,6 +396,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const activeThreadKeyRef = useRef(String(props.threadId));
   activeThreadKeyRef.current = String(props.threadId);
   const [providerChanging, setProviderChanging] = useState(false);
+  const [deliveryChanging, setDeliveryChanging] = useState(false);
+  const [confirmArtifacts, setConfirmArtifacts] = useState(false);
   const optionSave = useRef<{ saving: boolean; queued: ProviderModelOptionValues | undefined }>({
     saving: false,
     queued: undefined,
@@ -401,7 +443,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     { readonly messageId: string; readonly kind: "mark" | "restore" } | undefined
   >();
   const checkpoints = useThreadCheckpoints({
-    enabled: displayReady && props.controller.conversation.length > 0,
+    enabled: displayReady && !remoteCheckout && props.controller.conversation.length > 0,
     threadId: String(props.threadId),
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
@@ -414,7 +456,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     };
   }, []);
   const scaffolds = useScaffoldCatalog({
-    enabled: emptyConversation,
+    enabled: emptyConversation && !remoteCheckout,
     threadId: String(props.threadId),
     checkoutId: String(view?.checkout.id ?? ""),
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
@@ -423,7 +465,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // The preset needs the checkout the thread is bound to. A thread without one
   // yet has nothing to arrange around, so the picker offers nothing.
   const presets = useWorkspacePresets({
-    enabled: emptyConversation,
+    enabled: emptyConversation && !remoteCheckout,
     threadId: props.threadId,
     ...(view === undefined ? {} : { checkoutId: view.checkout.id }),
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
@@ -545,7 +587,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // The path travels as ordinary prompt text; the host still decides what the
   // turn may read, so naming a file here reaches nothing on its own.
   const pathMentions = useCodePathMentions({
-    ...(props.fileListingClient === undefined ? {} : { client: props.fileListingClient }),
+    ...(props.fileListingClient === undefined || remoteCheckout
+      ? {}
+      : { client: props.fileListingClient }),
     threadId: props.threadId,
     checkoutId: view?.checkout.id,
     draft,
@@ -713,7 +757,31 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // The host owns follow-ups while a turn or queue is active, and refuses a
   // turn while the session compacts. Draft editing remains available while
   // the queue's acknowledgment is pending.
+  // While the host reports the thread's target unable to take this turn,
+  // the thread says why and offers no Start. A window that cannot read SSH
+  // targets leaves the decision to the host, which refuses the same way.
+  // A thread on an agent placed on the target also needs that runtime
+  // admitted in the posture and its path set there.
+  const runsPlacedAgent = (props.providerGroups ?? []).some(
+    (group) =>
+      String(group.instance.id) === String(thread.providerInstanceId) &&
+      group.runtime !== "octant-harness",
+  );
+  const remoteReadiness =
+    remoteCheckout && remoteProjects.length > 0
+      ? runsPlacedAgent
+        ? remotePlacedAgentReadiness(
+            remoteProject?.target,
+            String(thread.providerInstanceId),
+            nextTurnAccess,
+            SSH_TARGET_TIMES,
+          )
+        : remoteCodeTurnReadiness(remoteProject?.target, nextTurnAccess, SSH_TARGET_TIMES)
+      : undefined;
+  const remoteRefusal =
+    remoteReadiness?.status === "unavailable" ? remoteReadiness.message : undefined;
   const canSend =
+    remoteRefusal === undefined &&
     trimmed.length > 0 &&
     !compacting &&
     !attachments.busy &&
@@ -723,6 +791,26 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     !messageQueue.uncertain &&
     (!queueFollowUp || messageQueue.available);
   const providerGroups = props.providerGroups ?? [];
+  // The account must allow Claude artifacts for the thread to choose them; a
+  // thread that already chose them can always go back to Canvas.
+  const artifactsChoosable =
+    thread.lifecycle !== "archived" &&
+    threadMayChooseArtifacts(providerGroups, thread.providerInstanceId, "code");
+  const changeDocumentDelivery = async (documentDelivery: ThreadDocumentDelivery) => {
+    if (deliveryChanging) return;
+    setDeliveryChanging(true);
+    try {
+      await props.controller.execute({
+        kind: "change-code-thread-document-delivery",
+        threadId: thread.id,
+        expectedVersion: thread.version,
+        documentDelivery,
+      });
+    } finally {
+      setDeliveryChanging(false);
+      setConfirmArtifacts(false);
+    }
+  };
   const threadDriverKind = providerGroups.find(
     (group) => String(group.instance.id) === String(thread.providerInstanceId),
   )?.instance.driverKind;
@@ -743,12 +831,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const hasProviderSession = messages.some(
     (message) => message.role === "assistant" && message.status === "completed",
   );
-  const threadModelGroups = hasProviderSession
+  const sessionModelGroups = hasProviderSession
     ? startedCodeThreadPickerGroups(providerGroups, {
         providerInstanceId: thread.providerInstanceId,
         modelId: thread.modelId,
       })
     : providerGroups;
+  const threadModelGroups = remoteCheckout
+    ? remoteCodeThreadProviderGroups(sessionModelGroups, remoteProject?.target)
+    : sessionModelGroups;
   // The provider the conversation's session lives on is the one the last
   // finished reply came from, or the one a switching turn's journaled handoff
   // opened a session on even if that turn then stopped: the host records the
@@ -782,6 +873,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     ),
     threadCanvases.cards,
   );
+  // Offered once: an answer either way is the thread's journaled choice.
+  const artifactsOfferRow = threadArtifactsOfferRow({
+    choosable: artifactsChoosable,
+    documentDelivery: thread.documentDelivery,
+    rowKeys: messages.map((message) => message.id),
+    canvasesByRow: canvasPlacement.byRow,
+  });
   const liveTasks = liveTaskProgress(
     messages.flatMap((message) => {
       if (message.role !== "assistant" || message.operationId === undefined) return [];
@@ -1398,11 +1496,19 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             ? {}
             : {
                 afterItem: (message: (typeof messages)[number]) => (
-                  <ThreadCanvases
-                    cards={canvasPlacement.byRow.get(message.id)}
-                    client={canvasClient}
-                    {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
-                  />
+                  <>
+                    <ThreadCanvases
+                      cards={canvasPlacement.byRow.get(message.id)}
+                      client={canvasClient}
+                      {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
+                    />
+                    {message.id === artifactsOfferRow ? (
+                      <ThreadArtifactsOffer
+                        onChoose={(choice) => void changeDocumentDelivery(choice)}
+                        pending={deliveryChanging}
+                      />
+                    ) : null}
+                  </>
                 ),
               })}
           renderItem={(message, index) => {
@@ -1490,12 +1596,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   <TurnActionMenu
                     actions={codeTurnActions({
                       canFork:
+                        !remoteCheckout &&
                         message.role === "assistant" &&
                         message.operationId !== undefined &&
                         message.status === "completed" &&
                         props.onOpenCodeThread !== undefined,
                       // A fork's own finished replies; inherited ones are the source's.
                       canMergeBack:
+                        !remoteCheckout &&
                         view?.thread.forkedFrom !== undefined &&
                         message.sourceThreadId === undefined &&
                         message.role === "assistant" &&
@@ -1507,12 +1615,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         message.status === "completed" &&
                         message.text.trim().length > 0,
                       canCheckpoint:
+                        !remoteCheckout &&
                         message.sourceThreadId === undefined &&
                         message.role === "assistant" &&
                         message.operationId !== undefined &&
                         message.status === "completed" &&
                         checkpoints.available,
                       canRestoreFiles:
+                        !remoteCheckout &&
                         message.sourceThreadId === undefined &&
                         message.role === "user" &&
                         message.checkpoint !== undefined &&
@@ -1609,6 +1719,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         {activity === undefined ? null : (
                           <TurnActivityRows
                             activity={activity}
+                            publishedSnapshotRuntime={(toolCallId) =>
+                              publishedSnapshotRunRuntimeFor(props.canvasClient, {
+                                mode: "code",
+                                threadId: String(thread.id),
+                                toolCallId,
+                              })
+                            }
                             running={message.status === "incomplete"}
                             settled={
                               message.status === "completed" ||
@@ -1767,17 +1884,25 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         >
           {props.controller.providerRequests.map((request) =>
             request.kind === "approval" ? (
-              <ProviderApprovalPrompt
-                key={String(request.approvalId)}
-                onAnswer={(decision) =>
-                  void props.controller.answerProviderRequest({
-                    kind: "approval",
-                    approvalId: request.approvalId,
-                    decision,
-                  })
-                }
-                summary={request.summary}
-              />
+              props.pairedDevice === true && request.localPersonOnly === true ? (
+                <ProviderApprovalPrompt
+                  answeredAtHost
+                  key={String(request.approvalId)}
+                  summary={request.summary}
+                />
+              ) : (
+                <ProviderApprovalPrompt
+                  key={String(request.approvalId)}
+                  onAnswer={(decision) =>
+                    void props.controller.answerProviderRequest({
+                      kind: "approval",
+                      approvalId: request.approvalId,
+                      decision,
+                    })
+                  }
+                  summary={request.summary}
+                />
+              )
             ) : (
               <ProviderQuestionCard
                 key={request.requestId}
@@ -1810,6 +1935,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         threadId={String(props.threadId)}
         turnActive={busy}
       />
+      {remoteRefusal === undefined ? null : (
+        <p className="code-thread-workspace__remote-notice thread-column" role="status">
+          {remoteRefusal}
+        </p>
+      )}
       <ThreadComposer
         queue={<ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />}
         threadBusy={busy || (messageQueue.snapshot?.items.length ?? 0) > 0}
@@ -1817,9 +1947,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         {...(threadDropKey === undefined ? {} : { threadDropKey })}
         context={
           <CodeCheckoutBar
-            {...(props.onCreatePullRequest === undefined
+            {...(props.onCreatePullRequest === undefined || remoteCheckout
               ? {}
               : { onCreatePullRequest: props.onCreatePullRequest })}
+            {...(remoteProject === undefined ? {} : { remoteLocation: remoteProject.location })}
           />
         }
         className="thread-composer code-thread-workspace__composer thread-column"
@@ -2061,6 +2192,43 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               {plan == null || plan.status === "withdrawn" ? (
                 <ThreadPlanProposal key={String(thread.id)} />
               ) : null}
+              {thread.documentDelivery === "native-artifacts" || artifactsChoosable ? (
+                <OctantMenu
+                  items={
+                    thread.documentDelivery === "native-artifacts"
+                      ? [
+                          {
+                            value: "canvas",
+                            label: "Use Canvas instead of Claude artifacts",
+                            disabled: deliveryChanging,
+                          },
+                        ]
+                      : [
+                          {
+                            value: "native-artifacts",
+                            label: "Use Claude artifacts instead of Canvas",
+                            disabled: deliveryChanging,
+                          },
+                        ]
+                  }
+                  onValueChange={(value) => {
+                    if (value === "canvas") void changeDocumentDelivery("canvas");
+                    else setConfirmArtifacts(true);
+                  }}
+                  selectionMode="action"
+                  trigger={<FileOutput aria-hidden="true" size={16} />}
+                  triggerClassName="shell-icon-button"
+                  triggerLabel="How this thread delivers documents"
+                  value=""
+                />
+              ) : null}
+              {confirmArtifacts ? (
+                <ThreadArtifactsConfirm
+                  onCancel={() => setConfirmArtifacts(false)}
+                  onConfirm={() => void changeDocumentDelivery("native-artifacts")}
+                  pending={deliveryChanging}
+                />
+              ) : null}
               <CodeAccessPicker
                 {...(props.harnessAutoReviewSupported === true
                   ? {
@@ -2081,6 +2249,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 onLowerThread={(next) => void changeAccess(next)}
                 onRaiseThread={(next) => void changeAccess(next)}
                 onSelect={setTurnAccessOverride}
+                {...(remoteCheckout ? { raiseRefusal: remoteCodeThreadPostureRefusal } : {})}
                 value={nextTurnAccess}
               />
             </>

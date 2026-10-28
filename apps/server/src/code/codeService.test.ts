@@ -36,6 +36,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { remoteCodeThreadPostureRefusal } from "@octant/domain/ssh-target-recovery";
 import { describe, expect, it, vi } from "vitest";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import { CodeContentStore, type CodeContentStoreOptions } from "./codeContentStore";
@@ -1698,6 +1699,100 @@ describe("CodeService commands", () => {
     ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
   });
 
+  describe("a thread whose checkout is on an SSH target", () => {
+    // A remote turn takes no checkpoint, so an edit accepted without review
+    // has no way back on the target, and Full access has nowhere to be
+    // remembered for a remote-bound Project. The window offers neither, and
+    // a command sent around the window must be refused here too.
+    const remoteCheckout = decodeCodeCheckoutIdentity({
+      id: ids.checkout,
+      repositoryId,
+      kind: "remote-root",
+      availability: "available",
+      head: { kind: "none" },
+      observedAt: now,
+    });
+
+    it("refuses to create one in Auto-accept edits or Full access and journals nothing", async () => {
+      for (const executionPolicy of ["auto-accept-edits", "full-access"] as const) {
+        const fixture = serviceFixture({
+          threads: [],
+          checkout: remoteCheckout,
+          observedCheckout: remoteCheckout,
+          approve: true,
+        });
+        await expect(
+          fixture.service.execute(ids.window, {
+            kind: "create-code-thread",
+            thread: thread({ executionPolicy }),
+          }),
+        ).rejects.toMatchObject({
+          failure: {
+            category: "unauthorized",
+            message: remoteCodeThreadPostureRefusal(executionPolicy),
+          },
+        });
+        expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+      }
+    });
+
+    it("creates one in Plan or Ask for approvals", async () => {
+      for (const executionPolicy of ["plan", "approval-gated"] as const) {
+        const created = thread({ executionPolicy });
+        const fixture = serviceFixture({
+          threads: [],
+          checkout: remoteCheckout,
+          observedCheckout: remoteCheckout,
+        });
+        await expect(
+          fixture.service.execute(ids.window, { kind: "create-code-thread", thread: created }),
+        ).resolves.toEqual({ kind: "thread-created", thread: created });
+      }
+    });
+
+    it("refuses to raise one to Auto-accept edits or Full access, even with native approval", async () => {
+      for (const executionPolicy of ["auto-accept-edits", "full-access"] as const) {
+        const fixture = serviceFixture({
+          threads: [thread({ executionPolicy: "approval-gated" })],
+          checkout: remoteCheckout,
+          approve: true,
+        });
+        await expect(
+          fixture.service.execute(ids.window, {
+            kind: "change-code-thread-access",
+            threadId: ids.thread,
+            expectedVersion: 1,
+            executionPolicy,
+            permissionPersistence: "current-session",
+            approvalId: "00000000-0000-4000-8000-000000000088" as never,
+          }),
+        ).rejects.toMatchObject({
+          failure: {
+            category: "unauthorized",
+            message: remoteCodeThreadPostureRefusal(executionPolicy),
+          },
+        });
+        expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+      }
+    });
+
+    it("still narrows one to Plan", async () => {
+      const fixture = serviceFixture({
+        threads: [thread({ executionPolicy: "approval-gated" })],
+        checkout: remoteCheckout,
+      });
+      await expect(
+        fixture.service.execute(ids.window, {
+          kind: "change-code-thread-access",
+          threadId: ids.thread,
+          expectedVersion: 1,
+          executionPolicy: "plan",
+          permissionPersistence: "current-session",
+        }),
+      ).resolves.toMatchObject({ kind: "thread-updated", thread: { executionPolicy: "plan" } });
+    });
+  });
+
   it("denies durable Full access until the canonical Code Project opts in", async () => {
     const current = thread({ executionPolicy: "approval-gated" });
     const fixture = serviceFixture({
@@ -1912,6 +2007,54 @@ describe("CodeService commands", () => {
       kind: "thread-updated",
       thread: expect.objectContaining({ title: "Rewrite the importer", version: 2 }),
     });
+  });
+
+  it("records the thread's choice of Claude artifacts and refuses it on an archived thread", async () => {
+    const fixture = serviceFixture();
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "change-code-thread-document-delivery",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        documentDelivery: "native-artifacts",
+      }),
+    ).resolves.toEqual({
+      kind: "thread-updated",
+      thread: expect.objectContaining({ documentDelivery: "native-artifacts", version: 2 }),
+    });
+    const stored =
+      fixture.persistence.journal.append.mock.calls.at(-1)?.[0].events[0].payload.thread;
+    expect(stored).toMatchObject({ documentDelivery: "native-artifacts" });
+
+    const archived = serviceFixture({ threads: [thread({ lifecycle: "archived" })] });
+    await expect(
+      archived.service.execute(ids.window, {
+        kind: "change-code-thread-document-delivery",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        documentDelivery: "native-artifacts",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+  });
+
+  it("refuses to create a thread that already chose Claude artifacts", async () => {
+    // The choice turns on the runtime's telemetry, so it is made only through
+    // the change command a paired device cannot send; a created thread that
+    // carried it would let any caller of create skip that refusal.
+    const fixture = serviceFixture({ threads: [] });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "create-code-thread",
+        thread: thread({ executionPolicy: "approval-gated", documentDelivery: "native-artifacts" }),
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "create-code-thread",
+        thread: thread({ executionPolicy: "approval-gated" }),
+      }),
+    ).resolves.toMatchObject({ kind: "thread-created" });
   });
 
   it("pins a thread and erases the pin again rather than storing a false", async () => {

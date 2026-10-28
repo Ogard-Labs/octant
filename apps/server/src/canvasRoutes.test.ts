@@ -13,6 +13,7 @@ import {
   decodeCanvasActionResult,
   decodeCanvasHistoryOutcome,
   decodeCanvasCreateResult,
+  decodeCanvasHtmlImportResult,
   decodeCanvasThreadReferenceCardsOutcome,
   decodeCanvasId,
   decodeCanvasInventoryList,
@@ -34,6 +35,10 @@ import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
 import { ProjectionRegistry } from "./persistence/projection";
 import { openSqlite } from "./persistence/sqlitePort";
 import { CanvasEventStore } from "./canvas/canvasEventStore";
+import {
+  canvasOutsideContentWriters,
+  registerCanvasOutsideContentEvents,
+} from "./canvas/canvasOutsideContentMark";
 import { CanvasProjection } from "./canvas/canvasProjection";
 import { CanvasService } from "./canvas/canvasService";
 import { CanvasDesignRunTickets } from "./canvas/canvasDesignPage";
@@ -88,6 +93,11 @@ function createRevisionRoute(
     /** Seed the Canvas as owned by its thread, with no Project, and open the window on no Project. */
     readonly threadOwned?: boolean;
     readonly activeMode?: "chat" | "work";
+    /** Handed the route's journal, for a test that reads what it recorded. */
+    readonly journal?: (journal: Journal) => void;
+    readonly findPublishedSnapshot?: Parameters<
+      typeof createCanvasRouteHandler
+    >[0]["findPublishedSnapshot"];
   } = {},
 ) {
   const canvasProjectId = options.threadOwned === true ? null : projectId;
@@ -144,14 +154,16 @@ function createRevisionRoute(
   directories.push(directory);
   const connection = openSqlite(join(directory, "events.sqlite3"));
   applyMigrations(connection, MIGRATIONS, () => now);
-  const registry = registerCanvasExportFolderEvents(
-    registerCanvasCommentEvents(
-      registerCanvasShareEvents(
-        new EventRegistry()
-          .register(CANVAS_CREATED, 1, CanvasCreated)
-          .register(CANVAS_VERSION_APPENDED, 1, CanvasVersionAppended)
-          .register(CANVAS_REFRESH_RECEIPT_RECORDED, 1, CanvasRefreshReceiptRecorded)
-          .register(CANVAS_ACTION_RECEIPT_RECORDED, 1, CanvasActionReceiptRecorded),
+  const registry = registerCanvasOutsideContentEvents(
+    registerCanvasExportFolderEvents(
+      registerCanvasCommentEvents(
+        registerCanvasShareEvents(
+          new EventRegistry()
+            .register(CANVAS_CREATED, 1, CanvasCreated)
+            .register(CANVAS_VERSION_APPENDED, 1, CanvasVersionAppended)
+            .register(CANVAS_REFRESH_RECEIPT_RECORDED, 1, CanvasRefreshReceiptRecorded)
+            .register(CANVAS_ACTION_RECEIPT_RECORDED, 1, CanvasActionReceiptRecorded),
+        ),
       ),
     ),
   );
@@ -164,6 +176,7 @@ function createRevisionRoute(
     projections,
     clock: () => now as never,
   });
+  options.journal?.(journal);
   const actor = Schema.decodeUnknownSync(EventActor)({
     kind: "local-user",
     actorId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -234,6 +247,10 @@ function createRevisionRoute(
   const route = createCanvasRouteHandler({
     canvasProjection: projection,
     canvasService,
+    designRunTickets: new CanvasDesignRunTickets(() => 1),
+    ...(options.findPublishedSnapshot === undefined
+      ? {}
+      : { findPublishedSnapshot: options.findPublishedSnapshot }),
     canvasShareService,
     canvasExportFolderService,
     resolveFolderCandidate: async (_windowId, input) => {
@@ -680,6 +697,176 @@ describe("canvas routes", () => {
     // The scope crosses the wire through the strict outcome schema, so a
     // client can echo it on a mutation instead of inferring one.
     expect(body.workspace).toEqual({ kind: "chat-virtual", projectId: null });
+  });
+
+  it("hands an authorized window its Canvas as one HTML file with its images, and another Project's window nothing", async () => {
+    const projection = new CanvasProjection();
+    seedProjection(projection);
+    const current = projection.getById(canvasId)?.currentVersion;
+    if (current === undefined) throw new Error("expected a seeded Canvas");
+    const versionId = "33333333-3333-4333-8333-333333333333";
+    projection.applyVersionAppended({
+      canvasId,
+      version: {
+        ...current,
+        versionId: versionId as never,
+        sequence: 2,
+        definition: {
+          ...current.definition,
+          blocks: [
+            ...current.definition.blocks,
+            {
+              blockId: "phone" as never,
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              kind: "design",
+              title: "Onboarding",
+              size: "phone",
+              assets: [
+                {
+                  assetId: "hero" as never,
+                  source: {
+                    kind: "generated-image",
+                    imageId: "44444444-4444-4444-8444-444444444444" as never,
+                  },
+                },
+              ],
+              frames: [
+                {
+                  frameId: "home" as never,
+                  title: "Home",
+                  html: '<img src="octant-asset:hero" alt="">',
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability: windowCapability, now: 0 });
+    const canvasService = new CanvasService(
+      {
+        projection,
+        eventStore: {
+          appendVersion: () => {
+            throw new Error("not used");
+          },
+        } as never,
+        uuid: () => "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        clock: () => later as never,
+      },
+      {
+        authorize: () => true,
+        resolveWorkspace: () => ({ kind: "chat-virtual", projectId: null }),
+      },
+    );
+    const resolveDesignAssets = vi.fn(async () => [
+      {
+        assetId: "hero" as never,
+        status: "resolved" as const,
+        mediaType: "image/png" as const,
+        data: "iVBORw0KGgo=",
+      },
+    ]);
+    let active = projectId;
+    const route = createCanvasRouteHandler({
+      canvasProjection: projection,
+      canvasService,
+      windowAuthorityStore: store,
+      resolveDesignAssets,
+      projects: {
+        bootstrap: async () => ({
+          active: [
+            {
+              id: projectId,
+              name: "Chat Project",
+              type: "chat",
+              lifecycle: "active",
+              pinned: false,
+              rank: "0/1" as never,
+              version: 1 as never,
+              createdAt: now as never,
+              updatedAt: now as never,
+            },
+          ],
+          archived: [],
+          availability: [],
+          memory: [],
+        }),
+      },
+      activeContextResolver: async () => ({ mode: "chat", projectId: active }),
+      now: () => 1,
+    });
+    const ask = async (body: unknown) => {
+      const response = await route(
+        new Request("http://127.0.0.1/api/canvas/html-file", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-octant-window-capability": windowCapability,
+          },
+          body: JSON.stringify(body),
+        }),
+      );
+      return { status: response?.status, body: JSON.parse((await response?.text()) ?? "{}") };
+    };
+    const request = {
+      schemaVersion: 1,
+      kind: "canvas-html-file",
+      canvasId: String(canvasId),
+      versionId,
+    };
+
+    const ready = await ask(request);
+    expect(ready.status).toBe(200);
+    expect(ready.body).toMatchObject({
+      kind: "ready",
+      canvasId: String(canvasId),
+      versionId,
+      fileName: "Quarterly summary.html",
+      writesDesignMarkup: true,
+      imagesLeftOut: 0,
+    });
+    const html: string = ready.body.html;
+    expect(html).toContain("<h1>Quarterly summary</h1>");
+    expect(html).toContain('sandbox=""');
+    expect(html).toContain("data:image/png;base64,iVBORw0KGgo=");
+    // The file is the reader's; none of the host's identities travel in it.
+    for (const leak of [
+      String(projectId),
+      threadId,
+      String(canvasId),
+      versionId,
+      "octant-asset:",
+    ]) {
+      expect(html).not.toContain(leak);
+    }
+    expect(resolveDesignAssets).toHaveBeenCalledWith(
+      expect.objectContaining({ blockId: "phone" }),
+      expect.objectContaining({ mode: "chat", projectId, threadId }),
+    );
+
+    // A request the contract does not admit is refused as a value.
+    expect((await ask({ ...request, path: "/etc/hosts" })).body).toMatchObject({
+      kind: "refused",
+      code: "malformed",
+    });
+
+    // A window looking at another Project is told nothing and resolves nothing.
+    resolveDesignAssets.mockClear();
+    active = otherProjectId;
+    expect((await ask(request)).body).toMatchObject({ kind: "refused", code: "unauthorized" });
+    expect(resolveDesignAssets).not.toHaveBeenCalled();
+
+    // A request without the window credential is refused before anything is read.
+    const anonymous = await route(
+      new Request("http://127.0.0.1/api/canvas/html-file", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(request),
+      }),
+    );
+    expect(anonymous?.status).toBe(401);
   });
 
   it("resolves a design's images for an authorized window from the version's own provenance, and nothing for another Project", async () => {
@@ -1246,6 +1433,238 @@ describe("canvas routes", () => {
     );
     const outcome = decodeCanvasThreadReferenceCardsOutcome(JSON.parse(await cards!.text()));
     expect(outcome.cards.map((card) => card.canvasId)).toContain(result.card.canvasId);
+  });
+
+  describe("importing an HTML page", () => {
+    const headers = {
+      "content-type": "application/json",
+      "x-octant-window-capability": windowCapability,
+    };
+    const importBody = (html: string, overrides: Record<string, unknown> = {}) => {
+      const {
+        intent: _intent,
+        prompt: _prompt,
+        sourceManifest: _sources,
+        title: _title,
+        ...scope
+      } = createBody();
+      return {
+        ...scope,
+        kind: "canvas-html-import",
+        source: "file",
+        fileName: "habit-tracker.html",
+        html,
+        ...overrides,
+      };
+    };
+    const post = async (
+      route: ReturnType<typeof createRevisionRoute>,
+      path: string,
+      body: unknown,
+    ) => {
+      const response = await route(
+        new Request(`http://127.0.0.1${path}`, {
+          method: "POST",
+          headers,
+          body: typeof body === "string" ? body : JSON.stringify(body),
+        }),
+      );
+      if (response === undefined) throw new Error(`expected ${path} to answer`);
+      return response;
+    };
+    const runningPage =
+      "<!doctype html><html><head><title>Tracker</title>" +
+      '<script src="https://cdn.tailwindcss.com"></script></head>' +
+      '<body><button onclick="add()">Add</button><output id="n">0</output>' +
+      "<script>let n = 0; function add() { n += 1; }</script></body></html>";
+
+    it("lands a page with script only as a running design, served under the running page's sandbox and policy", async () => {
+      let journal: Journal | undefined;
+      const route = createRevisionRoute(new CanvasProjection(), {
+        journal: (opened) => {
+          journal = opened;
+        },
+      });
+
+      const response = await post(route, "/api/canvas/import-html", importBody(runningPage));
+      expect(response.status).toBe(200);
+      const result = decodeCanvasHtmlImportResult(JSON.parse(await response.text()));
+      if (result.kind !== "imported") throw new Error(`expected an import, got ${result.kind}`);
+      expect(result.frame).toBe("running");
+      expect(result.dropped).toEqual([
+        { kind: "script-file", count: 1, examples: ["https://cdn.tailwindcss.com"] },
+      ]);
+      // Named by its file, not by the page's own title, which an agent's
+      // Canvas list would hand on without reading the Canvas.
+      expect(result.card.title).toBe("habit-tracker");
+
+      const got = await route(
+        new Request(`http://127.0.0.1/api/canvas/get?canvasId=${String(result.card.canvasId)}`, {
+          method: "GET",
+          headers: { "x-octant-window-capability": windowCapability },
+        }),
+      );
+      const outcome = JSON.parse(await got!.text());
+      expect(outcome.version.definition.blocks).toEqual([
+        expect.objectContaining({
+          kind: "design",
+          title: "Tracker",
+          size: "document",
+          theme: "none",
+          runsScript: true,
+        }),
+      ]);
+      // The Canvas carries outside content from its first version.
+      expect(canvasOutsideContentWriters(journal!, String(result.card.canvasId))).toEqual([
+        `imported-page:${String(result.card.versionId)}`,
+      ]);
+
+      const run = await post(route, "/api/canvas/design-run", {
+        canvasId: String(result.card.canvasId),
+        versionId: String(result.card.versionId),
+        blockId: "imported-page",
+      });
+      const ready = JSON.parse(await run.text());
+      expect(ready.kind).toBe("ready");
+      const page = await route(
+        new Request(`http://127.0.0.1${ready.page as string}`, {
+          method: "GET",
+          headers: { "sec-fetch-dest": "iframe" },
+        }),
+      );
+      expect(page?.status).toBe(200);
+      const policy = page?.headers.get("content-security-policy") ?? "";
+      expect(policy.startsWith("sandbox allow-scripts; ")).toBe(true);
+      expect(policy).not.toContain("allow-same-origin");
+      expect(policy).toContain("connect-src 'none'");
+      const served = await page!.text();
+      expect(served).toContain("function add()");
+      expect(served).not.toContain("cdn.tailwindcss.com");
+    });
+
+    it("runs a thread's published page only from the host's own snapshot, under the design page's rules", async () => {
+      const asked: unknown[] = [];
+      const snapshots: Record<string, { format: "html" | "markdown"; content: string }> = {
+        "tool-script": {
+          format: "html",
+          content: '<button onclick="add()">Add</button><script>function add() {}</script>',
+        },
+        "tool-static": { format: "html", content: "<h1>Plain</h1>" },
+        "tool-notes": { format: "markdown", content: "# Notes" },
+      };
+      const route = createRevisionRoute(new CanvasProjection(), {
+        findPublishedSnapshot: async (_windowId, request) => {
+          asked.push(request);
+          return snapshots[request.toolCallId];
+        },
+      });
+      const threadId = "abababab-abab-4bab-8bab-000000000901";
+      const run = async (toolCallId: string) =>
+        JSON.parse(
+          await (
+            await post(route, "/api/canvas/published-snapshot-run", {
+              mode: "work",
+              threadId,
+              toolCallId,
+            })
+          ).text(),
+        );
+      const ready = await run("tool-script");
+      expect(ready.kind).toBe("ready");
+      expect(asked[0]).toEqual({ mode: "work", threadId, toolCallId: "tool-script" });
+      const page = await route(
+        new Request(`http://127.0.0.1${ready.page as string}`, {
+          method: "GET",
+          headers: { "sec-fetch-dest": "iframe" },
+        }),
+      );
+      expect(page?.status).toBe(200);
+      const policy = page?.headers.get("content-security-policy") ?? "";
+      expect(policy.startsWith("sandbox allow-scripts; ")).toBe(true);
+      expect(policy).toContain("connect-src 'none'");
+      expect(await page!.text()).toContain("function add()");
+
+      for (const toolCallId of ["tool-static", "tool-notes", "tool-missing"]) {
+        expect((await run(toolCallId)).kind).toBe("unavailable");
+      }
+      // The request names a step; it never carries the page.
+      const forged = await post(route, "/api/canvas/published-snapshot-run", {
+        mode: "work",
+        threadId,
+        toolCallId: "tool-script",
+        html: "<script>steal()</script>",
+      });
+      expect(forged.status).toBe(400);
+    });
+
+    it("lands a page with no script as a static design that cannot be run", async () => {
+      const route = createRevisionRoute();
+      const response = await post(
+        route,
+        "/api/canvas/import-html",
+        importBody('<h1>Plain</h1><img src="https://images.test/a.png" alt="">', {
+          source: "paste",
+          fileName: undefined,
+          title: "Pasted",
+        }),
+      );
+      const result = decodeCanvasHtmlImportResult(JSON.parse(await response.text()));
+      if (result.kind !== "imported") throw new Error(`expected an import, got ${result.kind}`);
+      expect(result.frame).toBe("static");
+      expect(result.card.title).toBe("Pasted");
+      expect(result.dropped).toEqual([
+        { kind: "file", count: 1, examples: ["https://images.test/a.png"] },
+      ]);
+      const run = await post(route, "/api/canvas/design-run", {
+        canvasId: String(result.card.canvasId),
+        versionId: String(result.card.versionId),
+        blockId: "imported-page",
+      });
+      expect(JSON.parse(await run.text()).kind).toBe("unavailable");
+    });
+
+    it("refuses an oversized, non-HTML, or unterminated page and writes no Canvas", async () => {
+      const projection = new CanvasProjection();
+      const route = createRevisionRoute(projection);
+      const before = projection.byProject(projectId).length;
+      const refusal = async (body: unknown) => {
+        const response = await post(route, "/api/canvas/import-html", body);
+        expect(response.status).toBe(200);
+        const result = decodeCanvasHtmlImportResult(JSON.parse(await response.text()));
+        if (result.kind !== "refused") throw new Error(`expected a refusal, got ${result.kind}`);
+        return result.reason;
+      };
+
+      expect(await refusal(importBody(`<p>${"é".repeat(140_000)}</p>`))).toBe("too-large");
+      // Past what the route reads at all, the answer is still that it is too large.
+      expect(await refusal(JSON.stringify(importBody("x".repeat(1_100_000))))).toBe("too-large");
+      expect(await refusal(importBody("Meeting notes, no markup."))).toBe("not-html");
+      expect(await refusal(importBody("<p>ok</p><script>let x = 1;"))).toBe("unparseable");
+      expect(await refusal(importBody("<head><title>Only a title</title></head>"))).toBe("empty");
+      expect(projection.byProject(projectId)).toHaveLength(before);
+    });
+
+    it("refuses an import into a Project or mode the window could not create a Canvas in", async () => {
+      const projection = new CanvasProjection();
+      const route = createRevisionRoute(projection);
+      const before = projection.byProject(projectId).length;
+      const response = await post(
+        route,
+        "/api/canvas/import-html",
+        importBody("<p>Hi</p>", {
+          workspace: { kind: "chat-virtual", projectId: String(otherProjectId) },
+        }),
+      );
+      expect(decodeCanvasHtmlImportResult(JSON.parse(await response.text()))).toMatchObject({
+        kind: "denied",
+        denialCode: "scope-mismatch",
+      });
+
+      const workWindow = createRevisionRoute(new CanvasProjection(), { activeMode: "work" });
+      const refused = await post(workWindow, "/api/canvas/import-html", importBody("<p>Hi</p>"));
+      expect(decodeCanvasHtmlImportResult(JSON.parse(await refused.text())).kind).toBe("denied");
+      expect(projection.byProject(projectId)).toHaveLength(before);
+    });
   });
 
   it("serves a Canvas owned by a Chat thread outside every Project to a Chat window with no Project, lists it on that thread, and files its exports under the host folder", async () => {

@@ -710,7 +710,7 @@ describe("createCanvasAgentTools", () => {
     );
   });
 
-  it("lets an agent create a pie, a donut, stacked and grouped bars, a bar and line chart, a funnel, a radar, and a sankey from the examples describe returns", async () => {
+  it("lets an agent create a pie, a donut, stacked and grouped bars, a bar and line chart, a funnel, a radar, a sankey, and titled charts with callouts from the examples describe returns", async () => {
     const { create, set } = tools();
     const described = await set.execute({
       name: CANVAS_TOOL_NAME,
@@ -732,6 +732,8 @@ describe("createCanvasAgentTools", () => {
       "funnel",
       "radar",
       "sankey",
+      "line",
+      "bar",
     ]);
     expect(result.blockSchema?.properties?.chartType?.enum).toEqual(
       expect.arrayContaining([
@@ -1826,6 +1828,24 @@ describe("createCanvasAgentTools", () => {
       );
       expect(description).toContain("this Code thread's checkout");
       expect(description).toContain("grants no file, shell, Git, or network access");
+    });
+
+    it("tells the agent a visualization answering the question goes inline and a longer document stays in the sidebar", () => {
+      for (const set of [tools().set, boundTools("work").set, boundTools("code").set]) {
+        const description = set.definitions[0]?.description ?? "";
+        expect(description).toContain("A visualization that answers the current question");
+        for (const visual of [
+          "a chart",
+          "a small dashboard",
+          "a diagram",
+          "an interactive visual",
+        ]) {
+          expect(description).toContain(visual);
+        }
+        expect(description).toContain("goes inline");
+        expect(description).toContain("Longer documents");
+        expect(description).toContain("stay in the sidebar");
+      }
     });
 
     it("lists the thread's Canvases with the sequence a revision must name", async () => {

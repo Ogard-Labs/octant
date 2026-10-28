@@ -3,6 +3,7 @@ import type { SubscriptionOAuthOffer } from "@octant/contracts/host-oauth";
 import { subscriptionOAuthOffers } from "@octant/domain";
 import { Plus } from "lucide-react";
 import { useEffect, useId, useState } from "react";
+import { thisComputerName, useHostPlatform } from "../../platform";
 import { ProviderGlyph } from "../../providers/ProviderGlyph";
 import { signInConsent } from "../../providers/ProviderOAuthSignIn";
 import { OctantAlert } from "../../ui/base/OctantAlert";
@@ -79,6 +80,7 @@ export interface EndpointChoicesProps {
  */
 export function EndpointChoices(props: EndpointChoicesProps) {
   const offers = offeredSignIns();
+  const computer = thisComputerName(useHostPlatform());
   const consentId = useId();
   return (
     <ul className="endpoint-choices">
@@ -115,7 +117,7 @@ export function EndpointChoices(props: EndpointChoicesProps) {
               {signInConsent(offer.termsSummary)}
               {props.credentialManagementAvailable
                 ? null
-                : " Sign-in starts from the Octant app or a browser on this Mac."}
+                : ` Sign-in starts from the Octant app or a browser on ${computer}.`}
             </p>
           </li>
         );

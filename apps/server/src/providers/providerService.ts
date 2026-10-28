@@ -13,11 +13,13 @@ import {
   decodeProviderRegistrySnapshot,
   type OutsideHarnessEndpointProviderInstance,
   type OutsideProviderDriverListing,
+  type OutsideProviderDriverReference,
   type ProviderDriverKind,
   type ProviderFailure,
   type ProviderInstance,
   type ProviderInstanceId,
   type ProviderCatalogSnapshot,
+  type ClaudeAuthentication,
   type ClaudeProviderConfiguration,
   type ProviderObservedState,
   type ProviderProbeResult,
@@ -69,12 +71,16 @@ import {
   createCodexProvider,
   createOllamaProvider,
   createOutsideHarnessEndpointProvider,
+  rebindOutsideHarnessEndpointDriver,
+  isOutsideDriverQuarantined,
+  quarantineOutsideHarnessEndpointDriver,
   createPiProvider,
   createOhMyPiProvider,
   changeOhMyPiConfiguration,
   createOpenCodeProvider,
   removeProvider,
   renameProvider,
+  setClaudeArtifactDelivery,
   setProviderEnabled,
   setProviderDataTags,
   setProviderModelDataTags,
@@ -101,6 +107,7 @@ import type { PersistenceService } from "../persistence/persistenceService";
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { snapshotClaudeHostEnvironment } from "./claudeAccountDirectory";
+import { claudeNativeArtifactsSupport } from "./claudeNativeArtifacts";
 import { PROVIDER_DEFAULTS_AGGREGATE_ID } from "./providerProjection";
 import {
   carryModelContextWindowFacts,
@@ -202,6 +209,13 @@ export interface ProviderServiceOptions {
    * instance is blocked.
    */
   readonly isOutsideDriverAdmitted?: (instance: OutsideHarnessEndpointProviderInstance) => boolean;
+  /**
+   * The digest an outside instance moves to because its person trusted it, or
+   * nothing. Absent on a host that admits no outside driver.
+   */
+  readonly outsideDriverRebindTarget?: (
+    instance: OutsideHarnessEndpointProviderInstance,
+  ) => OutsideProviderDriverReference | undefined;
   /** The outside drivers the provider catalog lists. Reading them starts nothing. */
   readonly outsideDriverListings?: () => ReadonlyArray<OutsideProviderDriverListing>;
   readonly clearResumeIdentities?: (instanceId: ProviderInstanceId) => Promise<void>;
@@ -250,6 +264,9 @@ export class ProviderService implements ProviderServiceApi {
   readonly #driverProvider: ProviderServiceOptions["driver"];
   readonly #isDriverPluginEffective: (driverKind: ProviderDriverKind) => boolean;
   readonly #isOutsideDriverAdmitted: (instance: OutsideHarnessEndpointProviderInstance) => boolean;
+  readonly #outsideDriverRebindTarget: NonNullable<
+    ProviderServiceOptions["outsideDriverRebindTarget"]
+  >;
   readonly #outsideDriverListings: () => ReadonlyArray<OutsideProviderDriverListing>;
   readonly #clearResumeIdentities: ProviderServiceOptions["clearResumeIdentities"];
   readonly #clearRuntimeUsageLimits: ProviderServiceOptions["clearRuntimeUsageLimits"];
@@ -288,6 +305,7 @@ export class ProviderService implements ProviderServiceApi {
       options.isDriverPluginEffective ??
       ((driverKind) => admittedBundledProviderDriverKinds().has(driverKind));
     this.#isOutsideDriverAdmitted = options.isOutsideDriverAdmitted ?? (() => false);
+    this.#outsideDriverRebindTarget = options.outsideDriverRebindTarget ?? (() => undefined);
     this.#outsideDriverListings = options.outsideDriverListings ?? (() => []);
     this.#clearResumeIdentities = options.clearResumeIdentities;
     this.#clearRuntimeUsageLimits = options.clearRuntimeUsageLimits;
@@ -375,6 +393,85 @@ export class ProviderService implements ProviderServiceApi {
     } catch (error) {
       throw this.#mapFailure(error);
     }
+  }
+
+  /**
+   * Moves every outside instance whose person has trusted another digest of
+   * its driver to that digest, as a journaled configuration change. Trust is
+   * the only way there: an update or rollback clears it and holds the
+   * package, so neither moves an instance by itself. What was learned at the
+   * old digest goes with the move: the Verify tools record and model evidence
+   * in the catalogue, the observation, and the runtime, so the next use
+   * starts the new digest's process unverified, under its own crash limit.
+   * Idempotent, so a host that stopped between the trust and the move makes
+   * it on its next pass.
+   */
+  async rebindOutsideDrivers(): Promise<ReadonlyArray<ProviderInstanceId>> {
+    const moved: Array<ProviderInstanceId> = [];
+    for (const candidate of this.#persistence.readProviderInstances()) {
+      if (candidate.driverKind !== "outside-harness-endpoint") continue;
+      if (this.#outsideDriverRebindTarget(candidate) === undefined) continue;
+      const rebound = await this.#withInstanceOperation(candidate.id, async () => {
+        this.#assertReady();
+        // Read again inside the instance's queue: a change that landed while
+        // this waited is the one to move.
+        const current = this.#persistence.readProviderInstance(candidate.id);
+        if (current?.driverKind !== "outside-harness-endpoint") return false;
+        const driver = this.#outsideDriverRebindTarget(current);
+        if (driver === undefined) return false;
+        const updatedAt = decodeTimestamp(this.#clock());
+        const instance = rebindOutsideHarnessEndpointDriver(current, driver, updatedAt);
+        // A turn still holding the old digest's runtime keeps it until it
+        // ends; that process is already stopped, so the turn fails at once.
+        await this.#runtime.invalidateRuntime(current.id).catch((error: unknown) => {
+          if (!(error instanceof ProviderRuntimeInvalidationRejected)) throw error;
+        });
+        this.#appendInstance(current.version, "provider.instance-driver-rebound@1", instance);
+        this.#authoritativeInstance(instance);
+        this.#invalidateCatalog(
+          instance.id,
+          { kind: "driver" },
+          "provider driver moved to a newly trusted version",
+          updatedAt,
+        );
+        this.#runtime.clearObservedState(instance.id);
+        this.#clearRuntimeUsageLimits?.(instance.id);
+        return true;
+      });
+      if (rebound) moved.push(candidate.id);
+    }
+    return moved;
+  }
+
+  /**
+   * Journals that an outside instance's driver crashed past its limit at the
+   * digest it binds, so the hold outlives this host. The process owner calls
+   * it the moment the limit is crossed. A report for a digest the instance no
+   * longer binds, or for one already held, journals nothing. Nothing a person
+   * or client sends reaches this: only binding another digest lifts the hold.
+   */
+  async quarantineOutsideDriver(
+    instanceId: ProviderInstanceId,
+    digest: OutsideProviderDriverReference["digest"],
+  ): Promise<void> {
+    await this.#withInstanceOperation(instanceId, async () => {
+      this.#assertReady();
+      const current = this.#persistence.readProviderInstance(instanceId);
+      if (current?.driverKind !== "outside-harness-endpoint") return;
+      if (String(current.configuration.driver.digest) !== String(digest)) return;
+      const instance = quarantineOutsideHarnessEndpointDriver(
+        current,
+        decodeTimestamp(this.#clock()),
+      );
+      if (instance === current) return;
+      this.#appendInstance(current.version, "provider.instance-driver-quarantined@1", instance);
+      this.#authoritativeInstance(instance);
+      if (instance.enabled) {
+        this.#runtime.setObservedState(
+          outsideDriverQuarantinedObservation(instance.id, instance.updatedAt),
+        );
+      }
+    });
   }
 
   pendingInstanceOperationCount(): number {
@@ -957,6 +1054,17 @@ export class ProviderService implements ProviderServiceApi {
           if (command.kind === "set-provider-data-tags") {
             instance = setProviderDataTags(current, command.dataTags, updatedAt);
             eventName = "provider.instance-data-tags-changed@1";
+          } else if (command.kind === "set-claude-artifact-delivery") {
+            if (current.driverKind !== "claude") {
+              throw this.#unsupported("Only a Claude account delivers documents as artifacts.");
+            }
+            instance = setClaudeArtifactDelivery(current, { enabled: command.enabled, updatedAt });
+            // The process, its sign-in, and its models stay as they are: the
+            // driver reads this setting at each launch (one per turn) and
+            // again at every Artifact call, so turning it off refuses a
+            // publish at once and the next turn launches with every guard.
+            keepsRuntime = true;
+            eventName = "provider.instance-configuration-changed@1";
           } else if (command.kind === "rename-provider") {
             instance = renameProvider(current, {
               displayName: command.displayName,
@@ -1208,6 +1316,16 @@ export class ProviderService implements ProviderServiceApi {
           this.#appendInstance(command.expectedVersion, eventName, instance);
           const authoritative = this.#authoritativeInstance(instance);
           if (
+            command.kind === "set-claude-artifact-delivery" &&
+            authoritative.driverKind === "claude"
+          ) {
+            this.#reportClaudeArtifactsSetting(
+              authoritative.id,
+              authoritative.configuration.authentication,
+              authoritative.configuration.artifactDelivery === true,
+            );
+          }
+          if (
             !keepsRuntime &&
             eventName !== "provider.instance-renamed@1" &&
             eventName !== "provider.instance-data-tags-changed@1"
@@ -1307,6 +1425,20 @@ export class ProviderService implements ProviderServiceApi {
           );
           this.#clearRuntimeUsageLimits?.(instanceId);
           throw this.#unsupported("This provider driver is not available.");
+        }
+        if (
+          instance.driverKind === "outside-harness-endpoint" &&
+          isOutsideDriverQuarantined(instance)
+        ) {
+          // Decided from the journal before the driver is asked to start.
+          this.#runtime.setObservedState(
+            outsideDriverQuarantinedObservation(instanceId, decodeTimestamp(this.#clock())),
+          );
+          this.#clearRuntimeUsageLimits?.(instanceId);
+          throw new ProviderServiceError({
+            category: "unavailable",
+            message: OUTSIDE_DRIVER_QUARANTINED_MESSAGE,
+          });
         }
         if (isImageProfileDriverKind(instance.driverKind)) {
           // Image profiles are generation endpoints with a stored credential,
@@ -1521,6 +1653,14 @@ export class ProviderService implements ProviderServiceApi {
     // built, so no driver code runs to describe its own block.
     if (!this.#isInstanceDriverAvailable(instance)) {
       return driverNotAdmittedObservation(instance.id, decodeTimestamp(this.#clock()));
+    }
+    // A journaled crash-limit hold is reported without starting the driver,
+    // so a restarted host shows it before anyone checks the connection.
+    if (
+      instance.driverKind === "outside-harness-endpoint" &&
+      isOutsideDriverQuarantined(instance)
+    ) {
+      return outsideDriverQuarantinedObservation(instance.id, decodeTimestamp(this.#clock()));
     }
     if (this.#claudeAccountNeedsOwnConfigDirectory(instance)) {
       return decodeProviderObservedState({
@@ -2057,6 +2197,32 @@ export class ProviderService implements ProviderServiceApi {
       aggregate: { aggregateType: "provider-instance", aggregateId: instance.id },
       expectedVersion: expectedVersion as never,
       events: [this.#pendingEvent(eventName, { instance })],
+    });
+  }
+
+  /**
+   * Reports the account's Claude artifacts as the setting now reads, without
+   * a probe: the capability follows the person's setting, and the host switch
+   * the last probe's launch carried still holds.
+   */
+  #reportClaudeArtifactsSetting(
+    instanceId: ProviderInstanceId,
+    authentication: ClaudeAuthentication,
+    enabled: boolean,
+  ): void {
+    const observed = this.#runtime.observedState(instanceId);
+    const current = observed?.capabilities.nativeArtifacts;
+    if (observed === undefined || current === undefined) return;
+    this.#runtime.setObservedState({
+      ...observed,
+      capabilities: {
+        ...observed.capabilities,
+        nativeArtifacts: claudeNativeArtifactsSupport({
+          authentication,
+          artifactDelivery: enabled,
+          hostTrafficDisabled: current.unsupportedReason === "host-traffic-disabled",
+        }),
+      },
     });
   }
 
@@ -2726,6 +2892,29 @@ function driverNotAdmittedObservation(
     capabilities: unavailableCapabilities,
     message: "This provider driver is not available.",
     reason: "driver-not-admitted",
+    observedAt,
+  });
+}
+
+const OUTSIDE_DRIVER_QUARANTINED_MESSAGE =
+  "The provider driver stopped too often, so Octant holds this version until you trust another version.";
+
+/**
+ * What an outside instance reports while its driver is held at the digest it
+ * binds: unavailable, Octant's own words, and nothing it could offer.
+ */
+function outsideDriverQuarantinedObservation(
+  instanceId: ProviderInstanceId,
+  observedAt: ProviderObservedState["observedAt"],
+): ProviderObservedState {
+  return decodeProviderObservedState({
+    instanceId,
+    readiness: "unavailable",
+    processState: "stopped",
+    models: [],
+    capabilities: unavailableCapabilities,
+    message: OUTSIDE_DRIVER_QUARANTINED_MESSAGE,
+    reason: "runtime-unavailable",
     observedAt,
   });
 }

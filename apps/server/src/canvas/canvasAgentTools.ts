@@ -169,7 +169,7 @@ const canvasDefinitionSchema = {
       type: "string",
       enum: ["inline", "sidebar"],
       description:
-        "For create and revise: inline draws the Canvas inside the conversation (any reading blocks, or one document-size design without script; no diagram board, plan, mockup, or other design); sidebar, the default, shows a card that opens it beside the thread. Revise keeps the current choice when omitted.",
+        "For create and revise: inline draws the Canvas in the conversation (a plan, mockup, or device-size design shows there as a preview card instead); sidebar, the default, shows a card that opens it beside the thread. Revise keeps the current choice when omitted.",
     },
   },
   required: ["operation"],
@@ -485,9 +485,9 @@ const BLOCK_GUIDANCE: Readonly<Record<string, { readonly use: string; readonly d
         "Use diagram for a generic graph of nodes and edges, such as a flowchart or a zone map: a node's role is process (a box), decision (a diamond), or terminator (a pill), or left out for a plain box; an edge's style is line, arrow, or dashed (a dashed arrow, for an optional or asynchronous step); an edge or a group may take a tone of neutral, accent, success, warning, or danger, and a toned group reads as a region. Tones are theme roles, never colours, and a label still says what the tone means. Lay out a system or architecture diagram by tier: one group per tier (clients, services, data), the flow left to right, node labels of a few words, and the protocol or data on each edge label. For an architecture diagram give each node an icon (client, browser, mobile, server, service, database, cache, queue, storage, cdn, gateway, auth, function, external, user, or analytics) and a short detail such as a technology or port, and nest a group inside another with parentGroupId (up to three levels) for a region that holds zones. Prefer sequence, state, er, swimlane, or mindmap when the drawing is one of those.",
     },
     chart: {
-      use: "A pie, donut, stacked or grouped bar, bar-line, funnel, radar, or sankey chart.",
+      use: "A pie, donut, stacked or grouped bar, bar-line, funnel, radar, or sankey chart, or a line or bar chart that calls out its finding.",
       detail:
-        "A share of a whole is a pie or a donut: one series of labeled slices whose values are not negative. Comparing series across the same categories is a stacked-bar or a grouped-bar; every series lists those categories in the same order, and a stacked bar's values are not negative. A bar-line pairs bar series and line series on those categories, and each series names its mark. Drop-off through ordered stages is a funnel: one series of up to 16 labeled stages, each no larger than the one before. Comparing a few things on the same 3 to 16 qualities is a radar: every series lists the same labeled axes in the same order, with readings that are not negative. Where a quantity goes is a sankey: series is empty and links lists flows of { source, target, value } between node names (at most 80 characters, 64 nodes, 256 flows), each value positive, no flow listed twice, and no flow returning to a node it left.",
+        "A share of a whole is a pie or a donut: one series of labeled slices whose values are not negative. Comparing series across the same categories is a stacked-bar or a grouped-bar; every series lists those categories in the same order, and a stacked bar's values are not negative. A bar-line pairs bar series and line series on those categories, and each series names its mark. Drop-off through ordered stages is a funnel: one series of up to 16 labeled stages, each no larger than the one before. Comparing a few things on the same 3 to 16 qualities is a radar: every series lists the same labeled axes in the same order, with readings that are not negative. Where a quantity goes is a sankey: series is empty and links lists flows of { source, target, value } between node names (at most 80 characters, 64 nodes, 256 flows), each value positive, no flow listed twice, and no flow returning to a node it left. Any chart may take a title that states its finding as a sentence and a subtitle that says what was measured and over which span. On a line, area, scatter, bar, or distribution chart, a point may carry a note of up to 40 characters, drawn beside it (such as +344 on a jump; at most 12 per chart), and emphasis: true on the reading the chart is about, which leaves that bar in the series colour and the others in neutral ink.",
     },
     mockup: {
       use: "A wireframe or UI mockup of a screen, with states or alternatives.",
@@ -646,7 +646,7 @@ function toolDescription(
     "Operations: describe, list, read, create, revise, preview. Before you author, call describe: with no block kinds it lists every kind, when to use the structured ones, the document recipes to start from, and a create example; with up to three blockKinds it returns their exact schemas, guidance, and examples. Start from a document recipe before inventing a shape, and make it look finished: typed blocks for data, a design frame only for the look.",
     "Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, or CSS; only a design block's frames are HTML and CSS; they load nothing, and run script only in a design that declares it. Mermaid is never drawn; describe code-excerpt for how a Mermaid diagram you already have becomes a typed diagram. Text renders as plain text, not Markdown: give each section its own heading block (the Canvas title is already shown, so do not repeat it), and use key-value, table, status, or callout blocks instead of Markdown lists, bold, or code spans.",
     "A Canvas is a document: it grants no file, shell, Git, or network access. Creation adds a card to this thread and offers the Canvas in its dock; the user can also select Open Canvas. Do not claim the user has read it or invent a download URL.",
-    "Choose where the thread shows it. Use presentation inline for a visual or a reading document that answers the question in place, such as a chart, a few metrics, a short table, a diagram, or an article made of reading blocks or one document-size design; it is drawn in the conversation just below your reply to this turn, so refer to it as below. A long one starts as a faded teaser the user can expand in place. Leave presentation out (sidebar) for plans, boards, mockups, other designs, and anything the user will keep working on; inline never holds those, and when the host shows a card instead, the result says so in presentationNote.",
+    "Choose where the thread shows it. A visualization that answers the current question (a chart, a few metrics, a small dashboard, a short table, a diagram, or an interactive visual as a document-size design) goes inline: it is drawn just below your reply to this turn, so refer to it as below. Longer documents, plans, mockups, device-size designs, and work the user will keep editing stay in the sidebar (leave presentation out); when the host shows a card instead, the result says why in presentationNote.",
     "Revise with the canvasId, the last observed expectedSequence, and the complete replacement blocks; people edit Canvases too, so read before revising and keep their changes. Reference blocks require source ids already in the Canvas source manifest; create attaches no sources. Never invent file or artifact references.",
     "Preview once after you create or revise a chart, treemap, design, or inline Canvas, revise to fix what its warnings or picture show, then reply. An unchanged document previews the same.",
   ].join(" ");
@@ -1645,10 +1645,13 @@ function readerMarked(
 }
 
 /**
- * The presentation to record for an authoring call. Inline is recorded only
- * when the host would draw these blocks in the thread; otherwise the Canvas
- * is recorded as sidebar and the agent is told why, so it never believes a
- * document sits in the conversation when the person sees a card.
+ * The presentation to record for an authoring call, and why an inline request
+ * is not drawn in the thread. The request is recorded as asked: a Canvas whose
+ * blocks the thread cannot draw is still a sidebar Canvas
+ * (`effectiveCanvasPresentation`), and the recorded request is what lets the
+ * thread show it as a preview card rather than a row. The agent is told, so it
+ * never believes a document sits in the conversation when the person sees a
+ * card.
  */
 function placement(input: CanvasAuthoringInput): {
   readonly presentation?: CanvasPresentation;
@@ -1660,7 +1663,7 @@ function placement(input: CanvasAuthoringInput): {
   const refusal = canvasInlineRefusal(input.blocks);
   return refusal === undefined
     ? { presentation: "inline" }
-    : { presentation: "sidebar", note: refusal };
+    : { presentation: "inline", note: refusal };
 }
 
 /**

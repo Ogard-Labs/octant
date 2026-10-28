@@ -1,5 +1,9 @@
 import type { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
-import { decodeDesktopProviderId, decodeDesktopViewId } from "@octant/contracts";
+import {
+  decodeDesktopMachineId,
+  decodeDesktopProviderId,
+  decodeDesktopViewId,
+} from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { createRemoteDevicePrincipal } from "./clientPrincipal";
 import type { DesktopLeaseService } from "./computerUse/desktopLeaseService";
@@ -50,7 +54,7 @@ function post(
   return request;
 }
 
-function routes() {
+function routes(recipeKey?: Parameters<typeof createDesktopPaneRouteHandler>[0]["recipeKey"]) {
   const store = new WindowAuthorityStore();
   store.register({ windowId: windowId as never, capability, now: 1 });
   const service = {
@@ -86,6 +90,20 @@ function routes() {
       frame: { mediaType: "image/png", width: 1, height: 1, bytes: png },
     })),
     input: vi.fn<DesktopLeaseService["input"]>(async () => ({ status: "delivered" })),
+    recipeMachines: vi.fn<DesktopLeaseService["recipeMachines"]>(async ({ actor }) =>
+      actor.kind === "local-user"
+        ? {
+            status: "recipe-machines",
+            machines: [
+              {
+                machineId: decodeDesktopMachineId("host-studio"),
+                displayName: "studio",
+                online: true,
+              },
+            ],
+          }
+        : { status: "refused", reason: "not-permitted" },
+    ),
     destination: vi.fn<DesktopLeaseService["destination"]>(() => ({
       status: "leasable",
       kind: "disposable-desktop",
@@ -104,6 +122,7 @@ function routes() {
     service,
     localActorId,
     now: () => 2,
+    ...(recipeKey === undefined ? {} : { recipeKey }),
   });
   return { handler, service };
 }
@@ -216,6 +235,64 @@ describe("Desktop pane routes", () => {
     expect(
       (await handler(post("/api/code/desktops", { kind: "recipe-providers", threadId })))?.status,
     ).toBe(400);
+  });
+
+  it("asks for the person's machines as the authenticated person, so a paired device is refused", async () => {
+    const { handler, service } = routes();
+    const request = { kind: "recipe-machines", providerId: "cua", placementId: "other-machine" };
+    const local = await handler(post("/api/code/desktops", request));
+    await expect(local?.json()).resolves.toEqual({
+      status: "recipe-machines",
+      machines: [{ machineId: "host-studio", displayName: "studio", online: true }],
+    });
+    const remote = await handler(post("/api/code/desktops", request, { remote: true }));
+    await expect(remote?.json()).resolves.toEqual({ status: "refused", reason: "not-permitted" });
+    expect(service.recipeMachines.mock.calls.map(([input]) => input.actor.kind)).toEqual([
+      "local-user",
+      "remote-device",
+    ]);
+    const namesActor = await handler(
+      post(
+        "/api/code/desktops",
+        { ...request, actor: { kind: "local-user", actorId: localActorId } },
+        { remote: true },
+      ),
+    );
+    expect(namesActor?.status).toBe(400);
+    expect(service.recipeMachines).toHaveBeenCalledTimes(2);
+  });
+
+  it("says whether a Project's recipe has its key, never the key, to a window or a paired device", async () => {
+    const projectId = "60000000-0000-4000-8000-000000000006";
+    const recipeKey = vi.fn(async (_asked: string) => ({
+      key: "rejected" as const,
+      store: "available" as const,
+    }));
+    const { handler } = routes(recipeKey);
+    for (const remote of [false, true]) {
+      const answered = await handler(
+        post("/api/code/desktops", { kind: "recipe-key", projectId }, { remote }),
+      );
+      await expect(answered?.json()).resolves.toEqual({
+        status: "recipe-key",
+        key: "rejected",
+        store: "available",
+      });
+    }
+    expect(recipeKey.mock.calls.map(([asked]) => String(asked))).toEqual([projectId, projectId]);
+    const malformed = await handler(
+      post("/api/code/desktops", { kind: "recipe-key", projectId: "not-a-project" }),
+    );
+    expect(malformed?.status).toBe(400);
+
+    // A host that wires no desktop keys has none to report and no store to save one in.
+    const { handler: keyless } = routes();
+    const none = await keyless(post("/api/code/desktops", { kind: "recipe-key", projectId }));
+    await expect(none?.json()).resolves.toEqual({
+      status: "recipe-key",
+      key: "none",
+      store: "unavailable",
+    });
   });
 
   it("leaves every other path to the routes that own it", async () => {

@@ -1,5 +1,6 @@
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts";
 import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
+import { thisComputerName, useHostPlatform } from "../platform";
 import { ModelPicker } from "../providers/ModelPicker";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -26,6 +27,7 @@ export interface FirstRunModelStepProps {
  * says exactly what stays unavailable as a result.
  */
 export function FirstRunModelStep(props: FirstRunModelStepProps) {
+  const computer = thisComputerName(useHostPlatform());
   // A provider that is enabled and reachable still gets a group even when it
   // offered no usable models, so counting groups would draw an empty picker
   // for the state the provider step already reports as "no models". What
@@ -59,8 +61,8 @@ export function FirstRunModelStep(props: FirstRunModelStepProps) {
         >
           <p className="first-run__intro">
             {listed
-              ? "No provider on this Mac offered a model, so there is nothing to choose from yet."
-              : "No provider on this Mac is ready, so there is nothing to choose from yet."}
+              ? `No provider on ${computer} offered a model, so there is nothing to choose from yet.`
+              : `No provider on ${computer} is ready, so there is nothing to choose from yet.`}
           </p>
         </OctantAlert>
       ) : (

@@ -28,8 +28,11 @@ import type { CanvasExportFilePort } from "./canvasExportFilePort";
  * gets a numbered copy beside it, as a single file would.
  */
 
+// The id is stored with every export, so it keeps the name it was first given.
 export const FOLDER_EXPORT_TARGET_ID = "folder-on-this-mac";
-export const FOLDER_EXPORT_TARGET_LABEL = "A folder on this Mac";
+// A signed-in paired device lists destinations, and the host's platform is
+// disclosed only to its own window, so the label is neutral on every host.
+export const FOLDER_EXPORT_TARGET_LABEL = "A folder on this computer";
 
 /** What the folder destination can do for one Canvas, read from the host. */
 export type FolderExportAvailability =

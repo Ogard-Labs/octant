@@ -501,6 +501,17 @@ html:not([data-octant-reduced-transparency="true"])
   gap: 2px;
 }
 
+/* The file name takes the room and gives it up first, so Save and Open
+   externally stay on the header line at every width: stacking the header put
+   Save on a centred line of its own at 390px (observed in rendered QA). */
+.code-editor-pane__toolbar > div {
+  flex: 1 1 auto;
+}
+
+.code-editor-pane__toolbar > :not(div) {
+  flex: none;
+}
+
 .code-editor-pane__toolbar span,
 .code-diff-pane__toolbar span {
   color: var(--oct-meta);
@@ -852,13 +863,11 @@ html:not([data-octant-reduced-transparency="true"])
 }
 
 @container workspace (max-width: 520px) {
-  .code-editor-pane__toolbar,
   .code-diff-pane__toolbar {
     align-items: stretch;
     flex-direction: column;
   }
 
-  .code-editor-pane__toolbar > p,
   .code-diff-pane__toolbar > p {
     white-space: normal;
   }
@@ -1234,7 +1243,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   padding: 0 var(--oct-nav-inset);
   color: var(--octant-text-secondary);
   font-size: var(--oct-text-detail);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   text-align: start;
 }
 
@@ -1664,7 +1673,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   color: var(--oct-meta);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   letter-spacing: 0;
 }
 
@@ -1723,7 +1732,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   padding: 2px 0;
   margin-inline-start: 0;
   font-size: var(--oct-text-sm);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   text-align: left;
 }
 
@@ -2065,6 +2074,12 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   min-width: 0;
   color: var(--oct-fg);
 }
+/* Why a thread on an SSH target takes no message now, above its composer. */
+.code-thread-workspace__remote-notice {
+  margin-block: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-sm);
+}
 .code-checkout-bar {
   display: flex;
   min-width: 0;
@@ -2089,7 +2104,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   overflow: hidden;
   min-width: 0;
   color: var(--oct-fg);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2266,7 +2281,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   margin: 0;
   color: var(--octant-text-secondary);
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .code-turn-files__list {
@@ -2529,7 +2544,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   margin: 0;
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

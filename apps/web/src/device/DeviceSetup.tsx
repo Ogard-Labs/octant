@@ -1,10 +1,11 @@
 import { Check, CircleDashed, CircleX } from "lucide-react";
 import { useId } from "react";
+import { thisComputerName, useHostPlatform } from "../platform";
 import { OctantButton } from "../ui/base/OctantButton";
 import type { DeviceSetupCheck } from "./deviceModel";
 
 /**
- * What stands between this Mac and a running device, one row per check. A row
+ * What stands between the host and a running device, one row per check. A row
  * that failed says the one thing to do about it. Octant installs nothing.
  */
 export function DeviceSetup(props: {
@@ -15,13 +16,14 @@ export function DeviceSetup(props: {
   readonly onCheckAgain?: () => void;
 }) {
   const headingId = useId();
+  const computer = thisComputerName(useHostPlatform());
   return (
     <section aria-labelledby={headingId} className="device-card">
       <h2 className="device-card__title" id={headingId}>
         {props.title}
       </h2>
       <p className="device-card__lede">
-        {props.note ?? "Octant checks these on this Mac. Nothing is installed for you."}
+        {props.note ?? `Octant checks these on ${computer}. Nothing is installed for you.`}
       </p>
       <ul className="device-checks">
         {props.checks.map((check) => (

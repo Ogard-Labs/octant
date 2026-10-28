@@ -78,6 +78,12 @@ export interface CodeAccessPickerProps {
   readonly onRaiseThread: (executionPolicy: ProviderExecutionPolicy) => void;
   /** Lower the durable thread grant back to approval-gated. Narrowing needs no confirmation. */
   readonly onLowerThread: (executionPolicy: ProviderExecutionPolicy) => void;
+  /**
+   * Why the host refuses raising the thread to a posture, or undefined where
+   * it allows it. A thread on an SSH target is raised no further than Ask for
+   * approvals, and each refused row names its own reason.
+   */
+  readonly raiseRefusal?: (executionPolicy: ProviderExecutionPolicy) => string | undefined;
 }
 
 /**
@@ -105,18 +111,27 @@ export function CodeAccessPicker(props: CodeAccessPickerProps) {
       id,
       label: CODE_ACCESS_POSTURE_LABEL[id],
     })),
-    ...raises.map((id) => ({
-      id,
-      label: `Raise thread · ${CODE_ACCESS_POSTURE_LABEL[id]}`,
-      ...(id === "full-access" && !props.nativeConfirmationAvailable
-        ? {
-            disabled: true,
-            disabledNote: "Confirm in the desktop app",
-            disabledReason:
-              "Full access requires native confirmation, which only the desktop app can give. Remembered Project Full access is granted when a thread is created.",
-          }
-        : {}),
-    })),
+    ...raises.map((id) => {
+      const refusal = props.raiseRefusal?.(id);
+      return {
+        id,
+        label: `Raise thread · ${CODE_ACCESS_POSTURE_LABEL[id]}`,
+        ...(refusal !== undefined
+          ? {
+              disabled: true,
+              disabledNote: "Not on an SSH target",
+              disabledReason: refusal,
+            }
+          : id === "full-access" && !props.nativeConfirmationAvailable
+            ? {
+                disabled: true,
+                disabledNote: "Confirm in the desktop app",
+                disabledReason:
+                  "Full access requires native confirmation, which only the desktop app can give. Remembered Project Full access is granted when a thread is created.",
+              }
+            : {}),
+      };
+    }),
   ];
   const harnessAsks = props.harnessAsksUnderFullAccess === true && props.value === "full-access";
   const reviewAvailable =

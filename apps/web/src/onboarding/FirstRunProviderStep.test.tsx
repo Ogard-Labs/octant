@@ -1,7 +1,8 @@
 import type { DiscoverySnapshot, ProviderInstance, ProviderInstanceId } from "@octant/contracts";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { HostPlatformContext } from "../platform";
 import { FirstRunProviderStep, type FirstRunProviderStepProps } from "./FirstRunProviderStep";
 import { summarizeFirstRunReadiness } from "./firstRunReadinessModel";
 
@@ -13,7 +14,7 @@ const instance = {
   enabled: true,
 } as ProviderInstance;
 
-// A scan that ran to completion: only then may the surface claim this Mac has
+// A scan that ran to completion: only then may the surface claim the host has
 // no provider on it.
 const searchedThisMac = {
   scanning: false,
@@ -105,7 +106,7 @@ describe("FirstRunProviderStep", () => {
     expect(screen.queryByText(/No provider is ready, so Chat cannot answer yet/)).toBeNull();
   });
 
-  it("does not tell a first-run user nothing is configured while this Mac is still being scanned", () => {
+  it("does not tell a first-run user nothing is configured while the host is still being scanned", () => {
     mount({
       readiness: summarizeFirstRunReadiness({
         providerStatus: "ready",
@@ -117,7 +118,8 @@ describe("FirstRunProviderStep", () => {
     });
 
     const status = screen.getByRole("status");
-    expect(status).toHaveTextContent("Octant has not finished checking this Mac");
+    // No host platform is known here, so the copy uses the neutral name.
+    expect(status).toHaveTextContent("Octant has not finished checking this computer");
     expect(status).not.toHaveTextContent("No provider is configured");
     expect(status).toHaveAttribute("data-overall", "checking");
   });
@@ -141,7 +143,7 @@ describe("FirstRunProviderStep", () => {
     await user.click(screen.getByRole("button", { name: "Set up a provider" }));
     expect(props.onOpenProviderSettings).toHaveBeenCalledOnce();
 
-    await user.click(screen.getByRole("button", { name: "Check this Mac again" }));
+    await user.click(screen.getByRole("button", { name: "Check this computer again" }));
     expect(props.onRescan).toHaveBeenCalledOnce();
   });
 
@@ -149,5 +151,52 @@ describe("FirstRunProviderStep", () => {
     mount({ scanning: true });
 
     expect(screen.getByRole("button", { name: "Checking…" })).toBeDisabled();
+  });
+});
+
+// Each host is seen from a window on the other platform, so copy that read the
+// window's platform instead of the host's would name the wrong computer.
+const HOSTS = [
+  { hostPlatform: "linux", window: "MacIntel", computer: "this computer", elsewhere: /this Mac/ },
+  {
+    hostPlatform: "darwin",
+    window: "Linux x86_64",
+    computer: "this Mac",
+    elsewhere: /this computer/,
+  },
+] as const;
+
+describe.each(HOSTS)("FirstRunProviderStep on a $hostPlatform host", (host) => {
+  beforeEach(() => {
+    Object.defineProperty(window.navigator, "platform", { value: host.window, configurable: true });
+  });
+  afterEach(() => Reflect.deleteProperty(window.navigator, "platform"));
+
+  it("says Octant runs on the host's computer and offers to check that computer again", () => {
+    render(
+      <HostPlatformContext.Provider value={host.hostPlatform}>
+        <FirstRunProviderStep
+          onOpenProviderSettings={vi.fn()}
+          onRescan={vi.fn()}
+          readiness={summarizeFirstRunReadiness({
+            providerStatus: "ready",
+            instances: [],
+            observedByInstance: new Map(),
+            discovery: { scanning: false },
+            hostPlatform: host.hostPlatform,
+          })}
+          scanning={false}
+        />
+      </HostPlatformContext.Provider>,
+    );
+
+    expect(screen.getByText(/^Octant runs on/)).toHaveTextContent(
+      `Octant runs on ${host.computer} and talks to the AI providers you choose.`,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      `Octant has not finished checking ${host.computer}`,
+    );
+    expect(screen.getByRole("button", { name: `Check ${host.computer} again` })).toBeVisible();
+    expect(document.body.textContent).not.toMatch(host.elsewhere);
   });
 });

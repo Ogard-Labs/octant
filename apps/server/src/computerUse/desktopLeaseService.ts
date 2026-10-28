@@ -7,6 +7,7 @@ import {
   EventId,
   decodeAggregateVersion,
   decodeDesktopLeaseId,
+  decodeDesktopMachineId,
   decodeDesktopViewId,
   decodeEventActor,
   decodeUtcTimestamp,
@@ -29,6 +30,9 @@ import {
   type DesktopLeaseRequested,
   type DesktopLeaseState,
   type DesktopLeaseTransitioned,
+  type DesktopMachine,
+  type DesktopMachineId,
+  type DesktopPaneAnswer,
   type DesktopPaneRefusal,
   type DesktopPaneStart,
   type DesktopPlacementId,
@@ -53,17 +57,20 @@ import {
   desktopLeaseFits,
   desktopLeaseHoldsDesktop,
   desktopLeaseTransitionAllowed,
+  desktopNetworkAllowed,
   desktopProviderExpiryHolds,
   extendCacheBackoff,
   type CacheBackoff,
 } from "@octant/domain";
-import type {
-  DesktopDaemonDeclaration,
-  DesktopFrame,
-  DesktopHandle,
-  DesktopProvider,
-  DesktopScreen,
-  DesktopTeardownPort,
+import {
+  DESKTOP_CREDENTIAL_REJECTED,
+  DESKTOP_SESSION_READABLE,
+  type DesktopDaemonDeclaration,
+  type DesktopFrame,
+  type DesktopHandle,
+  type DesktopProvider,
+  type DesktopScreen,
+  type DesktopTeardownPort,
 } from "@octant/plugin-api/desktop-provider";
 import type { ComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { Schema } from "effect";
@@ -107,6 +114,8 @@ export interface DesktopLeaseConfirmation {
   readonly provider: LeasableDesktopProvider;
   /** Where the desktop runs, for a provider with placements. */
   readonly placementId?: DesktopPlacementId;
+  /** The person's machine it runs on, for a placement that chooses one. */
+  readonly machine?: DesktopMachine;
   /**
    * `billed` and `off-machine` ask a person in every posture; `in-thread`
    * follows the thread's approvals.
@@ -256,8 +265,21 @@ export interface DesktopLeaseService {
        */
       readonly confirmedProvider?: DesktopProviderId;
       readonly confirmedPlacement?: DesktopPlacementId;
+      readonly confirmedMachine?: DesktopMachineId;
     },
   ) => Promise<DesktopLeaseAcquireResult>;
+  /**
+   * The person's machines an offered placement that chooses one can run a
+   * desktop on, for a person choosing one in a recipe. Only a local window
+   * sets a recipe, so only a person there is answered.
+   */
+  readonly recipeMachines: (input: {
+    readonly actor: EventActor;
+    readonly providerId: DesktopProviderId;
+    readonly placementId: DesktopPlacementId;
+  }) => Promise<
+    Extract<DesktopPaneAnswer, { readonly status: "recipe-machines" }> | DesktopLeaseRefusal
+  >;
   /** A person's or the owning agent's release of one of the thread's leases. */
   readonly release: (
     caller: DesktopLeaseCaller & { readonly leaseId: DesktopLeaseId },
@@ -328,6 +350,12 @@ export interface DesktopLeaseService {
   ) => Promise<{ readonly status: "view-closed" } | DesktopPaneRefusal>;
   /** Ends leases whose clock, thread, recipe, provider, or setting ended them; retries failed releases. */
   readonly sweep: () => Promise<void>;
+  /**
+   * Whether teardown may still need the key this reference names: a lease
+   * that recorded it may still hold a desktop, or a desktop made on that
+   * account is not yet verified gone.
+   */
+  readonly holdsCredential: (credentialRef: DesktopCredentialRef) => boolean;
 }
 
 /** What the host holds in memory for a lease that may still have a desktop. */
@@ -387,6 +415,8 @@ const DEFAULT_TEARDOWN_TIMEOUT_MS = 60_000;
 const DEFAULT_VIEW_IDLE_MS = 30_000;
 /** Open views one lease may hold: two leases' worth of windows and a phone, with room to spare. */
 const MAX_VIEWS_PER_LEASE = 4;
+/** Machines a recipe editor is shown for one placement. */
+const MAX_RECIPE_MACHINES = 64;
 const ACQUIRE_FAILURE_DETAIL = {
   refused: "The provider refused to create the desktop.",
   failed: "The provider failed to create the desktop.",
@@ -397,6 +427,12 @@ const refused = (reason: DesktopLeaseRefusalReason): DesktopLeaseRefusal => ({
   status: "refused",
   reason,
 });
+/**
+ * A view refused because the provider's route to the desktop could let a
+ * third party read the session; the person is told so rather than shown a
+ * provider that is merely unavailable.
+ */
+const SESSION_READABLE: DesktopPaneRefusal = { status: "refused", reason: "session-readable" };
 const DRIVER_DID_NOT_ANSWER: ComputerControlResult = {
   kind: "failed",
   reason: "driver-error",
@@ -516,13 +552,14 @@ function teardownPortOf(provider: DesktopTeardownPort): DesktopTeardownPort {
   };
 }
 
-/** A recipe whose provider, credential reference, or placement changed counts as removed. */
+/** A recipe whose provider, credential reference, placement, or machine changed counts as removed. */
 function recipeStillCovers(recipe: DesktopRecipe | undefined, lease: DesktopLease): boolean {
   return (
     recipe !== undefined &&
     String(recipe.providerId) === String(lease.providerId) &&
     String(recipe.credentialRef ?? "") === String(lease.credentialRef ?? "") &&
-    String(recipe.placementId ?? "") === String(lease.placementId ?? "")
+    String(recipe.placementId ?? "") === String(lease.placementId ?? "") &&
+    String(recipe.machine?.machineId ?? "") === String(lease.machine?.machineId ?? "")
   );
 }
 
@@ -531,13 +568,17 @@ interface DesktopLeaseTerms {
   readonly locality: DesktopProviderLocality;
   readonly billed: boolean;
   readonly placementId?: DesktopPlacementId;
+  /** The person's machine, for a placement that chooses one. */
+  readonly machine?: DesktopMachine;
 }
 
 /**
  * A recipe's terms: its placement's for a provider that declares placements,
  * the provider's own otherwise. Undefined when the recipe names a placement
  * the provider does not declare, names none for a provider that declares
- * some, or names one for a provider that declares none, so a recipe never
+ * some, or names one for a provider that declares none, when it names no
+ * machine for a placement that chooses one or names one anywhere else, or
+ * when it allows network where its desktop cannot have it, so a recipe never
  * leases on terms nobody chose.
  */
 function recipeTerms(
@@ -549,16 +590,33 @@ function recipeTerms(
   if (provider.daemon !== undefined && recipe.credentialRef !== undefined) return undefined;
   const placements = provider.placements ?? [];
   if (placements.length === 0) {
-    return recipe.placementId === undefined
+    return recipe.placementId === undefined &&
+      recipe.machine === undefined &&
+      (recipe.network === "none" ||
+        desktopNetworkAllowed({ locality: provider.locality, placed: false }))
       ? { locality: provider.locality, billed: provider.billed }
       : undefined;
   }
   const placement = placements.find(
     (entry) => String(entry.id) === String(recipe.placementId ?? ""),
   );
-  return placement === undefined
-    ? undefined
-    : { locality: placement.locality, billed: placement.billed, placementId: placement.id };
+  if (placement === undefined) return undefined;
+  if (
+    recipe.network !== "none" &&
+    !desktopNetworkAllowed({ locality: placement.locality, placed: true })
+  ) {
+    return undefined;
+  }
+  const { machine } = recipe;
+  if (placement.choosesMachine === true ? machine === undefined : machine !== undefined) {
+    return undefined;
+  }
+  return {
+    locality: placement.locality,
+    billed: placement.billed,
+    placementId: placement.id,
+    ...(machine === undefined ? {} : { machine }),
+  };
 }
 
 /**
@@ -594,6 +652,7 @@ function leasableOf(
     displayName: placement.displayName.trim().slice(0, 128) || String(placement.id),
     locality: placement.locality,
     billed: placement.billed,
+    ...(placement.choosesMachine === true ? { choosesMachine: true as const } : {}),
   }));
   return {
     providerId: provider.id,
@@ -677,7 +736,9 @@ export function createDesktopLeaseService(
     leaseId: DesktopLeaseId,
     to: DesktopLeaseState,
     actor: EventActor,
-    extra: Partial<Pick<DesktopLeaseTransitioned, "endReason" | "requestedBy" | "detail">> = {},
+    extra: Partial<
+      Pick<DesktopLeaseTransitioned, "endReason" | "requestedBy" | "detail" | "credentialRejected">
+    > = {},
   ): DesktopLease {
     const record = read(leaseId);
     const from = record.lease.state;
@@ -693,6 +754,7 @@ export function createDesktopLeaseService(
       ...(extra.endReason === undefined ? {} : { endReason: extra.endReason }),
       ...(extra.requestedBy === undefined ? {} : { requestedBy: extra.requestedBy }),
       ...(extra.detail === undefined ? {} : { detail: extra.detail.slice(0, 512) }),
+      ...(extra.credentialRejected === undefined ? {} : { credentialRejected: true }),
     };
     append(record, leaseId, DESKTOP_LEASE_EVENT_NAMES.transitioned, payload, actor);
     return read(leaseId).lease;
@@ -1035,7 +1097,8 @@ export function createDesktopLeaseService(
       const answer =
         gate.asks !== "in-thread" && isPerson(caller.actor)
           ? String(caller.confirmedProvider ?? "") === String(first.provider.id) &&
-            String(caller.confirmedPlacement ?? "") === String(first.terms.placementId ?? "")
+            String(caller.confirmedPlacement ?? "") === String(first.terms.placementId ?? "") &&
+            String(caller.confirmedMachine ?? "") === String(first.terms.machine?.machineId ?? "")
             ? "approved"
             : "declined"
           : await options
@@ -1045,6 +1108,7 @@ export function createDesktopLeaseService(
                 ...(first.terms.placementId === undefined
                   ? {}
                   : { placementId: first.terms.placementId }),
+                ...(first.terms.machine === undefined ? {} : { machine: first.terms.machine }),
                 asks: gate.asks,
                 leaseMinutes: first.recipe.leaseMinutes,
               })
@@ -1052,12 +1116,14 @@ export function createDesktopLeaseService(
       if (answer !== "approved") return refused("declined");
     }
     // Authority may have changed while a person was deciding, and an answer
-    // given for one provider or placement never covers another.
+    // given for one provider, placement, or machine never covers another.
     const admitted = admitAcquire(caller);
     if (admitted.status === "refused") return admitted;
     if (
       String(admitted.provider.id) !== String(first.provider.id) ||
       String(admitted.terms.placementId ?? "") !== String(first.terms.placementId ?? "") ||
+      String(admitted.terms.machine?.machineId ?? "") !==
+        String(first.terms.machine?.machineId ?? "") ||
       admitted.terms.billed !== first.terms.billed ||
       admitted.terms.locality !== first.terms.locality ||
       admitted.thread.executionPolicy !== first.thread.executionPolicy
@@ -1079,6 +1145,7 @@ export function createDesktopLeaseService(
       hostTag,
       ...(recipe.credentialRef === undefined ? {} : { credentialRef: recipe.credentialRef }),
       ...(terms.placementId === undefined ? {} : { placementId: terms.placementId }),
+      ...(terms.machine === undefined ? {} : { machine: terms.machine }),
       ...(provider.daemon === undefined || options.daemonUserId === undefined
         ? {}
         : {
@@ -1118,13 +1185,22 @@ export function createDesktopLeaseService(
         // and who asked, as a teardown would; a driver that honours the
         // cancellation otherwise leaves only "cancelled" behind.
         const pending = entry.pendingEnd;
-        // Only Octant-authored text reaches the journal, never the driver's reason.
+        // Only Octant-authored text reaches the journal, never the driver's
+        // reason. A provider refusing the recipe's key is the one reason kept,
+        // as a marker, so the recipe editor can say the key was refused.
+        const keyRejected =
+          result.status === "refused" &&
+          result.reason === DESKTOP_CREDENTIAL_REJECTED &&
+          recipe.credentialRef !== undefined;
         const lease = transition(
           leaseId,
           result.status === "refused" ? "refused" : "failed",
           caller.actor,
           {
-            detail: ACQUIRE_FAILURE_DETAIL[result.status],
+            detail: keyRejected
+              ? "The provider refused the key saved for this recipe."
+              : ACQUIRE_FAILURE_DETAIL[result.status],
+            ...(keyRejected ? { credentialRejected: true as const } : {}),
             ...(pending === undefined ? {} : { endReason: pending.reason }),
             ...(pending?.requestedBy === undefined ? {} : { requestedBy: pending.requestedBy }),
           },
@@ -1466,8 +1542,60 @@ export function createDesktopLeaseService(
       ...(admitted.terms.placementId === undefined
         ? {}
         : { placementId: admitted.terms.placementId }),
+      ...(admitted.terms.machine === undefined ? {} : { machine: admitted.terms.machine }),
     };
   }
+
+  const recipeMachines: DesktopLeaseService["recipeMachines"] = async (input) => {
+    if (input.actor.kind !== "local-user") return refused("not-permitted");
+    // Only a provider offered for leasing now, on a placement that chooses a
+    // machine, is asked: the same list a recipe may name.
+    const loaded = registered(String(input.providerId));
+    const placement = loaded?.provider.placements?.find(
+      (entry) => String(entry.id) === String(input.placementId),
+    );
+    const listMachines = loaded?.provider.listMachines;
+    if (
+      loaded === undefined ||
+      !loaded.effective ||
+      placement?.choosesMachine !== true ||
+      listMachines === undefined
+    ) {
+      return refused("no-provider-configured");
+    }
+    const controller = new AbortController();
+    const listed = await bounded(() => listMachines(placement.id, controller.signal), {
+      status: "failed" as const,
+      reason: "timed-out",
+    });
+    controller.abort();
+    if (listed.status !== "listed") return refused("provider-unavailable");
+    // A driver is untrusted: an id that is not one is left out, and a name is
+    // bounded, falling back to the id. A name is trimmed again after the cut,
+    // because the answer's names are trimmed text and one that is not fails
+    // the whole listing.
+    const machines: Array<{
+      readonly machineId: DesktopMachineId;
+      readonly displayName: string;
+      readonly online: boolean;
+    }> = [];
+    for (const machine of listed.machines) {
+      if (machines.length >= MAX_RECIPE_MACHINES) break;
+      let machineId: DesktopMachineId;
+      try {
+        machineId = decodeDesktopMachineId(machine.id);
+      } catch {
+        continue;
+      }
+      const name = typeof machine.name === "string" ? machine.name.trim().slice(0, 128).trim() : "";
+      machines.push({
+        machineId,
+        displayName: name === "" ? String(machineId) : name,
+        online: machine.online === true,
+      });
+    }
+    return { status: "recipe-machines", machines };
+  };
 
   /** A view the caller holds on this lease, with the lease still operable by them. */
   function admitView(
@@ -1491,16 +1619,23 @@ export function createDesktopLeaseService(
     return { status: "viewing", view, operating };
   }
 
-  /** The view's screen from the driver resolved now; a different driver serves a fresh one. */
+  /**
+   * The view's screen from the driver resolved now; a different driver serves
+   * a fresh one. `readable` is a driver that refused because the session could
+   * be read on its way, the one driver reason a person is told.
+   */
   async function screenOf(
     view: DesktopView,
     operating: Operating,
-  ): Promise<DesktopScreen | undefined> {
+  ): Promise<DesktopScreen | "readable" | undefined> {
     if (view.screen?.provider === operating.provider) return view.screen.screen;
     const opened = await bounded(() => operating.provider.screen(operating.handle), {
       status: "failed" as const,
       reason: "timed-out",
     });
+    if (opened.status === "refused" && opened.reason === DESKTOP_SESSION_READABLE) {
+      return "readable";
+    }
     if (opened.status !== "ready") return undefined;
     // The view may have closed while the driver answered.
     if (views.get(view.viewId) !== view) {
@@ -1531,9 +1666,10 @@ export function createDesktopLeaseService(
     };
     views.set(String(viewId), view);
     markTab(caller.leaseId, "opened");
-    if ((await screenOf(view, operating)) === undefined) {
+    const screen = await screenOf(view, operating);
+    if (screen === undefined || screen === "readable") {
       if (views.get(String(viewId)) === view) closeView(String(viewId), view);
-      return refused("provider-unavailable");
+      return screen === "readable" ? SESSION_READABLE : refused("provider-unavailable");
     }
     return { status: "viewing", viewId };
   };
@@ -1542,11 +1678,15 @@ export function createDesktopLeaseService(
     const admitted = admitView(caller);
     if (admitted.status === "refused") return admitted;
     const screen = await screenOf(admitted.view, admitted.operating);
+    if (screen === "readable") return SESSION_READABLE;
     if (screen === undefined) return { status: "no-frame" };
     const answered = await bounded(() => screen.frame(), {
       status: "failed" as const,
       reason: "timed-out",
     });
+    if (answered.status === "refused" && answered.reason === DESKTOP_SESSION_READABLE) {
+      return SESSION_READABLE;
+    }
     const started = live.get(String(caller.leaseId))?.screen;
     if (
       answered.status !== "frame" ||
@@ -1582,11 +1722,15 @@ export function createDesktopLeaseService(
       const entry = live.get(String(caller.leaseId));
       if (entry !== undefined) entry.lastActivityAt = options.now();
       const screen = await screenOf(admitted.view, admitted.operating);
+      if (screen === "readable") return SESSION_READABLE;
       if (screen === undefined) return { status: "not-delivered" };
       const delivered = await bounded(() => screen.input(caller.event), {
         status: "failed" as const,
         reason: "timed-out",
       });
+      if (delivered.status === "refused" && delivered.reason === DESKTOP_SESSION_READABLE) {
+        return SESSION_READABLE;
+      }
       return delivered.status === "delivered"
         ? { status: "delivered" }
         : { status: "not-delivered" };
@@ -1684,10 +1828,25 @@ export function createDesktopLeaseService(
         .map((entry) => leasableOf(entry.provider)),
     });
 
+  const holdsCredential = (credentialRef: DesktopCredentialRef): boolean =>
+    projection
+      .list()
+      .some(
+        (record) =>
+          String(record.lease.credentialRef ?? "") === String(credentialRef) &&
+          desktopLeaseHoldsDesktop(record.lease.state),
+      ) ||
+    [...orphans.values()].some(
+      (orphan) =>
+        String(orphan.credentialRef ?? orphan.handle?.credentialRef ?? "") ===
+        String(credentialRef),
+    );
+
   return {
     start,
     destination,
     acquire,
+    recipeMachines,
     release,
     retryRelease,
     extend,
@@ -1700,6 +1859,7 @@ export function createDesktopLeaseService(
     input,
     closeView: closeViewByCaller,
     sweep,
+    holdsCredential,
   };
 }
 

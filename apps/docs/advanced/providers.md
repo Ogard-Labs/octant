@@ -220,8 +220,8 @@ Below that is one guided setup with a single next step:
   second one. The host refuses to duplicate one too.
 - **Turn on** switches the provider on.
 - **Sign in** uses the runtime's own Providers & Models card, shown on the
-  setup page. A key you enter there is stored in the system keychain, never
-  in the catalog.
+  setup page. A key you enter there is stored in the host's credential store
+  (the Keychain on a Mac, Secret Service on Linux), never in the catalog.
 - **Check connection** starts the runtime once to read its models and sign-in.
   If the runtime cannot start at its configured path, the card's **Locate
   binary…** fixes it.
@@ -236,7 +236,8 @@ under **Outside drivers**, marked as an outside driver rather than bundled.
 
 Its setup adds a provider in place: a name, the address of the service the
 driver speaks to (HTTPS, or HTTP on this computer), how the key is sent, the
-key, and the model IDs to offer. The provider is added off. Turning it on
+key, and the model IDs to offer. The key is saved in the host's credential
+store (the Keychain on a Mac). The provider is added off. Turning it on
 starts nothing; **Check connection** starts the driver in its own confined
 process, with no network and none of your files, and Octant makes every
 request for it, adding the key itself, only to the address you entered. Only
@@ -245,10 +246,18 @@ model use Octant's tools, use **Verify tools** on the provider's card: Octant
 sends one request and checks the answer itself.
 
 Trust holds for the exact version you trusted. If the folder's contents change
-and you update, the provider stays blocked, with its history and key, until you
-remove it and add it again. Turning the plugin off, withdrawing trust, or
-uninstalling stops the driver and blocks the provider. Linux and Windows hosts
-cannot confine a driver, so they never run one.
+and you update, the new version arrives untrusted and the provider is blocked,
+with its history and key. Trusting the new version moves the provider to it:
+its next check starts the new version, and its models need **Verify tools**
+again, since what Octant learned about the old version does not carry over. A
+rollback works the same way. If the driver stops on its own three times
+within a minute, Octant holds that version of it: the provider's card says
+so, and restarting Octant does not lift the hold. Installing another version
+and trusting it moves the provider and leaves the hold behind. Turning the
+plugin off, withdrawing trust, or uninstalling stops the driver and blocks
+the provider. Linux and Windows hosts
+cannot confine a driver, so they never run one. To write one, see
+[Build a provider driver](/advanced/provider-drivers).
 
 An endpoint driver (OpenAI-compatible, Anthropic-compatible, Azure AI Foundry,
 Ollama) is added under **Octant Harness → Model endpoints** with **Add
@@ -491,18 +500,21 @@ dialog walks through five steps:
 Supported profiles:
 
 - **OpenAI-compatible** HTTP (`auto`, `responses`, or `chat-completions`;
-  an API key, none on this Mac, or your organization account)
+  an API key, none on this computer, or your organization account)
 - **Anthropic-compatible** HTTP (`auto` or `messages`; an API key, none on
-  this Mac, or your organization account)
+  this computer, or your organization account)
 - **Azure AI Foundry** (OpenAI-compatible v1 profile; base URL must end with
   `/openai/v1/`; an API key or your organization account; at least one
   deployment)
 - **Ollama** local HTTP (loopback origin only)
 
-API keys are stored only by the Octant desktop app. In a browser, an endpoint
-that needs a key is added without one and reads **Needs key** until you add the
-key in the desktop app; an endpoint that needs no key, such as Ollama or a
-server on this computer, works fully. If a
+API keys are stored only by the Octant desktop app, in the host's credential
+store: Settings says **Saved in this Mac's Keychain** on a Mac and **Saved in
+this computer's credential store** on Linux, where it is Secret Service. In a
+browser, an endpoint that needs a key is added without one and reads **Needs
+key** until you add the key in the desktop app on the host's computer; an
+endpoint that needs no key, such as Ollama or a server on this computer, works
+fully. If a
 configured endpoint lists far more models than you set up, such as an Azure
 resource that lists every base model, **Settings → Octant Harness** shows the
 models you configured first and the rest under **Discovered on the endpoint**;
@@ -546,7 +558,7 @@ and listed:
 
 Allowlists are manual-entry; suggested IDs are not the only values Octant
 accepts. Black Forest Labs and Ideogram profiles take an optional base URL for
-a proxy (HTTPS, or HTTP on this Mac); leave it blank to call the provider
+a proxy (HTTPS, or HTTP on this computer); leave it blank to call the provider
 directly. Changing it removes the stored API key, so enter the key again.
 The other image profiles have no editable base URL. GPT Image models require
 OpenAI Organization Verification. Black Forest Labs generates exactly one
@@ -575,9 +587,10 @@ Image profiles.
 
 ### Credentials
 
-Credentials are write-only and stored as indirect references in the macOS
-Keychain — never returned to the interface, never journaled, never placed in
-process arguments or diagnostics. Remote endpoints require bearer or API-key
+Credentials are write-only and stored as indirect references in the host's
+credential store (the macOS Keychain, or Secret Service on Linux) — never
+returned to the interface, never journaled, never placed in process arguments
+or diagnostics. Remote endpoints require bearer or API-key
 authentication; anonymous access is accepted only for loopback. OAuth and
 subscription modes work where the official runtime supports them and are
 never silently replaced by API-key modes.
@@ -607,6 +620,61 @@ active key runs out.
 - Anthropic-compatible, OpenAI-compatible, Azure AI Foundry, and image endpoints
   switch keys within a turn. A command-line runtime, such as Claude Code or
   Codex, uses the first key for now and does not switch.
+
+### Claude artifacts
+
+By default Claude delivers a document, report, deck, or page as a Canvas, and
+Canvas stays the default. A Claude Code account signed in with claude.ai can
+let its threads publish them as Claude artifacts instead. Claude artifacts
+are a per-thread choice: Claude Code's usage telemetry is sent to Anthropic
+only for the threads that use them.
+
+1. Open the account's card in **Settings → Providers**, open its details, and
+   turn on **Enable Claude artifacts**. The warning under the switch, repeated
+   in a confirmation, says that it also turns on Claude Code's usage telemetry
+   to Anthropic for the account's Work and Code threads that use artifacts;
+   error reports and conversation uploads stay off. It is off for every
+   account until you turn it on, and only the Octant app on the host can
+   change it; a paired device cannot.
+2. In a Work or Code thread on that account, choose artifacts for that
+   thread. The first time such a thread makes a Canvas, Octant asks once
+   beneath it: **Use Claude artifacts for this thread instead?** Answer
+   **Use Claude artifacts** or **Keep Canvas**; it does not ask again. You
+   can switch either way at any time from the thread's composer: the task
+   actions menu in Work, or the document button beside the access picker in
+   Code. The change applies from the next turn. A paired device can switch a
+   thread back to Canvas but cannot turn artifacts on.
+
+In a thread that uses Claude artifacts:
+
+- Claude writes the document as a page in the folder and publishes it to your
+  claude.ai account. **The page is uploaded to claude.ai and leaves this
+  computer.**
+- That thread's turns run Claude Code with its usage telemetry to Anthropic
+  on. Every other thread keeps it off, as before.
+- Claude asks before each publish, even when the thread has Full access, and
+  an earlier answer never covers a later publish. It can only publish a file
+  inside the thread's folder. A replacement of a page already on your account
+  names that page in the request.
+- Plan never publishes, and Chat never does.
+- The thread shows a link card under the turn's steps that opens the page in
+  your browser, where you are signed in to claude.ai, and beside it a
+  snapshot of the file as it was when you approved publishing it. Edits made
+  later on claude.ai are not shown. In a Work thread the snapshot appears
+  when the turn finishes. A page with its own script waits for
+  **Run**, as an imported HTML page in a Canvas does. Octant never downloads,
+  displays, or signs in to the live page.
+- Ask for a Canvas and you still get one.
+
+Whether Claude offers its Artifact tool also depends on your Claude plan and
+organization. When it doesn't, documents stay Canvases. An account that uses an
+Anthropic API key has no claude.ai account to publish to, so the setting is
+unavailable there. If your computer exports
+`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, `DISABLE_TELEMETRY=1` or
+`DO_NOT_TRACK=1`, that opt-out keeps Claude Code's telemetry and Claude
+artifacts off, and the card says so. Turning the setting
+or a thread's choice off refuses Claude's next publish at once, and the
+thread's next turn runs with telemetry off again.
 
 ### Signing in with a subscription
 
@@ -674,7 +742,8 @@ instead. The administrator's registration must then also set
 **Authentication › Allow public client flows** to **Yes**.
 
 The address must be on `openai.azure.com`, `services.ai.azure.com`, or
-`cognitiveservices.azure.com`. What the row says when the sign-in needs you:
+`cognitiveservices.azure.com`. Once you have opened the endpoint, its row also
+says who is signed in. What the row says when the sign-in needs you:
 
 - **Sign in again**: your organization wants you to sign in in person again,
   for example to complete multi-factor authentication. Octant keeps the
@@ -750,14 +819,26 @@ on the models you use, and gives you the access portal URL
 (`https://<name>.awsapps.com/start`), the region it runs in, the account ID,
 and the permission set's name. Only the commercial AWS regions are supported.
 
-Settings cannot add this endpoint yet; until it can, use a Bedrock API key
-with an OpenAI-compatible endpoint. An Amazon Bedrock endpoint signs in only
-with [`octant provider sign-in`](../guide/linux-host#sign-in-an-organization-endpoint-with-a-code):
-the command shows a page on `device.sso.<region>.amazonaws.com` or your access
-portal and a code to enter there. Changing the endpoint's region, portal,
-account, or role, or removing it, ends that sign-in. Each model is checked on
-its first request: a model the permission set does not allow reads **No
-access**. The endpoint does not send attached files yet.
+To add one, open **Settings → Octant Harness → Model endpoints**, choose **Add
+endpoint**, then **Amazon Bedrock**. Give it a name, the region your models
+run in, the access portal URL, the portal's region, the 12-digit account ID,
+the permission set's name, and the model IDs you use (Bedrock does not list
+the models a role may use, so name each one). It takes no key and no address.
+Once it's added the row reads **Sign in to use** and names the command to run.
+
+An Amazon Bedrock endpoint signs in only with
+[`octant provider sign-in`](../guide/linux-host#sign-in-an-organization-endpoint-with-a-code)
+in a terminal on the host: the command shows a page on
+`device.sso.<region>.amazonaws.com` or your access portal and a code to enter
+there. Settings never shows the code; after you sign in, choose **Check
+again**. The endpoint's row and page then say **Signed in as** the role and
+account, and **Sign out** asks your organization's portal to end the session and
+removes the sign-in from this computer. Changing the endpoint's region,
+portal, account, or role, or removing it, ends that sign-in; changing only its
+models keeps it. Each model is checked on its first request: a model the
+permission set does not allow reads **No access**. The endpoint does not send
+attached files yet. A Bedrock API key still works with an OpenAI-compatible
+endpoint.
 
 ### Presets added with a key
 

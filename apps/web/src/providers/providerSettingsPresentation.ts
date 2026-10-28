@@ -3,14 +3,20 @@ import {
   isAcpAgentKind,
   type AnthropicCompatibleProtocol,
   type DiscoverySnapshot,
+  type HostPlatform,
   type OpenAiCompatibleProtocol,
   type ProviderInstance,
   type ProviderObservedState,
   type ProviderRefusalReason,
 } from "@octant/contracts";
+import { isOutsideDriverQuarantined } from "@octant/domain";
+import { thisComputerName } from "../platform";
 
 export const capabilityLabels: ReadonlyArray<
-  readonly [Exclude<keyof ProviderObservedState["capabilities"], "sessionCompaction">, string]
+  readonly [
+    Exclude<keyof ProviderObservedState["capabilities"], "sessionCompaction" | "nativeArtifacts">,
+    string,
+  ]
 > = [
   ["streaming", "Streaming"],
   ["resume", "Resume"],
@@ -61,9 +67,14 @@ export function protocolLabel(
  * state rather than implying absence: a scan that has not run, failed, or was
  * cancelled is not evidence that the runtime is gone.
  */
-export function providerDetectionBlockedReason(snapshot: DiscoverySnapshot | undefined): string {
+export function providerDetectionBlockedReason(
+  snapshot: DiscoverySnapshot | undefined,
+  hostPlatform: HostPlatform | undefined,
+): string {
+  // The scan runs on the host, so the host's platform names the computer.
+  const computer = thisComputerName(hostPlatform);
   if (snapshot === undefined) {
-    return "This Mac has not been scanned for it yet. Use “Check again” to scan.";
+    return `${computer.charAt(0).toUpperCase()}${computer.slice(1)} has not been scanned for it yet. Use “Check again” to scan.`;
   }
   if (snapshot.status === "failed") {
     return "The last scan failed, so its presence is unknown. Use “Check again” to retry.";
@@ -74,7 +85,7 @@ export function providerDetectionBlockedReason(snapshot: DiscoverySnapshot | und
   if (snapshot.status === "partial") {
     return "The last scan did not finish, so it may have missed this binary. Use “Check again” to scan again.";
   }
-  return "The latest scan did not find its binary on this Mac. Use “Check again” to scan again.";
+  return `The latest scan did not find its binary on ${computer}. Use “Check again” to scan again.`;
 }
 
 /**
@@ -88,6 +99,7 @@ export const MODEL_ENDPOINT_DRIVER_KINDS = [
   "anthropic-compatible",
   "ollama",
   "azure-foundry",
+  "amazon-bedrock",
 ] as const satisfies ReadonlyArray<ProviderInstance["driverKind"]>;
 
 export type ModelEndpointDriverKind = (typeof MODEL_ENDPOINT_DRIVER_KINDS)[number];
@@ -145,7 +157,7 @@ export function providerRefusalCopy(
     return {
       reason: "This provider's driver package is not admitted, so it offers no models.",
       nextStep:
-        "Octant runs this provider only once its driver package is installed, trusted, and enabled.",
+        "Octant runs this provider only once its driver package is installed, trusted, and enabled. After an update, trusting the new version moves this provider to it.",
     };
   }
   if (reason === "driver-incompatible") {
@@ -153,6 +165,15 @@ export function providerRefusalCopy(
       reason: "This provider's driver package does not speak a protocol Octant can use.",
       nextStep:
         "Octant stopped the driver. Install a version of the package built for this Octant, then check the connection again.",
+    };
+  }
+  if (reason === "runtime-unavailable" && instance.driverKind === "outside-harness-endpoint") {
+    const held = outsideDriverHoldGuidance(instance);
+    if (held !== undefined) return held;
+    return {
+      reason: "Octant could not start this provider's driver, or the driver stopped.",
+      nextStep:
+        "Check the connection again. If the driver keeps stopping, Octant holds this version until you trust another version.",
     };
   }
   if (reason === "runtime-unavailable") {
@@ -167,10 +188,32 @@ export function providerRefusalCopy(
   };
 }
 
+const OUTSIDE_DRIVER_QUARANTINE_COPY = {
+  reason:
+    "This provider's driver stopped three times within a minute, so Octant holds this version of it.",
+  nextStep:
+    "Restarting Octant does not lift the hold. Install another version of the driver package and trust it; this provider moves to it.",
+} as const;
+
+/**
+ * Why an outside provider's driver is held and what lifts it, or nothing. The
+ * hold is journaled on the provider, so it is read from the record itself and
+ * shown whether or not a check has run, and while the provider is off.
+ */
+export function outsideDriverHoldGuidance(
+  instance: ProviderInstance,
+): { readonly reason: string; readonly nextStep: string } | undefined {
+  return instance.driverKind === "outside-harness-endpoint" && isOutsideDriverQuarantined(instance)
+    ? OUTSIDE_DRIVER_QUARANTINE_COPY
+    : undefined;
+}
+
 export function providerRefusalGuidance(
   instance: ProviderInstance,
   observed: ProviderObservedState | undefined,
 ): { readonly reason: string; readonly nextStep: string } | undefined {
+  const held = outsideDriverHoldGuidance(instance);
+  if (held !== undefined) return held;
   return observed?.reason === undefined
     ? undefined
     : providerRefusalCopy(observed.reason, instance);

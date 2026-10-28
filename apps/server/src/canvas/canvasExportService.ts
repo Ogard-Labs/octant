@@ -262,7 +262,10 @@ export class CanvasExportService {
     // window may publish one; a paired device can read links, not mint them.
     if (destination?.linkTerms !== undefined && requester !== "local-window") {
       return decodeCanvasExportPrepareResult(
-        refused("unauthorized", "A public link can be published only from a window on this Mac."),
+        refused(
+          "unauthorized",
+          "A public link can be published only from a window on this computer.",
+        ),
       );
     }
     const nowMs = Date.parse(this.#clock());
@@ -378,7 +381,10 @@ export class CanvasExportService {
     ) {
       this.#pending.delete(key);
       return decodeCanvasExportDecideResult(
-        refused("unauthorized", "A public link can be published only from a window on this Mac."),
+        refused(
+          "unauthorized",
+          "A public link can be published only from a window on this computer.",
+        ),
       );
     }
     const offer = this.#offerFor(pending.card.card.targetId, pending.card.card.canvasId);

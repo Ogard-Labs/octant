@@ -584,6 +584,39 @@ describe("RemoteGateway — local-only routes fail before auth/product dispatch"
   });
 });
 
+describe("RemoteGateway — the host's platform stays on the loopback listener", () => {
+  // The loopback listener's `/api/hosts` names the OS the host runs on, so a
+  // local window can say "this Mac" or "this computer". Anyone who can reach
+  // the private listener could read a pre-auth answer, so that listener must
+  // not answer the route at all, nor hand it to product dispatch or the web
+  // assets, either of which could carry the host's platform.
+  it("answers a remote client's host identity read with no platform", async () => {
+    const { serve, getFetch } = createCapturingServe();
+    const platformReport = () =>
+      Promise.resolve(Response.json({ hosts: [{ hostId: "local", platform: process.platform }] }));
+    const dispatched = vi.fn(platformReport);
+    const webAssets = vi.fn(platformReport);
+    const { gateway } = setup({ productDispatch: dispatched, serve, webAssets });
+    await gateway.start();
+    const capturedFetch = getFetch();
+    if (capturedFetch === undefined) throw new Error("The gateway is not serving.");
+    for (const method of ["GET", "HEAD"] as const) {
+      const response = await capturedFetch(
+        new Request(`${ORIGIN}/api/hosts`, {
+          method,
+          headers: { host: "192.168.1.20:9443", origin: ORIGIN },
+        }),
+        lanFacts,
+      );
+      expect(response.status, method).toBe(404);
+      expect(await response.text(), method).not.toContain("platform");
+    }
+    expect(dispatched).not.toHaveBeenCalled();
+    expect(webAssets).not.toHaveBeenCalled();
+    await gateway.stop();
+  });
+});
+
 describe("RemoteGateway — host listener and pairing administration stay local", () => {
   // The `octant listener` and `octant pair` commands reach these routes only
   // over the loopback administration channel. A request arriving on the

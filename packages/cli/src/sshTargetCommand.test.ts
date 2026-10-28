@@ -33,9 +33,10 @@ const status = {
   runtimeBinaries: [
     { providerInstanceId: "77777777-7777-4777-8777-777777777777", path: "/opt/agent/bin/agent" },
   ],
+  placeableRuntimes: [],
 };
 
-function harness(ask?: (question: string) => Promise<string | undefined>) {
+function harness(ask?: (question: string) => Promise<string | undefined>, listed: object = status) {
   const sent: LocalControlRequest[] = [];
   const out: string[] = [];
   const err: string[] = [];
@@ -43,7 +44,7 @@ function harness(ask?: (question: string) => Promise<string | undefined>) {
     request.path === "/api/desktop/ssh-targets/host-key"
       ? { status: 200, body: probe }
       : request.path === "/api/desktop/ssh-targets"
-        ? { status: 200, body: { targets: [status] } }
+        ? { status: 200, body: { targets: [listed] } }
         : { status: 200, body: status };
   return {
     sent,
@@ -145,6 +146,49 @@ describe("octant ssh-target", () => {
     expect(
       resolveSshTargetCliCommand(["runtime", "id", "instance", "/a", "/b"], {}),
     ).toBeUndefined();
+  });
+
+  it("lists a target the host is reconnecting to with the attempt, when the next starts, and what it refuses meanwhile", async () => {
+    const decision = {
+      status: "refused",
+      reason: "target-reconnecting",
+      attempt: 2,
+      maxAttempts: 8,
+      nextAttemptAt: Date.UTC(2026, 9, 28, 14, 5, 12),
+    };
+    // The remote user and platform are reported only while a session attests them.
+    const { remoteUser: _remoteUser, platform: _platform, ...unattested } = status;
+    const run = harness(undefined, {
+      ...unattested,
+      connection: "reconnecting",
+      reconnect: {
+        status: "waiting",
+        attempt: 2,
+        maxAttempts: 8,
+        nextAttemptAt: decision.nextAttemptAt,
+      },
+      admission: [{ posture: "plan", decision }],
+    });
+    expect(await run.run(["list"])).toBe(0);
+    const printed = run.out.join("");
+    expect(printed).toContain("build@devbox  reconnecting\n");
+    expect(printed).toContain(
+      "  reconnecting on its own: attempt 2 of 8 at 2026-10-28T14:05:12.000Z\n",
+    );
+    expect(printed).toContain("  plan: refused, target-reconnecting\n");
+  });
+
+  it("lists a target the host stopped reconnecting to after one attempt", async () => {
+    const decision = { status: "refused", reason: "host-key-changed" };
+    const { remoteUser: _remoteUser, platform: _platform, ...unattested } = status;
+    const run = harness(undefined, {
+      ...unattested,
+      connection: "host-key-changed",
+      reconnect: { status: "stopped", attempts: 1 },
+      admission: [{ posture: "plan", decision }],
+    });
+    expect(await run.run(["list"])).toBe(0);
+    expect(run.out.join("")).toContain("  stopped reconnecting after 1 attempt\n");
   });
 
   it("re-pins against the target's own destination", async () => {

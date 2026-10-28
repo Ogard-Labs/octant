@@ -5,7 +5,7 @@ import type {
 } from "@octant/contracts/extension-rpc";
 import { Plus, X } from "lucide-react";
 import { useId, useState, type FormEvent } from "react";
-import { thisComputerName } from "../platform";
+import { thisComputerName, useHostPlatform } from "../platform";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
@@ -66,6 +66,7 @@ export function AddMcpServerDialog(props: AddMcpServerDialogProps) {
 
 function AddMcpServerForm(props: Omit<AddMcpServerDialogProps, "open">) {
   const ids = useId();
+  const hostPlatform = useHostPlatform();
   const [kind, setKind] = useState<ServerKind>("stdio");
   const [name, setName] = useState("");
   const [command, setCommand] = useState("");
@@ -287,7 +288,7 @@ function AddMcpServerForm(props: Omit<AddMcpServerDialogProps, "open">) {
         </OctantButton>
         <span className="endpoint-flow__hint">
           {props.secretsAvailable
-            ? `A secret value is kept in ${thisComputerName()}'s credential store, never in the package, and Octant can't show it again.`
+            ? `A secret value is kept in ${thisComputerName(hostPlatform)}'s credential store, never in the package, and Octant can't show it again.`
             : "This browser can't keep secrets. Add secret values from the Octant window on this host."}
         </span>
       </fieldset>

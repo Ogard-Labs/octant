@@ -22,6 +22,10 @@ when you press **Start**, and a breakpoint you set or clear while a session
 runs reaches it at once. Octant does not keep them: reloading the window
 clears them.
 
+A session takes at most 256 breakpoints in a file and breakpoints in at most
+64 files. Past either, the editor sets nothing and says which limit you
+reached; clear a breakpoint, or another file's breakpoints, first.
+
 ## Configurations
 
 A configuration says what runs: the adapter, the program and its arguments,
@@ -38,9 +42,11 @@ the working folder, and environment values. The tool lists three things:
   Put one argument per line and one `NAME=value` per line for the
   environment.
 
-**Review** shows a confirmation card with every value that will run, and for
-a launch file entry, every field Octant does not use (a pre-launch task, for
-example, never runs). Choose **Allow in this checkout** or **Allow in this
+**Review** shows a confirmation card with every value that will run, the
+adapter with the package and version it came from, and for a launch file
+entry, every field Octant does not use (a pre-launch task, for example,
+never runs). When two installed adapters share a name, the list names each
+one's package too. Choose **Allow in this checkout** or **Allow in this
 Project**. The arguments and environment values are kept in the Project's
 record of what you allowed. Changing the configuration, or any change to its
 adapter (an update, switching it off and on, or changing its trust), asks
@@ -61,7 +67,10 @@ Press **Start** on a confirmed configuration. The tool then shows:
   you type and press Enter on, evaluated in the selected frame.
 
 When the program pauses, the editor opens the file at that line and marks
-it. When the session ends the tool says why: you stopped it, the program
+it. Closing the tool removes the mark, since nothing then follows the
+program; the session keeps running, and reopening the tool marks the line
+again. A notice that the host could not be reached goes away once the host
+answers again. When the session ends the tool says why: you stopped it, the program
 exited (with its exit code), or something about the thread changed, such as
 moving to Plan or being archived.
 
@@ -84,7 +93,9 @@ this thread is:
 
 Octant keeps no variable value, expression, output, or breakpoint: they live
 in memory for the session and are gone when it ends. The Project's record
-holds what you confirmed and when each session started and ended.
+holds what you confirmed and when each session started and ended. A
+diagnostics export counts the sessions started, and ended for each reason,
+over the last 14 days, and names none of them.
 
 ## Where it is not offered
 

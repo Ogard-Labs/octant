@@ -1,5 +1,6 @@
 import {
   LOCAL_HOST_ID,
+  type HostPlatform,
   decodeProviderInstanceId,
   type NativeHarnessRoutingSettings,
   type ProviderModel,
@@ -9,12 +10,13 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { HostPlatformContext } from "../../platform";
 import type { ModelToolCheck } from "../../providers/useProviderController";
 import { chooseSelectFieldOption } from "../../test/chooseSelectFieldOption.test-support";
 import { endpointPreset } from "./addEndpointSteps";
 import { AddEndpointFlow, type AddEndpointFlowProps, type AddedEndpoint } from "./AddEndpointFlow";
 import { EndpointChoices } from "./AddModelEndpoint";
-import type { EndpointStatus, ModelEndpointInstance } from "./endpointStatus";
+import { endpointStatus, type EndpointStatus, type ModelEndpointInstance } from "./endpointStatus";
 
 const id = decodeProviderInstanceId("80000000-0000-4000-8000-0000000004a7");
 const READY: EndpointStatus = { tone: "ready", label: "Ready" };
@@ -142,6 +144,7 @@ function flowProps(overrides: Overrides = {}): AddEndpointFlowProps {
     onCreateOpenAiCompatible: clearing,
     onCreateAnthropicCompatible: clearing,
     onCreateAzureFoundry: clearing,
+    onCreateAmazonBedrock: vi.fn(async () => true),
     onCreateOllama: vi.fn(async () => true),
     onChangeOpenAiCompatibleConfiguration: vi.fn(async () => true),
     onChangeAnthropicCompatibleConfiguration: vi.fn(async () => true),
@@ -184,6 +187,9 @@ function Harness(props: { readonly flow: AddEndpointFlowProps; readonly override
       onCreateAzureFoundry={async (...args) =>
         listed(await props.flow.onCreateAzureFoundry(...args))
       }
+      onCreateAmazonBedrock={async (...args) =>
+        listed(await props.flow.onCreateAmazonBedrock(...args))
+      }
       onCreateOllama={async (...args) => listed(await props.flow.onCreateOllama(...args))}
       onCreateOpenAiCompatible={async (...args) =>
         listed(await props.flow.onCreateOpenAiCompatible(...args))
@@ -192,9 +198,14 @@ function Harness(props: { readonly flow: AddEndpointFlowProps; readonly override
   );
 }
 
-function renderFlow(overrides: Overrides = {}) {
+/** Renders the flow against a host that reports `hostPlatform`, macOS unless named. */
+function renderFlow(overrides: Overrides = {}, hostPlatform: HostPlatform = "darwin") {
   const flow = flowProps(overrides);
-  render(<Harness flow={flow} overrides={overrides} />);
+  render(
+    <HostPlatformContext.Provider value={hostPlatform}>
+      <Harness flow={flow} overrides={overrides} />
+    </HostPlatformContext.Provider>,
+  );
   return flow;
 }
 
@@ -223,7 +234,7 @@ async function connect(
 }
 
 describe("Add endpoint, step by step", () => {
-  it("starts with four kinds of endpoint by their plain names", () => {
+  it("starts with five kinds of endpoint by their plain names", () => {
     renderFlow();
 
     const kinds = screen.getByRole("list", { name: "Kinds of endpoint" });
@@ -233,6 +244,7 @@ describe("Add endpoint, step by step", () => {
         .map((button) => button.textContent),
     ).toEqual([
       expect.stringMatching(/^Azure AI Foundry/),
+      expect.stringMatching(/^Amazon Bedrock/),
       expect.stringMatching(/^OpenAI-compatible/),
       expect.stringMatching(/^Anthropic-compatible/),
       expect.stringMatching(/^Local \(Ollama\)/),
@@ -449,6 +461,91 @@ describe("Add endpoint, step by step", () => {
       },
       expect.objectContaining({ value: "" }),
     );
+  });
+
+  it("adds Amazon Bedrock by portal, account, role, and models with no key or address, and ends at its sign-in", async () => {
+    const user = userEvent.setup();
+    const configuration = {
+      kind: "amazon-bedrock-converse-http",
+      region: "us-west-2" as never,
+      authentication: "cloud-iam",
+      cloudIam: {
+        startUrl: "https://contoso.awsapps.com/start" as never,
+        ssoRegion: "us-east-1" as never,
+        accountId: "123456789012" as never,
+        roleName: "BedrockUser" as never,
+      },
+      manualModelIds: [
+        "anthropic.claude-sonnet-4-20250514-v1:0" as never,
+        "amazon.nova-pro-v1:0" as never,
+      ],
+    } as const;
+    const instance: ModelEndpointInstance = {
+      id,
+      displayName: "Contoso Bedrock",
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1 as never,
+      createdAt: "2026-10-09T10:00:00.000Z" as never,
+      updatedAt: "2026-10-09T10:00:00.000Z" as never,
+      driverKind: "amazon-bedrock",
+      configuration,
+    };
+    const props = renderFlow({
+      creates: instance,
+      statusAfterCreate: endpointStatus({
+        instance,
+        checking: false,
+        hostPlatform: "darwin",
+        observed: {
+          ...observed([]),
+          readiness: "unauthenticated",
+          unauthenticatedReason: "missing",
+        },
+      }),
+    });
+    await user.click(screen.getByRole("button", { name: /^Amazon Bedrock/ }));
+    const form = screen.getByRole("form", { name: "Connect Amazon Bedrock" });
+    expect(
+      within(screen.getByRole("list", { name: "Steps" }))
+        .getAllByRole("listitem")
+        .map((step) => step.textContent),
+    ).toEqual(["1Kind", "2Connect"]);
+    expect(within(form).queryByLabelText("API key")).not.toBeInTheDocument();
+    expect(within(form).queryByRole("textbox", { name: /address/i })).not.toBeInTheDocument();
+    await user.clear(within(form).getByLabelText("Name"));
+    await user.type(within(form).getByLabelText("Name"), "Contoso Bedrock");
+    await user.type(within(form).getByLabelText("Region"), "us-west-2");
+    await user.type(within(form).getByLabelText("Access portal"), "https://contoso.example/start");
+    await user.type(within(form).getByLabelText("Portal region"), "us-east-1");
+    await user.type(within(form).getByLabelText("Account ID"), "1234-5678-9012");
+    await user.type(within(form).getByLabelText("Role"), "BedrockUser");
+    await user.type(
+      within(form).getByLabelText("Model IDs"),
+      "anthropic.claude-sonnet-4-20250514-v1:0, amazon.nova-pro-v1:0",
+    );
+    await user.click(within(form).getByRole("button", { name: "Check and add" }));
+    // Only the cloud's own portal addresses are accepted, so a look-alike is refused here.
+    expect(screen.getByText(/your organization's access portal/)).toBeVisible();
+    expect(props.onCreateAmazonBedrock).not.toHaveBeenCalled();
+
+    const portal = within(form).getByLabelText("Access portal");
+    await user.clear(portal);
+    // Pasted from the browser's address bar, with the page's trailing /#/.
+    await user.type(portal, "https://contoso.awsapps.com/start/#/");
+    await user.click(within(form).getByRole("button", { name: "Check and add" }));
+
+    expect(props.onCreateAmazonBedrock).toHaveBeenCalledWith("Contoso Bedrock", configuration);
+    expect(await screen.findByText("Sign in to use")).toBeVisible();
+    expect(
+      screen.getByText(/run octant provider sign-in "Contoso Bedrock" and enter the code/),
+    ).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Check again" }));
+    expect(props.onProbe).toHaveBeenCalledWith(id, { quiet: true });
+    // Its models were named on Connect, and checking their tools needs the sign-in.
+    await user.click(screen.getByRole("button", { name: "Finish" }));
+    expect(screen.getByRole("heading", { name: "Added Contoso Bedrock" })).toBeVisible();
+    expect(screen.queryByRole("list", { name: "Steps" })).not.toBeInTheDocument();
   });
 
   it("does not suggest Azure for an ordinary address", async () => {
@@ -883,6 +980,33 @@ describe("Add endpoint, step by step", () => {
       "Team Azure",
       expect.objectContaining({ kind: "azure-foundry-openai-http" }),
       expect.objectContaining({ value: "" }),
+    );
+  });
+
+  it("names a Linux host's credential store, not this Mac's Keychain, where the key is kept", async () => {
+    const user = userEvent.setup();
+    // The window says Mac; the host that keeps the key runs Linux.
+    Object.defineProperty(window.navigator, "platform", { value: "MacIntel", configurable: true });
+    try {
+      renderFlow({}, "linux");
+      const form = await connect(user, "Azure AI Foundry", {});
+      expect(
+        within(form).getByText(
+          "Saved in this computer's credential store. Octant can't show it again.",
+        ),
+      ).toBeVisible();
+      expect(within(form).queryByText(/Keychain|this Mac/)).not.toBeInTheDocument();
+    } finally {
+      Reflect.deleteProperty(window.navigator, "platform");
+    }
+  });
+
+  it("tells a browser on a Linux host the key is added on this computer", async () => {
+    const user = userEvent.setup();
+    renderFlow({ credentialManagementAvailable: false }, "linux");
+    const form = await connect(user, "Azure AI Foundry", {});
+    expect(within(form).getByTestId("endpoint-key-later")).toHaveTextContent(
+      "then add the key in the Octant desktop app on this computer.",
     );
   });
 });

@@ -1,5 +1,6 @@
 import {
   decodeDesktopCredentialRef,
+  decodeDesktopMachineId,
   decodeDesktopPlacementId,
   decodeDesktopRecipe,
   decodeLeasableDesktopProvider,
@@ -327,6 +328,38 @@ describe("Project creation and lifecycle", () => {
       ).toEqual(keyed);
     });
 
+    it("lets a person remove a cloud recipe's key in place, but never move to the provider without one", () => {
+      const cloud = decodeLeasableDesktopProvider({
+        providerId: "e2b",
+        displayName: "E2B",
+        locality: "cloud",
+        billed: true,
+      });
+      const keyed = {
+        ...recipe,
+        providerId: cloud.providerId,
+        credentialRef: decodeDesktopCredentialRef("5f0c6f7e-7b0a-4d43-9a3c-2f1d8f4e6a10"),
+      };
+      const { credentialRef: _removed, ...keyless } = keyed;
+      const saved = changeCodeProjectDesktopRecipe(
+        makeProject(ids.code, "0/1", { type: "code" }),
+        keyed,
+        [cloud, hostLocal],
+        updatedAt,
+      );
+      const removed = changeCodeProjectDesktopRecipe(saved, keyless, [cloud], updatedAt);
+      expect(removed.desktopRecipe).toEqual(keyless);
+      // The keyless recipe stays editable on the same provider.
+      const wider = { ...keyless, screen: { width: 1920, height: 1080 } };
+      expect(
+        changeCodeProjectDesktopRecipe(removed, wider, [cloud], updatedAt).desktopRecipe,
+      ).toEqual(wider);
+      const onThisHost = changeCodeProjectDesktopRecipe(saved, recipe, [hostLocal], updatedAt);
+      expect(() =>
+        changeCodeProjectDesktopRecipe(onThisHost, keyless, [cloud, hostLocal], updatedAt),
+      ).toThrow(ProjectPolicyRejected);
+    });
+
     it("refuses a recipe that names a placement its provider does not offer", () => {
       const project = makeProject(ids.code, "0/1", { type: "code" });
       expect(() =>
@@ -355,12 +388,17 @@ describe("Project creation and lifecycle", () => {
           },
           {
             placementId: "other-machine",
-            displayName: "Your other machine",
+            displayName: "Your other computer",
             locality: "cloud",
             billed: false,
+            choosesMachine: true,
           },
         ],
       });
+      const studio = {
+        machineId: decodeDesktopMachineId("host-studio"),
+        displayName: "studio",
+      };
       const onDaemon = { ...recipe, providerId: daemonRun.providerId };
       const project = makeProject(ids.code, "0/1", { type: "code" });
       const save = (next: typeof recipe) =>
@@ -377,13 +415,42 @@ describe("Project creation and lifecycle", () => {
       });
 
       it("takes a placement off this machine in place of a credential, and refuses any key", () => {
-        const away = { ...onDaemon, placementId: decodeDesktopPlacementId("other-machine") };
+        const away = {
+          ...onDaemon,
+          placementId: decodeDesktopPlacementId("other-machine"),
+          machine: studio,
+        };
         expect(save(away).desktopRecipe).toEqual(away);
         expect(() =>
           save({
             ...away,
             credentialRef: decodeDesktopCredentialRef("5f0c6f7e-7b0a-4d43-9a3c-2f1d8f4e6a10"),
           }),
+        ).toThrow(ProjectPolicyRejected);
+      });
+
+      it("refuses network on a placement off this machine, whose loopback holds the person's own services", () => {
+        const away = {
+          ...onDaemon,
+          placementId: decodeDesktopPlacementId("other-machine"),
+          machine: studio,
+        };
+        expect(() => save({ ...away, network: "allow" })).toThrow(ProjectPolicyRejected);
+      });
+
+      it("names the machine a placement that runs on one of the person's machines uses, and only there", () => {
+        const away = { ...onDaemon, placementId: decodeDesktopPlacementId("other-machine") };
+        expect(() => save(away)).toThrow(ProjectPolicyRejected);
+        expect(save({ ...away, machine: studio }).desktopRecipe?.machine).toEqual(studio);
+        const here = { ...onDaemon, placementId: decodeDesktopPlacementId("this-machine") };
+        expect(() => save({ ...here, machine: studio })).toThrow(ProjectPolicyRejected);
+        expect(() =>
+          changeCodeProjectDesktopRecipe(
+            project,
+            { ...recipe, machine: studio },
+            [hostLocal],
+            updatedAt,
+          ),
         ).toThrow(ProjectPolicyRejected);
       });
     });

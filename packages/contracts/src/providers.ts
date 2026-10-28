@@ -8,6 +8,7 @@ import {
   ToolExtensionId,
 } from "./extensionIdentity";
 import { OctantMode } from "./modes";
+import { ThreadPublishedPage } from "./threadToolSteps";
 import {
   ACP_AGENT_KINDS,
   AcpAgentAuthentication,
@@ -76,6 +77,20 @@ export type ProviderDataTags = typeof ProviderDataTags.Type;
 
 export const ProviderCapabilitySupport = Schema.Literal("supported", "unsupported", "unavailable");
 export type ProviderCapabilitySupport = typeof ProviderCapabilitySupport.Type;
+/**
+ * Why a runtime's own artifact tool is not available to an account's threads:
+ * the person has not enabled it (`turned-off`), the account signs in with no
+ * account to publish to (`no-publishing-account`), or the host's own switch
+ * for the runtime's non-essential traffic keeps it off
+ * (`host-traffic-disabled`).
+ */
+export const ProviderNativeArtifactsUnsupportedReason = Schema.Literal(
+  "turned-off",
+  "no-publishing-account",
+  "host-traffic-disabled",
+);
+export type ProviderNativeArtifactsUnsupportedReason =
+  typeof ProviderNativeArtifactsUnsupportedReason.Type;
 export const ProviderInputModality = Schema.Literal("text", "image", "audio", "document");
 export type ProviderInputModality = typeof ProviderInputModality.Type;
 const UniqueInputModalities = Schema.Array(ProviderInputModality).pipe(
@@ -849,6 +864,14 @@ export const ClaudeProviderConfiguration = Schema.Struct({
   /** Claude-owned directory for this account. Absent uses Claude's default. */
   configDirectory: Schema.optional(ClaudeConfigDirectory),
   accent: Schema.optional(ClaudeAccountAccent),
+  /**
+   * The person enabled Claude artifacts for this account: its Work and Code
+   * threads may each choose Claude's own Artifact tool, which publishes to
+   * their claude.ai account, instead of a Canvas. Absent is off. Only
+   * `set-claude-artifact-delivery` changes it; a configuration change or a
+   * new account never carries it.
+   */
+  artifactDelivery: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type ClaudeProviderConfiguration = typeof ClaudeProviderConfiguration.Type;
 
@@ -973,10 +996,25 @@ export const IdeogramImageProviderInstance = Schema.Struct({
 }).annotations(strict);
 export type IdeogramImageProviderInstance = typeof IdeogramImageProviderInstance.Type;
 
+/**
+ * The host's hold on an outside instance's driver at one digest. The process
+ * owner sets it when the driver crashes past its limit (a third crash within
+ * a minute). It is journaled, so a host restart does not hand the driver a
+ * fresh crash budget, and it is not configuration: no command sets or clears
+ * it. Only binding another digest leaves it behind.
+ */
+export const OutsideDriverQuarantine = Schema.Struct({
+  reason: Schema.Literal("crash-limit"),
+  digest: ExtensionContentDigest,
+  quarantinedAt: UtcTimestamp,
+}).annotations(strict);
+export type OutsideDriverQuarantine = typeof OutsideDriverQuarantine.Type;
+
 export const OutsideHarnessEndpointProviderInstance = Schema.Struct({
   ...ProviderInstanceFields,
   driverKind: Schema.Literal("outside-harness-endpoint"),
   configuration: OutsideHarnessEndpointProviderConfiguration,
+  driverQuarantine: Schema.optional(OutsideDriverQuarantine),
 }).annotations(strict);
 export type OutsideHarnessEndpointProviderInstance =
   typeof OutsideHarnessEndpointProviderInstance.Type;
@@ -1095,6 +1133,27 @@ export const ProviderInstanceConfigurationChanged = Schema.Struct({
   ),
 }).annotations(strict);
 export type ProviderInstanceConfigurationChanged = typeof ProviderInstanceConfigurationChanged.Type;
+/**
+ * An outside instance moved to another digest of its own driver. Only the host
+ * writes it, once the person has trusted that digest; no command reconfigures
+ * an outside instance, so `provider.instance-configuration-changed@1` never
+ * carries one.
+ */
+export const ProviderInstanceDriverRebound = Schema.Struct({
+  instance: OutsideHarnessEndpointProviderInstance,
+}).annotations(strict);
+export type ProviderInstanceDriverRebound = typeof ProviderInstanceDriverRebound.Type;
+/**
+ * An outside instance's driver crashed past its limit and is held at the
+ * digest it binds. Only the host writes it; the instance it carries holds the
+ * quarantine.
+ */
+export const ProviderInstanceDriverQuarantined = Schema.Struct({
+  instance: OutsideHarnessEndpointProviderInstance.pipe(
+    Schema.filter((instance) => instance.driverQuarantine !== undefined),
+  ),
+}).annotations(strict);
+export type ProviderInstanceDriverQuarantined = typeof ProviderInstanceDriverQuarantined.Type;
 export const ProviderInstanceDataTagsChanged = Schema.Struct({
   instance: ProviderInstance,
 }).annotations(strict);
@@ -1118,6 +1177,8 @@ export const PROVIDER_EVENT_NAMES = [
   "provider.instance-renamed@1",
   "provider.instance-binary-changed@1",
   "provider.instance-configuration-changed@1",
+  "provider.instance-driver-rebound@1",
+  "provider.instance-driver-quarantined@1",
   "provider.instance-data-tags-changed@1",
   "provider.instance-enabled-changed@1",
   "provider.instance-removed@1",
@@ -1363,6 +1424,23 @@ export const ProviderCapabilities = Schema.Struct({
   ),
   citations: ProviderCapabilitySupport,
   harnessAutoReview: ProviderCapabilitySupport,
+  /**
+   * Whether a thread may choose the runtime's own tool that publishes a
+   * document to the person's account with the model's provider, outside this
+   * host, per mode. Absent reads as unsupported in every mode. Supported means
+   * the person enabled it for this account and nothing on the host keeps it
+   * off; the runtime may still leave the tool out of a session (the
+   * provider's own plan checks), and such a turn delivers a Canvas instead.
+   * `unsupportedReason` says why Work and Code read unsupported.
+   */
+  nativeArtifacts: Schema.optional(
+    Schema.Struct({
+      chat: ProviderCapabilitySupport,
+      work: ProviderCapabilitySupport,
+      code: ProviderCapabilitySupport,
+      unsupportedReason: Schema.optional(ProviderNativeArtifactsUnsupportedReason),
+    }).annotations(strict),
+  ),
 }).annotations(strict);
 export type ProviderCapabilities = typeof ProviderCapabilities.Type;
 
@@ -1983,6 +2061,15 @@ export const ProviderRegistryCommand = Schema.Union(
     ...ProviderInstanceCommandFields,
     enabled: Schema.Boolean,
   }).annotations(strict),
+  /**
+   * Enables or disables Claude artifacts for one Claude account. Only a person
+   * at the Octant window on this host sends it.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("set-claude-artifact-delivery"),
+    ...ProviderInstanceCommandFields,
+    enabled: Schema.Boolean,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("set-provider-data-tags"),
     ...ProviderInstanceCommandFields,
@@ -2378,6 +2465,13 @@ export const ProviderRuntimeEvent = Schema.Union(
     kind: Schema.Literal("tool-success"),
     toolCallId: Schema.NonEmptyTrimmedString,
     summary: Schema.NonEmptyTrimmedString,
+    /**
+     * The page the tool published outside this host, when it is a tool whose
+     * whole result is such a page (a Claude artifact). Only the address and
+     * title cross; the adapter checks the address belongs to the service the
+     * tool publishes to.
+     */
+    published: Schema.optional(ThreadPublishedPage),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,
@@ -2673,6 +2767,12 @@ export const decodeProviderInstanceBinaryChanged = Schema.decodeUnknownSync(
 );
 export const decodeProviderInstanceConfigurationChanged = Schema.decodeUnknownSync(
   ProviderInstanceConfigurationChanged,
+);
+export const decodeProviderInstanceDriverRebound = Schema.decodeUnknownSync(
+  ProviderInstanceDriverRebound,
+);
+export const decodeProviderInstanceDriverQuarantined = Schema.decodeUnknownSync(
+  ProviderInstanceDriverQuarantined,
 );
 export const decodeProviderInstanceEnabledChanged = Schema.decodeUnknownSync(
   ProviderInstanceEnabledChanged,

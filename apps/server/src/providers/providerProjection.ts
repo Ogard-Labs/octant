@@ -8,6 +8,8 @@ import {
   decodeProviderInstanceConfigurationChanged,
   decodeProviderInstanceCreated,
   decodeProviderInstanceDataTagsChanged,
+  decodeProviderInstanceDriverQuarantined,
+  decodeProviderInstanceDriverRebound,
   decodeProviderInstanceEnabledChanged,
   decodeProviderInstanceRemoved,
   decodeProviderInstanceRenamed,
@@ -39,6 +41,10 @@ const instanceDecoders = {
     decodeProviderInstanceBinaryChanged(payload).instance,
   "provider.instance-configuration-changed@1": (payload: unknown) =>
     decodeProviderInstanceConfigurationChanged(payload).instance,
+  "provider.instance-driver-rebound@1": (payload: unknown) =>
+    decodeProviderInstanceDriverRebound(payload).instance,
+  "provider.instance-driver-quarantined@1": (payload: unknown) =>
+    decodeProviderInstanceDriverQuarantined(payload).instance,
   "provider.instance-data-tags-changed@1": (payload: unknown) =>
     decodeProviderInstanceDataTagsChanged(payload).instance,
   "provider.instance-enabled-changed@1": (payload: unknown) =>

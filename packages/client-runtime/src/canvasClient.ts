@@ -8,11 +8,15 @@ import {
   type CanvasId,
   type CanvasCreateRequest,
   CanvasCreateResult,
+  type CanvasHtmlImportRequest,
+  CanvasHtmlImportResult,
   type CanvasExportDecideRequest,
   CanvasExportDecideResult,
   CanvasExportOfferList,
   type CanvasExportPrepareRequest,
   CanvasExportPrepareResult,
+  type CanvasHtmlFileRequest,
+  CanvasHtmlFileResult,
   type CanvasCommentCommand,
   CanvasCommentCommandResult,
   CanvasCommentsOutcome,
@@ -36,6 +40,8 @@ import {
   type ProjectId,
   CanvasDesignRunOutcome,
   decodeHostAnswer,
+  PublishedSnapshotRunOutcome,
+  type PublishedSnapshotRunRequest,
 } from "@octant/contracts";
 import {
   type CanvasExportFolderCommand,
@@ -90,6 +96,12 @@ export interface CanvasClient {
     readonly blockId: string;
     readonly frameId?: string;
   }): Promise<CanvasDesignRunStart>;
+  /**
+   * A single-use page for the snapshot of a page a Work or Code thread
+   * published, built by the host from that thread's own journal. A host
+   * without the route omits it and such a page says it cannot run here.
+   */
+  runPublishedSnapshot?(input: PublishedSnapshotRunRequest): Promise<CanvasDesignRunStart>;
   revise(request: CanvasReviseRequest): Promise<CanvasReviseResult>;
   /**
    * Journal a user's node positions as a new immutable version of a board.
@@ -135,6 +147,12 @@ export interface CanvasClient {
   prepareExport?(request: CanvasExportPrepareRequest): Promise<CanvasExportPrepareResult>;
   decideExport?(request: CanvasExportDecideRequest): Promise<CanvasExportDecideResult>;
   /**
+   * The Canvas as one self-contained HTML file for this window to save or
+   * copy. The host renders it under the read check; it goes to no
+   * destination. A host without the route omits it.
+   */
+  htmlFile?(request: CanvasHtmlFileRequest): Promise<CanvasHtmlFileResult>;
+  /**
    * The folder a Canvas exports to, and the host identity and browse mode a
    * person chooses one with. A host without the route offers no folder
    * chooser; the folder destination then stays `not-connected`.
@@ -161,6 +179,11 @@ export interface CanvasClient {
    */
   browseFolders?(request: FolderBrowseRequest): Promise<FolderBrowseResult>;
   create(request: CanvasCreateRequest): Promise<CanvasCreateResult>;
+  /**
+   * A new Canvas from an HTML page the person chose or pasted. A host without
+   * the route omits it, and no import is offered.
+   */
+  importHtml?(request: CanvasHtmlImportRequest): Promise<CanvasHtmlImportResult>;
   /**
    * The recipes a person may start a Canvas from. A host without the route
    * omits it, and the chooser then offers only a blank Canvas.
@@ -246,6 +269,22 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
                 ? outcome.reason
                 : "This prototype is not available in this workspace.",
           };
+    },
+    async runPublishedSnapshot(input) {
+      const outcome = await request(
+        options.fetch,
+        new URL("/api/canvas/published-snapshot-run", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify(input),
+        },
+        decodeHostAnswer(PublishedSnapshotRunOutcome),
+      );
+      return outcome.kind === "ready"
+        ? { kind: "ready", url: new URL(outcome.page, options.baseUrl).toString() }
+        : { kind: "refused", reason: outcome.reason };
     },
     history(canvasId) {
       const url = new URL("/api/canvas/history", options.baseUrl);
@@ -448,6 +487,18 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
         decodeHostAnswer(CanvasExportDecideResult),
       );
     },
+    htmlFile(body) {
+      return request(
+        options.fetch,
+        new URL("/api/canvas/html-file", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        decodeHostAnswer(CanvasHtmlFileResult),
+      );
+    },
     publicShares(canvasId) {
       const url = new URL("/api/canvas/public-shares", options.baseUrl);
       url.searchParams.set("canvasId", String(canvasId));
@@ -529,6 +580,18 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
           body: JSON.stringify(body),
         },
         decodeHostAnswer(CanvasCreateResult),
+      );
+    },
+    importHtml(body) {
+      return request(
+        options.fetch,
+        new URL("/api/canvas/import-html", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        decodeHostAnswer(CanvasHtmlImportResult),
       );
     },
     recipes() {

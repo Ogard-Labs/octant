@@ -7,6 +7,8 @@ import { Effect, Scope } from "effect";
 import { WorkFileListingService } from "./work/workFileListingService";
 import { WorkThreadService } from "./work/workThreadService";
 import { WorkTurnService } from "./work/workTurnService";
+import { makePublishedSnapshotSource } from "./publishedSnapshotSource";
+import type { PublishedSnapshotRunRequest, WindowId } from "@octant/contracts";
 import { MAX_CHAT_ATTACHMENT_BYTES } from "./chat/chatAttachmentStore";
 import { MAX_CODE_FILE_BODY_SIZE } from "./codeRoutes";
 import { existsSync } from "node:fs";
@@ -66,6 +68,8 @@ import { wireWorkRequests } from "./wiring/workRequests";
 import { wireRoutes } from "./wiring/routes";
 import { wireRemote } from "./wiring/remote";
 import { wireSshTargets } from "./wiring/sshTargets";
+import { remoteCodeProjectOf } from "./sshTarget/sshRemoteCodeThreads";
+import type { SshTargetStore } from "./sshTarget/sshTargetStore";
 import { wireReplica } from "./wiring/replica";
 
 export { MAX_CHAT_ATTACHMENT_BYTES };
@@ -312,6 +316,7 @@ export function startOctantServer(
       computerUseRuntime,
       computerUseTools,
       desktopPaneRoutes,
+      desktopRecipeKeys,
       launchSessionRoutes,
       machineChangeRoutes,
       offeredDesktopProviders,
@@ -332,6 +337,10 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
     });
+    // SSH targets are wired after the workspace; a window binds to a
+    // remote-bound Project through their store once it exists, and no
+    // request is served before then.
+    const remoteCodeProjectStore: { store?: SshTargetStore } = {};
     const {
       authorizeWorkThreadForWindow,
       codeBoardPlanProgressSource,
@@ -356,10 +365,18 @@ export function startOctantServer(
       workProjectStatusFiles,
       workProjectStatusReader,
     } = yield* wireWorkspace({
+      remoteCodeProjects: {
+        has: (projectId) =>
+          remoteCodeProjectStore.store?.getProject(String(projectId)) !== undefined,
+        holdsThread: (thread) =>
+          remoteCodeProjectStore.store !== undefined &&
+          remoteCodeProjectOf(remoteCodeProjectStore.store, thread) !== undefined,
+      },
       onWindowRevoked,
       bindingReceiptStore,
       githubCapabilityService,
       githubIntegrationIsEffective,
+      desktopRecipeKeys,
       offeredDesktopProviders,
       options,
       persistence,
@@ -431,10 +448,12 @@ export function startOctantServer(
       workThreadProjection,
     });
     const { sshTargetConnections, sshTargetStore } = wireSshTargets({
+      configuredDriverOptions,
       persistence,
       providerDataDirectory,
       version,
     });
+    remoteCodeProjectStore.store = sshTargetStore;
     const {
       followUpCreation,
       followUpSuggestionRoutes,
@@ -549,6 +568,14 @@ export function startOctantServer(
       resolveCanvasWorkspace,
       snapshotCanvas,
     } = wireCanvas({
+      // Work and Code are wired below; a request only arrives after startup.
+      findPublishedSnapshot: (windowId: WindowId, request: PublishedSnapshotRunRequest) =>
+        makePublishedSnapshotSource({
+          workTurns: (window, threadId) => workTurnService.turns(window, threadId),
+          ...(routeCodeService.conversation === undefined
+            ? {}
+            : { codeConversation: routeCodeService.conversation }),
+        })(windowId, request),
       agentRunPersistence,
       browserCaptures,
       chatDataDirectory,
@@ -1170,6 +1197,7 @@ export function startOctantServer(
       serve,
       sshTargetConnections,
       sshTargetStore,
+      codeOperationRuntime,
       startedAt,
       threadMessageQueue,
       toolEgressRules,
@@ -1231,6 +1259,8 @@ export function startOctantServer(
               }
               // Intentionally pre-auth (like /health): returns static, non-sensitive
               // host identity so the UI can render the selector before capability exchange.
+              // Only this loopback listener answers it; the private listener refuses
+              // the route, so the host's platform reaches only a window on this host.
               if (url.pathname === "/api/hosts") {
                 const origin = request.headers.get("origin");
                 const headers = new Headers({ vary: "Origin" });
@@ -1240,7 +1270,10 @@ export function startOctantServer(
                 ) {
                   headers.set("access-control-allow-origin", origin);
                 }
-                return Response.json({ hosts: listHosts(localHostDisplayName()) }, { headers });
+                return Response.json(
+                  { hosts: listHosts(localHostDisplayName(), process.platform) },
+                  { headers },
+                );
               }
               return (
                 (await privateListenerAdministrationRoutes(request)) ??
