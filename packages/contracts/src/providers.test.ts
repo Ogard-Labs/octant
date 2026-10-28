@@ -10,6 +10,7 @@ import {
   decodeProviderInstanceCreated,
   decodeProviderInstanceBinaryChanged,
   decodeProviderInstanceConfigurationChanged,
+  decodeProviderInstanceDriverQuarantined,
   decodeProviderInstanceDriverRebound,
   decodeOllamaHistoryRecorded,
   decodeProviderModel,
@@ -40,6 +41,7 @@ describe("provider registry contracts", () => {
       "provider.instance-binary-changed@1",
       "provider.instance-configuration-changed@1",
       "provider.instance-driver-rebound@1",
+      "provider.instance-driver-quarantined@1",
       "provider.instance-data-tags-changed@1",
       "provider.instance-enabled-changed@1",
       "provider.instance-removed@1",
@@ -1795,6 +1797,34 @@ describe("provider registry contracts", () => {
           driverKind: "ollama",
           configuration: { kind: "ollama-native-http", baseUrl: "http://127.0.0.1:11434" },
         },
+      }),
+    ).toThrow();
+    // A crash-limit hold is journaled on the instance at the digest that
+    // crashed, by its own event, and only an outside instance carries one.
+    const driverQuarantine = {
+      reason: "crash-limit",
+      digest: outside.configuration.driver.digest,
+      quarantinedAt: occurredAt,
+    } as const;
+    const held = { ...outside, driverQuarantine };
+    expect(decodeProviderInstance(held)).toEqual(held);
+    expect(decodeProviderInstanceDriverQuarantined({ instance: held })).toEqual({
+      instance: held,
+    });
+    expect(() => decodeProviderInstanceDriverQuarantined({ instance: outside })).toThrow();
+    for (const hold of [
+      { ...driverQuarantine, reason: "person" },
+      { ...driverQuarantine, digest: "sha256:abc" },
+      { ...driverQuarantine, stderr: "driver text" },
+    ]) {
+      expect(() => decodeProviderInstance({ ...outside, driverQuarantine: hold })).toThrow();
+    }
+    expect(() =>
+      decodeProviderInstance({
+        ...outside,
+        driverKind: "ollama",
+        configuration: { kind: "ollama-native-http", baseUrl: "http://127.0.0.1:11434" },
+        driverQuarantine,
       }),
     ).toThrow();
   });

@@ -84,6 +84,7 @@ import {
   ProviderCatalogUpdated,
   ProviderInstanceBinaryChanged,
   ProviderInstanceConfigurationChanged,
+  ProviderInstanceDriverQuarantined,
   ProviderInstanceDriverRebound,
   ProviderInstanceCreated,
   ProviderInstanceDataTagsChanged,
@@ -381,6 +382,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("provider.instance-binary-changed@1", 1, ProviderInstanceBinaryChanged)
     .register("provider.instance-configuration-changed@1", 1, ProviderInstanceConfigurationChanged)
     .register("provider.instance-driver-rebound@1", 1, ProviderInstanceDriverRebound)
+    .register("provider.instance-driver-quarantined@1", 1, ProviderInstanceDriverQuarantined)
     .register("provider.instance-data-tags-changed@1", 1, ProviderInstanceDataTagsChanged)
     .register("provider.instance-enabled-changed@1", 1, ProviderInstanceEnabledChanged)
     .register("provider.instance-removed@1", 1, ProviderInstanceRemoved)

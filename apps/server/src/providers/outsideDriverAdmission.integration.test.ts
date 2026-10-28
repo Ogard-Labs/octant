@@ -629,6 +629,96 @@ describe("outside driver admission end to end", () => {
     expect(context.instance()).toMatchObject({ enabled: true });
   });
 
+  it("journals a crash-loop hold once, keeps it across a restart, and lifts it only when another version is trusted", async () => {
+    const context = await host();
+    const entry = await context.install();
+    await context.admit(entry.extensionId);
+    await context.addProvider(entry);
+    await context.turnOn();
+    await context.providers.probe(windowId, instanceId);
+    const before = context.instance();
+
+    // The process owner reports the crash loop and the host journals the
+    // hold on the instance, at the digest that crashed.
+    const head = context.persistence.journal.headSequence();
+    await context.providers.quarantineOutsideDriver(
+      instanceId,
+      outside(before).configuration.driver.digest,
+    );
+    const held = context.instance();
+    expect(held).toEqual({
+      ...before,
+      driverQuarantine: { reason: "crash-limit", digest: entry.digest, quarantinedAt: now },
+      version: before.version + 1,
+      updatedAt: now,
+    });
+    expect(context.persistence.journal.headSequence()).toBe(head + 1);
+    // Settings sees the hold, with no models, and a check refuses before
+    // any process starts.
+    expect(await context.observed()).toMatchObject({
+      readiness: "unavailable",
+      reason: "runtime-unavailable",
+      models: [],
+      message: expect.stringMatching(/stopped too often/),
+    });
+    await expect(context.providers.probe(windowId, instanceId)).rejects.toThrow(
+      /stopped too often/,
+    );
+    expect(context.starts).toHaveLength(1);
+
+    // The same crash loop reported again journals nothing.
+    await context.providers.quarantineOutsideDriver(
+      instanceId,
+      outside(held).configuration.driver.digest,
+    );
+    expect(context.persistence.journal.headSequence()).toBe(head + 1);
+
+    // A restart forgets every observation and rebuilds from the journal; the
+    // hold is still there and still reported.
+    rebuildAll({
+      connection: context.persistence.connection,
+      journal: context.persistence.journal,
+      projections: context.persistence.projections,
+      clock: () => now,
+    });
+    context.registry.clearObservedState(instanceId);
+    expect(context.instance()).toEqual(held);
+    expect(await context.observed()).toMatchObject({ reason: "runtime-unavailable", models: [] });
+
+    // Trusting the digest it already binds lifts nothing.
+    await context.mutate(entry.extensionId, { kind: "set-source-trust", trusted: false });
+    await context.mutate(entry.extensionId, { kind: "set-source-trust", trusted: true });
+    await context.mutate(entry.extensionId, { kind: "set-plugin-desired", desired: true });
+    expect(context.instance()).toEqual(held);
+    await expect(context.providers.probe(windowId, instanceId)).rejects.toThrow(
+      /stopped too often/,
+    );
+
+    // Trusting another version moves the provider, and the hold stays with
+    // the digest that crashed.
+    await writeDriverFolder(context.driverRoot, "0.2.0");
+    const updated = await context.inspect();
+    await context.extension({
+      kind: "update-package",
+      extensionId: entry.extensionId,
+      packageId: updated.packageId,
+      version: updated.version,
+      digest: updated.digest,
+    });
+    await context.mutate(entry.extensionId, { kind: "set-source-trust", trusted: true });
+    await context.mutate(entry.extensionId, { kind: "set-plugin-desired", desired: true });
+    const moved = context.instance();
+    expect(moved).toMatchObject({ configuration: { driver: { digest: updated.digest } } });
+    expect(moved).not.toHaveProperty("driverQuarantine");
+    expect(await context.providers.probe(windowId, instanceId)).toMatchObject({
+      readiness: "ready",
+    });
+    expect(context.starts).toHaveLength(2);
+    // A late report for the digest it no longer binds holds nothing.
+    await context.providers.quarantineOutsideDriver(instanceId, entry.digest as never);
+    expect(context.instance()).toEqual(moved);
+  });
+
   it("admits nothing on a host that cannot confine a driver", async () => {
     const context = await host({ platform: "linux" });
     const entry = await context.install();

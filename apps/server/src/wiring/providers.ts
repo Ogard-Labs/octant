@@ -14,9 +14,11 @@ import {
   decodeWindowId,
   type DiscoveryCandidate,
   LOCAL_HOST_ID,
+  type OutsideProviderDriverReference,
   type PermissionPersistence,
   type ProviderDriverKind,
   type ProviderInstance,
+  type ProviderInstanceId,
   type ProviderProbeResult,
   type ProviderRuntimeEvent,
   type UtcTimestamp,
@@ -1108,6 +1110,13 @@ export function wireProviders(deps: ProvidersDependencies) {
           });
     const credentialResolver =
       credentialBroker === undefined ? undefined : makeProviderApiKeyPool(credentialBroker);
+    // Set once the provider service exists, which journals a crash-limit hold.
+    let quarantineOutsideDriver:
+      | ((
+          instanceId: ProviderInstanceId,
+          digest: OutsideProviderDriverReference["digest"],
+        ) => Promise<void>)
+      | undefined;
     // An outside driver runs only under the supervisor this host owns, which
     // builds the driver profile; an injected supervisor starts none.
     const outsideDriverProcesses =
@@ -1117,6 +1126,21 @@ export function wireProviders(deps: ProvidersDependencies) {
             platform: process.platform,
             runtime: outsideDriverRuntime,
             temporaryRoot: tmpdir(),
+            quarantine: {
+              holds: (instanceId, digest) => {
+                const instance = persistence.readProviderInstance(instanceId);
+                const hold =
+                  instance?.driverKind === "outside-harness-endpoint"
+                    ? instance.driverQuarantine
+                    : undefined;
+                return hold !== undefined && String(hold.digest) === String(digest);
+              },
+              // The owner's own hold refuses until this host stops even if
+              // the journal write fails.
+              record: (instanceId, driver) => {
+                void quarantineOutsideDriver?.(instanceId, driver.digest).catch(() => undefined);
+              },
+            },
           })
         : {
             start: async () => ({ status: "refused" as const, reason: "start-failed" as const }),
@@ -1295,6 +1319,8 @@ export function wireProviders(deps: ProvidersDependencies) {
       providerService.reconcileConfiguredProviders();
     };
     reconcileOutsideDrivers = reconcileOutsideDriverState;
+    quarantineOutsideDriver = (instanceId, digest) =>
+      providerService.quarantineOutsideDriver(instanceId, digest);
     // A host that stopped between a trust and the move it causes makes the
     // move now; with nothing to move this journals nothing and starts nothing.
     yield* Effect.promise(() => reconcileOutsideDriverState().catch(() => undefined));

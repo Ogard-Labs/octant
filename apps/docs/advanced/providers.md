@@ -250,8 +250,12 @@ and you update, the new version arrives untrusted and the provider is blocked,
 with its history and key. Trusting the new version moves the provider to it:
 its next check starts the new version, and its models need **Verify tools**
 again, since what Octant learned about the old version does not carry over. A
-rollback works the same way. Turning the plugin off, withdrawing trust, or
-uninstalling stops the driver and blocks the provider. Linux and Windows hosts
+rollback works the same way. If the driver stops on its own three times
+within a minute, Octant holds that version of it: the provider's card says
+so, and restarting Octant does not lift the hold. Installing another version
+and trusting it moves the provider and leaves the hold behind. Turning the
+plugin off, withdrawing trust, or uninstalling stops the driver and blocks
+the provider. Linux and Windows hosts
 cannot confine a driver, so they never run one. To write one, see
 [Build a provider driver](/advanced/provider-drivers).
 

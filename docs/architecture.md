@@ -6528,7 +6528,8 @@ configured origin only), the confined process per instance that carries that
 protocol on macOS, and admission (trust at a digest, a provider added off from
 a local window, host-run Verify tools, and the process stopped whenever the
 driver stops being effective) are built, as is moving an instance to a newly
-trusted digest of its driver with its records cleared. Publisher signatures
+trusted digest of its driver with its records cleared, and a crash-limit hold
+journaled at the digest that crashed, which a restart does not lift. Publisher signatures
 are not. Only a macOS host admits one. The author kit
 (`@octant/provider-sdk/outside-driver`, `outside-driver-serve`, and
 `outside-driver-conformance`) and an example loopback driver package live in

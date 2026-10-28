@@ -24,7 +24,8 @@ the ceiling clamp, and closed reasons (see
 [Wire protocol rules](#wire-protocol-rules)). Slice 4 (confined driver
 process) is built: one supervised process per instance under the driver
 profile from the shared confinement builder, a fixed environment, the
-process's stdio as the proxy's channel, the crash limit, and `host-prohibited`
+process's stdio as the proxy's channel, the crash limit with its journaled
+hold, and `host-prohibited`
 on Linux (see [Driver process rules](#driver-process-rules)); its acceptance,
 the escape tests on macOS, runs in the `macos-15` CI job and passed there on
 2026-10-27 ([job][macos-escape-2026-10-27]). Slice 5 (admission end
@@ -313,9 +314,40 @@ the fail-closed option.
   the driver process owner counts crashes per instance and digest with the
   supervisor's numbers: the next use may start the driver again, and a third
   crash within a minute quarantines that instance's driver at that digest.
-  Every later start is refused as `quarantined` until the instance binds
-  another digest or the host restarts. A stop the host asked for (a disable,
-  or the proxy stopping a driver that broke the protocol) is not a crash.
+  A stop the host asked for (a disable, or the proxy stopping a driver that
+  broke the protocol) is not a crash.
+- **The crash-limit hold is journaled.** On the third crash the owner refuses
+  the next start at once and the host journals the hold on the instance as
+  `provider.instance-driver-quarantined@1`, an instance snapshot whose
+  `driverQuarantine` names the reason (`crash-limit`), the digest, and the
+  time. Only the host writes it; no command, route, or remote client sets or
+  clears it. Every later start at that digest is refused as `quarantined`
+  before any folder or process exists, after a host restart too: the owner
+  reads the journaled hold, so a restart gives a crash-looping driver no
+  fresh budget. The hold is idempotent: a report for a digest already held,
+  or for one the instance no longer binds, journals nothing, and replay
+  reads back the same instance. While held, the instance reports
+  `unavailable` with the closed reason `runtime-unavailable`, no models, and
+  Octant's own words, decided from the journal before the driver is asked;
+  Settings shows the hold and what lifts it from the instance record, whether
+  or not a check has run and while the provider is off. The extension
+  projection's `outside-driver-quarantined` diagnostic is not reused: that is
+  the package's admission hold, which trust lifts, and a crash belongs to one
+  instance (see [Admission rules](#admission-rules)).
+  _Rationale: the hold used to live in memory until the host restarted, so a
+  driver that crashed on every start ran three more times on each restart.
+  Lifting it on restart was the open option; the hold now takes the
+  fail-closed one._
+- **What lifts the hold.** Only binding another digest: the person installs
+  another version (an update or a rollback) and trusts it, the instance moves
+  to it ([Rebind rules](#rebind-rules)), and the hold stays behind with the
+  digest that crashed. A move to the same digest under another version label
+  keeps it. Trusting the digest the instance already binds, a restart, and
+  turning the provider off and on lift nothing. Removing the provider and
+  adding it again from the same version makes a new provider with no crashes,
+  which is a person's explicit choice at a local window. No action retries the
+  held digest in place; one would need its own rule (who may ask, and how
+  much budget it restores) and is left to the maintainer.
 - **The channel.** The process's stdout is split into lines on bytes, so a
   character split across reads is never torn. A line still unfinished past
   the 4 MiB cap is handed to the proxy as it stands, and the proxy's own cap
@@ -538,7 +570,7 @@ the fail-closed option.
   invalidated. The next connection check or turn starts one process at the
   new digest, unverified until Verify tools runs again. The crash limit is
   kept per instance and digest, so the new digest starts with no crashes and
-  a quarantine of the old digest does not follow it; the capability ceiling
+  a journaled hold of the old digest does not follow it; the capability ceiling
   is the proxy's and applies to every process alike.
 - **The old process.** The update or rollback that changed the selection
   already stopped it, so a turn still holding the old runtime fails at once;
@@ -792,8 +824,8 @@ These rules resolve what slice 7 left to implementation.
   person-maintained `eu` and `zdr` tags) applies to an outside instance like any
   other.
 - Stored state: the package in the extension package store; the instance and
-  its digest binding, probe observation, and Verify tools records in the
-  journal; the key in the credential broker; transcripts in the host's harness
+  its digest binding, any crash-limit hold, probe observation, and Verify
+  tools records in the journal; the key in the credential broker; transcripts in the host's harness
   journal. The driver has no persistent storage. Uninstall removes the package
   files; instance records, threads, and the key stay until the person removes
   them, and the host data map lists where each lives.
@@ -815,7 +847,7 @@ put a package in front of the person. Controls marked new are this design's;
 | Puts attacker text in Settings or diagnostics                       | New, built: closed reasons only; stderr bounded and kept out of clients                                                                                             |
 | Swaps code under a trusted name (update, mirror, typosquat)         | New, built: digest-bound trust and records; held updates and rollbacks that move an instance only on trust and clear its verification. New: publisher key pin       |
 | Points the key at an internal service or attacker host              | Existing endpoint rule, built for the brokered call: HTTPS or loopback HTTP, origin-checked before the key is read; no redirect                                     |
-| Exhausts the host (floods, hangs, crash loops)                      | Existing supervisor bounds; new, built: per-message cap, host-owned deadlines, bounded brokered calls, per-instance crash limit                                     |
+| Exhausts the host (floods, hangs, crash loops)                      | Existing supervisor bounds; new, built: per-message cap, host-owned deadlines, bounded brokered calls, per-instance crash limit and journaled hold                  |
 | An agent, mention, routine, or paired device installs or trusts one | Existing and new, built: lifecycle, add-provider, and Verify tools only from a local window; structured references stay inert; install stays held until trusted     |
 | Impersonates a bundled provider                                     | New, built: one reserved family; package-name identity with an outside label; no bundled logo, account profile, or sign-in dialect                                  |
 

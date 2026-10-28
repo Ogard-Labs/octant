@@ -1159,12 +1159,50 @@ export function rebindOutsideHarnessEndpointDriver(
   ) {
     reject("invalid-configuration", "A provider moves only to another version of its own driver.");
   }
+  // A crash-limit hold belongs to the bytes that crashed: it stays while the
+  // provider binds that digest and is left behind when it binds another.
+  const { driverQuarantine, ...rest } = provider;
   return {
-    ...provider,
+    ...rest,
     configuration: { ...provider.configuration, driver },
+    ...(driverQuarantine !== undefined && String(driverQuarantine.digest) === String(driver.digest)
+      ? { driverQuarantine }
+      : {}),
     version: nextVersion(provider.version),
     updatedAt,
   };
+}
+
+/**
+ * Holds a provider's driver at the digest it binds because it crashed past
+ * its limit. Returns the provider unchanged when it is already held there, so
+ * a second report of the same crash loop journals nothing.
+ */
+export function quarantineOutsideHarnessEndpointDriver(
+  provider: OutsideHarnessEndpointProviderInstance,
+  quarantinedAt: UtcTimestamp,
+): OutsideHarnessEndpointProviderInstance {
+  if (isOutsideDriverQuarantined(provider)) return provider;
+  return {
+    ...provider,
+    driverQuarantine: {
+      reason: "crash-limit",
+      digest: provider.configuration.driver.digest,
+      quarantinedAt,
+    },
+    version: nextVersion(provider.version),
+    updatedAt: quarantinedAt,
+  };
+}
+
+/** Whether the provider's driver is held at the digest the provider binds now. */
+export function isOutsideDriverQuarantined(
+  provider: OutsideHarnessEndpointProviderInstance,
+): boolean {
+  return (
+    provider.driverQuarantine !== undefined &&
+    String(provider.driverQuarantine.digest) === String(provider.configuration.driver.digest)
+  );
 }
 
 interface CreateOpenAiCompatibleProviderInput {
