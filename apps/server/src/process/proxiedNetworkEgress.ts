@@ -47,9 +47,12 @@ export function proxiedLaunchEnvironment(
  * or start the command it exits 125 before the command runs.
  *
  * `forwarder <socket> <port> --inbound <inbound-socket> <inbound-port> ...`
- * also listens on the inbound socket, before the command starts, and relays
- * each connection the host opens there to 127.0.0.1:<inbound-port> inside the
- * capsule and to nothing else. A debug session's child connection uses it.
+ * also listens on the inbound socket and relays each connection the host
+ * opens there to 127.0.0.1:<inbound-port> inside the capsule and to nothing
+ * else. A debug session's child connection uses it. The command starts only
+ * after the host's first connection, which carries nothing: until then only
+ * the forwarder runs in the capsule, so the socket the host found is the
+ * forwarder's own, and the host keeps a link to it the capsule cannot reach.
  *
  * `forwarder <socket> <port> --child-seccomp <filter> <command> [args...]`
  * opens the filter file before anything else runs and hands it to the
@@ -102,11 +105,17 @@ const server = net.createServer({ allowHalfOpen: true }, (client) => {
 });
 function listenInbound(then) {
   if (inbound === undefined) return then();
+  let started = false;
   const inboundServer = net.createServer({ allowHalfOpen: true }, (client) => {
+    if (!started) {
+      started = true;
+      client.destroy();
+      return then();
+    }
     relay(client, net.connect({ host: "127.0.0.1", port: inbound.port, allowHalfOpen: true }));
   });
   inboundServer.on("error", (error) => refuse("cannot listen inbound: " + error.message));
-  inboundServer.listen({ path: inbound.path, exclusive: true }, then);
+  inboundServer.listen({ path: inbound.path, exclusive: true });
 }
 server.on("error", (error) => refuse("cannot listen: " + error.message));
 listenInbound(() => server.listen({ host: "127.0.0.1", port: Number(portText), exclusive: true }, () => {

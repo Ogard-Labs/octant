@@ -116,6 +116,12 @@ export function useCodeDebugSession(input: {
   const afterOutput = useRef(0);
   const loadedRevision = useRef<number>(undefined);
   const lineId = useRef(0);
+  /**
+   * Moves when another process is selected. A read sent for the last one
+   * that answers after the switch is dropped, so its stack, scopes, or
+   * stopped line never overwrite the new process's.
+   */
+  const target = useRef(0);
   const callbacks = useRef({
     onStoppedAt: input.onStoppedAt,
     onEnded: input.onEnded,
@@ -163,6 +169,7 @@ export function useCodeDebugSession(input: {
 
   // Another process selected: what the last one's stop showed no longer holds.
   useEffect(() => {
+    target.current += 1;
     loadedRevision.current = undefined;
     setState(undefined);
     setFrames([]);
@@ -240,9 +247,11 @@ export function useCodeDebugSession(input: {
 
   const loadFrame = useCallback(
     async (frameId: number) => {
+      const at = target.current;
       setSelectedFrameId(frameId);
       setChildren(new Map());
       const answer = await ask({ kind: "scopes", frameId });
+      if (at !== target.current) return;
       if (answer?.status !== "scopes") {
         setScopes([]);
         return;
@@ -254,7 +263,7 @@ export function useCodeDebugSession(input: {
       const first = answer.scopes.find((scope) => !scope.expensive && scope.variablesReference > 0);
       if (first === undefined) return;
       const variables = await loadVariables(first.variablesReference);
-      if (variables === undefined || !mounted.current) return;
+      if (variables === undefined || !mounted.current || at !== target.current) return;
       setScopes((current) =>
         current.map((view) =>
           view.scope.variablesReference === first.variablesReference
@@ -268,10 +277,18 @@ export function useCodeDebugSession(input: {
 
   const loadStop = useCallback(
     async (programThreadId: number) => {
+      const at = target.current;
       const answer = await ask({ kind: "stack-trace", programThreadId });
       // A Stop that landed while the stack was read has already cleared the
       // editor's stopped line; marking it again would outlive the session.
-      if (answer?.status !== "stack" || !mounted.current || ended.current) return;
+      if (
+        answer?.status !== "stack" ||
+        !mounted.current ||
+        ended.current ||
+        at !== target.current
+      ) {
+        return;
+      }
       setFrames(answer.frames);
       setFramesTruncated(answer.truncated);
       const top = answer.frames[0];
@@ -376,8 +393,9 @@ export function useCodeDebugSession(input: {
       void loadFrame(frameId);
     },
     loadScope: (variablesReference) => {
+      const at = target.current;
       void loadVariables(variablesReference).then((variables) => {
-        if (variables === undefined || !mounted.current) return;
+        if (variables === undefined || !mounted.current || at !== target.current) return;
         setScopes((current) =>
           current.map((view) =>
             view.scope.variablesReference === variablesReference
@@ -388,8 +406,9 @@ export function useCodeDebugSession(input: {
       });
     },
     expand: (variablesReference) => {
+      const at = target.current;
       void loadVariables(variablesReference).then((variables) => {
-        if (variables === undefined || !mounted.current) return;
+        if (variables === undefined || !mounted.current || at !== target.current) return;
         setChildren((current) =>
           new Map(current).set(variablesReference, {
             variables: variables.variables,

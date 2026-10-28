@@ -1,5 +1,6 @@
 import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
-import { chmod, lstat, mkdir, rm } from "node:fs/promises";
+import { connect as connectSocket } from "node:net";
+import { chmod, link, lstat, mkdir, rm } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import {
@@ -81,7 +82,7 @@ export interface DebugAdapterLaunchInput {
 /**
  * Where the host opens a child connection: the child port on loopback (macOS,
  * and Linux under Full access, where the capsule shares the host's network),
- * or the relay's socket in the state folder (Linux under `proxied`, whose
+ * or the host's own link to the relay's socket (Linux under `proxied`, whose
  * private namespace hides its loopback from the host).
  */
 export type DebugChildEndpoint =
@@ -165,8 +166,13 @@ export class DebugAdapterProcessPort {
     } catch {
       return { status: "failed" };
     }
+    // The host's own link to the Linux relay's socket: beside the state
+    // folder, under the root every capsule has hidden, so nothing in the
+    // capsule can replace what it names.
+    const relayDirectory = join(input.stateRoot, `${input.sessionId}.relay`);
     const removeState = async () => {
       await rm(stateDirectory, { recursive: true, force: true }).catch(() => undefined);
+      await rm(relayDirectory, { recursive: true, force: true }).catch(() => undefined);
     };
 
     let proxy: Extract<DebugSessionEgressStart, { status: "listening" }> | undefined;
@@ -192,12 +198,10 @@ export class DebugAdapterProcessPort {
       childPorts !== undefined && !darwin && proxy !== undefined
         ? join(stateDirectory, "child.sock")
         : undefined;
-    const childEndpoint: DebugChildEndpoint | undefined =
-      childPorts === undefined
+    let childEndpoint: DebugChildEndpoint | undefined =
+      childPorts === undefined || relaySocket !== undefined
         ? undefined
-        : relaySocket === undefined
-          ? { kind: "loopback", port: childPorts.child }
-          : { kind: "unix-socket", path: relaySocket };
+        : { kind: "loopback", port: childPorts.child };
     const loopbackRules = darwin
       ? [
           ...(debugPort === undefined ? [] : debugPortSeatbeltRules(debugPort)),
@@ -296,6 +300,17 @@ export class DebugAdapterProcessPort {
       await removeState();
       return { status: "failed" };
     }
+    if (relaySocket !== undefined) {
+      const linked = await holdRelaySocket(relaySocket, relayDirectory, exited);
+      if (linked === undefined) {
+        await stopGroup(pid, exited);
+        await receipt.remove().catch(() => undefined);
+        await closeNetwork();
+        await removeState();
+        return { status: "failed" };
+      }
+      childEndpoint = { kind: "unix-socket", path: linked };
+    }
     let finished: Promise<void> | undefined;
     // The program and anything it started share the capsule's group, so the
     // group is ended before the receipt goes, whether the adapter left on its
@@ -386,6 +401,58 @@ function debugPortSeatbeltRules(port: number): ReadonlyArray<string> {
     `(allow network-inbound (local ip "${address}"))`,
     `(allow network-outbound (remote ip "${address}"))`,
   ];
+}
+
+const RELAY_WAIT_MS = 10_000;
+
+/**
+ * Takes hold of the Linux relay's socket before anything but the forwarder
+ * runs in the capsule. The socket sits in the state folder, which the
+ * program can write: had the host connected by that path, the program could
+ * swap it for a link to any socket the host can reach. So the host waits for
+ * the forwarder's socket, refuses anything else there (a link, a file), hard
+ * links that inode into a folder the capsule cannot see, and then opens the
+ * one connection that lets the forwarder start the adapter. Every child
+ * connection after uses the host's link, whatever the folder holds by then.
+ */
+async function holdRelaySocket(
+  relaySocket: string,
+  relayDirectory: string,
+  exited: Promise<void>,
+): Promise<string | undefined> {
+  let gone = false;
+  void exited.then(() => {
+    gone = true;
+  });
+  const deadline = Date.now() + RELAY_WAIT_MS;
+  for (;;) {
+    const metadata = await lstat(relaySocket).catch(() => undefined);
+    if (metadata !== undefined) {
+      if (!metadata.isSocket()) return undefined;
+      break;
+    }
+    if (gone || Date.now() > deadline) return undefined;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  const held = join(relayDirectory, "child.sock");
+  try {
+    await rm(relayDirectory, { recursive: true, force: true });
+    await mkdir(relayDirectory, { mode: 0o700 });
+    await link(relaySocket, held);
+    const linkedMetadata = await lstat(held);
+    if (!linkedMetadata.isSocket()) return undefined;
+  } catch {
+    return undefined;
+  }
+  const started = await new Promise<boolean>((resolve) => {
+    const socket = connectSocket({ path: held });
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once("error", () => resolve(false));
+  });
+  return started ? held : undefined;
 }
 
 async function stopGroup(pid: number | undefined, exited: Promise<void>): Promise<void> {

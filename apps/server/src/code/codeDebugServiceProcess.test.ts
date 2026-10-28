@@ -1232,6 +1232,38 @@ describe("a debug session under confinement", () => {
     60_000,
   );
 
+  it.runIf(bubblewrap)(
+    "connects a child through the relay socket it held before the adapter ran, not one the capsule swapped in",
+    async () => {
+      const outside = join(realpathSync(tmpdir()), `octant-outside-${randomUUID()}.sock`);
+      let reached = 0;
+      const listener = createServer((socket) => {
+        reached += 1;
+        socket.destroy();
+      });
+      listeners.push(listener);
+      markers.push(outside);
+      await new Promise<void>((resolve) => listener.listen(outside, resolve));
+      const test = await host(makeProcessConfinementLive());
+      await test.install(adapterFolder(test.root, "children-event"));
+      await test.enable();
+      const sessionId = await startedSession(
+        test,
+        test.configuration({ env: [{ key: "FIXTURE_SWAP_RELAY", value: outside }] }),
+      );
+      await test.waitFor(
+        sessionId,
+        (result) => result.status === "state" && result.state.status === "stopped",
+        1,
+      );
+      expect(adapterLog(test)).toEqual(
+        expect.arrayContaining(["relay swapped", "child 1 attached"]),
+      );
+      expect(reached).toBe(0);
+    },
+    60_000,
+  );
+
   it.runIf(bubblewrap || seatbelt)(
     "attaches a child in the session's capsule, which stops at a breakpoint, cannot write outside the checkout, and reaches no host its rules refuse",
     async () => {

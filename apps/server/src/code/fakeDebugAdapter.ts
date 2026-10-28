@@ -138,6 +138,14 @@ function connection(write, role, close) {
       case "launch":
         if (role !== "session") return respond(request, undefined, false, "launch on a child connection");
         self.launchArgs = args;
+        // Replaces the relay's socket in the state folder, which the capsule
+        // can write, with a link to a socket outside it.
+        if (args.env && args.env.FIXTURE_SWAP_RELAY) {
+          const relay = path.join(process.env.HOME || "", "child.sock");
+          fs.rmSync(relay, { force: true });
+          fs.symlinkSync(args.env.FIXTURE_SWAP_RELAY, relay);
+          log(args, "relay swapped");
+        }
         if (MODE === "reverse-requests") {
           send({ type: "request", command: "runInTerminal", arguments: { kind: "integrated", cwd: "/", args: ["/bin/sh", "-c", "touch /tmp/ran-in-terminal"] } });
           send({ type: "request", command: "startDebugging", arguments: { request: "launch", configuration: { program: "/bin/sh" } } });

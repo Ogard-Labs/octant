@@ -62,7 +62,14 @@ function listed(approved: boolean, adapters: ReadonlyArray<unknown> = [fixtureAd
  * A host with one session: it stops at the breakpoint on line 3, steps to
  * line 5, and ends when stopped. Only the shapes the host answers in.
  */
-function fakeHost(options: { readonly start?: unknown; readonly children?: boolean } = {}) {
+function fakeHost(
+  options: {
+    readonly start?: unknown;
+    readonly children?: boolean;
+    /** Holds the program's stack reads until it settles. */
+    readonly programStackGate?: Promise<void>;
+  } = {},
+) {
   let approved = false;
   let line = 3;
   let revision = 1;
@@ -101,6 +108,9 @@ function fakeHost(options: { readonly start?: unknown; readonly children?: boole
           truncated: false,
         });
       }
+    }
+    if (request.kind === "stack-trace" && options.programStackGate !== undefined) {
+      await options.programStackGate;
     }
     switch (request.kind) {
       case "state":
@@ -538,5 +548,35 @@ describe("Run and debug panel", () => {
     expect(within(processes).queryByRole("button", { name: /Subprocess 4242/ })).toBeNull();
     expect(screen.getByRole("button", { name: "Stop" })).toBeVisible();
     expect(screen.queryByText("You stopped the session.")).toBeNull();
+  });
+
+  it("keeps a selected child's stop when the program's slower stack read answers after the switch", async () => {
+    const user = userEvent.setup();
+    const store = new CodeDebugWindowState();
+    let release = () => {};
+    const programStackGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { client } = fakeHost({ children: true, programStackGate });
+    vi.mocked(client.configurations).mockResolvedValue(listed(true));
+    render(
+      <RunDebugPanel
+        checkoutId={checkoutId}
+        client={client}
+        pollMs={fast}
+        store={store}
+        threadId={threadId}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Start Run the fixture" }));
+    const processes = await screen.findByRole("region", { name: "Processes" });
+    // The program's stack is still being read when the person picks the child.
+    await user.click(await within(processes).findByRole("button", { name: /Subprocess 4242/ }));
+    expect(await screen.findByText("src/main.js:9")).toBeVisible();
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.getByText("src/main.js:9")).toBeVisible();
+    expect(screen.queryByText("src/main.js:3")).toBeNull();
+    expect(store.read(key).stopped).toEqual({ path: "src/main.js", line: 9 });
   });
 });

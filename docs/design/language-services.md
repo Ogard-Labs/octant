@@ -1395,7 +1395,14 @@ The rule:
   namespace hides its loopback from the host, so a relay started inside the
   capsule beside the egress forwarder listens on a Unix socket in the
   session's state folder and connects only to the child port inside the
-  namespace; the host connects to that socket. On Linux under Full access the
+  namespace. The program can write that folder, so the host never connects
+  by its path: the forwarder starts the adapter only after the host's first
+  connection, and before it the host refuses anything but a socket at that
+  path and hard links the socket into a folder beside the state folder that
+  no capsule can see. Every child connection uses that link. Reason: a review
+  on 2026-10-28 reproduced a program swapping the socket for a link
+  to a socket outside the capsule, which a host connecting by path follows.
+  On Linux under Full access the
   host connects to the child port on loopback. On macOS the profile allows
   binding, inbound, and outbound on `localhost:<child port>`, as DB6 allows
   the debug port.
@@ -1475,6 +1482,7 @@ Rejected alternatives:
 | A child escapes the parent's confinement or network  | The child runs in the parent's capsule; the host launches nothing for it                                                            | None beyond the parent's                                                                 |
 | Another local process drives a child port on macOS   | Host-chosen ports, held only while the session runs                                                                                 | A same-user process can connect to them during the session, as to the debug port         |
 | A program floods the host with children              | At most 8 at once and 32 per session; the rest run undebugged                                                                       | None                                                                                     |
+| The program swaps the relay socket for a link out    | The host links the forwarder's socket before the adapter runs, where no capsule sees it, and connects only through that link        | None                                                                                     |
 | A child outlives its session                         | Every end of the parent ends its children, then the capsule's group as today                                                        | As for the parent: a process that calls `setsid()` leaves the group                      |
 
 _Verify:_ a fixture adapter that announces a child by event and
@@ -1499,7 +1507,10 @@ announcement made while the session ends, are dropped; nothing of a child is
 journaled. Under Seatbelt on macOS and under Bubblewrap on Linux, in an
 approval-gated thread, the child runs in the session's capsule, stops at a
 breakpoint, cannot write outside the checkout, and its `CONNECT` to
-`example.com:443` is refused `403` by the session's proxy. The connection
+`example.com:443` is refused `403` by the session's proxy. Under
+Bubblewrap, a program that swaps the relay socket for a link to a socket
+outside the capsule reaches nothing: the child still attaches through the
+host's own link. The connection
 refuses `attach` on the session's own connection and `launch` on a child's
 (`debugAdapterConnection.test.ts`); the review names the announcement, and
 adding children or changing the announcement quarantines the update
