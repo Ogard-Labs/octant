@@ -70,7 +70,12 @@ built: a person's terminals and managed worktrees on a remote-bound Project,
 under the same admission
 ([Terminals and managed worktrees](#terminals-and-managed-worktrees)),
 Settings › SSH targets, and the Project picker's listing; its packaged
-desktop smoke on a Mac remains. Slice 8 is not built. Remote SSH
+desktop smoke on a Mac remains. Slice 8 is built in part: a macOS target
+attests Plan through Seatbelt and is admitted there, for a bound root's
+reads and Git; its writing postures and placed runtimes stay unattested until a
+forwarder for a proxied launch on macOS is designed
+([macOS targets](#macos-targets)), and the run against a second Mac is the
+maintainer's. Remote SSH
 environments are authorized post-preview work as of 2026-10-26, when the
 maintainer unlocked the parked backlog and accepted the
 [maintainer decisions](#maintainer-decisions) below. That authorizes this design
@@ -561,6 +566,16 @@ details, each in the fail-closed direction:
   whatever those grants become. On macOS, Seatbelt's `proxied` rule names a
   loopback port the executor would have to listen on, so the writing postures
   do not attest on a macOS target until slice 8 settles its forwarder.
+- **macOS probes read as the launches do.** Seatbelt denies by default and
+  grants reads by path, where Bubblewrap mounts the system and binds the
+  executable, so a probe given only its own folder died before it could
+  report, and every probe on a macOS target was `inconclusive`. Each command
+  probe now carries the launches' broad read under the profile's denials
+  (`allowFileReadStar`, which Bubblewrap ignores) and, on macOS, its
+  runtime's folder beside the home denial, as a launch carries its binary's
+  folder. Measured on this Mac's Seatbelt (macOS 27): every Plan probe then
+  reports `refused`, and one run with Plan's write, exec, fork, and network
+  granted reports each of those `escaped`.
 - **No canaries as root.** A uid 0 executor launches no probe: the host refuses
   `remote-root-user` before it looks at canaries, and a root launch would only
   add risk.
@@ -2055,6 +2070,41 @@ agent can implement and verify it in a Linux container with OpenSSH installed an
    The projection tables are migration 87.
 8. **macOS targets.** Needs a second Mac reachable by SSH (maintainer). Seatbelt
    canaries and the same end-to-end evidence as slice 3 against a macOS target.
+   Built in part 2026-10-28 ([macOS targets](#macos-targets)).
+
+#### macOS targets
+
+A macOS target attests Plan: its canaries run through Seatbelt with the
+grants Octant's own launches carry (see the macOS probes rule under
+[Confinement attestation and admission](#confinement-attestation-and-admission)),
+so binding a root, Files, Git status and diff, and a Plan thread's reads are
+admitted there; a Plan turn on a macOS target is not yet shown end to end. The writing postures report their probes `inconclusive` and
+refuse `not-attested`, and placed runtimes refuse `runtime-not-attestable`,
+because both run `proxied` and Seatbelt's `proxied` rule names a loopback TCP
+port: on a target the executor would have to listen on one, which every user
+of that Mac could reach, where Linux puts its forwarder in a network
+namespace of the launch's own behind an owner-only Unix socket.
+
+**Open decision (maintainer).** How a proxied launch reaches this host's proxy
+on a macOS target. Each choice changes who on the target can reach the
+proxy, so none is taken here: a loopback listener per launch that admits
+only that launch's egress token (the token a proxied command's proxy
+variables already carry); offline writing postures on macOS, which would
+leave commands and runtimes there without a network; or something
+Seatbelt-specific that keeps the listener out of other users' reach. Until
+it is decided, terminals, managed worktrees, approval-gated and auto-accept
+threads, and provider runtimes are refused on a macOS target.
+
+Evidence: `sshTargetMacLoopback.smoke.test.ts` (macOS only: the bundled
+executor behind a stand-in client on this Mac, attesting Plan with this
+Mac's Seatbelt, admitting it and refusing the writing postures
+`not-attested`, binding a root and reading its files, Git status, and diff
+through Seatbelt-confined Git, refusing a root that holds `~/.ssh`, and
+removing its runtime directory with the session; both cases fail without
+the probes' read grant) and `executorAttestation.test.ts` (macOS only: every
+Plan probe refused by Seatbelt, and a capsule granting Plan's write, exec,
+fork, and network reporting each `escaped`). Not yet shown: the same
+through a real `sshd` on a second Mac, which is the maintainer's run.
 
 ## Verification
 
