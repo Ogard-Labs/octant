@@ -988,6 +988,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                   setCanvasRefreshKey((current) => current + 1);
                   setCanvasPanelOpen(false);
                 }}
+                // The panel stays open after an import, on what was taken out
+                // of the page; the thread shows the new Canvas meanwhile.
+                onImported={() => setCanvasRefreshKey((current) => current + 1)}
               />
               <CanvasThreadReferenceCardList
                 cards={threadCanvases.cards.filter(

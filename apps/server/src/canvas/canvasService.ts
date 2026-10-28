@@ -7,6 +7,8 @@ import {
   decodeCanvasActionResult,
   decodeCanvasActor,
   decodeCanvasCreateResult,
+  decodeCanvasHtmlImportRequest,
+  decodeCanvasHtmlImportResult,
   decodeCanvasDiagramLayoutReviseCommand,
   decodeCanvasPlanTaskReviseCommand,
   decodeCanvasId,
@@ -31,6 +33,8 @@ import {
   type CanvasVersionId,
   type CanvasBoardDenialCode,
   type CanvasCreateResult,
+  type CanvasHtmlImportRequest,
+  type CanvasHtmlImportResult,
   type CanvasDiagramLayoutReviseCommand,
   type CanvasDiagramLayoutReviseResult,
   type CanvasPlanTaskReviseCommand,
@@ -60,6 +64,7 @@ import {
   admitCanvasRevise,
   authorizeCanvasCreateRequest,
   buildCreateVersion,
+  importCanvasHtmlPage,
   listCanvasVersionHistory,
   projectThreadReferenceCardFromVersion,
   CanvasRefreshPolicyRejected,
@@ -755,6 +760,96 @@ export class CanvasService {
     authoredBy?: CanvasActor,
     presentation?: CanvasPresentation,
   ): CanvasCreateResult {
+    return this.#open(requestInput, context, project, {
+      ...(blocks === undefined ? {} : { blocks }),
+      ...(authoredBy === undefined ? {} : { authoredBy }),
+      ...(presentation === undefined ? {} : { presentation }),
+    });
+  }
+
+  /**
+   * Open a Canvas holding an HTML page a person brought: a file or pasted
+   * markup, as one `design` block. The import is the create a person could
+   * make in the same window, with the same scope and authority checks first;
+   * then the page is read and refused or reduced (`importCanvasHtmlPage`)
+   * before anything is journaled. The Canvas's title is what the person typed
+   * or the file's name, never the page's own `<title>`: a thread's Canvas list
+   * hands titles to its agent without reading the Canvas, so outside text
+   * stays inside the design, where reading it marks the reader. The Canvas
+   * carries outside content from its first version.
+   */
+  importHtml(
+    requestInput: unknown,
+    context: CanvasAuthorizationContext,
+    project: CanvasProjectRecord | undefined,
+  ): CanvasHtmlImportResult {
+    let request: CanvasHtmlImportRequest;
+    try {
+      request = decodeCanvasHtmlImportRequest(requestInput);
+    } catch {
+      return {
+        kind: "denied",
+        denialCode: "malformed-request",
+        message: "Canvas import request is malformed.",
+      };
+    }
+    const title = request.title ?? fileTitle(request.fileName) ?? "Imported page";
+    const create = {
+      schemaVersion: request.schemaVersion,
+      kind: "canvas-create",
+      requestId: request.requestId,
+      intent: "blank",
+      hostId: request.hostId,
+      mode: request.mode,
+      workspace: request.workspace,
+      originThreadId: request.originThreadId,
+      title,
+      sourceManifest: [],
+      requestedAuthority: request.requestedAuthority,
+    };
+    try {
+      authorizeCanvasCreateRequest({ request: create, activeContext: context });
+    } catch (error) {
+      if (error instanceof CanvasCardsPolicyRejected) {
+        return { kind: "denied", denialCode: error.denialCode, message: error.message };
+      }
+      return {
+        kind: "denied",
+        denialCode: "malformed-request",
+        message: "Canvas import request is malformed.",
+      };
+    }
+    const page = importCanvasHtmlPage(request.html, { title });
+    if (page.status === "refused") {
+      return { kind: "refused", reason: page.reason, message: page.message };
+    }
+    const opened = this.#open(create, context, project, {
+      blocks: [page.block],
+      importedPage: true,
+    });
+    if (opened.kind === "denied") return opened;
+    return decodeCanvasHtmlImportResult({
+      kind: "imported",
+      receipt: opened.receipt,
+      card: opened.card,
+      frame: page.frame,
+      dropped: page.dropped,
+    });
+  }
+
+  #open(
+    requestInput: unknown,
+    context: CanvasAuthorizationContext,
+    project: CanvasProjectRecord | undefined,
+    document: {
+      readonly blocks?: ReadonlyArray<CanvasDefinition["blocks"][number]>;
+      readonly authoredBy?: CanvasActor;
+      readonly presentation?: CanvasPresentation;
+      /** The blocks hold a page a person imported from outside Octant. */
+      readonly importedPage?: true;
+    },
+  ): CanvasCreateResult {
+    const { blocks, authoredBy, presentation } = document;
     let request;
     try {
       request = authorizeCanvasCreateRequest({
@@ -843,6 +938,7 @@ export class CanvasService {
         canvasId,
         version,
         occurredAt: admitted.receipt.createdAt,
+        ...(document.importedPage === true ? { importedPage: true } : {}),
       });
       this.#projection.applyCreated({ canvasId, version });
       // A created Canvas is a committed version like any other, and since an
@@ -1733,6 +1829,14 @@ function sameCanvasSource(
     // sourceVersion is a mutable observation, not part of source identity.
     left.displayName === right.displayName
   );
+}
+
+/** A file's name without its folder or HTML extension, as a Canvas title. */
+function fileTitle(fileName: string | undefined): string | undefined {
+  if (fileName === undefined) return undefined;
+  const base = fileName.slice(Math.max(fileName.lastIndexOf("/"), fileName.lastIndexOf("\\")) + 1);
+  const stem = base.replace(/\.html?$/i, "").trim();
+  return stem.length === 0 ? undefined : stem;
 }
 
 /**
