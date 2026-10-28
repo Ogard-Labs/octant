@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
@@ -12,7 +13,11 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AppStoreConnectKeyFiles } from "../providers/credentialBrokerClient";
 import type { AppleDeviceExecutionContext } from "./appleDeviceService";
-import { AppleDistributionUpload, altoolAnswer } from "./appleDistributionUpload";
+import {
+  AppleDistributionUpload,
+  altoolAnswer,
+  type AppleDistributionUploadOptions,
+} from "./appleDistributionUpload";
 import type { AppleProcessResult } from "./appleToolchainService";
 
 const TEAM = "A1B2C3D4E5";
@@ -141,7 +146,10 @@ describe("AppleDistributionUpload", () => {
     },
   };
 
-  function service(keys: AppStoreConnectKeyFiles | "no-broker" = keyFiles) {
+  function service(
+    keys: AppStoreConnectKeyFiles | "no-broker" = keyFiles,
+    overrides: Partial<AppleDistributionUploadOptions> = {},
+  ) {
     const launch = async (input: {
       readonly argv: ReadonlyArray<string>;
       readonly isolatedRoots?: ReadonlyArray<string>;
@@ -205,6 +213,7 @@ describe("AppleDistributionUpload", () => {
       realpath,
       recordEvidence: (evidence) => recorded.push(evidence),
       now: () => "2026-10-28T12:00:00.000Z",
+      ...overrides,
     });
   }
 
@@ -257,6 +266,34 @@ describe("AppleDistributionUpload", () => {
     // Only reads: build settings and the keychain's identities.
     expect(host.launches.map((argv) => argv[0])).toEqual(["xcodebuild", "security"]);
     expect(keyWrites).toBe(0);
+  });
+
+  it("reads the keychain on a Mac that has never uploaded, whose upload folder does not exist yet", async () => {
+    // A real process start, which fails when its working directory is missing.
+    const spawned = (input: { readonly cwd: string }): Promise<AppleProcessResult> =>
+      new Promise((resolve) => {
+        const child = spawn(
+          "/bin/sh",
+          ["-c", `printf '  1) ${FINGERPRINT} "Apple Distribution: Fixture"\\n'`],
+          { cwd: input.cwd },
+        );
+        const chunks: Buffer[] = [];
+        child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+        child.on("error", () =>
+          resolve({ ...failed(), termination: "unavailable", exitCode: null }),
+        );
+        child.on("close", (code) =>
+          resolve({ ...ok(Buffer.concat(chunks).toString("utf8")), exitCode: code }),
+        );
+      });
+    const upload = service(keyFiles, {
+      executeSigning: spawned,
+      uploadRoot: join(root, "never-created", "uploads"),
+    });
+    await expect(
+      upload.prepare({ projectPath: "Fixture.xcodeproj", teamId: TEAM as never }, context()),
+    ).resolves.toMatchObject({ kind: "prepared", upload: { signing: { identity: FINGERPRINT } } });
+    expect((await stat(join(root, "never-created", "uploads"))).mode & 0o777).toBe(0o700);
   });
 
   it("archives unsigned, signs with exactly the confirmed identity and profile, and uploads with a key file it never reads", async () => {

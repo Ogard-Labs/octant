@@ -177,6 +177,10 @@ export class AppleDistributionUpload {
           "The scheme does not build one iOS app with PRODUCT_BUNDLE_IDENTIFIER, MARKETING_VERSION, and CURRENT_PROJECT_VERSION set, so Octant cannot say exactly what it would upload.",
       };
     }
+    // The keychain listing runs in the host's private upload root, which a Mac
+    // that never uploaded has not created yet; a launch cannot start in a
+    // directory that does not exist.
+    await mkdir(this.#options.uploadRoot, { recursive: true, mode: 0o700 });
     const listed = await this.#options.executeSigning(
       {
         argv: ["security", "find-identity", "-v", "-p", "codesigning"],
