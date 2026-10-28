@@ -247,7 +247,7 @@ the fail-closed option.
   shared confinement builder (`apps/server/src/process/seatbeltProfile.ts`)
   and sets the environment itself, ignoring whatever environment the caller
   passed. No caller can widen either.
-- **The grants.** Read: the package root, the runtime's install, `/System`,
+- **The grants.** Read: the package root, the runtime's install,
   `/usr/lib`, `/usr/share`, `/private/var/db/timezone`, the time-zone link
   `/private/etc/localtime`, the data devices `/dev/null`, `/dev/zero`,
   `/dev/random`, and `/dev/urandom`, `/` itself, and metadata of every parent
@@ -295,6 +295,16 @@ the fail-closed option.
     `libexec` hold programs the driver may not exec, and `local` holds
     whatever the person installed there, on an Intel Mac Homebrew's whole
     prefix with its services' data.
+  - `/System`, whole: Bun and Electron's Node read nothing under it to run
+    a driver. The system frameworks they link come from the shared cache,
+    which the loader maps without a file read the profile judges. Measured
+    on an Apple Silicon Mac on 2026-10-28 with both runtimes: with no
+    `/System` grant, the example loopback driver answered its handshake,
+    probe, and a streamed send, and a probe of Intl formatting, collation and
+    segmentation, crypto, zlib, a worker, and `os` gave the same answers as
+    with the grant. The escape tests read
+    `/System/Library/CoreServices/SystemVersion.plist`, which the host reads
+    first, and require the driver to be refused.
   - The system's public TLS files (`/private/etc/ssl`: `openssl.cnf`,
     `cert.pem`, and `certs`), which the confinement builder grants every
     launch so that an offline one fails at the socket rather than before
@@ -306,16 +316,13 @@ the fail-closed option.
   `/Applications`, `/Library`, `/usr/local`) can also be spelled beneath it:
   `/System/Volumes/Data/Users/<name>/notes.txt` is the file
   `/Users/<name>/notes.txt`. The home and `/private` denials name only the
-  short spelling, and `/System` is a read root, so the profile denies
-  `/System/Volumes/Data` whole, reads and writes, through the builder's
-  isolated roots, which come after every grant. A denial among the builder's
-  other extra denials would come before the read roots, and the `/System`
-  grant would open the volume again; the profile test holds that no later
-  grant reopens it. A runtime names nothing by that spelling to start: its
-  loader, libraries, and ICU data are on the system volume and in the
-  cryptex on the Preboot volume, and it reads the zone data by its short
-  path. The other volumes under `/System/Volumes` stay readable, Preboot
-  because it holds that cryptex. The escape tests plant a file in the
+  short spelling. The profile no longer grants any read under `/System`, and
+  it still denies `/System/Volumes/Data` whole, reads and writes, through the
+  builder's isolated roots, which come after every grant, so a `/System`
+  grant restored for some runtime cannot reopen the home folder by that
+  spelling. A denial among the builder's other extra denials would come
+  before the read roots, and such a grant would open the volume again; the
+  profile test holds that no later grant reopens it. The escape tests plant a file in the
   person's home and have the driver read it by the data volume's spelling,
   after the host reads it by the same path, so the refusal is the profile's;
   the `macos-15` job passed that case on Bun and Electron's Node on
@@ -325,8 +332,8 @@ the fail-closed option.
   was opened through or by the short one was not measured. The denial holds
   either way: if Seatbelt sees the short spelling, the denial matches no file
   a runtime needs; if it sees the long one, the denial closes a way into the
-  home folder. Narrowing `/System` itself to the folders a runtime reads
-  would close this and any like it, and is a measurement of its own._
+  home folder. Dropping the `/System` grant, measured on 2026-10-28, closes
+  this and any like it; the denial stays as a backstop._
 - **The runtime's install** is taken from the runtime's own resolved path,
   never a fixed location. For Bun it is the executable's folder, wherever Bun
   is installed. For Electron's Node it is the app bundle that holds the
@@ -905,7 +912,7 @@ put a package in front of the person. Controls marked new are this design's;
 | Exfiltrates prompts, code, or files                                 | New, built (escape tests pass on macOS): no network, read only its package, no Project path; only egress is the brokered call to the configured origin              |
 | Steals or replays a credential                                      | New, built for the brokered call: never holds one; host injects the header per request and strips it from responses; broker coordinates absent from the environment |
 | Uses another instance's or provider's credential                    | New, built: one process and one request channel per instance; the lease is keyed by that instance                                                                   |
-| Escapes to the host (files, processes, other extensions)            | New, built (escape tests pass on macOS): deny-default Seatbelt without exec or fork; `/System/Volumes/Data` denied; Linux refuses to launch                         |
+| Escapes to the host (files, processes, other extensions)            | New, built (escape tests pass on macOS): deny-default Seatbelt without exec or fork; no read under `/System`; Linux refuses to launch                               |
 | Over-claims capabilities (tools, approvals, resume)                 | New, built: host ceiling clamp; `admitTurn` computed by the host; host-run Verify tools                                                                             |
 | Fabricates tool calls or injects instructions in output             | Existing: model output is untrusted; the harness offers, approves, and runs tools under thread authority; taint rules apply                                         |
 | Puts attacker text in Settings or diagnostics                       | New, built: closed reasons only; stderr bounded and kept out of clients                                                                                             |
