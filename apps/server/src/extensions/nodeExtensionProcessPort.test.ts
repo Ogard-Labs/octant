@@ -169,6 +169,10 @@ describe("node extension process port", () => {
     expect(profile).toContain('(allow file-read* (literal "/dev/urandom"))');
     // Of the host's configuration, only the link naming its time zone.
     expect(profile).toContain('(allow file-read* (literal "/private/etc/localtime"))');
+    // The root link `/etc` itself, which the runtime opens that link through,
+    // and nothing beneath it.
+    expect(profile).toContain('(allow file-read* (literal "/etc"))');
+    expect(profile).not.toContain('(subpath "/etc")');
     // The builder gives every launch the public TLS files; a driver has no
     // network, so its profile takes them away again, after that grant.
     const rules = profile.split("\n");

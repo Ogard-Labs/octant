@@ -35,6 +35,8 @@ interface EscapeOutcome {
   readonly readHome: string;
   readonly readHomeThroughDataVolume: string;
   readonly readSystem: string;
+  readonly readHostConfiguration: string;
+  readonly timeZone: string;
   readonly readKeychains: string;
   readonly writeTemporary: string;
   readonly writePackage: string;
@@ -88,6 +90,8 @@ const outcome = {
   readHome: attempt(() => readdirSync(paths.home)),
   readHomeThroughDataVolume: attempt(() => readFileSync(paths.homeCanaryThroughDataVolume)),
   readSystem: attempt(() => readFileSync(paths.systemFile)),
+  readHostConfiguration: attempt(() => readFileSync("/etc/hosts")),
+  timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   readKeychains: attempt(() => readdirSync(join(paths.home, "Library", "Keychains"))),
   writeTemporary: attempt(() => writeFileSync(join(process.env.TMPDIR, "scratch"), "ok")),
   writePackage: attempt(() => writeFileSync(join(paths.packageRoot, "planted"), "x")),
@@ -192,6 +196,7 @@ onMacos("an outside driver's confined process", () => {
     // is the profile's and not a path that leads nowhere.
     expect(readFileSync(homeCanaryThroughDataVolume, "utf8")).toBe("home canary");
     expect(existsSync(SYSTEM_FILE)).toBe(true);
+    expect(existsSync("/etc/hosts")).toBe(true);
     const entryPoint = join(packageRoot, "main.mjs");
     await writeFile(
       entryPoint,
@@ -235,6 +240,12 @@ onMacos("an outside driver's confined process", () => {
         readHome: "refused",
         readHomeThroughDataVolume: "refused",
         readSystem: "refused",
+        // The host's other configuration stays closed through the `/etc`
+        // link the time zone is read through.
+        readHostConfiguration: "refused",
+        // The driver keeps the host's local time, which it reads through
+        // `/etc/localtime`.
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         readKeychains: "refused",
         writeTemporary: "allowed",
         writePackage: "refused",
@@ -257,7 +268,7 @@ onMacos("an outside driver's confined process", () => {
     expect(await readdir(temporaryRoot)).toEqual([]);
   }
 
-  it("reaches no network, no file outside its package and folder, nothing under /System, not the home folder by either spelling or its keychains, no program, and no host variable", async () => {
+  it("reaches no network, no file outside its package and folder, nothing under /System or the host's configuration but its time zone, not the home folder by either spelling or its keychains, no program, and no host variable", async () => {
     await expectConfined({ kind: "bun", path: resolveBun() });
   });
 

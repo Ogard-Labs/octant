@@ -249,7 +249,8 @@ the fail-closed option.
   passed. No caller can widen either.
 - **The grants.** Read: the package root, the runtime's install,
   `/usr/lib`, `/usr/share`, `/private/var/db/timezone`, the time-zone link
-  `/private/etc/localtime`, the data devices `/dev/null`, `/dev/zero`,
+  `/private/etc/localtime` and the root link `/etc` it is opened through,
+  the data devices `/dev/null`, `/dev/zero`,
   `/dev/random`, and `/dev/urandom`, `/` itself, and metadata of every parent
   folder of those. These began as the extension profile's measured roots
   less `/bin` and `/sbin` (programs the driver may not exec) and less the
@@ -285,7 +286,13 @@ the fail-closed option.
     Silicon would load; the runtimes a driver runs on are native.
   - `/private/etc`, apart from the link `/private/etc/localtime`: the host's
     user and group lists, hosts and name-service files, and SSH and sudo
-    configuration are of no use to a driver with no network and no exec.
+    configuration are of no use to a driver with no network and no exec. A
+    runtime opens the zone link as `/etc/localtime`, through the root link
+    `/etc`, so that link itself is readable too, as a single path and never
+    as a folder. Without it both runtimes fell back to UTC (measured
+    2026-10-28). Every other name through it still resolves into the denied
+    `/private/etc`. The escape tests require the driver to report the host's
+    time zone and to be refused `/etc/hosts`.
   - `/private/var/db`, apart from `timezone`, where the time-zone link leads:
     the rest is the host's own databases (the local directory's user
     records, installer receipts, diagnostics), none of which a runtime reads
@@ -907,20 +914,20 @@ The attacker is the driver package (malicious or compromised) or whoever can
 put a package in front of the person. Controls marked new are this design's;
 "built" marks one a landed slice has made real.
 
-| Threat                                                              | Control                                                                                                                                                             |
-| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Exfiltrates prompts, code, or files                                 | New, built (escape tests pass on macOS): no network, read only its package, no Project path; only egress is the brokered call to the configured origin              |
-| Steals or replays a credential                                      | New, built for the brokered call: never holds one; host injects the header per request and strips it from responses; broker coordinates absent from the environment |
-| Uses another instance's or provider's credential                    | New, built: one process and one request channel per instance; the lease is keyed by that instance                                                                   |
-| Escapes to the host (files, processes, other extensions)            | New, built (escape tests pass on macOS): deny-default Seatbelt without exec or fork; no read under `/System`; Linux refuses to launch                               |
-| Over-claims capabilities (tools, approvals, resume)                 | New, built: host ceiling clamp; `admitTurn` computed by the host; host-run Verify tools                                                                             |
-| Fabricates tool calls or injects instructions in output             | Existing: model output is untrusted; the harness offers, approves, and runs tools under thread authority; taint rules apply                                         |
-| Puts attacker text in Settings or diagnostics                       | New, built: closed reasons only; stderr bounded and kept out of clients                                                                                             |
-| Swaps code under a trusted name (update, mirror, typosquat)         | New, built: digest-bound trust and records; held updates and rollbacks that move an instance only on trust and clear its verification. New: publisher key pin       |
-| Points the key at an internal service or attacker host              | Existing endpoint rule, built for the brokered call: HTTPS or loopback HTTP, origin-checked before the key is read; no redirect                                     |
-| Exhausts the host (floods, hangs, crash loops)                      | Existing supervisor bounds; new, built: per-message cap, host-owned deadlines, bounded brokered calls, per-instance crash limit and journaled hold                  |
-| An agent, mention, routine, or paired device installs or trusts one | Existing and new, built: lifecycle, add-provider, and Verify tools only from a local window; structured references stay inert; install stays held until trusted     |
-| Impersonates a bundled provider                                     | New, built: one reserved family; package-name identity with an outside label; no bundled logo, account profile, or sign-in dialect                                  |
+| Threat                                                              | Control                                                                                                                                                              |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Exfiltrates prompts, code, or files                                 | New, built (escape tests pass on macOS): no network, read only its package, no Project path; only egress is the brokered call to the configured origin               |
+| Steals or replays a credential                                      | New, built for the brokered call: never holds one; host injects the header per request and strips it from responses; broker coordinates absent from the environment  |
+| Uses another instance's or provider's credential                    | New, built: one process and one request channel per instance; the lease is keyed by that instance                                                                    |
+| Escapes to the host (files, processes, other extensions)            | New, built (escape tests pass on macOS): deny-default Seatbelt without exec or fork; no read under `/System`; of `/etc`, only the zone link; Linux refuses to launch |
+| Over-claims capabilities (tools, approvals, resume)                 | New, built: host ceiling clamp; `admitTurn` computed by the host; host-run Verify tools                                                                              |
+| Fabricates tool calls or injects instructions in output             | Existing: model output is untrusted; the harness offers, approves, and runs tools under thread authority; taint rules apply                                          |
+| Puts attacker text in Settings or diagnostics                       | New, built: closed reasons only; stderr bounded and kept out of clients                                                                                              |
+| Swaps code under a trusted name (update, mirror, typosquat)         | New, built: digest-bound trust and records; held updates and rollbacks that move an instance only on trust and clear its verification. New: publisher key pin        |
+| Points the key at an internal service or attacker host              | Existing endpoint rule, built for the brokered call: HTTPS or loopback HTTP, origin-checked before the key is read; no redirect                                      |
+| Exhausts the host (floods, hangs, crash loops)                      | Existing supervisor bounds; new, built: per-message cap, host-owned deadlines, bounded brokered calls, per-instance crash limit and journaled hold                   |
+| An agent, mention, routine, or paired device installs or trusts one | Existing and new, built: lifecycle, add-provider, and Verify tools only from a local window; structured references stay inert; install stays held until trusted      |
+| Impersonates a bundled provider                                     | New, built: one reserved family; package-name identity with an outside label; no bundled logo, account profile, or sign-in dialect                                   |
 
 Residual risk: the configured endpoint receives what the person sends it, as
 for any endpoint; a trusted driver can mistranslate (send a different model id,

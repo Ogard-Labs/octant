@@ -351,8 +351,12 @@ const OUTSIDE_DRIVER_DEVICE_READS = ["/dev/null", "/dev/zero", "/dev/random", "/
  * runtime follows to give the driver local time. The rest (the host's user
  * and group lists, its hosts and name-service files, its SSH and sudo
  * configuration) is nothing a driver with no network or exec has a use for.
+ * A runtime opens that link as `/etc/localtime`, through the root link `/etc`;
+ * without a read of that link itself, Bun and Electron's Node both fell back
+ * to UTC. The link is granted alone, never as a folder, so every other name
+ * through it still resolves into the denied `/private/etc`.
  */
-const OUTSIDE_DRIVER_SYSTEM_FILE_READS = ["/private/etc/localtime"];
+const OUTSIDE_DRIVER_SYSTEM_FILE_READS = ["/etc", "/private/etc/localtime"];
 
 /**
  * The whole environment an outside driver gets, whatever the caller passed:
