@@ -28,7 +28,9 @@ The design rests on a small set of invariants that every package obeys:
   Octant operates none of it; an S3-compatible store is contacted only at the
   endpoint the person configured and only while the Settings › Sync switch is
   on. Remote access is host-to-device over the user's
-  own network. Four host-initiated
+  own network; traffic among a person's own hub and spokes there is not a
+  third-party call ([Hub and spokes](design/hub-and-spokes.md), designed and
+  not built). Four host-initiated
   HTTPS calls exist in code: desktop update checks against a signed feed, managed
   device-tool update checks against the npm registry, server marketplace
   fetches when the person searches, inspects, previews, or installs from the
@@ -6654,7 +6656,11 @@ mechanisms are:
   that secret and bound to its origin. Another OS user, an `ssh -L` forward,
   or a proxy that rewrites `Host` reaches the listener but gets no capability
   (the local client context under [Process topology](#process-topology) has
-  the flow).
+  the flow). The hub-and-spoke design adds one more way, not built: an owner
+  device the person marked holds window authority on a host that honors
+  owners only for a request signed by a key its platform uses after the
+  person proves presence
+  ([Hub and spokes: owner devices](design/hub-and-spokes.md#owner-devices)).
   Paired remote clients keep their own device-session path, unchanged.
 - **Server-side tool-call policy.** A tool call from a model is a petition, not
   a grant. Every call resolves through the closed tool catalog, the mode's

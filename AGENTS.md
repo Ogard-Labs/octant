@@ -157,6 +157,9 @@ test count.
   agent cannot mark any thread Done. Remote clients never exceed host, mode,
   provider, Project, or thread authority. A hub or peer host acting on another
   host is a remote client there, held to the grant that host's person chose.
+  A person's own owner device may use a local window's powers on a host only
+  after a fresh unlock on that device; agents, routines, and peer hosts never
+  do.
 
 ## Originality, Privacy, And Architecture
 
@@ -167,7 +170,10 @@ test count.
   approved dependency with a compatible license and explicit architectural fit.
 - Preserve local-first and privacy-preserving defaults. Add telemetry, external
   calls, credential exposure, or cloud dependencies only when the request authorizes them and the current
-  specification documents the boundary.
+  specification documents the boundary. Privacy is about third parties:
+  traffic among a person's own devices over their private network is not an
+  external call and may be generous, but it is always authenticated,
+  encrypted, and held to the owning specification's rules.
 - Dependencies point inward: apps may consume packages; contracts and domain do
   not import apps. Provider-specific payloads stop at adapters.
 - Authority checks occur on the server before side effects, never only in React.

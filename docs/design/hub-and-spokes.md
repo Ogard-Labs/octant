@@ -44,8 +44,12 @@ in a browser at its Tailscale name. After that:
 4. if the hub goes down, members switch to the standby hub the person chose,
    and switch back when the hub returns;
 5. routines can be scheduled to run on a spoke that is asleep, and the hub
-   wakes it; and
-6. phone notifications from every spoke go out through the hub.
+   wakes it;
+6. phone notifications from every spoke go out through the hub; and
+7. a device the person marks as their own (an owner device) can set up and run
+   any member as if sitting at it, after Face ID, Touch ID, a device passcode,
+   or a passkey, so a headless hub never needs a screen or a shell after the
+   first owner exists.
 
 **Not in scope:** members that are not the person's own devices (teams, shared
 machines, other people's computers), cloud machines Octant provisions, and
@@ -65,6 +69,8 @@ the hub off their private network uses the
 | Roster       | The hub's signed list of members: each one's name, role, identity key fingerprint, listener pin, private-network host names and addresses, and the standby order                            |
 | Hub grant    | The closed set of things a spoke lets its hub (and standby hub) do, chosen on the spoke when it joins and changeable only there                                                             |
 | Peer grant   | The closed set of things a spoke lets another member do to it, chosen on the receiving spoke                                                                                                |
+| Owner device | A member the person marked as their own. With a fresh unlock it acts on a host that honors owners with the powers of a window on that host                                                  |
+| Unlock       | A signature from a key the device's platform uses only after the person proves presence (biometrics, device passcode, or a passkey with user verification)                                  |
 | Introduction | The hub vouching, through the signed roster, that a name belongs to an identity key and listener pin, so a receiver can check who is knocking. An introduction authorizes nothing by itself |
 
 ## What exists today
@@ -104,18 +110,19 @@ These hold for every slice and are not reopened here:
   owner's behalf.
 - The journal is per host. No host replays, rewrites, or becomes the
   projection source for another host's journal.
-- Credentials never leave the host that holds them except through an explicit,
-  per-credential grant the person makes on that host (see
-  [Spoke-to-spoke discovery and delegation](#spoke-to-spoke-discovery-and-delegation)).
+- Credentials stay in the credential broker of each host that holds them, are
+  never readable by an agent, and never appear in the journal, a log, or
+  diagnostics. Copying one to another host is an owner's explicit act (see
+  [Shared sign-ins](#shared-sign-ins)).
 - Install never implies trust or enablement. Nothing the hub sends to a spoke
   installs, trusts, enables, or elevates anything there.
 - Code starts approval-gated; Plan is read-only; Work never silently becomes
   Code; an agent cannot mark a thread Done. A request that arrives from the hub
   or another member changes none of these.
-- The private listener binds only private LAN or Tailscale addresses, and
-  listener, pairing, and device administration stay on the loopback
-  administration channel. Joining, leaving, and grant changes on a spoke are
-  local actions on that spoke.
+- The private listener binds only private LAN or Tailscale addresses.
+  Listener, pairing, and device administration need window authority on the
+  host: the loopback administration channel, or, once this design lands, an
+  owner device with a fresh unlock ([Owner devices](#owner-devices)).
 
 ## Design
 
@@ -145,11 +152,14 @@ the CLI. The hub depends on that:
   name appears in public certificate-transparency logs; the hub says so
   before it asks. The phone and desktop apps keep using the pinned self-made
   certificate and need none of this.
-- **Administration stays local.** Turning the hub role on, the listener, and
-  the join codes are administered over the loopback channel: Settings in a
-  desktop window on the hub, or `octant hub` and `octant listener` in a shell
-  on it (over SSH for a headless box). A browser guest never administers the
-  hub.
+- **Administration needs window authority.** Turning the hub role on, the
+  listener, and the join codes are administered over the loopback channel
+  (Settings in a desktop window on the hub, or `octant hub` and
+  `octant listener` in a shell on it) or from an owner device with a fresh
+  unlock. A headless hub needs a shell once, over SSH, to turn the listener on
+  and show the first join code with `octant hub join-code --owner`; after
+  that the person sets it up from the browser or phone they joined as owner.
+  An ordinary guest never administers the hub.
 
 ### Roles
 
@@ -229,6 +239,7 @@ grant applies to a standby hub while it acts as hub:
 | Status          | Read host resources, running threads' titles and states, waiting approvals (count and kind), and update status, the same read a paired device has                                                         |
 | Introduce       | Introduce other members to this spoke (they are then judged by decision H2 and the peer grant)                                                                                                            |
 | Wake            | Hold this spoke's routine wake times and wake it (see [Wake service](#wake-service))                                                                                                                      |
+| Owners          | Let the person's owner devices act on this spoke with a window's powers after a fresh unlock (see [Owner devices](#owner-devices)). Ticked by default                                                     |
 | Standby         | Let a standby hub the person named use this same grant while it stands in for the hub (see [Failover](#failover))                                                                                         |
 | Push            | Receive this spoke's sealed phone notifications and send them through the hub's push sender                                                                                                               |
 | Provision       | Offer configuration (below). Every offer lands on the spoke as a proposal the person on the spoke applies, unless the person turned on auto-apply for that kind of offer ([decision H5](#open-decisions)) |
@@ -248,20 +259,106 @@ authority ceiling and revalidation.
 - its files and checkouts, which the hub never reads except through a thread
   or tool read the spoke authorizes like any paired device's;
 - its credentials (provider sign-ins, API keys, SSH identities, Keychain
-  items), which never leave the spoke;
+  items), which leave the spoke only when an owner copies one
+  ([Shared sign-ins](#shared-sign-ins));
 - its sandbox, confinement posture, and approval policy, which the hub cannot
   set or loosen;
 - the final say on risky actions: a Full access posture, a remembered "always
-  allow", a Code approval, a Work-to-Code promotion, a credential grant, and a
-  pull-request merge are each decided only by a person on the spoke's local
-  window or on a member the spoke itself accepted, never by the hub principal;
-- its own membership: only the spoke joins, leaves, or changes the hub grant,
-  and only locally.
+  allow", a Code approval, a Work-to-Code promotion, a credential copy, and a
+  pull-request merge are each decided only by a person: on the spoke's local
+  window, on an owner device with a fresh unlock, or (for approvals) on a
+  member the spoke accepted for that; never by the hub principal, a peer, a
+  routine, or an agent;
+- its own membership: only the spoke joins, and only it, locally or from an
+  owner device with a fresh unlock, leaves or changes the hub grant.
 
 Rationale: the hub is a convenience the person can lose without losing any
 machine. If the hub could hold credentials or approve, compromising the one
 always-on box would compromise every machine, which is the failure a
 self-hosted control plane most needs to avoid.
+
+### Owner devices
+
+All members are the person's own devices, so the person should be able to do
+from their phone or laptop what they could do sitting at any of them. An
+**owner device** is a member the person marked as their own; with a fresh
+**unlock** it has the powers of a window on every host that honors owners.
+
+- **Marking the first owner.** On the hub itself: in a desktop window, or by
+  making the join code with `octant hub join-code --owner` in a shell on it.
+  The member that joins with that code is an owner. After that, an owner
+  device with a fresh unlock may mark or unmark other members. Each mark and
+  unmark is journaled on the hub and carried in the signed roster.
+- **Which hosts honor owners.** Each spoke chooses at join, as the hub grant
+  item **Owners** ("let my owner devices act as if they were here"). It is
+  ticked by default, because every member is the person's own device, and
+  can be unticked for a machine that should only ever be run in person
+  ([decision H16](#open-decisions)). A spoke that honors owners still checks
+  every owner request itself.
+- **The unlock key.** When a member becomes an owner, it makes a second key
+  that its platform uses only after the person proves presence: Face ID,
+  Touch ID, or the device passcode on a phone (a Secure Enclave key, or an
+  Android Keystore key that needs user authentication); Touch ID or the login
+  password on a Mac; a passkey with user verification in a browser. The
+  private key never leaves that hardware. The device registers the public key
+  with each host that honors owners, over its authenticated session, and the
+  host shows the person the device's name before it records the key.
+- **Using it.** An owner request that needs window authority carries the
+  unlock key's signature over a fresh host challenge and the request's command
+  id. The host accepts it for that one request, or, for administration screens
+  only, for a short window ([decision H17](#open-decisions)). Without a fresh
+  unlock, an owner device is an ordinary member.
+- **What it allows,** on a host that honors owners: listener, pairing, and
+  device administration (approving joins, revoking devices); setting provider
+  keys and adding MCP servers with secrets; remembering Full access or an
+  "always allow"; a Terminal Browser grant; the confirmed pull-request merge;
+  changing that host's hub and peer grants; and copying sign-ins
+  ([Shared sign-ins](#shared-sign-ins)). Each use is journaled on the host
+  with the device and `owner-unlock`.
+- **What it never allows.** An unlock answers one person's direct action in a
+  client. An agent, a routine, the hub principal, a standby, and a peer
+  never carry one, and no tool can ask a device for it. An agent still cannot
+  approve its own steps or mark a thread Done. Joining a spoke to a hub still
+  happens on that spoke.
+- **Browsers.** A passkey belongs to one web origin, so a browser owner
+  registers one passkey per host origin it uses (with decision H15's direct
+  option, one per spoke). A browser without a platform authenticator cannot
+  be an owner.
+- **Losing a device.** Remove on the hub, an unmark from another owner device,
+  or a revoke on any host ends its owner powers there; Remove ends them
+  everywhere at the next roster. A thief holding the device without the
+  person's face, finger, passcode, or passkey has only ordinary member powers
+  until then.
+
+Rationale: the earlier rule, that only a window on the host may administer it
+or hold its most sensitive powers, assumed every other device might belong to
+someone else. Inside one person's own devices that rule makes a headless hub
+impossible to run without a shell, while adding little safety, because the
+person is the same. The unlock key keeps what the rule protected: possession
+of a member key alone, or a compromised hub, still cannot reach those powers
+without the person's presence on the device.
+
+### Shared sign-ins
+
+An owner device with a fresh unlock can copy a sign-in from one host to
+another, so the person signs in once:
+
+- **What can be copied.** API keys and model endpoint keys from the credential
+  broker, and MCP server secrets. The source host sends the value over the
+  pinned session to the target host's broker, and the target stores it like a
+  key the person typed there. No agent on either host can read it.
+- **Records.** Both hosts journal the copy with the owner device, the source,
+  the target, and the credential's name, never the value. The hub's view lists
+  where each sign-in was copied.
+- **Removing.** Removing a sign-in on the source does not remove the copies;
+  the person removes each one, or chooses **Remove everywhere**, which asks
+  each reachable host to delete its copy and lists the ones it could not
+  reach. A leaked key still needs rotating at the provider.
+- **Not copied yet.** Subscription sign-ins held by a provider's own app (for
+  example a Claude or Codex account login) stay per machine until each
+  provider's terms and token binding are checked
+  ([decision H6](#open-decisions)). Delegated work never carries a sign-in;
+  it uses what the receiving host holds.
 
 ### Spoke-to-spoke discovery and delegation
 
@@ -278,7 +375,9 @@ its person, who chooses a **peer grant** for A (default: none;
 
 - whether A may delegate work to B, and into which of B's Projects;
 - the mode and the highest posture B will run that work at (Work ask-first,
-  Code approval-gated, or Plan read-only; never Full access);
+  Code approval-gated, or Plan read-only; Full access only when an owner chose
+  it for that peer and Project with a fresh unlock, and only where B's own
+  Project allows Full access);
 - which provider profiles on B that work may use; and
 - whether A may read B's status.
 
@@ -310,12 +409,8 @@ state as read through B, and cancelling the parent asks B to interrupt the
 child. A guest never receives delegated work.
 
 **Credentials.** No credential crosses with a delegation. The work on B uses
-B's own provider sign-ins and B's own Git and SSH identities. A grant that lets
-a specific credential cross (for example, a provider API key A lends to B for
-one Project) is a separate, per-credential action the person takes on the
-host that holds the credential, through the credential broker, revocable
-there, and is [open decision H6](#open-decisions); until it is decided, no
-credential crosses.
+B's own provider sign-ins and B's own Git and SSH identities, including any an
+owner copied there ([Shared sign-ins](#shared-sign-ins)).
 
 Rationale: delegation as a remote child run reuses the existing subagent rule
 (equal or narrower, clamped server-side) and the existing paired-principal
@@ -425,16 +520,16 @@ notifications from all of them after joining once:
 
 ### Journal and authority boundaries
 
-| Item                                              | Owner and journal                                          | Never                                                    |
-| ------------------------------------------------- | ---------------------------------------------------------- | -------------------------------------------------------- |
-| Threads, turns, approvals, Done                   | The spoke that runs them                                   | Mirrored into the hub's journal                          |
-| Joining, hub grant, peer grants, leave            | The member, as local actions                               | Changed by the hub or a peer                             |
-| Roster, standby order, removal                    | The hub (a standby keeps a copy)                           | Treated by a spoke as a grant; changed by a standby      |
-| Delegation request and result reference           | The delegating spoke (A)                                   | Treated as authority on B                                |
-| Delegated thread                                  | The receiving spoke (B), principal `peer:A`                | Approvable from A or the hub                             |
-| Wake times (routine id, next time, hardware addr) | The hub and standbys, rebuilt from spoke reports           | Holds the routine's prompt, Project, or profile          |
-| Push envelopes in transit                         | Not journaled on the hub; counts and failure category only | Readable by the hub                                      |
-| Credentials                                       | The host that holds them                                   | Sent anywhere except by an explicit per-credential grant |
+| Item                                              | Owner and journal                                          | Never                                               |
+| ------------------------------------------------- | ---------------------------------------------------------- | --------------------------------------------------- |
+| Threads, turns, approvals, Done                   | The spoke that runs them                                   | Mirrored into the hub's journal                     |
+| Joining, hub grant, peer grants, leave            | The member, locally or by an owner's unlocked act          | Changed by the hub or a peer                        |
+| Roster, standby order, removal                    | The hub (a standby keeps a copy)                           | Treated by a spoke as a grant; changed by a standby |
+| Delegation request and result reference           | The delegating spoke (A)                                   | Treated as authority on B                           |
+| Delegated thread                                  | The receiving spoke (B), principal `peer:A`                | Approvable from A or the hub                        |
+| Wake times (routine id, next time, hardware addr) | The hub and standbys, rebuilt from spoke reports           | Holds the routine's prompt, Project, or profile     |
+| Push envelopes in transit                         | Not journaled on the hub; counts and failure category only | Readable by the hub                                 |
+| Credentials                                       | The broker of each host that holds them                    | Copied except by an owner's unlocked act; journaled |
 
 All-hosts views stay client-side merges, as Architecture's federation rule
 says. The hub does not serve a merged read model of spokes' threads; a member
@@ -447,6 +542,7 @@ reads each spoke directly.
 | A compromised hub          | Use every hub grant each spoke gave it; add a fake member to the roster; drop or delay wakes and push; read roster metadata | Approve on a spoke, read a spoke's credentials, change a hub or peer grant, loosen a sandbox, read sealed push content, or act on a spoke that never granted Act                     |
 | A compromised standby      | While standing in, what a compromised hub can, limited to the spokes whose grant covers the standby; it cannot add members  | Change the roster or anything a compromised hub cannot                                                                                                                               |
 | A compromised spoke        | Use the peer grants other spokes gave it; send bad results back to a delegating spoke; claim to be standing in as hub       | Exceed those grants; answer approvals on another spoke; make another spoke's agent follow its output as instructions; stand in unless it is a named standby in the hub-signed roster |
+| A stolen owner device      | What an ordinary member can, until removed or revoked                                                                       | Use owner powers without the person's face, finger, passcode, or passkey                                                                                                             |
 | A lost or stolen phone     | What each spoke allows that guest, until revoked                                                                            | Run agents, receive delegated work, or outlive Remove on the hub and revocation on each spoke                                                                                        |
 | A spoke's agent            | Ask its own host to delegate within its thread's authority                                                                  | Choose the peer grant, approve on the receiver, widen authority, carry a credential                                                                                                  |
 | Someone on the private net | Reach members' listeners, as today, and send Wake-on-LAN packets, as anyone on that LAN already can                         | Pass device authentication; make a spoke run anything: a wake starts no routine the spoke did not define                                                                             |
@@ -455,8 +551,10 @@ The biggest risk is the hub as introducer: whoever controls the hub can tell a
 spoke that an attacker's key belongs to another member. Two rules bound it:
 joining the roster authorizes nothing until the receiving spoke chooses a peer
 grant (decision H2 decides whether that choice can be automatic), and a peer
-grant never exceeds approval-gated Code, so every risky step still waits for a
-person.
+grant reaches Full access only when an owner chose it with a fresh unlock, so
+every risky step still waits for a person. Owner powers move the main risk to
+the unlock key; it lives in each device's secure hardware and is used only
+after the person proves presence.
 
 ## Open decisions
 
@@ -472,7 +570,9 @@ matters. The recommendation is the option the design currently assumes.
 | H3  | When a member leaves or is removed, are peer grants made through that hub dropped? | (a) Dropped on leave and on removal seen in a newer roster; kept if the hub is merely unreachable. (b) Kept until revoked one by one                                                                                       | (a)                                                                          |
 | H4  | One hub per spoke, or several?                                                     | (a) One. (b) Several, each with its own hub grant                                                                                                                                                                          | (a) for v1                                                                   |
 | H5  | May the person allow the hub's provisioning offers to auto-apply on a spoke?       | (a) Never; every offer is a proposal. (b) Per kind (update channel, untrusted plugin install, profile without secrets), never routines                                                                                     | (b), off by default                                                          |
-| H6  | Can a credential ever cross to another spoke?                                      | (a) Never. (b) A per-credential lend, made on the holding host, scoped to one peer and Project, revocable, never readable by the receiver's agent                                                                          | (a) for v1; (b) as its own design with the credential broker                 |
+| H6  | Can a subscription sign-in held by a provider's own app be copied to another host? | (a) No; each machine signs in to its subscription itself. (b) Yes, per provider, once its terms and token binding allow it                                                                                                 | (a) until each provider is checked; API keys copy already                    |
+| H16 | Do spokes honor owner devices by default?                                          | (a) Ticked at join, clearly labeled, untickable. (b) Off until turned on per spoke                                                                                                                                         | (a); every member is the person's own device                                 |
+| H17 | How long does one unlock last?                                                     | (a) Each owner request needs its own unlock. (b) One unlock covers five minutes of administration screens; Full access, merge, credential copy, and owner changes each need their own                                      | (b)                                                                          |
 | H7  | Which push path does the hub support first?                                        | (a) Forward to the push gateway from Mobile maturity. (b) Send directly with the person's own Apple and Firebase credentials for a self-built phone app                                                                    | (a); (b) only once self-building the phone app is documented                 |
 | H8  | Where do the hub's roster, failover, and wake service live?                        | (a) In the Octant server (`apps/server`), on when the hub role is on. (b) A separate process                                                                                                                               | (a), as the maintainer suggested                                             |
 | H10 | May a standby add or remove members while standing in?                             | (a) No; membership waits for the hub or a permanent promotion. (b) Yes, and the hub reconciles on return                                                                                                                   | (a); (b) forks the roster                                                    |
@@ -495,11 +595,12 @@ maintainer's hardware.
 2. **Contracts and pure policy.** The `hub` and `peer` principal kinds, the
    guest role, the hub grant and peer grant schemas, the signed roster and its
    sequence rule, the delegation request and result, and the pure clamping
-   policy (peer grant ∩ Project authority, never Full access). Acceptance:
+   policy (peer grant ∩ Project authority; Full access only by an owner's
+   choice). Acceptance:
    strict decode refuses unknown fields; clamping never widens; a roster entry
    without a peer grant authorizes nothing; an older roster never replaces a
    newer one. Verification: focused contract and domain tests. Waits on H2,
-   H4, H6. **Yes.**
+   H4, H16. **Yes.**
 3. **Hub role and joining.** The hub as a service that runs without the
    desktop app (H13), Act as hub, Add a device with QR and text codes,
    Join a hub on a computer, Leave, Remove, the hub grant screen, and the
@@ -514,29 +615,39 @@ maintainer's hardware.
    (H14); desktop windows show every member. Acceptance: a spoke that has not accepted a
    guest refuses it; a forged roster refuses. Verification: client-runtime
    tests and a three-host smoke; a phone run is a maintainer gate.
-5. **Delegation.** Remote child runs from A to B with the peer grant, `peer:A`
+5. **Owner devices and shared sign-ins.** Owner marking, the Owners hub grant
+   item, unlock keys on the phone (Secure Enclave, Android Keystore), the Mac
+   (Touch ID or password), and the browser (passkey), unlock verification on
+   the host, the owner routes for administration, credentials, and postures,
+   and sign-in copy. Acceptance: an owner request without a fresh unlock is
+   refused every window power; an agent, routine, hub, or peer request never
+   reaches them; a copied key is unreadable by agents on both hosts and never
+   journaled; a headless hub is set up end to end from a browser owner.
+   Verification: server permission negatives and a two-host smoke with a
+   software authenticator; phone and Touch ID runs are maintainer gates.
+6. **Delegation.** Remote child runs from A to B with the peer grant, `peer:A`
    principal, approvals on B, results as data, and cancel. Acceptance: B
    refuses a request outside the grant or above approval-gated Code; an
    approval on B cannot be answered from A or the hub; the result is recorded
    on A as external content. Verification: server tests and a three-host smoke
    with a fake provider; a real-provider run is a maintainer gate.
-6. **Failover.** Standby order, roster and wake-time copies, stand-in and
+7. **Failover.** Standby order, roster and wake-time copies, stand-in and
    step-down. Acceptance: members switch after the set time and return when
    the hub is back; a standby cannot change membership; a spoke not named as
    standby cannot stand in. Verification: a three-host smoke that stops the
    hub. **Yes.**
-7. **Wake service.** Spokes report wake times; the hub sends Wake-on-LAN or a
+8. **Wake service.** Spokes report wake times; the hub sends Wake-on-LAN or a
    nudge; the spoke fires its own timer. Acceptance: the hub never learns a
    routine's prompt or Project; a nudge for an unknown routine does nothing.
    Verification: server tests; a real Wake-on-LAN wake of a sleeping Mac is a
    maintainer gate (hardware).
-8. **Push through the hub.** Spokes hand sealed envelopes to the hub, which
+9. **Push through the hub.** Spokes hand sealed envelopes to the hub, which
    forwards per H7. Depends on the push gateway slices in Mobile maturity.
    Verification: transport tests against a local gateway; a device delivery
    is a maintainer gate.
-9. **Provisioning.** Update-feed mirror, catalog offers, profiles, and routine
-   offers as proposals, with per-kind auto-apply per H5. Acceptance: nothing
-   offered installs trusted, enables, or carries a secret. **Yes.**
+10. **Provisioning.** Update-feed mirror, catalog offers, profiles, and routine
+    offers as proposals, with per-kind auto-apply per H5. Acceptance: nothing
+    offered installs trusted, enables, or carries a secret. **Yes.**
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.
@@ -547,5 +658,6 @@ This change is design only; the format, path, and decision-archive checks cover
 it. The invariants every slice must keep testable: the spoke is the only
 authority over its threads; the hub principal is refused outside its grant;
 no approval, credential, or sandbox change can come from the hub, a standby,
-or a peer; results from another spoke are data; joining happens only over a
+or a peer; owner powers need a fresh unlock and never reach an agent or
+routine; results from another spoke are data; joining happens only over a
 private network; the hub runs and serves the web app with no desktop window; and every hub service is off until the person turns it on.
