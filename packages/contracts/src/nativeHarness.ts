@@ -1134,6 +1134,7 @@ export const NativeHarnessApprovalDecisionResult = Schema.Union(
     reason: Schema.Literal(
       "approval-not-found",
       "already-settled",
+      "withdrawn",
       "not-authorized",
       "host-not-offered",
       "lost-in-restart",

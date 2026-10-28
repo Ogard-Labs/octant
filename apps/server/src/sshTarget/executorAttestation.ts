@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { connect } from "node:net";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { Schema } from "effect";
 import {
@@ -464,8 +464,21 @@ async function runProbe(
           args,
           boundRoot: layout.root,
           temporaryDirectory: layout.temporaryDirectory,
+          // Octant's own launches on a target read the system and their
+          // runtime as these grants allow, so the probes do too. Bubblewrap
+          // mounts the system and binds the executable; Seatbelt denies by
+          // default and reads by path, so on macOS every probe died before it
+          // could report, all of them inconclusive, until it was given the
+          // read the launches have and its runtime's folder outside the home
+          // denial.
+          allowFileReadStar: true,
           readRoots: [layout.probeDirectory],
-          privateHomeAllowPaths: [layout.root, layout.temporaryDirectory, layout.probeDirectory],
+          privateHomeAllowPaths: [
+            layout.root,
+            layout.temporaryDirectory,
+            layout.probeDirectory,
+            ...(environment.platform === "darwin" ? [dirname(environment.runtimeExecutable)] : []),
+          ],
           ...postureGrants(posture),
           networkEgress,
         });

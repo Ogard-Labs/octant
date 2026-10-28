@@ -93,6 +93,19 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         "notifications notify alerts push phone waiting approval failure completion automation routines",
       settings: [
         {
+          id: settingId("host-phone-notifications"),
+          label: "Phone notifications",
+          scope: "host",
+          keywords:
+            "phone notifications push paired phone mobile lock screen sealed gateway apns fcm",
+        },
+        {
+          id: settingId("host-push-gateway"),
+          label: "Push gateway",
+          scope: "host",
+          keywords: "push gateway address url self-host phone notifications delivery",
+        },
+        {
           id: settingId("host-automation-notifications"),
           label: "Automation notifications",
           scope: "host",

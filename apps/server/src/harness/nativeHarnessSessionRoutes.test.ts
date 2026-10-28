@@ -168,6 +168,36 @@ describe("native harness session routes", () => {
     expect(lifted).not.toHaveBeenCalled();
   });
 
+  it("tells a person a withdrawn approval was withdrawn, not already decided", async () => {
+    const handler = createNativeHarnessSessionRouteHandler({
+      windowAuthorityStore: new WindowAuthorityStore(),
+      store: { read: () => undefined } as never,
+      followUps: {} as never,
+      authorizeThread: () => true,
+      decideApproval: () => "withdrawn",
+    });
+    const request = new Request(
+      `http://127.0.0.1/api/native-harness/sessions/${threadId}/approvals`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          approvalId: "00000000-0000-4000-8000-000000000031",
+          decision: "approve",
+        }),
+      },
+    );
+    bindPrincipalRouteContext(request, {
+      principal: { kind: "local-window" } as never,
+      scopeId: windowId,
+    });
+    const response = await handler(request);
+    expect(response?.status).toBe(409);
+    const body = (await response?.json()) as { reason?: string; message?: string };
+    expect(body.reason).toBe("withdrawn");
+    expect(body.message).toContain("withdrawn");
+    expect(body.message).not.toContain("already decided");
+  });
+
   it("refuses an answer to the lead's question from a window that may not open the thread", async () => {
     // The thread's inline question card and the Agents tab both post here; the
     // window's reach is checked on the host, never only by the card.

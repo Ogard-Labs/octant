@@ -53,6 +53,11 @@ const ROUTES = new Set([
   "/v1/desktop-provider-credentials/resolve",
   "/v1/desktop-provider-credentials/set",
   "/v1/desktop-provider-credentials/delete",
+  // No resolve: nothing on the host reads an App Store Connect key back yet,
+  // so a stolen broker token cannot either.
+  "/v1/app-store-connect-keys/has",
+  "/v1/app-store-connect-keys/set",
+  "/v1/app-store-connect-keys/delete",
   "/v1/oauth/begin",
   "/v1/oauth/status",
   "/v1/oauth/refresh",
@@ -68,6 +73,7 @@ const REPLICA_STORE_CREDENTIAL_PREFIX = "/v1/replica-store-credentials/";
 const CANVAS_PUBLIC_SHARE_SECRET_PREFIX = "/v1/canvas-public-share-secrets/";
 const MCP_SERVER_CREDENTIAL_PREFIX = "/v1/mcp-server-credentials/";
 const DESKTOP_PROVIDER_CREDENTIAL_PREFIX = "/v1/desktop-provider-credentials/";
+const APP_STORE_CONNECT_KEY_PREFIX = "/v1/app-store-connect-keys/";
 type NamespacedIdField = "instanceId" | "credentialRef" | "secretId";
 const MAX_CREDENTIAL_BYTES = 12 * 1_024;
 const PURGE_FAILURE_STATUS: Readonly<Record<CredentialPurgeFailure["category"], number>> = {
@@ -130,6 +136,13 @@ export async function startCredentialBroker(
    * with the same UUID can reach one, and a desktop driver can reach no other.
    */
   desktopProviderCredentials?: CredentialStore,
+  /**
+   * The App Store Connect API key a person enters for distributing their own
+   * app, in a credential namespace of its own. It is served only on
+   * `/v1/app-store-connect-keys/*`, which can store, test for, and delete the
+   * key but never read it back.
+   */
+  appStoreConnectKeys?: CredentialStore,
 ): Promise<CredentialBroker> {
   const token = randomBytes(32).toString("base64url");
   const runtime = createHostOAuthRuntime({
@@ -162,6 +175,7 @@ export async function startCredentialBroker(
       canvasPublicShareSecrets,
       mcpServerCredentials,
       desktopProviderCredentials,
+      appStoreConnectKeys,
     ).then(
       ({ destroyIncoming, response }) => {
         const headers: Record<string, string> = {};
@@ -236,6 +250,7 @@ export async function startCredentialBroker(
         canvasPublicShareSecrets,
         mcpServerCredentials,
         desktopProviderCredentials,
+        appStoreConnectKeys,
       ),
   });
 }
@@ -253,6 +268,7 @@ async function handleIncoming(
   canvasPublicShareSecrets: CredentialStore | undefined,
   mcpServerCredentials: CredentialStore | undefined,
   desktopProviderCredentials: CredentialStore | undefined,
+  appStoreConnectKeys: CredentialStore | undefined,
 ): Promise<{ destroyIncoming: boolean; response: ResponseData }> {
   if (brokerUrl === undefined) throw new Error("unavailable");
   const headers = requestHeaders(incoming.headers);
@@ -288,6 +304,7 @@ async function handleIncoming(
         canvasPublicShareSecrets,
         mcpServerCredentials,
         desktopProviderCredentials,
+        appStoreConnectKeys,
       ),
     ),
   };
@@ -306,6 +323,7 @@ async function handleBrokerRequest(
   canvasPublicShareSecrets: CredentialStore | undefined,
   mcpServerCredentials: CredentialStore | undefined,
   desktopProviderCredentials: CredentialStore | undefined,
+  appStoreConnectKeys: CredentialStore | undefined,
 ): Promise<Response> {
   const url = new URL(request.url);
   if (!isAuthorized(peerAddress, request.headers, token)) {
@@ -376,6 +394,16 @@ async function handleBrokerRequest(
       "credentialRef",
       request,
       desktopProviderCredentials,
+    );
+  }
+
+  if (url.pathname.startsWith(APP_STORE_CONNECT_KEY_PREFIX)) {
+    if (appStoreConnectKeys === undefined) return failure("not-found", 404);
+    return handleNamespacedRoute(
+      url.pathname.slice(APP_STORE_CONNECT_KEY_PREFIX.length),
+      "credentialRef",
+      request,
+      appStoreConnectKeys,
     );
   }
 

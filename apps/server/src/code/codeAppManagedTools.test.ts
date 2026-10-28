@@ -2660,6 +2660,26 @@ describe("a paired iPhone or iPad through the Apple tool", () => {
     expect(sent()).toMatchObject({ kind: "launch", approval: { kind: "approved" } });
   });
 
+  it("keeps an escape-heavy console under the answer limit by shortening it, not losing it", async () => {
+    const noisy = `${'\u0001"\n'.repeat(20_000)}last line\n`;
+    const { call } = deviceTools({ executionPolicy: "approval-gated" } as never, {
+      request: vi.fn(async () =>
+        deviceEvidence({
+          kind: "logs",
+          bundleIdentifier,
+          artifacts: [{ kind: "log", reference: "apple-device-console-1" }],
+        }),
+      ),
+      readConsole: vi.fn(async () => new TextEncoder().encode(noisy)),
+    });
+
+    const logs = await call({ operation: "logs", deviceId, bundleIdentifier });
+
+    expect(logs).toMatchObject({ isError: false, result: { truncated: true } });
+    expect((logs.result as { console: string }).console.endsWith("last line\n")).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(logs.result), "utf8")).toBeLessThan(64 * 1024);
+  });
+
   it("reads a leased device's screen as an image and its app's console as text, unasked", async () => {
     const png = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
     const { ask, call, devices, record } = deviceTools(

@@ -1187,6 +1187,63 @@ describe("startOctantServer", () => {
     );
   });
 
+  it("serves App Store Connect key entry to a desktop window and refuses a new key while distribution is closed", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-server-asc-key-routes-"));
+    directories.push(directory);
+    let routeHandler: ((request: Request) => Response | Promise<Response>) | undefined;
+    const capability = "A".repeat(43);
+    const windowId = "00000000-0000-4000-8000-000000000493";
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* startOctantServer({
+            hostname: "127.0.0.1",
+            port: 0,
+            desktopBridgeSecret: "desktop-secret",
+            serve: (options) => {
+              routeHandler = options.fetch;
+              return { url: new URL("http://127.0.0.1:13773"), stop: () => undefined };
+            },
+          });
+          const send = (path: string, headers: Record<string, string>, body: unknown = {}) =>
+            Effect.promise(() =>
+              Promise.resolve(
+                routeHandler?.(
+                  new Request(`http://127.0.0.1:13773${path}`, {
+                    method: "POST",
+                    headers: { "content-type": "application/json", ...headers },
+                    body: JSON.stringify(body),
+                  }),
+                ),
+              ),
+            );
+          const registered = yield* send(
+            "/api/desktop/window-authorities",
+            { "x-octant-desktop-secret": "desktop-secret" },
+            { windowId, capability },
+          );
+          expect(registered?.status).toBe(204);
+
+          const browser = yield* send("/api/desktop/app-store-connect-key/status", {
+            "x-octant-window-capability": capability,
+          });
+          expect(browser?.status).toBe(401);
+
+          const desktop = yield* send("/api/desktop/app-store-connect-key/status", {
+            "x-octant-desktop-secret": "desktop-secret",
+            "x-octant-window-capability": capability,
+          });
+          expect(desktop?.status).toBe(409);
+          expect(yield* Effect.promise(() => Promise.resolve(desktop?.json()))).toMatchObject({
+            category:
+              process.platform === "darwin" ? "distribution-not-enabled" : "unsupported-host",
+          });
+        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
+      ),
+    );
+  });
+
   it("registers authenticated Code routes while preserving the larger Chat outer ceiling", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-server-code-routes-"));
     directories.push(directory);

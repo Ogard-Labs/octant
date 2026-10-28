@@ -19,19 +19,22 @@ computer while its file tools and commands act on the target with the usual
 approvals, or on GitHub Copilot running on the target itself
 ([Where a provider runs on the target](#where-a-provider-runs-on-the-target)).
 Any other provider is refused for it, and Full access is not offered there.
-macOS targets are not admitted yet.
+A macOS target is admitted in Plan only: you can bind a folder on it and
+read its files, Git status, and diff. Terminals, managed worktrees, modes
+that write, and providers on a macOS target are not admitted yet.
 
 ## What the target needs
 
-- Linux on an x64 or arm64 CPU, reachable with `ssh` from this computer as you
+- Linux on an x64 or arm64 CPU (or macOS, in Plan only), reachable with `ssh` from this computer as you
   already set it up (aliases, `ProxyJump`, and hardware keys in your SSH
   configuration all work).
 - A user other than root. Octant refuses a root login.
 - The headless Octant of **exactly this version**, installed by you. Octant
   never installs software on the target. See [Linux host](/guide/linux-host)
   for the install; you only need the files, not a running server.
-- Bubblewrap (`bwrap`), with unprivileged user namespaces enabled for that
-  user, and an existing `~/.ssh` folder (Octant proves it cannot be read).
+- On Linux, Bubblewrap (`bwrap`), with unprivileged user namespaces enabled
+  for that user, and an existing `~/.ssh` folder (Octant proves it cannot be
+  read). macOS uses its own sandbox, which every Mac has.
 
 ## Add a target
 

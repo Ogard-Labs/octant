@@ -249,7 +249,7 @@ describe("a pending harness approval across a host restart", () => {
     expect(settledEvents().count).toBe(2);
     expect(leadApprovalFor(after, thread)).toBeUndefined();
     expect(awaitsLeadQuestion(after, thread)).toBe(false);
-    expect(after.approvals.decide(thread, approvalId, "approve")).toBe("already-settled");
+    expect(after.approvals.decide(thread, approvalId, "approve")).toBe("withdrawn");
     expect(after.questions.answer(thread, questionId, "Q4")).toBe("already-settled");
     expect(after.sessions.read(thread)?.approvals?.[0]?.status).toBe("expired");
     expect(after.sessions.read(otherThread)?.approvals?.[0]?.status).toBe("pending");
