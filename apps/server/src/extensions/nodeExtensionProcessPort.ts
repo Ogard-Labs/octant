@@ -320,13 +320,15 @@ async function prepareProcessLaunch(
  * outside driver specification, so a runtime that fails to start without one
  * can have that one restored.
  */
-const OUTSIDE_DRIVER_SYSTEM_READ_ROOTS = [
-  "/System",
-  "/usr",
-  "/private/etc",
-  "/private/var/db",
-] as const;
+const OUTSIDE_DRIVER_SYSTEM_READ_ROOTS = ["/System", "/usr", "/private/var/db"] as const;
 const OUTSIDE_DRIVER_DEVICE_READS = ["/dev/null", "/dev/zero", "/dev/random", "/dev/urandom"];
+/**
+ * Of `/private/etc`, only the link naming the host's time zone, which a
+ * runtime follows to give the driver local time. The rest (the host's user
+ * and group lists, its hosts and name-service files, its SSH and sudo
+ * configuration) is nothing a driver with no network or exec has a use for.
+ */
+const OUTSIDE_DRIVER_SYSTEM_FILE_READS = ["/private/etc/localtime"];
 
 /**
  * The whole environment an outside driver gets, whatever the caller passed:
@@ -453,6 +455,7 @@ async function prepareOutsideDriverLaunch(
   const readLiterals = uniqueAbsolutePaths([
     "/",
     ...OUTSIDE_DRIVER_DEVICE_READS,
+    ...OUTSIDE_DRIVER_SYSTEM_FILE_READS,
     ...(runtime === input.command ? [] : [input.command]),
   ]);
   const metadataLiterals = uniqueAbsolutePaths(

@@ -147,6 +147,8 @@ describe("node extension process port", () => {
     ).toEqual(runtimePaths.map((path) => `(allow process-exec (literal "${path}"))`));
     expect(profile).not.toContain('(allow file-read* (subpath "/dev"))');
     expect(profile).toContain('(allow file-read* (literal "/dev/urandom"))');
+    // Of the host's configuration, only the link naming its time zone.
+    expect(profile).toContain('(allow file-read* (literal "/private/etc/localtime"))');
     // Every folder the driver may read, and nothing more: its package, its
     // runtime's own folder, the system roots a runtime reads to start, and
     // its temporary folder. The macOS escape tests measure that a driver
@@ -159,7 +161,6 @@ describe("node extension process port", () => {
           runtimeFolder,
           "/System",
           "/usr",
-          "/private/etc",
           "/private/var/db",
           "/private/etc/ssl/certs",
         ]),
@@ -232,7 +233,6 @@ describe("node extension process port", () => {
           "/Applications/Octant.app",
           "/System",
           "/usr",
-          "/private/etc",
           "/private/var/db",
           "/private/etc/ssl/certs",
         ]),
