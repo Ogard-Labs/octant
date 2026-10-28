@@ -444,8 +444,9 @@ gateway service implements them in `octant-webapp` (`apps/push`).
   12-byte nonce, then AES-256-GCM over the JSON of those three fields under the
   named gateway key, with `octant-push-capability-v1\n<key id>` as associated
   data, unpadded base64url. The gateway records nothing when it issues one. It
-  refuses a token over 512 bytes and a platform it holds no credential for
-  (`unavailable`). Keys are named so one can be retired: a capability whose key
+  refuses a token over 512 bytes, a platform it holds no credential for
+  (`unavailable`), and more than thirty requests from one client address in a
+  minute (`rate-limited`). Keys are named so one can be retired: a capability whose key
   the gateway does not hold is answered `421 capability-not-issued-here`.
 - **Delivery.** The host posts `RemotePushDeliveryRequestV1` (the capability
   and the envelope) to `<gateway>/v1/deliveries` with three headers: the
@@ -473,7 +474,8 @@ platform-failed` otherwise, and `503 unavailable` without that platform's
   Android priority, so the app's receiver opens it and posts the notification
   itself. No other field is added.
 - **What the gateway keeps.** Its keys, its platform credentials, per-capability
-  rate counters and recently seen signatures, all in memory except the
+  rate counters and recently seen signed requests (keyed by the signed text,
+  since an ECDSA signature has a second valid form), all in memory except the
   credentials. Its logs hold counts and failure categories only: never a
   token, capability, fingerprint, envelope, or address.
 - **The host's side.** The transport reports delivery `available` only while
