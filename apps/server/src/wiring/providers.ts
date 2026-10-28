@@ -54,6 +54,7 @@ import { OutsideDriverAdmission } from "../providers/outsideDriverAdmission";
 import {
   OutsideDriverProcesses,
   resolveOutsideDriverRuntime,
+  type OutsideDriverProcessesOptions,
 } from "../providers/outsideDriverProcess";
 import {
   makeCredentialBrokerClient,
@@ -435,6 +436,39 @@ function isPathWithin(root: string, candidate: string): boolean {
     confined === "" ||
     (confined !== ".." && !confined.startsWith(`..${sep}`) && !isAbsolute(confined))
   );
+}
+
+/**
+ * How the host keeps an outside driver's crash-limit hold for the process
+ * owner: read from the instance the journal holds, so a start at a held
+ * digest is refused after a restart too, and journaled through the provider
+ * service. That service is built after the owner it depends on, so the owner
+ * asks for it when a driver crosses the limit, not when the owner is built.
+ */
+export function journaledOutsideDriverHold(input: {
+  readonly readProviderInstance: (instanceId: ProviderInstanceId) => ProviderInstance | undefined;
+  readonly journalHold: () =>
+    | ((
+        instanceId: ProviderInstanceId,
+        digest: OutsideProviderDriverReference["digest"],
+      ) => Promise<void>)
+    | undefined;
+}): NonNullable<OutsideDriverProcessesOptions["quarantine"]> {
+  return {
+    holds: (instanceId, digest) => {
+      const instance = input.readProviderInstance(instanceId);
+      const hold =
+        instance?.driverKind === "outside-harness-endpoint" ? instance.driverQuarantine : undefined;
+      return hold !== undefined && String(hold.digest) === String(digest);
+    },
+    // The owner's own hold refuses until this host stops even if the journal
+    // write fails.
+    record: (instanceId, driver) => {
+      void input
+        .journalHold()?.(instanceId, driver.digest)
+        .catch(() => undefined);
+    },
+  };
 }
 
 export type ProvidersDependencies = Pick<
@@ -1126,21 +1160,10 @@ export function wireProviders(deps: ProvidersDependencies) {
             platform: process.platform,
             runtime: outsideDriverRuntime,
             temporaryRoot: tmpdir(),
-            quarantine: {
-              holds: (instanceId, digest) => {
-                const instance = persistence.readProviderInstance(instanceId);
-                const hold =
-                  instance?.driverKind === "outside-harness-endpoint"
-                    ? instance.driverQuarantine
-                    : undefined;
-                return hold !== undefined && String(hold.digest) === String(digest);
-              },
-              // The owner's own hold refuses until this host stops even if
-              // the journal write fails.
-              record: (instanceId, driver) => {
-                void quarantineOutsideDriver?.(instanceId, driver.digest).catch(() => undefined);
-              },
-            },
+            quarantine: journaledOutsideDriverHold({
+              readProviderInstance: (instanceId) => persistence.readProviderInstance(instanceId),
+              journalHold: () => quarantineOutsideDriver,
+            }),
           })
         : {
             start: async () => ({ status: "refused" as const, reason: "start-failed" as const }),
