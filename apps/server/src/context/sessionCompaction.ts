@@ -92,6 +92,11 @@ export interface SessionCompactionThread {
   readonly providerInstanceId: ProviderInstanceId;
   readonly modelId: ProviderModelId;
   /**
+   * A Code thread whose root is on an SSH target. Its runtime starts there
+   * only through the placement a turn binds, so its session is not compacted.
+   */
+  readonly runsOnSshTarget?: boolean;
+  /**
    * The provider policy of the Project the thread's turns are admitted under.
    * A Work or Code Project carries one; a Chat Project is a virtual container
    * with none, so a Chat thread supplies none and its provider is never
@@ -871,6 +876,7 @@ export class SessionCompactionService {
     const facts = {
       principal,
       modeEnabled: thread === undefined || this.#modeEnabled(thread),
+      runsOnSshTarget: thread?.runsOnSshTarget === true,
       owner,
       runtimeCompaction: support ?? "supported",
       turnAdmission:

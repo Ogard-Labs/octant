@@ -113,8 +113,8 @@ button is disabled, with the reason, while something you can wait out stands
 in the way, such as a reply that is still running, or a runtime that is not
 ready. Where the runtime keeps its own history and Octant has no compaction
 request for it (OpenCode, Pi and the ACP agents), or this version of it is too
-old, the button is replaced by a line saying so; on a paired device it is left
-out.
+old, or the task runs on an SSH target, the button is replaced by a line
+saying so; on a paired device it is left out.
 
 ## Watching usage
 

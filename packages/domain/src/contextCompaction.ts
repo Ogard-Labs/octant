@@ -402,6 +402,8 @@ export function selectSessionCompaction(
 export interface SessionCompactionFacts {
   readonly principal: "local-window" | "remote-device";
   readonly modeEnabled: boolean;
+  /** Whether the thread's root is on an SSH target, where nothing compacts yet. */
+  readonly runsOnSshTarget: boolean;
   /** Who owns the conversation, and so who alone can change what it sends. */
   readonly owner: "host" | "runtime";
   /** The runtime's own compaction, reported by its adapter. Ignored for the host. */
@@ -436,6 +438,7 @@ export function decideSessionCompaction(
   ) => ({ status: "refused", reason }) as const;
   if (facts.principal !== "local-window") return refuse("remote-client");
   if (!facts.modeEnabled) return refuse("mode-disabled");
+  if (facts.runsOnSshTarget) return refuse("runs-on-ssh-target");
   if (facts.owner === "runtime") {
     if (facts.runtimeCompaction === "unsupported") return refuse("runtime-cannot-compact");
     if (facts.runtimeCompaction === "unavailable") return refuse("runtime-version-unsupported");

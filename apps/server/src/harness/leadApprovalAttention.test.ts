@@ -8,6 +8,7 @@ import {
   decodeNativeHarnessSlotCandidate,
   decodeProviderModelId,
   EventActor,
+  NATIVE_HARNESS_SESSION_EVENT_NAMES,
   type NativeHarnessInteractionSource,
   type OctantMode,
 } from "@octant/contracts";
@@ -59,7 +60,13 @@ const child = {
 let counter = 0;
 const uuid = () => `aaaaaaaa-aaaa-4aaa-8aaa-${(++counter).toString(16).padStart(12, "0")}`;
 
-function openStores(connection: SqliteConnection, options: { readonly timeoutMs?: number } = {}) {
+function openStores(
+  connection: SqliteConnection,
+  options: {
+    readonly timeoutMs?: number;
+    readonly runsOnSshTarget?: (threadId: string) => boolean;
+  } = {},
+) {
   const sessions = new NativeHarnessSessionStore({
     journal: new Journal({
       connection,
@@ -70,6 +77,7 @@ function openStores(connection: SqliteConnection, options: { readonly timeoutMs?
     uuid,
     actor,
     clock: () => now,
+    ...(options.runsOnSshTarget === undefined ? {} : { runsOnSshTarget: options.runsOnSshTarget }),
   });
   const approvals = new NativeHarnessApprovalStore({
     sessions,
@@ -206,6 +214,46 @@ describe("a pending harness approval across a host restart", () => {
     expect(after.sessions.resume(thread)).toBe(true);
     expect(after.sessions.read(thread)?.approvals?.[0]?.status).toBe("expired");
     expect(awaitsLeadApproval(after, thread)).toBe(false);
+  });
+
+  it("withdraws what a lead on an SSH target left parked, so no answer reaches its ended turn", () => {
+    const before = fixture();
+    void before.ask({ mode: "code" });
+    void before.questions.ask({
+      threadId: thread,
+      mode: "code",
+      lead,
+      prompt: "Which report should I update?",
+      options: ["Q3", "Q4"],
+    });
+    const approvalId = String(before.sessions.read(thread)?.approvals?.[0]?.id);
+    const questionId = String(before.sessions.read(thread)?.questions[0]?.id);
+    const settledEvents = () =>
+      before.connection
+        .prepare(
+          "SELECT COUNT(*) AS count FROM event_journal WHERE aggregate_id = ? AND event_name IN (?, ?)",
+        )
+        .get(
+          thread,
+          NATIVE_HARNESS_SESSION_EVENT_NAMES.approvalSettled,
+          NATIVE_HARNESS_SESSION_EVENT_NAMES.questionSettled,
+        ) as { readonly count: number };
+
+    const onTarget = { runsOnSshTarget: (id: string) => id === thread };
+    const after = openStores(before.connection, onTarget);
+    expect(after.sessions.read(thread)?.approvals?.[0]?.status).toBe("expired");
+    expect(after.sessions.read(thread)?.questions[0]?.status).toBe("expired");
+    expect(settledEvents().count).toBe(2);
+    expect(leadApprovalFor(after, thread)).toBeUndefined();
+    expect(awaitsLeadQuestion(after, thread)).toBe(false);
+    expect(after.approvals.decide(thread, approvalId, "approve")).toBe("already-settled");
+    expect(after.questions.answer(thread, questionId, "Q4")).toBe("already-settled");
+    expect(after.sessions.read(thread)?.approvals?.[0]?.status).toBe("expired");
+
+    // Replayed again, the withdrawal is already in the journal: nothing more is settled.
+    const again = openStores(before.connection, onTarget);
+    expect(again.sessions.read(thread)?.approvals?.[0]?.status).toBe("expired");
+    expect(settledEvents().count).toBe(2);
   });
 
   it("keeps a paused session's live approval needing the person until it is decided", async () => {

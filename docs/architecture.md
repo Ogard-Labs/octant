@@ -875,8 +875,9 @@ with that remote tool set alone, or on an ACP agent placed on the target whose
 client file and terminal requests run as those same calls; every other
 provider is refused before anything launches, other Code operations on the
 thread are refused, and Full access is not offered there yet. A restart
-interrupts a remote turn it cut off, and a target is not removed while a
-thread on it holds a turn. A local desktop window lists such Projects
+interrupts a remote turn it cut off and withdraws the approvals and
+questions it left pending, a remote thread's session is not compacted, and
+a target is not removed while a thread on it holds a turn. A local desktop window lists such Projects
 in the Code sidebar and the composer and starts their threads: a Code draft
 in one binds the window to it with no folder of this host (`boundRoot` null),
 so root-backed surfaces fail closed, and only the thread's own view opens; a
@@ -3653,6 +3654,13 @@ server checks it before any side effect:
   - A harness session that is paused (by the advisor, by the person, or for
     recovery) refuses `thread-paused` in every mode, through the same harness
     admission every Chat, Work and Code turn asks before it starts.
+- A Code thread whose root is on an SSH target refuses `runs-on-ssh-target`
+  before any other fact but the principal and the mode. Its runtime starts
+  on the target only through the placement a turn binds on the target's
+  session, and a compaction binds none, so opening its session would start a
+  runtime on this host against the target's path; the Code runtime's
+  compaction session also opens nothing for a remote root
+  ([Remote SSH environments](design/remote-ssh-environments.md#remote-bound-code-threads)).
 - The summarizer is always the thread's own provider instance and model. The
   command carries no summarizer choice, and the domain's
   `cross-vendor-opt-in-required` refusal stays the guard on the host path.
@@ -3918,8 +3926,8 @@ watched has ended.
   Rebuild, and its `compact-range` remedy runs the same command, labelled
   Compact session; choosing a range is not offered.
 - A permanent refusal (`runtime-cannot-compact`,
-  `runtime-version-unsupported`, and `remote-client`, which no window on a
-  paired device can change) hides the button, and the inspector leaves the
+  `runtime-version-unsupported`, `runs-on-ssh-target`, and `remote-client`,
+  which no window on a paired device can change) hides the button, and the inspector leaves the
   `compact-range` remedy out; every other refusal (`turn-running`,
   `compaction-running`, `provider-unavailable`, `no-session`,
   `nothing-to-compact`, `spend-ceiling-reached`, `mode-disabled`,

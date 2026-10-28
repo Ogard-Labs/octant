@@ -105,7 +105,10 @@ If the target disconnects, the running turn stops as interrupted and the task
 says the target is not connected. It offers no send until the target is
 connected again; nothing reconnects or replays on its own. A restart of
 Octant on this computer ends the target's session too, so a turn it cut off
-reads as interrupted afterwards.
+reads as interrupted afterwards, and an approval or question it was waiting
+on is withdrawn rather than left for an answer that could no longer run
+anything. A task on a target is not compacted yet; its context popover says
+so in place of **Compact session**.
 
 ## Terminals
 

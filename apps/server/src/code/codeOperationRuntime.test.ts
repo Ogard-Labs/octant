@@ -1548,6 +1548,11 @@ describe("CodeOperationRuntime", () => {
       expect(await sessions.open(String(threadId), undefined)).toBeUndefined();
       accessible = false;
       expect(await sessions.open(String(threadId), windowId)).toBeUndefined();
+      // A root on an SSH target names the target's folder, and a runtime
+      // started from it with no placement would run on this host.
+      accessible = true;
+      fixture.bindCheckoutToSshTarget();
+      expect(await sessions.open(String(threadId), windowId)).toBeUndefined();
       // A session on another provider is not the one the next turn resumes.
       fixture.setThread({
         ...thread(),
@@ -6389,7 +6394,7 @@ function runtimeFixture(options: {
   let activeThread = thread();
   const snapshotPolicies: Array<string | undefined> = [];
   let restoredTrees = 0;
-  const checkout = decodeCodeCheckoutIdentity({
+  let checkout = decodeCodeCheckoutIdentity({
     id: checkoutId,
     repositoryId: activeThread.repositoryId,
     kind: "existing-worktree",
@@ -6745,6 +6750,17 @@ function runtimeFixture(options: {
       conversationReader.conversation({ threadId: of, afterCursor: 0, limit: 100 }),
     setThread: (next: CodeThread) => {
       activeThread = next;
+    },
+    /** Make the thread's checkout a remote-bound Project's root on an SSH target. */
+    bindCheckoutToSshTarget: () => {
+      checkout = decodeCodeCheckoutIdentity({
+        id: checkoutId,
+        repositoryId: activeThread.repositoryId,
+        kind: "remote-root",
+        availability: "available",
+        head: { kind: "none" },
+        observedAt: now,
+      });
     },
     /** Hold another thread beside the one under test, replacing any with its id. */
     setOtherThread: (next: CodeThread) => {
