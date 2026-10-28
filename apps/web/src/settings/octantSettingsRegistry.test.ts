@@ -275,6 +275,12 @@ describe("octantSettingsRegistry", () => {
  * they are not things a person looks up.
  */
 const UNLISTED_SETTING_ROWS = new Set([
+  // Shown only once the release boundary admits distribution; search must not
+  // offer them before the section can appear.
+  "app-store-connect-issuer",
+  "app-store-connect-key-id",
+  "app-store-connect-key-state",
+  "app-store-connect-private-key",
   "first-run-task-mode",
   "first-run-task-project",
   "managed-tools-empty",

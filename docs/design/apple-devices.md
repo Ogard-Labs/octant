@@ -751,7 +751,8 @@ accounts or hardware; its real-hardware acceptance is separate where noted.
    (the key only on standard input); and the local-only listener probe for
    `/api/desktop/app-store-connect-key/set`. Still open: the Keychain helper
    gained the service but runs only on a Mac, so a maintainer-run
-   save-status-remove on a Mac is its native check once the gate opens.
+   save-status-remove on a Mac is its native check once the gate opens, and
+   the section's rows join Settings search in the same change that opens it.
 7. **Person-confirmed upload** (maintainer account, a real app, and the
    decision-7 gate). Archive, export, and upload as one confirmed local action
    with a journaled record. _Accept:_ one confirmation uploads exactly the
