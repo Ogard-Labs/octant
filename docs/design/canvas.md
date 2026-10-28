@@ -218,8 +218,10 @@ version 16, a design's image `assets` at version 17, a design's
 diagram styles, and the plan's `gantt` view at version 19, and a Chat
 Canvas owned by its thread (a chat provenance with no Project) at version
 20, the design and diagram fields below at version 21, a chart's
-`title`, `subtitle`, and point `note` and `emphasis` at version 22, and the
-`flow` block at version 23, so a document that
+`title`, `subtitle`, and point `note` and `emphasis` at version 22, the
+`flow` block at version 23, and the mockup library at version 24 (its new
+components, a node's `progress`, `assetId`, and `defId` fields, and a block's
+`definitions`), so a document that
 declares an earlier version and carries one is refused as a declared future
 version. Version 20 adds no block or field a share carries, so a share names a
 block authored at 20 as 19 under share version 10. Version 21 adds the
@@ -728,8 +730,9 @@ with share version 7 (whose blocks may name Canvas version 14), the dashboard
 with share version 8, and tabs, columns, a diagram's edge styles and tones,
 its group tones, and a plan's `gantt` view with share version 9, and a
 design's frames with share version 10, and a brand and the richer diagram
-fields with share version 11 (frame notes never leave), and the flow block
-with share version 12, so a share
+fields with share version 11 (frame notes never leave), the flow block
+with share version 12, and the mockup library with share version 13 (a
+mockup's declared images stay behind, like a design's), so a share
 that declares an older version
 and carries one is refused as a future version.
 A `tabs` block has 2 to 12 panes, each a short label and the block ids it

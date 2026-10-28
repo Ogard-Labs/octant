@@ -27,6 +27,9 @@ import {
   CANVAS_MOCKUP_LEGACY_MAX_DEPTH,
   CANVAS_MOCKUP_LEGACY_MAX_NODES,
   CANVAS_MAX_MOCKUP_NODES,
+  CANVAS_MAX_MOCKUP_DEFINITIONS,
+  CANVAS_MAX_MOCKUP_DEFINITION_NODES,
+  CANVAS_MOCKUP_LIBRARY_SCHEMA_VERSION,
   CANVAS_MAX_MOCKUP_TEXT_LENGTH,
   CANVAS_MAX_PAYLOAD_BYTES,
   CANVAS_MAX_SERIES,
@@ -58,6 +61,7 @@ import {
   CANVAS_MAX_FLOW_SCREENS,
   CANVAS_FLOW_HOTSPOT_COMPONENTS,
   canvasChartUsesCallouts,
+  canvasMockupUsesLibrary,
   CANVAS_MAX_DIAGRAM_GROUP_DEPTH,
   canvasProvenanceIsThreadOwned,
   canvasDesignUsesDesignFields,
@@ -131,6 +135,7 @@ const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
   CANVAS_DESIGN_FIELDS_SCHEMA_VERSION,
   CANVAS_CHART_CALLOUTS_SCHEMA_VERSION,
   CANVAS_FLOW_SCHEMA_VERSION,
+  CANVAS_MOCKUP_LIBRARY_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
 ];
 // A block kind that a document may only carry from the version that
@@ -283,6 +288,10 @@ export type CanvasPolicyRejectionCode =
   | "dangling-flow-edge"
   | "flow-edge-self"
   | "flow-hotspot-refused"
+  | "mockup-definitions-budget-exceeded"
+  | "duplicate-mockup-definition"
+  | "dangling-mockup-definition"
+  | "mockup-definition-nested"
   | "block-placed-twice";
 
 export class CanvasPolicyRejected extends Error {
@@ -552,6 +561,8 @@ function declaredSchemaRejection(input: unknown): CanvasPolicyRejectionCode | un
               canvasDiagramUsesRichFields(block as Record<string, unknown>))) ||
           (declared < CANVAS_CHART_CALLOUTS_SCHEMA_VERSION &&
             canvasChartUsesCallouts(block as Record<string, unknown>)) ||
+          (declared < CANVAS_MOCKUP_LIBRARY_SCHEMA_VERSION &&
+            canvasMockupUsesLibrary(block as Record<string, unknown>)) ||
           (declared < CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION &&
             (canvasDiagramUsesStyles(block as Record<string, unknown>) ||
               canvasPlanUsesGantt(block as Record<string, unknown>)))),
@@ -1123,7 +1134,8 @@ function validateCrossReferences(definition: CanvasDefinition): void {
     if (block.kind === "er") validateEr(block);
     if (block.kind === "swimlane") validateSwimlane(block);
     if (block.kind === "mindmap") validateMindmap(block);
-    if (block.kind === "mockup") validateMockup(block, definition.schemaVersion);
+    if (block.kind === "mockup")
+      validateMockup(block, definition.schemaVersion, definition.provenance.mode);
     if (block.kind === "design") validateDesign(block, definition.provenance.mode);
     if (block.kind === "flow") validateFlow(block, definition.blocks);
     if (block.kind === "treemap") validateTreemap(block);
@@ -1882,11 +1894,140 @@ const MOCKUP_FIELD_COMPONENTS: ReadonlyArray<{
  * Variants, callouts, and node fields must name what the block holds and what
  * its components draw.
  */
+/**
+ * What the mockup library added: a field belongs to the components that read
+ * it (a progress reading to progress, slider, and stepper; an image to the
+ * image-capable components; a defId to an instance), a declared image obeys
+ * the design-asset rules, and a reusable definition is a small fixed subtree
+ * placed by instances — unique, within its budgets, counted against the
+ * block's own node budget, and never holding an instance itself, so a
+ * definition tree is acyclic by construction.
+ */
+function validateMockupLibrary(
+  block: Extract<CanvasBlock, { readonly kind: "mockup" }>,
+  mode: CanvasDefinition["provenance"]["mode"],
+): void {
+  const name = `Canvas mockup ${block.blockId}`;
+  const progressComponents = new Set(["progress", "slider", "stepper"]);
+  const imageComponents = new Set(["image-placeholder", "media", "map"]);
+  const checkFields = (
+    nodes: ReadonlyArray<{
+      readonly component: string;
+      readonly progress?: number | undefined;
+      readonly assetId?: string | undefined;
+      readonly defId?: string | undefined;
+    }>,
+  ) => {
+    for (const node of nodes) {
+      if (node.progress !== undefined && !progressComponents.has(node.component)) {
+        reject(
+          "mockup-field-refused",
+          `${name} gives ${node.component} a progress reading; only progress, slider, and stepper take one.`,
+        );
+      }
+      if (node.assetId !== undefined && !imageComponents.has(node.component)) {
+        reject(
+          "mockup-field-refused",
+          `${name} gives ${node.component} an image; only image-placeholder, media, and map take one.`,
+        );
+      }
+      if (node.defId !== undefined && node.component !== "instance") {
+        reject(
+          "mockup-field-refused",
+          `${name} gives ${node.component} a definition reference; only an instance takes one.`,
+        );
+      }
+    }
+  };
+  checkFields(block.nodes);
+
+  const assetIds = new Set<string>();
+  for (const asset of block.assets ?? []) {
+    const id = String(asset.assetId);
+    if (assetIds.has(id)) {
+      reject("design-asset-refused", `${name} declares the asset ${id} twice.`);
+    }
+    assetIds.add(id);
+    if (asset.source.kind === "generated-image") continue;
+    if (mode === "chat") {
+      reject(
+        "design-asset-refused",
+        `${name} asset ${id} names a ${asset.source.kind === "project-file" ? "Project file" : "captured page"}; a Chat Project has neither, so use a generated image.`,
+      );
+    }
+    if (asset.source.kind === "browser-capture") continue;
+    try {
+      canonicalizeWorkRelativePath(asset.source.path);
+    } catch (error) {
+      if (!(error instanceof WorkConfinementRejected)) throw error;
+      reject(
+        "design-asset-refused",
+        `${name} asset ${id} path must be relative to the thread's folder and stay inside it.`,
+      );
+    }
+  }
+
+  const defIds = new Set<string>();
+  let definitionNodes = 0;
+  const definitions = block.definitions ?? [];
+  if (definitions.length > CANVAS_MAX_MOCKUP_DEFINITIONS) {
+    reject(
+      "mockup-definitions-budget-exceeded",
+      `${name} declares more than ${String(CANVAS_MAX_MOCKUP_DEFINITIONS)} reusable components.`,
+    );
+  }
+  for (const definition of definitions) {
+    const id = String(definition.defId);
+    if (defIds.has(id)) {
+      reject("duplicate-mockup-definition", `${name} declares component ${id} twice.`);
+    }
+    defIds.add(id);
+    if (definition.nodes.length > CANVAS_MAX_MOCKUP_DEFINITION_NODES) {
+      reject(
+        "mockup-definitions-budget-exceeded",
+        `${name} component ${id} holds more than ${String(CANVAS_MAX_MOCKUP_DEFINITION_NODES)} nodes.`,
+      );
+    }
+    definitionNodes += definition.nodes.length;
+    checkFields(definition.nodes);
+    if (definition.nodes.some((node) => node.component === "instance")) {
+      reject(
+        "mockup-definition-nested",
+        `${name} component ${id} places an instance; a reusable component holds a plain subtree.`,
+      );
+    }
+  }
+  if (block.nodes.length + definitionNodes > CANVAS_MAX_MOCKUP_NODES) {
+    reject(
+      "mockup-node-budget-exceeded",
+      `${name} holds more than ${String(CANVAS_MAX_MOCKUP_NODES)} nodes across its screen and its components.`,
+    );
+  }
+  for (const node of block.nodes) {
+    if (node.defId !== undefined && !defIds.has(String(node.defId))) {
+      reject(
+        "dangling-mockup-definition",
+        `${name} places component ${String(node.defId)}, which the block does not define.`,
+      );
+    }
+  }
+  for (const node of block.nodes) {
+    if (node.assetId !== undefined && !assetIds.has(String(node.assetId))) {
+      reject(
+        "design-asset-refused",
+        `${name} names the image ${String(node.assetId)}, which the block does not declare.`,
+      );
+    }
+  }
+}
+
 function validateMockup(
   block: Extract<CanvasBlock, { readonly kind: "mockup" }>,
   declared: number,
+  mode: CanvasDefinition["provenance"]["mode"],
 ): void {
   const catalog = declared >= CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION;
+  validateMockupLibrary(block, mode);
   const maxDepth = catalog ? CANVAS_MAX_MOCKUP_DEPTH : CANVAS_MOCKUP_LEGACY_MAX_DEPTH;
   const maxNodes = catalog ? CANVAS_MAX_MOCKUP_NODES : CANVAS_MOCKUP_LEGACY_MAX_NODES;
   const name = `Canvas mockup ${block.blockId}`;

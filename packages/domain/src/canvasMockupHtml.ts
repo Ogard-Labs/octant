@@ -207,6 +207,66 @@ function renderNode(
       };
     case "toast":
       return { markup: `<p class="oct-mockup-toast">${label}</p>`, headingLevel };
+    case "search":
+      return {
+        markup: `<p class="oct-mockup-field"><input type="search" disabled aria-label="${label}" placeholder="${escapeHtml(node.value ?? "")}"></p>`,
+        headingLevel,
+      };
+    case "breadcrumb":
+      return { markup: `<p class="oct-mockup-part">${name}: ${label}</p>`, headingLevel };
+    case "pagination":
+      return { markup: `<p class="oct-mockup-part">${name}: ${label}</p>`, headingLevel };
+    case "stepper":
+      return {
+        markup: `<p class="oct-mockup-part">${name}: ${label}${node.progress === undefined ? "" : `, step ${String(node.progress)}`}</p>`,
+        headingLevel,
+      };
+    case "progress":
+      return {
+        markup: `<p class="oct-mockup-progress"><span>${label}</span><progress value="${String(node.progress ?? 0)}" max="100"></progress></p>`,
+        headingLevel,
+      };
+    case "slider":
+      return {
+        markup: `<p class="oct-mockup-progress"><span>${label}</span><input type="range" disabled min="0" max="100" value="${String(node.progress ?? 0)}" aria-label="${label}"></p>`,
+        headingLevel,
+      };
+    case "menu":
+      return {
+        markup: `<details class="oct-mockup-part"><summary>${name}: ${label}</summary>${childMarkup}</details>`,
+        headingLevel,
+      };
+    case "footer":
+      return {
+        markup: `<footer class="oct-mockup-part">${hotspotLabel}${childMarkup}</footer>`,
+        headingLevel,
+      };
+    case "hero":
+      return {
+        markup: `<div class="oct-mockup-hero"><p class="oct-mockup-hero-title">${label}</p>${node.value === undefined ? "" : `<p>${escapeHtml(node.value)}</p>`}${childMarkup}</div>`,
+        headingLevel,
+      };
+    case "media":
+    case "map":
+      return {
+        markup: `<figure class="oct-mockup-image"><figcaption>${label}</figcaption></figure>`,
+        headingLevel,
+      };
+    case "chat":
+      return {
+        markup: `<div class="oct-mockup-stack" aria-label="${label}">${childMarkup}</div>`,
+        headingLevel,
+      };
+    case "chat-message":
+      return {
+        markup: `<p class="oct-mockup-chat-message"><span>${label}</span></p>`,
+        headingLevel,
+      };
+    case "instance":
+      return {
+        markup: `<div class="oct-mockup-part" data-component="${escapeHtml(node.defId ?? "")}">${hotspotLabel}${childMarkup}</div>`,
+        headingLevel,
+      };
   }
 }
 

@@ -32,6 +32,20 @@ export const CANVAS_MOCKUP_COMPONENT_NAME: Readonly<Record<CanvasMockupComponent
   nav: "Navigation",
   modal: "Modal",
   toast: "Toast",
+  search: "Search",
+  breadcrumb: "Breadcrumb",
+  pagination: "Pagination",
+  stepper: "Stepper",
+  progress: "Progress",
+  slider: "Slider",
+  menu: "Menu",
+  footer: "Footer",
+  hero: "Hero",
+  media: "Media",
+  map: "Map",
+  chat: "Chat",
+  "chat-message": "Chat message",
+  instance: "Component",
 };
 
 export const CANVAS_MOCKUP_DEVICE_NAME: Readonly<Record<CanvasMockupDevice, string>> = {

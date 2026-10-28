@@ -745,7 +745,7 @@ describe("Canvas share contracts", () => {
     const dropped = (kind: string, path: string) =>
       /(?:^|\.)sourceIds?$/.test(path) ||
       flattened.has(`${kind}.${path}`) ||
-      (kind === "design" && /^assets(?:$|\[|\.)/.test(path));
+      ((kind === "design" || kind === "mockup") && /^assets(?:$|\[|\.)/.test(path));
     const missing: string[] = [];
     for (const [kind, paths] of live) {
       const sharedPaths = shared.get(kind);
@@ -807,7 +807,7 @@ describe("Canvas share contracts", () => {
     ).toThrow();
     // And a version this runtime has not learned is still a future version.
     expect(() =>
-      decodeCanvasStaticExportDocument({ ...document, schemaVersion: 13, blocks: [] }),
+      decodeCanvasStaticExportDocument({ ...document, schemaVersion: 14, blocks: [] }),
     ).toThrow();
   });
 

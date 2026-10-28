@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CANVAS_FLOW_SCHEMA_VERSION,
   CANVAS_MAX_BLOCKS,
   CANVAS_MAX_DASHBOARD_CELLS,
   CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH,
@@ -3826,7 +3827,7 @@ describe("flow screens and transitions", () => {
   });
 
   it("refuses a flow in a document that declares the version before it", () => {
-    const earlier = CANVAS_SCHEMA_VERSION - 1;
+    const earlier = CANVAS_FLOW_SCHEMA_VERSION - 1;
     const gated = flow([{ screenId: "s1", blockId: "search" }]);
     expectPolicyCode(
       () =>
@@ -3839,6 +3840,220 @@ describe("flow screens and transitions", () => {
           ],
         }),
       "unsupported-schema-version",
+    );
+  });
+});
+
+describe("mockup library", () => {
+  const libraryMockup = (overrides: Record<string, unknown> = {}) => ({
+    blockId: "screen",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "mockup" as const,
+    device: "phone" as const,
+    title: "Search",
+    nodes: [
+      { nodeId: "window", component: "window", label: "Search" },
+      { nodeId: "bar", parentId: "window", component: "progress", label: "Loading", progress: 40 },
+    ],
+    ...overrides,
+  });
+
+  it("accepts the library components with their own fields", () => {
+    expect(() => validateCanvasDefinition(withBlocks([libraryMockup()]))).not.toThrow();
+  });
+
+  it("refuses a field on the component that does not read it", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            libraryMockup({
+              nodes: [
+                { nodeId: "window", component: "window", label: "S" },
+                { nodeId: "t", parentId: "window", component: "text", label: "Hi", progress: 3 },
+              ],
+            }),
+          ]),
+        ),
+      "mockup-field-refused",
+    );
+  });
+
+  it("refuses an image on a non-image component, an undeclared asset, and a Chat Project file", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            libraryMockup({
+              nodes: [{ nodeId: "window", component: "window", label: "S", assetId: "shot" }],
+            }),
+          ]),
+        ),
+      "mockup-field-refused",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            libraryMockup({
+              nodes: [
+                { nodeId: "window", component: "window", label: "S" },
+                {
+                  nodeId: "m",
+                  parentId: "window",
+                  component: "media",
+                  label: "Photo",
+                  assetId: "shot",
+                },
+              ],
+            }),
+          ]),
+        ),
+      "design-asset-refused",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            libraryMockup({
+              assets: [{ assetId: "shot", source: { kind: "project-file", path: "a.png" } }],
+              nodes: [
+                { nodeId: "window", component: "window", label: "S" },
+                {
+                  nodeId: "m",
+                  parentId: "window",
+                  component: "media",
+                  label: "Photo",
+                  assetId: "shot",
+                },
+              ],
+            }),
+          ]),
+        ),
+      "design-asset-refused",
+    );
+  });
+
+  it("pins a callout to a library component and to an instance, and refuses one naming a node only a definition holds", () => {
+    // A callout on an instance names a node the screen holds: the marker draws
+    // on every placement, and the comment it anchors stays on that instance.
+    expect(() =>
+      validateCanvasDefinition(
+        withBlocks([
+          libraryMockup({
+            definitions: [
+              {
+                defId: "row",
+                label: "Row",
+                nodes: [{ nodeId: "r1", component: "list-row", label: "One" }],
+              },
+            ],
+            nodes: [
+              { nodeId: "window", component: "window", label: "S" },
+              { nodeId: "go", parentId: "window", component: "search", label: "Search" },
+              {
+                nodeId: "i1",
+                parentId: "window",
+                component: "instance",
+                label: "Row",
+                defId: "row",
+              },
+            ],
+            annotations: [
+              { nodeId: "go", note: "Search as you type." },
+              { nodeId: "i1", note: "One placed row." },
+            ],
+          }),
+        ]),
+      ),
+    ).not.toThrow();
+    // A definition's own node is not on the screen, so a callout cannot pin
+    // to it: the callout would have no one place to draw.
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            libraryMockup({
+              definitions: [
+                {
+                  defId: "row",
+                  label: "Row",
+                  nodes: [{ nodeId: "r1", component: "list-row", label: "One" }],
+                },
+              ],
+              nodes: [{ nodeId: "window", component: "window", label: "S" }],
+              annotations: [{ nodeId: "r1", note: "Inside the definition." }],
+            }),
+          ]),
+        ),
+      "dangling-mockup-annotation",
+    );
+  });
+
+  it("places a reusable component by instance, and refuses a dangling, repeated, or nesting one", () => {
+    const withInstances = (overrides: Record<string, unknown>) =>
+      validateCanvasDefinition(withBlocks([libraryMockup(overrides)]));
+    expect(() =>
+      withInstances({
+        definitions: [
+          {
+            defId: "row",
+            label: "Row",
+            nodes: [{ nodeId: "r1", component: "list-row", label: "One" }],
+          },
+        ],
+        nodes: [
+          { nodeId: "window", component: "window", label: "S" },
+          { nodeId: "i1", parentId: "window", component: "instance", label: "Row", defId: "row" },
+        ],
+      }),
+    ).not.toThrow();
+    expectPolicyCode(
+      () =>
+        withInstances({
+          nodes: [
+            { nodeId: "window", component: "window", label: "S" },
+            {
+              nodeId: "i1",
+              parentId: "window",
+              component: "instance",
+              label: "Row",
+              defId: "gone" as never,
+            },
+          ],
+        }),
+      "dangling-mockup-definition",
+    );
+    expectPolicyCode(
+      () =>
+        withInstances({
+          definitions: [
+            {
+              defId: "row",
+              label: "Row",
+              nodes: [{ nodeId: "r1", component: "list-row", label: "One" }],
+            },
+            {
+              defId: "row",
+              label: "Row",
+              nodes: [{ nodeId: "r2", component: "list-row", label: "Two" }],
+            },
+          ],
+        }),
+      "duplicate-mockup-definition",
+    );
+    expectPolicyCode(
+      () =>
+        withInstances({
+          definitions: [
+            {
+              defId: "row",
+              label: "Row",
+              nodes: [{ nodeId: "r1", component: "instance", label: "Nested", defId: "row" }],
+            },
+          ],
+        }),
+      "mockup-definition-nested",
     );
   });
 });
