@@ -108,5 +108,12 @@ export function RemoteProjectsSidebarGroup(props: {
 
 function connectionLabel(project: RemoteCodeProject): string {
   if (project.target === undefined) return "Target removed";
-  return project.target.connection === "connected" ? "Connected" : "Not connected";
+  switch (project.target.connection) {
+    case "connected":
+      return "Connected";
+    case "reconnecting":
+      return "Reconnecting";
+    default:
+      return "Not connected";
+  }
 }

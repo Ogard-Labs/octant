@@ -64,6 +64,7 @@ import {
   remoteCodeTurnReadiness,
   remotePlacedAgentReadiness,
 } from "@octant/domain/ssh-target-recovery";
+import { SSH_TARGET_TIMES } from "../../host/sshTargetClient";
 import { remoteCodeSelection, remoteCodeThreadProviderGroups } from "./remoteCodeComposer";
 import {
   useCallback,
@@ -577,8 +578,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
             remote.target,
             String(remoteSelection.providerInstanceId),
             submittedPolicy,
+            SSH_TARGET_TIMES,
           )
-        : remoteCodeTurnReadiness(remote.target, submittedPolicy);
+        : remoteCodeTurnReadiness(remote.target, submittedPolicy, SSH_TARGET_TIMES);
   const remoteRefusal =
     remoteReadiness?.status === "unavailable"
       ? remoteReadiness.message

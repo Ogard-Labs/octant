@@ -29,6 +29,14 @@ import type {
  */
 export type SshTargetConnection =
   | { readonly state: "unreachable" }
+  | {
+      readonly state: "reconnecting";
+      readonly attempt: number;
+      readonly maxAttempts: number;
+      /** Absent while the attempt runs. */
+      readonly nextAttemptAt?: number;
+    }
+  | { readonly state: "authentication-refused" }
   | { readonly state: "host-key-changed" }
   | { readonly state: "executor-missing" }
   | { readonly state: "executor-version-mismatch" }
@@ -189,6 +197,18 @@ export function decideSshAdmission(request: SshAdmissionRequest): SshAdmissionDe
 
   const { connection } = request;
   if (connection.state === "unreachable") return refused("target-unreachable");
+  if (connection.state === "reconnecting") {
+    return {
+      status: "refused",
+      reason: "target-reconnecting",
+      attempt: connection.attempt,
+      maxAttempts: connection.maxAttempts,
+      ...(connection.nextAttemptAt === undefined
+        ? {}
+        : { nextAttemptAt: connection.nextAttemptAt }),
+    };
+  }
+  if (connection.state === "authentication-refused") return refused("authentication-refused");
   if (connection.state === "host-key-changed") return refused("host-key-changed");
   if (connection.state === "executor-missing") return refused("executor-missing");
   if (connection.state === "executor-version-mismatch") {

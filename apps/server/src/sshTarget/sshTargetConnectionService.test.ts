@@ -7,7 +7,7 @@ import type {
   ProviderPlacedLaunch,
   ProviderRemoteProcessPlacement,
 } from "@octant/provider-sdk/driver";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   SshDestination,
   SshExecutorPath,
@@ -22,6 +22,7 @@ import {
   SSH_CANARY_PROBES_BY_POSTURE,
   SSH_RUNTIME_CANARY_PROBES_BY_POSTURE,
 } from "@octant/domain/ssh-target-admission-policy";
+import { describeSshAdmissionRefusal } from "@octant/domain/ssh-target-recovery";
 import { bindSshRemoteHarness } from "./sshRemoteHarness";
 import { decodeCodeTerminalId } from "@octant/contracts/code";
 import { WindowId } from "@octant/contracts/shell";
@@ -31,6 +32,7 @@ import type { ProviderRuntimeEgress } from "./providerRuntimeEgress";
 import { placeableRuntimesOn, type RemoteRuntimeSource } from "./sshRemoteCodeThreads";
 import {
   SshTargetConnectionService,
+  type SshTargetConnectionServiceOptions,
   type SshTargetPlacementInput,
 } from "./sshTargetConnectionService";
 import type { SshTargetStore } from "./sshTargetStore";
@@ -63,7 +65,19 @@ if (args.includes("-N")) {
   process.stderr.write("build@devbox.example: Permission denied (publickey).\n");
   process.exit(255);
 }
-const mode = process.env.FAKE_SSH_MODE;
+// A test that changes the target between sessions writes the next one's mode
+// and facts to these files; without them every session is the same.
+const fromFile = (path, fallback) => (fs.existsSync(path) ? fs.readFileSync(path, "utf8").trim() : fallback);
+const mode = fromFile(process.env.FAKE_SSH_MODE_FILE, process.env.FAKE_SSH_MODE);
+fs.appendFileSync(process.env.FAKE_SSH_REQUEST + ".sessions", mode + "\n");
+if (mode === "unreachable") {
+  process.stderr.write("ssh: connect to host devbox.example port 22: Connection refused\n");
+  process.exit(255);
+}
+if (mode === "authentication-refused") {
+  process.stderr.write("build@devbox.example: Permission denied (publickey).\n");
+  process.exit(255);
+}
 if (mode === "host-key-changed") {
   process.stderr.write("@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @\nHost key verification failed.\n");
   process.exit(255);
@@ -85,11 +99,13 @@ const frame = (value) => {
 process.stdout.write("Welcome to devbox\n");
 process.stdout.write(${JSON.stringify(SSH_EXECUTOR_PREAMBLE)});
 process.stdout.write(frame({ type: "hello", identity: JSON.parse(process.env.FAKE_IDENTITY) }));
+// The test drops the session by killing this process, as a network loss ends the client.
+fs.writeFileSync(process.env.FAKE_SSH_REQUEST + ".pid", String(process.pid));
 if (mode === "exits-after-introduction") process.exit(1);
 const answer = (request) => {
   switch (request.kind) {
     case "attest":
-      return { kind: "attested", remoteUser: "build", facts: JSON.parse(process.env.FAKE_FACTS) };
+      return { kind: "attested", remoteUser: "build", facts: JSON.parse(fromFile(process.env.FAKE_FACTS_FILE, process.env.FAKE_FACTS)) };
     case "resolve-root":
       return { kind: "root-resolved", root: "/srv/app" };
     case "list-directory":
@@ -209,11 +225,15 @@ function service(
     readonly runtimeEgress?: ProviderRuntimeEgress;
     /** The provider instances a status reports placeable agents from, as the server wires them. */
     readonly runtimes?: () => ReadonlyArray<RemoteRuntimeSource>;
+    readonly now?: () => number;
+    readonly reconnect?: SshTargetConnectionServiceOptions["reconnect"];
   } = {},
 ) {
   const { runtimes } = overrides;
   const connections: SshTargetConnectionService = new SshTargetConnectionService({
     ...(overrides.runtimeEgress === undefined ? {} : { runtimeEgress: overrides.runtimeEgress }),
+    ...(overrides.now === undefined ? {} : { now: overrides.now }),
+    ...(overrides.reconnect === undefined ? {} : { reconnect: overrides.reconnect }),
     ...(runtimes === undefined
       ? {}
       : {
@@ -229,6 +249,8 @@ function service(
       FAKE_SSH_REQUEST: join(directory, "request.json"),
       FAKE_HOST_KEY: HOST_KEY,
       FAKE_SSH_MODE: overrides.mode ?? "executor",
+      FAKE_SSH_MODE_FILE: join(directory, "next-mode"),
+      FAKE_FACTS_FILE: join(directory, "next-facts.json"),
       FAKE_IDENTITY: JSON.stringify(overrides.identity ?? passingFacts().identity),
       FAKE_FACTS: JSON.stringify(overrides.facts ?? passingFacts()),
       OCTANT_DESKTOP_BRIDGE_SECRET: "never-forwarded",
@@ -833,7 +855,9 @@ describe("SSH target connection service", () => {
       reason: "executor-unavailable",
     });
     expect(projects.list()).toEqual([]);
-    expect(connections.list()[0]?.connection).toBe("unreachable");
+    // The broken session is gone; a new one would have to attest from nothing.
+    expect(connections.list()[0]?.connection).toBe("reconnecting");
+    connections.close();
   });
 
   it("re-pins only with a key read from the target's own destination", async () => {
@@ -1251,6 +1275,429 @@ function placementOn(
     currentPosture: () => posture,
   };
 }
+
+/** Timers that run only when the test says their time came, recording each wait. */
+function manualTimers() {
+  const scheduled: Array<{ readonly run: () => void; readonly delayMs: number; live: boolean }> =
+    [];
+  return {
+    schedule: (run: () => void, delayMs: number) => {
+      const entry = { run, delayMs, live: true };
+      scheduled.push(entry);
+      return () => {
+        entry.live = false;
+      };
+    },
+    /** The waits still due, in order. */
+    pending: () => scheduled.filter((entry) => entry.live).map((entry) => entry.delayMs),
+    runNext: () => {
+      const entry = scheduled.find((candidate) => candidate.live);
+      if (entry === undefined) throw new Error("No reconnect is due.");
+      entry.live = false;
+      entry.run();
+    },
+  };
+}
+
+describe("SSH target reconnect", () => {
+  const sessions = () =>
+    readFileSync(join(directory, "request.json.sessions"), "utf8").trim().split("\n");
+  const requests = () =>
+    readFileSync(join(directory, "request.json.log"), "utf8").trim().split("\n");
+  /** Ends the client the way a lost network does: the process is gone, nobody said why. */
+  const dropSession = () =>
+    process.kill(Number(readFileSync(join(directory, "request.json.pid"), "utf8")), "SIGKILL");
+  const nextSession = (mode: string) => writeFileSync(join(directory, "next-mode"), mode);
+  const plan = {
+    posture: "plan",
+    permissionPersistence: "current-session",
+    subject: { kind: "file-operation" },
+  } as const;
+
+  function reconnecting(clock: { now: number }) {
+    const timers = manualTimers();
+    const connections = service({
+      now: () => clock.now,
+      reconnect: { random: () => 0.5, schedule: timers.schedule },
+    });
+    /** Runs the attempt due and waits until it connected or failed. */
+    const attempt = async () => {
+      timers.runNext();
+      expect(connections.list()[0]?.reconnect?.status).toBe("attempting");
+      await vi.waitFor(() =>
+        expect(connections.list()[0]?.reconnect?.status).not.toBe("attempting"),
+      );
+    };
+    return { connections, timers, attempt };
+  }
+
+  it("reconnects on its own after an attested session drops, re-attesting from the journal's pin before a turn binds to the new session", async () => {
+    const clock = { now: 1_700_000_000_000 };
+    const { connections, timers, attempt } = reconnecting(clock);
+    const projects = new SshRemoteProjectService({
+      store: registry,
+      connections,
+      uuid: () => "55555555-5555-4555-8555-555555555555",
+      clock: () => "2026-10-26T10:00:00.000Z",
+    });
+    const status = await registered(connections);
+    const bound = await projects.bind({
+      targetId: status.target.id,
+      remoteRoot: remotePath("/home/build/app"),
+      name: "App",
+    });
+    if (bound.status !== "ok") throw new Error("bind refused");
+    const first = connections.session(status.target.id);
+    if (first === undefined) throw new Error("no session");
+    let told = 0;
+    first.onEnd(() => {
+      told += 1;
+    });
+    const pin = registry.knownHostsFile(status.target.id);
+    writeFileSync(pin, "* ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAnotherKeyAnotherKeyAnother\n");
+
+    dropSession();
+    await vi.waitFor(() => expect(connections.list()[0]?.connection).toBe("reconnecting"));
+    expect(told).toBe(1);
+    const waiting = {
+      status: "refused",
+      reason: "target-reconnecting",
+      attempt: 1,
+      maxAttempts: 8,
+      nextAttemptAt: clock.now + 1_000,
+    };
+    expect(connections.list()[0]).toMatchObject({
+      connection: "reconnecting",
+      reconnect: {
+        status: "waiting",
+        attempt: 1,
+        maxAttempts: 8,
+        nextAttemptAt: clock.now + 1_000,
+      },
+      admission: [
+        { posture: "plan", decision: waiting },
+        { posture: "approval-gated", decision: waiting },
+        { posture: "auto-accept-edits", decision: waiting },
+      ],
+    });
+    expect(timers.pending()).toEqual([1_000]);
+    // Nothing the last session attested admits a read while the host reconnects.
+    expect(await projects.gitStatus({ projectId: bound.value.id })).toEqual({
+      status: "refused",
+      reason: "not-admitted",
+      decision: waiting,
+    });
+
+    clock.now += 1_000;
+    await attempt();
+    const healed = connections.list()[0];
+    expect(healed).toMatchObject({ connection: "connected", remoteUser: "build" });
+    expect(healed?.reconnect).toBeUndefined();
+    expect(healed?.admission.every((entry) => entry.decision.status === "admitted")).toBe(true);
+    // The new session trusted the journal's key, not the file it found, and
+    // attested before any read went out on it.
+    expect(readFileSync(pin, "utf8")).toBe(`* ssh-ed25519 ${HOST_KEY}\n`);
+    expect(sessions()).toEqual(["executor", "executor"]);
+    expect(requests()).toEqual(["attest", "resolve-root", "attest"]);
+
+    const second = connections.session(status.target.id);
+    expect(second).toBeDefined();
+    expect(String(second?.connectionId)).not.toBe(String(first.connectionId));
+    // The dropped session's work never travels on the new one.
+    expect(
+      await connections.harnessFile(
+        first,
+        { ...plan, subject: { kind: "file-operation" } },
+        {
+          kind: "harness-file",
+          root: bound.value.remoteRoot,
+          reader: "99999999-9999-4999-8999-999999999999",
+          operation: { tool: "read", arguments: { path: "README.md" } },
+        },
+      ),
+    ).toEqual({ status: "unavailable" });
+    expect(await projects.gitStatus({ projectId: bound.value.id })).toMatchObject({
+      status: "ok",
+    });
+    expect(
+      bindSshRemoteHarness(
+        { connections, uuid: () => "99999999-9999-4999-8999-999999999999" },
+        {
+          project: bound.value,
+          scope: {
+            threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            projectId: String(bound.value.id),
+          },
+          posture: () => ({
+            executionPolicy: "approval-gated",
+            permissionPersistence: "current-session",
+          }),
+          onTargetDisconnected: () => undefined,
+        },
+      ),
+    ).toMatchObject({ status: "bound" });
+    expect(timers.pending()).toEqual([]);
+    connections.close();
+  });
+
+  it("refuses a turn that starts while the host reconnects, with the reason and the attempt", async () => {
+    const clock = { now: 1_700_000_000_000 };
+    const { connections } = reconnecting(clock);
+    const projects = new SshRemoteProjectService({
+      store: registry,
+      connections,
+      uuid: () => "55555555-5555-4555-8555-555555555555",
+      clock: () => "2026-10-26T10:00:00.000Z",
+    });
+    const status = await registered(connections);
+    const bound = await projects.bind({
+      targetId: status.target.id,
+      remoteRoot: remotePath("/home/build/app"),
+      name: "App",
+    });
+    if (bound.status !== "ok") throw new Error("bind refused");
+    dropSession();
+    await vi.waitFor(() => expect(connections.list()[0]?.connection).toBe("reconnecting"));
+
+    const turn = bindSshRemoteHarness(
+      { connections, uuid: () => "99999999-9999-4999-8999-999999999999" },
+      {
+        project: bound.value,
+        scope: {
+          threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          projectId: String(bound.value.id),
+        },
+        posture: () => ({
+          executionPolicy: "approval-gated",
+          permissionPersistence: "current-session",
+        }),
+        onTargetDisconnected: () => undefined,
+      },
+    );
+    expect(turn).toEqual({
+      status: "refused",
+      decision: {
+        status: "refused",
+        reason: "target-reconnecting",
+        attempt: 1,
+        maxAttempts: 8,
+        nextAttemptAt: clock.now + 1_000,
+      },
+    });
+    if (turn.status !== "refused") return;
+    // The sentence a turn's refusal carries, as the Code turn runtime ends it with.
+    expect(describeSshAdmissionRefusal(turn.decision)).toBe(
+      "The SSH target's session dropped, and Octant is reconnecting on its own (attempt 1 of 8). Work there waits until it connects and attests again.",
+    );
+    expect(requests()).toEqual(["attest", "resolve-root"]);
+    connections.close();
+  });
+
+  it("stops at a changed host key during a reconnect, keeping the pin, and waits for the person", async () => {
+    const clock = { now: 1_700_000_000_000 };
+    const { connections, timers, attempt } = reconnecting(clock);
+    const status = await registered(connections);
+    nextSession("host-key-changed");
+    dropSession();
+    await vi.waitFor(() => expect(connections.list()[0]?.connection).toBe("reconnecting"));
+    await attempt();
+
+    expect(connections.list()[0]).toMatchObject({
+      connection: "host-key-changed",
+      reconnect: { status: "stopped", attempts: 1 },
+    });
+    expect(timers.pending()).toEqual([]);
+    expect(connections.admit(status.target.id, plan)).toEqual({
+      status: "refused",
+      reason: "host-key-changed",
+    });
+    // The pin stays the key the person confirmed; nothing relaxed it to let
+    // the session through.
+    expect(readFileSync(registry.knownHostsFile(status.target.id), "utf8")).toBe(
+      `* ssh-ed25519 ${HOST_KEY}\n`,
+    );
+    const args: ReadonlyArray<string> = JSON.parse(
+      readFileSync(join(directory, "args.json"), "utf8"),
+    );
+    expect(args).toContain("StrictHostKeyChecking=yes");
+    expect(sessions()).toEqual(["executor", "host-key-changed"]);
+
+    // The person's connect starts over and clears the stopped reconnect.
+    nextSession("executor");
+    expect(await connections.connect(status.target.id)).toMatchObject({
+      status: "ok",
+      value: { connection: "connected" },
+    });
+    expect(connections.list()[0]?.reconnect).toBeUndefined();
+    connections.close();
+  });
+
+  it("stops when the reconnected session's attestation refuses, holding the session and admitting nothing", async () => {
+    const clock = { now: 1_700_000_000_000 };
+    const { connections, timers, attempt } = reconnecting(clock);
+    const status = await registered(connections);
+    const facts = passingFacts();
+    writeFileSync(
+      join(directory, "next-facts.json"),
+      JSON.stringify({
+        ...facts,
+        canaries: facts.canaries.map((entry) =>
+          entry.posture === "plan"
+            ? {
+                ...entry,
+                results: entry.results.map((result) =>
+                  result.probe === "open-network-socket"
+                    ? { ...result, outcome: "escaped" }
+                    : result,
+                ),
+              }
+            : entry,
+        ),
+      }),
+    );
+    dropSession();
+    await vi.waitFor(() => expect(connections.list()[0]?.connection).toBe("reconnecting"));
+    await attempt();
+
+    const escaped = {
+      status: "refused",
+      reason: "confinement-canary-escaped",
+      posture: "plan",
+      probe: "open-network-socket",
+    };
+    const after = connections.list()[0];
+    expect(after?.connection).toBe("connected");
+    expect(after?.reconnect).toBeUndefined();
+    expect(after?.admission.map((entry) => entry.decision)).toEqual([escaped, escaped, escaped]);
+    expect(connections.admit(status.target.id, plan)).toEqual(escaped);
+    // The earlier session's passing attestation is not carried over, and
+    // nothing tries again.
+    expect(timers.pending()).toEqual([]);
+    expect(requests()).toEqual(["attest", "attest"]);
+    connections.close();
+  });
+
+  it("stops when this Mac's SSH key or agent no longer signs in, rather than retrying", async () => {
+    const clock = { now: 1_700_000_000_000 };
+    const { connections, timers, attempt } = reconnecting(clock);
+    const status = await registered(connections);
+    nextSession("authentication-refused");
+    dropSession();
+    await vi.waitFor(() => expect(connections.list()[0]?.connection).toBe("reconnecting"));
+    await attempt();
+    expect(connections.list()[0]).toMatchObject({
+      connection: "authentication-refused",
+      reconnect: { status: "stopped", attempts: 1 },
+    });
+    expect(connections.admit(status.target.id, plan)).toEqual({
+      status: "refused",
+      reason: "authentication-refused",
+    });
+    expect(timers.pending()).toEqual([]);
+    connections.close();
+  });
+
+  it("waits longer before each attempt on an unreachable target and stops after the last, as unreachable", async () => {
+    const clock = { now: 1_700_000_000_000 };
+    const { connections, timers, attempt } = reconnecting(clock);
+    const status = await registered(connections);
+    nextSession("unreachable");
+    dropSession();
+    await vi.waitFor(() => expect(connections.list()[0]?.connection).toBe("reconnecting"));
+    const waits: number[] = [];
+    while (timers.pending().length > 0) {
+      const [wait] = timers.pending();
+      if (wait === undefined) break;
+      waits.push(wait);
+      clock.now += wait;
+      await attempt();
+    }
+    expect(waits).toEqual([1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 60_000, 60_000]);
+    expect(connections.list()[0]).toMatchObject({
+      connection: "unreachable",
+      reconnect: { status: "stopped", attempts: 8 },
+    });
+    expect(connections.admit(status.target.id, plan)).toEqual({
+      status: "refused",
+      reason: "target-unreachable",
+    });
+    expect(sessions()).toHaveLength(9);
+    connections.close();
+  });
+
+  it("continues the count when a reconnected session drops again soon, so a flapping target still stops", async () => {
+    const clock = { now: 1_700_000_000_000 };
+    const { connections, timers, attempt } = reconnecting(clock);
+    const status = await registered(connections);
+    let attempts = 0;
+    for (;;) {
+      dropSession();
+      await vi.waitFor(() => expect(connections.list()[0]?.connection).not.toBe("connected"));
+      if (timers.pending().length === 0) break;
+      attempts += 1;
+      // Each session attests and drops again within the minute it must hold.
+      clock.now += 1_000;
+      await attempt();
+      expect(connections.list()[0]?.connection).toBe("connected");
+      clock.now += 5_000;
+    }
+    expect(attempts).toBe(8);
+    expect(connections.list()[0]).toMatchObject({
+      connection: "unreachable",
+      reconnect: { status: "stopped", attempts: 8 },
+    });
+
+    // A session that held past the minute starts a fresh count.
+    await connections.connect(status.target.id);
+    clock.now += 61_000;
+    dropSession();
+    await vi.waitFor(() => expect(connections.list()[0]?.connection).toBe("reconnecting"));
+    expect(connections.list()[0]?.reconnect).toMatchObject({ status: "waiting", attempt: 1 });
+    connections.close();
+  });
+
+  it("stops and waits for the person when an attempt cannot even start, admitting nothing", async () => {
+    const clock = { now: 1_700_000_000_000 };
+    const { connections, timers } = reconnecting(clock);
+    const status = await registered(connections);
+    dropSession();
+    await vi.waitFor(() => expect(connections.list()[0]?.connection).toBe("reconnecting"));
+    // A full disk or a lost state directory: the pin file cannot be written.
+    const writePin = vi.spyOn(registry, "writePin").mockImplementationOnce(() => {
+      throw new Error("ENOSPC: no space left on device");
+    });
+    timers.runNext();
+    await vi.waitFor(() =>
+      expect(connections.list()[0]?.reconnect).toEqual({ status: "stopped", attempts: 1 }),
+    );
+    writePin.mockRestore();
+    expect(connections.list()[0]?.connection).toBe("unreachable");
+    expect(connections.admit(status.target.id, plan)).toEqual({
+      status: "refused",
+      reason: "target-unreachable",
+    });
+    expect(timers.pending()).toEqual([]);
+    expect(sessions()).toEqual(["executor"]);
+    connections.close();
+  });
+
+  it("does not reconnect after the person removes the target or the host closes", async () => {
+    const clock = { now: 1_700_000_000_000 };
+    const { connections, timers } = reconnecting(clock);
+    const status = await registered(connections);
+    dropSession();
+    await vi.waitFor(() => expect(connections.list()[0]?.connection).toBe("reconnecting"));
+    expect(connections.remove(status.target.id)).toEqual({ status: "ok", value: null });
+    expect(timers.pending()).toEqual([]);
+
+    const other = await registered(connections);
+    connections.close();
+    expect(connections.list().find((entry) => entry.target.id === other.target.id)).toMatchObject({
+      connection: "unreachable",
+    });
+    expect(timers.pending()).toEqual([]);
+  });
+});
 
 /** The failure a launch through the placement ends with, or undefined when it started. */
 async function launchExit(

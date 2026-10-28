@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import type { SshTargetAdministrationBridge, SshTargetOperation } from "../shell/hostBridge";
 import { HostPlatformContext } from "../platform";
 import { SshTargetsSettingsPage } from "./SshTargetsSettingsSection";
+import { SSH_TARGET_TIMES } from "./sshTargetClient";
 
 const fingerprint = `SHA256:${"Q".repeat(43)}`;
 const hostKey = {
@@ -99,6 +100,83 @@ describe("Settings › SSH targets", () => {
     expect(row.textContent).toContain(
       "Ask for approvals: The target has no working bubblewrap. Install bubblewrap on the target.",
     );
+  });
+
+  it("follows a dropped session as the host reconnects, with the attempt and its time, and says when it stopped", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      const nextAttemptAt = Date.UTC(2026, 9, 28, 14, 5, 12);
+      const reconnecting = {
+        status: "refused",
+        reason: "target-reconnecting",
+        attempt: 2,
+        maxAttempts: 8,
+        nextAttemptAt,
+      };
+      const { administration } = bridge();
+      let listed: unknown = { targets: [status] };
+      vi.mocked(administration.sshTargetRequest).mockImplementation(async (operation) => {
+        if (operation === "list") return { status: 200, body: listed };
+        if (operation === "projects") return { status: 200, body: { projects: [project] } };
+        return { status: 200, body: { worktrees: [] } };
+      });
+      render(<SshTargetsSettingsPage bridge={administration} />);
+      const row = await screen.findByRole("group", { name: "build@devbox setting" });
+      expect(row.textContent).toContain("Connected as build on Linux");
+
+      // The page reads the host again on its own: the session dropped meanwhile.
+      listed = {
+        targets: [
+          {
+            target,
+            fingerprint,
+            connection: "reconnecting",
+            reconnect: { status: "waiting", attempt: 2, maxAttempts: 8, nextAttemptAt },
+            admission: [
+              { posture: "plan", decision: reconnecting },
+              { posture: "approval-gated", decision: reconnecting },
+            ],
+            runtimeBinaries: [],
+            placeableRuntimes: [],
+          },
+        ],
+      };
+      vi.advanceTimersByTime(5_000);
+      const time = SSH_TARGET_TIMES.formatTime(nextAttemptAt);
+      await waitFor(() =>
+        expect(row.textContent).toContain(
+          `Reconnecting · ${fingerprint}The session dropped. Reconnecting on its own: attempt 2 of 8 at ${time}.`,
+        ),
+      );
+      expect(row.textContent).toContain(
+        `Plan · read-only: The SSH target's session dropped, and Octant is reconnecting on its own (attempt 2 of 8, next at ${time}).`,
+      );
+
+      listed = {
+        targets: [
+          {
+            target,
+            fingerprint,
+            connection: "host-key-changed",
+            reconnect: { status: "stopped", attempts: 3 },
+            admission: [
+              { posture: "plan", decision: { status: "refused", reason: "host-key-changed" } },
+            ],
+            runtimeBinaries: [],
+            placeableRuntimes: [],
+          },
+        ],
+      };
+      vi.advanceTimersByTime(5_000);
+      await waitFor(() =>
+        expect(row.textContent).toContain(
+          "Host key changed · " +
+            `${fingerprint}Stopped reconnecting after 3 attempts. Connect it again once the reason below is fixed.`,
+        ),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("pins a host key only after the person confirms the fingerprint, saying what the pin does not prove", async () => {

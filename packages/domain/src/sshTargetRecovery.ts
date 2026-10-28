@@ -3,10 +3,13 @@ import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import type { SshAdmissionDecision, SshTargetStatus } from "@octant/contracts/ssh-target";
 
 /** Why a bind, a read, or a worktree change on a remote-bound Project did nothing, in a sentence. */
-export function describeSshRemoteProjectRefusal(refusal: SshRemoteProjectRefusal): string {
+export function describeSshRemoteProjectRefusal(
+  refusal: SshRemoteProjectRefusal,
+  describe: Parameters<typeof describeSshAdmissionRefusal>[1] = {},
+): string {
   if (refusal.reason === "not-admitted") {
     return refusal.decision.status === "refused"
-      ? describeSshAdmissionRefusal(refusal.decision)
+      ? describeSshAdmissionRefusal(refusal.decision, describe)
       : "The target refused the request.";
   }
   switch (refusal.reason) {
@@ -61,12 +64,30 @@ export function describeSshRemoteProjectRefusal(refusal: SshRemoteProjectRefusal
  */
 export function describeSshAdmissionRefusal(
   decision: Extract<SshAdmissionDecision, { readonly status: "refused" }>,
+  options: {
+    /**
+     * Renders a reconnect's next attempt time for the reader, such as a
+     * window's local clock time. Without it the sentence names no time.
+     */
+    readonly formatTime?: (epochMilliseconds: number) => string;
+  } = {},
 ): string {
   switch (decision.reason) {
     case "target-removed":
       return "This SSH target was removed. Its Projects stay readable here, and take no new work.";
     case "target-unreachable":
       return "The SSH target is not connected. Connect it again when it is reachable.";
+    case "target-reconnecting": {
+      const next =
+        decision.nextAttemptAt === undefined
+          ? ", under way"
+          : options.formatTime === undefined
+            ? ""
+            : `, next at ${options.formatTime(decision.nextAttemptAt)}`;
+      return `The SSH target's session dropped, and Octant is reconnecting on its own (attempt ${String(decision.attempt)} of ${String(decision.maxAttempts)}${next}). Work there waits until it connects and attests again.`;
+    }
+    case "authentication-refused":
+      return "The target no longer accepts this Mac's SSH key or agent. Check that ssh to it signs in without a prompt, then connect it again.";
     case "host-key-changed":
       return "The SSH target presented a different host key. Check it, then confirm the new key from this Mac.";
     case "executor-missing":
@@ -170,6 +191,7 @@ export type RemoteCodeTurnReadiness =
 export function remoteCodeTurnReadiness(
   target: Pick<SshTargetStatus, "connection" | "admission"> | undefined,
   posture: ProviderExecutionPolicy,
+  describe: Parameters<typeof describeSshAdmissionRefusal>[1] = {},
 ): RemoteCodeTurnReadiness {
   if (target === undefined) {
     return {
@@ -180,13 +202,20 @@ export function remoteCodeTurnReadiness(
   if (posture === "full-access") {
     return { status: "unavailable", message: REMOTE_CODE_THREAD_FULL_ACCESS_UNAVAILABLE };
   }
+  const decision = target.admission.find((entry) => entry.posture === posture)?.decision;
   if (target.connection !== "connected") {
+    // The host's own refusal names why (reconnecting, a changed key); a
+    // status that holds none for the posture still admits nothing.
     return {
       status: "unavailable",
-      message: describeSshAdmissionRefusal({ status: "refused", reason: "target-unreachable" }),
+      message: describeSshAdmissionRefusal(
+        decision?.status === "refused"
+          ? decision
+          : { status: "refused", reason: "target-unreachable" },
+        describe,
+      ),
     };
   }
-  const decision = target.admission.find((entry) => entry.posture === posture)?.decision;
   if (decision === undefined) {
     return {
       status: "unavailable",
@@ -195,7 +224,7 @@ export function remoteCodeTurnReadiness(
   }
   return decision.status === "admitted"
     ? { status: "ready" }
-    : { status: "unavailable", message: describeSshAdmissionRefusal(decision) };
+    : { status: "unavailable", message: describeSshAdmissionRefusal(decision, describe) };
 }
 
 /**
@@ -278,8 +307,9 @@ export function remotePlacedAgentReadiness(
     | undefined,
   providerInstanceId: string,
   posture: ProviderExecutionPolicy,
+  describe: Parameters<typeof describeSshAdmissionRefusal>[1] = {},
 ): RemoteCodeTurnReadiness {
-  const targetReadiness = remoteCodeTurnReadiness(target, posture);
+  const targetReadiness = remoteCodeTurnReadiness(target, posture, describe);
   if (targetReadiness.status === "unavailable" || posture === "full-access") return targetReadiness;
   const offer = remoteCodeProviderOffer(target, providerInstanceId);
   if (offer.status === "unavailable") return offer;

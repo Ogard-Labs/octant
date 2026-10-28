@@ -131,6 +131,7 @@ import {
   remotePlacedAgentReadiness,
 } from "@octant/domain/ssh-target-recovery";
 import { remoteCodeProjectFor, useRemoteCodeProjects } from "../projects/sshRemoteProjectEntries";
+import { SSH_TARGET_TIMES } from "../host/sshTargetClient";
 import { remoteCodeThreadProviderGroups } from "./composer/remoteCodeComposer";
 import {
   ComposerSlashTypeahead,
@@ -763,8 +764,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             remoteProject?.target,
             String(thread.providerInstanceId),
             nextTurnAccess,
+            SSH_TARGET_TIMES,
           )
-        : remoteCodeTurnReadiness(remoteProject?.target, nextTurnAccess)
+        : remoteCodeTurnReadiness(remoteProject?.target, nextTurnAccess, SSH_TARGET_TIMES)
       : undefined;
   const remoteRefusal =
     remoteReadiness?.status === "unavailable" ? remoteReadiness.message : undefined;
