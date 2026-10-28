@@ -596,7 +596,9 @@ function writeStatus(
       `  reconnecting on its own: attempt ${String(reconnect.attempt)} of ${String(reconnect.maxAttempts)} under way\n`,
     );
   } else if (reconnect?.status === "stopped") {
-    stdout.write(`  stopped reconnecting after ${String(reconnect.attempts)} attempts\n`);
+    stdout.write(
+      `  stopped reconnecting after ${String(reconnect.attempts)} ${reconnect.attempts === 1 ? "attempt" : "attempts"}\n`,
+    );
   }
   stdout.write(`  host key ${status.fingerprint}\n`);
   stdout.write(`  executor ${status.target.executorPath}\n`);

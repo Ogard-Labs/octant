@@ -178,6 +178,19 @@ describe("octant ssh-target", () => {
     expect(printed).toContain("  plan: refused, target-reconnecting\n");
   });
 
+  it("lists a target the host stopped reconnecting to after one attempt", async () => {
+    const decision = { status: "refused", reason: "host-key-changed" };
+    const { remoteUser: _remoteUser, platform: _platform, ...unattested } = status;
+    const run = harness(undefined, {
+      ...unattested,
+      connection: "host-key-changed",
+      reconnect: { status: "stopped", attempts: 1 },
+      admission: [{ posture: "plan", decision }],
+    });
+    expect(await run.run(["list"])).toBe(0);
+    expect(run.out.join("")).toContain("  stopped reconnecting after 1 attempt\n");
+  });
+
   it("re-pins against the target's own destination", async () => {
     const run = harness(async () => "yes");
     await run.run(["repin", status.target.id]);

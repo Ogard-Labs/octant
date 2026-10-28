@@ -1656,6 +1656,31 @@ describe("SSH target reconnect", () => {
     connections.close();
   });
 
+  it("stops and waits for the person when an attempt cannot even start, admitting nothing", async () => {
+    const clock = { now: 1_700_000_000_000 };
+    const { connections, timers } = reconnecting(clock);
+    const status = await registered(connections);
+    dropSession();
+    await vi.waitFor(() => expect(connections.list()[0]?.connection).toBe("reconnecting"));
+    // A full disk or a lost state directory: the pin file cannot be written.
+    const writePin = vi.spyOn(registry, "writePin").mockImplementationOnce(() => {
+      throw new Error("ENOSPC: no space left on device");
+    });
+    timers.runNext();
+    await vi.waitFor(() =>
+      expect(connections.list()[0]?.reconnect).toEqual({ status: "stopped", attempts: 1 }),
+    );
+    writePin.mockRestore();
+    expect(connections.list()[0]?.connection).toBe("unreachable");
+    expect(connections.admit(status.target.id, plan)).toEqual({
+      status: "refused",
+      reason: "target-unreachable",
+    });
+    expect(timers.pending()).toEqual([]);
+    expect(sessions()).toEqual(["executor"]);
+    connections.close();
+  });
+
   it("does not reconnect after the person removes the target or the host closes", async () => {
     const clock = { now: 1_700_000_000_000 };
     const { connections, timers } = reconnecting(clock);

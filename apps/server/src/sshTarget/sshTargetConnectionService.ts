@@ -1163,7 +1163,20 @@ export class SshTargetConnectionService {
       return;
     }
     this.#reconnects.set(key, { status: "attempting", attempt });
-    const outcome = await this.#connectOnce(target, attempt);
+    let outcome: ConnectOutcome;
+    try {
+      outcome = await this.#connectOnce(target, attempt);
+    } catch {
+      // The attempt broke before it could end in a state (the pin file could
+      // not be written, say). Nobody awaits a timer's attempt, so it stops
+      // here, holding no session, and waits for the person rather than
+      // reading `reconnecting` for ever or rejecting into the process.
+      const latest = this.#reconnects.get(key);
+      if (latest?.status !== "attempting" || latest.attempt !== attempt) return;
+      this.#disconnect(targetId);
+      this.#reconnects.set(key, { status: "stopped", attempts: attempt });
+      return;
+    }
     const latest = this.#reconnects.get(key);
     // The person connected, re-pinned, or removed the target meanwhile, and
     // the outcome is theirs.

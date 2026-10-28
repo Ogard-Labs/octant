@@ -1794,7 +1794,8 @@ This host owns the connection and every process on the target.
   - **Stops where only the person can help.** A changed host key, a refused
     sign-in (`authentication-refused`), or a missing or mismatched executor
     stops after that attempt, as does a target still unreachable after the
-    last. The status then reads that state with `reconnect` stopped and the
+    last, and an attempt that breaks before it ends in a state (the pin file
+    cannot be written), which also ends any session it opened. The status then reads that state with `reconnect` stopped and the
     attempts made, and nothing tries again until the person connects. A
     reconnected session whose attestation refuses (an escaped canary, a
     missing backend) is a session: it is held, admits nothing its
