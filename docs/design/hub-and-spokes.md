@@ -135,26 +135,41 @@ the CLI. The hub depends on that:
   `octant server run`. A Mac that also runs the desktop app uses the same
   server; quitting the desktop app does not stop a hub
   ([decision H13](#decisions)).
-- **Starts and runs unattended.** A hub must come back by itself after a
-  restart, a power cut, or an update, with no one logged in and no window
-  open. Turning the hub role on therefore installs the server as a boot
-  service, not the login service an ordinary host uses: on macOS a system
-  launch daemon that runs the server as the person's own user account, and on
-  Linux a user service with lingering turned on, so systemd starts it at boot.
+- **Starts and runs unattended, on every platform.** A hub must come back by
+  itself after a restart, a power cut, or an update, with no one logged in and
+  no window open, on macOS, Linux, and Windows alike. Turning the hub role on
+  therefore installs the server as a boot service, not the login service an
+  ordinary host uses, always running as the person's own account:
+  - macOS: a system launch daemon;
+  - Linux: a systemd user service with lingering turned on;
+  - Windows: a Windows service set to start automatically.
+
   Installing it needs administrator approval once. The service restarts the
   server if it exits, and an update restarts it the same way.
-  - **Secrets at boot.** The person's login keychain stays locked until they
-    log in, so the hub keeps what it needs to serve (its identity key, roster
-    signing key, listener and web certificates, and owner and member keys)
-    in a store it can open at boot ([decision H18](#decisions)). Credentials
-    held only in the login keychain, such as a provider app's own sign-in,
-    are unavailable until someone logs in, and the hub says which ones.
-  - **The Mac itself.** For a power cut, the hub's setup turns on "start up
-    automatically after a power failure". With FileVault on, macOS asks for
-    the password before it boots, so a planned restart or update uses an
-    authenticated restart that skips that prompt once; after a power cut
-    someone unlocks the Mac once, and the hub's setup says so. A standby
-    keeps the members working meanwhile.
+  - **Secrets at boot.** A platform's login-bound secret store (the macOS
+    login keychain, a Linux desktop keyring, Windows Credential Manager) is
+    not reliably open before someone logs in. So on every platform the hub
+    keeps what it needs to serve in one store of its own: its identity key,
+    roster signing key, listener and web certificates, and owner and member
+    keys. That store is a file in the Octant data folder that only the
+    person's account can read (file mode on macOS and Linux, an access list on
+    Windows), on an encrypted disk ([decision H18](#decisions)). The hub's
+    setup checks that the disk is encrypted and warns when it is not.
+    Credentials held only in a login-bound store, such as a provider app's own
+    sign-in, are unavailable until someone logs in, and the hub says which
+    ones.
+  - **The machine itself.** The hub's setup turns on starting up after a
+    power failure where the platform allows it, and explains what full-disk
+    encryption asks at boot. FileVault, and LUKS with a passphrase, ask for a
+    password before the system starts, so a planned restart or update uses
+    the platform's unattended restart where one exists (an authenticated
+    restart on macOS), and after a power cut someone unlocks the machine once.
+    BitLocker with a TPM, and LUKS unlocked by a TPM, boot unattended. A
+    standby keeps the members working meanwhile.
+  - **Windows.** A Windows hub runs the hub role, the web app, and the hub's
+    services. Running agents on Windows waits for the approved Windows
+    confinement design, as the release boundary says.
+
 - **Serves the web app.** The hub's private listener, on its Tailscale or LAN
   address, serves the same web app the desktop window shows. A phone or
   laptop with no Octant installed opens `https://<hub>.<tailnet>.ts.net` in a
@@ -672,8 +687,7 @@ after the person proves presence.
 ## Decisions
 
 The maintainer settled these on 2026-10-28. Where the maintainer left the
-choice to the design, the design's recommendation was taken. H18 is still open and needs
-the maintainer's answer before slice 3.
+choice to the design, the design's recommendation was taken.
 
 | ID  | Question                                                                    | Decision                                                                                                                                                                                                                                                                                                         |
 | --- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -687,8 +701,8 @@ the maintainer's answer before slice 3.
 | H10 | May a standby add or remove members while standing in?                      | Yes; the hub takes the changes back on return, and removal wins                                                                                                                                                                                                                                                  |
 | H11 | How is a standby promoted to hub for good?                                  | A local action on the standby; spokes whose grant covers the standby follow it, and the rest confirm the new hub locally                                                                                                                                                                                         |
 | H12 | How long without the hub before members fail over?                          | A setting on the hub, carried in the roster, default five minutes                                                                                                                                                                                                                                                |
-| H13 | Does the hub keep running when the desktop app quits, and after a restart?  | Yes; the hub runs as a boot service (a system launch daemon on macOS, a lingering user service on Linux) and starts unattended after a restart, power cut, or update. The desktop app connects to it                                                                                                             |
-| H18 | Where does the hub keep its own keys so it can serve before anyone logs in? | Open: recommended a file store readable only by the person's account inside the Octant data folder, on a FileVault-encrypted disk; the alternative is the System keychain through a small privileged helper, which is stronger but adds a privileged component                                                   |
+| H13 | Does the hub keep running when the desktop app quits, and after a restart?  | Yes, on macOS, Linux, and Windows: the hub runs as a boot service under the person's account (a launch daemon, a lingering systemd user service, a Windows service) and starts unattended after a restart, power cut, or update. The desktop app connects to it                                                  |
+| H18 | Where does the hub keep its own keys so it can serve before anyone logs in? | The same way on every platform: a file in the Octant data folder readable only by the person's account, on an encrypted disk (FileVault, LUKS, or BitLocker); setup warns when the disk is not encrypted                                                                                                         |
 | H14 | Does a host fetch its own Tailscale certificate for the web app?            | Yes, on the hub and on each spoke a browser reaches directly, through the local Tailscale daemon, off until the person turns it on after the certificate-transparency note                                                                                                                                       |
 | H15 | How does a browser guest reach a spoke?                                     | Directly: each spoke serves its own web app at its own Tailscale name, and the hub's web app links to it, so the hub never sees spoke traffic                                                                                                                                                                    |
 | H16 | Do spokes honor owner devices by default?                                   | Yes: ticked at join, clearly labeled, and untickable                                                                                                                                                                                                                                                             |
