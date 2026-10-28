@@ -129,6 +129,8 @@ type SavedKey =
     }
   | { readonly status: "failed" };
 
+const KEY_RELEASE_POLL_MS = 5_000;
+
 const screenId = (screen: DesktopRecipe["screen"]) => `${screen.width}x${screen.height}`;
 
 /** The placement a provider starts from: its first, or none when it offers none. */
@@ -430,6 +432,10 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
     String(saved.placementId ?? "") === draft.placementId;
   const savedKeyRef = keyCarries ? String(saved.credentialRef ?? "") : "";
   const [savedKey, setSavedKey] = useState<SavedKey>({ status: "loading" });
+  // Teardown and the key sweep change nothing the query below depends on, so
+  // while a retired key is waiting the answer is asked for again.
+  const [keyAsked, setKeyAsked] = useState(0);
+  const waitingOnRelease = savedKey.status === "loaded" && savedKey.releasing;
   const keyQuery = takesKey
     ? `${String(props.project.id)}|${savedKeyRef}|${String(props.project.version)}`
     : undefined;
@@ -441,7 +447,8 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
       return undefined;
     }
     const controller = new AbortController();
-    setSavedKey({ status: "loading" });
+    // A repeat ask keeps the last answer on screen rather than flickering.
+    setSavedKey((current) => (keyAsked > 0 ? current : { status: "loading" }));
     client
       .request({ kind: "recipe-key", projectId: String(props.project.id) }, controller.signal)
       .then(
@@ -463,7 +470,12 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
         },
       );
     return () => controller.abort();
-  }, [props.client, props.project.id, keyQuery]);
+  }, [props.client, props.project.id, keyQuery, keyAsked]);
+  useEffect(() => {
+    if (!waitingOnRelease) return undefined;
+    const timer = setInterval(() => setKeyAsked((count) => count + 1), KEY_RELEASE_POLL_MS);
+    return () => clearInterval(timer);
+  }, [waitingOnRelease]);
   const keyStoreUnavailable = savedKey.status === "loaded" && savedKey.store === "unavailable";
   // What the key field says: a recipe moving to this provider has no key
   // yet whatever the host holds for another one.

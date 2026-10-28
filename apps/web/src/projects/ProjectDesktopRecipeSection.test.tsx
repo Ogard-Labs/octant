@@ -383,6 +383,37 @@ describe("ProjectDesktopRecipeSection", () => {
       ).toBeTruthy();
     });
 
+    it("stops saying a previous key is waiting once its desktops are gone", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        const answers: Array<{ releasing?: true }> = [{ releasing: true }, {}];
+        const request = vi.fn<DesktopPaneClient["request"]>(async (asked) =>
+          decodeDesktopPaneAnswer(
+            asked.kind === "recipe-key"
+              ? {
+                  status: "recipe-key",
+                  key: "none",
+                  store: "available",
+                  ...(answers.length > 1 ? answers.shift() : answers[0]),
+                }
+              : { status: "recipe-providers", providers: [cloud] },
+          ),
+        );
+        render(
+          <ProjectDesktopRecipeSection
+            client={{ request }}
+            onChange={vi.fn(async () => true)}
+            project={project(decodeDesktopRecipe(savedRecipe))}
+          />,
+        );
+        expect(await screen.findByText(/A previous key stays in/)).toBeTruthy();
+        await vi.advanceTimersByTimeAsync(5_100);
+        await waitFor(() => expect(screen.queryByText(/A previous key stays in/)).toBeNull());
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("keeps the key field closed on a host with no credential store", async () => {
       render(
         <ProjectDesktopRecipeSection
