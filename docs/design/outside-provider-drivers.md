@@ -144,8 +144,8 @@ digest }`. The set of outside drivers is data, held by the package store.
 - **The instance arm grows with admission.** The configuration holds only the
   `kind` and the driver reference until the add-provider step lands; the
   address, key placement, and listed model ids join it in that same change.
-  No command creates or reconfigures an outside instance before then, so no
-  journaled instance can lack them. The provider projection's `driver_kind`
+  No command created or reconfigured an outside instance before then, so no
+  journaled instance lacks them. The provider projection's `driver_kind`
   column keeps only a non-empty check and leaves the vocabulary to the
   instance schema, so replay of such an instance needs no migration of its own.
 - **The matrix column's source.** An outside package ships no capability block
@@ -552,10 +552,26 @@ implementation; each takes the fail-closed option.
   the address under the endpoint rule (HTTPS, or HTTP on loopback; no
   credentials, query, or fragment), and, as for any endpoint, refuses a
   provider that sends no key unless its address is on loopback. The key goes
-  to the credential broker through the existing per-instance key routes. No
-  command reconfigures an outside instance: its package, address, key
-  placement, and models are fixed when it is added, so its records cannot
-  outlive what they were made for; a change is a removal and a new provider.
+  to the credential broker through the existing per-instance key routes. The
+  driver reference is fixed when it is added; the rest changes under
+  [Reconfiguring](#reconfiguring).
+- **Reconfiguring.** `change-outside-harness-endpoint-configuration` carries
+  the instance, its expected version, and the whole configuration the person
+  now wants: address, key placement, and listed model IDs under the rules for
+  adding. Its driver reference must be the one the instance binds, version and
+  digest included, or the host refuses it; another driver is a new provider,
+  and another digest is a rebind that only the person's trust causes
+  ([Rebind rules](#rebind-rules)). It is local window only, like adding one.
+  It installs, trusts, enables, and starts nothing and consults no admission:
+  the provider's switch, its crash-limit hold, its name, and its threads stay
+  as they are, so an instance that is `driver-not-admitted` stays so. It is
+  refused while a session is active on the provider. What the instance
+  learned under the old configuration goes: the process stops and the next use
+  starts one with the new address and models, the provider catalogue is
+  invalidated with its Verify tools record removed, and the stored key is
+  forgotten when the address changes or the provider stops sending one. A new
+  key header on the same address keeps the key. The change journals as
+  `provider.instance-configuration-changed@1`.
 - **Key placement.** The person chooses the one header the key travels in
   (lowercase, never `proxy-authorization`, `cookie`, `set-cookie`, or `host`)
   and whether it goes as `Bearer`. A brokered request that asks for the key
@@ -623,8 +639,8 @@ the fail-closed option.
 - **What moves.** Only the driver reference's version and digest, as a
   journaled `provider.instance-driver-rebound@1` that only the host writes,
   with the person's trust as its cause; it is its own event so that
-  `provider.instance-configuration-changed@1` still never carries an outside
-  instance. The name, address, key placement, listed models, provider
+  `provider.instance-configuration-changed@1`, which carries only the person's
+  own change, never moves a driver reference. The name, address, key placement, listed models, provider
   switch, threads, and stored key stay as the person set them. The move is idempotent and runs after every extension lifecycle
   change and once at host start, so a host that stopped between a trust and
   its move makes the move on its next pass.

@@ -1590,6 +1590,8 @@ function providerSettingsViewProps(
     onChangePiConfiguration: controller.changePiConfiguration,
     onChangeOhMyPiConfiguration: controller.changeOhMyPiConfiguration,
     onChangeOllamaConfiguration: controller.changeOllamaConfiguration,
+    onChangeOutsideHarnessEndpointConfiguration:
+      controller.changeOutsideHarnessEndpointConfiguration,
     onChangeOpenAiCompatibleConfiguration: controller.changeOpenAiCompatibleConfiguration,
     onChangeOpenAiImageConfiguration: controller.changeOpenAiImageConfiguration,
     onChangeGeminiImageConfiguration: controller.changeGeminiImageConfiguration,

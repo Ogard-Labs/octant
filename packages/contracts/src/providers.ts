@@ -1130,14 +1130,15 @@ export const ProviderInstanceConfigurationChanged = Schema.Struct({
     PiProviderInstance,
     OhMyPiProviderInstance,
     OllamaProviderInstance,
+    OutsideHarnessEndpointProviderInstance,
   ),
 }).annotations(strict);
 export type ProviderInstanceConfigurationChanged = typeof ProviderInstanceConfigurationChanged.Type;
 /**
  * An outside instance moved to another digest of its own driver. Only the host
- * writes it, once the person has trusted that digest; no command reconfigures
- * an outside instance, so `provider.instance-configuration-changed@1` never
- * carries one.
+ * writes it, once the person has trusted that digest; the person's own change
+ * of the instance's address, key placement, or models travels in
+ * `provider.instance-configuration-changed@1`, which keeps the driver as bound.
  */
 export const ProviderInstanceDriverRebound = Schema.Struct({
   instance: OutsideHarnessEndpointProviderInstance,
@@ -1974,6 +1975,16 @@ export const ProviderRegistryCommand = Schema.Union(
     kind: Schema.Literal("create-outside-harness-endpoint-provider"),
     ...ProviderInstanceCommandFields,
     displayName: Schema.NonEmptyTrimmedString,
+    configuration: OutsideHarnessEndpointProviderConfiguration,
+  }).annotations(strict),
+  /**
+   * Changes the address, key placement, or listed models of an outside
+   * provider. The configuration must name the driver the provider already
+   * binds, exactly; it never installs, trusts, enables, or switches a driver.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("change-outside-harness-endpoint-configuration"),
+    ...ProviderInstanceCommandFields,
     configuration: OutsideHarnessEndpointProviderConfiguration,
   }).annotations(strict),
   Schema.Struct({
