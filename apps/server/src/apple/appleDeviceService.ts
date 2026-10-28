@@ -64,11 +64,13 @@ import {
 
 /**
  * Whether the Current Release Boundary admits distribution (decision 7 of
- * docs/design/apple-devices.md). Until the change that admits it lands in its
- * own PR, every upload, submission, and release, and every App Store Connect
- * key entry, is refused as `distribution-not-enabled`.
+ * docs/design/apple-devices.md). The maintainer admitted it on 2026-10-28, so
+ * App Store Connect key entry is open on a Mac and upload, submission, and
+ * release are decided by the distribution rows of the device policy; each
+ * still needs a local person's confirmation. Turning this off again refuses
+ * every one of them as `distribution-not-enabled`.
  */
-export const APPLE_DISTRIBUTION_ADMITTED = false;
+export const APPLE_DISTRIBUTION_ADMITTED = true;
 
 const DEVICECTL_TIMEOUT_MS = 30_000;
 /** The largest `--json-output` document the host reads back. */

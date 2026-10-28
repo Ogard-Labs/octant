@@ -62,6 +62,19 @@ describe("AppStoreConnectKeySection", () => {
     expect(screen.getByLabelText("Private key")).toHaveValue("");
   });
 
+  it("asks the host for the key's status once when Settings renders it again", async () => {
+    const host = bridge(() => ({ status: 200, body: { outcome: "missing" } }));
+    const request = host.appStoreConnectKeyRequest;
+    const { rerender } = render(
+      <AppStoreConnectKeySection bridge={{ appStoreConnectKeyRequest: request }} />,
+    );
+    await screen.findByLabelText("Issuer ID");
+    rerender(<AppStoreConnectKeySection bridge={{ appStoreConnectKeyRequest: request }} />);
+    rerender(<AppStoreConnectKeySection bridge={{ appStoreConnectKeyRequest: request }} />);
+    await screen.findByLabelText("Issuer ID");
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
   it("removes a saved key", async () => {
     const host = bridge((operation) =>
       operation === "status"

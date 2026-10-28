@@ -1187,7 +1187,7 @@ describe("startOctantServer", () => {
     );
   });
 
-  it("serves App Store Connect key entry to a desktop window and refuses a new key while distribution is closed", async () => {
+  it("serves App Store Connect key entry to a desktop window only", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-server-asc-key-routes-"));
     directories.push(directory);
     let routeHandler: ((request: Request) => Response | Promise<Response>) | undefined;
@@ -1234,10 +1234,12 @@ describe("startOctantServer", () => {
             "x-octant-desktop-secret": "desktop-secret",
             "x-octant-window-capability": capability,
           });
-          expect(desktop?.status).toBe(409);
+          // Distribution is admitted, so a Mac reaches the key store, which this
+          // server was started without; any other host refuses key entry.
+          expect(desktop?.status).toBe(process.platform === "darwin" ? 503 : 409);
           expect(yield* Effect.promise(() => Promise.resolve(desktop?.json()))).toMatchObject({
             category:
-              process.platform === "darwin" ? "distribution-not-enabled" : "unsupported-host",
+              process.platform === "darwin" ? "credential-store-unavailable" : "unsupported-host",
           });
         }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
       ),
