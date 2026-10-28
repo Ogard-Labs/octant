@@ -314,14 +314,17 @@ async function prepareProcessLaunch(
  * runtime reading to start, less what a driver has no use for: `/bin` and
  * `/sbin` hold only programs it may not exec, and `/dev` is narrowed to the
  * data devices, because the person's own terminals are devices there that
- * their user may read.
+ * their user may read. `/Library/Apple` holds Apple's add-ons outside the
+ * sealed system, Rosetta's translator among them, which only an Intel
+ * runtime on Apple Silicon loads. Each later narrowing is listed in the
+ * outside driver specification, so a runtime that fails to start without one
+ * can have that one restored.
  */
 const OUTSIDE_DRIVER_SYSTEM_READ_ROOTS = [
   "/System",
   "/usr",
   "/private/etc",
   "/private/var/db",
-  "/Library/Apple",
 ] as const;
 const OUTSIDE_DRIVER_DEVICE_READS = ["/dev/null", "/dev/zero", "/dev/random", "/dev/urandom"];
 

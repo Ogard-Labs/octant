@@ -247,8 +247,7 @@ the fail-closed option.
   and sets the environment itself, ignoring whatever environment the caller
   passed. No caller can widen either.
 - **The grants.** Read: the package root, the runtime's install, `/System`,
-  `/usr`, `/private/etc`, `/private/var/db`,
-  `/Library/Apple`, the data devices `/dev/null`, `/dev/zero`, `/dev/random`,
+  `/usr`, `/private/etc`, `/private/var/db`, the data devices `/dev/null`, `/dev/zero`, `/dev/random`,
   and `/dev/urandom`, `/` itself, and metadata of every parent folder of those.
   These are the extension profile's measured roots less `/bin` and `/sbin`
   (programs the driver may not exec) and less the rest of `/dev`, since the
@@ -277,6 +276,9 @@ the fail-closed option.
     Bun links only the system's libraries; a Homebrew Node is what needed
     them. The CI job installs Bun without Homebrew, so this one is measured
     only on a Mac whose Bun comes from Homebrew.
+  - `/Library/Apple`: it holds Apple's add-ons outside the sealed system,
+    Rosetta's translator among them, which only an Intel runtime on Apple
+    Silicon would load; the runtimes a driver runs on are native.
 - **The runtime's install** is taken from the runtime's own resolved path,
   never a fixed location. For Bun it is the executable's folder, wherever Bun
   is installed. For Electron's Node it is the app bundle that holds the
