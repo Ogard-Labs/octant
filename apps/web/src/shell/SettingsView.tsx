@@ -111,6 +111,7 @@ import { ImageGenerationSettingsView } from "../settings/ImageGenerationSettings
 import { ModelEndpointSettingsView } from "../settings/ModelEndpointSettingsView";
 import { ComputerUseSettingsView } from "../settings/ComputerUseSettingsView";
 import { ManagedToolsSettingsView } from "../settings/ManagedToolsSettingsView";
+import { AppStoreConnectKeySection } from "../settings/AppStoreConnectKeySection";
 import { UserProfileSettingsView } from "../profile/UserProfileSettingsView";
 import {
   ScopeIndicator,
@@ -1009,12 +1010,19 @@ function ActiveSectionContent({
           {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
         />
       );
-    case "device-tools":
+    case "device-tools": {
+      const appStoreConnectKeyRequest = props.hostBridge?.appStoreConnectKeyRequest;
       return (
-        <ManagedToolsSettingsView
-          {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
-        />
+        <>
+          <ManagedToolsSettingsView
+            {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
+          />
+          {appStoreConnectKeyRequest === undefined ? null : (
+            <AppStoreConnectKeySection bridge={{ appStoreConnectKeyRequest }} />
+          )}
+        </>
       );
+    }
     case "providers":
       // The catalog of every provider Octant can set up sits under the ones
       // this host has, so finding and configuring a provider is one page. A

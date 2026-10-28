@@ -96,6 +96,22 @@ export function makeDesktopProviderCredentialBrokerClient(
   return makeBrokerCredentialClient(options, "/v1/desktop-provider-credentials/", "credentialRef");
 }
 
+/**
+ * The App Store Connect API key, through the broker's own routes for it. The
+ * broker serves no resolve there, so this client can store, test for, and
+ * delete the key and never read it.
+ */
+export function makeAppStoreConnectKeyBrokerClient(
+  options: CredentialBrokerClientOptions,
+): Pick<ProviderCredentialStore, "has" | "set" | "delete"> {
+  const client = makeBrokerCredentialClient(
+    options,
+    "/v1/app-store-connect-keys/",
+    "credentialRef",
+  );
+  return Object.freeze({ has: client.has, set: client.set, delete: client.delete });
+}
+
 function makeBrokerCredentialClient(
   options: CredentialBrokerClientOptions,
   routePrefix:
@@ -104,7 +120,8 @@ function makeBrokerCredentialClient(
     | "/v1/replica-store-credentials/"
     | "/v1/canvas-public-share-secrets/"
     | "/v1/mcp-server-credentials/"
-    | "/v1/desktop-provider-credentials/",
+    | "/v1/desktop-provider-credentials/"
+    | "/v1/app-store-connect-keys/",
   field: "providerInstanceId" | "instanceId" | "credentialRef" | "secretId",
 ): ProviderCredentialStore {
   const fetch = options.fetch ?? globalThis.fetch;

@@ -1159,6 +1159,7 @@ export function startOctantServer(
       zenRoutes,
     });
     const {
+      appStoreConnectKeyRoutes,
       composeHostDiagnostics,
       externalContentRoutes,
       hostControlRoutes,
@@ -1279,6 +1280,7 @@ export function startOctantServer(
                 (await privateListenerAdministrationRoutes(request)) ??
                 (await sshTargetAdministrationRoutes(request)) ??
                 (await providerCredentialRoutes(request)) ??
+                (await appStoreConnectKeyRoutes(request)) ??
                 (await localDeviceAdministrationRoutes(request)) ??
                 (await hostControlRoutes(request)) ??
                 (await externalContentRoutes(request)) ??

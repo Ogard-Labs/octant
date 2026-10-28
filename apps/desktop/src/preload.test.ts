@@ -244,6 +244,7 @@ describe("desktop preload bridge", () => {
       "acknowledgeCanvasPrototypeFrame",
       "acknowledgeWhatsNew",
       "addProviderApiKey",
+      "appStoreConnectKeyRequest",
       "approveRemotePairingRequest",
       "attachBrowserSurface",
       "cancelCodeOperationApproval",
