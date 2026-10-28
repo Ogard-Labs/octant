@@ -487,8 +487,10 @@ find-identity -v -p codesigning` lists and the profiles Xcode installed in
   remote-approvable. So are the agent's lease and device effects: their
   `approval-requested` event carries `localPersonOnly: true`, and a paired
   client shows that card read-only, with the line "Answer this on the
-  computer running Octant." and no Approve or Deny. The host still refuses a
-  paired device's answer, whatever a client shows. _Reason:_ the card is
+  computer running Octant." and no Approve or Deny. A phone notification for
+  it says it is waiting at that computer and is not sealed as an approval
+  ([Mobile maturity: When the host sends](mobile-maturity.md#when-the-host-sends)).
+  The host still refuses a paired device's answer, whatever a client shows. _Reason:_ the card is
   journaled once for every client, so the mark rides on the ask rather than
   on a client's guess from its wording. The mark is optional so journals
   written before it still replay; a request waits only on a live turn, so no
