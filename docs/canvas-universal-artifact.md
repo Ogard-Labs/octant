@@ -408,7 +408,7 @@ links across the exported pages. Supersedes D-6.
 | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | -------------------------------------- |
 | 1     | `flow` block: schema 23, policies, pure layout, board drawing (mockup frames and design frames as live nodes), comment anchors, reading order, MD/HTML/SVG export parity, share v12, preview warnings, journaled drags | FR-1, FR-3, NFR-1, NFR-2, NFR-3, NFR-5 | In review (#1830); rendered QA pending |
 | 2     | Click-through Play over the flow; flow HTML export as one linked, script-free page set (D-9: one self-contained site)                                                                                                  | FR-2, FR-7 (flow part), NFR-4, NFR-6   | In review (#1832); rendered QA pending |
-| 3     | Mockup catalog: new components, image fills, reusable definitions — schema 24, share v13                                                                                                                               | FR-4, FR-5, FR-6, NFR-5                | In review (#1834); rendered QA pending |
+| 3     | Mockup catalog: new components, image fills, reusable definitions — schema 24, share v13                                                                                                                               | FR-4, FR-5, FR-6, NFR-5                | In review (#1839); rendered QA pending |
 | 4     | Per-variant mockup HTML and TSX export; describe guidance and recipes for everything above                                                                                                                             | FR-7 (rest), FR-9                      | Planned                                |
 | 5     | `deck` block: schema 25, share v14, player integration, deck recipes                                                                                                                                                   | FR-8, FR-9                             | Planned                                |
 
@@ -836,4 +836,4 @@ governs over any number written earlier.
   (the inference cliff of D-8's delta still stands) and carried by a share
   whole except its images. The generator, outline readings, hotspot list,
   renderer faces, and describe guidance grew with the catalog. Delivered for
-  review as #1834.
+  review as #1839.
