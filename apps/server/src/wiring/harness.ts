@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { realpath, stat as statFromDisk } from "node:fs/promises";
 import { join } from "node:path";
+import { queueSteeringWhereDelivered, withSteerable } from "../harness/nativeHarnessSteerability";
 import {
   AggregateId,
   decodeCodeThreadId,
@@ -326,10 +327,7 @@ export function wireHarness(deps: HarnessDependencies) {
         nativeHarnessApprovals.expireOverdue();
         nativeHarnessQuestions.expireOverdue();
         const read = nativeHarnessSessions.read(threadId);
-        const view =
-          read === undefined
-            ? undefined
-            : { ...read, steerable: leadDeliversSteering(read.session.lead.providerInstanceId) };
+        const view = read === undefined ? undefined : withSteerable(read, leadDeliversSteering);
         const suggestions = threadFollowUpSuggestions.read(threadId);
         return view === undefined || suggestions === undefined
           ? view
@@ -395,9 +393,7 @@ export function wireHarness(deps: HarnessDependencies) {
       if (command.kind === "take") {
         return { taken: nativeHarnessSessions.takeSteering(threadId) };
       }
-      const lead = nativeHarnessSessions.read(threadId)?.session.lead;
-      if (lead !== undefined && !leadDeliversSteering(lead.providerInstanceId)) return "no-session";
-      return nativeHarnessSessions.queueSteering(threadId, {
+      return queueSteeringWhereDelivered(nativeHarnessSessions, leadDeliversSteering, threadId, {
         id: command.noteId ?? randomUUID(),
         text: command.text,
         status: "queued",
