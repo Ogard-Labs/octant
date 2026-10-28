@@ -23,6 +23,7 @@ import {
   type SshDestination,
   type SshHostKeyFingerprint,
   type SshHostKeyProbe,
+  type SshPlaceableRuntime,
   type SshRemoteUser,
   type SshTarget,
   type SshTargetAdministrationRefusal,
@@ -64,7 +65,10 @@ import {
   type SshAdmissionSubject,
   type SshTargetConnection,
 } from "@octant/domain/ssh-target-admission-policy";
-import { describeSshAdmissionRefusal } from "@octant/domain/ssh-target-recovery";
+import {
+  describeSshAdmissionRefusal,
+  sshTargetRuntimePathMissing,
+} from "@octant/domain/ssh-target-recovery";
 import type {
   ProviderDriver,
   ProviderPlacedLaunch,
@@ -163,6 +167,12 @@ export interface SshTargetConnectionServiceOptions {
    * target's own network or runs offline.
    */
   readonly runtimeEgress?: ProviderRuntimeEgress;
+  /**
+   * The agents a remote-bound Project's turn could place on a target, as its
+   * status reports them to a window (`placeableRuntimesOn`). Absent, a status
+   * lists none, and a window offers none.
+   */
+  readonly placeableRuntimes?: (targetId: SshTargetId) => ReadonlyArray<SshPlaceableRuntime>;
 }
 
 export type SshTargetAdministrationResult<T> =
@@ -320,6 +330,7 @@ export class SshTargetConnectionService {
   readonly #attestationTimeoutMs: number;
   readonly #readTimeoutMs: number;
   readonly #runtimeEgress: ProviderRuntimeEgress | undefined;
+  readonly #placeableRuntimes: SshTargetConnectionServiceOptions["placeableRuntimes"];
   readonly #connections = new Map<string, ConnectionRecord>();
   readonly #probes = new Map<string, HeldProbe>();
 
@@ -335,6 +346,7 @@ export class SshTargetConnectionService {
     this.#attestationTimeoutMs = options.attestationTimeoutMs ?? ATTESTATION_TIMEOUT_MS;
     this.#readTimeoutMs = options.readTimeoutMs ?? READ_TIMEOUT_MS;
     this.#runtimeEgress = options.runtimeEgress;
+    this.#placeableRuntimes = options.placeableRuntimes;
   }
 
   list(): ReadonlyArray<SshTargetStatus> {
@@ -407,8 +419,10 @@ export class SshTargetConnectionService {
         status: "refused",
         failure: {
           category: "invalid-configuration",
-          message:
-            "Set where this provider's runtime is on the SSH target before it runs there: octant ssh-target runtime <target> <provider instance> <path>.",
+          message: sshTargetRuntimePathMissing(
+            String(input.session.targetId),
+            String(input.providerInstanceId),
+          ),
         },
       };
     }
@@ -1056,6 +1070,7 @@ export class SshTargetConnectionService {
         }),
       })),
       runtimeBinaries: this.#store.runtimeBinaries(target.id),
+      placeableRuntimes: this.#placeableRuntimes?.(target.id) ?? [],
     };
   }
 

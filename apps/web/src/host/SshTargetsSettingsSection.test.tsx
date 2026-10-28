@@ -30,6 +30,7 @@ const status = {
     },
   ],
   runtimeBinaries: [],
+  placeableRuntimes: [],
 };
 const project = {
   id: "66666666-6666-4666-8666-666666666666",

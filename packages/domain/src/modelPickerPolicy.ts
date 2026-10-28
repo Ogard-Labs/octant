@@ -257,6 +257,12 @@ export interface PickerGroup {
    * It remains valid for that binding while staying out of the selectable rows.
    */
   readonly hiddenCurrent?: PickerModel;
+  /**
+   * Why none of this provider's models can be chosen in this composer, shown
+   * above its list. A row's own reason is only its tooltip and a short badge,
+   * so a reason the person acts on (a command to run) is spelled out here.
+   */
+  readonly unavailableNote?: string;
 }
 
 export interface ModelPickerSelection {

@@ -110,13 +110,14 @@ export const REMOTE_CODE_THREAD_CONNECTORS_UNAVAILABLE =
   "Connectors and plugins run their tools on this Mac, so a thread on an SSH target cannot use them. Send the message without them.";
 
 /**
- * Why a provider other than Octant's own harness is not offered for a thread
- * on an SSH target. The host refuses such a turn before anything launches,
- * with admission's reason for a runtime it cannot place and with this rule
- * for one it could place but does not start yet.
+ * Why a provider that is neither Octant's own harness nor an agent the host
+ * places is not offered for a thread on an SSH target. The host refuses such
+ * a turn before anything launches, with admission's reason for a runtime it
+ * cannot place and with its own rule for one it could place but does not
+ * start there.
  */
 export const REMOTE_CODE_THREAD_PROVIDER_UNAVAILABLE =
-  "This model is not available on an SSH target: threads there run on Octant's own harness for now.";
+  "This model is not available on an SSH target: threads there run on Octant's own harness or an ACP agent Octant places there.";
 
 /** Why a thread on an SSH target is not created holding Full access. */
 export const REMOTE_CODE_THREAD_FULL_ACCESS_UNAVAILABLE =
@@ -186,6 +187,105 @@ export function remoteCodeTurnReadiness(
     };
   }
   const decision = target.admission.find((entry) => entry.posture === posture)?.decision;
+  if (decision === undefined) {
+    return {
+      status: "unavailable",
+      message: describeSshAdmissionRefusal({ status: "refused", reason: "not-attested", posture }),
+    };
+  }
+  return decision.status === "admitted"
+    ? { status: "ready" }
+    : { status: "unavailable", message: describeSshAdmissionRefusal(decision) };
+}
+
+/**
+ * The command that sets where a provider instance's runtime is on a target,
+ * with the path left for the person to fill in.
+ */
+export function sshTargetRuntimeCommand(targetId: string, providerInstanceId: string): string {
+  return `octant ssh-target runtime ${targetId} ${providerInstanceId} <path>`;
+}
+
+/**
+ * Why a placed agent does not run on a target where the person set no path
+ * for it. The host refuses the turn with this sentence and a window shows the
+ * same one on the agent it lists unavailable.
+ */
+export function sshTargetRuntimePathMissing(targetId: string, providerInstanceId: string): string {
+  return `Set where this provider's runtime is on the SSH target before it runs there: ${sshTargetRuntimeCommand(targetId, providerInstanceId)}.`;
+}
+
+/** Whether a window offers a provider's models for a thread on an SSH target. */
+export type RemoteCodeProviderOffer =
+  | { readonly status: "offered" }
+  | { readonly status: "unavailable"; readonly message: string };
+
+type PlaceableRuntimeStatus = Pick<SshTargetStatus, "target" | "placeableRuntimes">;
+
+function placeableRuntime(target: PlaceableRuntimeStatus | undefined, providerInstanceId: string) {
+  return target?.placeableRuntimes.find(
+    (runtime) => String(runtime.providerInstanceId) === providerInstanceId,
+  );
+}
+
+/**
+ * Whether a window offers a provider other than Octant's own harness for a
+ * thread on an SSH target, from the host's status of the target alone. An
+ * agent is offered only where the host listed it placeable (an ACP agent the
+ * turn would place), its runtime is attestable there in some posture a remote
+ * thread offers, and the person set its path there; otherwise the window lists
+ * it unavailable with the host's sentence. It decides nothing: the host
+ * checks each turn itself.
+ */
+export function remoteCodeProviderOffer(
+  target: PlaceableRuntimeStatus | undefined,
+  providerInstanceId: string,
+): RemoteCodeProviderOffer {
+  const runtime = placeableRuntime(target, providerInstanceId);
+  if (target === undefined || runtime === undefined) {
+    return { status: "unavailable", message: REMOTE_CODE_THREAD_PROVIDER_UNAVAILABLE };
+  }
+  // A runtime its driver does not confine in a posture, or that a macOS
+  // target cannot place, is refused there whatever the connection does next.
+  const attestableNowhere = REMOTE_CODE_THREAD_POSTURES.every((posture) => {
+    const decision = runtime.admission.find((entry) => entry.posture === posture)?.decision;
+    return decision?.status === "refused" && decision.reason === "runtime-not-attestable";
+  });
+  if (attestableNowhere) {
+    return {
+      status: "unavailable",
+      message: describeSshAdmissionRefusal({ status: "refused", reason: "runtime-not-attestable" }),
+    };
+  }
+  if (runtime.runtimePath === "missing") {
+    return {
+      status: "unavailable",
+      message: sshTargetRuntimePathMissing(String(target.target.id), providerInstanceId),
+    };
+  }
+  return { status: "offered" };
+}
+
+/**
+ * Whether a placed agent's turn could start on a target in `posture` now:
+ * the target ready for the posture, the agent offered there, and its
+ * runtime's own admission in the posture, which also asks the runtime
+ * canaries a command does not need.
+ */
+export function remotePlacedAgentReadiness(
+  target:
+    | Pick<SshTargetStatus, "target" | "connection" | "admission" | "placeableRuntimes">
+    | undefined,
+  providerInstanceId: string,
+  posture: ProviderExecutionPolicy,
+): RemoteCodeTurnReadiness {
+  const targetReadiness = remoteCodeTurnReadiness(target, posture);
+  if (targetReadiness.status === "unavailable" || posture === "full-access") return targetReadiness;
+  const offer = remoteCodeProviderOffer(target, providerInstanceId);
+  if (offer.status === "unavailable") return offer;
+  const decision = placeableRuntime(target, providerInstanceId)?.admission.find(
+    (entry) => entry.posture === posture,
+  )?.decision;
   if (decision === undefined) {
     return {
       status: "unavailable",
