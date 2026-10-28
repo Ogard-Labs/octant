@@ -44,7 +44,10 @@ import { createDesktopHttpsPort } from "../computerUse/desktopHttpsPort";
 import { createDesktopDaemonPort } from "../computerUse/desktopDaemonPort";
 import { leasableProvidersOf } from "../computerUse/computerUseDestination";
 import { readProjectDesktopRecipe } from "../computerUse/projectDesktopRecipe";
-import { createDesktopRecipeKeys } from "../computerUse/desktopRecipeKeys";
+import {
+  createDesktopRecipeKeys,
+  credentialRefsRecipesNamed,
+} from "../computerUse/desktopRecipeKeys";
 import {
   createHostLocalDesktopProvider,
   HOST_LOCAL_DESKTOP_PROGRAMS,
@@ -355,6 +358,7 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
             ? [project.desktopRecipe.credentialRef]
             : [],
         ),
+    namedEver: () => credentialRefsRecipesNamed(persistence.journal),
   });
   void desktopLeases.start().catch(() => undefined);
   const sweepDesktopLeases = () =>

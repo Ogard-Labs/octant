@@ -1,9 +1,11 @@
-import type {
-  DesktopCredentialRef,
-  DesktopLease,
-  DesktopRecipe,
-  DesktopRecipeKeyState,
+import {
+  decodeCodeProjectDesktopRecipeChanged,
+  type DesktopCredentialRef,
+  type DesktopLease,
+  type DesktopRecipe,
+  type DesktopRecipeKeyState,
 } from "@octant/contracts";
+import type { Journal } from "../persistence/journal";
 import type { ProviderCredentialStore } from "../providers/credentialBrokerClient";
 
 export interface DesktopRecipeKeysOptions {
@@ -18,6 +20,11 @@ export interface DesktopRecipeKeysOptions {
   readonly holdsCredential: (credentialRef: DesktopCredentialRef) => boolean;
   /** The credential references Projects' recipes name now, archived Projects included. */
   readonly namedByRecipes: () => ReadonlyArray<DesktopCredentialRef>;
+  /**
+   * Every credential reference a journaled recipe change ever named: the keys
+   * Octant itself stored, replaced and removed ones included.
+   */
+  readonly namedEver: () => ReadonlyArray<DesktopCredentialRef>;
 }
 
 export interface DesktopRecipeKeyView {
@@ -54,8 +61,10 @@ export interface DesktopRecipeKeys {
 export function createDesktopRecipeKeys(options: DesktopRecipeKeysOptions): DesktopRecipeKeys {
   const retired = new Set<string>();
   const refs = new Map<string, DesktopCredentialRef>();
-  // A key retired before a restart is still in the store; the leases that
-  // recorded it say so, and the first settle after a start takes them in.
+  // A key retired before a restart may still be in the store when its
+  // deletion failed or had not run yet. The first settle after a start takes
+  // in every key a lease recorded or a journaled recipe ever named that no
+  // recipe names now; a key no lease recorded would otherwise stay forever.
   let adopted = false;
   let settling: Promise<void> | undefined;
 
@@ -67,13 +76,20 @@ export function createDesktopRecipeKeys(options: DesktopRecipeKeysOptions): Desk
   const settleOnce = async (): Promise<void> => {
     const store = options.store;
     if (store === undefined) return;
+    // A sweep follows every journal commit; with nothing retired there is
+    // nothing to read.
+    if (adopted && retired.size === 0) return;
     const named = new Set(options.namedByRecipes().map(String));
     if (!adopted) {
+      const known = [
+        ...options
+          .leases()
+          .flatMap((lease) => (lease.credentialRef === undefined ? [] : [lease.credentialRef])),
+        ...options.namedEver(),
+      ];
       adopted = true;
-      for (const lease of options.leases()) {
-        if (lease.credentialRef !== undefined && !named.has(String(lease.credentialRef))) {
-          retireLater(lease.credentialRef);
-        }
+      for (const credentialRef of known) {
+        if (!named.has(String(credentialRef))) retireLater(credentialRef);
       }
     }
     for (const key of retired) {
@@ -165,4 +181,32 @@ export function createDesktopRecipeKeys(options: DesktopRecipeKeysOptions): Desk
       }
     },
   };
+}
+
+const RECIPE_HISTORY_BATCH = 1_000;
+
+/**
+ * Every credential reference a journaled desktop recipe change named. Only
+ * the host mints a recipe's reference, so these are the keys Octant stored.
+ */
+export function credentialRefsRecipesNamed(
+  journal: Pick<Journal, "replayAggregateType">,
+): ReadonlyArray<DesktopCredentialRef> {
+  const named = new Map<string, DesktopCredentialRef>();
+  let afterSequence = 0;
+  for (;;) {
+    const batch = journal.replayAggregateType({
+      aggregateType: "project",
+      eventName: "project.code-desktop-recipe-changed@1",
+      afterSequence,
+      limit: RECIPE_HISTORY_BATCH,
+    });
+    for (const envelope of batch) {
+      afterSequence = envelope.globalSequence;
+      const credentialRef = decodeCodeProjectDesktopRecipeChanged(envelope.payload).project
+        .desktopRecipe?.credentialRef;
+      if (credentialRef !== undefined) named.set(String(credentialRef), credentialRef);
+    }
+    if (batch.length < RECIPE_HISTORY_BATCH) return [...named.values()];
+  }
 }

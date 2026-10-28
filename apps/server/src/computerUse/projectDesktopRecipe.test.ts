@@ -16,7 +16,7 @@ import {
   type DesktopProvider,
 } from "@octant/plugin-api/desktop-provider";
 import { Effect } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createFakeDesktopProvider } from "../../../../packages/plugin-api/src/fakeDesktopProvider";
 import {
   Persistence,
@@ -26,7 +26,7 @@ import {
 import { ProjectService } from "../projectService";
 import { leasableProvidersOf } from "./computerUseDestination";
 import { createDesktopLeaseService } from "./desktopLeaseService";
-import { createDesktopRecipeKeys } from "./desktopRecipeKeys";
+import { createDesktopRecipeKeys, credentialRefsRecipesNamed } from "./desktopRecipeKeys";
 import { readProjectDesktopRecipe } from "./projectDesktopRecipe";
 
 const START = Date.parse("2026-10-27T09:00:00.000Z");
@@ -307,6 +307,7 @@ function cloudHostOver(
             ? [project.desktopRecipe.credentialRef]
             : [],
         ),
+    namedEver: () => credentialRefsRecipesNamed(persistence.journal),
   });
   const projects = new ProjectService({
     persistence,
@@ -488,16 +489,108 @@ describe("a cloud desktop recipe's key", () => {
         // A window never names a key reference of its own.
         { recipe: { ...cloudRecipe, credentialRef: randomUUID() } },
       ]) {
-        await expect(
-          projects.executeProject(windowId, {
+        const refusal: unknown = await projects
+          .executeProject(windowId, {
             kind: "change-code-project-desktop-recipe",
             projectId,
             expectedVersion: 1,
             ...change,
-          }),
-        ).rejects.toMatchObject({ failure: { category: "invalid" } });
+          })
+          .then(
+            () => undefined,
+            (error: unknown) => error,
+          );
+        expect(refusal).toMatchObject({ failure: { category: "invalid" } });
+        // The refusal a window shows carries nothing of the key it sent.
+        expect(JSON.stringify(refusal)).not.toContain(key.key);
+        expect(String(refusal)).not.toContain(key.key);
       }
       expect(keys.held.size).toBe(0);
     });
+  });
+
+  it("deletes an entered key whose recipe change lost to another, and the conflict does not carry it", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-desktop-recipe-key-"));
+    directories.push(directory);
+    const keys = memoryKeyStore();
+    const key = "e2b_lost-the-race-0a1b2c";
+    await runCloudHost(directory, keys, { current: false }, async ({ projects, savedRef }) => {
+      await projects.executeProject(windowId, createProject);
+      // The key is written while another window's change lands first, so
+      // this change's journal write is refused for a stale version.
+      let storing: (() => void) | undefined;
+      const stored = keys.store.set;
+      keys.store.set = async (ref, value) => {
+        await stored(ref, value);
+        await new Promise<void>((resolve) => {
+          storing = resolve;
+        });
+      };
+      const entering = projects
+        .executeProject(windowId, {
+          kind: "change-code-project-desktop-recipe",
+          projectId,
+          expectedVersion: 1,
+          recipe: cloudRecipe,
+          key: { action: "enter", key },
+        })
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+      await vi.waitFor(() => expect(keys.held.size).toBe(1));
+      await projects.executeProject(windowId, {
+        kind: "rename-project",
+        projectId,
+        expectedVersion: 1,
+        name: "Desktop app, renamed",
+      });
+      storing?.();
+      const refusal = await entering;
+      expect(refusal).toMatchObject({ failure: { category: "conflict" } });
+      expect(JSON.stringify(refusal)).not.toContain(key);
+      expect(String(refusal)).not.toContain(key);
+      expect(savedRef()).toBeUndefined();
+      expect(keys.held.size).toBe(0);
+    });
+    expect(everythingWritten(directory)).not.toContain(key);
+  });
+
+  it("deletes a replaced key no desktop ever used after a restart, even when the first deletion failed", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-desktop-recipe-key-"));
+    directories.push(directory);
+    const keys = memoryKeyStore();
+    const deleteKey = keys.store.delete;
+    keys.store.delete = async () => {
+      throw new Error("The credential store is locked.");
+    };
+    const refs = await runCloudHost(directory, keys, { current: false }, async (host) => {
+      await host.projects.executeProject(windowId, createProject);
+      await host.projects.executeProject(windowId, {
+        kind: "change-code-project-desktop-recipe",
+        projectId,
+        expectedVersion: 1,
+        recipe: cloudRecipe,
+        key: { action: "enter", key: "e2b_never-leased-key" },
+      });
+      const firstRef = host.savedRef();
+      await host.projects.executeProject(windowId, {
+        kind: "change-code-project-desktop-recipe",
+        projectId,
+        expectedVersion: 2,
+        recipe: { ...cloudRecipe, ...(firstRef === undefined ? {} : { credentialRef: firstRef }) },
+        key: { action: "enter", key: "e2b_replacement-key" },
+      });
+      await host.recipeKeys.settle();
+      return { first: String(firstRef), second: String(host.savedRef()) };
+    });
+    // No lease ever recorded the first key, and its deletion failed.
+    expect([...keys.held.keys()].sort()).toEqual([refs.first, refs.second].sort());
+
+    keys.store.delete = deleteKey;
+    await runCloudHost(directory, keys, { current: false }, async (host) => {
+      await host.recipeKeys.settle();
+    });
+    expect([...keys.held.keys()]).toEqual([refs.second]);
   });
 });

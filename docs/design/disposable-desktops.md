@@ -2133,8 +2133,11 @@ Rules this delivery resolved:
   any more, replaced or removed with its recipe or by itself, is deleted from
   the store as soon as no lease that recorded it may still hold a desktop and
   no desktop made with it is waiting to be verified gone. Each sweep retries;
-  after a restart, a key leases recorded that no recipe names is taken in
-  again. The removal confirmation says the key stays until those desktops are
+  after a restart, every key a lease recorded or a journaled recipe change
+  ever named that no recipe names now is taken in again, so a deletion that
+  failed before the restart is retried even for a key no desktop used. Only
+  those references are deleted: the store is never listed, so nothing Octant
+  did not store for a recipe is touched. The removal confirmation says the key stays until those desktops are
   gone; the editor shows no standing waiting state yet.
 - **Removing a key keeps the recipe.** The recipe stays on its provider with
   no reference and starts nothing (`no-provider-configured`) until a key is
@@ -2157,7 +2160,10 @@ old key deleted, leases with the new one, finds neither key anywhere under
 the data directory, and after a restart removes the key, keeps it while the
 running desktop needs it, and deletes it once the sweep ends that desktop;
 it also stores nothing for a refused recipe, a provider the host does not
-offer, a removed recipe, or a reference a window names.
+offer, a removed recipe, or a reference a window names, and none of those
+refusals carries the key; deletes an entered key whose change lost to another
+window's, with a conflict that does not carry it; and, after a restart,
+deletes a replaced key no lease recorded whose first deletion failed.
 `projectRoutes.test.ts` refuses a paired device's change carrying a key
 before the service runs, without echoing it; `desktopPaneRoutes.test.ts`
 answers `recipe-key`; `projectPolicy.test.ts` covers a key removed in place
@@ -2173,9 +2179,9 @@ horizontal overflow, and the typed key absent from the page after saving.
 
 Nothing here is owed by the maintainer beyond slice 6's E2B live smoke, which
 still gates offering E2B. Left for later: the editor shows the recipe as
-editable on a paired device, which the route refuses, and a key retired
-before any lease recorded it whose deletion fails is left in the store if
-the host restarts before a sweep retries it.
+editable on a paired device, which the route refuses, and a key stored for a
+change that was not journaled stays in the store if deleting it fails too,
+since nothing names it and the store is never listed.
 
 ## Rationale
 
