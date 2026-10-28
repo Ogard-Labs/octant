@@ -30,7 +30,6 @@ import {
   SshRemotePath,
   type SshTargetStatus,
 } from "@octant/contracts/ssh-target";
-import { resolveGitExecutable } from "../process/gitSeatbeltLaunch";
 import { SshRemoteProjectService } from "./sshRemoteProjectService";
 import { SshRemoteTerminalService } from "./sshRemoteTerminalService";
 import type { ProviderRuntimeEgress } from "./providerRuntimeEgress";
@@ -408,6 +407,8 @@ describe.skipIf(!runnable)("a macOS SSH target on this Mac's Seatbelt", () => {
         `curl -sS -o /dev/null --max-time 5 --noproxy '*' http://127.0.0.1:${String(sshPort)}/ 2>/dev/null; echo "other-port:$?"`,
         'echo "port:$port"',
         "echo written > written-by-command",
+        // A harness command runs the xcode-select shim as a terminal does.
+        '/usr/bin/git status --short >/dev/null 2>&1; echo "git-status:$?"',
       ].join("\n");
       const ran = await connections.runCommand(
         session,
@@ -436,6 +437,7 @@ describe.skipIf(!runnable)("a macOS SSH target on this Mac's Seatbelt", () => {
       const forwarderPort = Number(lines[4]?.replace("port:", ""));
       expect(forwarderPort).toBeGreaterThan(0);
       expect(forwarderPort).not.toBe(sshPort);
+      expect(lines[5]).toBe("git-status:0");
       expect(readFileSync(join(checkout, "written-by-command"), "utf8")).toBe("written\n");
       // Only the connection that presented the launch's token reached this host.
       expect(heads).toHaveLength(1);
@@ -615,11 +617,13 @@ describe.skipIf(!runnable)("a macOS SSH target on this Mac's Seatbelt", () => {
         data: [
           "pwd",
           // Each marker is printed by `printf`, so the typed line never matches it.
-          // The developer Git, as Octant's own Git launches use: the
-          // `/usr/bin/git` shim asks xcode-select, whose link under
-          // `/private/var` a confined shell may not read.
-          `g=${resolveGitExecutable()}`,
-          "echo made > made.txt && $g add made.txt && $g -c user.name=O -c user.email=o@example.invalid commit -qm made && printf 'COMMIT-%s\\n' OK",
+          // `/usr/bin/git` is the xcode-select shim, which reads two links
+          // under `/private/var`; the shell may read those and nothing
+          // beside them there.
+          "/usr/bin/git status --short >/dev/null && printf 'STATUS-%s\\n' OK",
+          "ls /private/var/select >/dev/null 2>&1 || printf 'SELECT-%s\\n' DENIED",
+          "ls /private/var/db >/dev/null 2>&1 || printf 'DB-%s\\n' DENIED",
+          "echo made > made.txt && git add made.txt && git -c user.name=O -c user.email=o@example.invalid commit -qm made && printf 'COMMIT-%s\\n' OK",
           `touch ${join(parent, "beside.txt")}`,
           "printf 'END-%s\\n' SCRIPT",
           "exit",
@@ -629,6 +633,9 @@ describe.skipIf(!runnable)("a macOS SSH target on this Mac's Seatbelt", () => {
       await expect.poll(output, { timeout: 30_000 }).toContain("END-SCRIPT");
       const printed = await output();
       expect(printed).toContain(worktreePath);
+      expect(printed).toContain("STATUS-OK");
+      expect(printed).toContain("SELECT-DENIED");
+      expect(printed).toContain("DB-DENIED");
       expect(printed).toContain("COMMIT-OK");
       expect(existsSync(join(parent, "beside.txt"))).toBe(false);
       expect(

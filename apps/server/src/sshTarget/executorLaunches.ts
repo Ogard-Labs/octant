@@ -16,6 +16,7 @@ import {
   type SshExecutorStreamFrame,
 } from "@octant/contracts/ssh-executor-protocol";
 import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
+import { MACOS_GIT_SHIM_READ_PATHS } from "../process/gitSeatbeltLaunch";
 import {
   makeProcessConfinementLive,
   type ProcessConfinementPort,
@@ -382,6 +383,9 @@ export async function runExecutorCommand(
       confinement: { prepare: (input) => base.prepare({ ...input, ...grants }) },
       temporaryDirectory: work,
       harnessShellScriptDirectory: scripts,
+      // As a terminal does: the xcode-select shim's two links, and nothing
+      // else under the denied `/private/var`.
+      ...(environment.platform === "darwin" ? { literalReadPaths: MACOS_GIT_SHIM_READ_PATHS } : {}),
       networkEgress: request.network === "none" ? "none" : "allow",
     });
     const result = await port.executeShellScript(

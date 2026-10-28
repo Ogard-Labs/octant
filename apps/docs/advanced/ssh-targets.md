@@ -226,11 +226,6 @@ anything reaches your computer, where each request is still decided by the
 task's egress rules. The port closes when the command ends or the runtime
 stops.
 
-On a Mac target, `git` typed in a terminal fails, because `/usr/bin/git` asks
-`xcode-select` for the developer folder, which the sandbox keeps from it. Run
-the developer Git instead: `xcrun --find git`, run in an ordinary `ssh` session
-on the target, prints its path.
-
 ## Removing a target
 
 **Remove…** on a target ends its session and forgets its pinned key. While a

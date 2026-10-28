@@ -2152,7 +2152,9 @@ the forwarder closed with the command; a placed runtime in Plan and
 approval-gated doing the same, Plan unable to write its root; a managed
 worktree and an approval-gated terminal in it that commits there and writes
 nowhere beside it; binding a root and reading its files, Git status, and
-diff through Seatbelt-confined Git; refusing a root that holds `~/.ssh`;
+diff through Seatbelt-confined Git; `/usr/bin/git status` working in that
+terminal and in a proxied command while `/private/var/select` and
+`/private/var/db` stay unlistable; refusing a root that holds `~/.ssh`;
 removing its runtime directory with the session). On every platform,
 `executorLaunches.test.ts` shows the forwarder refusing no token, another
 token, and a malformed head without a frame to the host, forwarding the
@@ -2160,12 +2162,17 @@ token's connection with its first request as a stream naming the launch,
 and no longer listening once the launch ends. Not yet shown: the same
 through a real `sshd` on a second Mac, which is the maintainer's run.
 
-Known gap: `/usr/bin/git` on macOS is the `xcode-select` shim, which reads
-`/private/var/select/developer_dir`, and a terminal's profile does not grant
-that read, so `git` typed in a terminal on a macOS target fails (observed on
-this Mac's Seatbelt) unless it names the developer Git (`xcrun --find git`),
-as Octant's own Git launches do (`gitShimExtraRules`). Harness commands run
-under the same read rules.
+**Git's shim.** `/usr/bin/git` on macOS is the `xcode-select` shim, which
+reads `/private/var/select/developer_dir` and `/private/var/db/xcode_select_link`
+under the denied `/private/var`; without them `git` in a terminal on a macOS
+target failed "unable to read data link" (measured on this Mac's Seatbelt).
+A terminal and a harness command on a macOS target may read those two links,
+each as a `literal` rule (`MACOS_GIT_SHIM_READ_PATHS`, as Octant's own Git
+launches use), and nothing else there: listing `/private/var/select` or
+`/private/var/db` stays refused. Seatbelt matches the resolved
+`/private/var` spelling, so the `/var` form needs no rule of its own. The
+first `xcrun` lookup in a session prints warnings because it cannot reach
+its user cache; it then caches in the launch's own temporary folder.
 
 ## Verification
 
