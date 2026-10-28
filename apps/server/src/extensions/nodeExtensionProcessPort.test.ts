@@ -149,6 +149,16 @@ describe("node extension process port", () => {
     expect(profile).toContain('(allow file-read* (literal "/dev/urandom"))');
     // Of the host's configuration, only the link naming its time zone.
     expect(profile).toContain('(allow file-read* (literal "/private/etc/localtime"))');
+    // The builder gives every launch the public TLS files; a driver has no
+    // network, so its profile takes them away again, after that grant.
+    const rules = profile.split("\n");
+    const tlsDenied = rules.indexOf('(deny file-read* (subpath "/private/etc/ssl"))');
+    expect(tlsDenied).toBeGreaterThan(
+      rules.indexOf('(allow file-read* (subpath "/private/etc/ssl/certs"))'),
+    );
+    expect(rules.slice(tlsDenied).filter((rule) => rule.includes('"/private/etc/ssl'))).toEqual([
+      '(deny file-read* (subpath "/private/etc/ssl"))',
+    ]);
     // Every folder the driver may read, and nothing more: its package, its
     // runtime's own folder, the system roots a runtime reads to start, and
     // its temporary folder. The macOS escape tests measure that a driver
@@ -163,6 +173,7 @@ describe("node extension process port", () => {
           "/usr/lib",
           "/usr/share",
           "/private/var/db/timezone",
+          // Granted by the builder to every launch, and denied again above.
           "/private/etc/ssl/certs",
         ]),
       ].sort(),

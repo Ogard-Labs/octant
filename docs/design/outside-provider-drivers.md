@@ -283,8 +283,6 @@ the fail-closed option.
   - `/private/etc`, apart from the link `/private/etc/localtime`: the host's
     user and group lists, hosts and name-service files, and SSH and sudo
     configuration are of no use to a driver with no network and no exec.
-    The confinement builder still lets every launch read the public TLS
-    files there (`openssl.cnf`, `cert.pem`, and `ssl/certs`).
   - `/private/var/db`, apart from `timezone`, where the time-zone link leads:
     the rest is the host's own databases (the local directory's user
     records, installer receipts, diagnostics), none of which a runtime reads
@@ -294,6 +292,11 @@ the fail-closed option.
     `libexec` hold programs the driver may not exec, and `local` holds
     whatever the person installed there, on an Intel Mac Homebrew's whole
     prefix with its services' data.
+  - The system's public TLS files (`/private/etc/ssl`: `openssl.cnf`,
+    `cert.pem`, and `certs`), which the confinement builder grants every
+    launch so that an offline one fails at the socket rather than before
+    it. A driver never opens a socket, so its profile denies the folder
+    again after that grant, through the builder's own extra denials.
 - **The runtime's install** is taken from the runtime's own resolved path,
   never a fixed location. For Bun it is the executable's folder, wherever Bun
   is installed. For Electron's Node it is the app bundle that holds the

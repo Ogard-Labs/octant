@@ -484,6 +484,10 @@ async function prepareOutsideDriverLaunch(
     temporaryDirectory: sandbox.temporaryDirectory,
     readRoots,
     networkEgress: "none",
+    // The builder lets every launch read the system's public TLS files so
+    // that an offline one fails at the socket rather than before it. A
+    // driver never opens a socket, so it reads none of them.
+    additionalDenyReadPaths: ["/private/etc/ssl"],
     allowProcessExec: false,
     allowProcessFork: false,
     interpreterSearchPath: SAFE_PATH,
