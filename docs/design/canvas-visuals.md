@@ -72,6 +72,19 @@ coordinates, offset above (or below near the top), so it never covers the
 pointer, and it follows keyboard focus as well as the pointer. It has no
 entrance motion.
 
+**Title and callouts.** A chart may state its finding as a title (strong
+weight, `--oct-text-base`) over a subtitle in `--oct-meta` that says what was
+measured, both above the plot. A point's note is a callout set just above the
+point in the text ink, never the series hue, at `--oct-text-xs` and the strong
+weight, with a halo in the surface colour so it stays legible over a gridline;
+near either edge of the plot it reads inward. The point keeps a visible dot to
+anchor it. Emphasis leaves the chosen bar in its series hue and draws the rest
+of that series in the neutral ink, and on a line it keeps the point's dot. A
+note and emphasis are always read aloud with the mark and listed in a Note
+column of the disclosed table, so neither the halo, the position, nor the hue
+carries the reading alone. Under forced colours a note is CanvasText and a
+receded bar GrayText.
+
 **Path labels.** A file label is read from the right: the directory is dimmed and
 the file name is at full ink, in the code font.
 

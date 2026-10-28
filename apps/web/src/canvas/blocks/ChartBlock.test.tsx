@@ -27,8 +27,12 @@ describe("chart marks", () => {
           name: new RegExp(`${spoken[block.chartType] ?? block.chartType} chart`),
         }),
       ).toBeVisible();
-      // A funnel is one series, so like a lone line it carries no legend.
-      expect(screen.queryAllByRole("button").length > 0).toBe(block.chartType !== "funnel");
+      // A funnel is one series, and a lone line or bar is named by the Canvas
+      // around it, so neither carries a legend.
+      const lone = ["line", "bar"].includes(block.chartType) && block.series.length === 1;
+      expect(screen.queryAllByRole("button").length > 0).toBe(
+        block.chartType !== "funnel" && !lone,
+      );
       const summary = screen.getByText("View chart data");
       expect(summary.tagName).toBe("SUMMARY");
       await user.click(summary);
@@ -198,6 +202,49 @@ describe("chart marks", () => {
     expect(headline?.textContent).toBe("310W5+158% since W1");
     // Only the last reading carries a point until the pointer asks for another.
     expect(container.querySelectorAll(".canvas-chart__dot")).toHaveLength(1);
+  });
+});
+
+describe("chart titles and callouts", () => {
+  const chart = (chartType: string) => {
+    const block = chartExampleBlocks.find((candidate) => candidate.chartType === chartType);
+    if (block === undefined) throw new Error(`${chartType} example is missing.`);
+    return block;
+  };
+
+  it("states the chart's finding above it and draws a callout beside the point it names", () => {
+    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [chart("line")] }} />);
+
+    const figure = document.querySelector(".canvas-block__chart--line");
+    if (!(figure instanceof HTMLElement)) throw new Error("Line chart was not drawn.");
+    const caption = figure.querySelector("figcaption");
+    expect(caption).toHaveTextContent("Up 2,304 subscribers this year, most of it before May");
+    expect(caption).toHaveTextContent("Email subscribers at the end of each month, 2026");
+    expect(figure.querySelector("svg .canvas-chart__note")).toHaveTextContent("+344 on Jan 25");
+    // The point keeps a dot to anchor its note, and reads the note aloud.
+    expect(
+      within(figure)
+        .getByRole("img", { name: /line chart/ })
+        .querySelector("[aria-label='Subscribers: 7,808, +344 on Jan 25']"),
+    ).not.toBeNull();
+  });
+
+  it("leaves the emphasized bar in its series colour and the rest muted, and says so in the table", async () => {
+    const user = userEvent.setup();
+    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [chart("bar")] }} />);
+
+    const figure = document.querySelector(".canvas-block__chart--bar");
+    if (!(figure instanceof HTMLElement)) throw new Error("Bar chart was not drawn.");
+    const bars = [...figure.querySelectorAll("svg rect.canvas-chart__bar")];
+    expect(bars).toHaveLength(5);
+    expect(bars.filter((bar) => bar.getAttribute("data-muted") === "true")).toHaveLength(4);
+    expect(bars[3]).not.toHaveAttribute("data-muted");
+    expect(bars[3]).toHaveAttribute("aria-label", "Net new: 210, +210, highlighted");
+
+    await user.click(within(figure).getByText("View chart data"));
+    const table = within(figure).getByRole("table", { name: "Chart readings" });
+    expect(within(table).getByRole("columnheader", { name: "Note" })).toBeVisible();
+    expect(table).toHaveTextContent("+210 · Highlighted");
   });
 });
 

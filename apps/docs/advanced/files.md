@@ -226,6 +226,12 @@ there as a row that opens it.
   to pan and hold Ctrl or Command while scrolling to zoom.
 - Hover a line or bar chart to read the value under the pointer. **View chart
   data** lists every reading.
+- A chart can carry a title that states what it shows, with a line under it
+  saying what was measured. An agent can also label a few points on a line or
+  bar chart (such as "+344" on a jump) and highlight the one bar the chart is
+  about, which leaves the other bars grey. **View chart data** lists those
+  labels too. A shared or public copy of the Canvas keeps the chart's
+  readings but not its title or labels yet.
 - Charts also include a funnel (how many make it through each stage), a radar
   (a few things compared on the same qualities), and a sankey (where a quantity
   flows, drawn as bands between named steps). Hover or Tab to a stage, a point,

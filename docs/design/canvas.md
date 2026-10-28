@@ -175,7 +175,8 @@ version 16, a design's image `assets` at version 17, a design's
 `runsScript` at version 18, the `tabs` and `columns` layout groups,
 diagram styles, and the plan's `gantt` view at version 19, and a Chat
 Canvas owned by its thread (a chat provenance with no Project) at version
-20, and the design and diagram fields below at version 21, so a document that
+20, the design and diagram fields below at version 21, and a chart's
+`title`, `subtitle`, and point `note` and `emphasis` at version 22, so a document that
 declares an earlier version and carries one is refused as a declared future
 version. Version 20 adds no block or field a share carries, so a share names a
 block authored at 20 as 19 under share version 10. Version 21 adds the
@@ -401,6 +402,13 @@ layout is pure and deterministic in `packages/domain`
 feeds it, every ending lines up in the last column, and one scale sizes every
 band, so the screen and the artifact preview SVG draw the same picture. The
 three types arrive together with Canvas schema version 14.
+From Canvas schema version 22 any chart may carry a `title` (the finding, as a
+sentence) and a `subtitle` (what was measured and over which span), each at
+most 160 characters. On a line, area, scatter, bar, or distribution chart a
+point may also carry a `note` of at most 40 characters, drawn as a callout
+beside it, and `emphasis: true` on the reading the chart is about; a chart
+holds at most 12 notes. Other chart types refuse both, since a slice, stage,
+axis spoke, or stacked segment has no single point to label.
 A `dashboard` block is a KPI layout: a title that names its region, an
 optional `columns` of 1 to 4 (four when absent), and 1 to 24 `cells`, each
 naming the `blockId` of a metric, progress, status, chart, or table block in the
@@ -587,7 +595,11 @@ version 8 carries the version-15 dashboard, so it named blocks up to version
 view, so it names blocks up to version 19. Share version 10 carries a design's
 frames and accompanies no Canvas version, and share version 11 carries the
 version-21 design and diagram fields, so it names blocks up to version 21
-(`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`).
+(`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`). Version 22 adds only a chart's title,
+subtitle, and point callouts, which share version 11 does not carry: a shared
+chart leaves as its readings and is named as version 21. Carrying them is a
+share format bump, which the share service must learn before a desktop
+release publishes it.
 Share documents version independently of Canvas documents: a treemap, a
 heatmap, a bar list, a chart's or a table column's number format, a table
 column's display, and a board's layout arrive with share version 3, and a
