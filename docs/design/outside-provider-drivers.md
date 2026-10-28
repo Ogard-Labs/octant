@@ -262,9 +262,20 @@ the fail-closed option.
   `macos-15` CI job, which passed on 2026-10-27 with no grant added
   ([job][macos-escape-2026-10-27]); a grant the runtime turns out to need is
   added only with its observed failure.
+- **Grants narrowed since that run.** The first profile kept grants it had
+  inherited from the extension profile, whose Node loads modules and
+  libraries a plain `.mjs` driver on Bun or Electron's Node does not. Each is
+  removed in its own commit, so a failure in the `macos-15` job names the
+  one to restore, and is not measured until that job passes on the change
+  that removes it. Removing a read only narrows: a runtime missing one fails
+  to start, which the instance reports as `runtime-unavailable`, and never
+  reaches more than before.
+  - The folder above Bun's executable (`~/.bun`, which holds its install
+    cache): Bun is one self-contained executable, and its home is the
+    driver's temporary folder, so it looks for no cache there.
 - **The runtime's install** is taken from the runtime's own resolved path,
-  never a fixed location. For Bun it is the executable's folder and its parent
-  (and, for a Homebrew Bun, the prefix's `Cellar`, `opt`, and
+  never a fixed location. For Bun it is the executable's folder (and, for a
+  Homebrew Bun, the prefix's `Cellar`, `opt`, and
   `etc/openssl@3`). For Electron's Node it is the app bundle that holds the
   executable (`<name>.app` above `Contents/MacOS/<name>`), which holds
   Electron's framework, its ICU data and V8 snapshot, and its resources; the

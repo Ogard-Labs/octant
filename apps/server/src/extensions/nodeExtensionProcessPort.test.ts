@@ -157,7 +157,6 @@ describe("node extension process port", () => {
         ...new Set([
           ...[packageRoot, temporaryDirectory].flatMap((path) => [path, realpathSync(path)]),
           runtimeFolder,
-          dirname(runtimeFolder),
           "/System",
           "/usr",
           "/private/etc",
