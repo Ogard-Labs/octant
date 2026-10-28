@@ -940,8 +940,12 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             ? project.binding.canonicalRoot
             : undefined;
         },
-        forkContext: ({ source, throughOperationId }) =>
-          selectCodeConversation(source.id, { purpose: "fork", throughOperationId }),
+        forkContext: ({ source, throughOperationId, targetContextLimitTokens }) =>
+          selectCodeConversation(source.id, {
+            purpose: "fork",
+            throughOperationId,
+            ...(targetContextLimitTokens === undefined ? {} : { targetContextLimitTokens }),
+          }),
         forkMergeBackContext: ({ fork, afterOperationId, throughOperationId }) =>
           selectCodeConversation(fork.id, {
             purpose: "fork-merge-back",

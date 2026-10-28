@@ -4212,7 +4212,8 @@ every fork onto a provider instance other than the one that wrote the fork
 point, it reads the source through the same selector (purpose `fork`,
 bounded `throughOperationId`): the source's accepted prompts and completed
 replies up to and including the named turn, with the same bounds,
-attribution, taint and omission counts. The named turn must be found or the
+attribution, taint and omission counts, bounded by the fork's own model
+window when the probe reported it, as for a provider switch. The named turn must be found or the
 read refuses (`source-point-unavailable`); a whole-thread read refuses when
 the thread moved during the read, but a read through a fork point covers only
 settled turns, so the source running a later turn does not refuse it. The
