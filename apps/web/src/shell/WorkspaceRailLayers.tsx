@@ -60,6 +60,7 @@ const CodeProjectPullRequests = lazy(() =>
   })),
 );
 import type { RepositoryIssueRow } from "../github/readIssuesAcrossRepositories";
+import { ArrowLeft } from "lucide-react";
 
 const GitHubIssueBrowser = lazy(() =>
   import("../github/GitHubIssueBrowser").then((module) => ({
@@ -183,6 +184,7 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
             action={{
               label: "Back to workspace",
               onClick: props.onDismissRailPlaceholder,
+              glyph: ArrowLeft,
             }}
             eyebrow="Sidebar"
             message={props.railPlaceholder.message}

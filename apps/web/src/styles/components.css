@@ -53,7 +53,7 @@
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-pill);
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .octant-chip:hover {
@@ -327,7 +327,7 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   gap: var(--oct-space-1);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .thread-search__results {
@@ -822,7 +822,7 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
 
 .thread-task-viewer__footer-progress {
   color: var(--octant-text-primary);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .thread-task-viewer__actions {
@@ -975,7 +975,7 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
 }
 
 .thread-tasks__list > li[data-task-state="running"] .thread-tasks__summary {
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .goal-loop {

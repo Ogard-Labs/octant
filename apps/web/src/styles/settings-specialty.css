@@ -111,7 +111,7 @@
   margin: 0;
   color: var(--octant-text-primary);
   font-size: var(--oct-text-sm);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .settings-view .provider-settings__create {

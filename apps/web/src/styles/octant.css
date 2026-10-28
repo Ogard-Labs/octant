@@ -732,7 +732,7 @@ h4 {
   line-height: 0.95;
   letter-spacing: var(--oct-tracking-stat);
   color: var(--oct-accent-fg);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 .stat .stat-label {
   color: var(--oct-muted);
@@ -1178,7 +1178,7 @@ input.switch:checked::after {
 }
 .ds-table th {
   color: var(--oct-muted);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-detail);
   letter-spacing: var(--oct-tracking-wordmark);
@@ -1229,7 +1229,7 @@ input.switch:checked::after {
   border-bottom: 1px solid var(--oct-border);
   background: var(--oct-surface-warm);
   color: var(--oct-muted);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   letter-spacing: var(--oct-tracking-wordmark);
   text-transform: none;
   text-align: left;
@@ -1321,7 +1321,7 @@ input.switch:checked::after {
   z-index: 2;
   background: var(--oct-surface-warm);
   color: var(--oct-meta);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   text-align: center;
   min-width: 84px;
 }
@@ -1331,7 +1331,7 @@ input.switch:checked::after {
   z-index: 1;
   background: var(--oct-surface-warm);
   color: var(--oct-meta);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   text-align: right;
   min-width: 34px;
 }
@@ -1832,7 +1832,7 @@ input.switch:checked::after {
   border: 2px solid var(--oct-border);
   border-top-color: var(--oct-accent-fg);
   border-radius: var(--oct-radius-pill);
-  animation: oct-spin 700ms linear infinite;
+  animation: oct-spin var(--oct-motion-spin) linear infinite;
   vertical-align: -3px;
 }
 .spinner-sm {
@@ -2665,7 +2665,7 @@ input.switch:checked::after {
 }
 .provider-question-card__prompt {
   margin: 0;
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 .provider-question-card__progress {
   margin: 0;
@@ -2698,7 +2698,7 @@ input.switch:checked::after {
   padding: 0 var(--oct-space-2) var(--oct-space-2) var(--oct-space-3);
 }
 .provider-question-card__option-label {
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 .provider-question-card__option-description {
   color: var(--oct-muted);
@@ -3111,7 +3111,7 @@ input.switch:checked::after {
   color: var(--oct-fg);
   font-family: var(--oct-font-display);
   font-size: var(--octant-ui-font-size);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   line-height: var(--oct-leading-snug);
   overflow-wrap: anywhere;
 }
@@ -3853,7 +3853,7 @@ input.switch:checked::after {
   padding: 0 var(--oct-nav-inset);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-detail);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   letter-spacing: 0;
   color: var(--oct-meta);
   text-transform: none;
@@ -4040,7 +4040,7 @@ input.switch:checked::after {
 .mode-switcher__context {
   color: var(--oct-muted);
   font-size: var(--octant-ui-font-size);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 .modeswitch[data-oct-modeswitch="icons"] .mode {
   position: relative;
@@ -4520,7 +4520,7 @@ input.switch:checked::after {
   color: var(--oct-meta);
   background: transparent;
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 /* The select trigger wears the pane title's own recipe — meta ink at rest,
    fg ink over the soft fill when pointed at — so the frame's controls and the
@@ -4544,7 +4544,7 @@ input.switch:checked::after {
   color: var(--oct-meta);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   text-align: left;
 }
 
@@ -7390,7 +7390,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   padding: var(--oct-space-1) var(--oct-space-2);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   letter-spacing: normal;
   color: var(--oct-meta);
   white-space: nowrap;
@@ -7513,7 +7513,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
 }
 .setrow-label {
   font-size: var(--oct-text-sm);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   color: var(--oct-fg);
 }
 .setrow-hint {
