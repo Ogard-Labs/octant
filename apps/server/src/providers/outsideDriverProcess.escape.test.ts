@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { createServer, type Server } from "node:net";
@@ -33,6 +33,7 @@ interface EscapeOutcome {
   readonly readPackage: string;
   readonly readOutside: string;
   readonly readHome: string;
+  readonly readHomeThroughDataVolume: string;
   readonly readKeychains: string;
   readonly writeTemporary: string;
   readonly writePackage: string;
@@ -48,6 +49,7 @@ function escapeProbe(paths: {
   readonly secret: string;
   readonly outside: string;
   readonly home: string;
+  readonly homeCanaryThroughDataVolume: string;
   readonly port: number;
 }): string {
   return `
@@ -82,6 +84,7 @@ const outcome = {
   readPackage: attempt(() => readFileSync(join(paths.packageRoot, "own.txt"))),
   readOutside: attempt(() => readFileSync(paths.secret)),
   readHome: attempt(() => readdirSync(paths.home)),
+  readHomeThroughDataVolume: attempt(() => readFileSync(paths.homeCanaryThroughDataVolume)),
   readKeychains: attempt(() => readdirSync(join(paths.home, "Library", "Keychains"))),
   writeTemporary: attempt(() => writeFileSync(join(process.env.TMPDIR, "scratch"), "ok")),
   writePackage: attempt(() => writeFileSync(join(paths.packageRoot, "planted"), "x")),
@@ -122,13 +125,25 @@ function resolveElectron(): string | undefined {
 
 const electron = process.platform === "darwin" ? resolveElectron() : undefined;
 
+/**
+ * Where macOS mounts the data volume. The person's files live on it, and each
+ * folder the system volume links there (`/Users`, `/private`, `/opt`, ...) can
+ * also be spelled beneath it, inside the `/System` the driver may read.
+ */
+const DATA_VOLUME = "/System/Volumes/Data";
+
 onMacos("an outside driver's confined process", () => {
   let root = "";
   let server: Server | undefined;
   let connections = 0;
+  let homeCanaryFolder = "";
 
   beforeAll(async () => {
     root = await mkdtemp(join(tmpdir(), "octant-driver-escape-"));
+    // A file in the person's home, which the driver must not reach by any
+    // spelling of its path.
+    homeCanaryFolder = await mkdtemp(join(realpathSync(homedir()), ".octant-driver-escape-"));
+    await writeFile(join(homeCanaryFolder, "canary.txt"), "home canary");
     server = createServer((socket) => {
       connections += 1;
       socket.destroy();
@@ -137,7 +152,13 @@ onMacos("an outside driver's confined process", () => {
   });
 
   afterAll(async () => {
-    await new Promise<void>((resolve) => server?.close(() => resolve()));
+    // The canary goes first: it sits in the person's real home, and a
+    // set-up that failed before the server existed left nothing to close,
+    // which waited out the hook's timeout with the canary still there.
+    if (homeCanaryFolder !== "") await rm(homeCanaryFolder, { recursive: true, force: true });
+    await new Promise<void>((resolve) =>
+      server === undefined ? resolve() : server.close(() => resolve()),
+    );
     await rm(root, { recursive: true, force: true });
   });
 
@@ -156,10 +177,21 @@ onMacos("an outside driver's confined process", () => {
     const secret = join(outside, "secret.txt");
     await writeFile(secret, "host secret");
     await writeFile(join(packageRoot, "own.txt"), "package file");
+    const homeCanaryThroughDataVolume = `${DATA_VOLUME}${join(homeCanaryFolder, "canary.txt")}`;
+    // The host itself reads the canary by that spelling, so a refusal below
+    // is the profile's and not a path that leads nowhere.
+    expect(readFileSync(homeCanaryThroughDataVolume, "utf8")).toBe("home canary");
     const entryPoint = join(packageRoot, "main.mjs");
     await writeFile(
       entryPoint,
-      escapeProbe({ packageRoot, secret, outside, home: homedir(), port: address.port }),
+      escapeProbe({
+        packageRoot,
+        secret,
+        outside,
+        home: homedir(),
+        homeCanaryThroughDataVolume,
+        port: address.port,
+      }),
     );
     const connectionsBefore = connections;
     // A variable the server holds must not reach the driver.
@@ -189,6 +221,7 @@ onMacos("an outside driver's confined process", () => {
         readPackage: "allowed",
         readOutside: "refused",
         readHome: "refused",
+        readHomeThroughDataVolume: "refused",
         readKeychains: "refused",
         writeTemporary: "allowed",
         writePackage: "refused",
@@ -211,7 +244,7 @@ onMacos("an outside driver's confined process", () => {
     expect(await readdir(temporaryRoot)).toEqual([]);
   }
 
-  it("reaches no network, no file outside its package and folder, not the home folder or its keychains, no program, and no host variable", async () => {
+  it("reaches no network, no file outside its package and folder, not the home folder by either spelling or its keychains, no program, and no host variable", async () => {
     await expectConfined({ kind: "bun", path: resolveBun() });
   });
 

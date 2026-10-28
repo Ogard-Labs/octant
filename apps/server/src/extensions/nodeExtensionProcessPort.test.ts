@@ -177,6 +177,10 @@ describe("node extension process port", () => {
       rules.indexOf('(allow file-read* (subpath "/private/etc/ssl/certs"))'),
     );
     expect(readsReopeningAfterDeny(profile, "/private/etc/ssl")).toEqual([]);
+    // `/System` is read whole, and the data volume beneath it spells the
+    // person's files a second way (`/System/Volumes/Data/Users/...`), so that
+    // volume is denied after every grant, `/System`'s included.
+    expect(readsReopeningAfterDeny(profile, "/System/Volumes/Data")).toEqual([]);
     // Every folder the driver may read, and nothing more: its package, its
     // runtime's own folder, the system roots a runtime reads to start, and
     // its temporary folder. The macOS escape tests measure that a driver
@@ -270,6 +274,7 @@ describe("node extension process port", () => {
       ].sort(),
     );
     expect(readsReopeningAfterDeny(profile, "/private/etc/ssl")).toEqual([]);
+    expect(readsReopeningAfterDeny(profile, "/System/Volumes/Data")).toEqual([]);
     expect(profile).not.toContain("(allow network");
     expect(profile).not.toContain("(allow process-fork)");
     expect(profile.split("\n").filter((rule) => rule.startsWith("(allow process-exec"))).toEqual([

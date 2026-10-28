@@ -330,6 +330,20 @@ const OUTSIDE_DRIVER_SYSTEM_READ_ROOTS = [
   "/usr/share",
   "/private/var/db/timezone",
 ] as const;
+/**
+ * The data volume, beneath the `/System` read root. Since macOS 10.15 the
+ * person's files live on a volume mounted at `/System/Volumes/Data`, and every
+ * folder the sealed system volume links there (`/Users`, `/private`, `/opt`,
+ * `/Applications`, `/Library`, `/usr/local`) can be spelled beneath it too:
+ * `/System/Volumes/Data/Users/<name>/...` is the file `/Users/<name>/...`. The
+ * home and `/private` denials name only the short spelling, so the volume is
+ * denied whole after every grant. A runtime names nothing by that spelling
+ * to start: its loader, libraries, and ICU data sit on the system volume and
+ * its Preboot cryptex, and the zone data it reaches through `/private` is
+ * read by that short path. The other volumes under `/System/Volumes`
+ * (Preboot among them, which holds that cryptex) stay readable.
+ */
+const OUTSIDE_DRIVER_DENIED_SYSTEM_ROOTS = ["/System/Volumes/Data"];
 const OUTSIDE_DRIVER_DEVICE_READS = ["/dev/null", "/dev/zero", "/dev/random", "/dev/urandom"];
 /**
  * Of `/private/etc`, only the link naming the host's time zone, which a
@@ -488,6 +502,9 @@ async function prepareOutsideDriverLaunch(
     // that an offline one fails at the socket rather than before it. A
     // driver never opens a socket, so it reads none of them.
     additionalDenyReadPaths: ["/private/etc/ssl"],
+    // Denied after the read roots, not among the denials above: those come
+    // before the roots, and the `/System` grant would open the volume again.
+    isolatedRoots: OUTSIDE_DRIVER_DENIED_SYSTEM_ROOTS,
     allowProcessExec: false,
     allowProcessFork: false,
     interpreterSearchPath: SAFE_PATH,
