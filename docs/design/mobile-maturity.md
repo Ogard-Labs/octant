@@ -193,7 +193,8 @@ its acceptance.
   with an opaque window while the scene is not active, which is when iOS
   takes the app switcher's snapshot, and while its screen is captured
   (recording, AirPlay mirroring, a wired capture; from iOS 17 each scene's own
-  capture state, earlier the screen's flag). While captured, the cover
+  capture state, watched for changes; earlier the screen's flag and
+  notification). While captured, the cover
   says why Octant is hidden and how to show it. Settings names what is covered
   and says that a screenshot is not blocked. Reason: the known way to hide
   content from a screenshot rests on an undocumented UIKit layer that an iOS

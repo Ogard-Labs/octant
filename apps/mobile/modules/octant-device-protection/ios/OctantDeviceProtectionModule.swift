@@ -55,6 +55,9 @@ final class PrivacyCover {
   private var inactive = Set<ObjectIdentifier>()
   private var covers: [ObjectIdentifier: Cover] = [:]
   private var observers: [NSObjectProtocol] = []
+  /// Scenes whose capture state is already watched (iOS 17 and later).
+  private var watched = Set<ObjectIdentifier>()
+  private var traitRegistrations: [Any] = []
 
   func start() {
     if started { return }
@@ -118,9 +121,26 @@ final class PrivacyCover {
     return scene.screen.isCaptured
   }
 
+  /// A scene's capture state can change without the screen posting anything,
+  /// so from iOS 17 each connected scene is watched for it directly.
+  private func watchCaptureState(of scene: UIWindowScene) {
+    guard #available(iOS 17.0, *) else { return }
+    if !watched.insert(ObjectIdentifier(scene)).inserted { return }
+    // Every call here runs on the main thread, which `assumeIsolated` asserts.
+    let registration = MainActor.assumeIsolated {
+      scene.registerForTraitChanges([UITraitSceneCaptureState.self]) {
+        [weak self] (_: UIWindowScene, _: UITraitCollection) in
+        self?.update()
+      }
+    }
+    traitRegistrations.append(registration)
+  }
+
   private func update() {
     let scenes = windowScenes()
+    for scene in scenes { watchCaptureState(of: scene) }
     let connected = Set(scenes.map { ObjectIdentifier($0) })
+    watched.formIntersection(connected)
     for (id, cover) in covers where !connected.contains(id) {
       cover.window.isHidden = true
       covers[id] = nil
