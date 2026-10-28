@@ -1391,6 +1391,26 @@ function approvalTarget(
     : normalized(relativePath, APPROVAL_TARGET_MAX_CHARACTERS);
 }
 
+/**
+ * What approving a Claude artifact publish does. A `url` makes the publish
+ * replace a page already on the account, which may be shared with other
+ * people, so the prompt names that page rather than reading like a new one.
+ */
+function artifactApprovalDescription(
+  target: string | undefined,
+  input: ClaudeToolRequest["input"],
+): string {
+  const replaced =
+    typeof input.url === "string"
+      ? normalized(input.url, APPROVAL_TARGET_MAX_CHARACTERS)
+      : undefined;
+  const replacing =
+    replaced === undefined
+      ? ""
+      : `, replacing the page at ${replaced}${input.force === true ? " even if it changed since" : ""}`;
+  return `Publish ${target ?? "a Project file"} to your claude.ai account${replacing}. It leaves this computer.`;
+}
+
 export function mapClaudeToolRequest(
   context: ClaudeEventContext,
   request: ClaudeToolRequest,
@@ -1421,7 +1441,7 @@ export function mapClaudeToolRequest(
     // requests permission to use Edit." was approved blind every time.
     description:
       request.toolName === "Artifact"
-        ? `Publish ${target ?? "a Project file"} to your claude.ai account. It leaves this computer.`
+        ? artifactApprovalDescription(target, request.input)
         : target === undefined
           ? `Claude requests permission to use ${toolName}.`
           : `${toolName} · ${target}`,

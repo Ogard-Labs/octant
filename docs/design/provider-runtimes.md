@@ -82,7 +82,16 @@ umbrella and without it alike. Reading the bundled 2.1.211 binary
 launch lists `Artifact` once `CLAUDE_CODE_ARTIFACT` is set, and then only for
 a claude.ai sign-in on a Pro, Max, Team, or Enterprise plan whose
 organization allows it, on the first-party API, with nonessential traffic
-allowed, and while claude.ai's own feature switch is on. Octant sets
+allowed, and while claude.ai's own feature switch is on. The runtime reads
+that feature switch only through its feature-flag service, which it turns off
+whenever `DISABLE_TELEMETRY` is set, and every Octant launch sets it
+(`ISOLATED_CLAUDE_LAUNCH_GUARDS`); the switch then reads as its default, off,
+so 2.1.211 lists no `Artifact` for any Octant launch today (binary read
+2026-10-28), and a turn with the person's switch on delivers as a Canvas
+through the rule's fallback. `CLAUDE_CODE_ARTIFACT` is an internal switch of
+the runtime, not a documented interface: a runtime that ignores or renames it
+leaves the tool out, and Octant never admits a tool its own list did not
+request. Octant sets
 `CLAUDE_CODE_ARTIFACT=1` and adds `Artifact` to the tool list only for a Work
 or Code session outside Plan on an account whose person turned on
 [Claude artifacts](model-endpoints.md#claude-artifacts); every other launch

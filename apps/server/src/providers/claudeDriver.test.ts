@@ -2924,6 +2924,29 @@ describe("Claude artifact delivery", () => {
       );
       await expect(decision).resolves.toEqual({ behavior: "allow" });
 
+      // The same call again republishes the file as it is now, so the earlier
+      // answer does not cover it, even with session approvals remembered.
+      await expect(
+        open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Artifact",
+          input,
+          toolUseId: "publish-again",
+          signal,
+        }),
+      ).resolves.toEqual({ behavior: "ask" });
+      const again = open.canUseTool({
+        toolName: "Artifact",
+        input,
+        toolUseId: "publish-again",
+        signal,
+      });
+      await Effect.runPromise(
+        acquired.connection.answerApproval({ sessionId, requestId: "request-2", approved: false }),
+      );
+      await expect(again).resolves.toMatchObject({ behavior: "deny" });
+
       on = false;
       await expect(
         open.preToolUse({
@@ -2943,7 +2966,7 @@ describe("Claude artifact delivery", () => {
     }
   });
 
-  it("publishes only a Project file, even in Full access, and never lists the account's artifacts", async () => {
+  it("publishes only a Project file and asks first even in Full access, and never lists the account's artifacts", async () => {
     const f = harness("subscription", "current-session", { artifactDelivery: () => true });
     const acquired = await acquire(f.driver, "code");
     try {
@@ -2969,8 +2992,10 @@ describe("Claude artifact delivery", () => {
       await expect(
         call("keychain", { file_path: `${projectRoot}/../..${claudeLoginKeychainPath()}` }),
       ).resolves.toMatchObject({ behavior: "deny" });
+      // Full access answers every other tool here; a publish still goes on to
+      // the person's approval.
       await expect(call("inside", { file_path: `${projectRoot}/report.html` })).resolves.toEqual({
-        behavior: "allow",
+        behavior: "ask",
       });
     } finally {
       await acquired.close();

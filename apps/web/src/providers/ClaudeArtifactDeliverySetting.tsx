@@ -26,7 +26,7 @@ export function ClaudeArtifactDeliverySetting(props: ClaudeArtifactDeliverySetti
         <>
           When on, Claude in Work and Code publishes documents, reports, and pages to your claude.ai
           account instead of making a Canvas. Each page is uploaded to claude.ai and leaves this
-          computer; Octant shows a link to it. Claude asks first unless the thread has Full access,
+          computer; Octant shows a link to it. Claude asks before every publish, in Full access too,
           and Plan never publishes. Ask for a Canvas and you still get one. Your Claude plan decides
           whether the tool is offered; when it isn’t, documents stay Canvases.
           {/* A switch that cannot be turned on says why in words, not only on hover. */}

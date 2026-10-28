@@ -7131,12 +7131,21 @@ mechanisms are:
   session already running; only a publish is admitted (`list`, which reads
   titles other people chose into the conversation, is refused); and the file
   must be inside the bound Project and outside the login keychain folder, in
-  Full access too. Above that gate the thread's ordinary posture decides:
-  approval-gated and auto-accepting-edits threads raise an approval that says
-  the file goes to claude.ai and leaves this computer, Full access publishes
-  unasked, and Plan, whose read-only rule refuses an outward side effect,
-  never offers the tool (Chat runs in Plan, so Chat never publishes). Only a
-  person at this host's own window can change the switch. claude.ai's answer
+  Full access too. Above that gate every publish asks, under approval-gated,
+  auto-accepting-edits, and Full access alike: the approval says the file
+  goes to claude.ai and leaves this computer and, when the call names a
+  `url`, which existing page it replaces. An answer is never reused for a
+  later publish, even with session approvals remembered, because the same
+  call republishes the file as it is then. Full access asks because putting
+  a Project file on an outside service is the person's own act, as a Canvas
+  public link is ([Canvas public links](design/canvas-public-links.md)), and
+  because the first publish marks the thread with outside content, after
+  which Octant's own outward actions ask afresh under every posture. The
+  approval is answered like the thread's other provider approvals, a paired
+  device included for the turns it may already answer. Plan, whose read-only
+  rule refuses an outward side effect, never offers the tool (Chat runs in
+  Plan, so Chat never publishes). Only a person at this host's own window
+  can change the switch. claude.ai's answer
   (the page's address, title, and warnings) reaches the model, so each call
   is reported as outside content (`hosted-tool`); Octant keeps only the
   `https` claude.ai address and title, as the call's `published` page, and

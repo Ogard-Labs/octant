@@ -2367,6 +2367,44 @@ describe("mapClaudeToolRequest", () => {
     expect(JSON.stringify(outside)).not.toContain("private-must-not-cross");
   });
 
+  it("says an artifact publish leaves the computer, and names the page it would replace", () => {
+    const fresh = mapClaudeToolRequest(
+      context(),
+      toolRequest({
+        toolName: "Artifact",
+        input: { file_path: `${projectRoot}/report.html`, favicon: "📊" },
+      }),
+    );
+    expect(fresh).toMatchObject({
+      request: {
+        event: {
+          description: "Publish report.html to your claude.ai account. It leaves this computer.",
+        },
+      },
+    });
+    const replacing = mapClaudeToolRequest(
+      context(),
+      toolRequest({
+        toolName: "Artifact",
+        toolUseId: "sdk-tool-replace",
+        input: {
+          file_path: `${projectRoot}/report.html`,
+          favicon: "📊",
+          url: "https://claude.ai/artifact/shared-team-page",
+          force: true,
+        },
+      }),
+    );
+    expect(replacing).toMatchObject({
+      request: {
+        event: {
+          description:
+            "Publish report.html to your claude.ai account, replacing the page at https://claude.ai/artifact/shared-team-page even if it changed since. It leaves this computer.",
+        },
+      },
+    });
+  });
+
   it("keeps a token-shaped literal out of the prompt while still naming the command", () => {
     const result = mapClaudeToolRequest(
       context(),

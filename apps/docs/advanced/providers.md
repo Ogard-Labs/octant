@@ -631,8 +631,10 @@ With it on, in Work and Code threads:
 - Claude writes the document as a page in the folder and publishes it to your
   claude.ai account. **The page is uploaded to claude.ai and leaves this
   computer.**
-- Claude asks before each publish, unless the thread has Full access. It can
-  only publish a file inside the thread's folder.
+- Claude asks before each publish, even when the thread has Full access, and
+  an earlier answer never covers a later publish. It can only publish a file
+  inside the thread's folder. A replacement of a page already on your account
+  names that page in the request.
 - Plan never publishes, and Chat never does.
 - The thread shows a link card under the turn's steps; it opens the page in
   your browser, where you are signed in to claude.ai. Octant does not

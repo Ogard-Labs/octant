@@ -251,7 +251,7 @@ it on (maintainer request, 2026-10-27). Its help says what it does before it
 is flipped: Claude in Work and Code publishes documents, reports, and pages
 to the person's claude.ai account instead of making a Canvas; each page is
 uploaded to claude.ai and leaves this computer, and Octant shows a link to
-it; Claude asks first unless the thread has Full access; Plan never
+it; Claude asks before every publish, in Full access too; Plan never
 publishes; asking for a Canvas still makes one; and the person's Claude plan
 decides whether the tool is offered at all. An API-key account cannot turn it
 on, and the switch says why ("Claude artifacts need a claude.ai sign-in").

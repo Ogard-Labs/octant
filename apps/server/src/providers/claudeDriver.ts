@@ -1642,7 +1642,9 @@ function makeConnection(
             if (refusal !== undefined) return deny(refusal);
           }
           if (
-            (input.executionPolicy === "full-access" && request.toolName !== "AskUserQuestion") ||
+            (input.executionPolicy === "full-access" &&
+              request.toolName !== "AskUserQuestion" &&
+              request.toolName !== CLAUDE_ARTIFACT_TOOL) ||
             // Auto-accept edits covers exactly the file writes the gate above
             // already proved to be inside the Project. Shell, network, and
             // every other tool still ask.
@@ -1857,8 +1859,13 @@ function makeConnection(
             });
             return { behavior: "ask" };
           };
+          // A publish asks under every posture, Full access included: like a
+          // Canvas public link, putting a Project file on an outside service
+          // is the person's own act, and each publish is asked afresh.
           const decide = (): ClaudePreToolDecision =>
-            (input.executionPolicy === "full-access" && request.toolName !== "AskUserQuestion") ||
+            (input.executionPolicy === "full-access" &&
+              request.toolName !== "AskUserQuestion" &&
+              request.toolName !== CLAUDE_ARTIFACT_TOOL) ||
             (input.executionPolicy === "auto-accept-edits" &&
               CLAUDE_EDIT_TOOLS.has(request.toolName)) ||
             (request.toolName !== "AskUserQuestion" && CLAUDE_READ_TOOLS.has(request.toolName)) ||
@@ -2401,7 +2408,9 @@ function makeConnection(
               } catch {
                 // An unreadable setting cannot broaden a one-shot answer into reuse.
               }
-              if (persistence === "current-session") {
+              // A publish is never reused: the same input republishes the
+              // file as it is now, which the person has not seen.
+              if (persistence === "current-session" && pending.toolName !== CLAUDE_ARTIFACT_TOOL) {
                 state.approvalReuse.add(pending.reuseKey);
               }
               pending.decision.resolve({ behavior: "allow" });
