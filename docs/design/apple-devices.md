@@ -308,7 +308,8 @@ access covers neither the device lease nor any distribution step.
 - `logs` keeps the console output as host-private evidence by reference; only
   its size enters the journal, since an app's own prints can carry the
   person's data and the journal reaches the provider. The agent's `logs` call
-  receives the text itself (its latest 32 KiB) as that call's answer, inside
+  receives the text itself (its latest 32 KiB, shortened further when its JSON escapes would push the answer
+  past the turn-event limit) as that call's answer, inside
   the lease whose confirmation said the thread may read the app's console, and
   its `screenshot` call receives the pixels as an image the same way. The host
   hands back a console read or a screenshot only to the thread, on the
