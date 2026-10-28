@@ -15,16 +15,12 @@ import type { CanvasMockupBlock, CanvasMockupNode } from "@octant/contracts/canv
  * deterministic, so the app's player and an export generate the same shape.
  */
 
-// Braces escape too: a browser reads `&#123;` as `{`, and the TSX handoff
-// shares this tree, where a bare brace would open a JavaScript expression.
 const escapeHtml = (value: string): string =>
   value
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("{", "&#123;")
-    .replaceAll("}", "&#125;");
+    .replaceAll('"', "&quot;");
 
 export interface CanvasMockupHtmlOptions {
   /** The variant to render; the block's single frame when omitted. */

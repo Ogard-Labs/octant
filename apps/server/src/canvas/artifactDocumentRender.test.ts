@@ -1382,11 +1382,38 @@ describe("a destination export near the approval card's limit", () => {
     expect(exported.body).toContain('class="oct-mockup-window"');
     expect(exported.body).toContain("disabled>Go</button>");
     expect(exported.body).not.toContain("<script");
+    // The page carries the generated stylesheet it is written against.
+    expect(exported.body).toContain(".oct-mockup-page {");
     // The Markdown form keeps the outline reading alone.
     const markdown = renderArtifactMarkdown(definition([mockup]));
     if (markdown.kind !== "rendered") throw new Error("expected a rendered document");
     expect(markdown.body).toContain("- Window, Search");
     expect(markdown.body).not.toContain("oct-mockup-window");
+  });
+
+  it("redacts secret-shaped text in a mockup's generated page, every variant included", () => {
+    const secret = "token sk-proj-abcdefghij0123456789";
+    const mockup = {
+      blockId: "screen",
+      schemaVersion: 24,
+      kind: "mockup",
+      device: "phone",
+      title: "Settings",
+      variants: [
+        { variantId: "empty", label: "Empty" },
+        { variantId: "filled", label: secret },
+      ],
+      nodes: [
+        { nodeId: "a", component: "window", label: "Empty", variantId: "empty" },
+        { nodeId: "b", component: "window", label: "Filled", variantId: "filled" },
+        { nodeId: "key", parentId: "b", component: "form-field", label: "Key", value: secret },
+      ],
+    } as unknown as CanvasBlock;
+    const exported = renderArtifactHtml(definition([mockup]));
+    if (exported.kind !== "rendered") throw new Error("expected a rendered document");
+    expect(exported.body).toContain('aria-label="Empty: Settings"');
+    expect(exported.body).toContain("[redacted]");
+    expect(exported.body).not.toContain("sk-proj-");
   });
 
   it("renders a flow as a script-free site whose transitions are real anchors", () => {

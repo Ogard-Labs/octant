@@ -51,7 +51,6 @@ export * from "./canvasNumberFormat";
 export * from "./canvasMockupExamples";
 export * from "./canvasMockupOutline";
 export * from "./canvasMockupHtml";
-export * from "./canvasMockupTsx";
 export * from "./canvasFlowSite";
 export * from "./canvasFlowLayout";
 export * from "./canvasDesignPolicy";

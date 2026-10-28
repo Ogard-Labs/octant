@@ -20,7 +20,7 @@ import {
   type CanvasFlowScreenSourceBlock,
 } from "@octant/domain/canvas-flow-layout";
 import { canvasFlowSite } from "@octant/domain/canvas-flow-site";
-import { canvasMockupHtml } from "@octant/domain/canvas-mockup-html";
+import { CANVAS_MOCKUP_HTML_STYLES, canvasMockupHtml } from "@octant/domain/canvas-mockup-html";
 import {
   treemapChildren,
   treemapRootId,
@@ -1169,22 +1169,30 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
  * variant's name when there are several), then the numbered callouts.
  */
 /**
- * A mockup as the HTML form draws it: each variant's semantic page, generated
- * from typed data by this host, then the outline reading the Markdown form
- * always writes. The TSX handoff (canvasMockupTsx) generates the same tree as
- * a dependency-free component.
+ * A mockup as the HTML form draws it: each variant's semantic page with the
+ * generated stylesheet, then the outline reading the Markdown form always
+ * writes. The pages are generated from the redacted block, so text the share
+ * filter would not let leave reads `[redacted]` here as in the outline.
  */
 function mockupPagePieces(
   block: Extract<CanvasBlock, { readonly kind: "mockup" }>,
 ): ReadonlyArray<Piece> {
-  const pages = canvasMockupFrames(block)
+  const readable = readableMockup(block);
+  const pages = canvasMockupFrames(readable)
     .map((frame) =>
-      canvasMockupHtml(block, {
+      canvasMockupHtml(readable, {
         ...(frame.key === "screen" ? {} : { variantId: frame.key }),
       }),
     )
     .join("");
-  return [{ kind: "site", markup: pages, writesDesignMarkup: false }, ...piecesFor(block)];
+  return [
+    {
+      kind: "site",
+      markup: `<style>${CANVAS_MOCKUP_HTML_STYLES.join("")}</style>${pages}`,
+      writesDesignMarkup: false,
+    },
+    ...piecesFor(block),
+  ];
 }
 
 function mockupPieces(
