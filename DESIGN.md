@@ -2046,7 +2046,11 @@ callbacks; the existing host or server still decides whether an action may
 proceed. Native Code approvals keep their isolated host-owned document. The
 extension tool request names the plugin, its server, and the tool, and adds
 "Always allow in this Project" only when the host marks the call rememberable
-and the window is a local one. Settings › Permissions lists those answers by
+and the window is a local one. A request the host marks as answerable only at
+its own windows shows on a paired device with no action row: its detail line
+says to answer it on the computer running Octant
+([Apple devices: remote clients](docs/design/apple-devices.md#remote-clients)).
+Settings › Permissions lists those answers by
 Project, each with Revoke, beside Remembered websites. A Browser request from a
 CLI in a Code thread's terminal names the origin and the thread and says a
 program in the terminal asked, not the thread's agent

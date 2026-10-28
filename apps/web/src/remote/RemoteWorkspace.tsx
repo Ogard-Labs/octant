@@ -234,6 +234,7 @@ function RemoteCodeSurface(props: RemoteSurfaceProps) {
       {activeThreadId === undefined ? null : (
         <CodeThreadWorkspace
           controller={controller}
+          pairedDevice
           threadId={activeThreadId}
           providerGroups={props.providerGroups}
         />

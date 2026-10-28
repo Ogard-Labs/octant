@@ -31,7 +31,10 @@ authenticated session with a per-request device proof. A paired browser can:
 It cannot bind or relink a project folder, approve tool use, remember Full
 access, manage provider credentials, or administer the listener and other
 devices; those stay with the person at the host, and the server refuses them
-for a remote principal regardless of what the browser shows. While the
+for a remote principal regardless of what the browser shows. A Code request
+that only the person at the host may answer, such as an agent asking to use a
+paired iPhone, shows without **Approve** or **Deny** and says to answer it on
+the computer running Octant. While the
 connection is stale the thread stays readable, the composer keeps its draft on
 the device, and sending is refused rather than queued.
 

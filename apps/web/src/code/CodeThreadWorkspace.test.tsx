@@ -2480,6 +2480,58 @@ describe("CodeThreadWorkspace", () => {
     });
   });
 
+  it("shows a paired device an approval only the host's own windows may answer, without answer controls", () => {
+    const providerRequests = [
+      {
+        kind: "approval" as const,
+        approvalId: "30000000-0000-4000-8000-000000000003" as never,
+        summary: "Let this thread use Henrik's iPhone?",
+        localPersonOnly: true as const,
+      },
+    ];
+    const { unmount } = render(
+      <CodeThreadWorkspace
+        controller={controller({ providerRequests })}
+        pairedDevice
+        threadId={threadId}
+      />,
+    );
+    const card = screen.getByRole("group", { name: "Provider approval" });
+    expect(card).toHaveTextContent("Let this thread use Henrik's iPhone?");
+    expect(card).toHaveTextContent("Answer this on the computer running Octant.");
+    expect(within(card).queryByRole("button")).not.toBeInTheDocument();
+    unmount();
+
+    // The same card at a window on that computer is answered as usual.
+    render(
+      <CodeThreadWorkspace controller={controller({ providerRequests })} threadId={threadId} />,
+    );
+    const local = screen.getByRole("group", { name: "Provider approval" });
+    expect(within(local).getByRole("button", { name: "Approve" })).toBeInTheDocument();
+    expect(local).not.toHaveTextContent("Answer this on the computer running Octant.");
+  });
+
+  it("lets a paired device answer an approval the host accepts from it", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          providerRequests: [
+            {
+              kind: "approval",
+              approvalId: "30000000-0000-4000-8000-000000000003" as never,
+              summary: "terminal: run bun test",
+            },
+          ],
+        })}
+        pairedDevice
+        threadId={threadId}
+      />,
+    );
+    const card = screen.getByRole("group", { name: "Provider approval" });
+    expect(within(card).getByRole("button", { name: "Approve" })).toBeInTheDocument();
+    expect(within(card).getByRole("button", { name: "Deny" })).toBeInTheDocument();
+  });
+
   it("keeps provider requests immediately above the composer", () => {
     render(
       <CodeThreadWorkspace
