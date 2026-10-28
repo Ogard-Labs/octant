@@ -95,6 +95,9 @@ function createRevisionRoute(
     readonly activeMode?: "chat" | "work";
     /** Handed the route's journal, for a test that reads what it recorded. */
     readonly journal?: (journal: Journal) => void;
+    readonly findPublishedSnapshot?: Parameters<
+      typeof createCanvasRouteHandler
+    >[0]["findPublishedSnapshot"];
   } = {},
 ) {
   const canvasProjectId = options.threadOwned === true ? null : projectId;
@@ -245,6 +248,9 @@ function createRevisionRoute(
     canvasProjection: projection,
     canvasService,
     designRunTickets: new CanvasDesignRunTickets(() => 1),
+    ...(options.findPublishedSnapshot === undefined
+      ? {}
+      : { findPublishedSnapshot: options.findPublishedSnapshot }),
     canvasShareService,
     canvasExportFolderService,
     resolveFolderCandidate: async (_windowId, input) => {
@@ -1534,6 +1540,61 @@ describe("canvas routes", () => {
       const served = await page!.text();
       expect(served).toContain("function add()");
       expect(served).not.toContain("cdn.tailwindcss.com");
+    });
+
+    it("runs a thread's published page only from the host's own snapshot, under the design page's rules", async () => {
+      const asked: unknown[] = [];
+      const snapshots: Record<string, { format: "html" | "markdown"; content: string }> = {
+        "tool-script": {
+          format: "html",
+          content: '<button onclick="add()">Add</button><script>function add() {}</script>',
+        },
+        "tool-static": { format: "html", content: "<h1>Plain</h1>" },
+        "tool-notes": { format: "markdown", content: "# Notes" },
+      };
+      const route = createRevisionRoute(new CanvasProjection(), {
+        findPublishedSnapshot: async (_windowId, request) => {
+          asked.push(request);
+          return snapshots[request.toolCallId];
+        },
+      });
+      const threadId = "abababab-abab-4bab-8bab-000000000901";
+      const run = async (toolCallId: string) =>
+        JSON.parse(
+          await (
+            await post(route, "/api/canvas/published-snapshot-run", {
+              mode: "work",
+              threadId,
+              toolCallId,
+            })
+          ).text(),
+        );
+      const ready = await run("tool-script");
+      expect(ready.kind).toBe("ready");
+      expect(asked[0]).toEqual({ mode: "work", threadId, toolCallId: "tool-script" });
+      const page = await route(
+        new Request(`http://127.0.0.1${ready.page as string}`, {
+          method: "GET",
+          headers: { "sec-fetch-dest": "iframe" },
+        }),
+      );
+      expect(page?.status).toBe(200);
+      const policy = page?.headers.get("content-security-policy") ?? "";
+      expect(policy.startsWith("sandbox allow-scripts; ")).toBe(true);
+      expect(policy).toContain("connect-src 'none'");
+      expect(await page!.text()).toContain("function add()");
+
+      for (const toolCallId of ["tool-static", "tool-notes", "tool-missing"]) {
+        expect((await run(toolCallId)).kind).toBe("unavailable");
+      }
+      // The request names a step; it never carries the page.
+      const forged = await post(route, "/api/canvas/published-snapshot-run", {
+        mode: "work",
+        threadId,
+        toolCallId: "tool-script",
+        html: "<script>steal()</script>",
+      });
+      expect(forged.status).toBe(400);
     });
 
     it("lands a page with no script as a static design that cannot be run", async () => {

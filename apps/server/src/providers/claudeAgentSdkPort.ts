@@ -10,6 +10,7 @@ import type {
   ProviderExecutionPolicy,
   ProviderFailure,
   ProviderToolDefinition,
+  ThreadPublishedSnapshot,
 } from "@octant/contracts";
 import { withClaudeAccountDirectory } from "./claudeAccountDirectory";
 import { createManagedMcpTools, type ManagedToolAnswer } from "./managedMcpTools";
@@ -275,6 +276,17 @@ export type ClaudeDecodedMessage =
       readonly results: readonly {
         readonly toolUseId: string;
         readonly isError: boolean;
+        /**
+         * The claude.ai page the tool's structured result names, read only
+         * from a message that settles one call. The mapper keeps it only for
+         * an Artifact call.
+         */
+        readonly publishedPage?: {
+          readonly url: string;
+          readonly title?: string;
+          /** Attached by the driver from the file the person approved publishing. */
+          readonly snapshot?: ThreadPublishedSnapshot;
+        };
       }[];
     }
   | {

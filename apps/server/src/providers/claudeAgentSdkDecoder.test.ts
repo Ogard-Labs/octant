@@ -344,3 +344,55 @@ describe("Interruption", () => {
     ).toThrow();
   });
 });
+
+describe("A published Claude artifact", () => {
+  const active = { kind: "active", sessionId: "session-1" } as const;
+  const settled = (toolUseResult: unknown, isError = false) => ({
+    type: "user",
+    message: {
+      role: "user",
+      content: [{ type: "tool_result", tool_use_id: "toolu-1", is_error: isError, content: "ok" }],
+    },
+    parent_tool_use_id: null,
+    session_id: "session-1",
+    tool_use_result: toolUseResult,
+  });
+
+  it("carries the claude.ai address and title the publish returned", () => {
+    expect(
+      decodeMessage(
+        settled({
+          url: "https://claude.ai/artifact/abc123",
+          path: "/repo/report.html",
+          title: "  Quarterly\nreport ",
+        }),
+        openInput,
+        active,
+      ),
+    ).toEqual({
+      kind: "tool-results",
+      sessionId: "session-1",
+      results: [
+        {
+          toolUseId: "toolu-1",
+          isError: false,
+          publishedPage: { url: "https://claude.ai/artifact/abc123", title: "Quarterly report" },
+        },
+      ],
+    });
+  });
+
+  it("names no page for another host, plain http, a failed call, or no address", () => {
+    for (const message of [
+      settled({ url: "https://claude.ai.example.com/artifact/abc" }),
+      settled({ url: "http://claude.ai/artifact/abc" }),
+      settled({ url: "https://user:secret@claude.ai/artifact/abc" }),
+      settled({ url: "https://claude.ai/artifact/abc" }, true),
+      settled({ artifacts: [] }),
+    ]) {
+      const decoded = decodeMessage(message, openInput, active);
+      expect(decoded).toMatchObject({ results: [{ toolUseId: "toolu-1" }] });
+      expect(JSON.stringify(decoded)).not.toContain("publishedPage");
+    }
+  });
+});

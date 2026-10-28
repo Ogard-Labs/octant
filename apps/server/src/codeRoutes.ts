@@ -1,5 +1,9 @@
 import type { CodeOperationExecuteOptions } from "./code/codeOperationService";
 import {
+  NATIVE_ARTIFACTS_LOCAL_ONLY,
+  refusesThreadDocumentDelivery,
+} from "./threadDocumentDeliveryAuthority";
+import {
   decodeGitHistoryQuery,
   decodeGitHistoryResult,
   type GitHistoryQuery,
@@ -594,6 +598,16 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             command = decodeCodeCommand(value);
           } catch {
             // The authenticated command endpoint also carries strict Code operations.
+          }
+          if (
+            command?.kind === "change-code-thread-document-delivery" &&
+            refusesThreadDocumentDelivery(request, command.documentDelivery)
+          ) {
+            return failureResponse(
+              { category: "unauthorized", message: NATIVE_ARTIFACTS_LOCAL_ONLY },
+              403,
+              origin,
+            );
           }
           if (command !== undefined) {
             return jsonResponse(

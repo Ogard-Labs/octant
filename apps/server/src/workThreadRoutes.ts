@@ -14,6 +14,10 @@ import {
   type WorkThreadFailure,
   type WindowId,
 } from "@octant/contracts";
+import {
+  NATIVE_ARTIFACTS_LOCAL_ONLY,
+  refusesThreadDocumentDelivery,
+} from "./threadDocumentDeliveryAuthority";
 import { Schema } from "effect";
 import { authenticateRouteWindowId } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
@@ -169,6 +173,16 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
         );
       }
       const command = decodeWorkThreadCommand(value);
+      if (
+        command.kind === "change-work-thread-document-delivery" &&
+        refusesThreadDocumentDelivery(request, command.documentDelivery)
+      ) {
+        return failureResponse(
+          { category: "unauthorized", message: NATIVE_ARTIFACTS_LOCAL_ONLY },
+          403,
+          origin,
+        );
+      }
       return jsonResponse(
         decodeWorkThreadCommandResult(
           await dependencies.service.execute(authenticatedWindowId, command),

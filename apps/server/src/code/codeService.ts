@@ -1644,6 +1644,15 @@ export class CodeService {
       }
       if (command.kind === "create-code-thread") {
         await this.#authorizeThread(authenticatedWindowId, command.thread);
+        // Choosing Claude artifacts turns on the runtime's telemetry, so only
+        // the change command, which a paired device cannot send with it, may
+        // make that choice; a create carrying it would skip that refusal.
+        if (command.thread.documentDelivery === "native-artifacts") {
+          throw this.#failure(
+            "unauthorized",
+            "A new Code thread starts with Canvas; choose Claude artifacts for it afterwards.",
+          );
+        }
         if (this.#persistence.readCodeThread(command.thread.id) !== undefined) {
           throw this.#failure("conflict", "Code thread already exists.");
         }
@@ -2021,6 +2030,17 @@ export class CodeService {
           );
         }
       }
+      // The choice takes effect when the next turn launches its provider; a
+      // running turn keeps the launch it started with.
+      if (
+        command.kind === "change-code-thread-document-delivery" &&
+        current.lifecycle === "archived"
+      ) {
+        throw this.#failure(
+          "invalid",
+          "An archived Code thread cannot change how it delivers documents.",
+        );
+      }
       if (command.kind === "propose-code-delivery-outcome") {
         // An agent proposal is advisory: it records a pending proposal but must
         // never redefine or lower the confirmed outcome. A no-op proposal has
@@ -2207,12 +2227,19 @@ export class CodeService {
                                 version: command.expectedVersion + 1,
                                 updatedAt,
                               }
-                            : {
-                                ...current,
-                                workingDirectory: command.workingDirectory,
-                                version: command.expectedVersion + 1,
-                                updatedAt,
-                              },
+                            : command.kind === "change-code-thread-document-delivery"
+                              ? {
+                                  ...current,
+                                  documentDelivery: command.documentDelivery,
+                                  version: command.expectedVersion + 1,
+                                  updatedAt,
+                                }
+                              : {
+                                  ...current,
+                                  workingDirectory: command.workingDirectory,
+                                  version: command.expectedVersion + 1,
+                                  updatedAt,
+                                },
       );
       const next =
         command.kind === "change-code-thread-access" &&

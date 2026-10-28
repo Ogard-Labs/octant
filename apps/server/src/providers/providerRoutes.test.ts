@@ -120,6 +120,48 @@ describe("ProviderRoutes", () => {
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
+  it("refuses a paired device turning on Claude artifacts before the service runs", async () => {
+    const execute = vi.fn(() => ({ kind: "provider-updated", instance: provider() }));
+    const route = routeFixture({ execute });
+    const body = JSON.stringify({
+      kind: "set-claude-artifact-delivery",
+      instanceId,
+      expectedVersion: 1,
+      enabled: true,
+    });
+    const remote = new Request("http://127.0.0.1/api/providers/commands", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+    });
+    const pairedDeviceId = "80000000-0000-4000-8000-000000000040";
+    bindPrincipalRouteContext(remote, {
+      principal: {
+        kind: "remote-device",
+        hostId: "local",
+        deviceId: pairedDeviceId,
+        credentialGeneration: 1,
+        origin: "https://remote.example",
+        protocolVersion: 1,
+        capabilityDigest: "a".repeat(64),
+        sessionId: "80000000-0000-4000-8000-000000000041",
+      } as never,
+      scopeId: pairedDeviceId as never,
+    });
+    expect((await route(remote))?.status).toBe(401);
+    expect(execute).not.toHaveBeenCalled();
+
+    const local = await route(
+      new Request("http://127.0.0.1/api/providers/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": capability },
+        body,
+      }),
+    );
+    expect(local?.status).toBe(200);
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
   it("enforces loopback, origin, capability, query, and method policy", async () => {
     const route = routeFixture({});
     const headers = { "x-octant-window-capability": capability };

@@ -264,6 +264,33 @@ describe("WorkTurnService", () => {
     }
   });
 
+  it("offers the runtime's artifact tool only to a thread that chose it, and keeps Canvas for the rest", async () => {
+    const seen: Array<{ readonly nativeArtifacts: boolean; readonly context: string }> = [];
+    for (const documentDelivery of [undefined, "canvas", "native-artifacts"] as const) {
+      const fixture = serviceFixture({
+        ...(documentDelivery === undefined ? {} : { documentDelivery }),
+        resolveDriver: (_id, fallback) => ({ ...fallback, nativeArtifactTool: () => "Artifact" }),
+        turnRuntime: {
+          run: async (input) => {
+            seen.push({
+              nativeArtifacts: input.nativeArtifacts === true,
+              context: JSON.stringify(input.context ?? []),
+            });
+            return { kind: "completed", response: "Done" };
+          },
+        },
+      });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await fixture.waitForIdle();
+    }
+    expect(seen.map((turn) => turn.nativeArtifacts)).toEqual([false, false, true]);
+    expect(seen.map((turn) => turn.context.includes("publish that file with Artifact"))).toEqual([
+      false,
+      false,
+      true,
+    ]);
+  });
+
   it("does not announce a host-dispatched limit recovery as a person's turn request", async () => {
     const onTurnRequested = vi.fn();
     const fixture = serviceFixture({ onTurnRequested });
@@ -2812,6 +2839,58 @@ describe("WorkTurnService", () => {
     controller.abort();
   });
 
+  it("streams a published page's link live and keeps its snapshot for the settled turn", async () => {
+    const gate = deferred<void>();
+    const published = {
+      url: "https://claude.ai/artifact/0f1e2d3c",
+      title: "Notes",
+      snapshot: { format: "markdown" as const, content: "# Notes" },
+    };
+    const publish = {
+      toolCallId: "call-1",
+      toolName: "Artifact",
+      state: "completed" as const,
+      published,
+    };
+    const fixture = serviceFixture({
+      turnRuntime: {
+        run: async (input) => {
+          input.onToolSteps?.({ truncated: false, steps: [publish] });
+          input.onToolSteps?.({
+            truncated: false,
+            steps: [publish, { toolCallId: "call-2", toolName: "Read", state: "started" }],
+          });
+          await gate.promise;
+          return { kind: "completed", response: "Published" };
+        },
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    const controller = new AbortController();
+    const stream = fixture.service.subscribe(ids.window, ids.thread, 0, controller.signal);
+    const live: unknown[] = [];
+    for (;;) {
+      const frame = (await stream.next()).value as {
+        readonly kind: string;
+        readonly toolSteps?: unknown;
+      };
+      if (frame.kind !== "turn-tools") continue;
+      live.push(frame.toolSteps);
+      if (live.length === 2) break;
+    }
+    // Every step change restates the whole list, so a snapshot carried live
+    // would be resent, and held in the feed, once per later tool event.
+    expect(JSON.stringify(live)).not.toContain("# Notes");
+    expect(JSON.stringify(live)).toContain(published.url);
+    const running = (await fixture.service.transcript(ids.window, ids.thread)).turns.at(-1);
+    expect(JSON.stringify(running?.toolSteps)).not.toContain("# Notes");
+    gate.resolve();
+    await fixture.waitForIdle();
+    const settledTurn = (await fixture.service.transcript(ids.window, ids.thread)).turns.at(-1);
+    expect(settledTurn?.toolSteps?.[0]?.published).toEqual(published);
+    controller.abort();
+  });
+
   it.each([true, false])(
     "keeps native Work follow-ups without replay when the provider repeats its cursor: %s",
     async (repeatsCursor) => {
@@ -3685,6 +3764,7 @@ function serviceFixture(
     readonly turnFileObserver?: WorkTurnServiceDependencies["turnFileObserver"];
     readonly readProviderModel?: WorkTurnServiceDependencies["persistence"]["readProviderModel"];
     readonly threadAccess?: "ask-first" | "auto-accept-edits";
+    readonly documentDelivery?: "canvas" | "native-artifacts";
     readonly onTurnRequested?: WorkTurnServiceDependencies["onTurnRequested"];
     readonly agentRuns?: WorkTurnServiceDependencies["agentRuns"];
     readonly runningAccess?: RunningWorkTurnAccess;
@@ -3808,6 +3888,9 @@ function serviceFixture(
         workingDirectory: ".",
         ...(options.threadAccess === undefined ? {} : { access: options.threadAccess }),
         ...(options.completionConfirmed?.() === true ? { completionConfirmed: true } : {}),
+        ...(options.documentDelivery === undefined
+          ? {}
+          : { documentDelivery: options.documentDelivery }),
         version: 1,
         createdAt: now,
         updatedAt: now,

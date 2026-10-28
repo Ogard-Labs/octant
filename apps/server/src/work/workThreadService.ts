@@ -677,6 +677,29 @@ export class WorkThreadService {
         this.#projection.apply({ kind: "thread-updated", thread: updated });
         return { kind: "thread-updated", thread: updated };
       }
+      if (command.kind === "change-work-thread-document-delivery") {
+        if (current.lifecycle !== "active") {
+          throw this.#failure(
+            "invalid",
+            "Only an active Work thread can change how it delivers documents.",
+          );
+        }
+        // The choice takes effect when the next turn launches its provider:
+        // the turn reads it from the thread, so a running turn keeps the
+        // launch it started with and the next one carries the new choice.
+        const updated = decodeWorkThread({
+          ...current,
+          documentDelivery: command.documentDelivery,
+          version: command.expectedVersion + 1,
+          updatedAt: decodeTimestamp(this.#clock()),
+        });
+        this.#append(current.id, command.expectedVersion, "work.thread-updated@1", {
+          kind: "thread-updated",
+          thread: updated,
+        });
+        this.#projection.apply({ kind: "thread-updated", thread: updated });
+        return { kind: "thread-updated", thread: updated };
+      }
       if (command.kind === "change-work-thread-provider") {
         await this.#requireProviderModel(
           command.providerInstanceId,

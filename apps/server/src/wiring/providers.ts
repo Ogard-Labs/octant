@@ -350,6 +350,16 @@ export function makeConfiguredProviderDriver(
       ...(options.claudeInstances === undefined
         ? {}
         : { claudeInstances: options.claudeInstances }),
+      // `claudeInstances` is a getter over the journal on the host's options;
+      // reading it here at every call keeps a running session on the
+      // person's current switch.
+      claudeArtifactDelivery: (instanceId) =>
+        options.claudeInstances?.some(
+          (candidate) =>
+            String(candidate.id) === String(instanceId) &&
+            candidate.driverKind === "claude" &&
+            candidate.configuration.artifactDelivery === true,
+        ) === true,
       ...(options.codexInstances === undefined ? {} : { codexInstances: options.codexInstances }),
       ...(options.credentialResolver === undefined
         ? {}
@@ -1318,7 +1328,9 @@ export function wireProviders(deps: ProvidersDependencies) {
             claudeSdk,
             claudeResumeIdentityPort: claudeResumeIdentityStore,
             isProjectConfinedPath,
-            claudeInstances: persistence.readProviderInstances(),
+            get claudeInstances() {
+              return persistence.readProviderInstances();
+            },
             codexInstances: persistence.readProviderInstances(),
             runtimeRegistry: providerRuntimeRegistry,
             permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,

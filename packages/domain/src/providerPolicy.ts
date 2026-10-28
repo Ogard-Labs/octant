@@ -1824,9 +1824,40 @@ export function changeClaudeConfiguration(
   ) {
     reject("active-sessions", "Stop active sessions before reconfiguring this provider.");
   }
+  const normalized = normalizeClaudeConfiguration(configuration);
+  // Artifact delivery is the person's own switch, never part of an account
+  // edit. It holds only for a claude.ai sign-in: an API key has no claude.ai
+  // account to publish to, so moving to one turns it off.
+  const keepsArtifactDelivery =
+    current.configuration.artifactDelivery === true && normalized.authentication === "subscription";
   return {
     ...current,
-    configuration: normalizeClaudeConfiguration(configuration),
+    configuration: keepsArtifactDelivery ? { ...normalized, artifactDelivery: true } : normalized,
+    version: nextVersion(current.version),
+    updatedAt: input.updatedAt,
+  };
+}
+
+/**
+ * Turns delivering documents as Claude artifacts on or off. Turning it on
+ * needs a claude.ai sign-in, the only account Claude's Artifact tool can
+ * publish to. It changes no process input, so a running session is kept: the
+ * driver reads the switch again at every Artifact call.
+ */
+export function setClaudeArtifactDelivery(
+  current: ClaudeProviderInstance,
+  input: { readonly enabled: boolean; readonly updatedAt: UtcTimestamp },
+): ClaudeProviderInstance {
+  if (input.enabled && current.configuration.authentication !== "subscription") {
+    reject(
+      "invalid-authentication",
+      "Claude artifacts need a claude.ai sign-in; an API-key account cannot publish them.",
+    );
+  }
+  const { artifactDelivery: _previous, ...rest } = current.configuration;
+  return {
+    ...current,
+    configuration: input.enabled ? { ...rest, artifactDelivery: true } : rest,
     version: nextVersion(current.version),
     updatedAt: input.updatedAt,
   };
