@@ -49,6 +49,15 @@ export function wireHarnessState(deps: HarnessStateDependencies) {
     uuid: randomUUID,
     actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
     clock: () => new Date().toISOString(),
+    // Read once, while the store replays at start-up: restart reconciliation
+    // has already marked the thread's remote turn interrupted.
+    runsOnSshTarget: (threadId) => {
+      const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+      return (
+        thread !== undefined &&
+        persistence.readCodeCheckout(thread.checkoutId)?.kind === "remote-root"
+      );
+    },
   });
   const nativeHarnessQuestions = new NativeHarnessQuestionStore({
     sessions: nativeHarnessSessions,

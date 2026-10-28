@@ -500,6 +500,7 @@ describe("session compaction on request", () => {
   const available: SessionCompactionFacts = {
     principal: "local-window",
     modeEnabled: true,
+    runsOnSshTarget: false,
     owner: "host",
     runtimeCompaction: "unsupported",
     turnAdmission: "admitted",
@@ -516,6 +517,7 @@ describe("session compaction on request", () => {
     const cases: ReadonlyArray<readonly [Partial<SessionCompactionFacts>, string]> = [
       [{ principal: "remote-device", modeEnabled: false }, "remote-client"],
       [{ modeEnabled: false, owner: "runtime" }, "mode-disabled"],
+      [{ runsOnSshTarget: true, owner: "runtime" }, "runs-on-ssh-target"],
       [{ owner: "runtime", turnRunning: true }, "runtime-cannot-compact"],
       [{ owner: "runtime", runtimeCompaction: "unavailable" }, "runtime-version-unsupported"],
       [{ turnAdmission: "project-unavailable", hasSession: false }, "project-unavailable"],
