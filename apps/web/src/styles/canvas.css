@@ -2320,7 +2320,6 @@
 
 .canvas-flow-board__design-frame {
   position: relative;
-  aspect-ratio: var(--oct-flow-screen-ratio, 16 / 10);
   border: 1px solid var(--oct-border);
   background: var(--oct-surface);
 }
