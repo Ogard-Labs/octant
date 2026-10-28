@@ -62,18 +62,50 @@ function listed(approved: boolean, adapters: ReadonlyArray<unknown> = [fixtureAd
  * A host with one session: it stops at the breakpoint on line 3, steps to
  * line 5, and ends when stopped. Only the shapes the host answers in.
  */
-function fakeHost(options: { readonly start?: unknown } = {}) {
+function fakeHost(options: { readonly start?: unknown; readonly children?: boolean } = {}) {
   let approved = false;
   let line = 3;
   let revision = 1;
   let ended = false;
+  // With children: one child process, paused at line 9 until the person stops it.
+  let childRunning = options.children === true;
   const answer = (value: unknown) => decodeCodeDebugSessionResult(value);
   const session = vi.fn(async (call: CodeDebugSessionCall): Promise<CodeDebugSessionResult> => {
     const request = call.request;
     if (ended) return answer({ status: "ended", endReason: "stopped" });
+    const children =
+      options.children === true
+        ? {
+            children: childRunning
+              ? [{ child: 1, name: "Subprocess 4242", status: "stopped" }]
+              : [],
+            undebuggedChildren: 1,
+          }
+        : {};
+    if (call.child !== undefined) {
+      if (!childRunning) return answer({ status: "refused", reason: "no-session" });
+      if (request.kind === "stop") {
+        childRunning = false;
+        return answer({ status: "ended", endReason: "stopped" });
+      }
+      if (request.kind === "stack-trace") {
+        return answer({
+          status: "stack",
+          frames: [
+            {
+              id: 1,
+              name: "worker",
+              location: { kind: "checkout", path: "src/main.js", line: 9, column: 1 },
+            },
+          ],
+          truncated: false,
+        });
+      }
+    }
     switch (request.kind) {
       case "state":
         return answer({
+          ...children,
           status: "state",
           state: {
             status: "stopped",
@@ -472,5 +504,39 @@ describe("Run and debug panel", () => {
       }),
       scope: "project",
     });
+  });
+
+  it("lists the session's child processes, shows a child's stop when it is selected, and goes back to the program when the child is stopped", async () => {
+    const user = userEvent.setup();
+    const store = new CodeDebugWindowState();
+    const { client, session } = fakeHost({ children: true });
+    vi.mocked(client.configurations).mockResolvedValue(listed(true));
+    render(
+      <RunDebugPanel
+        checkoutId={checkoutId}
+        client={client}
+        pollMs={fast}
+        store={store}
+        threadId={threadId}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Start Run the fixture" }));
+    expect(await screen.findByText("src/main.js:3")).toBeVisible();
+    const processes = screen.getByRole("region", { name: "Processes" });
+    expect(within(processes).getByText("One child process ran undebugged.")).toBeVisible();
+
+    await user.click(await within(processes).findByRole("button", { name: /Subprocess 4242/ }));
+    expect(await screen.findByText("src/main.js:9")).toBeVisible();
+    await waitFor(() => expect(store.read(key).stopped).toEqual({ path: "src/main.js", line: 9 }));
+    expect(
+      session.mock.calls.some(([call]) => call.child === 1 && call.request.kind === "stack-trace"),
+    ).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: "Stop child process" }));
+    // The session goes on: the program's stop is shown again, and the child is gone.
+    expect(await screen.findByText("src/main.js:3")).toBeVisible();
+    expect(within(processes).queryByRole("button", { name: /Subprocess 4242/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Stop" })).toBeVisible();
+    expect(screen.queryByText("You stopped the session.")).toBeNull();
   });
 });

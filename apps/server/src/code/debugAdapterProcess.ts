@@ -34,7 +34,8 @@ import type {
  * egress proxy below Full access and the open network under it; a host with
  * no proxy refuses the session rather than running it open or with none. The
  * environment is built from nothing: no provider key, token, broker
- * credential, or `OCTANT_*` value reaches the capsule. The capsule's process
+ * credential, or `OCTANT_*` value reaches the capsule, beside the two child
+ * ports the host chose for a session that declares children. The capsule's process
  * group is recorded before the adapter is used, so a restarted host reaps it.
  */
 
@@ -66,11 +67,32 @@ export interface DebugAdapterLaunchInput {
    * loopback inside it, so no port is opened.
    */
   readonly debugPort?: number;
+  /**
+   * The two host-chosen ports of an adapter that declares children: `child`,
+   * where the adapter listens for a child's connection, and `childServer`,
+   * where it listens for the child process itself. Both reach the capsule as
+   * `OCTANT_DEBUG_CHILD_PORT` and `OCTANT_DEBUG_CHILD_SERVER_PORT`; on macOS
+   * the profile opens both on `localhost`, and on Linux under `proxied` the
+   * child port is relayed through a socket in the session's state folder.
+   */
+  readonly childPorts?: { readonly child: number; readonly childServer: number };
 }
+
+/**
+ * Where the host opens a child connection: the child port on loopback (macOS,
+ * and Linux under Full access, where the capsule shares the host's network),
+ * or the relay's socket in the state folder (Linux under `proxied`, whose
+ * private namespace hides its loopback from the host).
+ */
+export type DebugChildEndpoint =
+  | { readonly kind: "loopback"; readonly port: number }
+  | { readonly kind: "unix-socket"; readonly path: string };
 
 export interface DebugAdapterProcess {
   readonly stdin: Writable;
   readonly stdout: Readable;
+  /** Present when the session declared children. */
+  readonly childEndpoint?: DebugChildEndpoint;
   /** Settles once the capsule's leader has exited, however it ended. */
   readonly exited: Promise<void>;
   /** Ends the capsule's process group, closes its egress, and removes its state and receipt. */
@@ -163,7 +185,30 @@ export class DebugAdapterProcessPort {
     };
     const networkEgress: OsNetworkEgress =
       proxy === undefined ? "allow" : { kind: "proxied", endpoint: proxy.endpoint };
-    const debugPort = this.#platform === "darwin" ? input.debugPort : undefined;
+    const darwin = this.#platform === "darwin";
+    const debugPort = darwin ? input.debugPort : undefined;
+    const childPorts = input.childPorts;
+    const relaySocket =
+      childPorts !== undefined && !darwin && proxy !== undefined
+        ? join(stateDirectory, "child.sock")
+        : undefined;
+    const childEndpoint: DebugChildEndpoint | undefined =
+      childPorts === undefined
+        ? undefined
+        : relaySocket === undefined
+          ? { kind: "loopback", port: childPorts.child }
+          : { kind: "unix-socket", path: relaySocket };
+    const loopbackRules = darwin
+      ? [
+          ...(debugPort === undefined ? [] : debugPortSeatbeltRules(debugPort)),
+          ...(childPorts === undefined
+            ? []
+            : [
+                ...debugPortSeatbeltRules(childPorts.child),
+                ...debugPortSeatbeltRules(childPorts.childServer),
+              ]),
+        ]
+      : [];
 
     let launch: ConfinedProcessLaunch;
     try {
@@ -183,7 +228,10 @@ export class DebugAdapterProcessPort {
         additionalDenyReadPaths: [input.stateRoot],
         additionalDenyWritePaths: [input.stateRoot],
         isolatedRoots: [input.stateRoot],
-        ...(debugPort === undefined ? {} : { extraRules: debugPortSeatbeltRules(debugPort) }),
+        ...(loopbackRules.length === 0 ? {} : { extraRules: loopbackRules }),
+        ...(relaySocket === undefined || childPorts === undefined
+          ? {}
+          : { inboundRelay: { socketPath: relaySocket, port: childPorts.child } }),
       });
     } catch (error) {
       await closeNetwork();
@@ -201,6 +249,7 @@ export class DebugAdapterProcessPort {
           temporaryDirectory,
           configured: input.environment,
           proxy,
+          childPorts,
         }),
       });
     } catch {
@@ -267,6 +316,7 @@ export class DebugAdapterProcessPort {
       process: {
         stdin,
         stdout,
+        ...(childEndpoint === undefined ? {} : { childEndpoint }),
         exited,
         kill: async () => {
           await stopGroup(pid, exited);
@@ -290,8 +340,9 @@ export class DebugAdapterProcessPort {
 /**
  * The capsule's environment. The configuration's entries come first, so the
  * person may set `PATH` or the locale for their program; the state folder
- * and the proxy variables are the host's and come last, so no entry moves
- * the session's writes or its network. The configuration schema already
+ * the proxy variables, and the child ports are the host's and come last, so
+ * no entry moves the session's writes, its network, or where a child's
+ * connection is accepted. The configuration schema already
  * refuses `OCTANT_*` names and the credential names the host keeps from
  * children.
  */
@@ -300,6 +351,7 @@ function sessionEnvironment(input: {
   readonly temporaryDirectory: string;
   readonly configured: ReadonlyArray<{ readonly key: string; readonly value: string }>;
   readonly proxy: Extract<DebugSessionEgressStart, { status: "listening" }> | undefined;
+  readonly childPorts: DebugAdapterLaunchInput["childPorts"];
 }): NodeJS.ProcessEnv {
   const environment: Record<string, string> = {
     PATH: MINIMAL_PATH,
@@ -308,6 +360,10 @@ function sessionEnvironment(input: {
   for (const entry of input.configured) environment[entry.key] = entry.value;
   environment.HOME = input.stateDirectory;
   environment.TMPDIR = input.temporaryDirectory;
+  if (input.childPorts !== undefined) {
+    environment.OCTANT_DEBUG_CHILD_PORT = String(input.childPorts.child);
+    environment.OCTANT_DEBUG_CHILD_SERVER_PORT = String(input.childPorts.childServer);
+  }
   if (input.proxy !== undefined) {
     Object.assign(environment, proxiedLaunchEnvironment(input.proxy.endpoint, input.proxy.token));
   }
@@ -317,8 +373,11 @@ function sessionEnvironment(input: {
 /**
  * Seatbelt's `none` and `proxied` deny loopback, so an adapter that declares
  * a debug port gets this one port on `localhost` to bind, accept on, and
- * connect to, and nothing else there (decision DB6). Not yet measured on a
- * Mac; the macOS confined-program smoke records whether it is enough.
+ * connect to, and nothing else there (decision DB6); one that declares
+ * children gets its two child ports on the same terms (DB9). Measured with
+ * debugpy 1.8.22 under `sandbox-exec` on macOS on 2026-10-28: a child stopped
+ * at its breakpoint with its two ports opened this way, and never connected
+ * back with its server port left closed.
  */
 function debugPortSeatbeltRules(port: number): ReadonlyArray<string> {
   const address = `localhost:${String(port)}`;

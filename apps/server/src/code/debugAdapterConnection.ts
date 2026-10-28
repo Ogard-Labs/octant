@@ -1,4 +1,5 @@
 import type { Readable, Writable } from "node:stream";
+import type { ExtensionDebugChildAnnouncement } from "@octant/contracts";
 import { contentLength, frameHeader } from "./languageServerConnection";
 
 /**
@@ -7,21 +8,31 @@ import { contentLength, frameHeader } from "./languageServerConnection";
  * Canonical: docs/design/language-services.md § Protocol.
  *
  * Everything protocol-shaped stops here. Octant sends only the requests on
- * its closed list. An adapter's own request (`runInTerminal`,
+ * its closed list: `launch` only on the session's own connection, `attach`
+ * only on a child's. An adapter's own request (`runInTerminal`,
  * `startDebugging`, or anything else) is answered with a failure and has no
  * effect, and only the accepted events reach the session; `telemetry` output
- * and every other event are dropped. A frame over the cap, or one that is
- * not a frame, ends the connection and its owner ends the session.
+ * and every other event are dropped. The one exception is the child
+ * announcement an adapter declared (§ Child processes): on the session's own
+ * connection, that `startDebugging` request or that event is handed to the
+ * session, which decides whether a child connection follows. A frame over the
+ * cap, or one that is not a frame, ends the connection and its owner ends the
+ * session.
  */
 
 /** The largest frame either side may send, body bytes. */
 export const DEBUG_ADAPTER_FRAME_CAP_BYTES = 4 * 1024 * 1024;
 const MAX_HEADER_BYTES = 8 * 1024;
 
-/** What Octant sends: the closed list. `attach`, `restart`, memory and reverse requests are not on it. */
+/**
+ * What Octant sends: the closed list. `restart`, memory and reverse requests
+ * are not on it; `attach` is sent only on a child connection, in place of
+ * `launch`.
+ */
 export type DebugAdapterRequestCommand =
   | "initialize"
   | "launch"
+  | "attach"
   | "configurationDone"
   | "setBreakpoints"
   | "setExceptionBreakpoints"
@@ -44,6 +55,7 @@ export type DebugAdapterRequestCommand =
 const REQUEST_COMMANDS: ReadonlySet<string> = new Set<DebugAdapterRequestCommand>([
   "initialize",
   "launch",
+  "attach",
   "configurationDone",
   "setBreakpoints",
   "setExceptionBreakpoints",
@@ -107,7 +119,15 @@ export type DebugAdapterResponse =
 
 export type DebugAdapterViolation = "oversize-frame" | "malformed-frame";
 
+/**
+ * Which connection this is: the session's own, on the capsule's stdio, which
+ * `launch`es the program; or a child's, which `attach`es once to a process
+ * the adapter announced.
+ */
+export type DebugAdapterConnectionRole = "session" | "child";
+
 export interface DebugAdapterConnectionOptions {
+  readonly role?: DebugAdapterConnectionRole;
   /** The capsule's stdout. */
   readonly input: Readable;
   /** The capsule's stdin. */
@@ -118,6 +138,14 @@ export interface DebugAdapterConnectionOptions {
   readonly onEvent: (event: DebugAdapterEvent, body: unknown) => void;
   /** An adapter's own request, after it was refused; the session counts what it asked. */
   readonly onRefusedRequest?: (command: string) => void;
+  /** How the adapter declared it announces a child; absent when it declared none. */
+  readonly childAnnouncement?: ExtensionDebugChildAnnouncement;
+  /**
+   * A declared child announcement on the session's own connection, with the
+   * configuration it carries, unparsed. The session answers whether it takes
+   * the child; a `startDebugging` request is answered with that.
+   */
+  readonly onChildAnnounced?: (configuration: unknown) => "accepted" | "refused";
 }
 
 interface PendingRequest {
@@ -131,6 +159,9 @@ export class DebugAdapterConnection {
   readonly #onViolation: DebugAdapterConnectionOptions["onViolation"];
   readonly #onEvent: DebugAdapterConnectionOptions["onEvent"];
   readonly #onRefusedRequest: DebugAdapterConnectionOptions["onRefusedRequest"];
+  readonly #role: DebugAdapterConnectionRole;
+  readonly #childAnnouncement: ExtensionDebugChildAnnouncement | undefined;
+  readonly #onChildAnnounced: DebugAdapterConnectionOptions["onChildAnnounced"];
   readonly #pending = new Map<number, PendingRequest>();
   #buffered: Buffer = Buffer.alloc(0);
   #nextSeq = 1;
@@ -142,6 +173,9 @@ export class DebugAdapterConnection {
     this.#onViolation = options.onViolation;
     this.#onEvent = options.onEvent;
     this.#onRefusedRequest = options.onRefusedRequest;
+    this.#role = options.role ?? "session";
+    this.#childAnnouncement = this.#role === "session" ? options.childAnnouncement : undefined;
+    this.#onChildAnnounced = options.onChildAnnounced;
     options.input.on("data", (chunk: Buffer) => this.#receive(chunk));
     options.input.on("end", () => this.close());
     options.input.on("error", () => this.close());
@@ -155,14 +189,20 @@ export class DebugAdapterConnection {
 
   /**
    * Sends one request on the closed list. A command not on it is never
-   * written, whatever the caller passes.
+   * written, whatever the caller passes, and neither is `attach` on the
+   * session's own connection or `launch` on a child's.
    */
   request(
     command: DebugAdapterRequestCommand,
     args?: unknown,
     deadlineMs = this.#requestDeadlineMs,
   ): Promise<DebugAdapterResponse> {
-    if (this.#closed || !REQUEST_COMMANDS.has(command)) {
+    if (
+      this.#closed ||
+      !REQUEST_COMMANDS.has(command) ||
+      (command === "attach" && this.#role !== "child") ||
+      (command === "launch" && this.#role !== "session")
+    ) {
       return Promise.resolve({ status: "closed" });
     }
     const seq = this.#nextSeq++;
@@ -265,6 +305,18 @@ export class DebugAdapterConnection {
     }
   }
 
+  /**
+   * A `startDebugging` the adapter declared, asking to attach to a child:
+   * handed to the session, whose answer is the response. A request to
+   * `launch` something is never a child of the program and is refused.
+   */
+  #takesChild(args: unknown): boolean {
+    if (!isRecord(args) || args.request !== "attach" || !isRecord(args.configuration)) {
+      return false;
+    }
+    return this.#onChildAnnounced?.(args.configuration) === "accepted";
+  }
+
   #dispatch(message: Readonly<Record<string, unknown>>): void {
     switch (message.type) {
       case "response": {
@@ -282,6 +334,15 @@ export class DebugAdapterConnection {
       }
       case "event": {
         const event = message.event;
+        const announcement = this.#childAnnouncement;
+        if (
+          announcement?.kind === "event" &&
+          event === announcement.event &&
+          !isAcceptedEvent(event)
+        ) {
+          this.#onChildAnnounced?.(message.body);
+          return;
+        }
         if (!isAcceptedEvent(event)) return;
         // Telemetry rides on `output`; it is never shown or kept.
         if (event === "output" && isRecord(message.body) && message.body.category === "telemetry") {
@@ -295,6 +356,22 @@ export class DebugAdapterConnection {
         // chose; `startDebugging` would start a second session nobody
         // confirmed. Neither, nor any other adapter request, is honoured.
         const command = typeof message.command === "string" ? message.command : "";
+        if (
+          command === "startDebugging" &&
+          this.#childAnnouncement?.kind === "start-debugging" &&
+          this.#takesChild(message.arguments)
+        ) {
+          if (typeof message.seq === "number") {
+            this.#write({
+              seq: this.#nextSeq++,
+              type: "response",
+              request_seq: message.seq,
+              success: true,
+              command,
+            });
+          }
+          return;
+        }
         if (typeof message.seq === "number") {
           this.#write({
             seq: this.#nextSeq++,

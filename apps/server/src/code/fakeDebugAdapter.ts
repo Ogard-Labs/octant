@@ -13,197 +13,297 @@
  *
  * Modes: `normal`; `reverse-requests` asks the host to run a terminal and to
  * start a second session before it answers `launch`; `oversize` answers a
- * `threads` request with a frame past the host's cap.
+ * `threads` request with a frame past the host's cap. `children-event` and
+ * `children-start-debugging` announce children of the program, by the
+ * `fixtureAttach` event or the standard request, and serve each child's
+ * connection on `OCTANT_DEBUG_CHILD_PORT`; the configuration's environment
+ * says how many, how far apart, and what each announcement names. The
+ * adapter logs what it did with its children to `adapter-log.txt` in the
+ * program's folder.
  */
 
-export type FakeDebugAdapterMode = "normal" | "reverse-requests" | "oversize";
+export type FakeDebugAdapterMode =
+  | "normal"
+  | "reverse-requests"
+  | "oversize"
+  | "children-event"
+  | "children-start-debugging";
 
 export function fakeDebugAdapterScript(mode: FakeDebugAdapterMode = "normal"): string {
   return `#!${process.execPath}
 "use strict";
+const fs = require("node:fs");
+const net = require("node:net");
+const path = require("node:path");
 const { spawn } = require("node:child_process");
 const MODE = ${JSON.stringify(mode)};
-let buffered = Buffer.alloc(0);
 let seq = 1;
-let launchArgs = {};
-const breakpoints = new Map();
-let program;
-let control;
-let resume;
-let stepping = false;
-let locals = {};
-let line = 0;
+let parent;
 
-function send(message) {
+function frame(message) {
   const body = Buffer.from(JSON.stringify({ seq: seq++, ...message }), "utf8");
-  process.stdout.write(Buffer.concat([Buffer.from("Content-Length: " + body.length + "\\r\\n\\r\\n"), body]));
+  return Buffer.concat([Buffer.from("Content-Length: " + body.length + "\\r\\n\\r\\n"), body]);
 }
-function respond(request, body, success = true, message) {
-  send({ type: "response", request_seq: request.seq, command: request.command, success, ...(body === undefined ? {} : { body }), ...(message === undefined ? {} : { message }) });
+function reader(onMessage, onBroken) {
+  let buffered = Buffer.alloc(0);
+  return (chunk) => {
+    buffered = Buffer.concat([buffered, chunk]);
+    for (;;) {
+      const end = buffered.indexOf("\\r\\n\\r\\n");
+      if (end < 0) return;
+      const match = /Content-Length: (\\d+)/i.exec(buffered.subarray(0, end).toString("ascii"));
+      if (match === null) return onBroken();
+      const length = Number(match[1]);
+      if (buffered.length < end + 4 + length) return;
+      const body = buffered.subarray(end + 4, end + 4 + length).toString("utf8");
+      buffered = buffered.subarray(end + 4 + length);
+      onMessage(JSON.parse(body));
+    }
+  };
 }
-function event(name, body) {
-  send({ type: "event", event: name, ...(body === undefined ? {} : { body }) });
+// What the adapter did with its children, in order, for the tests to read.
+function log(launchArgs, line) {
+  if (launchArgs && launchArgs.cwd) fs.appendFileSync(path.join(launchArgs.cwd, "adapter-log.txt"), line + "\\n");
 }
 
-function startProgram() {
-  program = spawn(process.execPath, [launchArgs.program, ...(launchArgs.args || [])], {
-    cwd: launchArgs.cwd,
-    env: { ...process.env, ...(launchArgs.env || {}) },
-    stdio: ["ignore", "pipe", "pipe", "pipe"],
-  });
-  program.stdout.on("data", (chunk) => event("output", { category: "stdout", output: chunk.toString("utf8") }));
-  program.stderr.on("data", (chunk) => event("output", { category: "stderr", output: chunk.toString("utf8") }));
-  event("output", { category: "telemetry", output: "adapter telemetry" });
-  control = program.stdio[3];
-  let pending = "";
-  control.on("data", (chunk) => {
-    pending += chunk.toString("utf8");
-    while (pending.includes("\\n")) {
-      const at = pending.indexOf("\\n");
-      const checkpoint = JSON.parse(pending.slice(0, at));
-      pending = pending.slice(at + 1);
-      line = checkpoint.line;
-      locals = checkpoint.locals;
-      const lines = breakpoints.get(launchArgs.program) || new Set();
-      const stopOnEntry = launchArgs.stopOnEntry === true && checkpoint.first === true;
-      if (stepping || lines.has(line) || stopOnEntry) {
-        const reason = stepping ? "step" : stopOnEntry ? "entry" : "breakpoint";
-        stepping = false;
-        resume = () => control.write("go\\n");
-        event("stopped", { reason, threadId: 1, allThreadsStopped: true, description: "Paused in " + launchArgs.program });
-      } else {
-        control.write("go\\n");
+// One DAP connection and the program it debugs: the session's own on stdio,
+// or a child's on a connection to the child port.
+function connection(write, role, close) {
+  const self = { breakpoints: new Map(), launchArgs: {}, program: undefined, control: undefined, resume: undefined, stepping: false, locals: {}, line: 0, childId: undefined };
+  const send = (message) => write(frame(message));
+  const respond = (request, body, success = true, message) =>
+    send({ type: "response", request_seq: request.seq, command: request.command, success, ...(body === undefined ? {} : { body }), ...(message === undefined ? {} : { message }) });
+  const event = (name, body) => send({ type: "event", event: name, ...(body === undefined ? {} : { body }) });
+  self.event = event;
+  self.send = send;
+
+  function startProgram() {
+    const args = self.launchArgs;
+    self.program = spawn(process.execPath, [args.program, ...(args.args || [])], {
+      cwd: args.cwd,
+      env: { ...process.env, ...(args.env || {}) },
+      stdio: ["ignore", "pipe", "pipe", "pipe"],
+    });
+    self.program.stdout.on("data", (chunk) => event("output", { category: "stdout", output: chunk.toString("utf8") }));
+    self.program.stderr.on("data", (chunk) => event("output", { category: "stderr", output: chunk.toString("utf8") }));
+    event("output", { category: "telemetry", output: "adapter telemetry" });
+    self.control = self.program.stdio[3];
+    let pending = "";
+    self.control.on("data", (chunk) => {
+      pending += chunk.toString("utf8");
+      while (pending.includes("\\n")) {
+        const at = pending.indexOf("\\n");
+        const checkpoint = JSON.parse(pending.slice(0, at));
+        pending = pending.slice(at + 1);
+        self.line = checkpoint.line;
+        self.locals = checkpoint.locals;
+        const lines = self.breakpoints.get(args.program) || new Set();
+        const stopOnEntry = args.stopOnEntry === true && checkpoint.first === true;
+        if (self.stepping || lines.has(self.line) || stopOnEntry) {
+          const reason = self.stepping ? "step" : stopOnEntry ? "entry" : "breakpoint";
+          self.stepping = false;
+          self.resume = () => self.control.write("go\\n");
+          event("stopped", { reason, threadId: 1, allThreadsStopped: true, description: "Paused in " + args.program });
+        } else {
+          self.control.write("go\\n");
+        }
       }
+    });
+    self.program.on("exit", (code) => {
+      event("exited", { exitCode: code === null ? 1 : code });
+      event("terminated");
+    });
+  }
+
+  function variablesOf(value, base) {
+    return Object.entries(value).map(([name, item], index) => ({
+      name,
+      value: typeof item === "object" && item !== null ? "{...}" : String(item),
+      type: typeof item,
+      variablesReference: typeof item === "object" && item !== null ? base + index + 1 : 0,
+    }));
+  }
+
+  self.handle = (request) => {
+    const args = request.arguments || {};
+    switch (request.command) {
+      case "initialize":
+        if (role === "session") self.clientCapabilities = args;
+        respond(request, {
+          supportsConfigurationDoneRequest: true,
+          exceptionBreakpointFilters: [{ filter: "raised", label: "Raised exceptions", default: false }],
+        });
+        event("initialized");
+        return;
+      case "launch":
+        if (role !== "session") return respond(request, undefined, false, "launch on a child connection");
+        self.launchArgs = args;
+        if (MODE === "reverse-requests") {
+          send({ type: "request", command: "runInTerminal", arguments: { kind: "integrated", cwd: "/", args: ["/bin/sh", "-c", "touch /tmp/ran-in-terminal"] } });
+          send({ type: "request", command: "startDebugging", arguments: { request: "launch", configuration: { program: "/bin/sh" } } });
+        }
+        respond(request);
+        return;
+      case "attach":
+        if (role !== "child") return respond(request, undefined, false, "attach on the session's connection");
+        self.launchArgs = args;
+        self.childId = args.childId;
+        log(args, "child " + args.childId + " attached" + (args.connect === undefined ? "" : " with connect"));
+        respond(request);
+        return;
+      case "setBreakpoints": {
+        const lines = (args.breakpoints || []).map((breakpoint) => breakpoint.line);
+        self.breakpoints.set(args.source.path, new Set(lines));
+        respond(request, { breakpoints: lines.map((value) => ({ verified: true, line: value })) });
+        return;
+      }
+      case "setExceptionBreakpoints":
+        respond(request, {});
+        return;
+      case "configurationDone":
+        respond(request);
+        if (role === "child" && self.launchArgs.env && self.launchArgs.env.FIXTURE_CHILD_EXITS === "1") {
+          event("terminated");
+          return;
+        }
+        startProgram();
+        if (role === "session") announceChildren(self);
+        return;
+      case "threads":
+        if (MODE === "oversize") {
+          write(Buffer.from("Content-Length: " + String(5 * 1024 * 1024) + "\\r\\n\\r\\n"));
+          return;
+        }
+        respond(request, { threads: [{ id: 1, name: "main" }] });
+        return;
+      case "stackTrace":
+        respond(request, {
+          stackFrames: [
+            { id: 1, name: (role === "child" ? "child " : "main ") + "(" + self.launchArgs.program + ")", source: { path: self.launchArgs.program }, line: self.line, column: 1 },
+            { id: 2, name: "internal runner", source: { path: "/usr/lib/runtime/internal.js" }, line: 10, column: 3 },
+            { id: 3, name: "generated", source: { name: "generated", sourceReference: 7 }, line: 1, column: 1 },
+          ],
+          totalFrames: 3,
+        });
+        return;
+      case "scopes":
+        respond(request, { scopes: [{ name: "Locals", variablesReference: 1000, expensive: false }] });
+        return;
+      case "variables": {
+        if (args.variablesReference === 1000) {
+          respond(request, { variables: variablesOf(self.locals, 1000) });
+          return;
+        }
+        const entry = Object.values(self.locals)[args.variablesReference - 1001];
+        respond(request, { variables: entry && typeof entry === "object" ? variablesOf(entry, 2000) : [] });
+        return;
+      }
+      case "source":
+        respond(request, { content: "// generated by the adapter\\n" });
+        return;
+      case "evaluate": {
+        const value = Object.prototype.hasOwnProperty.call(self.locals, args.expression) ? self.locals[args.expression] : undefined;
+        if (value === undefined) {
+          respond(request, undefined, false, "name '" + args.expression + "' is not defined in " + self.launchArgs.program);
+          return;
+        }
+        respond(request, { result: String(value), type: typeof value, variablesReference: 0 });
+        return;
+      }
+      case "continue":
+        respond(request, { allThreadsContinued: true });
+        event("continued", { threadId: 1, allThreadsContinued: true });
+        if (self.resume) { const go = self.resume; self.resume = undefined; go(); }
+        return;
+      case "next":
+      case "stepIn":
+      case "stepOut":
+        respond(request);
+        self.stepping = true;
+        if (self.resume) { const go = self.resume; self.resume = undefined; go(); }
+        return;
+      case "pause":
+        respond(request);
+        return;
+      case "disconnect":
+        if (role === "session") {
+          const env = self.launchArgs.env || {};
+          if (env.FIXTURE_ANNOUNCE_ON_DISCONNECT === "1") announce(self, 99);
+          log(self.launchArgs, "session disconnected");
+        } else {
+          log(self.launchArgs, "child " + self.childId + " disconnected");
+        }
+        respond(request);
+        if (self.program && self.program.exitCode === null) self.program.kill("SIGKILL");
+        setTimeout(close, 50);
+        return;
+      default:
+        respond(request, undefined, false, "unsupported");
     }
-  });
-  program.on("exit", (code) => {
-    event("exited", { exitCode: code === null ? 1 : code });
-    event("terminated");
-  });
+  };
+  return self;
 }
 
-function variablesOf(value, base) {
-  return Object.entries(value).map(([name, item], index) => ({
-    name,
-    value: typeof item === "object" && item !== null ? "{...}" : String(item),
-    type: typeof item,
-    variablesReference: typeof item === "object" && item !== null ? base + index + 1 : 0,
-  }));
+// Children: each is announced on the session's connection, then attached on
+// a connection of its own to the child port. Announcements and what they
+// name come from the configuration's environment, so one fixture serves
+// every case.
+const childClosed = new Map();
+function announce(session, childId) {
+  const env = session.launchArgs.env || {};
+  const configuration = {
+    request: "attach",
+    name: "Child process " + childId,
+    childId,
+    program: session.launchArgs.program,
+    args: [...(session.launchArgs.args || []), "--child"],
+    cwd: session.launchArgs.cwd,
+    env,
+    connect: {
+      host: env.FIXTURE_ANNOUNCE_HOST || "127.0.0.1",
+      port: Number(env.FIXTURE_ANNOUNCE_PORT || process.env.OCTANT_DEBUG_CHILD_PORT || 0),
+    },
+  };
+  log(session.launchArgs, "child " + childId + " announced");
+  if (MODE === "children-start-debugging") {
+    session.send({ type: "request", command: "startDebugging", arguments: { request: "attach", configuration } });
+  } else {
+    session.event("fixtureAttach", configuration);
+  }
 }
-
-function handle(request) {
-  const args = request.arguments || {};
-  switch (request.command) {
-    case "initialize":
-      respond(request, {
-        supportsConfigurationDoneRequest: true,
-        exceptionBreakpointFilters: [{ filter: "raised", label: "Raised exceptions", default: false }],
-      });
-      event("initialized");
-      return;
-    case "launch":
-      launchArgs = args;
-      if (MODE === "reverse-requests") {
-        send({ type: "request", command: "runInTerminal", arguments: { kind: "integrated", cwd: "/", args: ["/bin/sh", "-c", "touch /tmp/ran-in-terminal"] } });
-        send({ type: "request", command: "startDebugging", arguments: { request: "launch", configuration: { program: "/bin/sh" } } });
-      }
-      respond(request);
-      return;
-    case "setBreakpoints": {
-      const lines = (args.breakpoints || []).map((breakpoint) => breakpoint.line);
-      breakpoints.set(args.source.path, new Set(lines));
-      respond(request, { breakpoints: lines.map((value) => ({ verified: true, line: value })) });
-      return;
-    }
-    case "setExceptionBreakpoints":
-      respond(request, {});
-      return;
-    case "configurationDone":
-      respond(request);
-      startProgram();
-      return;
-    case "threads":
-      if (MODE === "oversize") {
-        process.stdout.write("Content-Length: " + String(5 * 1024 * 1024) + "\\r\\n\\r\\n");
-        return;
-      }
-      respond(request, { threads: [{ id: 1, name: "main" }] });
-      return;
-    case "stackTrace":
-      respond(request, {
-        stackFrames: [
-          { id: 1, name: "main (" + launchArgs.program + ")", source: { path: launchArgs.program }, line, column: 1 },
-          { id: 2, name: "internal runner", source: { path: "/usr/lib/runtime/internal.js" }, line: 10, column: 3 },
-          { id: 3, name: "generated", source: { name: "generated", sourceReference: 7 }, line: 1, column: 1 },
-        ],
-        totalFrames: 3,
-      });
-      return;
-    case "scopes":
-      respond(request, { scopes: [{ name: "Locals", variablesReference: 1000, expensive: false }] });
-      return;
-    case "variables": {
-      if (args.variablesReference === 1000) {
-        respond(request, { variables: variablesOf(locals, 1000) });
-        return;
-      }
-      const entry = Object.values(locals)[args.variablesReference - 1001];
-      respond(request, { variables: entry && typeof entry === "object" ? variablesOf(entry, 2000) : [] });
-      return;
-    }
-    case "source":
-      respond(request, { content: "// generated by the adapter\\n" });
-      return;
-    case "evaluate": {
-      const value = Object.prototype.hasOwnProperty.call(locals, args.expression) ? locals[args.expression] : undefined;
-      if (value === undefined) {
-        respond(request, undefined, false, "name '" + args.expression + "' is not defined in " + launchArgs.program);
-        return;
-      }
-      respond(request, { result: String(value), type: typeof value, variablesReference: 0 });
-      return;
-    }
-    case "continue":
-      respond(request, { allThreadsContinued: true });
-      event("continued", { threadId: 1, allThreadsContinued: true });
-      if (resume) { const go = resume; resume = undefined; go(); }
-      return;
-    case "next":
-    case "stepIn":
-    case "stepOut":
-      respond(request);
-      stepping = true;
-      if (resume) { const go = resume; resume = undefined; go(); }
-      return;
-    case "pause":
-      respond(request);
-      return;
-    case "disconnect":
-      respond(request);
-      if (program && program.exitCode === null) program.kill("SIGKILL");
-      setTimeout(() => process.exit(0), 50);
-      return;
-    default:
-      respond(request, undefined, false, "unsupported");
+async function announceChildren(session) {
+  if (MODE !== "children-event" && MODE !== "children-start-debugging") return;
+  const env = session.launchArgs.env || {};
+  const count = Number(env.FIXTURE_CHILDREN || 1);
+  const gap = Number(env.FIXTURE_CHILD_GAP_MS || 0);
+  for (let childId = 1; childId <= count; childId += 1) {
+    let closed;
+    childClosed.set(childId, new Promise((resolve) => { closed = resolve; }));
+    childClosed.set("resolve-" + childId, closed);
+    announce(session, childId);
+    if (gap > 0) await Promise.race([childClosed.get(childId), new Promise((resolve) => setTimeout(resolve, gap))]);
   }
 }
 
-process.stdin.on("data", (chunk) => {
-  buffered = Buffer.concat([buffered, chunk]);
-  for (;;) {
-    const end = buffered.indexOf("\\r\\n\\r\\n");
-    if (end < 0) return;
-    const match = /Content-Length: (\\d+)/i.exec(buffered.subarray(0, end).toString("ascii"));
-    if (match === null) process.exit(1);
-    const length = Number(match[1]);
-    if (buffered.length < end + 4 + length) return;
-    const body = buffered.subarray(end + 4, end + 4 + length).toString("utf8");
-    buffered = buffered.subarray(end + 4 + length);
-    const message = JSON.parse(body);
-    if (message.type === "request") handle(message);
-    else if (message.type === "response") event("output", { category: "console", output: "host answered " + message.command + ": " + String(message.success) + "\\n" });
-  }
-});
+if (process.env.OCTANT_DEBUG_CHILD_PORT) {
+  const server = net.createServer((socket) => {
+    const child = connection((bytes) => socket.write(bytes), "child", () => socket.end());
+    socket.on("data", reader((message) => { if (message.type === "request") child.handle(message); }, () => socket.destroy()));
+    socket.on("close", () => {
+      if (child.program && child.program.exitCode === null) child.program.kill("SIGKILL");
+      const resolve = childClosed.get("resolve-" + child.childId);
+      if (resolve) resolve();
+    });
+    socket.on("error", () => undefined);
+  });
+  server.listen(Number(process.env.OCTANT_DEBUG_CHILD_PORT), "127.0.0.1");
+}
+
+parent = connection((bytes) => process.stdout.write(bytes), "session", () => process.exit(0));
+process.stdin.on("data", reader((message) => {
+  if (message.type === "request") parent.handle(message);
+  else if (message.type === "response") parent.event("output", { category: "console", output: "host answered " + message.command + ": " + String(message.success) + "\\n" });
+}, () => process.exit(1)));
 process.stdin.on("end", () => process.exit(0));
 `;
 }

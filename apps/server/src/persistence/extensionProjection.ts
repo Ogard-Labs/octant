@@ -616,7 +616,8 @@ function hasCapabilityExpansion(
  * `repo-tooling` lets it write the checkout, run tooling, and reach the
  * network with the same kind and the same declared capabilities. A debug
  * adapter's `launch` body decides how the program it runs is started, and a
- * debug port opens loopback, so a changed body or an added port is new too.
+ * debug port opens loopback, so a changed body or an added port is new too,
+ * as is debugging children or announcing them another way.
  */
 function componentWidened(
   prior: ExtensionPackageManifest["components"][number] | undefined,
@@ -633,6 +634,11 @@ function componentWidened(
     (component.debugAdapter !== undefined &&
       (prior.debugAdapter === undefined ||
         component.debugAdapter.debugPorts > prior.debugAdapter.debugPorts ||
+        // Debugging children opens a connection into the capsule and, on
+        // macOS, loopback ports; announcing them differently is a new grant.
+        (component.debugAdapter.childSessions ?? 0) > (prior.debugAdapter.childSessions ?? 0) ||
+        canonicalJson(component.debugAdapter.childAnnouncement ?? null) !==
+          canonicalJson(prior.debugAdapter.childAnnouncement ?? null) ||
         canonicalJson(component.debugAdapter.launchArguments) !==
           canonicalJson(prior.debugAdapter.launchArguments)))
   );

@@ -244,6 +244,18 @@ function DebugAdapterReview(props: { readonly review: ExtensionPackageReviewDebu
           <dt>Debug port</dt>
           <dd>{review.debugPorts === 1 ? "One, chosen by Octant" : "None"}</dd>
         </div>
+        <div>
+          <dt>Child processes</dt>
+          <dd>
+            {review.childSessions === 1 && review.childAnnouncement !== undefined
+              ? `Debugged too, announced by ${
+                  review.childAnnouncement.kind === "event"
+                    ? `its ${review.childAnnouncement.event} event`
+                    : "the standard startDebugging request"
+                }`
+              : "Not debugged"}
+          </dd>
+        </div>
       </dl>
       <p className="extensions-settings__preview-heading">Launch request</p>
       <pre>{JSON.stringify(review.launchArguments, null, 2)}</pre>

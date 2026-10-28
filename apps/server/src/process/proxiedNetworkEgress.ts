@@ -46,6 +46,11 @@ export function proxiedLaunchEnvironment(
  * the token and every decision stay with the host proxy. When it cannot listen
  * or start the command it exits 125 before the command runs.
  *
+ * `forwarder <socket> <port> --inbound <inbound-socket> <inbound-port> ...`
+ * also listens on the inbound socket, before the command starts, and relays
+ * each connection the host opens there to 127.0.0.1:<inbound-port> inside the
+ * capsule and to nothing else. A debug session's child connection uses it.
+ *
  * `forwarder <socket> <port> --child-seccomp <filter> <command> [args...]`
  * opens the filter file before anything else runs and hands it to the
  * command as file descriptor 3. That form starts a launch whose own process
@@ -63,6 +68,12 @@ function refuse(message) {
   process.stderr.write("octant-egress-forwarder: " + message + "\\n");
   process.exit(125);
 }
+let inbound;
+if (rest[0] === "--inbound") {
+  if (!rest[1] || !/^[0-9]{1,5}$/.test(rest[2] || "")) refuse("invalid inbound relay");
+  inbound = { path: rest[1], port: Number(rest[2]) };
+  rest.splice(0, 3);
+}
 let childFilter;
 if (rest[0] === "--child-seccomp") {
   try {
@@ -74,8 +85,7 @@ if (rest[0] === "--child-seccomp") {
 }
 const [executable, ...args] = rest;
 if (!socketPath || !executable || !/^[0-9]{1,5}$/.test(portText || "")) refuse("invalid arguments");
-const server = net.createServer({ allowHalfOpen: true }, (client) => {
-  const upstream = net.connect({ path: socketPath, allowHalfOpen: true });
+function relay(client, upstream) {
   const end = () => {
     client.destroy();
     upstream.destroy();
@@ -86,9 +96,20 @@ const server = net.createServer({ allowHalfOpen: true }, (client) => {
   upstream.on("close", end);
   client.pipe(upstream);
   upstream.pipe(client);
+}
+const server = net.createServer({ allowHalfOpen: true }, (client) => {
+  relay(client, net.connect({ path: socketPath, allowHalfOpen: true }));
 });
+function listenInbound(then) {
+  if (inbound === undefined) return then();
+  const inboundServer = net.createServer({ allowHalfOpen: true }, (client) => {
+    relay(client, net.connect({ host: "127.0.0.1", port: inbound.port, allowHalfOpen: true }));
+  });
+  inboundServer.on("error", (error) => refuse("cannot listen inbound: " + error.message));
+  inboundServer.listen({ path: inbound.path, exclusive: true }, then);
+}
 server.on("error", (error) => refuse("cannot listen: " + error.message));
-server.listen({ host: "127.0.0.1", port: Number(portText), exclusive: true }, () => {
+listenInbound(() => server.listen({ host: "127.0.0.1", port: Number(portText), exclusive: true }, () => {
   const environment = { ...process.env };
   delete environment.ELECTRON_RUN_AS_NODE;
   const child = spawn(executable, args, {
@@ -101,5 +122,5 @@ server.listen({ host: "127.0.0.1", port: Number(portText), exclusive: true }, ()
     const number = signal === null ? 0 : os.constants.signals[signal] || 0;
     process.exit(code === null ? 128 + number : code);
   });
-});
+}));
 `;

@@ -778,9 +778,9 @@ person confirms it.
   activation ladder as `language-server`. It is `mode-prohibited` in Chat and
   Work and quarantined until reviewed.
 - **Declaration.** A `debug-adapter` component carries
-  `debugAdapter: { runtimes, launchArguments, importTypes, debugPorts }`,
-  present exactly when the kind is `debug-adapter`. Unknown fields are refused
-  on decode.
+  `debugAdapter: { runtimes, launchArguments, importTypes, debugPorts,
+childSessions?, childAnnouncement? }`, present exactly when the kind is
+  `debug-adapter`. Unknown fields are refused on decode.
   - `runtimes`: 1 to 8 Octant runtime identifiers
     (`^[a-z][a-z0-9-]{0,31}$`, such as `node`, `python`, `native`). They label
     the adapter in the configuration picker and choose nothing.
@@ -795,6 +795,11 @@ person confirms it.
     imported repository file (below). They are matching labels only.
   - `debugPorts`: `0` or `1`, whether the adapter needs one loopback port to
     reach the program it launched (below).
+  - `childSessions` (`0` or `1`, default `0`) and `childAnnouncement`
+    (`{ kind: "start-debugging" }` or `{ kind: "event", event }`, present
+    exactly when `childSessions` is `1`): whether the adapter also debugs the
+    program's child processes, and how it announces one
+    ([Child processes](#child-processes)).
 - **Package.** As a user-added language server is (slice 5): a local folder
   with `octant-debug-adapter.json` at its root holding `{ manifest }`, imported
   from Settings › Skills & Extensions › Marketplace with the native folder
@@ -806,12 +811,14 @@ person confirms it.
   binary is its only executable file; the adapter may still run programs the
   capsule can see, such as a runtime on the system path, because the program
   being debugged needs them. The package store's bounds apply.
-- **Updates.** Adding the kind, changing `launchArguments`, or raising
-  `debugPorts` is a capability expansion: quarantine, trust and switches
-  cleared. Changing `runtimes` or `importTypes` is not.
+- **Updates.** Adding the kind, changing `launchArguments`, raising
+  `debugPorts` or `childSessions`, or changing `childAnnouncement` is a
+  capability expansion: quarantine, trust and switches cleared. Changing
+  `runtimes` or `importTypes` is not.
 - **Review.** The inspection preview names the binary, its own SHA-256 digest,
-  the runtimes, the `launch` body with its placeholders, and whether it uses a
-  debug port, and says that the adapter runs programs from the checkout, can
+  the runtimes, the `launch` body with its placeholders, whether it uses a
+  debug port, and whether it also debugs the program's child processes and
+  how it announces one, and says that the adapter runs programs from the checkout, can
   write the checkout, reaches only the hosts the thread's network rules allow,
   and never runs in Plan, for a paired device, or for an agent.
 - **Verified at every start.** As slice 5: the stored version verifies against
@@ -1008,14 +1015,17 @@ frame ends the session. Each request has a 10-second deadline and reports
 `timed-out`. The renderer never sees protocol payloads, only Octant contracts.
 
 - **What Octant sends** (closed list): `initialize`, `launch` (the adapter's
-  `launchArguments` with its placeholders filled), `configurationDone`,
+  `launchArguments` with its placeholders filled; on the session's own
+  connection only), `attach` (once, on a child connection only, per
+  [Child processes](#child-processes)), `configurationDone`,
   `setBreakpoints`, `setExceptionBreakpoints` (only filters the adapter
   advertised), `threads`, `stackTrace`, `scopes`, `variables`, `source` (by
   source reference only), `exceptionInfo`, `continue`, `next`, `stepIn`,
   `stepOut`, `pause`, `evaluate`, `terminate`, `disconnect`, and `cancel`.
   `evaluate` carries only an expression the person typed or a watch they
   added, in the `repl`, `watch`, or `hover` context. Each later request is
-  added on purpose with its own contract. Not sent: `attach`, `restart`
+  added on purpose with its own contract. Not sent: `attach` on the session's
+  own connection, `restart`
   (Octant stops and starts), `setVariable`, `setExpression`, `goto`,
   `stepBack`, `reverseContinue`, `readMemory`, `writeMemory`, `disassemble`,
   and data or instruction breakpoints.
@@ -1026,8 +1036,9 @@ frame ends the session. Each request has a 10-second deadline and reports
   and does not debug the child; with debugpy's `subProcess` on, a Python child
   then waits for a client that never comes, so a debugpy package sets
   `subProcess: false` in its `launch` body. Debugging child processes needs
-  its own rule, accepted under [Child processes](#child-processes) and not
-  yet built; until it is, the announcement is dropped as above.
+  its own rule, under [Child processes](#child-processes): an adapter that
+  declares children has its declared announcement taken, and any other
+  adapter's is dropped as above.
 - **Events accepted.** `initialized`, `stopped`, `continued`, `exited`,
   `terminated`, `thread`, `output` (`console`, `stdout`, `stderr`,
   `important`), `breakpoint`, `capabilities`, `invalidated`, `process`, and
@@ -1336,8 +1347,8 @@ the addendum left a choice open.
 
 ### Child processes
 
-**Status: accepted on 2026-10-28 as decision DB9. Not built yet.** Until it is
-built, the [Protocol](#protocol) rule stands: an adapter's child announcement
+**Status: accepted on 2026-10-28 as decision DB9; built.** An adapter that
+declares nothing keeps the [Protocol](#protocol) rule: its child announcement
 is dropped, and the child runs undebugged.
 
 The outcome: a program that starts another program (Python's `subprocess` or
@@ -1393,10 +1404,21 @@ The rule:
   stays inside the capsule's namespace, or on the open loopback under Full
   access. On macOS Seatbelt denies it unless that listener also uses a
   host-chosen port, so an adapter that declares children gets a second one,
-  `OCTANT_DEBUG_CHILD_SERVER_PORT`, on the same terms. Whether debugpy's
-  package wrapper can pin both listeners to host-chosen ports is unmeasured
-  and is the slice's first measurement. If it cannot, children are refused on
-  macOS as `unsupported-platform`; loopback is not opened further.
+  `OCTANT_DEBUG_CHILD_SERVER_PORT`, on the same terms. The host sets both
+  ports on every platform, so one package serves both. _Measured on
+  2026-10-28_ with debugpy 1.8.22 on CPython 3.14 on macOS: no supported flag
+  or `launch` field pins either listener (the stdio adapter refuses `--port`,
+  and its listener for the program's processes takes a free port), but a
+  package wrapper that wraps debugpy's own `debugpy.common.sockets.serve`
+  binds the `Client` listener to `OCTANT_DEBUG_CHILD_PORT` and the `Server`
+  listener to `OCTANT_DEBUG_CHILD_SERVER_PORT`. With it, the announcement
+  named the child port, and under `sandbox-exec` with loopback denied except
+  the session's ports, a child stopped at its breakpoint; with the child
+  server port left closed the child never connected back. So children are
+  not refused on macOS. Residual: the wrapper depends on a debugpy internal,
+  pinned by the package's own version; and debugpy's parent also opens a
+  `Launcher` listener on a free port, which the macOS confined-program smoke
+  (8d) must cover for the parent session itself.
 - **What the host sends on a child connection.** The closed list is
   unchanged, except that `attach` takes the place of `launch`, sent once. Its
   body is the announced configuration, bounded at 8 KiB, with `connect`
@@ -1415,7 +1437,9 @@ The rule:
   session.
 - **Ending.** A child session ends when its process exits, when the adapter
   closes the child connection, or when the person stops that child, with
-  `disconnect` and `terminateDebuggee: true`. Every end of the parent ends its
+  `disconnect` and `terminateDebuggee: true`. An announcement the host drops
+  is not answered further: an adapter whose child waits for its debugger
+  (debugpy's does) leaves that child waiting until the session ends. Every end of the parent ends its
   children first; a child's end never ends the parent. The parent's
   `code.debug-session-ended@1` record adds how many children were attached,
   as a count only.
@@ -1461,6 +1485,28 @@ past the bounds, or from an adapter that declared nothing is dropped; a
 parent's Stop ends its children; the child cannot write outside the checkout
 and its connection to a host no rule allows is refused by the session's
 proxy. Then real debugpy under Bubblewrap, and on a Mac with 8d.
+
+_State:_ built. With the fixture adapter (`codeDebugServiceProcess.test.ts`):
+a child announced by the declared event and one announced by `startDebugging`
+attach, stop at the window's breakpoint, and answer their stack; the host's
+`attach` carries the announced configuration without `connect`; stopping a
+child leaves the session running, and the ended child reads as no session; a
+session's Stop ends its child first, and the end record counts it; an
+announcement naming another port or a host off loopback is refused and
+nothing connects; ten at once leave eight attached and two undebugged; forty
+in turn attach thirty-two; an adapter that declared nothing, and an
+announcement made while the session ends, are dropped; nothing of a child is
+journaled. Under Seatbelt on macOS and under Bubblewrap on Linux, in an
+approval-gated thread, the child runs in the session's capsule, stops at a
+breakpoint, cannot write outside the checkout, and its `CONNECT` to
+`example.com:443` is refused `403` by the session's proxy. The connection
+refuses `attach` on the session's own connection and `launch` on a child's
+(`debugAdapterConnection.test.ts`); the review names the announcement, and
+adding children or changing the announcement quarantines the update
+(`extensionLifecycleService.test.ts`); the panel lists children under the
+session, shows a selected child's stop, and goes back to the program when the
+child is stopped (`RunDebugPanel.test.tsx`). Still to run: real debugpy
+through the session host, and the Mac smoke with 8d.
 
 ### Debugger delivery
 
@@ -1899,7 +1945,7 @@ accounts or hardware.
      2026-10-27; its sub-slices 8a to 8d are the delivery plan. 8a to 8c are
      built; 8d needs a Mac. Debugging a program's child processes (debugpy's
      `debugpyAttach`) was [accepted](#child-processes) on 2026-10-28 as
-     decision DB9 and is not built yet.
+     decision DB9 and is built.
 
 The extension host is not planned (D7). Each slice is reviewable and leaves
 the editor working when the companion is off or refused.
