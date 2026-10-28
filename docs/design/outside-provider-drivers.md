@@ -37,12 +37,14 @@ keep the provider blocked, and the provider catalog lists effective outside
 drivers in their own group (see [Admission rules](#admission-rules)). Its
 product acceptance, the live loopback smoke on macOS with a local model
 server, is the maintainer's to run; on Linux every outside driver stays
-`host-prohibited`. Slice 6 (provenance) is half built: an instance moves to a
+`host-prohibited`. Slice 6 (provenance) is built: an instance moves to a
 newly trusted digest of its driver, and only then, with its records cleared
-(see [Rebind rules](#rebind-rules)); publisher signatures are not built,
-because the rules listed under
-[Signature rules not yet settled](#signature-rules-not-yet-settled) are open,
-and until they are no source but an unsigned local folder yields a driver.
+(see [Rebind rules](#rebind-rules)); and publisher signatures are verified at
+inspection, the publisher key is pinned at first trust and journaled, a
+version by another key is held until the person re-trusts the new publisher
+or forgets the pin, and the author kit signs a package (see
+[Signature rules](#signature-rules)). No source but a local folder yields a
+driver until the npm source (slice 8) lands.
 Slice 7 (author kit and example driver) is built: the author-facing protocol
 re-export, the serve helper, the out-of-process conformance kit, and an
 example loopback driver package that passes the kit and the host proxy's
@@ -627,8 +629,8 @@ implementation; each takes the fail-closed option.
   The setup adds a provider in place (name, address, how the key is sent, the
   key, the model IDs); the provider's card on Providers & Models holds its
   key, its facts, and Verify tools, since it has no Model endpoints page. The
-  Package facts say "Local folder, unsigned", trusted by the person at this
-  digest. A driver that is not effective is not listed; its instances show
+  Package facts say "Local folder, unsigned", or "Local folder, signed" with
+  the publisher key, trusted by the person at this digest. A driver that is not effective is not listed; its instances show
   the block on their cards.
 
 ### Rebind rules
@@ -692,10 +694,12 @@ the fail-closed option.
 - **Digest pinning.** Inspection and install pin `name@version` and its
   content digest; trust and Verify tools records bind that digest.
 - **Signing.** A package from a marketplace source carries a publisher
-  signature over its manifest and digest; first trust pins the publisher key,
-  and a later version signed by another key is refused until the person
-  re-trusts it as a new publisher. A local-folder package is unsigned developer
-  input, labelled so in review ([decision 3](#maintainer-decisions)).
+  signature over its name, version, protocol versions, and files; first trust
+  pins the publisher key, and a later version signed by another key is held
+  until the person re-trusts it as a new publisher. A local-folder package may
+  be unsigned developer input, labelled so in review; a signed one is verified
+  the same way ([decision 3](#maintainer-decisions),
+  [Signature rules](#signature-rules)).
 - **Updates are never automatic.** No background check runs. An update is an
   inspect and install of the new digest, which arrives held and untrusted.
   Trust binds a digest, so the earlier version does not keep serving under
@@ -709,28 +713,98 @@ the fail-closed option.
   admission rules built in slice 5 hold the package whenever its selection
   changes, which is the fail-closed reading, and this bullet follows them._
 
-### Signature rules not yet settled
+### Signature rules
 
-Signature verification is not built, because these consequential rules are
-open; until a maintainer settles them, no source but a local folder yields a
-driver, so no package is admitted on a signature Octant cannot check.
+The maintainer accepted these on 2026-10-28, settling what decision 3 left
+open. Each takes the fail-closed option.
 
-- **What is signed, and where it travels.** "Its manifest and digest" does not
-  name the bytes: the host derives the manifest's identity, source, and
-  digest itself, so a publisher cannot sign them as the host writes them, and
-  the digest algorithm and its canonical encoding are not a published format.
-  Nor is it settled whether the signature and public key travel in the
-  package (a file beside the driver document), in the driver document, or in
-  the npm registry's metadata.
-- **What the pin belongs to.** Whether the first-trust pin is kept per
-  extension, per package name, or per source; where it is stored (a journaled
-  lifecycle fact or the package store); and whether an uninstall forgets it.
-- **Re-trusting a new publisher.** Which action it is: a separate command, a
-  flag on `set-source-trust`, or an uninstall and fresh install, and what it
-  clears.
-- **Refused or held.** Whether a missing signature, a signature that does not
-  verify, and a valid signature by an unpinned key are refused at inspection
-  or installed held, and with which closed reasons.
+- **What is signed, and where it travels.** The publisher signs a small file,
+  `octant-signature.json`, kept at the package root beside
+  `octant-provider-driver.json`; the same file and format serve a local
+  folder, an npm package, and any later source. It holds `format`
+  (`octant-signature/1`), `name`, `version`, `protocolVersions`, `files` (each
+  `{ path, sha256 }`: every file in the package except the signature file,
+  with its lowercase hex SHA-256), `publicKey` (the 32 raw bytes of an
+  Ed25519 key, standard base64), and `signature` (64 bytes, standard base64),
+  and nothing else (`OutsideProviderDriverSignatureDocument` in
+  `@octant/plugin-api`). The signature is Ed25519 over the UTF-8 bytes of
+  these lines, each ended by one LF (0x0A) and nothing else:
+
+  ```text
+  octant-signature/1
+  name <name>
+  version <version>
+  protocol <version>          one line per protocol version, sorted, no repeats
+  file <sha256> <path>        one line per file, sorted by the path's UTF-8 bytes
+  ```
+
+  A path is `/`-separated and package-relative, with no empty, `.` or `..`
+  segment, no leading `/`, no backslash, and no control character, so each
+  path is one line. Sorting by UTF-8 bytes is sorting by code point.
+  `outsideProviderDriverSignedMessage` builds these bytes for the host.
+
+- **What the host checks.** It hashes every file itself and builds the
+  message from its own reading, never from the file's list: the list must
+  name exactly those files with those hashes; `name` must be the package's
+  name in its source (the slug for a local folder), and `version` and the
+  protocol versions must be the driver document's; a link or any other
+  non-file entry cannot be covered; and the signature must verify under the
+  key the file carries. Any failure refuses the package at inspection as
+  `signature-invalid`. A verified key is recorded in the manifest's
+  provenance as `publisherKey`, a fingerprint `ed25519:<hex SHA-256 of the
+raw key>` that the host sets and a document that states it is refused, so
+  the review and Settings show which key signed what the person trusts.
+- **Missing.** A package from any source other than a local folder without a
+  signature file is refused at inspection as `signature-missing`. A verified
+  marketplace package is still refused as `source-unsupported` until the npm
+  source lands (slice 8). An unsigned local folder stays allowed as labelled
+  developer input ([decision 3](#maintainer-decisions)); a signed one is held
+  to every check above.
+- **What the pin belongs to.** One key per package name per source (for
+  example `npm:@scope/name`). It is pinned when the person first trusts a
+  signed version, journaled as a `publisher-pinned` lifecycle fact in the
+  same append as that trust, and kept on the package's lifecycle record,
+  whose identity the host derives from the source and the name. An uninstall
+  keeps it, so reinstalling the same name from the same source under another
+  key is held; only the forget action clears it. Replay restores it like any
+  projection.
+- **Held for a new publisher.** A selected version (install, update, or
+  rollback) whose key is not the pinned one, including an unsigned version of
+  a pinned package, installs held with the closed reason `publisher-changed`
+  (`ExtensionPublisherHoldReason` in contracts; the package state carries the
+  pinned key, the selected key, and the hold). Trusting the source refuses
+  and does not lift it.
+- **Re-trusting a new publisher.** `trust-new-publisher` is its own command,
+  local window only (the lifecycle route refuses it from a paired device, and
+  remote forwarding never admits it). Settings shows the pinned and the new
+  key fingerprints side by side, and the command carries the new key the
+  person saw; the host refuses any other key, a version that is not held,
+  and an unsigned one. It journals `publisher-replaced` (old and new key),
+  replaces the pin, keeps the package held and untrusted for its digest, and
+  clears the Verify tools records and observations of every instance added
+  from the package. Trusting the source then admits it and moves the
+  instances as for any digest ([Rebind rules](#rebind-rules)).
+- **Forgetting a publisher.** `forget-publisher`, local window only, carries
+  the pinned key and journals `publisher-forgotten`; it works on an installed
+  or an uninstalled package. It changes no trust: a package held for its
+  publisher stays held for admission, and the next trust pins the key that
+  signed the selected version.
+- **Signing.** The author kit's signing tool
+  (`@octant/provider-sdk/outside-driver-sign`, plain `.mjs`) writes the file.
+  It reads a PKCS #8 Ed25519 private key from a file or from standard input,
+  never writes or prints it, and prints only the key's fingerprint.
+
+_Rationale: a file beside the driver document is the one place every source
+can carry unchanged, so a local folder and an npm package are checked
+identically; signing a line-based message the host rebuilds from its own
+hashes avoids trusting a JSON canonical form or the file's own list. The pin
+follows the name rather than one install so a removal cannot launder a key
+change, and a separate command that shows both keys keeps "trust this
+digest" from also meaning "accept a new publisher". Rejected: a signature
+inside the driver document (it would sign itself), registry metadata only
+(a local folder has none), refusing a different key at inspection (the
+person could not then compare the keys before deciding), and a flag on
+`set-source-trust` (one click would accept both)._
 
 ### Marketplace and catalog
 
@@ -781,9 +855,11 @@ takes the fail-closed option.
   used. The host derives the identity from the folder and the slug, so a
   package cannot name itself into another package's identity, and records a
   local folder as unreviewed.
-- **Source.** Only a `local-folder` source yields a driver until publisher
-  signatures exist ([decision 4](#maintainer-decisions)); a driver document
-  in any other source is refused as `source-unsupported`.
+- **Source.** Only a `local-folder` source yields a driver until the npm
+  source lands ([decision 4](#maintainer-decisions)). A driver document in
+  any other source is refused as `signature-missing` without a signature, as
+  `signature-invalid` with one that fails, and as `source-unsupported`
+  otherwise ([Signature rules](#signature-rules)).
 - **Protocol.** A package that declares no version the host speaks
   (`harness-endpoint/1` today) is refused at inspection as
   `protocol-incompatible`, as an incompatible app range or platform already
@@ -837,12 +913,15 @@ Conformance is enforced by the host, not trusted from the author:
 
 These rules resolve what slice 7 left to implementation.
 
-- **What the kit is.** Three provider SDK entry points:
+- **What the kit is.** Four provider SDK entry points:
   `@octant/provider-sdk/outside-driver` re-exports the protocol schemas a
   driver reads and writes from `@octant/contracts`;
-  `@octant/provider-sdk/outside-driver-serve` is the serve helper; and
+  `@octant/provider-sdk/outside-driver-serve` is the serve helper;
   `@octant/provider-sdk/outside-driver-conformance` is the out-of-process
-  conformance kit (`runOutsideDriverConformance`). The user guide's
+  conformance kit (`runOutsideDriverConformance`); and
+  `@octant/provider-sdk/outside-driver-sign` is the signing tool
+  ([Signature rules](#signature-rules)). CI signs a copy of the example
+  driver with a key made at test time; the repository holds no signing key. The user guide's
   [Build a provider driver](../../apps/docs/advanced/provider-drivers.md) page
   is the author's how-to.
 - **The serve helper is plain JavaScript a package carries.** A driver can
@@ -939,7 +1018,7 @@ put a package in front of the person. Controls marked new are this design's;
 | Over-claims capabilities (tools, approvals, resume)                 | New, built: host ceiling clamp; `admitTurn` computed by the host; host-run Verify tools                                                                              |
 | Fabricates tool calls or injects instructions in output             | Existing: model output is untrusted; the harness offers, approves, and runs tools under thread authority; taint rules apply                                          |
 | Puts attacker text in Settings or diagnostics                       | New, built: closed reasons only; stderr bounded and kept out of clients                                                                                              |
-| Swaps code under a trusted name (update, mirror, typosquat)         | New, built: digest-bound trust and records; held updates and rollbacks that move an instance only on trust and clear its verification. New: publisher key pin        |
+| Swaps code under a trusted name (update, mirror, typosquat)         | New, built: digest-bound trust and records; held updates and rollbacks that move an instance only on trust and clear its verification; publisher key pin             |
 | Points the key at an internal service or attacker host              | Existing endpoint rule, built for the brokered call: HTTPS or loopback HTTP, origin-checked before the key is read; no redirect                                      |
 | Exhausts the host (floods, hangs, crash loops)                      | Existing supervisor bounds; new, built: per-message cap, host-owned deadlines, bounded brokered calls, per-instance crash limit and journaled hold                   |
 | An agent, mention, routine, or paired device installs or trusts one | Existing and new, built: lifecycle, add-provider, and Verify tools only from a local window; structured references stay inert; install stays held until trusted      |

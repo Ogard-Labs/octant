@@ -9,9 +9,11 @@ import {
   type ExtensionDiagnostic,
   type ExtensionPackageManifest,
   type ExtensionPackageState,
+  type ExtensionPublisherKeyFingerprint,
 } from "@octant/contracts/extensions";
 import { decodeExtensionSnapshot, type ExtensionSnapshot } from "@octant/contracts/extension-rpc";
 import type { EventEnvelope } from "@octant/contracts/events";
+import { outsideDriverPublisherStanding } from "@octant/domain/outside-driver-publisher-policy";
 import { resolveExtensionActivation } from "@octant/plugin-host/activation";
 import type { Projection } from "./projection";
 import type { SqliteConnection } from "./sqlitePort";
@@ -67,6 +69,19 @@ export interface ProjectedExtensionRecord {
    * record's `quarantined` is already set.
    */
   readonly awaitingAdmission?: boolean;
+  /**
+   * The publisher key pinned for this package name and source, set when the
+   * person first trusts a signed version. It outlives an uninstall, since the
+   * record's identity is derived from the source and the name; only the
+   * person's forget or new-publisher action changes it.
+   */
+  readonly publisherPin?: ExtensionPublisherKeyFingerprint;
+  /**
+   * The selected version is signed by a key other than the pin, or by none.
+   * Trust does not lift this hold; re-trusting the new publisher or
+   * forgetting the pin does.
+   */
+  readonly publisherChanged?: boolean;
   readonly draining: boolean;
   readonly broken: boolean;
   readonly unavailable: boolean;
@@ -226,7 +241,7 @@ function applyLifecycle(
             message: "Updated package capabilities require review.",
           })
         : next.diagnostics;
-      return {
+      return withPublisherStanding({
         ...withoutPending(next),
         lifecycleState: held ? "quarantined" : "installed",
         current: payload.manifest,
@@ -245,10 +260,10 @@ function applyLifecycle(
         diagnostics: outsideDriver
           ? appendDiagnostic(diagnostics, OUTSIDE_DRIVER_QUARANTINE)
           : diagnostics,
-      };
+      });
     }
     case "rollback-selected":
-      return {
+      return withPublisherStanding({
         ...withoutPending(next),
         grantsEnded: { sequence: lastSequence, reason: "rolled-back" },
         lifecycleState: holdsProviderDriver(payload.manifest) ? "quarantined" : "installed",
@@ -265,7 +280,7 @@ function applyLifecycle(
         interrupted: false,
         waiting: false,
         tombstoned: false,
-      };
+      });
     case "transaction-interrupted":
       if (next.pending?.transactionId !== payload.transactionId) return next;
       return {
@@ -285,6 +300,22 @@ function applyLifecycle(
       return next.current !== undefined && !next.tombstoned && holdsProviderDriver(next.current)
         ? admitOutsideDriver(trusted, payload.trusted)
         : trusted;
+    }
+    case "publisher-pinned":
+      return withPublisherStanding({ ...next, publisherPin: payload.publisherKey });
+    case "publisher-replaced": {
+      // The new key is pinned and the package stays held until the person
+      // trusts it, which is still the review step for its digest.
+      const pinned = { ...next, publisherPin: payload.publisherKey, trusted: false };
+      return withPublisherStanding(
+        next.current !== undefined && !next.tombstoned && holdsProviderDriver(next.current)
+          ? admitOutsideDriver(pinned, false)
+          : pinned,
+      );
+    }
+    case "publisher-forgotten": {
+      const { publisherPin: _forgotten, ...unpinned } = next;
+      return withPublisherStanding(unpinned);
     }
     case "plugin-desired-state-changed":
       return { ...next, pluginDesired: payload.desired };
@@ -423,6 +454,9 @@ function projectPackageState(record: ProjectedExtensionRecord): ExtensionPackage
     source: manifest.source,
     compatibility: manifest.compatibility,
     activation: packageActivation,
+    ...(holdsProviderDriver(manifest) && publisherState(record) !== undefined
+      ? { publisher: publisherState(record) }
+      : {}),
     components: manifest.components.map((component) => {
       const desired = record.componentDesired[component.id] ?? false;
       const componentActivation = activation(record, installed, desired);
@@ -556,7 +590,45 @@ function isProviderDriverComponent(record: ProjectedExtensionRecord, componentId
 }
 
 function isQuarantined(record: ProjectedExtensionRecord): boolean {
-  return record.quarantined || record.awaitingAdmission === true;
+  return (
+    record.quarantined || record.awaitingAdmission === true || record.publisherChanged === true
+  );
+}
+
+/**
+ * Sets the publisher hold from the pin and the key that signed the selected
+ * version, for an outside driver. A package that holds no driver has no
+ * publisher standing.
+ */
+function withPublisherStanding(record: ProjectedExtensionRecord): ProjectedExtensionRecord {
+  const { publisherChanged: _previous, ...rest } = record;
+  const changed =
+    record.current !== undefined &&
+    holdsProviderDriver(record.current) &&
+    outsideDriverPublisherStanding(record.publisherPin, record.current.provenance.publisherKey)
+      .kind === "publisher-changed";
+  const diagnostics = changed
+    ? appendDiagnostic(record.diagnostics, OUTSIDE_DRIVER_PUBLISHER_CHANGED)
+    : record.diagnostics.filter(
+        (diagnostic) => diagnostic.code !== OUTSIDE_DRIVER_PUBLISHER_CHANGED.code,
+      );
+  return changed ? { ...rest, publisherChanged: true, diagnostics } : { ...rest, diagnostics };
+}
+
+const OUTSIDE_DRIVER_PUBLISHER_CHANGED: ExtensionDiagnostic = {
+  code: "outside-driver-publisher-changed",
+  message:
+    "Another publisher signed this provider driver. It stays held until you trust the new publisher or forget the old one.",
+};
+
+function publisherState(record: ProjectedExtensionRecord): ExtensionPackageState["publisher"] {
+  const selected = record.current?.provenance.publisherKey;
+  if (record.publisherPin === undefined && selected === undefined) return undefined;
+  return {
+    ...(record.publisherPin === undefined ? {} : { pinned: record.publisherPin }),
+    ...(selected === undefined ? {} : { selected }),
+    ...(record.publisherChanged === true ? { held: "publisher-changed" as const } : {}),
+  };
 }
 
 /**
@@ -579,7 +651,9 @@ function admitOutsideDriver(
       diagnostics: appendDiagnostic(record.diagnostics, OUTSIDE_DRIVER_QUARANTINE),
     };
   }
-  if (record.awaitingAdmission !== true) return record;
+  // A publisher hold is not lifted by trust: only re-trusting the new
+  // publisher or forgetting the pin does.
+  if (record.awaitingAdmission !== true || record.publisherChanged === true) return record;
   return {
     ...record,
     awaitingAdmission: false,

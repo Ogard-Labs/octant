@@ -9,6 +9,7 @@ import {
   ExtensionContentDigest,
   ExtensionPackageId,
   ExtensionPackageVersion,
+  ExtensionPublisherKeyFingerprint,
   extensionSemverPattern,
 } from "./extensionIdentity";
 
@@ -17,6 +18,7 @@ export {
   ExtensionContentDigest,
   ExtensionPackageId,
   ExtensionPackageVersion,
+  ExtensionPublisherKeyFingerprint,
 } from "./extensionIdentity";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -147,9 +149,19 @@ const canonicalHttpUrl = Schema.NonEmptyTrimmedString.pipe(
   }),
 );
 
+/**
+ * Why an installed outside provider driver is held for its publisher: the
+ * selected version is not signed by the key pinned for its package name and
+ * source. Only re-trusting the new publisher or forgetting the pin lifts it.
+ */
+export const ExtensionPublisherHoldReason = Schema.Literal("publisher-changed");
+export type ExtensionPublisherHoldReason = typeof ExtensionPublisherHoldReason.Type;
+
 export const ExtensionProvenance = Schema.Struct({
   canonicalUrl: Schema.optional(canonicalHttpUrl),
   publisher: Schema.optional(boundedText(256)),
+  /** The key whose signature the host verified, set by the host only. */
+  publisherKey: Schema.optional(ExtensionPublisherKeyFingerprint),
   sourceCommit: Schema.optional(
     Schema.String.pipe(Schema.pattern(/^[a-f0-9]{7,64}$/), Schema.maxLength(64)),
   ),
@@ -875,6 +887,18 @@ export const ExtensionPackageState = Schema.Struct({
   addedInSettings: Schema.optional(Schema.Literal(true)),
   compatibility: ExtensionCompatibility,
   activation: ExtensionActivationState,
+  /**
+   * An outside provider driver's publisher keys: the one pinned for its
+   * package name and source, the one that signed the selected version, and
+   * the hold when they differ. Absent when neither key exists.
+   */
+  publisher: Schema.optional(
+    Schema.Struct({
+      pinned: Schema.optional(ExtensionPublisherKeyFingerprint),
+      selected: Schema.optional(ExtensionPublisherKeyFingerprint),
+      held: Schema.optional(ExtensionPublisherHoldReason),
+    }).annotations(strict),
+  ),
   components: Schema.Array(
     Schema.Struct({
       component: ExtensionComponent,
@@ -913,6 +937,9 @@ export type ExtensionEffectivePackageState = typeof ExtensionEffectivePackageSta
 export const decodeExtensionPackageId = Schema.decodeUnknownSync(ExtensionPackageId);
 export const decodeExtensionComponentId = Schema.decodeUnknownSync(ExtensionComponentId);
 export const decodeExtensionContentDigest = Schema.decodeUnknownSync(ExtensionContentDigest);
+export const decodeExtensionPublisherKeyFingerprint = Schema.decodeUnknownSync(
+  ExtensionPublisherKeyFingerprint,
+);
 export const decodeExtensionPackageManifest = Schema.decodeUnknownSync(ExtensionPackageManifest);
 export const decodeExtensionActivationState = Schema.decodeUnknownSync(ExtensionActivationState);
 export const decodeExtensionSelection = Schema.decodeUnknownSync(ExtensionSelection);

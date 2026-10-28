@@ -23,6 +23,7 @@ import {
   ExtensionSkillCollision,
   ExtensionSource,
   ExtensionProvenance,
+  ExtensionPublisherKeyFingerprint,
   SourceQualifiedSkill,
   StandaloneSkillRecord,
 } from "./extensions";
@@ -373,6 +374,22 @@ export const ExtensionCommand = Schema.Union(
     kind: Schema.Literal("set-source-trust"),
     ...desiredStateMutation,
     trusted: Schema.Boolean,
+  }).annotations(strict),
+  /**
+   * Re-trusts an outside provider driver held because a key other than the
+   * pinned one signed it. `publisherKey` is the new key the person saw beside
+   * the pinned one; the host refuses any other.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("trust-new-publisher"),
+    ...desiredStateMutation,
+    publisherKey: ExtensionPublisherKeyFingerprint,
+  }).annotations(strict),
+  /** Forgets the publisher key pinned for a package, installed or not. */
+  Schema.Struct({
+    kind: Schema.Literal("forget-publisher"),
+    ...desiredStateMutation,
+    publisherKey: ExtensionPublisherKeyFingerprint,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("set-plugin-desired"),

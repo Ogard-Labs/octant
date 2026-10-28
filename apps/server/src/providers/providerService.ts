@@ -445,6 +445,33 @@ export class ProviderService implements ProviderServiceApi {
   }
 
   /**
+   * Clears what every outside instance added from a package learned under its
+   * previous publisher, when the person re-trusts a new one: the catalogue is
+   * invalidated with its Verify tools record removed, and the observation is
+   * cleared. The package is held, so nothing restarts until the person trusts
+   * it; the move to its new digest then clears them again, as for any digest.
+   */
+  async forgetOutsideDriverVerification(extensionId: string): Promise<void> {
+    for (const candidate of this.#persistence.readProviderInstances()) {
+      if (candidate.driverKind !== "outside-harness-endpoint") continue;
+      if (String(candidate.configuration.driver.extensionId) !== extensionId) continue;
+      await this.#withInstanceOperation(candidate.id, async () => {
+        this.#assertReady();
+        await this.#runtime.invalidateRuntime(candidate.id).catch((error: unknown) => {
+          if (!(error instanceof ProviderRuntimeInvalidationRejected)) throw error;
+        });
+        this.#invalidateCatalog(
+          candidate.id,
+          { kind: "driver" },
+          "provider driver's publisher changed",
+          decodeTimestamp(this.#clock()),
+        );
+        this.#runtime.clearObservedState(candidate.id);
+      });
+    }
+  }
+
+  /**
    * Journals that an outside instance's driver crashed past its limit at the
    * digest it binds, so the hold outlives this host. The process owner calls
    * it the moment the limit is crossed. A report for a digest the instance no

@@ -5,6 +5,7 @@ import {
   ExtensionContentDigest,
   ExtensionPackageId,
   ExtensionPackageVersion,
+  ExtensionPublisherKeyFingerprint,
   ToolExtensionId,
 } from "./extensionIdentity";
 import { OctantMode } from "./modes";
@@ -1782,8 +1783,8 @@ export type ProviderObservedState = typeof ProviderObservedState.Type;
  * One outside driver the activation ladder admits on this host, as the
  * provider catalog lists it: the exact package a provider would bind, the
  * package's own name, and the package facts the catalog repeats. Only a
- * local folder yields a driver today, so every listing is unsigned developer
- * input.
+ * local folder yields a driver today: developer input, unsigned unless its
+ * folder carries a signature the host verified, whose key is `publisherKey`.
  */
 export const OutsideProviderDriverListing = Schema.Struct({
   driver: OutsideProviderDriverReference,
@@ -1791,6 +1792,7 @@ export const OutsideProviderDriverListing = Schema.Struct({
   source: Schema.Literal("local-folder"),
   installed: Schema.Boolean,
   trusted: Schema.Boolean,
+  publisherKey: Schema.optional(ExtensionPublisherKeyFingerprint),
 }).annotations(strict);
 export type OutsideProviderDriverListing = typeof OutsideProviderDriverListing.Type;
 

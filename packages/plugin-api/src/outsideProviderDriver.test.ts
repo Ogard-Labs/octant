@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   OutsideProviderDriverEntry,
   decodeOutsideProviderDriverEntry,
+  decodeOutsideProviderDriverSignatureDocument,
+  outsideProviderDriverSignedMessage,
   readOutsideProviderDriverEntry,
 } from "./outsideProviderDriver";
 
@@ -186,5 +188,61 @@ describe("outside provider driver entry", () => {
     expect(refusal(entry({ protocolVersions: [] }))).toBe("entry-invalid");
     expect(refusal(entry({ protocolVersions: ["acp/1"] }))).toBe("entry-invalid");
     expect(refusal(entry({ protocolVersions: ["harness-endpoint/0"] }))).toBe("entry-invalid");
+  });
+});
+
+describe("outside provider driver signature format", () => {
+  it("signs one exact message: sorted protocols and files by UTF-8 bytes, each line ended by LF", () => {
+    const message = outsideProviderDriverSignedMessage({
+      name: "loopback-chat",
+      version: "0.1.0",
+      protocolVersions: ["harness-endpoint/2", "harness-endpoint/1", "harness-endpoint/1"],
+      files: [
+        { path: "z.mjs", sha256: "c".repeat(64) },
+        // U+FF5E sorts after U+1F600 by UTF-16 code units, before it by code point.
+        { path: "lib/\u{1F600}.json", sha256: "b".repeat(64) },
+        { path: "lib/\uFF5E.json", sha256: "a".repeat(64) },
+        { path: "driver.mjs", sha256: "d".repeat(64) },
+      ],
+    });
+
+    expect(new TextDecoder().decode(message)).toBe(
+      [
+        "octant-signature/1",
+        "name loopback-chat",
+        "version 0.1.0",
+        "protocol harness-endpoint/1",
+        "protocol harness-endpoint/2",
+        `file ${"d".repeat(64)} driver.mjs`,
+        `file ${"a".repeat(64)} lib/\uFF5E.json`,
+        `file ${"b".repeat(64)} lib/\u{1F600}.json`,
+        `file ${"c".repeat(64)} z.mjs`,
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("refuses a signature file with a path that could break a line of the signed message", () => {
+    const document = {
+      format: "octant-signature/1",
+      name: "loopback-chat",
+      version: "0.1.0",
+      protocolVersions: ["harness-endpoint/1"],
+      files: [{ path: "driver.mjs", sha256: "a".repeat(64) }],
+      publicKey: `${"A".repeat(43)}=`,
+      signature: `${"A".repeat(86)}==`,
+    };
+    expect(decodeOutsideProviderDriverSignatureDocument(document)._tag).toBe("Right");
+    for (const path of ["a\nfile x", "../driver.mjs", "/driver.mjs", "lib//x.mjs", "a\\b"]) {
+      expect(
+        decodeOutsideProviderDriverSignatureDocument({
+          ...document,
+          files: [{ path, sha256: "a".repeat(64) }],
+        })._tag,
+      ).toBe("Left");
+    }
+    expect(
+      decodeOutsideProviderDriverSignatureDocument({ ...document, privateKey: "x" })._tag,
+    ).toBe("Left");
   });
 });
