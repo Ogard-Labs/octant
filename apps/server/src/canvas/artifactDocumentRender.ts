@@ -4,6 +4,7 @@ import {
   type CanvasBlock,
   type CanvasDefinition,
   type CanvasDesignAssetResolution,
+  type CanvasMockupNode,
   type CanvasNumberFormat,
 } from "@octant/contracts/canvas";
 import {
@@ -510,6 +511,16 @@ function readableFlow(
   };
 }
 
+function readableMockupNode(node: CanvasMockupNode): CanvasMockupNode {
+  return {
+    ...node,
+    label: shareSafe(node.label),
+    ...(node.value === undefined ? {} : { value: shareSafe(node.value) }),
+    ...(node.columns === undefined ? {} : { columns: node.columns.map(shareSafe) }),
+    ...(node.rows === undefined ? {} : { rows: node.rows.map((cells) => cells.map(shareSafe)) }),
+  };
+}
+
 function readableMockup(
   block: Extract<CanvasBlock, { readonly kind: "mockup" }>,
 ): Extract<CanvasBlock, { readonly kind: "mockup" }> {
@@ -524,13 +535,16 @@ function readableMockup(
             label: shareSafe(variant.label),
           })),
         }),
-    nodes: block.nodes.map((node) => ({
-      ...node,
-      label: shareSafe(node.label),
-      ...(node.value === undefined ? {} : { value: shareSafe(node.value) }),
-      ...(node.columns === undefined ? {} : { columns: node.columns.map(shareSafe) }),
-      ...(node.rows === undefined ? {} : { rows: node.rows.map((cells) => cells.map(shareSafe)) }),
-    })),
+    nodes: block.nodes.map(readableMockupNode),
+    ...(block.definitions === undefined
+      ? {}
+      : {
+          definitions: block.definitions.map((definition) => ({
+            ...definition,
+            label: shareSafe(definition.label),
+            nodes: definition.nodes.map(readableMockupNode),
+          })),
+        }),
     ...(block.annotations === undefined
       ? {}
       : {
