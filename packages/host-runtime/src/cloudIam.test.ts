@@ -281,7 +281,7 @@ describe("cloud single sign-on", () => {
         expect(state).toMatchObject({ kind: "signed-in" });
         expect(current.waits.slice(0, 2)).toEqual([1_000, 2_000]);
         expect(timeouts.length).toBeGreaterThan(0);
-        expect(timeouts.every((ms) => ms > 0 && ms <= 60_000)).toBe(true);
+        expect(timeouts.every((ms) => ms === 30_000)).toBe(true);
       } finally {
         spy.mockRestore();
       }
