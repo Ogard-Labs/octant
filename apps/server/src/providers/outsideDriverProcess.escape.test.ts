@@ -152,9 +152,14 @@ onMacos("an outside driver's confined process", () => {
   });
 
   afterAll(async () => {
-    await new Promise<void>((resolve) => server?.close(() => resolve()));
-    await rm(root, { recursive: true, force: true });
+    // The canary goes first: it sits in the person's real home, and a
+    // set-up that failed before the server existed left nothing to close,
+    // which waited out the hook's timeout with the canary still there.
     if (homeCanaryFolder !== "") await rm(homeCanaryFolder, { recursive: true, force: true });
+    await new Promise<void>((resolve) =>
+      server === undefined ? resolve() : server.close(() => resolve()),
+    );
+    await rm(root, { recursive: true, force: true });
   });
 
   async function expectConfined(runtime: OutsideDriverRuntime): Promise<void> {
