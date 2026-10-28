@@ -15,6 +15,7 @@ import {
   type OpenAiCompatibleProviderConfiguration,
   type OpenAiImageProviderConfiguration,
   type OllamaProviderConfiguration,
+  type OutsideHarnessEndpointProviderConfiguration,
   type OhMyPiProviderConfiguration,
   type PiProviderConfiguration,
   type PermissionPersistence,
@@ -216,6 +217,12 @@ export interface ProviderSettingsViewProps {
   readonly onChangeOllamaConfiguration: (
     instanceId: ProviderInstanceId,
     configuration: OllamaProviderConfiguration,
+  ) => Promise<boolean>;
+  /** Changes an outside driver provider's address, key placement, and models; a new key goes to the host's keychain. */
+  readonly onChangeOutsideHarnessEndpointConfiguration?: (
+    instanceId: ProviderInstanceId,
+    configuration: OutsideHarnessEndpointProviderConfiguration,
+    credential: TransientProviderCredential,
   ) => Promise<boolean>;
   readonly onBeginProviderAuthentication: (
     instanceId: ProviderInstanceId,
@@ -447,6 +454,12 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onChangeAcpAgentConfiguration={props.onChangeAcpAgentConfiguration}
         onChangeOhMyPiConfiguration={props.onChangeOhMyPiConfiguration}
         onChangeOllamaConfiguration={props.onChangeOllamaConfiguration}
+        {...(props.onChangeOutsideHarnessEndpointConfiguration === undefined
+          ? {}
+          : {
+              onChangeOutsideHarnessEndpointConfiguration:
+                props.onChangeOutsideHarnessEndpointConfiguration,
+            })}
         onChangeOpenAiCompatibleConfiguration={props.onChangeOpenAiCompatibleConfiguration}
         onChangeOpenAiImageConfiguration={props.onChangeOpenAiImageConfiguration}
         onChangeGeminiImageConfiguration={props.onChangeGeminiImageConfiguration}

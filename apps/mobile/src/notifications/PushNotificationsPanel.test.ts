@@ -19,14 +19,15 @@ describe("mobile notification settings", () => {
         children: createElement(PushNotificationsPanel, {
           transport: undefined,
           permission: createUnavailableNotificationPermissionPort(),
+          hostKeyFingerprint: "f".repeat(64),
         }),
       }),
     );
 
     expect(markup).toContain("Push notifications are unavailable in this build.");
     expect(markup).toContain("Open Octant to check for updates");
-    expect(markup).not.toContain("Enable on this host");
+    expect(markup).not.toContain("Turn on for this computer");
     expect(markup).not.toContain("permission was not granted");
-    expect(markup).not.toContain("Clear token on this host");
+    expect(markup).not.toContain("Turn off for this computer");
   });
 });

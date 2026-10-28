@@ -1785,8 +1785,26 @@ describe("provider registry contracts", () => {
         configuration: { kind: "ollama-native-http", baseUrl: "http://127.0.0.1:11434" },
       }),
     ).toThrow();
-    // No command reconfigures one: its package, address, and models are fixed when it is added.
-    expect(() => decodeProviderInstanceConfigurationChanged({ instance: outside })).toThrow();
+    // The person's change of its address, key placement, or models is a configuration change.
+    expect(decodeProviderInstanceConfigurationChanged({ instance: outside })).toEqual({
+      instance: outside,
+    });
+    expect(
+      decodeProviderRegistryCommand({
+        kind: "change-outside-harness-endpoint-configuration",
+        instanceId: outside.id,
+        expectedVersion: 1,
+        configuration: outside.configuration,
+      }),
+    ).toMatchObject({ kind: "change-outside-harness-endpoint-configuration" });
+    expect(() =>
+      decodeProviderRegistryCommand({
+        kind: "change-outside-harness-endpoint-configuration",
+        instanceId: outside.id,
+        expectedVersion: 1,
+        configuration: { ...outside.configuration, enabled: true },
+      }),
+    ).toThrow();
     // The host's move to a newly trusted digest has its own event, for outside instances only.
     expect(decodeProviderInstanceDriverRebound({ instance: outside })).toEqual({
       instance: outside,

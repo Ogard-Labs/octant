@@ -205,8 +205,12 @@ the folder from **Marketplace**. The folder holds exactly one adapter, and its
 binary is the only executable file in it.
 
 **Review before installing** names the binary and its SHA-256 digest, the
-runtimes, the `launch` request with the values Octant fills in, and whether it
-takes a debug port. An adapter runs the programs you confirm from the
+runtimes, the `launch` request with the values Octant fills in, whether it
+takes a debug port, and whether it also debugs the program's child processes.
+An adapter that does declares `childSessions: 1` and how it announces a child
+(`childAnnouncement`: the standard `startDebugging` request, or one event of
+its own); Octant gives it two loopback ports as `OCTANT_DEBUG_CHILD_PORT` and
+`OCTANT_DEBUG_CHILD_SERVER_PORT`, and its listeners must use them. An adapter runs the programs you confirm from the
 checkout and can write the checkout, reaches only the hosts the thread's
 network rules allow, and never runs in Plan, for a paired device, or for an
 agent. **Confirm install** stores it disabled until you trust and enable it.

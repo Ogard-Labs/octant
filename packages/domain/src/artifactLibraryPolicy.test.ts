@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   artifactEditedAgo,
   artifactKindForBlocks,
+  artifactTagRoster,
   selectArtifactLibraryEntries,
   selectSyncedArtifactLibraryEntries,
 } from "./artifactLibraryPolicy";
@@ -118,6 +119,75 @@ describe("selecting the artifacts a library query asks for", () => {
       "Zeta",
     ]);
   });
+
+  it("matches a tag exactly, and only where the artifact carries it", () => {
+    const tagged = [
+      entry({ canvasId: "10000000-0000-4000-8000-00000000000d" as never, tags: ["Q4", "Launch"] }),
+      entry({ canvasId: "10000000-0000-4000-8000-00000000000c" as never, tags: ["q4"] }),
+      entry({ canvasId: "10000000-0000-4000-8000-00000000000e" as never }),
+    ] as ReadonlyArray<ArtifactLibraryEntry>;
+
+    expect(selectArtifactLibraryEntries(tagged, query({ tag: "Q4" }))).toHaveLength(1);
+    expect(selectArtifactLibraryEntries(tagged, query({ tag: "q4" }))).toHaveLength(1);
+    expect(selectArtifactLibraryEntries(tagged, query({ tag: "Absent" }))).toEqual([]);
+  });
+
+  it("keeps a Project filter a Project question, so a thread-owned entry matches none", () => {
+    // A thread-owned entry omits the Project fields entirely: with
+    // exactOptionalPropertyTypes, absence is not an explicit undefined.
+    const {
+      projectId: _drop,
+      projectName: _name,
+      ...threadOwned
+    } = entry({
+      canvasId: "10000000-0000-4000-8000-00000000000c" as never,
+      mode: "chat",
+      title: "Trip notes",
+    });
+    const withThreadOwned = [
+      entry({ canvasId: "10000000-0000-4000-8000-00000000000d" as never }),
+      threadOwned,
+    ] as ReadonlyArray<ArtifactLibraryEntry>;
+
+    expect(
+      selectArtifactLibraryEntries(
+        withThreadOwned,
+        query({ projectId: "20000000-0000-4000-8000-000000000001" as never }),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("still finds a thread-owned entry by its title", () => {
+    const {
+      projectId: _drop,
+      projectName: _name,
+      ...threadOwned
+    } = entry({
+      canvasId: "10000000-0000-4000-8000-00000000000c" as never,
+      mode: "chat",
+      title: "Trip notes",
+    });
+
+    expect(
+      selectArtifactLibraryEntries(
+        [threadOwned] as ReadonlyArray<ArtifactLibraryEntry>,
+        query({ query: "trip" }),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("counts each tag once per artifact that carries it, alphabetically", () => {
+    const tagged = [
+      entry({ canvasId: "10000000-0000-4000-8000-00000000000d" as never, tags: ["Q4", "Launch"] }),
+      entry({ canvasId: "10000000-0000-4000-8000-00000000000c" as never, tags: ["Q4"] }),
+    ] as ReadonlyArray<ArtifactLibraryEntry>;
+
+    expect(artifactTagRoster(tagged)).toEqual([
+      { name: "Launch", artifactCount: 1 },
+      { name: "Q4", artifactCount: 2 },
+    ]);
+    expect(artifactTagRoster([entry({})])).toEqual([]);
+  });
 });
 
 describe("saying how long ago an artifact was edited", () => {
@@ -165,5 +235,9 @@ describe("choosing synced artifacts for a library query", () => {
         query({ projectId: "20000000-0000-4000-8000-000000000001" as never }),
       ),
     ).toEqual([]);
+  });
+
+  it("matches nothing under a tag filter, because this host holds none to tag", () => {
+    expect(selectSyncedArtifactLibraryEntries([synced], query({ tag: "Launch" }))).toEqual([]);
   });
 });

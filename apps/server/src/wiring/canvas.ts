@@ -36,8 +36,10 @@ import { ArtifactLibraryService } from "../canvas/artifactLibraryService";
 import { createCanvasRouteHandler, resolveCanvasActiveContext } from "../canvasRoutes";
 import { CanvasEventStore } from "../canvas/canvasEventStore";
 import { markCanvasReader } from "../canvas/canvasOutsideContentMark";
+import type { CanvasProjectionEntry } from "../canvas/canvasProjection";
 import { CanvasService, type CanvasServiceDependencies } from "../canvas/canvasService";
 import { CanvasCommentService } from "../canvas/canvasCommentService";
+import { CanvasTagService } from "../canvas/canvasTagService";
 import { CanvasShareEventStore } from "../canvas/canvasShareEventStore";
 import { CanvasShareService } from "../canvas/canvasShareService";
 import { CanvasExportEventStore } from "../canvas/canvasExportEventStore";
@@ -82,6 +84,7 @@ import {
 import {
   authorizeCanvasInventoryAccess,
   chatThreadHoldsCanvas as threadLifecycleHoldsCanvas,
+  classifyThreadOwnedCanvasTab,
   defaultShellSettings,
 } from "@octant/domain";
 import { type CanvasAgentToolPort, createChildCanvasAgentTools } from "../canvas/canvasAgentTools";
@@ -1106,7 +1109,35 @@ export function wireCanvas(deps: CanvasDependencies) {
   // The library is a host-wide read of the same journal-derived projection
   // the per-Project inventory reads. It is deliberately wider than a window's
   // Project scope (0026); the service, not the route, decides what a given
-  // principal may see.
+  // principal may see. A Canvas a Chat thread owns outside every Project is
+  // listed for a window on this host under no Project, while its thread still
+  // holds it — the same rule that authorizes its tab.
+  const threadHoldsCanvas = (entry: CanvasProjectionEntry): boolean => {
+    const provenance = entry.currentVersion.definition.provenance;
+    // A Canvas that names no Project is owned by a Chat thread; the mode check
+    // is what lets the thread id be read as the Chat thread id it is.
+    const thread =
+      provenance.mode === "chat" ? persistence.readChatThread(provenance.threadId) : undefined;
+    return (
+      classifyThreadOwnedCanvasTab({
+        mode: "chat",
+        canvas: { projectId: provenance.projectId },
+        thread,
+      }) === "bound"
+    );
+  };
+  // Tags are the person's own filing facts on a Canvas, journaled beside the
+  // document; they change no version and leave this computer with nothing.
+  const canvasTagService = new CanvasTagService(
+    {
+      journal: persistence.journal,
+      projection: persistence.canvasProjection,
+      uuid: randomUUID,
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      clock: () => new Date().toISOString() as never,
+    },
+    { threadHoldsCanvas },
+  );
   const artifactLibraryService = new ArtifactLibraryService({
     projection: persistence.canvasProjection,
     projects: () =>
@@ -1117,6 +1148,8 @@ export function wireCanvas(deps: CanvasDependencies) {
         lifecycle: project.lifecycle,
       })),
     liveShares: () => canvasShareService.liveShareCanvasIds(),
+    tags: (canvasId) => canvasTagService.tags(canvasId),
+    threadHoldsCanvas,
     synced: () =>
       replicaSyncedLibraryEntries(
         persistence.replicaArtifactProjection.state(),
@@ -1133,6 +1166,7 @@ export function wireCanvas(deps: CanvasDependencies) {
   const artifactLibraryRoutes = createArtifactLibraryRouteHandler({
     library: artifactLibraryService,
     windowAuthorityStore,
+    tags: canvasTagService,
   });
   const artifactMirrorRoutes = createArtifactMirrorRouteHandler({
     mirror: artifactMirrorService,

@@ -76,6 +76,21 @@ moving to Plan or being archived.
 
 A thread has one session at a time. Stop it before starting another.
 
+## Child processes
+
+Some adapters also debug the programs your program starts, such as Python's
+`subprocess` or `multiprocessing` workers. The adapter's review in Settings
+says whether it does. With such an adapter, a **Processes** list appears
+under the session: the program, then each child process as it starts. Choose
+a child to see where it is paused, step it, or evaluate in it; **Stop child
+process** ends that child only, and the session goes on. Your breakpoints
+apply to the program and to every child. Stopping the session ends its
+children first.
+
+A session debugs at most 8 children at once and 32 in all; the list says how
+many more ran undebugged. A child runs in the same confinement as the program,
+with the same network rules, and nothing of it is kept after it ends.
+
 ## What a session can do
 
 The adapter and your program run together, confined as a terminal command in

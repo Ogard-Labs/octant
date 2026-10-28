@@ -31,6 +31,10 @@ private let mcpServerCredentialNamespace = "mcp-server-credential"
 // the desktop recipe's credential reference. A person may replace one.
 private let desktopProviderCredentialService = "app.octant.desktop-provider-credentials.v1"
 private let desktopProviderCredentialNamespace = "desktop-provider-credential"
+// The App Store Connect API key a person enters to distribute their own app
+// lives in a service of its own. A person may replace it.
+private let appStoreConnectKeyService = "app.octant.app-store-connect-keys.v1"
+private let appStoreConnectKeyNamespace = "app-store-connect-key"
 private let hostIdentityNamespace = "app.octant.host-identity.v1"
 private let hostIdentityKeyId = "host-identity"
 private let maximumPurgeProviderInstances = 128
@@ -67,6 +71,7 @@ private let octantOwnedServices = [
     canvasPublicShareSecretService,
     mcpServerCredentialService,
     desktopProviderCredentialService,
+    appStoreConnectKeyService,
 ]
 
 // A credential namespace of its own: the Keychain service it reaches, the
@@ -100,6 +105,11 @@ private let separateNamespaces: [String: SeparateNamespace] = [
     ),
     desktopProviderCredentialNamespace: SeparateNamespace(
         service: desktopProviderCredentialService,
+        idField: "credentialRef",
+        replaceable: true
+    ),
+    appStoreConnectKeyNamespace: SeparateNamespace(
+        service: appStoreConnectKeyService,
         idField: "credentialRef",
         replaceable: true
     ),

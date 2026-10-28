@@ -246,7 +246,8 @@ function normalizeEffect(effect: CodeApprovalEffect): unknown {
     effect.kind === "apple-action" ||
     effect.kind === "android-action" ||
     effect.kind === "apple-device-lease" ||
-    effect.kind === "apple-device-action"
+    effect.kind === "apple-device-action" ||
+    effect.kind === "apple-distribution-upload"
   ) {
     const { approval: _approval, ...request } = effect.request;
     return { ...effect, request };

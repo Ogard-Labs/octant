@@ -17,6 +17,7 @@
     "./outside-driver": "./src/outsideDriver.ts",
     "./outside-driver-conformance": "./src/outsideDriverConformance.ts",
     "./outside-driver-serve": "./src/outsideDriverServe.mjs",
+    "./outside-driver-sign": "./src/outsideDriverSign.mjs",
     "./subscription-oauth": "./src/subscriptionOAuth.ts",
     "./directory-oauth": "./src/directoryOAuth.ts",
     "./directory-oauth-conformance": "./src/directoryOAuthConformance.ts",
