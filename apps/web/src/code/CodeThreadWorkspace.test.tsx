@@ -520,6 +520,31 @@ describe("CodeThreadWorkspace", () => {
     if (mic !== null) expect(follows(model, mic)).toBe(true);
   });
 
+  it.each(["running", "waiting"])(
+    "disables the model picker while a turn is busy: %s",
+    (turnStatus) => {
+      render(
+        <CodeThreadWorkspace
+          controller={controller({ turnStatus: turnStatus as "running" | "waiting" })}
+          providerGroups={[providerGroup()]}
+          threadId={threadId}
+        />,
+      );
+      expect(screen.getByRole("button", { name: "Provider and model" })).toBeDisabled();
+    },
+  );
+
+  it("leaves the model picker enabled while idle", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller()}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Provider and model" })).toBeEnabled();
+  });
+
   it("renders the conversation center and sends follow-ups through the controller", async () => {
     const user = userEvent.setup();
     const sendFollowUp = vi.fn(async () => true);
