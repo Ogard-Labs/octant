@@ -211,6 +211,52 @@ describe("Desktop pane", () => {
     );
   });
 
+  it("tells the person what a cloud desktop could cost, how long it bills if this computer stops, and what the month has counted", async () => {
+    const aws = {
+      ...spaces,
+      placements: [
+        {
+          placementId: decodeDesktopPlacementId("aws"),
+          displayName: "Your AWS account",
+          locality: "cloud",
+          billed: true,
+          billedIfHostStopsMinutes: 480,
+        },
+      ],
+    } as const;
+    const { client } = fakeClient({
+      overview: overviewOf([], {
+        status: "available",
+        provider: { ...aws, billed: true },
+        placementId: decodeDesktopPlacementId("aws"),
+        spend: {
+          estimateUsdCents: 320,
+          summary: { month: "2026-10", spentUsdCents: 1_250, monthlyCapUsdCents: 5_000 },
+        },
+      }),
+    });
+    render(<DesktopPane client={client} threadId={threadId} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Start desktop" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByText("Start a desktop on Cua Spaces · Your AWS account?"),
+    ).toBeTruthy();
+    expect(dialog.textContent).toContain("keep billing for up to 8 hours");
+    expect(dialog.textContent).toContain("could cost up to $3.20");
+    expect(dialog.textContent).toContain("$12.50 of this month's $50.00 cap");
+  });
+
+  it("says the monthly cap stopped a desktop that bills, and offers no Start", async () => {
+    const { client } = fakeClient({
+      overview: overviewOf([], { status: "refused", reason: "spend-cap-reached" }),
+    });
+    render(<DesktopPane client={client} threadId={threadId} />);
+    expect(
+      await screen.findByText(/past your cap\. Desktops already running keep running/),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Start desktop" })).toBeNull();
+  });
+
   it("asks the person before starting a desktop off this computer, naming the computer it runs on and what a stopped host leaves behind", async () => {
     const { client, requests } = fakeClient({
       overview: overviewOf([], {

@@ -417,6 +417,19 @@ export function changeCodeProjectDesktopRecipe(
     ) {
       reject("invalid-desktop-recipe", "A cloud desktop needs a saved key for its account");
     }
+    // The host estimates every billed lease from the person's own hourly
+    // figure before it starts; Octant knows no provider's price. A desktop
+    // that does not bill has nothing to estimate, so it keeps no figure. A
+    // recipe saved on the same provider and placement before the figure
+    // existed may still be edited without one; it starts nothing until the
+    // person enters it.
+    const billed = placement?.billed ?? provider.billed;
+    if (billed && recipe.hourlyCostUsdCents === undefined && !keyRemovedInPlace) {
+      reject("invalid-desktop-recipe", "Enter what an hour of this desktop costs you");
+    }
+    if (!billed && recipe.hourlyCostUsdCents !== undefined) {
+      reject("invalid-desktop-recipe", "Only a desktop that bills you takes a cost per hour");
+    }
   }
   if (sameDesktopRecipe(project.desktopRecipe, recipe ?? undefined)) {
     reject("invalid-lifecycle", "Project desktop recipe is already selected");
@@ -447,7 +460,8 @@ function sameDesktopRecipe(
     left.network === right.network &&
     left.leaseMinutes === right.leaseMinutes &&
     left.maximumLeaseMinutes === right.maximumLeaseMinutes &&
-    left.idleMinutes === right.idleMinutes
+    left.idleMinutes === right.idleMinutes &&
+    left.hourlyCostUsdCents === right.hourlyCostUsdCents
   );
 }
 

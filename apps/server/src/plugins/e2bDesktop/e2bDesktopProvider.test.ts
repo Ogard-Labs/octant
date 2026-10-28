@@ -43,6 +43,7 @@ const credentialRef = "e4000000-0000-4000-8000-0000000000c1";
 const recipe: DesktopRecipe = decodeDesktopRecipe({
   providerId: "e2b",
   credentialRef,
+  hourlyCostUsdCents: 40,
   screen: { width: 1024, height: 768 },
   network: "none",
   leaseMinutes: 30,
@@ -111,7 +112,7 @@ function hostProcess(connection: SqliteConnection, provider: DesktopProvider) {
   for (const projection of runtime.projections.all()) {
     catchUpProjection({ connection, journal, projection, clock });
   }
-  return createDesktopLeaseService({
+  const service = createDesktopLeaseService({
     journal,
     projection: runtime.desktopLeaseProjection,
     hostTag,
@@ -133,6 +134,16 @@ function hostProcess(connection: SqliteConnection, provider: DesktopProvider) {
     uuid: randomUUID,
     teardownTimeoutMs: 1_000,
   });
+  // Billed desktops start only under a cap a person set; a restarted host
+  // reads the same cap back from the journal.
+  service.setSpendCap({
+    actor: decodeEventActor({
+      kind: "local-user",
+      actorId: "e4000000-0000-4000-8000-0000000000b5",
+    }),
+    monthlyCapUsdCents: 1_000_000,
+  });
+  return service;
 }
 
 describe("E2B desktop provider", () => {

@@ -99,14 +99,34 @@ import {
 
 export const CUA_DESKTOP_PROVIDER_ID = decodeDesktopProviderId("cua");
 /**
- * The placements offered now: a Space on this computer, and one on another
- * of the person's machines, which leaves this one through Cua's mesh or relay
- * and bills nothing; the recipe names which machine. Billed clouds wait for
- * decision C5. The names say "computer", as all copy the host writes does,
- * and never name this host's platform, which a paired device would read.
+ * The placements offered: a Space on this computer, one on another of the
+ * person's machines, which leaves this one through Cua's mesh or relay and
+ * bills nothing (the recipe names which machine), and one in the person's
+ * own AWS, Google Cloud, or Modal account, which bills them (decision C5,
+ * behind the host's monthly spend cap). The names say "computer", as all
+ * copy the host writes does, and never name this host's platform, which a
+ * paired device would read.
  */
 export const CUA_THIS_MACHINE_PLACEMENT = decodeDesktopPlacementId("this-machine");
 export const CUA_OTHER_MACHINE_PLACEMENT = decodeDesktopPlacementId("other-machine");
+/**
+ * Each billed cloud, by the `location` Cua creates in and the `cloud` a Space
+ * there reports, with how long the cloud keeps a Space billing once this host
+ * can no longer end it, by Cua's documented defaults at commit `8fbdf83`: the
+ * cloud link's time limit of 8 hours for AWS and Google Cloud, and Modal's
+ * own timeout of at most 24 hours. Hetzner (billed after power-off until a
+ * sweep) and Azure (never ended by the cloud) have no such bound and are not
+ * offered.
+ */
+export const CUA_CLOUD_PLACEMENTS = [
+  { id: decodeDesktopPlacementId("aws"), displayName: "Your AWS account", stopsMinutes: 480 },
+  {
+    id: decodeDesktopPlacementId("gcp"),
+    displayName: "Your Google Cloud account",
+    stopsMinutes: 480,
+  },
+  { id: decodeDesktopPlacementId("modal"), displayName: "Your Modal account", stopsMinutes: 1_440 },
+] as const;
 export const CUA_DESKTOP_PLACEMENTS: ReadonlyArray<DesktopPlacement> = [
   {
     id: CUA_THIS_MACHINE_PLACEMENT,
@@ -121,6 +141,15 @@ export const CUA_DESKTOP_PLACEMENTS: ReadonlyArray<DesktopPlacement> = [
     billed: false,
     choosesMachine: true,
   },
+  ...CUA_CLOUD_PLACEMENTS.map(
+    (cloud): DesktopPlacement => ({
+      id: cloud.id,
+      displayName: cloud.displayName,
+      locality: "cloud",
+      billed: true,
+      billedIfHostStopsMinutes: cloud.stopsMinutes,
+    }),
+  ),
 ];
 
 const SPACE = "/cua.daemon.v1.SpaceService";
@@ -187,6 +216,12 @@ const GRPC_NOT_FOUND = 5;
  * and anything else, is refused.
  */
 const UNREAD_ROUTES: ReadonlySet<string> = new Set(["mesh", "direct", "local"]);
+/**
+ * A Space in the person's own cloud is reached over `cloud`: the daemon
+ * talks to the machine in their account, not through Cua's relay. Only a
+ * Space created in a cloud accepts it; `relay_https` stays refused there too.
+ */
+const CLOUD_ROUTE = "cloud";
 /** A machine id the driver passes back to Cua as `host:<id>`. */
 const HOST_ID = /^[A-Za-z0-9][A-Za-z0-9 ._:@-]{0,127}$/;
 
@@ -216,8 +251,13 @@ export interface CuaDesktopProviderOptions {
 
 interface Session {
   readonly spaceId: string;
-  /** The Space runs on another of the person's machines, reached over Cua's mesh or relay. */
+  /**
+   * The Space runs off this machine, on another of the person's machines or
+   * in their cloud, so its route is asked before every use.
+   */
   readonly offMachine: boolean;
+  /** The Space runs in the person's own cloud account, whose route is `cloud`. */
+  readonly inCloud: boolean;
   /** The env passthrough key `ConnectSpace` minted; never journaled. */
   readonly envKey: string;
   readonly screen: DesktopRecipe["screen"];
@@ -442,7 +482,12 @@ export function createCuaDesktopProvider(
     const asked = await call(`${SPACE}/GetSpaceRoute`, cuaSpaceRequest(session.spaceId));
     if (asked.kind === "unreachable") return { status: "not-connected" };
     const transport = asked.kind === "ok" ? readCuaRouteTransport(asked.message) : undefined;
-    if (transport !== undefined && UNREAD_ROUTES.has(transport)) return { status: "unread" };
+    if (
+      transport !== undefined &&
+      (UNREAD_ROUTES.has(transport) || (session.inCloud && transport === CLOUD_ROUTE))
+    ) {
+      return { status: "unread" };
+    }
     return {
       status: "refused",
       reason: transport === "relay_https" ? DESKTOP_SESSION_READABLE : "route-unverified",
@@ -453,8 +498,10 @@ export function createCuaDesktopProvider(
   async function untilReady(
     spaceId: string,
     request: { readonly leaseId: DesktopLeaseId; readonly hostTag: DesktopHostTag },
-    /** The machine asked for, or undefined for this one. */
+    /** The machine asked for, or undefined for this one or a cloud. */
     host: CuaHost | undefined,
+    /** The person's cloud asked for, as Cua names it, or empty for none. */
+    cloud: string,
     signal: AbortSignal,
   ): Promise<"ready" | "cancelled" | "mismatched" | "not-ready"> {
     const deadline = now() + readyWithinMs;
@@ -471,7 +518,7 @@ export function createCuaDesktopProvider(
           current.id !== spaceId ||
           current.labels.get(CUA_LEASE_LABEL) !== String(request.leaseId) ||
           current.labels.get(CUA_HOST_LABEL) !== String(request.hostTag) ||
-          current.cloud !== "" ||
+          current.cloud !== cloud ||
           (host === undefined
             ? current.host !== ""
             : current.host === "" || (host.via === "relay" && current.host !== host.id)) ||
@@ -681,13 +728,14 @@ export function createCuaDesktopProvider(
       const { recipe, leaseId } = request;
       const placement = String(recipe.placementId ?? "");
       const offMachine = placement === String(CUA_OTHER_MACHINE_PLACEMENT);
-      if (!offMachine && placement !== String(CUA_THIS_MACHINE_PLACEMENT)) {
+      const cloud = CUA_CLOUD_PLACEMENTS.find((entry) => String(entry.id) === placement);
+      if (!offMachine && cloud === undefined && placement !== String(CUA_THIS_MACHINE_PLACEMENT)) {
         return { status: "refused", reason: "placement-not-offered" };
       }
       // A QEMU guest with user networking can reach its host's loopback: on
       // this machine the Octant server, on another the person's own
       // services there. So no placement has network until a live check
-      // shows otherwise (C7).
+      // shows otherwise (C7); a cloud Space is asked for the same VM.
       if (recipe.network !== "none") return { status: "refused", reason: "network-not-offered" };
       if (recipe.credentialRef !== undefined) {
         return { status: "refused", reason: "credential-not-used" };
@@ -707,7 +755,12 @@ export function createCuaDesktopProvider(
         `${SPACE}/CreateSpace`,
         cuaCreateSpaceRequest({
           image: recipe.image ?? CUA_DEFAULT_IMAGE,
-          location: host === undefined ? "local" : `host:${host.id}`,
+          location:
+            cloud !== undefined
+              ? String(cloud.id)
+              : host === undefined
+                ? "local"
+                : `host:${host.id}`,
           name: spaceName(leaseId),
           createId: String(leaseId),
           labels: { [CUA_LEASE_LABEL]: String(leaseId), [CUA_HOST_LABEL]: String(request.hostTag) },
@@ -752,7 +805,13 @@ export function createCuaDesktopProvider(
         await discard(leaseId, spaceId);
         return failed("lifetime-not-set");
       }
-      const ready = await untilReady(spaceId, request, host, request.signal);
+      const ready = await untilReady(
+        spaceId,
+        request,
+        host,
+        cloud === undefined ? "" : String(cloud.id),
+        request.signal,
+      );
       if (ready !== "ready") {
         await discard(leaseId, spaceId);
         return ready === "cancelled" ? { status: "cancelled" } : failed(`space-${ready}`);
@@ -784,7 +843,8 @@ export function createCuaDesktopProvider(
       const { screen } = recipe;
       const session: Session = {
         spaceId,
-        offMachine,
+        offMachine: offMachine || cloud !== undefined,
+        inCloud: cloud !== undefined,
         envKey,
         screen,
         control: new ScreenshotDesktopControl({

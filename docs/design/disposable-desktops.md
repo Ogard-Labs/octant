@@ -44,9 +44,14 @@ entry is built too: a local window enters, replaces, and removes the key a
 cloud recipe's provider reads, kept only in the host credential store
 ([Built: recipe key entry](#built-recipe-key-entry)); it shows only for a
 provider the host offers, so no running host shows it until E2B is offered.
-Slice 4's real-provider smoke,
-slice 6's E2B live smoke, and Cua sub-slices 2 and 3's live smokes are still
-owed by the maintainer.
+Billed cloud placements follow [decision C5](#expiry-and-teardown-when-the-daemons-host-may-die),
+accepted on 2026-10-28 behind a monthly spend cap: Cua's AWS, Google Cloud,
+and Modal placements, the cap, and the per-lease estimate are built against
+recorded and fake providers only
+([Built in Cua sub-slice 4](#built-in-cua-sub-slice-4)). Slice 4's
+real-provider smoke, slice 6's E2B live smoke, and Cua sub-slices 2 and 3's
+live smokes are still owed by the maintainer, and so is a billed placement's
+live run.
 
 **Name.** The product calls it a _disposable desktop_. "Computer" already names
 the Mac computer-use destination and the paired-host Computers card, and a
@@ -231,7 +236,17 @@ lease anyway.
   acquires a host-local desktop has already decided and is not asked again;
   Plan still refuses them, and a billed or off-machine lease still asks. The
   host re-checks authority after the answer, and an answer given for one
-  provider, placement, machine, or posture never covers another.
+  provider, placement, machine, posture, or spend estimate never covers
+  another.
+- **Spending** on a billed desktop is capped per month
+  ([C5](#expiry-and-teardown-when-the-daemons-host-may-die)). Billed desktops
+  are off until a person sets a monthly cap in Settings › Computer use. Before
+  any billed lease is journaled, the host estimates it and refuses it if the
+  month's spend plus the estimate would pass the cap; reaching the cap ends no
+  running lease, refuses new ones, and tells the person why. Only a person at
+  a local window reads or changes the cap; an agent, in any posture, and a
+  paired device are refused before anything is journaled, so no turn can raise
+  what it may spend.
 - **Reading** the screen (a frame, a screenshot, a window list) needs no
   approval. **Agent input** follows the existing computer-use rules unchanged:
   `@Computer`-style per-send selection, per-application approval, sensitive-field
@@ -318,7 +333,11 @@ lease anyway.
   one is refused by the seam's conformance suite, and the host itself refuses
   to keep a billed desktop whose reported provider-side expiry is missing or
   earlier than the lease expiry: the lease is `failed` and the desktop is
-  destroyed.
+  destroyed. The one exception is a billed placement that declares how long
+  its provider keeps billing once the host stops (`billedIfHostStopsMinutes`,
+  a day at most): the person is told that worst case before it starts, and
+  the spend estimate reserves it
+  ([C5](#expiry-and-teardown-when-the-daemons-host-may-die)).
 - **Teardown outlives revocation.** The `requested` event records the
   provider and the recipe's credential reference, never the material. When a
   lease is not yet `released`, removing its recipe or credential, or disabling
@@ -1204,8 +1223,9 @@ die. The maintainer accepted those decisions on 2026-10-27 in
 ## Cua Spaces through the local daemon
 
 **Status: accepted by the maintainer on 2026-10-27, every decision as
-recommended.** Cua is delivered first for this machine's placement, then the
-person's other machines; billed cloud placements wait for C5's condition. Cua
+recommended; on 2026-10-28 the maintainer accepted C5's alternative with a
+monthly spend cap.** Cua is delivered first for this machine's placement, then
+the person's other machines, then billed cloud placements under C5. Cua
 ships on Linux hosts first; on macOS, transfer stays refused until its own
 handle-path check exists. The decisions below are rules; the sub-slices under
 [Delivery sub-slices](#delivery-sub-slices) are the delivery plan, each its own
@@ -1214,7 +1234,9 @@ built ([Built in Cua sub-slice 1](#built-in-cua-sub-slice-1)), and so is
 sub-slice 2, the driver for a Space on this machine
 ([Built in Cua sub-slice 2](#built-in-cua-sub-slice-2)), and sub-slice 3,
 the person's other machines
-([Built in Cua sub-slice 3](#built-in-cua-sub-slice-3)); no host offers it
+([Built in Cua sub-slice 3](#built-in-cua-sub-slice-3)), and sub-slice 4,
+the person's own clouds behind the spend cap
+([Built in Cua sub-slice 4](#built-in-cua-sub-slice-4)); no host offers it
 until the maintainer's live smokes pass.
 
 ### What Cua offers now
@@ -1420,25 +1442,77 @@ both. What ends a Space then depends on where it is:
 | Hetzner                    | Powers off at the link's time limit but is billed until a later sweep or delete.                                                               |
 | Azure                      | Runs and bills until a daemon of the person's sweeps it.                                                                                       |
 
-**Decision C5: offer Cua's billed cloud
-placements only when Cua exposes a cloud-side deadline Octant can set and
-read.** The daemon's lifetime, and `expires_at_unix` as `ListSpaces`
-reports it, is the daemon's own record: it dies with the host and moves
-nothing in the cloud. The `cua-expires` tag follows the cloud link's time
-limit, which Octant cannot read through any declared method, cannot move on
-extension, and the person can set to none. So neither satisfies
-"provider-side expiry is mandatory for a billed provider": the host's
-billed-expiry check would pass on a number that does not outlive the host. Recommended
-first delivery: this machine's placement only, with the person's other
-machines next under C6; billed placements wait until Cua's `SetSpaceLifetime`
-moves the cloud's own deadline and a listing reports it. Rejected: (a)
-counting the daemon's lifetime as provider-side expiry, which is exactly
-the guarantee a dead host loses; (b) offering AWS, Google Cloud, and Modal
-now with the link's time limit as an unverified backstop the person
-acknowledges, because Octant could not check the limit exists and the
-promise would rest on a setting it never sees (the maintainer may still choose
-this; then Hetzner and Azure stay refused, and the billed confirmation
-states the worst case in the table above).
+**Decision C5, accepted by the maintainer on 2026-10-28: offer Cua's
+billed cloud placements in the person's own AWS, Google Cloud, and Modal
+accounts behind a monthly spend cap.** Cua still exposes no cloud-side
+deadline Octant can set and read. The daemon's lifetime, and
+`expires_at_unix` as `ListSpaces` reports it, is the daemon's own record: it
+dies with the host and moves nothing in the cloud. The `cua-expires` tag
+follows the cloud link's time limit, which Octant cannot read through any
+declared method, cannot move on extension, and the person can set to none.
+The maintainer chose what this section first listed as alternative (b): the
+cloud's own stop in the table above is an unverified backstop the person is
+told of before each lease, and a monthly cap bounds what billed desktops may
+spend. Hetzner and Azure, which have no such stop, stay refused.
+
+The spend-cap rules:
+
+- **Off until a cap is set.** No billed lease starts until a person sets a
+  monthly cap in Settings › Computer use. Clearing the cap turns billed
+  desktops off again. A cap of zero is a cap, and refuses every billed lease.
+- **Each lease is estimated before it starts.** A billed recipe carries the
+  person's own cost per hour (`hourlyCostUsdCents`), because Octant knows no
+  provider's price and C4 rules out showing a cost it cannot verify. The
+  estimate is that hourly cost times the longer of the recipe's maximum lease
+  and the placement's declared stop if the host dies
+  (`billedIfHostStopsMinutes`: 8 hours for AWS and Google Cloud, the cloud
+  link's default; a day for Modal), rounded up to a cent. A recipe without the
+  figure starts nothing (`spend-unestimated`); the recipe editor asks for it
+  on any billed recipe, and the policy refuses a new or moved billed recipe
+  without it and a non-billed recipe with one.
+- **Refused when it would pass the cap.** The host checks the month's spend
+  plus the estimate against the cap twice, before asking anyone and again
+  right before the lease is journaled with nothing awaited between, so two
+  acquires cannot both fit in the cap's last room. A lease that would pass it
+  is refused `spend-cap-reached` (`spend-cap-unset` with no cap) before any
+  provider call. The pane's Start shows the same refusal before it is
+  pressed, and the agent's tool answers it as its reason.
+- **Spend is tracked per month on the host.** Each billed lease journals its
+  hourly cost and estimate in `desktop.lease-requested@1` (`spend`), so the
+  month's spend is rebuilt from the journal after a restart. The month is the
+  UTC calendar month the lease was requested in, the month the clouds bill
+  by. A lease that may still hold a desktop counts its whole estimate; one
+  released, refused, or failed counts its time from request to end at the
+  hourly cost, rounded up and never above its estimate.
+- **Reaching the cap ends nothing running.** It refuses new billed leases and
+  tells the person: the pane says the cap stopped the start and Settings
+  shows the month's spend against it. Lowering the cap below what runs ends
+  no lease.
+- **Agents cannot raise the cap.** Only a person at a local window reads or
+  changes it (`spend-cap-local-only` for anyone else). No agent tool reaches
+  it, and the lease service refuses an agent, a paired device, and the
+  system actor before journaling anything.
+- **Journaled without secrets.** A change is `desktop.spend-cap-changed@1`
+  (the previous and new cap, as the person), and a refusal the cap made is
+  `desktop.billed-lease-refused@1` (owner, provider, placement, reason, month,
+  estimate, spend, and cap, as the actor who asked), both on the host's one
+  `desktop-spend` aggregate. Neither carries a key or credential reference.
+- **The person confirms where and how much.** A person still confirms every
+  billed lease (decision 2). The confirmation names the provider and
+  placement, the placement's worst case if this computer stops ("your
+  account can keep billing for up to 8 hours by its own default, longer if
+  you changed that limit"), the estimate, and the month's spend against the
+  cap.
+
+Rejected: counting the daemon's lifetime as provider-side expiry, which is
+exactly the guarantee a dead host loses; waiting until Cua's
+`SetSpaceLifetime` moves the cloud's own deadline and a listing reports it,
+which this section first recommended and which left billed placements with
+no date; prices written in the driver, numbers Octant cannot verify since Cua
+chooses the cloud machine; counting only leases that already started, which
+lets a burst of starts pass the cap before any is journaled; and ending
+running desktops at the cap, which would cut a session off mid-task when the
+spend it guards against is already reserved.
 
 What the person is told, in every case:
 
@@ -1538,11 +1612,11 @@ where Cua documents no `network` `none`.
 | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | The daemon socket can link clouds, set budgets, share Spaces, shut down | Declared method list in the driver's code, pinned by a test; no MCP or tool-call method; caller headers refused; confined tool launches get no home, so never the socket |
 | A planted or redirected socket impersonates the daemon                  | Home-relative declared path, no environment override, no symlink on any component, owner and `0600` checks, parent not writable by others, version and feature checks    |
-| A Space outlives a host that died                                       | Labels and journal-before-create; restart reconciliation; billed placements not offered until a cloud-side deadline exists (C5); the person is told what happens if not  |
+| A Space outlives a host that died                                       | Labels and journal-before-create; restart reconciliation; a billed placement only with the cloud's own stop, told to the person and reserved in the spend estimate (C5)  |
 | The relay reads the session                                             | Screen refused on `relay_https`; off-machine placements confirm where the Space runs                                                                                     |
 | A Space on this machine reaches the Octant server                       | QEMU VM with network `none`, verified from the create's answer (C7)                                                                                                      |
 | The daemon or Space answers with hostile or oversized data              | Port bounds on time and bytes; frames bounded before decoding; labels and names length-bounded; results taint the thread                                                 |
-| Teardown is reported but billing continues                              | Octant claims only that the person's daemon no longer lists the Space; billed placements deferred (C5)                                                                   |
+| Teardown is reported but billing continues                              | Octant claims only that the person's daemon no longer lists the Space; billed spend bounded by the monthly cap; Hetzner and Azure refused (C5)                           |
 
 ### Rejected alternatives
 
@@ -1589,8 +1663,13 @@ where Cua documents no `network` `none`.
    when_ a recorded route of `relay_https` refuses the screen and an
    off-machine acquire asks. _Owed by the maintainer:_ the same smoke with a
    second machine set up with `cua host setup --provide-spaces`.
-4. **Billed cloud placements**, only after C5's condition holds or the
-   maintainer chooses its alternative (b).
+4. **Billed cloud placements** (container; built, see
+   [Built in Cua sub-slice 4](#built-in-cua-sub-slice-4)). _Accepts when_ a
+   lease with no cap, one whose estimate would pass the cap, and an agent
+   changing the cap are each refused as C5 says, the refusals and the cap
+   change journaled, a new month starts at zero, and the cloud placements
+   pass the conformance suite against the recorded daemon. _Owed by the
+   maintainer:_ a live billed run, which spends their money.
 
 ### Built in Cua sub-slice 1
 
@@ -1818,8 +1897,9 @@ Rules this sub-slice resolved:
   read-only (`0444`) to a staging name, then moved into `/home/user/inbox`.
 - **The daemon's lifetime is reported, not relied on.** The acquire reports
   the lifetime the daemon confirmed as the provider's expiry. This
-  placement does not bill, so the host's billed-expiry check does not apply,
-  and C5 still keeps billed placements out.
+  placement does not bill, so the host's billed-expiry check does not apply.
+  A billed cloud placement is kept on its declared stop instead
+  ([sub-slice 4](#built-in-cua-sub-slice-4)).
 
 Evidence: `cuaDesktopProvider.test.ts` runs the conformance suite, restart
 included, against a recorded Cua daemon (`cuaRecordedDaemon.test-support.ts`,
@@ -1978,6 +2058,87 @@ the id `ListHosts` reports, that a Space there reports `network` `none`, its
 `SetSpaceLifetime` and `DeleteSpace` reach it through this daemon, and that
 a complete `ListSpaces` lists it. Until both smokes pass, the driver is
 offered on no host.
+
+### Built in Cua sub-slice 4
+
+- **Contract.** `hourlyCostUsdCents` on `DesktopRecipe`;
+  `billedIfHostStopsMinutes` on `LeasableDesktopPlacement`; `spend` (hourly
+  cost and estimate) on `desktop.lease-requested@1` and `DesktopLease`; the
+  `desktop-spend` aggregate with `desktop.spend-cap-changed@1` and
+  `desktop.billed-lease-refused@1`; `DesktopSpendSummary`; the pane requests
+  `spend` and `set-spend-cap` and the answer `spend`; `spend` on an available
+  Start; and the refusals `spend-unestimated`, `spend-cap-unset`,
+  `spend-cap-reached`, and `spend-cap-local-only`
+  (`packages/contracts/src/desktopLease.ts`).
+- **Seam.** `billedIfHostStopsMinutes` on `DesktopPlacement`
+  (`packages/plugin-api/src/desktopProvider.ts`).
+- **Policy.** `desktopSpendMonth`, `desktopLeaseSpendEstimate`,
+  `desktopLeaseSpent`, `desktopMonthSpent`, `decideDesktopBilledSpend`,
+  `desktopSpendCapChangeAllowed`, and the declared-stop exception in
+  `desktopProviderExpiryHolds` (`packages/domain/src/desktopLeasePolicy.ts`);
+  the hourly-cost rule at recipe save (`projectPolicy.ts`).
+- **Host.** The lease service estimates and checks every billed lease,
+  journals the refusals and the cap, answers `spend` and `setSpendCap` to a
+  person at a local window only, and keeps a billed placement on its declared
+  stop; the lease projection holds the cap (`desktopLeaseService.ts`,
+  `desktopLeaseProjection.ts`, `desktopPaneRoutes.ts`).
+- **Driver.** The `cua` provider declares `aws`, `gcp`, and `modal`, billed,
+  with their stops; a create names that `location` and asks for the same QEMU
+  VM with network `none`, and a Space that reports another cloud or none is
+  destroyed (`cuaDesktopProvider.ts`).
+- **Web.** Settings › Computer use › Desktops that bill you
+  (`DesktopSpendCapSettings.tsx`); **Cost per hour** in the recipe editor for
+  a billed recipe; the Desktop pane's confirmation and refusals
+  (`DesktopPane.tsx`, `desktopPaneModel.ts`).
+
+Rules this sub-slice resolved:
+
+- **A cloud Space's route is `cloud`.** `GetSpaceRoute` names `cloud` for a
+  Space in the person's own account, where the daemon reaches their machine
+  without Cua's relay. The driver asks the route before every use, as for
+  another machine, and accepts `cloud` only for a Space it created in a cloud;
+  `relay_https` stays refused there, and `cloud` stays refused for a Space on
+  another machine.
+- **The cap and the estimate apply to every billed lease**, E2B included, not
+  only Cua's placements: E2B bills the same person, and a cap that skipped it
+  would not bound their spend.
+- **A recipe saved before the hourly cost existed** stays editable in place
+  without one, as a keyless cloud recipe does, and starts nothing until the
+  person enters it.
+- **Units.** The cap and every spend figure are whole US cents, at most
+  $1,000,000; the cost per hour is at least a cent and at most $10,000.
+
+Evidence, all against fakes and recordings; nothing created a cloud account,
+spent money, or called a billed API. `desktopLeaseService.test.ts`, over a
+journal on disk: no cap refuses and journals the refusal with its figures, and
+the pane's Start shows it; an estimate that would pass the cap is refused and
+journaled, while lowering the cap and sweeping ends neither running desktop; a
+release frees all but its running time; a lease on 31 October counts toward
+October and a lease on 1 November starts from zero, and a restarted host
+rebuilds the same figures and cap; an agent, a paired device, and the system
+actor changing or reading the cap are refused with nothing journaled, and the
+person clearing it turns billed desktops off; a billed recipe with no hourly
+cost is refused before any provider call; and a billed placement with a
+declared stop is kept without a provider expiry and estimated over that stop.
+`desktopLeasePolicy.test.ts` covers the decision, the estimate, what a lease
+counts, the month, who may change the cap, and the expiry exception;
+`projectPolicy.test.ts` the hourly-cost rule; `desktopPaneRoutes.test.ts` the
+cap set from a local window and refused from a paired device or from a body
+that names its own actor; `cuaDesktopProvider.test.ts` the conformance suite
+on the `aws` placement against the recorded daemon, the three clouds created
+at their own location with Hetzner and Azure refused, a Space reported in
+another cloud or none destroyed, and the `cloud` route accepted only for a
+cloud Space; and `DesktopSpendCapSettings.test.tsx`,
+`ProjectDesktopRecipeSection.test.tsx`, and `DesktopPane.test.tsx` the
+setting, the cost field, the confirmation, and the refusal.
+
+Owed by the maintainer: a live billed run on a Linux host with Cua's daemon
+signed in and a cloud linked, once Cua is offered at all; it spends their
+money. It confirms what a recording cannot: that `location` `aws` (or `gcp`,
+`modal`) creates there, that a cloud Space can be a QEMU VM with network
+`none` (if not, every acquire there fails closed), that the Space reports its
+`cloud`, that `GetSpaceRoute` answers `cloud`, and that `DeleteSpace` and a
+complete `ListSpaces` reach it. No smoke target for it is built.
 
 ### Built: Cua follow-ups
 

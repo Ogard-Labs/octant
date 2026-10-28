@@ -89,6 +89,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
     agentRunSettingsClient,
     automationNotificationClient,
     canvasClient,
+    desktopPaneClient,
     diagnosticsExportClient,
     extensionClient,
     folderBrowseClient,
@@ -187,6 +188,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
       diagnosticsExportClient={diagnosticsExportClient}
       hostControlClient={hostControlClient}
       {...(canvasClient === undefined ? {} : { canvasClient })}
+      {...(desktopPaneClient === undefined ? {} : { desktopPaneClient })}
       {...(replicaStoreSettingsClient === undefined ? {} : { replicaStoreSettingsClient })}
       {...(replicaMembershipClient === undefined ? {} : { replicaMembershipClient })}
       replicaSyncStatusClient={replicaSyncStatusClient}

@@ -9,6 +9,7 @@ import type {
   DesktopMachine,
   DesktopPaneAnswer,
   DesktopPaneRequest,
+  DesktopPaneStart,
   DesktopPlacementId,
   DesktopViewId,
   LeasableDesktopProvider,
@@ -21,6 +22,8 @@ import { DeviceSpinner } from "../device/DeviceStage";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import {
+  desktopDollars,
+  desktopHours,
   desktopKeyIntent,
   desktopPaneState,
   desktopWhere,
@@ -57,6 +60,8 @@ interface StartToConfirm {
   readonly provider: LeasableDesktopProvider;
   readonly placementId?: DesktopPlacementId;
   readonly machine?: DesktopMachine;
+  /** For a billed desktop: its estimate and this month's spend against the cap. */
+  readonly spend?: Extract<DesktopPaneStart, { readonly status: "available" }>["spend"];
 }
 
 /** What this tab holds of one lease's screen in this window session. */
@@ -330,6 +335,7 @@ export function DesktopPane(props: {
                 provider: offered.provider,
                 ...(offered.placementId === undefined ? {} : { placementId: offered.placementId }),
                 ...(offered.machine === undefined ? {} : { machine: offered.machine }),
+                ...(offered.spend === undefined ? {} : { spend: offered.spend }),
               });
             } else void start();
           }}
@@ -373,7 +379,7 @@ function StartConfirmation(props: {
   readonly onCancel: () => void;
   readonly onConfirm: () => void;
 }) {
-  const { provider, placementId, machine } = props.confirm;
+  const { provider, placementId, machine, spend } = props.confirm;
   const placement = provider.placements?.find(
     (entry) => String(entry.placementId) === String(placementId ?? ""),
   );
@@ -405,6 +411,16 @@ function StartConfirmation(props: {
       >
         It runs on your own {account} account, which bills you while it runs. It ends when you
         release it or when it expires, and Octant confirms it is gone.
+        {placement?.billedIfHostStopsMinutes === undefined
+          ? ""
+          : ` If this computer stops, Octant cannot end it, and your account can keep billing for up to ${desktopHours(placement.billedIfHostStopsMinutes)} by its own default, longer if you changed that limit.`}
+        {spend === undefined
+          ? ""
+          : ` By your cost per hour it could cost up to ${desktopDollars(spend.estimateUsdCents)}${
+              spend.summary.monthlyCapUsdCents === undefined
+                ? ""
+                : `; ${desktopDollars(spend.summary.spentUsdCents)} of this month's ${desktopDollars(spend.summary.monthlyCapUsdCents)} cap is already counted`
+            }.`}
       </OctantConfirmDialog>
     );
   }

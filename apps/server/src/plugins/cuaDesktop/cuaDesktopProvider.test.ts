@@ -72,6 +72,10 @@ const onMachine = (host: RecordedCuaHost): DesktopRecipe =>
     machine: { machineId: host.id, displayName: host.name },
   });
 const otherMachineRecipe = onMachine(SPARE);
+/** A Space in the person's own AWS account, priced by their own hourly figure. */
+const inCloud = (placementId: string): DesktopRecipe =>
+  decodeDesktopRecipe({ ...recipe, placementId, hourlyCostUsdCents: 40 });
+const awsRecipe = inCloud("aws");
 const hostTag = decodeDesktopHostTag("c5000000-0000-4000-8000-0000000000aa");
 const ELEMENT_CLICK = decodeComputerControlCommand({
   operation: "click",
@@ -261,6 +265,123 @@ describe("Cua desktop provider", () => {
     });
   });
 
+  it("keeps the seam's promises for a Space in the person's own cloud", async () => {
+    const ordinary = await daemonWith({ clouds: ["aws"], route: "cloud" });
+    const declining = await daemonWith({
+      clouds: ["aws"],
+      route: "cloud",
+      holdsLifetimeMs: 45 * MINUTE,
+    });
+    const lingering = await daemonWith({ clouds: ["aws"], route: "cloud", outlivesDelete: true });
+    const backends = new WeakMap<DesktopProvider, RecordedCuaDaemon>();
+    await expect(
+      runDesktopProviderConformance({
+        create: (scenario) => {
+          const daemon = scenario.providerDeclinesExtension
+            ? declining
+            : scenario.desktopOutlivesDestroy
+              ? lingering
+              : ordinary;
+          const provider = driverOver(daemon);
+          backends.set(provider, daemon);
+          return provider;
+        },
+        restarted: (previous) => {
+          const daemon = backends.get(previous);
+          if (daemon === undefined) throw new Error("no recorded daemon for that driver");
+          return driverOver(daemon);
+        },
+        recipe: awsRecipe,
+        unsupportedCommand: ELEMENT_CLICK,
+      }),
+    ).resolves.toMatchObject({
+      stoppedWhenCancelled: true,
+      taggedWhatItCreated: true,
+      extendedOnlyWhenConfirmed: true,
+      reportedAbsenceOnlyWhenAbsent: true,
+      foundAfterRestart: true,
+    });
+  });
+
+  it("offers AWS, Google Cloud, and Modal as billed placements with the cloud's own stop, and no cloud without one", async () => {
+    const { daemon, provider } = await harness({ clouds: ["aws", "gcp", "modal"] });
+    expect(
+      provider.placements
+        ?.filter((placement) => placement.billed)
+        .map(({ id, locality, billedIfHostStopsMinutes }) => ({
+          id,
+          locality,
+          billedIfHostStopsMinutes,
+        })),
+    ).toEqual([
+      { id: "aws", locality: "cloud", billedIfHostStopsMinutes: 480 },
+      { id: "gcp", locality: "cloud", billedIfHostStopsMinutes: 480 },
+      { id: "modal", locality: "cloud", billedIfHostStopsMinutes: 1_440 },
+    ]);
+    // Hetzner bills after power-off and Azure is never ended by the cloud.
+    for (const placementId of ["hetzner", "azure"]) {
+      await expect(
+        provider.acquire({ ...acquireRequest(), recipe: inCloud(placementId) }),
+      ).resolves.toEqual({ status: "refused", reason: "placement-not-offered" });
+    }
+    expect(daemon.calls()).toEqual([]);
+
+    // Each cloud is created at its own location, as the same no-network VM.
+    for (const placementId of ["aws", "gcp", "modal"]) {
+      await acquired(provider, inCloud(placementId));
+    }
+    expect(
+      daemon.spaces().map((space) => ({
+        location: textOf(space.createRequest, 2),
+        kind: textOf(space.createRequest, 3),
+        runtime: textOf(space.createRequest, 4),
+        network: textOf(space.createRequest, 20),
+      })),
+    ).toEqual(
+      ["aws", "gcp", "modal"].map((location) => ({
+        location,
+        kind: "vm",
+        runtime: "qemu",
+        network: "none",
+      })),
+    );
+  });
+
+  it("destroys a cloud Space the daemon reports in another cloud, or in none", async () => {
+    const elsewhere = await harness({ clouds: ["aws"], placesInCloud: "gcp" });
+    await expect(
+      elsewhere.provider.acquire({ ...acquireRequest(), recipe: awsRecipe }),
+    ).resolves.toEqual({ status: "failed", reason: "space-mismatched" });
+    expect(elsewhere.daemon.spaces()).toEqual([]);
+
+    const nowhere = await harness({ clouds: ["aws"], placesInCloud: "" });
+    await expect(
+      nowhere.provider.acquire({ ...acquireRequest(), recipe: awsRecipe }),
+    ).resolves.toEqual({ status: "failed", reason: "space-mismatched" });
+    expect(nowhere.daemon.spaces()).toEqual([]);
+  });
+
+  it("shows a cloud Space over the route to the person's own cloud, never while Cua's relay can read it", async () => {
+    const { daemon, provider } = await harness({ clouds: ["aws"], route: "cloud" });
+    const { result } = await acquired(provider, awsRecipe);
+    const opened = await provider.screen(result.handle);
+    if (opened.status !== "ready") throw new Error("no screen over the cloud route");
+    await expect(opened.screen.frame()).resolves.toMatchObject({ status: "frame" });
+
+    daemon.routeOver("relay_https");
+    await expect(opened.screen.frame()).resolves.toEqual({
+      status: "refused",
+      reason: DESKTOP_SESSION_READABLE,
+    });
+    // `cloud` is accepted only for a Space created in a cloud.
+    const other = await harness({ hosts: [SPARE], route: "cloud" });
+    const onSpare = await acquired(other.provider, otherMachineRecipe);
+    await expect(other.provider.screen(onSpare.result.handle)).resolves.toEqual({
+      status: "refused",
+      reason: "route-unverified",
+    });
+  });
+
   it("creates a Space on the machine the recipe names, and refuses one the daemon does not list or that is asleep", async () => {
     const asleep = { ...SPARE, id: "m-0b1c", name: "old laptop", online: false };
     const second = { ...SPARE, id: "m-9d2e", name: "studio" };
@@ -347,6 +468,9 @@ describe("Cua desktop provider", () => {
     ).toEqual([
       ["This computer", undefined],
       ["Your other computer", true],
+      ["Your AWS account", undefined],
+      ["Your Google Cloud account", undefined],
+      ["Your Modal account", undefined],
     ]);
   });
 

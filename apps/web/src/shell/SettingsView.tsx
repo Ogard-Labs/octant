@@ -111,6 +111,8 @@ import { VoiceSettingsView } from "../settings/VoiceSettingsView";
 import { ImageGenerationSettingsView } from "../settings/ImageGenerationSettingsView";
 import { ModelEndpointSettingsView } from "../settings/ModelEndpointSettingsView";
 import { ComputerUseSettingsView } from "../settings/ComputerUseSettingsView";
+import { DesktopSpendCapSettings } from "../settings/DesktopSpendCapSettings";
+import type { DesktopPaneClient } from "@octant/client-runtime/desktop-pane-client";
 import { ManagedToolsSettingsView } from "../settings/ManagedToolsSettingsView";
 import { AppStoreConnectKeySection } from "../settings/AppStoreConnectKeySection";
 import { UserProfileSettingsView } from "../profile/UserProfileSettingsView";
@@ -201,6 +203,8 @@ export interface SettingsViewProps {
   readonly hostControlClient?: HostControlClient;
   /** Settings › Data & privacy › Public links; absent where the host has no such surface. */
   readonly canvasClient?: Pick<CanvasClient, "publicLinkSettings" | "setPublicLinkSettings">;
+  /** Settings › Computer use › the monthly cap for desktops that bill; absent where the host has no route to it. */
+  readonly desktopPaneClient?: Pick<DesktopPaneClient, "request">;
   /** Settings › Sync on this host; absent off it, where store setup is not offered. */
   readonly replicaStoreSettingsClient?: ReplicaStoreSettingsClient;
   /** Creating, joining, and revoking on this host; absent off it. */
@@ -1005,11 +1009,19 @@ function ActiveSectionContent({
       );
     case "computer-use":
       return (
-        <ComputerUseSettingsView
-          settings={props.settings.computerUse}
-          onSettingsChange={props.onSettingsChange}
-          {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
-        />
+        <>
+          <ComputerUseSettingsView
+            settings={props.settings.computerUse}
+            onSettingsChange={props.onSettingsChange}
+            {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
+          />
+          {props.desktopPaneClient === undefined ? null : (
+            <DesktopSpendCapSettings
+              client={props.desktopPaneClient}
+              focusedSetting={focusedSetting}
+            />
+          )}
+        </>
       );
     case "device-tools": {
       const appStoreConnectKeyRequest = props.hostBridge?.appStoreConnectKeyRequest;

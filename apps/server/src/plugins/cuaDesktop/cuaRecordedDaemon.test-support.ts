@@ -71,6 +71,12 @@ export interface RecordedCuaScenario {
   readonly placesOnHost?: string;
   /** What carries the connection to a Space on another machine (`GetSpaceRoute`'s transport). */
   readonly route?: string;
+  /**
+   * The clouds the person linked to Cua (`aws`, `gcp`, `modal`): a create
+   * there makes a Space that reports that cloud. Nothing is billed; this is
+   * a recording.
+   */
+  readonly clouds?: ReadonlyArray<string>;
 }
 
 export interface RecordedCuaHost {
@@ -89,6 +95,8 @@ interface RecordedSpace {
   readonly createId: string;
   /** The machine that provides it, as `Space.host` names it; empty on this machine. */
   readonly host: string;
+  /** The person's cloud it runs in, as `Space.cloud` names it; empty off a cloud. */
+  readonly cloud: string;
   readonly labels: ReadonlyMap<string, string>;
   readonly createRequest: Fields;
   expiresAt?: number;
@@ -394,7 +402,9 @@ export class RecordedCuaDaemon {
       case "/cua.daemon.v1.SpaceService/GetSpaceRoute": {
         const space = this.#spaces.get(textOf(request, 1));
         if (space === undefined) return fail(response, 5);
-        const transport = space.host === "" ? "local" : this.#transport;
+        // A Space on this machine is always `local`; one on another machine
+        // or in a cloud takes the route the test set.
+        const transport = space.host === "" && space.cloud === "" ? "local" : this.#transport;
         const route =
           transport === "local"
             ? "local 127.0.0.1:3211"
@@ -426,7 +436,8 @@ export class RecordedCuaDaemon {
     const asked = location.startsWith("host:")
       ? (this.#scenario.hosts ?? []).find((host) => host.online && `host:${host.id}` === location)
       : undefined;
-    if (location !== "local" && asked === undefined) return fail(response, 5);
+    const inCloud = (this.#scenario.clouds ?? []).includes(location);
+    if (location !== "local" && asked === undefined && !inCloud) return fail(response, 5);
     const host =
       this.#scenario.placesOnHost ??
       (asked === undefined ? "" : asked.via === "relay" ? asked.id : "direct:10.0.0.9:3211");
@@ -437,6 +448,7 @@ export class RecordedCuaDaemon {
         name,
         createId,
         host,
+        cloud: inCloud ? location : "",
         labels: mapOf(request, 21),
         createRequest: request,
         bootPolls: this.#scenario.bootPolls ?? 1,
@@ -478,8 +490,8 @@ export class RecordedCuaDaemon {
       .string(12, "vm")
       .string(14, space.host)
       .string(17, booted ? "running" : "")
-      .string(18, this.#scenario.placesInCloud ?? "")
-      .string(20, this.#scenario.placesInCloud === undefined ? "" : "here");
+      .string(18, this.#scenario.placesInCloud ?? space.cloud)
+      .string(20, (this.#scenario.placesInCloud ?? space.cloud) === "" ? "" : "here");
     for (const [key, value] of space.labels) {
       writer.bytes(22, new ProtobufWriter().string(1, key).string(2, value).finish());
     }

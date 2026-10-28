@@ -37,6 +37,8 @@ export interface DesktopPaneRouteDependencies {
     | "input"
     | "destination"
     | "recipeMachines"
+    | "spend"
+    | "setSpendCap"
   >;
   /**
    * What a Code Project's recipe editor says about its key. Absent on a host
@@ -162,6 +164,13 @@ async function answer(
       providerId: request.providerId,
       placementId: request.placementId,
     });
+  }
+  // The monthly cap for billed desktops is host-wide money. The service
+  // answers only a person at a local window, so a paired device is refused
+  // here as well, and no agent has a path to it at all.
+  if (request.kind === "spend") return service.spend({ actor });
+  if (request.kind === "set-spend-cap") {
+    return service.setSpendCap({ actor, monthlyCapUsdCents: request.monthlyCapUsdCents });
   }
   const caller = callerFor(request.threadId, actor, scopeId);
   switch (request.kind) {

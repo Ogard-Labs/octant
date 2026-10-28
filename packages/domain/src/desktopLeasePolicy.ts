@@ -164,15 +164,108 @@ export function decideDesktopLeaseExtension(input: {
 /**
  * Whether the provider's own clock stops a desktop no earlier than the lease
  * does. A billed desktop without one could outlive a host that never comes
- * back, so the host refuses to keep it.
+ * back, so the host refuses to keep it. The one exception is a billed
+ * placement that declares how long its provider bills once the host stops:
+ * the person confirmed that worst case before it started, and the spend
+ * estimate reserved it against the month's cap.
  */
 export function desktopProviderExpiryHolds(input: {
   readonly billed: boolean;
   readonly expiresAt: number;
   readonly providerExpiresAt: number | undefined;
+  readonly billedIfHostStopsMinutes?: number | undefined;
 }): boolean {
   if (!input.billed) return true;
+  if (input.billedIfHostStopsMinutes !== undefined) return true;
   return input.providerExpiresAt !== undefined && input.providerExpiresAt >= input.expiresAt;
+}
+
+/**
+ * The calendar month a billed desktop's spend counts toward: UTC, the month
+ * the cloud providers a desktop runs on bill by, so a lease never counts
+ * toward a month that depends on where the host happens to be.
+ */
+export function desktopSpendMonth(epochMs: number): string {
+  return new Date(epochMs).toISOString().slice(0, 7);
+}
+
+/**
+ * The most a billed lease could spend, in whole cents rounded up: the
+ * person's hourly cost times the longer of the recipe's maximum lease and
+ * how long the provider bills a desktop this host can no longer end.
+ */
+export function desktopLeaseSpendEstimate(input: {
+  readonly hourlyCostUsdCents: number;
+  readonly maximumLeaseMinutes: number;
+  readonly billedIfHostStopsMinutes?: number | undefined;
+}): number {
+  const minutes = Math.max(input.maximumLeaseMinutes, input.billedIfHostStopsMinutes ?? 0);
+  return Math.ceil((input.hourlyCostUsdCents * minutes) / 60);
+}
+
+export interface DesktopSpendHolding {
+  readonly state: DesktopLeaseState;
+  /** Epoch milliseconds the lease was journaled. */
+  readonly requestedAt: number;
+  /** Epoch milliseconds of the lease's last transition. */
+  readonly updatedAt: number;
+  readonly spend?: { readonly hourlyCostUsdCents: number; readonly estimateUsdCents: number };
+}
+
+/**
+ * What one billed lease counts against its month. A lease that may still
+ * hold a desktop counts its whole estimate, because the host cannot know it
+ * stops billing sooner. One verified gone, or never made, counts the time
+ * from its request to its end at the hourly cost, rounded up and never more
+ * than its estimate.
+ */
+export function desktopLeaseSpent(holding: DesktopSpendHolding): number {
+  const { spend } = holding;
+  if (spend === undefined) return 0;
+  if (desktopLeaseHoldsDesktop(holding.state)) return spend.estimateUsdCents;
+  const minutes = Math.max(0, holding.updatedAt - holding.requestedAt) / 60_000;
+  return Math.min(spend.estimateUsdCents, Math.ceil((spend.hourlyCostUsdCents * minutes) / 60));
+}
+
+/** This month's billed spend: every lease requested in the month, each as `desktopLeaseSpent` counts it. */
+export function desktopMonthSpent(input: {
+  readonly holdings: ReadonlyArray<DesktopSpendHolding>;
+  readonly month: string;
+}): number {
+  return input.holdings
+    .filter((holding) => desktopSpendMonth(holding.requestedAt) === input.month)
+    .reduce((total, holding) => total + desktopLeaseSpent(holding), 0);
+}
+
+export type DesktopBilledSpendDecision =
+  | { readonly kind: "proceed" }
+  | { readonly kind: "refused"; readonly reason: "spend-cap-unset" | "spend-cap-reached" };
+
+/**
+ * Billed desktops are off until a person sets a monthly cap. A lease starts
+ * only when its whole estimate fits under the cap beside what the month has
+ * already spent. Reaching the cap ends no running lease; it only refuses new
+ * ones.
+ */
+export function decideDesktopBilledSpend(input: {
+  readonly monthlyCapUsdCents: number | undefined;
+  readonly spentUsdCents: number;
+  readonly estimateUsdCents: number;
+}): DesktopBilledSpendDecision {
+  if (input.monthlyCapUsdCents === undefined) return { kind: "refused", reason: "spend-cap-unset" };
+  if (input.spentUsdCents + input.estimateUsdCents > input.monthlyCapUsdCents) {
+    return { kind: "refused", reason: "spend-cap-reached" };
+  }
+  return { kind: "proceed" };
+}
+
+/**
+ * Only a person at a local window sets or clears the cap. An agent never
+ * does, in any posture, so no turn can raise what it may spend; a paired
+ * device does not either, as with every host-wide money setting.
+ */
+export function desktopSpendCapChangeAllowed(actor: EventActor["kind"]): boolean {
+  return actor === "local-user";
 }
 
 export type DesktopArtifactPathDecision =

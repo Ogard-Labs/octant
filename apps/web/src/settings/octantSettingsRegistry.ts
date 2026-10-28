@@ -869,6 +869,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "app",
           keywords: "driver update check daily",
         },
+        {
+          id: settingId("desktop-spend-cap"),
+          label: "Monthly cap for desktops that bill you",
+          scope: "host",
+          keywords: "disposable desktop cloud billed spend cap budget money monthly limit cost",
+        },
       ],
     },
     {

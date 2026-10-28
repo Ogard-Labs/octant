@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 import type { WorkSettingsController } from "../work/useWorkSettings";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
+import type { DesktopPaneClient } from "@octant/client-runtime/desktop-pane-client";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import type { DiagnosticsExportClient } from "@octant/client-runtime/diagnostics-export-client";
@@ -69,6 +70,7 @@ export interface ShellSettingsSurfaceProps {
   readonly diagnosticsExportClient: DiagnosticsExportClient;
   readonly hostControlClient: HostControlClient;
   readonly canvasClient?: Pick<CanvasClient, "publicLinkSettings" | "setPublicLinkSettings">;
+  readonly desktopPaneClient?: Pick<DesktopPaneClient, "request">;
   readonly replicaStoreSettingsClient?: ReplicaStoreSettingsClient;
   readonly replicaMembershipClient?: ReplicaMembershipClient;
   readonly replicaSyncStatusClient?: ReplicaSyncStatusClient;
@@ -147,6 +149,9 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             diagnosticsExportClient={props.diagnosticsExportClient}
             hostControlClient={props.hostControlClient}
             {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
+            {...(props.desktopPaneClient === undefined
+              ? {}
+              : { desktopPaneClient: props.desktopPaneClient })}
             {...(props.replicaStoreSettingsClient === undefined
               ? {}
               : { replicaStoreSettingsClient: props.replicaStoreSettingsClient })}

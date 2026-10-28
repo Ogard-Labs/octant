@@ -315,7 +315,12 @@ describe("Project creation and lifecycle", () => {
         billed: true,
       });
       const project = makeProject(ids.code, "0/1", { type: "code" });
-      const keyless = { ...recipe, providerId: cloud.providerId, network: "allow" as const };
+      const keyless = {
+        ...recipe,
+        providerId: cloud.providerId,
+        network: "allow" as const,
+        hourlyCostUsdCents: 25,
+      };
       expect(() => changeCodeProjectDesktopRecipe(project, keyless, [cloud], updatedAt)).toThrow(
         ProjectPolicyRejected,
       );
@@ -339,6 +344,7 @@ describe("Project creation and lifecycle", () => {
         ...recipe,
         providerId: cloud.providerId,
         credentialRef: decodeDesktopCredentialRef("5f0c6f7e-7b0a-4d43-9a3c-2f1d8f4e6a10"),
+        hourlyCostUsdCents: 25,
       };
       const { credentialRef: _removed, ...keyless } = keyed;
       const saved = changeCodeProjectDesktopRecipe(
@@ -358,6 +364,36 @@ describe("Project creation and lifecycle", () => {
       expect(() =>
         changeCodeProjectDesktopRecipe(onThisHost, keyless, [cloud, hostLocal], updatedAt),
       ).toThrow(ProjectPolicyRejected);
+    });
+
+    it("asks a new billed recipe for the person's hourly cost, and keeps none on one that does not bill", () => {
+      const cloud = decodeLeasableDesktopProvider({
+        providerId: "e2b",
+        displayName: "E2B",
+        locality: "cloud",
+        billed: true,
+      });
+      const project = makeProject(ids.code, "0/1", { type: "code" });
+      const keyed = {
+        ...recipe,
+        providerId: cloud.providerId,
+        credentialRef: decodeDesktopCredentialRef("5f0c6f7e-7b0a-4d43-9a3c-2f1d8f4e6a10"),
+      };
+      expect(() => changeCodeProjectDesktopRecipe(project, keyed, [cloud], updatedAt)).toThrow(
+        "Enter what an hour of this desktop costs you",
+      );
+      const priced = { ...keyed, hourlyCostUsdCents: 25 };
+      expect(
+        changeCodeProjectDesktopRecipe(project, priced, [cloud], updatedAt).desktopRecipe,
+      ).toEqual(priced);
+      expect(() =>
+        changeCodeProjectDesktopRecipe(
+          project,
+          { ...recipe, hourlyCostUsdCents: 25 },
+          [hostLocal],
+          updatedAt,
+        ),
+      ).toThrow("Only a desktop that bills you takes a cost per hour");
     });
 
     it("refuses a recipe that names a placement its provider does not offer", () => {

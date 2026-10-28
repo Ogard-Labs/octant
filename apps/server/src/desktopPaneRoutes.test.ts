@@ -104,6 +104,23 @@ function routes(recipeKey?: Parameters<typeof createDesktopPaneRouteHandler>[0][
           }
         : { status: "refused", reason: "not-permitted" },
     ),
+    spend: vi.fn<DesktopLeaseService["spend"]>(({ actor }) =>
+      actor.kind === "local-user"
+        ? { status: "spend", summary: { month: "2026-10", spentUsdCents: 0 } }
+        : { status: "refused", reason: "spend-cap-local-only" },
+    ),
+    setSpendCap: vi.fn<DesktopLeaseService["setSpendCap"]>(({ actor, monthlyCapUsdCents }) =>
+      actor.kind === "local-user"
+        ? {
+            status: "spend",
+            summary: {
+              month: "2026-10",
+              spentUsdCents: 0,
+              ...(monthlyCapUsdCents === undefined ? {} : { monthlyCapUsdCents }),
+            },
+          }
+        : { status: "refused", reason: "spend-cap-local-only" },
+    ),
     destination: vi.fn<DesktopLeaseService["destination"]>(() => ({
       status: "leasable",
       kind: "disposable-desktop",
@@ -260,6 +277,39 @@ describe("Desktop pane routes", () => {
     );
     expect(namesActor?.status).toBe(400);
     expect(service.recipeMachines).toHaveBeenCalledTimes(2);
+  });
+
+  it("sets the monthly spend cap only for a person at a local window, never for a paired device", async () => {
+    const { handler, service } = routes();
+    const set = { kind: "set-spend-cap", monthlyCapUsdCents: 5_000 };
+    const local = await handler(post("/api/code/desktops", set));
+    await expect(local?.json()).resolves.toEqual({
+      status: "spend",
+      summary: { month: "2026-10", spentUsdCents: 0, monthlyCapUsdCents: 5_000 },
+    });
+    const remote = await handler(post("/api/code/desktops", set, { remote: true }));
+    await expect(remote?.json()).resolves.toEqual({
+      status: "refused",
+      reason: "spend-cap-local-only",
+    });
+    expect(service.setSpendCap.mock.calls.map(([input]) => input.actor.kind)).toEqual([
+      "local-user",
+      "remote-device",
+    ]);
+    const read = await handler(post("/api/code/desktops", { kind: "spend" }, { remote: true }));
+    await expect(read?.json()).resolves.toEqual({
+      status: "refused",
+      reason: "spend-cap-local-only",
+    });
+    // A body that names its own actor is refused before the service hears it.
+    const namesActor = await handler(
+      post("/api/code/desktops", {
+        ...set,
+        actor: { kind: "agent", actorId: localActorId },
+      }),
+    );
+    expect(namesActor?.status).toBe(400);
+    expect(service.setSpendCap).toHaveBeenCalledTimes(2);
   });
 
   it("says whether a Project's recipe has its key, never the key, to a window or a paired device", async () => {
