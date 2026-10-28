@@ -301,6 +301,7 @@ import { registerTurnMetricsEvents } from "../metrics/turnMetricsStore";
 import { registerSideTaskEvents } from "../sideTasks/sideTaskStore";
 import { registerShipEvents } from "../ship/shipEventStore";
 import { registerCanvasCommentEvents } from "../canvas/canvasCommentService";
+import { registerCanvasTagEvents } from "../canvas/canvasTagService";
 import { registerCanvasShareEvents } from "../canvas/canvasShareEventStore";
 import { registerCanvasExportEvents } from "../canvas/canvasExportEventStore";
 import { registerCanvasPublicShareEvents } from "../canvas/canvasPublicShareService";
@@ -594,6 +595,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerCanvasExportFolderEvents(events);
   registerCanvasOutsideContentEvents(events);
   registerCanvasCommentEvents(events);
+  registerCanvasTagEvents(events);
   registerArtifactMirrorEvents(events);
   registerGoalLoopEvents(events);
   registerNativeHarnessEvents(events);

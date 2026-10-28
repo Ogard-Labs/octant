@@ -138,6 +138,7 @@
     "./canvas-share-snapshot": "./src/canvasShareSnapshot.ts",
     "./canvas-share-access-log": "./src/canvasShareAccessLog.ts",
     "./canvas-board": "./src/canvasBoard.ts",
+    "./canvas-tags": "./src/canvasTags.ts",
     "./computer-use-plugin": "./src/computerUsePlugin.ts",
     "./desktop-lease": "./src/desktopLease.ts",
     "./simulator-device": "./src/simulatorDevice.ts",
