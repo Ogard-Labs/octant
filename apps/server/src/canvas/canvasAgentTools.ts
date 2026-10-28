@@ -484,6 +484,11 @@ const BLOCK_GUIDANCE: Readonly<Record<string, { readonly use: string; readonly d
       detail:
         "Use diagram for a generic graph of nodes and edges, such as a flowchart or a zone map: a node's role is process (a box), decision (a diamond), or terminator (a pill), or left out for a plain box; an edge's style is line, arrow, or dashed (a dashed arrow, for an optional or asynchronous step); an edge or a group may take a tone of neutral, accent, success, warning, or danger, and a toned group reads as a region. Tones are theme roles, never colours, and a label still says what the tone means. Lay out a system or architecture diagram by tier: one group per tier (clients, services, data), the flow left to right, node labels of a few words, and the protocol or data on each edge label. For an architecture diagram give each node an icon (client, browser, mobile, server, service, database, cache, queue, storage, cdn, gateway, auth, function, external, user, or analytics) and a short detail such as a technology or port, and nest a group inside another with parentGroupId (up to three levels) for a region that holds zones. Prefer sequence, state, er, swimlane, or mindmap when the drawing is one of those.",
     },
+    flow: {
+      use: "An app or site's screens connected by their transitions, on a board.",
+      detail:
+        "An app or site flow is a flow block: it places screens the same Canvas already holds and connects them. Each screen names a mockup block (with its variantId when the mockup declares variants) or one frame of a design that runs no script (with its frameId); a screen never copies its block, so revise the mockup or design and the board follows. An edge names fromScreenId and toScreenId, an optional label and tone, and optionally fromNodeId: the control a person taps, a node of the from-screen's mockup that is a button, list-row, nav, tabs, select, checkbox, or toggle. A block is placed once in the whole Canvas, so a screen is never also a dashboard cell or a tab child. People drag screens on the board, so read the Canvas before revising and keep their placements.",
+    },
     chart: {
       use: "A pie, donut, stacked or grouped bar, bar-line, funnel, radar, or sankey chart, or a line or bar chart that calls out its finding.",
       detail:

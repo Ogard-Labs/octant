@@ -70,7 +70,8 @@ table), an article (one themed document), a
 product or game design brief (a themed pitch, then typed blocks in tabs), a
 design system (a themed document and a token table), a UI kit (a token table
 and a component sheet in the kit's own palette with every state), and a
-clickable prototype (a design that runs). Together they cover the deliverables
+clickable prototype (a design that runs), and an app flow (typed screens and
+the flow that connects them). Together they cover the deliverables
 people ask an assistant for most: a web page, a one-page document, a deck, a
 dashboard, a system diagram, and a prototype or small app. A trusted, enabled, unscoped skill
 may add recipes through its Canvas contribution; a skill that is not enabled
@@ -216,8 +217,9 @@ version 16, a design's image `assets` at version 17, a design's
 `runsScript` at version 18, the `tabs` and `columns` layout groups,
 diagram styles, and the plan's `gantt` view at version 19, and a Chat
 Canvas owned by its thread (a chat provenance with no Project) at version
-20, the design and diagram fields below at version 21, and a chart's
-`title`, `subtitle`, and point `note` and `emphasis` at version 22, so a document that
+20, the design and diagram fields below at version 21, a chart's
+`title`, `subtitle`, and point `note` and `emphasis` at version 22, and the
+`flow` block at version 23, so a document that
 declares an earlier version and carries one is refused as a declared future
 version. Version 20 adds no block or field a share carries, so a share names a
 block authored at 20 as 19 under share version 10. Version 21 adds the
@@ -613,6 +615,62 @@ callouts, the preview SVG draws a frame per variant, and a share carries the
 block whole. The catalog arrives with Canvas schema version 12 and share
 version 6.
 
+## Flow blocks
+
+A `flow` block (Canvas schema version 23) composes screens the document already
+holds into one board: it holds the graph alone — the screens it names keep
+their single definitions — so a revision to a mockup or a design shows on every
+flow that places it. Each of its at most 24 `screens` places one block at a
+`screenId` the document holds: a mockup, at one `variantId` it declares
+(absent is its single frame, required when it declares variants), or one
+`frameId` of a design that runs no script; a design screen names exactly one
+frame, and a running design is refused, because a running frame is the
+prototype tier and keeps its own Play. Up to 96 `edges` carry `fromScreenId`,
+`toScreenId`, an optional label of at most 80 characters, an optional tone
+(the diagram tones), and optionally `fromNodeId`: the hotspot the person taps,
+a node of the from-screen's mockup from the closed interactive list (button,
+list-row, nav, tabs, select, checkbox, toggle), so a link is data the
+renderer can draw without a script; an edge from a design screen carries no
+hotspot, and an inert mockup part is refused (`flow-hotspot-refused`). The
+domain policy names each refusal (`dangling-flow-screen`,
+`flow-screen-kind-refused`, `flow-screen-variant-missing`,
+`flow-screen-frame-missing`, `flow-screen-design-refused`,
+`duplicate-flow-screen`, `duplicate-flow-edge`, `dangling-flow-edge`,
+`flow-edge-self`, and the screens and edges budgets). A placed block is
+placed once, exactly as a dashboard places its cells: a screen is never also
+a dashboard cell or a tab child (`block-placed-twice` names both placers).
+
+The board is the diagram board's model with screens instead of boxes: the
+pure `layoutCanvasFlow` (`packages/domain/src/canvasFlowLayout.ts`) ranks
+screens by their transitions (a breadth-first walk from screens with no
+incoming edge, so a screen sits one step past the first screen that reaches
+it, and a loop the walk cannot settle draws across columns with its closing
+edge routed backward, below the screens), draws each screen as wide as its
+declared device allows — the same caps the design board uses — and keeps
+every screen's aspect from its intrinsic size, so the layout needs no measured
+value and the board, the artifact SVG, and the exports draw the same picture.
+A person's drag or keyboard nudge on a screen journals a new version through
+the same `/api/canvas/layout-revise` path as a diagram drag, admitted by the
+same policy, whose target is any board — a diagram's nodes or a flow's
+screens — and which marks the flow `layout: "manual"` with the screen's
+`x`, `y`, `positioned`. The route is host-window only; a paired browser reads
+the board but does not move screens. Comments anchor to a flow's screens and
+edges through the existing node and edge anchors, so a comment on a screen
+stays on it through a revision and reads as no longer on the canvas when the
+screen is gone. `preview` warns about a `flow-unreachable-screen`: a screen
+no transition reaches and not the flow's first, computed from the document,
+so the warning returns whether or not a browser drew the picture. Design
+screens on the board are drawn frames, so the design-frame overflow and
+contrast warnings reach them through the same bridge.
+
+The Markdown and HTML export write the flow as its graph — the title, one
+line per screen, then each transition with its hotspot — and the artifact SVG
+thumbnail draws the layout scaled into the band, so no markup travels in a
+reading. A share carries the flow whole at share version 12, which names
+blocks authored up to Canvas version 23; the flow holds references and typed
+values, so no new markup acknowledgement exists. The `app-flow` recipe starts
+from typed screens: a mockup slot and a flow slot that names them.
+
 ## Shares
 
 A share names the Project it is taken from, and a reader's access is judged
@@ -635,12 +693,12 @@ version 8 carries the version-15 dashboard, so it named blocks up to version
 15, and share version 9 carries tabs, columns, diagram styles, and the Gantt
 view, so it names blocks up to version 19. Share version 10 carries a design's
 frames and accompanies no Canvas version, and share version 11 carries the
-version-21 design and diagram fields, so it names blocks up to version 21
-(`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`). Version 22 adds only a chart's title,
-subtitle, and point callouts, which share version 11 does not carry: a shared
-chart leaves as its readings and is named as version 21. Carrying them is a
-share format bump, which the share service must learn before a desktop
-release publishes it.
+version-21 design and diagram fields, so it names blocks up to version 21.
+Version 22 adds only a chart's title, subtitle, and point callouts, which a
+share still strips: a shared chart leaves as its readings and is named as
+version 21. Share version 12 carries the flow block, so it names blocks up
+to Canvas version 23 (`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`), and the share
+service must learn it before a desktop release publishes one.
 Share documents version independently of Canvas documents: a treemap, a
 heatmap, a bar list, a chart's or a table column's number format, a table
 column's display, and a board's layout arrive with share version 3, and a
@@ -650,7 +708,8 @@ with share version 7 (whose blocks may name Canvas version 14), the dashboard
 with share version 8, and tabs, columns, a diagram's edge styles and tones,
 its group tones, and a plan's `gantt` view with share version 9, and a
 design's frames with share version 10, and a brand and the richer diagram
-fields with share version 11 (frame notes never leave), so a share
+fields with share version 11 (frame notes never leave), and the flow block
+with share version 12, so a share
 that declares an older version
 and carries one is refused as a future version.
 A `tabs` block has 2 to 12 panes, each a short label and the block ids it
@@ -706,13 +765,15 @@ folder to bind.
 
 ## Diagram boards and comments
 
-A Canvas diagram block is also a board. The renderer zooms, pans, and fits the
+A Canvas diagram block is also a board, as a flow block is (see
+[Flow blocks](#flow-blocks)). The renderer zooms, pans, and fits the
 same deterministic layout every surface draws, and a user's drag or keyboard
 nudge is journaled through `/api/canvas/layout-revise` as a new immutable
 `canvas.version-appended@1` version with `actor: local-user` that the host
 stamps itself, whatever actor the request names, admitted by the
-pure `admitCanvasDiagramLayoutRevision` policy (target must be a diagram,
-every moved node must exist, the sequence must be the head, budgets stand).
+pure `admitCanvasDiagramLayoutRevision` policy (the target must be a board —
+a diagram's nodes or a flow's screens — every moved node must exist, the
+sequence must be the head, budgets stand).
 The generic diagram is also styled, from Canvas schema version 19. A node's
 `role` is closed to `process` (a box), `decision` (a diamond), and
 `terminator` (a pill); a node without one is the plain rounded box. A role

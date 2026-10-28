@@ -38,6 +38,7 @@ import {
   canvasMockupFrames,
   canvasMockupNodeReading,
   type CanvasMockupBranch,
+  type CanvasMockupFrame,
 } from "@octant/domain";
 
 // The bundled icon set: each meaning in the contract maps to one glyph here.
@@ -79,7 +80,48 @@ const CONTAINERS: ReadonlySet<CanvasMockupComponent> = new Set([
 ]);
 
 /** Callout numbers by node id: a callout's number is its place in the list. */
-type Callouts = ReadonlyMap<string, number>;
+export type Callouts = ReadonlyMap<string, number>;
+
+/**
+ * One frame of a mockup: the device chrome and the screen tree of a single
+ * variant. The block's own board draws one per variant; a flow board draws
+ * the one variant a flow screen names, from the same piece.
+ */
+export function MockupFrame({
+  block,
+  frame,
+  callouts,
+  deviceDetail,
+}: {
+  readonly block: CanvasMockupBlock;
+  readonly frame: CanvasMockupFrame;
+  readonly callouts: Callouts;
+  /** The block's device detail, computed once by the surface that owns the block. */
+  readonly deviceDetail: string;
+}) {
+  return (
+    <div className="canvas-mockup__frame" data-device={block.device} style={frameStyle(block)}>
+      <div className="canvas-mockup__chrome" aria-hidden="true">
+        <span className="canvas-mockup__chrome-dots" />
+        <span className="canvas-mockup__chrome-title">{block.title}</span>
+        <span className="canvas-mockup__chrome-device">{deviceDetail}</span>
+      </div>
+      <div className="canvas-mockup__screen">
+        <ul
+          className="canvas-mockup__tree"
+          role="tree"
+          aria-label={
+            frame.label === undefined ? block.title : `${frame.label ?? ""}: ${block.title}`
+          }
+        >
+          {frame.roots.map((branch) => (
+            <MockupItem key={String(branch.node.nodeId)} branch={branch} callouts={callouts} />
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
 
 function spoken(node: CanvasMockupNode, callouts: Callouts): string {
   return canvasMockupNodeReading(node, callouts.get(String(node.nodeId)));
@@ -118,34 +160,12 @@ export function MockupBlock({ block }: { readonly block: CanvasMockupBlock }) {
               {frame.label === undefined ? null : (
                 <figcaption className="canvas-mockup__variant-label">{frame.label}</figcaption>
               )}
-              <div
-                className="canvas-mockup__frame"
-                data-device={block.device}
-                style={frameStyle(block)}
-              >
-                <div className="canvas-mockup__chrome" aria-hidden="true">
-                  <span className="canvas-mockup__chrome-dots" />
-                  <span className="canvas-mockup__chrome-title">{block.title}</span>
-                  <span className="canvas-mockup__chrome-device">{deviceDetail}</span>
-                </div>
-                <div className="canvas-mockup__screen">
-                  <ul
-                    className="canvas-mockup__tree"
-                    role="tree"
-                    aria-label={
-                      frame.label === undefined ? block.title : `${frame.label}: ${block.title}`
-                    }
-                  >
-                    {frame.roots.map((branch) => (
-                      <MockupItem
-                        key={String(branch.node.nodeId)}
-                        branch={branch}
-                        callouts={callouts}
-                      />
-                    ))}
-                  </ul>
-                </div>
-              </div>
+              <MockupFrame
+                block={block}
+                frame={frame}
+                callouts={callouts}
+                deviceDetail={deviceDetail}
+              />
             </figure>
           ))}
         </div>

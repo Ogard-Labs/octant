@@ -118,6 +118,12 @@ export const CANVAS_MAX_DESIGN_MARKUP_LENGTH = 65_536;
 // Speaker or screen notes are prose a presenter reads, not markup: a page of
 // text per frame.
 export const CANVAS_MAX_DESIGN_NOTES_LENGTH = 2_000;
+// A flow places screens, not copies, so its budgets are small references: as
+// many screens as a design may hold frames, and four links per screen.
+export const CANVAS_MAX_FLOW_SCREENS = 24;
+export const CANVAS_MAX_FLOW_EDGES = 96;
+// An edge label says what the transition is ("Run search"), not a sentence.
+export const CANVAS_MAX_FLOW_LABEL_LENGTH = 80;
 // A diagram node's detail is a subtitle under its label, not a paragraph.
 export const CANVAS_MAX_DIAGRAM_DETAIL_LENGTH = 120;
 // A group inside a group inside a group: deeper boundaries stop reading as
@@ -253,6 +259,9 @@ export const CANVAS_THREAD_OWNED_SCHEMA_VERSION = 20;
 export const CANVAS_DESIGN_FIELDS_SCHEMA_VERSION = 21;
 // A chart's own title and subtitle, and a point's callout note and emphasis.
 export const CANVAS_CHART_CALLOUTS_SCHEMA_VERSION = 22;
+// The flow block, which places mockup and design screens on a board with
+// labeled edges between them.
+export const CANVAS_FLOW_SCHEMA_VERSION = 23;
 // The metric's sparkline, goodDirection, and caption arrived with the bar list.
 export const CANVAS_METRIC_TREND_SCHEMA_VERSION = 7;
 
@@ -553,6 +562,7 @@ export const CanvasBlockKind = Schema.Literal(
   "dashboard",
   "tabs",
   "columns",
+  "flow",
 );
 export type CanvasBlockKind = typeof CanvasBlockKind.Type;
 
@@ -2419,6 +2429,86 @@ export const CanvasDesignAssetsOutcome = Schema.Union(
 );
 export type CanvasDesignAssetsOutcome = typeof CanvasDesignAssetsOutcome.Type;
 
+// ── Flow ──────────────────────────────────────────────────────────────────────
+//
+// A flow composes screens the document already holds into one board: each
+// screen is a reference (a mockup variant, or one frame of a design that runs
+// no script), and the edges are the transitions between them. The block owns
+// the graph alone — the mockup or design keeps the screen's content — so the
+// board is cheap inside the block budget and a revision to a screen shows on
+// every flow that names it.
+
+/**
+ * The mockup components a flow edge may start from. A hotspot is a control a
+ * person could tap, so the interactive list is closed: naming one is data the
+ * renderer can draw as a link without a script, and a text or image node is
+ * refused rather than guessed at.
+ */
+export const CANVAS_FLOW_HOTSPOT_COMPONENTS = [
+  "button",
+  "list-row",
+  "nav",
+  "tabs",
+  "select",
+  "checkbox",
+  "toggle",
+] as const;
+export type CanvasFlowHotspotComponent = (typeof CANVAS_FLOW_HOTSPOT_COMPONENTS)[number];
+export const CanvasFlowHotspotComponent = Schema.Literal(...CANVAS_FLOW_HOTSPOT_COMPONENTS);
+
+/**
+ * One screen on the board: a mockup block at one variant (absent is its
+ * single frame), or one frame of a design that runs no script. `x` and `y`
+ * are a journaled placement, set by a person's drag through the layout-revise
+ * path, and `positioned` says the placement is authoritative.
+ */
+export const CanvasFlowScreen = Schema.Struct({
+  screenId: CanvasNodeId,
+  blockId: CanvasBlockId,
+  /** One variant of a mockup; absent is its single frame. */
+  variantId: Schema.optional(CanvasMockupVariantId),
+  /** One frame of a design that runs no script; required when the block is a design. */
+  frameId: Schema.optional(CanvasDesignFrameId),
+  x: Schema.optional(FiniteNumber),
+  y: Schema.optional(FiniteNumber),
+  positioned: Schema.optional(Schema.Literal(true)),
+}).annotations(strict);
+export type CanvasFlowScreen = typeof CanvasFlowScreen.Type;
+
+/**
+ * One transition between two screens of the same flow. `fromNodeId` names the
+ * hotspot the person taps, a node of the from-screen's mockup from the
+ * interactive list; absent is a screen-level link, and a design screen has no
+ * hotspots, so an edge from one always omits it.
+ */
+export const CanvasFlowEdge = Schema.Struct({
+  edgeId: CanvasEdgeId,
+  fromScreenId: CanvasNodeId,
+  toScreenId: CanvasNodeId,
+  fromNodeId: Schema.optional(CanvasNodeId),
+  label: Schema.optional(boundedNonEmptyText(CANVAS_MAX_FLOW_LABEL_LENGTH)),
+  tone: Schema.optional(CanvasDiagramTone),
+}).annotations(strict);
+export type CanvasFlowEdge = typeof CanvasFlowEdge.Type;
+
+/**
+ * A flow block: the screens of one app or site, connected. The layout is
+ * `auto` until a person drags a screen, which journals `manual` positions,
+ * exactly as a diagram board does.
+ */
+export const CanvasFlowBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("flow"),
+  title: CanvasLabel,
+  layout: Schema.optional(CanvasDiagramLayoutKind),
+  screens: Schema.Array(CanvasFlowScreen).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(CANVAS_MAX_FLOW_SCREENS),
+  ),
+  edges: Schema.Array(CanvasFlowEdge).pipe(Schema.maxItems(CANVAS_MAX_FLOW_EDGES)),
+}).annotations(strict);
+export type CanvasFlowBlock = typeof CanvasFlowBlock.Type;
+
 /**
  * Where the host serves a running design's page. A reader never names a
  * design here: the only query is a ticket the host issued for one Canvas
@@ -2713,6 +2803,7 @@ export const CanvasBlock = Schema.Union(
   CanvasActionBlock,
   CanvasTabsBlock,
   CanvasColumnsBlock,
+  CanvasFlowBlock,
 );
 export type CanvasBlock = typeof CanvasBlock.Type;
 
@@ -2927,11 +3018,13 @@ export const CanvasDefinition = Schema.Struct({
     ),
     Schema.filter(
       (definition) =>
-        definition.schemaVersion >= CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION ||
-        !definition.blocks.some(isCanvasLayoutGroup),
+        (definition.schemaVersion >= CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION ||
+          !definition.blocks.some(isCanvasLayoutGroup)) &&
+        (definition.schemaVersion >= CANVAS_FLOW_SCHEMA_VERSION ||
+          !definition.blocks.some((block) => block.kind === "flow")),
       {
         message: () =>
-          `Tabs and columns require Canvas schema version ${String(CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION)}.`,
+          `Tabs and columns require Canvas schema version ${String(CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION)}, and a flow block requires Canvas schema version ${String(CANVAS_FLOW_SCHEMA_VERSION)}.`,
       },
     ),
     Schema.filter(

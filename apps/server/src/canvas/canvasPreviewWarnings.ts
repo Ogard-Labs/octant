@@ -9,6 +9,10 @@ import {
   canvasDashboardCellWidth,
   canvasReadingOrder,
 } from "@octant/domain/canvas-dashboard-layout";
+import {
+  layoutCanvasFlow,
+  type CanvasFlowScreenSourceBlock,
+} from "@octant/domain/canvas-flow-layout";
 import { contrastRatio } from "@octant/theme";
 import type { CanvasPreviewDesignReading } from "./canvasPreviewFrames";
 
@@ -101,6 +105,18 @@ export type CanvasPreviewWarning =
        */
       readonly kind: "design-not-measured";
       readonly blockId: string;
+    }
+  | {
+      /**
+       * A flow screen no transition reaches and that is not the flow's first
+       * screen: the reader can walk to every other screen, and this one sits
+       * alone. Computed from the document, so it is reported whether or not a
+       * browser drew the picture.
+       */
+      readonly kind: "flow-unreachable-screen";
+      readonly blockId: string;
+      readonly screenId: string;
+      readonly label: string;
     };
 
 /**
@@ -226,9 +242,40 @@ function blockWarnings(
       return barListWarnings(block, input);
     case "design":
       return designAssetWarnings(block, input);
+    case "flow":
+      return flowWarnings(block, input.definition.blocks);
     default:
       return [];
   }
+}
+
+/**
+ * A flow's screens should all be reachable: a screen no transition reaches,
+ * that is not the flow's first screen, sits on the board where no walk
+ * through the app can arrive, so the author hears about it. The label is the
+ * one the board draws, from the same layout.
+ */
+function flowWarnings(
+  block: Extract<CanvasBlock, { readonly kind: "flow" }>,
+  blocks: ReadonlyArray<CanvasBlock>,
+): ReadonlyArray<CanvasPreviewWarning> {
+  const sources = blocks.filter(
+    (candidate) => candidate.kind === "mockup" || candidate.kind === "design",
+  ) as ReadonlyArray<CanvasFlowScreenSourceBlock>;
+  const layout = layoutCanvasFlow(block, sources);
+  const first = String(block.screens[0]?.screenId ?? "");
+  const reached = new Set(block.edges.map((edge) => String(edge.toScreenId)));
+  const warnings: CanvasPreviewWarning[] = [];
+  for (const screen of layout.screens) {
+    if (reached.has(screen.screenId) || screen.screenId === first) continue;
+    warnings.push({
+      kind: "flow-unreachable-screen",
+      blockId: block.blockId,
+      screenId: screen.screenId,
+      label: screen.label,
+    });
+  }
+  return warnings;
 }
 
 function chartWarnings(

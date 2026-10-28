@@ -147,6 +147,20 @@ const inTreeCanvasDocumentRecipeDocuments = [
     ],
   },
   {
+    id: "app-flow",
+    title: "App flow",
+    summary: "Screens of an app or site connected by their transitions on a board.",
+    whenToUse:
+      "When someone asks for a user flow, an app or site flow, or how screens of a mockup connect.",
+    skeleton: [
+      { kind: "mockup", role: "One screen, or one per state, at its device size." },
+      {
+        kind: "flow",
+        role: "The screens above as its screen nodes, edges naming the button or control each transition starts from.",
+      },
+    ],
+  },
+  {
     id: "website-redesign",
     title: "Website redesign",
     summary: "The current page as captured, beside a redesigned version, with the reasons.",
