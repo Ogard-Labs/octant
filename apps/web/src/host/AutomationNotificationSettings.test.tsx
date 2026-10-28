@@ -24,6 +24,13 @@ const status = (
     ...overrides,
   }) as AutomationNotificationDeliveryStatus;
 
+const gatewaySettings = {
+  kind: "remote-push-gateway-settings",
+  enabled: false,
+  gatewayUrl: "https://push.octant.sh",
+  version: 0,
+} as const;
+
 function makeClient(
   current: AutomationNotificationDeliveryStatus = status(),
 ): AutomationNotificationClient {
@@ -40,6 +47,8 @@ function makeClient(
           updatedAt: "2026-08-11T12:01:00.000Z" as never,
         }) as AutomationNotificationDeliveryStatus["preferences"],
     ),
+    pushGateway: vi.fn(async () => gatewaySettings),
+    setPushGateway: vi.fn(async () => gatewaySettings),
   };
 }
 

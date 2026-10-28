@@ -64,7 +64,11 @@ describe("octantSettingsRegistry", () => {
     ]);
     expect(section("host")?.keywords).toMatch(/lifecycle/);
     expect(section("host")?.keywords).toMatch(/diagnostics/);
-    expect(ids("notifications")).toEqual(["host-automation-notifications"]);
+    expect(ids("notifications")).toEqual([
+      "host-phone-notifications",
+      "host-push-gateway",
+      "host-automation-notifications",
+    ]);
     expect(section("permissions")?.label).toBe("Permissions");
     expect(ids("permissions")).toEqual([
       "public-links",
