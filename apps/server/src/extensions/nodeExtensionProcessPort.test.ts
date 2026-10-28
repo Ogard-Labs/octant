@@ -2,13 +2,21 @@ import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { spawn as nodeSpawn } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ExtensionSupervisor } from "./extensionSupervisor";
 import { createNodeExtensionProcessPort } from "./nodeExtensionProcessPort";
 
 const receiptDirectories: string[] = [];
 const macosOnly = process.platform === "darwin" ? it : it.skip;
+
+/** The folders a Seatbelt profile lets its process read, each once. */
+function subpathReads(profile: string): ReadonlyArray<string> {
+  const reads = profile
+    .split("\n")
+    .flatMap((rule) => /^\(allow file-read\* \(subpath "(.*)"\)\)$/.exec(rule)?.[1] ?? []);
+  return [...new Set(reads)].sort();
+}
 
 const startInput = {
   extensionId: "42700000-0000-4000-8000-000000000001",
@@ -139,6 +147,26 @@ describe("node extension process port", () => {
     ).toEqual(runtimePaths.map((path) => `(allow process-exec (literal "${path}"))`));
     expect(profile).not.toContain('(allow file-read* (subpath "/dev"))');
     expect(profile).toContain('(allow file-read* (literal "/dev/urandom"))');
+    // Every folder the driver may read, and nothing more: its package, its
+    // runtime's own folder, the system roots a runtime reads to start, and
+    // its temporary folder. The macOS escape tests measure that a driver
+    // still starts on each runtime with no more than this.
+    const runtimeFolder = dirname(realpathSync(process.execPath));
+    expect(subpathReads(profile)).toEqual(
+      [
+        ...new Set([
+          ...[packageRoot, temporaryDirectory].flatMap((path) => [path, realpathSync(path)]),
+          runtimeFolder,
+          dirname(runtimeFolder),
+          "/System",
+          "/usr",
+          "/private/etc",
+          "/private/var/db",
+          "/Library/Apple",
+          "/private/etc/ssl/certs",
+        ]),
+      ].sort(),
+    );
     expect(profile).toContain(`(allow file-read* (subpath "${packageRoot}"))`);
     expect(profile).toContain(`(deny file-write* (subpath "${packageRoot}"))`);
     expect(profile).toContain(`(allow file-write* (subpath "${temporaryDirectory}"))`);
@@ -199,6 +227,20 @@ describe("node extension process port", () => {
     // The bundle holds the executable, Electron's Frameworks, and its Resources.
     expect(profile).toContain('(allow file-read* (subpath "/Applications/Octant.app"))');
     expect(profile).not.toContain('(allow file-read* (subpath "/Applications"))');
+    expect(subpathReads(profile)).toEqual(
+      [
+        ...new Set([
+          ...[packageRoot, temporaryDirectory].flatMap((path) => [path, realpathSync(path)]),
+          "/Applications/Octant.app",
+          "/System",
+          "/usr",
+          "/private/etc",
+          "/private/var/db",
+          "/Library/Apple",
+          "/private/etc/ssl/certs",
+        ]),
+      ].sort(),
+    );
     expect(profile).not.toContain("(allow network");
     expect(profile).not.toContain("(allow process-fork)");
     expect(profile.split("\n").filter((rule) => rule.startsWith("(allow process-exec"))).toEqual([
