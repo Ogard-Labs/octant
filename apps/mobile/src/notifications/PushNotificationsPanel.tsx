@@ -3,16 +3,18 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-nati
 import {
   clearMobilePushToken,
   MobileInboxFailure,
-  registerMobilePushToken,
   type MobileRemoteTransport,
 } from "@octant/client-runtime";
 import type { MobileNotificationPermissionPort } from "./notificationPermissionPort";
+import { ENABLE_REFUSAL_COPY, enablePhoneNotifications } from "./enablePhoneNotifications";
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
 import { useTheme } from "../../design-system";
 
 export interface PushNotificationsPanelProps {
   readonly transport: MobileRemoteTransport | undefined;
   readonly permission: MobileNotificationPermissionPort;
+  /** The paired computer's key fingerprint, which the gateway binds the capability to. */
+  readonly hostKeyFingerprint: string;
 }
 
 export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
@@ -29,40 +31,16 @@ export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
     setBusy(true);
     setMessage(undefined);
     try {
-      const status = await props.permission.request();
-      if (status !== "granted") {
-        setMessage("Notification permission was not granted on this phone.");
-        return;
-      }
-      const token = await props.permission.getDevicePushToken();
-      if (token === undefined || token.length === 0) {
-        setMessage(
-          "No device push token is available yet. Live APNs/FCM delivery remains a host residual.",
-        );
-        return;
-      }
-      const notificationPublicKey = await props.permission.getNotificationPublicKey(
-        props.transport.hostId,
-      );
-      if (notificationPublicKey === undefined) {
-        setMessage("This phone has no notification key for this computer yet.");
-        return;
-      }
-      // Thread names stay off the lock screen until the person turns them on.
-      const receipt = await registerMobilePushToken({
+      const result = await enablePhoneNotifications({
         transport: props.transport,
-        platform: props.permission.platform,
-        token,
-        notificationPublicKey,
-        preferences: {
-          approvalNeeded: true,
-          waiting: true,
-          failure: true,
-          completion: true,
-          threadTitles: false,
-        },
+        hostKeyFingerprint: props.hostKeyFingerprint,
+        permission: props.permission,
       });
-      setMessage(`Push token ${receipt.result} on this host.`);
+      setMessage(
+        result.status === "registered"
+          ? "Notifications are on for this computer."
+          : ENABLE_REFUSAL_COPY[result.reason],
+      );
     } catch (cause) {
       setMessage(
         cause instanceof MobileInboxFailure
@@ -85,7 +63,11 @@ export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
     setMessage(undefined);
     try {
       const receipt = await clearMobilePushToken(props.transport);
-      setMessage(`Push token ${receipt.result} on this host.`);
+      setMessage(
+        receipt.result === "cleared" || receipt.result === "already-cleared"
+          ? "Notifications are off for this computer."
+          : "Notifications could not be turned off for this computer.",
+      );
     } catch (cause) {
       setMessage(
         cause instanceof MobileInboxFailure
@@ -142,8 +124,9 @@ export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
       {props.permission.available ? (
         <>
           <Text style={styles.help}>
-            Register a per-host push token for completion, waiting, failure, and approval-needed
-            awareness. Payloads stay redacted; live provider delivery needs host credentials.
+            Hear when a thread on this computer finishes, fails, or waits for you. Notifications are
+            sealed so only this phone can read them; the lock screen shows the kind and the
+            computer's name.
           </Text>
           <Pressable
             disabled={busy}
@@ -154,7 +137,7 @@ export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
             {busy ? (
               <ActivityIndicator color={colors.sendLabel} />
             ) : (
-              <Text style={styles.buttonLabel}>Enable on this host</Text>
+              <Text style={styles.buttonLabel}>Turn on for this computer</Text>
             )}
           </Pressable>
         </>
@@ -171,7 +154,7 @@ export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
           style={styles.secondary}
           testID="mobile-push-clear"
         >
-          <Text style={styles.secondaryLabel}>Clear token on this host</Text>
+          <Text style={styles.secondaryLabel}>Turn off for this computer</Text>
         </Pressable>
       ) : null}
       {message !== undefined ? <Text style={styles.message}>{message}</Text> : null}

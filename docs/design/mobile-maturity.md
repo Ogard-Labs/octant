@@ -27,7 +27,10 @@ are maintainer gates. Slice 5 (Android internal builds)
 is built in part: the workflow, the `android-internal` profile, and the
 Android hardening adapters are in the repository and verified in the
 container, and its EAS build and Android device pass wait on the maintainer
-steps in [Android build rules](#android-build-rules). Slices 6, 8, and 9 are
+steps in [Android build rules](#android-build-rules). Slice 6 is built in
+part: the phone's enable flow and its forgetting of a computer's
+notifications are implemented and verified in the container, and the native
+pieces wait on the gates in [Phone rules](#phone-rules). Slices 8 and 9 are
 not started. The
 maintainer authorized this scope as post-preview work and accepted the
 [maintainer decisions](#maintainer-decisions) below on 2026-10-26. That
@@ -96,7 +99,7 @@ These rules hold for every phase and are not reopened by any slice:
 | Push contracts    | `packages/contracts/src/remotePushNotifications.ts`: registration (token, the phone's notification public key, per-kind preferences and the thread-title opt-in), its receipts, the sealed content (kind, host, thread, mode, title ≤ 80 B, body ≤ 120 B), the delivery envelope, and the journaled delivery receipt                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Push policy       | `packages/domain/src/pushNotificationPolicy.ts` builds display text under [decision M2](#maintainer-decisions) (kind and computer label; a thread title or Automation name only for a phone that opted in) and owns per-kind preferences, deduplication keys, the per-device rate limit, and urgency                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Push on the host  | `PUT`/`DELETE /api/remote/auth/push-token` (`remoteHttpAuthentication.ts`) store a registration per `{hostId, deviceId}` in the owner-only `remote/push-registrations.json` (`apps/server/src/remote/pushNotificationTokenStore.ts`), as [What the host keeps](#what-the-host-keeps) describes: it survives a restart and is cleared with the device. Ordinary threads in every mode (`threadNotificationDeliveryService.ts`) and Automation runs (`automationNotificationDeliveryService.ts`) seal each notification to the phone (`pushNotificationSealing.ts`) as [Sealing](#sealing) and [Sending](#sending) describe, and hand the envelope to the gateway transport (`gatewayPushDeliveryTransport.ts`), which sends only while Settings › Notifications › Phone notifications is on (`pushGatewaySetting.ts`, owner-only `remote/push-gateway-setting.json`, off by default), as [Gateway rules](#gateway-rules) describes |
-| Push on the phone | `notificationPermissionPort.ts` is the unavailable stub; `PushNotificationsPanel.tsx` offers only clearing a registered token; `deepLinks.ts` parses `octant://hosts/{hostId}/threads/[{mode}/]{threadId}`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Push on the phone | `enablePhoneNotifications.ts` trades the platform token for a gateway capability bound to the paired computer's key fingerprint at the gateway compiled into the build (`MOBILE_PUSH_GATEWAY_URL`) and registers only the capability with the computer, as [Phone rules](#phone-rules) describes; removing a computer or revoking this phone from it calls the port's `forgetHost`. `notificationPermissionPort.ts` is still the unavailable stub in every build (no platform token, notification key, notification service extension, or Android receiver yet), so `PushNotificationsPanel.tsx` offers only turning a registration off; `deepLinks.ts` parses `octant://hosts/{hostId}/threads/[{mode}/]{threadId}`                                                                                                                                                                                                              |
 | Capture           | Chat, Work, and Code threads attach a camera photo, a library image, or a document-picker file (`apps/mobile/src/inbox/thread/pickAttachment.ts`, `useThreadAttachments.ts`) through each mode's own attachment route (`packages/client-runtime/src/mobileAttachmentClient.ts`), offered only for media the thread's model takes. The listener admits those routes for a paired device (`remoteRoutePolicy.ts`), and the host removes image metadata from every paired upload before a route sees it (`apps/server/src/attachments/imageMetadataRemoval.ts`, applied in `authenticatedProductRoutes.ts`). The camera and photo-library permission strings name both uses; the physical-device camera pass is a maintainer gate                                                                                                                                                                                                    |
 | Voice             | The listener forwards `/api/speech/status` and `/api/speech/transcriptions` to a paired device and never `/api/speech/synthesis`; `speechRoutes.ts` holds each device to its own budget and clip bound, as [Voice](#voice) describes. The phone composers draw a microphone only while the host reports transcription `ready` (`apps/mobile/src/voice/`), recording through `expo-audio`; `app.config.ts` names the one microphone use                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | Hardening ports   | On Android, screenshot privacy is the secure-window flag and key storage is reported (`deviceProtection.native.ts`). On iOS the same module covers the app in the app switcher and while the screen is captured, and reports whether a Secure Enclave protects the Keychain; secure storage keeps its items on that phone only (`hosts/expoSecureStorage.ts`), as [iOS capture and key storage rules](#ios-capture-and-key-storage-rules) describes. Device integrity is an unavailable stub (`deviceIntegrityPort.ts`) on both. Each unavailable port is disclosed in Settings                                                                                                                                                                                                                                                                                                                                                   |
@@ -495,6 +498,32 @@ platform-failed` otherwise, and `503 unavailable` without that platform's
   `gateway-refused`, `gateway-rate-limited`, `gateway-malformed`,
   `gateway-unreachable`, or `gateway-failed`. Only a window on the computer can
   change the setting; a paired device reads it and is refused a change.
+
+#### Phone rules
+
+- The phone offers to turn notifications on for a computer only while its
+  build has a notification port. Turning them on asks the system for
+  permission, takes the platform token, makes or reads this computer's
+  notification key, and trades the token at the gateway compiled into the build
+  for a capability bound to the fingerprint the phone recorded at pairing. The
+  computer is then given the capability, the public key, and preferences with
+  thread titles off; it never receives the platform token. A refusal at any
+  step registers nothing.
+- Removing a computer and the phone revoking itself call the port's
+  `forgetHost` before the rest of the removal, so delivered notifications for
+  that computer and the key that opens them go even if a later step fails. A
+  revoke made on the computer reaches the phone as a refused session; the
+  phone forgets that computer's notifications when the person removes it, and
+  the host has already dropped the registration.
+- Still to build, each behind an account gate decision M1 names: the iOS
+  notification service extension (it needs the push capability and a Keychain
+  access group shared with the app, both App ID capabilities), which opens the
+  sealed content with CryptoKit's HPKE for this suite; the Android data-message
+  receiver (it needs the Firebase project's `google-services.json`), which
+  opens it and posts the notification; the native port that returns the
+  platform token and keeps each computer's X25519 key in secure storage the
+  extension can read; and the device pass on both platforms against a test
+  gateway.
 
 ## Phase D: capture and voice as remote input
 
