@@ -179,6 +179,53 @@ describe("Settings › SSH targets", () => {
     }
   });
 
+  it("keeps a removed target gone when a status read sent before the removal answers after it", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      const user = userEvent.setup();
+      const { administration } = bridge();
+      let removed = false;
+      let answerHeldRead: (answer: { status: number; body: unknown }) => void = () => undefined;
+      vi.mocked(administration.sshTargetRequest).mockImplementation(async (operation) => {
+        if (operation === "remove") {
+          removed = true;
+          return { status: 204, body: null };
+        }
+        if (operation === "projects") return { status: 200, body: { projects: [] } };
+        if (operation === "worktrees") return { status: 200, body: { worktrees: [] } };
+        return { status: 200, body: { targets: removed ? [] : [status] } };
+      });
+      render(<SshTargetsSettingsPage bridge={administration} />);
+      await screen.findByRole("group", { name: "build@devbox setting" });
+
+      // The page's own status read goes out, and the host is slow to answer it.
+      vi.mocked(administration.sshTargetRequest).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            answerHeldRead = resolve;
+          }),
+      );
+      vi.advanceTimersByTime(5_000);
+
+      await user.click(screen.getByRole("button", { name: "Remove build@devbox" }));
+      await user.click(
+        within(await screen.findByRole("dialog")).getByRole("button", { name: "Remove target" }),
+      );
+      await screen.findByText("Removed build@devbox.");
+      await waitFor(() =>
+        expect(screen.queryByRole("group", { name: "build@devbox setting" })).toBeNull(),
+      );
+
+      // It answers with the target as it was before the removal.
+      answerHeldRead({ status: 200, body: { targets: [status] } });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(screen.queryByRole("group", { name: "build@devbox setting" })).toBeNull();
+      expect(screen.getByText("No SSH targets yet")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("pins a host key only after the person confirms the fingerprint, saying what the pin does not prove", async () => {
     const user = userEvent.setup();
     const { administration, sent } = bridge();

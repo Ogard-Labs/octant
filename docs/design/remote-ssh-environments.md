@@ -253,8 +253,10 @@ for the target's key; `ControlMaster=no` and `ControlPath=none` keep a shared
 master, checked under other rules, from carrying the session;
 `RemoteCommand=none` keeps a configured command from replacing the executor;
 `ForwardX11Trusted=no` and `Tunnel=no` close the remaining forwarding paths;
-`EscapeChar=none` keeps frame bytes from controlling the client; and
-`ServerAliveInterval=15` with `ServerAliveCountMax=3` turns a silent session
+`EscapeChar=none` keeps frame bytes from controlling the client;
+`LogLevel=ERROR` keeps a configured `LogLevel QUIET` from silencing the lines
+that tell a changed key or a refused sign-in from an unreachable host
+([Why a session failed](#transport)); and `ServerAliveInterval=15` with `ServerAliveCountMax=3` turns a silent session
 into a lost one. The known-hosts path is quoted, with `%` doubled, because
 OpenSSH splits that option's value on whitespace into several files and expands
 `%` tokens in it: unquoted, a data directory under macOS's `Application
@@ -352,7 +354,10 @@ leaves open:
   has changed" reads as `host-key-changed`. Under `BatchMode` a key or agent
   that no longer signs in is the client's "Permission denied (…)" and 255,
   which reads as `authentication-refused`; the remote shell's own permission
-  error exits 126 instead. The remote shell's 126 or 127 reads
+  error exits 126 instead. Both lines print at `LogLevel=ERROR`, which the
+  client is always given: under a configured `LogLevel QUIET` neither printed,
+  so a changed key read as unreachable and was retried as one, which the
+  loopback smoke, whose client configuration is quiet, now refuses. The remote shell's 126 or 127 reads
   as `executor-missing`. Any other 255 from the client, a session killed, or no introduction
   within a minute (or no attestation within three) reads as `target-unreachable`.
   Any other exit before an introduction means the program at the executor path
@@ -1788,7 +1793,9 @@ This host owns the connection and every process on the target.
     turn, a tool call, a read, a terminal, or a worktree change is refused
     before any frame instead of waiting. Turns that were running stopped as
     interrupted when the session dropped (above). Settings › SSH targets,
-    which reads the targets every five seconds while it lists any, the
+    which reads the targets every five seconds while it lists any (showing
+    no answer to a read sent before a later action or a later shown read, so
+    a removed target never reappears), the
     sidebar, the composer, and `octant ssh-target list` show the state and
     the next attempt's time on the reader's clock.
   - **Stops where only the person can help.** A changed host key, a refused

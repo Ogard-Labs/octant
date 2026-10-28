@@ -134,15 +134,28 @@ export function SshTargetsSettingsSection({
     [client],
   );
 
+  // Reads answer out of order: a status read sent before a removal could land
+  // after the read that followed it and show the removed target again until
+  // the next poll. Every read and every action takes the next number, and an
+  // answer is shown only if no action, and no answer shown, began after it.
+  const issued = useRef(0);
+  const shownFrom = useRef<ShownFrom>({ targets: 0, lists: 0 });
+
   const refresh = useCallback(async () => {
+    issued.current += 1;
+    const sent = issued.current;
     const [listed, bound, made] = await Promise.all([
       client.list(),
       client.projects(),
       client.worktrees(),
     ]);
-    if (listed.status === "ok") setTargets(listed.value);
-    if (bound.status === "ok") setProjects(bound.value);
-    if (made.status === "ok") setWorktrees(made.value);
+    if (listed.status === "ok" && answersNewest(shownFrom.current, "targets", sent)) {
+      setTargets(listed.value);
+    }
+    if (answersNewest(shownFrom.current, "lists", sent)) {
+      if (bound.status === "ok") setProjects(bound.value);
+      if (made.status === "ok") setWorktrees(made.value);
+    }
     const refused = [listed, bound, made].find((answer) => answer.status === "refused");
     if (refused?.status === "refused") setMessage({ kind: "error", text: refused.message });
   }, [client]);
@@ -155,8 +168,12 @@ export function SshTargetsSettingsSection({
   useEffect(() => {
     if (!listsTargets) return;
     const timer = setInterval(() => {
+      issued.current += 1;
+      const sent = issued.current;
       void client.list().then((listed) => {
-        if (listed.status === "ok") setTargets(listed.value);
+        if (listed.status === "ok" && answersNewest(shownFrom.current, "targets", sent)) {
+          setTargets(listed.value);
+        }
       });
     }, TARGET_REFRESH_MS);
     return () => clearInterval(timer);
@@ -169,6 +186,8 @@ export function SshTargetsSettingsSection({
   ): Promise<T | undefined> => {
     setBusy(true);
     setMessage(undefined);
+    issued.current += 1;
+    shownFrom.current = { targets: issued.current, lists: issued.current };
     try {
       const answer = await request();
       if (answer.status === "refused") {
@@ -633,6 +652,19 @@ export function SshTargetsSettingsSection({
       )}
     </div>
   );
+}
+
+/** The number of the newest action or shown read, for the targets and for the other lists. */
+interface ShownFrom {
+  targets: number;
+  lists: number;
+}
+
+/** Whether a read sent as `sent` is newer than what is shown, recording it as shown if so. */
+function answersNewest(shown: ShownFrom, part: keyof ShownFrom, sent: number): boolean {
+  if (sent <= shown[part]) return false;
+  shown[part] = sent;
+  return true;
 }
 
 /** The connection, who and what it reached, and what each posture would admit now. */

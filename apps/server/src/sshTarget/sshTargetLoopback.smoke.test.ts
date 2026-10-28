@@ -1623,6 +1623,11 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
         "  User root",
         `  IdentityFile ${join(root, "user-key")}`,
         "  IdentitiesOnly yes",
+        // A quiet client prints neither "Host key verification failed" nor
+        // "Permission denied", the only evidence that tells a changed key or
+        // a refused sign-in from an unreachable host; Octant's own LogLevel
+        // has to win over it.
+        "  LogLevel QUIET",
         "",
       ].join("\n"),
     );

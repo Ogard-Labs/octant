@@ -81,6 +81,10 @@ const SHARED_OPTIONS = [
   // Frames are binary; an escape character would let their bytes control ssh.
   "EscapeChar=none",
   "ConnectTimeout=15",
+  // The client's own error lines are the only evidence that tells a changed
+  // host key or a refused sign-in from an unreachable host. A configured
+  // `LogLevel QUIET` suppresses them, and a changed key then read as
+  // unreachable and was retried; set here, this level wins over it.
   "LogLevel=ERROR",
 ] as const;
 
