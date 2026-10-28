@@ -87,6 +87,9 @@ export interface FlowBoardProps {
   readonly designAssetRuntime?: DesignAssetRuntime;
 }
 
+/** Room under a screen for its label, in board pixels. */
+const FLOW_SCREEN_LABEL_ALLOWANCE = 28;
+
 export function FlowBoard(props: FlowBoardProps) {
   const [overrides, setOverrides] = useState<ReadonlyMap<string, { x: number; y: number }>>(
     new Map(),
@@ -401,7 +404,7 @@ export function FlowBoard(props: FlowBoardProps) {
         })}
         {layout.screens.map((screen) => (
           <foreignObject
-            height={screen.height + 28}
+            height={screen.height + FLOW_SCREEN_LABEL_ALLOWANCE}
             key={screen.screenId}
             width={screen.width}
             x={screen.x}
