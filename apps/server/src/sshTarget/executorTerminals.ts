@@ -11,7 +11,7 @@ import {
   type SshExecutorTerminalUnavailableReply,
 } from "@octant/contracts/ssh-executor-protocol";
 import type { PtyForkOptions, PtyProcess } from "../code/terminalProcessPort";
-import { gitLinkedWorktreeMetadataPaths } from "../process/gitSeatbeltLaunch";
+import { gitLinkedWorktreeMetadataPaths, gitShimExtraRules } from "../process/gitSeatbeltLaunch";
 import {
   makeProcessConfinementLive,
   type ProcessConfinementPort,
@@ -133,6 +133,11 @@ export class ExecutorTerminals {
         readRoots: [root, work, stateDirectory, dirname(shell), ...linked.readPaths],
         additionalWriteRoots: [stateDirectory, ...linked.writePaths],
         terminal: { shellStateDirectory: stateDirectory },
+        // `/usr/bin/git` on macOS is the xcode-select shim, which reads two
+        // links under the denied `/private/var`; without them `git status`
+        // in a shell on a macOS target failed "unable to read data link".
+        // The rules name those two links alone, never a folder.
+        extraRules: gitShimExtraRules(this.#environment.platform),
         // Full access launches as it does on this host: with the writing
         // postures' grants. Whatever else the launch asks for, these are the
         // grants the posture's canaries attested.

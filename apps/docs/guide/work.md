@@ -75,6 +75,20 @@ back to the composer — unless you have already typed something newer, which is
 kept instead. The waiting message lives on this client only; a restart drops it
 rather than sending it behind your back.
 
+## Continuing after a restart
+
+If Octant restarts while a turn is running, the affected conversation shows
+**Resume** above its composer. Review any changes already made, then click it
+to ask the agent to inspect its saved progress and continue the unfinished
+request in the same thread. This works in Chat, Work, and Code; nothing resumes
+automatically, and your composer draft is left alone.
+
+Octant checks the thread's current access, provider, and folder first. If another
+message is already queued, review and remove it from that queue before using
+this Resume action. Octant does not discard or unpause those messages for you. Old approvals and
+questions cannot be reused; the agent must ask again if needed. Resume continues
+from saved conversation state, not the exact operation interrupted by the crash.
+
 ## Long threads
 
 A long Work thread opens on its newest messages, so it is ready to read and

@@ -597,6 +597,7 @@ export function wireProviders(deps: ProvidersDependencies) {
     // are stops the host asked for and never count toward a crash limit.
     let stopOutsideDriversOf: ((extensionId: string) => Promise<void>) | undefined;
     let reconcileOutsideDrivers: (() => Promise<void>) | undefined;
+    let forgetOutsidePublisherVerification: ((extensionId: string) => Promise<void>) | undefined;
     const extensionLifecycleService = new ExtensionLifecycleService({
       connection: persistence.connection,
       journal: persistence.journal,
@@ -890,6 +891,11 @@ export function wireProviders(deps: ProvidersDependencies) {
         // Settings has no thread authority. Drain only package/components whose
         // lifecycle state changed; unrelated in-flight MCP calls remain intact.
         await agentPluginMcpSessionManager.reconcileLifecycleSnapshot(snapshot);
+        // Re-trusting a new publisher clears what its instances verified
+        // under the old one.
+        if (command.kind === "trust-new-publisher") {
+          await forgetOutsidePublisherVerification?.(String(command.extensionId));
+        }
         // A driver that stopped being effective (uninstall, rollback, withdrawn
         // trust, a switch turned off) stops its processes, and its instances
         // report the block.
@@ -1354,6 +1360,8 @@ export function wireProviders(deps: ProvidersDependencies) {
       providerService.reconcileConfiguredProviders();
     };
     reconcileOutsideDrivers = reconcileOutsideDriverState;
+    forgetOutsidePublisherVerification = (extensionId) =>
+      providerService.forgetOutsideDriverVerification(extensionId);
     quarantineOutsideDriver = (instanceId, digest) =>
       providerService.quarantineOutsideDriver(instanceId, digest);
     // A host that stopped between a trust and the move it causes makes the

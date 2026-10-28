@@ -10,6 +10,7 @@
 
 import { Schema } from "effect";
 import { CanvasId, CanvasVersionId } from "./canvas";
+import { CANVAS_MAX_TAGS_PER_CANVAS, CanvasTagName } from "./canvasTags";
 import { UtcTimestamp } from "./events";
 import { OctantMode } from "./modes";
 import { ProjectId } from "./projects";
@@ -67,9 +68,14 @@ export type ArtifactSyncStatus = typeof ArtifactSyncStatus.Type;
 
 export const ArtifactLibraryEntry = Schema.Struct({
   canvasId: CanvasId,
-  projectId: ProjectId,
+  /**
+   * The Project the Canvas was made in. Absent on a Canvas a Chat thread owns
+   * outside every Project: such an entry is the person's alone to see, names
+   * no Project, and opens in a Chat tab as the Canvas routes judge it.
+   */
+  projectId: Schema.optional(ProjectId),
   /** The Project's own name, so a card names a Project rather than an id. */
-  projectName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  projectName: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
   mode: OctantMode,
   kind: ArtifactKind,
   title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
@@ -79,6 +85,10 @@ export const ArtifactLibraryEntry = Schema.Struct({
   updatedAt: UtcTimestamp,
   /** Whether a share of this artifact is live right now. */
   shared: Schema.Boolean,
+  /** The person's own tags on this Canvas, absent when it carries none. */
+  tags: Schema.optional(
+    Schema.Array(CanvasTagName).pipe(Schema.maxItems(CANVAS_MAX_TAGS_PER_CANVAS)),
+  ),
   preview: Schema.optional(ArtifactPreview),
   /**
    * The computer that wrote the version shown. Present once this computer
@@ -130,7 +140,14 @@ export const ArtifactLibraryProject = Schema.Struct({
 }).annotations(strict);
 export type ArtifactLibraryProject = typeof ArtifactLibraryProject.Type;
 
-export const ArtifactLibraryTab = Schema.Literal("all", "by-project", "shared");
+/** One tag the library's artifacts carry, with how many artifacts carry it. */
+export const ArtifactLibraryTag = Schema.Struct({
+  name: CanvasTagName,
+  artifactCount: Schema.Int.pipe(Schema.nonNegative()),
+}).annotations(strict);
+export type ArtifactLibraryTag = typeof ArtifactLibraryTag.Type;
+
+export const ArtifactLibraryTab = Schema.Literal("all", "by-project", "by-tag", "shared");
 export type ArtifactLibraryTab = typeof ArtifactLibraryTab.Type;
 
 /**
@@ -146,6 +163,8 @@ export const ArtifactLibraryQuery = Schema.Struct({
   projectId: Schema.optional(ProjectId),
   mode: Schema.optional(OctantMode),
   kind: Schema.optional(ArtifactKind),
+  /** One tag, matched exactly: the folder view of the person's own filing. */
+  tag: Schema.optional(CanvasTagName),
 }).annotations(strict);
 export type ArtifactLibraryQuery = typeof ArtifactLibraryQuery.Type;
 
@@ -163,6 +182,12 @@ export const ArtifactLibraryListing = Schema.Struct({
     Schema.filter(
       (projects) =>
         new Set(projects.map((project) => String(project.projectId))).size === projects.length,
+    ),
+  ),
+  /** Every tag this caller's artifacts carry, whether or not filtered. */
+  tags: Schema.optional(
+    Schema.Array(ArtifactLibraryTag).pipe(
+      Schema.filter((tags) => new Set(tags.map((tag) => tag.name)).size === tags.length),
     ),
   ),
   /**
