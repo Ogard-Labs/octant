@@ -956,7 +956,8 @@ process the host launches); an adapter reached as a TCP debug server (a
 listener another local process could reach); `attach` to a process by id or
 address (the process sits outside the session's confinement, and attaching
 reads its memory). A later slice may add `attach` to a process the session
-itself started, with its own decision.
+itself started, with its own decision; [DB9](#child-processes) does so for a
+program's child processes.
 
 ### Session network
 
@@ -1025,8 +1026,8 @@ frame ends the session. Each request has a 10-second deadline and reports
   and does not debug the child; with debugpy's `subProcess` on, a Python child
   then waits for a client that never comes, so a debugpy package sets
   `subProcess: false` in its `launch` body. Debugging child processes needs
-  its own rule, proposed under [Child processes](#child-processes-proposed)
-  and not yet decided.
+  its own rule, accepted under [Child processes](#child-processes) and not
+  yet built; until it is, the announcement is dropped as above.
 - **Events accepted.** `initialized`, `stopped`, `continued`, `exited`,
   `terminated`, `thread`, `output` (`console`, `stdout`, `stderr`,
   `important`), `breakpoint`, `capabilities`, `invalidated`, `process`, and
@@ -1333,11 +1334,11 @@ the addendum left a choice open.
 - **Evaluate.** The console sends what the person typed as `repl` in the
   selected frame; the adapter's error answer is a console line.
 
-### Child processes (proposed)
+### Child processes
 
-**Status: proposed on 2026-10-28; waits on the maintainer's decision DB9.
-Not built.** Until DB9 is decided, the [Protocol](#protocol) rule stands: an
-adapter's child announcement is dropped, and the child runs undebugged.
+**Status: accepted on 2026-10-28 as decision DB9. Not built yet.** Until it is
+built, the [Protocol](#protocol) rule stands: an adapter's child announcement
+is dropped, and the child runs undebugged.
 
 The outcome: a program that starts another program (Python's `subprocess` or
 `multiprocessing`, a test runner's workers) stops at the person's breakpoints
@@ -1354,7 +1355,7 @@ beyond the session's one debug port (DB6). DB4 left this open: a later slice
 may add `attach` to a process the session itself started, with its own
 decision.
 
-The proposed rule, which is the recommended answer to DB9:
+The rule:
 
 - **Declared, not assumed.** An adapter that debugs children declares
   `childSessions: 1` (default `0`) in `debugAdapter` and names how it
@@ -1423,26 +1424,27 @@ The proposed rule, which is the recommended answer to DB9:
   lists children under the session; the window's breakpoints apply to the
   parent and every child.
 
-**Decision DB9 (open).** The maintainer decides whether the host may open a
-connection into a running session's capsule (the Linux relay and the macOS
-child listener), whether `attach` may be sent at all, and whether macOS gets
-up to two more loopback ports per session. Recommended: the rule above.
-Alternatives:
+**Decision DB9: debug a program's children under the rule above.** Accepted
+by the maintainer on 2026-10-28. The host may open a connection into a running
+session's capsule, only to the session's own child port (the Linux relay and
+the macOS child listener); `attach` may be sent, only on a child connection;
+and macOS gets up to two more host-chosen loopback ports per session.
+Rejected alternatives:
 
-1. Leave children undebugged, as today. Nothing new is granted, a debugpy
+1. Leave children undebugged, as before. Nothing new is granted, a debugpy
    package keeps `subProcess: false`, and a program that does its work in a
    child cannot be debugged in Octant.
 2. The rule above on Linux only, with children refused on macOS until 8d has
    measured the one debug port's Seatbelt rules. Grants no new loopback on
    macOS now.
-3. The rule above with a prompt at each child. Not recommended: it repeats
-   the confirmation's act, a worker pool would prompt many times, and
-   repeated prompts train people to accept them unread.
+3. The rule above with a prompt at each child. It repeats the confirmation's
+   act, a worker pool would prompt many times, and repeated prompts train
+   people to accept them unread.
 4. The standard `startDebugging` request only, never an adapter's own event.
    Provider-neutral, but it does nothing for debugpy, the one adapter
    measured.
 
-| Threat                                               | Mitigation in the proposed rule                                                                                                     | Residual                                                                                 |
+| Threat                                               | Mitigation                                                                                                                          | Residual                                                                                 |
 | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | The adapter points the host at another local service | The host connects only to the session's own host-chosen child port; any other host or port is refused before a connection is opened | None                                                                                     |
 | `attach` reaches a process outside the session       | Sent only on a child connection to the same adapter in the same capsule; Linux PID namespace; no task port on macOS                 | As for the parent: same-user processes on macOS stay visible to the capsule's broad read |
@@ -1451,7 +1453,7 @@ Alternatives:
 | A program floods the host with children              | At most 8 at once and 32 per session; the rest run undebugged                                                                       | None                                                                                     |
 | A child outlives its session                         | Every end of the parent ends its children, then the capsule's group as today                                                        | As for the parent: a process that calls `setsid()` leaves the group                      |
 
-_Verify, if accepted:_ a fixture adapter that announces a child by event and
+_Verify:_ a fixture adapter that announces a child by event and
 by `startDebugging`, under Bubblewrap in an approval-gated thread: the child
 stops at a breakpoint and answers its stack; an announcement naming another
 port is refused and nothing connects; an announcement after the parent ended,
@@ -1896,8 +1898,8 @@ accounts or hardware.
    - _State:_ the [Debugger addendum](#debugger-addendum) was accepted on
      2026-10-27; its sub-slices 8a to 8d are the delivery plan. 8a to 8c are
      built; 8d needs a Mac. Debugging a program's child processes (debugpy's
-     `debugpyAttach`) is [proposed](#child-processes-proposed), waits on
-     decision DB9, and is not built.
+     `debugpyAttach`) was [accepted](#child-processes) on 2026-10-28 as
+     decision DB9 and is not built yet.
 
 The extension host is not planned (D7). Each slice is reviewable and leaves
 the editor working when the companion is off or refused.
