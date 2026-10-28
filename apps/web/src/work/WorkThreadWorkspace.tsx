@@ -20,6 +20,7 @@ import {
   type WorkRequest,
   type WorkThread,
   type WorkThreadId,
+  type WorkTurnRequestId,
   type WorkTurnId,
   type WorkTurnState,
   type WorkTurnStreamFrame,
@@ -557,30 +558,103 @@ async function consumeWorkTurnStream(input: {
 }): Promise<void> {
   let cursor = input.afterSequence;
   let retryMs = 250;
-  while (input.active() && !input.signal.aborted) {
-    try {
-      let received = false;
-      for await (const frame of input.client.subscribe(input.threadId, cursor, input.signal)) {
-        if (!input.active() || input.signal.aborted) return;
-        received = true;
-        if (frame.kind === "snapshot-required") {
-          const snapshot = await readNewestWorkTurns(input.client, input.threadId, input.signal);
-          if (!input.active() || input.signal.aborted) return;
-          input.replace(snapshot);
-          cursor = snapshot.liveCursor;
-          break;
-        }
-        cursor = frame.sequence;
-        input.apply(frame);
-      }
-      retryMs = received ? 50 : Math.min(retryMs * 2, 2_000);
-    } catch {
-      if (!input.active() || input.signal.aborted) return;
-      retryMs = Math.min(retryMs * 2, 2_000);
+  // A streamed response commits on beats, not per delta: every apply
+  // re-renders the workspace and re-flattens the transcript, and a reply's
+  // deltas arrive far faster than a frame paints. Deltas of one request
+  // combine into one apply; a frame that supersedes them drops what it makes
+  // stale, and any other frame flushes them first so fields merge in order.
+  let pending:
+    | { readonly requestId: WorkTurnRequestId; readonly sequence: number; text: string }
+    | undefined;
+  let beat: ReturnType<typeof setTimeout> | undefined;
+  const clearBeat = () => {
+    if (beat !== undefined) {
+      clearTimeout(beat);
+      beat = undefined;
     }
-    await waitForWorkStreamReconnect(input.signal, retryMs);
+  };
+  const flushPending = () => {
+    clearBeat();
+    if (pending === undefined) return;
+    const delta = pending;
+    pending = undefined;
+    input.apply({
+      kind: "response-delta",
+      sequence: delta.sequence,
+      threadId: input.threadId,
+      requestId: delta.requestId,
+      text: delta.text,
+    });
+  };
+  try {
+    while (input.active() && !input.signal.aborted) {
+      try {
+        let received = false;
+        for await (const frame of input.client.subscribe(input.threadId, cursor, input.signal)) {
+          if (!input.active() || input.signal.aborted) return;
+          received = true;
+          if (frame.kind === "snapshot-required") {
+            const snapshot = await readNewestWorkTurns(input.client, input.threadId, input.signal);
+            if (!input.active() || input.signal.aborted) return;
+            // The replaced snapshot is the authority; pending deltas belong
+            // to the stream it replaces.
+            pending = undefined;
+            clearBeat();
+            input.replace(snapshot);
+            cursor = snapshot.liveCursor;
+            break;
+          }
+          cursor = frame.sequence;
+          if (frame.kind === "response-delta") {
+            if (pending !== undefined && String(pending.requestId) === String(frame.requestId)) {
+              pending = { ...pending, text: pending.text + frame.text, sequence: frame.sequence };
+            } else {
+              flushPending();
+              pending = {
+                requestId: frame.requestId,
+                sequence: frame.sequence,
+                text: frame.text,
+              };
+            }
+            if (beat === undefined) {
+              beat = setTimeout(() => {
+                beat = undefined;
+                flushPending();
+              }, STREAM_REPLY_BEAT_MS);
+            }
+            continue;
+          }
+          if (frame.kind === "turn-settled") {
+            // The settled turn carries the whole response; pending deltas of
+            // the same request are what it supersedes.
+            if (
+              pending !== undefined &&
+              String(pending.requestId) === String(frame.turn.requestId)
+            ) {
+              pending = undefined;
+              clearBeat();
+            } else {
+              flushPending();
+            }
+          } else {
+            flushPending();
+          }
+          input.apply(frame);
+        }
+        retryMs = received ? 50 : Math.min(retryMs * 2, 2_000);
+      } catch {
+        if (!input.active() || input.signal.aborted) return;
+        retryMs = Math.min(retryMs * 2, 2_000);
+      }
+      await waitForWorkStreamReconnect(input.signal, retryMs);
+    }
+  } finally {
+    flushPending();
   }
 }
+
+/** How often a streaming Work reply commits its accumulated text: see consumeWorkTurnStream. */
+const STREAM_REPLY_BEAT_MS = 50;
 
 async function waitForWorkStreamReconnect(signal: AbortSignal, delayMs: number): Promise<void> {
   if (signal.aborted) return;

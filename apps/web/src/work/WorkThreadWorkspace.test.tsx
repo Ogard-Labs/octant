@@ -1634,7 +1634,9 @@ describe("WorkThreadWorkspace", () => {
           requestId: running.requestId,
           text: "Immediate text",
         });
-        await Promise.resolve();
+        // The stream commits its text on a 50 ms beat, still far ahead of
+        // transcript polling: this is the beat, not the poll below.
+        await vi.advanceTimersByTimeAsync(50);
       });
 
       expect(screen.getByText("Immediate text")).toBeInTheDocument();
