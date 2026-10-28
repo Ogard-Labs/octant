@@ -82,31 +82,60 @@ export function selectArtifactLibraryEntries(
   return entries
     .filter((entry) => {
       if (query.tab === "shared" && !entry.shared) return false;
-      if (query.projectId !== undefined && String(entry.projectId) !== String(query.projectId)) {
-        return false;
+      if (query.projectId !== undefined) {
+        // A Project filter is a Project question: an entry that names no
+        // Project is not in any Project, so it matches no Project filter.
+        if (entry.projectId === undefined) return false;
+        if (String(entry.projectId) !== String(query.projectId)) {
+          return false;
+        }
       }
       if (query.mode !== undefined && entry.mode !== query.mode) return false;
       if (query.kind !== undefined && entry.kind !== query.kind) return false;
+      if (query.tag !== undefined && !(entry.tags ?? []).includes(query.tag)) return false;
       if (needle === undefined) return true;
       return (
         entry.title.toLocaleLowerCase("en-US").includes(needle) ||
-        entry.projectName.toLocaleLowerCase("en-US").includes(needle)
+        (entry.projectName?.toLocaleLowerCase("en-US").includes(needle) ?? false)
       );
     })
     .toSorted(compareArtifactLibraryEntries);
 }
 
 /**
+ * The tag roster the listing offers its filter: every tag the caller's
+ * artifacts carry, with how many carry it, alphabetical. An exact label is
+ * counted once per artifact, so the count never exceeds the artifacts a
+ * caller may see.
+ */
+export function artifactTagRoster(
+  entries: ReadonlyArray<ArtifactLibraryEntry>,
+): ReadonlyArray<{ readonly name: string; readonly artifactCount: number }> {
+  const counts = new Map<string, number>();
+  for (const entry of entries) {
+    for (const tag of entry.tags ?? []) {
+      counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .map(([name, artifactCount]) => ({ name, artifactCount }))
+    .sort((left, right) => left.name.localeCompare(right.name, "en-US"));
+}
+
+/**
  * Which synced artifacts a query asks for. A synced artifact belongs to no
- * Project on this host and has no share here, so a Project filter or the
- * Shared tab matches none of them; mode, kind, and text match as they do
- * for this host's own artifacts, and text also matches the computer's name.
+ * Project on this host, has no share here, and carries no tag here — the
+ * person tags what this host holds — so a Project or tag filter matches none
+ * of them; mode, kind, and text match as they do for this host's own
+ * artifacts, and text also matches the computer's name.
  */
 export function selectSyncedArtifactLibraryEntries(
   entries: ReadonlyArray<ArtifactLibrarySyncedEntry>,
   query: ArtifactLibraryQuery,
 ): ReadonlyArray<ArtifactLibrarySyncedEntry> {
-  if (query.tab === "shared" || query.projectId !== undefined) return [];
+  if (query.tab === "shared" || query.projectId !== undefined || query.tag !== undefined) {
+    return [];
+  }
   const needle = query.query?.toLocaleLowerCase("en-US");
   return entries.filter((entry) => {
     if (query.mode !== undefined && entry.mode !== query.mode) return false;

@@ -134,8 +134,12 @@ whole with no Project named, its owner being the thread in its provenance
 (the host-export Canvas record once required a Project, which left every
 such Canvas out of the cut). It is never mirrored (the
 mirror files artifacts by Project; the receipt says so and journals
-`skipped`), never published to an artifact replica, absent from the
-Project-grouped artifact library, and not shared (see [Shares](#shares)). A
+`skipped`), never published to an artifact replica, and not shared (see
+[Shares](#shares)). It is listed in the host-wide artifact library for a
+window on this host, under no Project, while its thread still holds it — the
+same rule that authorizes its tab — and a paired device sees none of it,
+having no Project to be clamped to (see
+[Artifact library and tags](#artifact-library-and-tags)). A
 Canvas tab that opens it names no Project and rests in the Chat layout
 whatever Project the pane's context binds. The shell opens and restores that
 tab under the rule the Canvas routes authorize by: the Canvas still belongs
@@ -826,6 +830,59 @@ the table row model; its criteria already anchor through node ids. Shared
 snapshots serialise the definition and so never carry comments
 ([decisions/0052-canvas-boards.md](../decisions/0052-canvas-boards.md)).
 
+## Artifact library and tags
+
+The **Artifacts** destination is the host-wide library of everything Canvas
+has made: the same journal-derived projection the per-Project inventory reads,
+gathered across every Project and mode on this host — the deliberate,
+recorded exception to per-window Project read scoping
+([0028](../decisions/0028-the-artifact-library.md)). The server decides its
+scope; a renderer never assembles it from Project reads of its own. A paired
+device is admitted to read it clamped to the Projects the remote catalog
+allows, and an artifact it may not see is absent rather than shown
+unavailable. A Canvas a Chat thread owns outside every Project is listed for
+a window on this host only, under **No Project**, while its thread still
+holds it, and opens in a Chat tab; a paired device has no Project to be
+clamped to, so it sees none of them. Creation stays thread-scoped: an
+artifact carries the thread it was made in, so the library's create action
+starts a thread. The listing carries no filesystem path; an artifact's kind
+is read from its blocks rather than declared; a preview is drawn once by the
+host as a self-contained SVG and is absent when it could not be drawn;
+opening an entry opens the same document by `canvasId`; and the listing is
+bounded and says when it is cut.
+
+The page opens grouped by Project, because that is how a person comes back to
+their work; **All** stays the flat reading, **Shared** the live shares, and
+**By tag** the person's own folders. The person chooses between a gallery of
+preview cards and a list of compact rows; the choice is a reading preference
+of the window, kept in the renderer's local storage, sent to no host, and
+journaled nowhere. Every filter — text (an entry's title or its Project
+name), kind, Project, mode, and tag — travels in the query, and the host
+applies it; a Project filter is a Project question, so an entry that names
+no Project matches none of them.
+
+**Tags** are the person's own filing on top of provenance: a short label a
+person puts on a Canvas from the library to find it again. A tag is a
+non-empty trimmed string of at most 40 characters, a Canvas carries at most
+12, and a tag is an exact label — two that differ only in case are two. A tag
+is a journaled fact of one `canvas-tags` aggregate per Canvas
+(`canvas.tag-added@1`, `canvas.tag-removed@1`, the aggregate version its
+sequence), beside the document like comments, but host-local: it never enters
+a Canvas version, so tagging changes no history, bumps no `updatedAt`, and
+marks no outside content, and a share, an export, a mirrored file, and
+artifact sync all leave it here. The pure `admitCanvasTagCommand` policy
+validates shape and budgets, and the refusals are named values
+(`malformed-request`, `oversized-payload`, `duplicate-tag`, `unknown-tag`,
+`tag-budget-exceeded`, `stale-version`). Only a window on this host changes
+tags: the command route is host-window only, a paired device reads a
+listing's tags and changes none, and the host stamps the event's timestamp
+and its own person, never a field the request carries. The listing carries
+each entry's tags and a roster of every tag with how many artifacts carry
+it; the query filters by one tag, matched exactly, and a synced artifact —
+which belongs to another computer's Project and is not held here — carries
+no tag and matches no tag filter. Tags are changed from the
+library's cards and rows; the open Canvas tab carries no tag control.
+
 ## Design block
 
 A `design` block (Canvas schema version 9) is the one block whose content is
@@ -1286,6 +1343,11 @@ keeps an import from adding an unmarked channel to an agent's context.
   (for example `canvasPolicy.test.ts`, `canvasDiagramLayout.test.ts`,
   `canvasMathPolicy.test.ts`, `canvasRecipeStarter.test.ts`).
 - Service, revision routes, and comments: `apps/server/src/canvas/canvasService.test.ts`.
+- The artifact library and its tags: `apps/server/src/canvas/artifactLibraryService.test.ts`,
+  `canvasTagService.test.ts`, `apps/server/src/artifactLibraryRoutes.test.ts`,
+  `packages/domain/src/artifactLibraryPolicy.test.ts` and `canvasTagsPolicy.test.ts`,
+  and the page and its tags in `apps/web/src/artifacts/ArtifactLibraryView.test.tsx`
+  and `ArtifactLibrarySurface.test.tsx`.
 - A Chat thread's own Canvas: offered and bound in
   `apps/server/src/canvas/canvasAgentTools.test.ts`, created, listed,
   revised, and replayed in `canvasService.test.ts` and

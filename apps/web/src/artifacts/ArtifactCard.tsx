@@ -3,6 +3,7 @@ import { artifactEditedAgo } from "@octant/domain";
 import { Link2, Lock } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { ArtifactSyncStatus } from "./ArtifactSyncStatus";
+import { ArtifactTags } from "./ArtifactTags";
 
 export interface ArtifactCardProps {
   readonly entry: ArtifactLibraryEntry;
@@ -16,6 +17,8 @@ export interface ArtifactCardProps {
    */
   readonly onSync?: (canvasId: ArtifactLibraryEntry["canvasId"]) => void;
   readonly onRestore?: (canvasId: ArtifactLibraryEntry["canvasId"]) => void;
+  readonly onTagAdd?: (canvasId: ArtifactLibraryEntry["canvasId"], tag: string) => void;
+  readonly onTagRemove?: (canvasId: ArtifactLibraryEntry["canvasId"], tag: string) => void;
 }
 
 export const KIND_LABEL: Record<ArtifactLibraryEntry["kind"], string> = {
@@ -60,7 +63,7 @@ export function ArtifactCard(props: ArtifactCardProps) {
         <span className="artifact-card__body">
           <span className="artifact-card__title">{entry.title}</span>
           <span className="artifact-card__meta">
-            {entry.projectName} · {KIND_LABEL[entry.kind]}
+            {entry.projectName ?? "No Project"} · {KIND_LABEL[entry.kind]}
           </span>
           {entry.writtenOn === undefined ? null : (
             <span className="artifact-card__meta">Written on {entry.writtenOn}</span>
@@ -85,6 +88,20 @@ export function ArtifactCard(props: ArtifactCardProps) {
           </span>
         </span>
       </OctantButton>
+      {/*
+        The person's tags sit beside the open control, not inside it: a tag
+        chip carries its own remove button, and a button cannot hold a button.
+      */}
+      <ArtifactTags
+        tags={entry.tags ?? []}
+        variant="card"
+        {...(props.onTagAdd === undefined
+          ? {}
+          : { onAdd: (tag) => props.onTagAdd?.(entry.canvasId, tag) })}
+        {...(props.onTagRemove === undefined
+          ? {}
+          : { onRemove: (tag) => props.onTagRemove?.(entry.canvasId, tag) })}
+      />
       <ArtifactSyncStatus
         {...(entry.syncStatus === undefined ? {} : { status: entry.syncStatus })}
         {...(entry.deletedOn === undefined ? {} : { deletedOn: entry.deletedOn })}
