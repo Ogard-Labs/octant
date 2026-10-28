@@ -27,6 +27,7 @@ import {
   type UtcTimestamp,
 } from "@octant/contracts";
 import {
+  DESKTOP_CREDENTIAL_REJECTED,
   maxDesktopFrameBytes,
   pngDimensions,
   ScreenshotDesktopControl,
@@ -324,7 +325,7 @@ export function createE2bDesktopProvider(
       if (created.status === "refused") return { status: "refused", reason: created.reason };
       if (created.status === "failed") return { status: "not-connected" };
       if (created.httpStatus === 401 || created.httpStatus === 403) {
-        return { status: "refused", reason: "credential-rejected" };
+        return { status: "refused", reason: DESKTOP_CREDENTIAL_REJECTED };
       }
       if (created.httpStatus !== 201) return failed(`create-answered-${created.httpStatus}`);
       const sandbox = json(created);
@@ -415,7 +416,7 @@ export function createE2bDesktopProvider(
       });
       if (moved.status !== "answered") return { status: "not-connected" };
       if (moved.httpStatus === 401 || moved.httpStatus === 403) {
-        return { status: "refused", reason: "credential-rejected" };
+        return { status: "refused", reason: DESKTOP_CREDENTIAL_REJECTED };
       }
       if (moved.httpStatus !== 204) return failed(`timeout-answered-${moved.httpStatus}`);
       const reported = await reportedExpiry(handle.resource, credentialRef);

@@ -18,7 +18,7 @@ import {
   type WorkProjectStatusFile,
 } from "@octant/contracts/projects";
 import type { CanvasDesignBrand } from "@octant/contracts/canvas";
-import type { DesktopRecipe } from "@octant/contracts/desktop-lease";
+import type { DesktopRecipe, DesktopRecipeKeyChange } from "@octant/contracts/desktop-lease";
 import type { AggregateVersion } from "@octant/contracts/events";
 import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
 import { createProjectClient, type ProjectClient } from "@octant/client-runtime/project-client";
@@ -311,10 +311,15 @@ export function useProjectController(options: ProjectControllerOptions) {
     );
   }
 
-  /** Set, replace, or (with `null`) remove a Code Project's disposable desktop recipe. */
+  /**
+   * Set, replace, or (with `null`) remove a Code Project's disposable desktop
+   * recipe, entering or removing its cloud provider's key with it. The key
+   * goes to the host in this one request and is kept nowhere here.
+   */
   async function setDesktopRecipe(
     projectId: ProjectId,
     recipe: DesktopRecipe | null,
+    key?: DesktopRecipeKeyChange,
   ): Promise<boolean> {
     const project = projectById.get(projectId);
     if (project?.type !== "code") return false;
@@ -324,8 +329,15 @@ export function useProjectController(options: ProjectControllerOptions) {
         projectId,
         expectedVersion: project.version,
         recipe,
+        ...(key === undefined ? {} : { key }),
       },
-      recipe === null ? "Desktop recipe removed." : "Desktop recipe saved.",
+      recipe === null
+        ? "Desktop recipe removed."
+        : key?.action === "remove"
+          ? "Desktop key removed."
+          : key?.action === "enter"
+            ? "Desktop recipe and key saved."
+            : "Desktop recipe saved.",
     );
   }
 

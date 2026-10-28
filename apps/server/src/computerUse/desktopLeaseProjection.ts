@@ -91,6 +91,7 @@ export class DesktopLeaseProjection implements Projection {
         ...lease,
         state: transitioned.to,
         ...(transitioned.endReason === undefined ? {} : { endReason: transitioned.endReason }),
+        ...(transitioned.credentialRejected === undefined ? {} : { credentialRejected: true }),
         updatedAt: event.occurredAt,
       }));
       return;

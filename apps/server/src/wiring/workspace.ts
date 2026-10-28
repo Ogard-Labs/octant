@@ -50,7 +50,7 @@ export type WorkspaceDependencies = Pick<ServerStart, "options" | "persistence">
   Pick<AgentRunsWiring, "spendCeilingHolder"> &
   Pick<IntegrationsWiring, "githubCapabilityService" | "githubIntegrationIsEffective"> &
   Pick<FoundationsWiring, "providerRuntimeRegistry" | "workThreadProjection"> &
-  Pick<ComputerUseWiring, "offeredDesktopProviders"> & {
+  Pick<ComputerUseWiring, "desktopRecipeKeys" | "offeredDesktopProviders"> & {
     /**
      * Remote-bound Code Projects, read when a window binds. SSH targets are
      * wired after the workspace, so this reads through to their store once
@@ -62,6 +62,7 @@ export type WorkspaceDependencies = Pick<ServerStart, "options" | "persistence">
 export function wireWorkspace(deps: WorkspaceDependencies) {
   const {
     bindingReceiptStore,
+    desktopRecipeKeys,
     githubCapabilityService,
     githubIntegrationIsEffective,
     offeredDesktopProviders,
@@ -349,6 +350,7 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
         await workProjectStatusFiles.seed(canonicalRoot, name, today);
       },
       offeredDesktopProviders,
+      desktopRecipeKeys,
     });
     return {
       authorizeWorkThreadForWindow,

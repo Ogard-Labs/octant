@@ -251,30 +251,47 @@ describe("Project routes", () => {
       "content-type": "application/json",
       "x-octant-window-capability": capability,
     };
+    const recipe = {
+      providerId: "host-local",
+      screen: { width: 1280, height: 800 },
+      network: "none",
+      leaseMinutes: 30,
+      maximumLeaseMinutes: 240,
+      idleMinutes: 15,
+    };
     const command = JSON.stringify({
       kind: "change-code-project-desktop-recipe",
       projectId,
       expectedVersion: 1,
-      recipe: {
-        providerId: "host-local",
-        screen: { width: 1280, height: 800 },
-        network: "none",
-        leaseMinutes: 30,
-        maximumLeaseMinutes: 240,
-        idleMinutes: 15,
-      },
+      recipe,
     });
 
-    const remote = new Request("http://127.0.0.1/api/projects/commands", {
-      method: "POST",
-      headers,
-      body: command,
-    });
-    bindPrincipalRouteContext(remote, {
-      principal: { kind: "remote-device" } as never,
-      scopeId: windowId,
-    });
-    expect((await route(remote))?.status).toBe(403);
+    // A paired device is refused before the service runs, so a key it sends
+    // never reaches the credential store, and the refusal does not echo it.
+    const key = "e2b_paired-device-key-never-stored";
+    for (const body of [
+      command,
+      JSON.stringify({
+        kind: "change-code-project-desktop-recipe",
+        projectId,
+        expectedVersion: 1,
+        recipe: { ...recipe, providerId: "e2b" },
+        key: { action: "enter", key },
+      }),
+    ]) {
+      const remote = new Request("http://127.0.0.1/api/projects/commands", {
+        method: "POST",
+        headers,
+        body,
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: { kind: "remote-device" } as never,
+        scopeId: windowId,
+      });
+      const refused = await route(remote);
+      expect(refused?.status).toBe(403);
+      expect(await refused?.text()).not.toContain(key);
+    }
     expect(executeProject).not.toHaveBeenCalled();
 
     const local = new Request("http://127.0.0.1/api/projects/commands", {

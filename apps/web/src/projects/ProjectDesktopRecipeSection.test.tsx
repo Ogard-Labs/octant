@@ -245,9 +245,13 @@ describe("ProjectDesktopRecipeSection", () => {
         "spare mini",
       ),
     );
-    expect(listed.request).toHaveBeenCalledWith(
-      { kind: "recipe-machines", providerId: "spaces.example", placementId: "other-machine" },
-      expect.anything(),
+    // The saved computer's name shows from the recipe itself, so the listing
+    // may still be on its way when it does.
+    await waitFor(() =>
+      expect(listed.request).toHaveBeenCalledWith(
+        { kind: "recipe-machines", providerId: "spaces.example", placementId: "other-machine" },
+        expect.anything(),
+      ),
     );
     cleanup();
 
@@ -276,5 +280,106 @@ describe("ProjectDesktopRecipeSection", () => {
     expect(await screen.findByText(/No desktop provider is ready on this host/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Set recipe" })).toBeNull();
     expect(screen.queryByRole("combobox", { name: "Desktop provider" })).toBeNull();
+  });
+
+  describe("on a cloud provider that reads the person's key", () => {
+    /** A billed cloud provider, offered here as a host offers one only after the person opts in. */
+    const cloud = {
+      providerId: "cloud-desktop",
+      displayName: "Cloud desktops",
+      locality: "cloud",
+      billed: true,
+    } as const;
+
+    function keyClient(key: {
+      readonly key: "none" | "saved" | "missing" | "rejected";
+      readonly store: "available" | "unavailable";
+    }) {
+      const request = vi.fn<DesktopPaneClient["request"]>(async (asked) =>
+        decodeDesktopPaneAnswer(
+          asked.kind === "recipe-key"
+            ? { status: "recipe-key", ...key }
+            : { status: "recipe-providers", providers: [cloud] },
+        ),
+      );
+      return { request };
+    }
+
+    it("sets a recipe only with a key, sends the key once, and clears the field", async () => {
+      const user = userEvent.setup();
+      const onChange = vi.fn(async () => true);
+      const asked = keyClient({ key: "none", store: "available" });
+      render(
+        <ProjectDesktopRecipeSection client={asked} onChange={onChange} project={project()} />,
+      );
+
+      expect(await screen.findByText(/No key saved/)).toBeTruthy();
+      expect(asked.request).toHaveBeenCalledWith(
+        { kind: "recipe-key", projectId: "80000000-0000-4000-8000-000000000001" },
+        expect.anything(),
+      );
+      expect(screen.getByRole("button", { name: "Set recipe" })).toBeDisabled();
+      const field = screen.getByLabelText("Cloud desktops API key");
+      expect(field).toHaveAttribute("type", "password");
+      await user.type(field, "  cloud-key-123  ");
+      await user.click(screen.getByRole("button", { name: "Set recipe" }));
+
+      expect(onChange).toHaveBeenCalledWith(
+        {
+          providerId: "cloud-desktop",
+          screen: { width: 1280, height: 800 },
+          network: "none",
+          leaseMinutes: 30,
+          maximumLeaseMinutes: 240,
+          idleMinutes: 15,
+        },
+        { action: "enter", key: "cloud-key-123" },
+      );
+      expect(field).toHaveValue("");
+      expect(document.body.innerHTML).not.toContain("cloud-key-123");
+    });
+
+    it("says the provider refused the saved key, replaces it, and removes it after asking", async () => {
+      const user = userEvent.setup();
+      const onChange = vi.fn(async () => true);
+      const keyed = decodeDesktopRecipe({
+        ...savedRecipe,
+        credentialRef: "80000000-0000-4000-8000-0000000000c1",
+      });
+      render(
+        <ProjectDesktopRecipeSection
+          client={keyClient({ key: "rejected", store: "available" })}
+          onChange={onChange}
+          project={project(keyed)}
+        />,
+      );
+
+      expect(
+        await screen.findByText(/Cloud desktops refused this key when a desktop last started/),
+      ).toBeTruthy();
+      // Nothing else changed, so only a new key makes the recipe worth saving.
+      expect(screen.getByRole("button", { name: "Save recipe" })).toBeDisabled();
+      await user.type(screen.getByLabelText("Cloud desktops API key"), "cloud-key-456");
+      await user.click(screen.getByRole("button", { name: "Save recipe" }));
+      expect(onChange).toHaveBeenLastCalledWith(keyed, { action: "enter", key: "cloud-key-456" });
+
+      await user.click(screen.getByRole("button", { name: "Remove key" }));
+      expect(onChange).toHaveBeenCalledTimes(1);
+      await user.click(await screen.findByRole("button", { name: "Remove key" }));
+      await waitFor(() => expect(onChange).toHaveBeenLastCalledWith(keyed, { action: "remove" }));
+    });
+
+    it("keeps the key field closed on a host with no credential store", async () => {
+      render(
+        <ProjectDesktopRecipeSection
+          client={keyClient({ key: "none", store: "unavailable" })}
+          onChange={vi.fn(async () => true)}
+          project={project()}
+        />,
+      );
+      expect(await screen.findByText(/no credential store Octant can reach/)).toBeTruthy();
+      expect(screen.getByLabelText("Cloud desktops API key")).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Set recipe" })).toBeDisabled();
+    });
   });
 });

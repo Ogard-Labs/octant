@@ -3,7 +3,7 @@ import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-cl
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { ProjectAvailability, ProjectId, ProjectSummary } from "@octant/contracts/projects";
 import type { CanvasDesignBrand } from "@octant/contracts/canvas";
-import type { DesktopRecipe } from "@octant/contracts/desktop-lease";
+import type { DesktopRecipe, DesktopRecipeKeyChange } from "@octant/contracts/desktop-lease";
 import type { ProjectColor, ProjectProviderPolicy } from "@octant/contracts/projects";
 import type { ProviderInstance } from "@octant/contracts/providers";
 import { ChevronDown, SquarePen } from "lucide-react";
@@ -61,6 +61,7 @@ export interface ProjectOverviewProps {
   readonly onDesktopRecipeChange?: (
     projectId: ProjectId,
     recipe: DesktopRecipe | null,
+    key?: DesktopRecipeKeyChange,
   ) => Promise<boolean>;
   /** The host this window reaches, so the recipe editor can ask which desktop providers it offers. */
   readonly serverUrl?: string;
@@ -398,8 +399,8 @@ export function ProjectOverview(props: ProjectOverviewProps) {
               <ProjectDesktopRecipeSection
                 {...(desktopPaneClient === undefined ? {} : { client: desktopPaneClient })}
                 disabled={archived || connectionStale}
-                onChange={async (recipe) =>
-                  (await props.onDesktopRecipeChange?.(props.project.id, recipe)) ?? false
+                onChange={async (recipe, key) =>
+                  (await props.onDesktopRecipeChange?.(props.project.id, recipe, key)) ?? false
                 }
                 project={props.project}
               />

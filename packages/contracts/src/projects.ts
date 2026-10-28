@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { CanvasDesignBrand } from "./canvasBrand";
-import { DesktopRecipe } from "./desktopLease";
+import { DesktopRecipe, DesktopRecipeKeyChange } from "./desktopLease";
 import { ActorId, AggregateVersion, EventActor, UtcTimestamp } from "./events";
 import { HostId } from "./host";
 import { ProviderInstanceId } from "./providers";
@@ -474,6 +474,12 @@ export const ProjectCommand = Schema.Union(
     ...ProjectCommandFields,
     /** `null` removes the recipe. */
     recipe: Schema.NullOr(DesktopRecipe),
+    /**
+     * The key a cloud recipe's provider reads, entered or removed with this
+     * save. The host stores an entered key in its credential store and
+     * journals only the reference.
+     */
+    key: Schema.optional(DesktopRecipeKeyChange),
   }).annotations(strict),
 );
 export type ProjectCommand = typeof ProjectCommand.Type;
