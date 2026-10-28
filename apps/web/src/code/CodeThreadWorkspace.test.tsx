@@ -3975,4 +3975,72 @@ describe("a Code thread on an SSH target", () => {
     );
     expect(screen.getByRole("button", { name: "Send follow-up" })).toBeEnabled();
   });
+
+  it("offers no send on its placed agent while the host refuses that agent's runtime or has no path for it", async () => {
+    const user = userEvent.setup();
+    const withAgent = (runtimePath: "set" | "missing", approvalGated: object) => {
+      const base = remoteProjects("connected");
+      const [project] = base.projects;
+      return {
+        ...base,
+        projects: [
+          {
+            ...project,
+            target: {
+              ...project?.target,
+              target: { id: "55555555-5555-4555-8555-555555555555" },
+              placeableRuntimes: [
+                {
+                  providerInstanceId: providerId,
+                  runtimePath,
+                  admission: [
+                    { posture: "plan", decision: { status: "admitted" } },
+                    { posture: "approval-gated", decision: approvalGated },
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+      };
+    };
+    const view = (projects: object) => (
+      <RemoteCodeProjectsContext.Provider value={projects as never}>
+        <CodeThreadWorkspace
+          controller={remoteController()}
+          providerGroups={[providerGroup()]}
+          threadId={threadId}
+        />
+      </RemoteCodeProjectsContext.Provider>
+    );
+    const { rerender } = render(
+      view(
+        withAgent("set", {
+          status: "refused",
+          reason: "not-attested",
+          posture: "approval-gated",
+          probe: "runtime-read-ssh-directory",
+        }),
+      ),
+    );
+    await user.type(screen.getByLabelText("Follow-up message"), "Run the tests");
+    // The target itself admits Ask for approvals; only the agent's runtime is refused.
+    expect(screen.getByRole("button", { name: "Send follow-up" })).toBeDisabled();
+    expect(
+      screen.getByText(
+        "The target could not show that approval-gated work is confined (runtime-read-ssh-directory). Connect it again to attest.",
+      ),
+    ).toBeVisible();
+
+    rerender(view(withAgent("missing", { status: "admitted" })));
+    expect(screen.getByRole("button", { name: "Send follow-up" })).toBeDisabled();
+    expect(
+      screen.getByText(
+        `Set where this provider's runtime is on the SSH target before it runs there: octant ssh-target runtime 55555555-5555-4555-8555-555555555555 ${String(providerId)} <path>.`,
+      ),
+    ).toBeVisible();
+
+    rerender(view(withAgent("set", { status: "admitted" })));
+    expect(screen.getByRole("button", { name: "Send follow-up" })).toBeEnabled();
+  });
 });

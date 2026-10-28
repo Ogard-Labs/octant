@@ -1646,7 +1646,9 @@ settle each, in the fail-closed direction:
   `sshTargetRecovery.test.ts` (the offer and the readiness from a status),
   and `CodeComposerAdapter.test.tsx` (the agent offered beside the harness
   and a thread started on it, a pathless agent disabled with the command
-  spelled out, and no Start while its runtime is refused in the posture).
+  spelled out, and no Start while its runtime is refused in the posture),
+  and `CodeThreadWorkspace.test.tsx` (a thread on the agent offers no send
+  while its runtime is refused in the posture or its path is missing).
 
 ### Credential custody
 
