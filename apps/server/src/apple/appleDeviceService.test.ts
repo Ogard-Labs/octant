@@ -752,7 +752,7 @@ describe("AppleDeviceService", () => {
     expect(leases.list()).toEqual([]);
   });
 
-  it("refuses a launch of an app the thread never installed, provisioning updates, and uploads", async () => {
+  it("refuses a launch of an app the thread never installed, provisioning updates, and an upload it does not carry out yet", async () => {
     const devices = service();
     const wired = byName((await discover(devices)).devices, "Henrik's iPhone");
     await devices.request(
@@ -779,7 +779,7 @@ describe("AppleDeviceService", () => {
     });
     await expect(
       devices.request(deviceRequest("upload", firstThread, approval), confirmed(firstThread)),
-    ).resolves.toEqual({ kind: "apple-device-refused", reason: "distribution-not-enabled" });
+    ).resolves.toEqual({ kind: "apple-device-refused", reason: "operation-unavailable" });
   });
 
   describe("the thread's own app on a leased device", () => {

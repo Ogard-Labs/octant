@@ -456,6 +456,7 @@ export function startOctantServer(
     remoteCodeProjectStore.store = sshTargetStore;
     const {
       followUpCreation,
+      restartContinuation,
       followUpSuggestionRoutes,
       nativeHarnessComposition,
       nativeHarnessEgressRoutes,
@@ -833,6 +834,8 @@ export function startOctantServer(
       workTurnService,
       workflowService,
     } = yield* wireWork({
+      nativeHarnessSessions,
+      restartContinuation,
       guardChatAttachmentPurge,
       workTurnProjection,
       threadAwaitsHarnessApproval,
@@ -1159,6 +1162,7 @@ export function startOctantServer(
       zenRoutes,
     });
     const {
+      appStoreConnectKeyRoutes,
       composeHostDiagnostics,
       externalContentRoutes,
       hostControlRoutes,
@@ -1279,6 +1283,7 @@ export function startOctantServer(
                 (await privateListenerAdministrationRoutes(request)) ??
                 (await sshTargetAdministrationRoutes(request)) ??
                 (await providerCredentialRoutes(request)) ??
+                (await appStoreConnectKeyRoutes(request)) ??
                 (await localDeviceAdministrationRoutes(request)) ??
                 (await hostControlRoutes(request)) ??
                 (await externalContentRoutes(request)) ??

@@ -262,7 +262,13 @@ export class NativeHarnessApprovalStore {
     approvalId: string,
     decision: "approve" | "approve-always" | "deny",
     answer?: NativeHarnessApprovalAnswer,
-  ): "decided" | "approval-not-found" | "already-settled" | "host-not-offered" | "lost-in-restart" {
+  ):
+    | "decided"
+    | "approval-not-found"
+    | "already-settled"
+    | "withdrawn"
+    | "host-not-offered"
+    | "lost-in-restart" {
     this.#expire();
     const waiter = this.#waiters.get(approvalId);
     let confirmed: ToolEgressCallConfirmation | undefined;

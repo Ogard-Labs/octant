@@ -7,6 +7,7 @@ import {
   ExtensionPackageId,
   ExtensionPackageManifest,
   ExtensionPackageVersion,
+  ExtensionPublisherKeyFingerprint,
 } from "./extensions";
 import { ProjectId } from "./projects";
 import { ToolExtensionId } from "./toolActions";
@@ -78,6 +79,29 @@ export const ExtensionLifecycleEventPayload = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("source-trust-changed"),
     trusted: Schema.Boolean,
+  }).annotations(strict),
+  /**
+   * An outside provider driver's publisher key, pinned for its package name
+   * and source when the person first trusts a signed version. Journaled with
+   * that trust, in the same append.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("publisher-pinned"),
+    ...packageOnly,
+    publisherKey: ExtensionPublisherKeyFingerprint,
+  }).annotations(strict),
+  /** The person re-trusted a new publisher: its key replaces the pinned one. */
+  Schema.Struct({
+    kind: Schema.Literal("publisher-replaced"),
+    ...packageOnly,
+    previousPublisherKey: ExtensionPublisherKeyFingerprint,
+    publisherKey: ExtensionPublisherKeyFingerprint,
+  }).annotations(strict),
+  /** The person forgot the pinned publisher; the next trust pins anew. */
+  Schema.Struct({
+    kind: Schema.Literal("publisher-forgotten"),
+    ...packageOnly,
+    publisherKey: ExtensionPublisherKeyFingerprint,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("plugin-desired-state-changed"),

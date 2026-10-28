@@ -24,6 +24,7 @@ import type {
   ExtensionProjectPinListing,
 } from "@octant/contracts/extension-rpc";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
+import type { ExtensionPublisherKeyFingerprint } from "@octant/contracts/extensions";
 import { CONNECTOR_PACKAGE_PREFIX } from "@octant/domain";
 import { SettingsDisclosure, SettingsSection } from "../settings/primitives";
 import { AddMcpServerDialog } from "./AddMcpServerDialog";
@@ -932,6 +933,30 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                           `${pkg.extensionId}:${pkg.packageId}`,
                         )
                       }
+                      onTrustNewPublisher={(publisherKey) =>
+                        runLifecycle(
+                          {
+                            kind: "trust-new-publisher",
+                            commandVersion: COMMAND_VERSION,
+                            extensionId: pkg.extensionId,
+                            expectedStateVersion: pkg.stateVersion,
+                            publisherKey,
+                          },
+                          `${pkg.extensionId}:${pkg.packageId}`,
+                        )
+                      }
+                      onForgetPublisher={(publisherKey) =>
+                        runLifecycle(
+                          {
+                            kind: "forget-publisher",
+                            commandVersion: COMMAND_VERSION,
+                            extensionId: pkg.extensionId,
+                            expectedStateVersion: pkg.stateVersion,
+                            publisherKey,
+                          },
+                          `${pkg.extensionId}:${pkg.packageId}`,
+                        )
+                      }
                       onUninstall={() =>
                         runLifecycle(
                           {
@@ -1836,6 +1861,77 @@ interface InstalledPackageCardProps {
     desired: boolean,
   ) => Promise<boolean>;
   readonly onUninstall: () => Promise<boolean>;
+  readonly onTrustNewPublisher: (
+    publisherKey: ExtensionPublisherKeyFingerprint,
+  ) => Promise<boolean>;
+  readonly onForgetPublisher: (publisherKey: ExtensionPublisherKeyFingerprint) => Promise<boolean>;
+}
+
+/**
+ * An outside provider driver's publisher keys. When another key signed the
+ * selected version, both keys are shown together, and trusting the new
+ * publisher is its own action: trusting the source does not take it.
+ */
+function PublisherKeys(props: {
+  readonly publisher: NonNullable<ExtensionSnapshot["packages"][number]["publisher"]>;
+  readonly busy: boolean;
+  readonly onTrustNewPublisher: (
+    publisherKey: ExtensionPublisherKeyFingerprint,
+  ) => Promise<boolean>;
+  readonly onForgetPublisher: (publisherKey: ExtensionPublisherKeyFingerprint) => Promise<boolean>;
+}) {
+  const { publisher } = props;
+  const held = publisher.held === "publisher-changed";
+  const pinned = publisher.pinned;
+  const selected = publisher.selected;
+  return (
+    <div className="extensions-settings__publisher">
+      {held ? (
+        <p className="extensions-settings__effective" data-blocked="true" role="status">
+          Another publisher signed this version. It stays held until you trust the new publisher or
+          forget the old one.
+        </p>
+      ) : null}
+      <dl className="extensions-settings__compatibility" aria-label="Publisher keys">
+        {pinned === undefined ? null : (
+          <div>
+            <dt>{held ? "Pinned publisher" : "Publisher key"}</dt>
+            <dd className="oct-meta--mono">{pinned}</dd>
+          </div>
+        )}
+        {held || pinned === undefined ? (
+          <div>
+            <dt>{held ? "New publisher" : "Signed by"}</dt>
+            <dd className="oct-meta--mono" data-blocked={held ? "true" : undefined}>
+              {selected ?? "Unsigned"}
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+      {held && selected !== undefined ? (
+        <OctantButton
+          size="sm"
+          variant="outline"
+          disabled={props.busy}
+          onClick={() => void props.onTrustNewPublisher(selected)}
+          type="button"
+        >
+          Trust new publisher
+        </OctantButton>
+      ) : null}
+      {pinned === undefined ? null : (
+        <OctantButton
+          size="sm"
+          variant="outline"
+          disabled={props.busy}
+          onClick={() => void props.onForgetPublisher(pinned)}
+          type="button"
+        >
+          Forget publisher
+        </OctantButton>
+      )}
+    </div>
+  );
 }
 
 /** Where the package works, in words: the modes and providers the host would allow. */
@@ -1927,6 +2023,14 @@ function InstalledPackageCard(props: InstalledPackageCardProps) {
           </span>
         ))}
       </div>
+      {pkg.publisher === undefined ? null : (
+        <PublisherKeys
+          busy={props.busy}
+          onForgetPublisher={props.onForgetPublisher}
+          onTrustNewPublisher={props.onTrustNewPublisher}
+          publisher={pkg.publisher}
+        />
+      )}
       {pkg.components.length > 0 ? (
         <div className="extensions-settings__components">
           {pkg.components.map((componentState) => {

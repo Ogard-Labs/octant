@@ -274,8 +274,8 @@ export function remoteCodeProviderOffer(
   if (target === undefined || runtime === undefined) {
     return { status: "unavailable", message: REMOTE_CODE_THREAD_PROVIDER_UNAVAILABLE };
   }
-  // A runtime its driver does not confine in a posture, or that a macOS
-  // target cannot place, is refused there whatever the connection does next.
+  // A runtime its driver does not confine in a posture is refused there
+  // whatever the connection does next.
   const attestableNowhere = REMOTE_CODE_THREAD_POSTURES.every((posture) => {
     const decision = runtime.admission.find((entry) => entry.posture === posture)?.decision;
     return decision?.status === "refused" && decision.reason === "runtime-not-attestable";

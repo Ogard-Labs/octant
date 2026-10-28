@@ -285,6 +285,40 @@ you first, again only on this Mac. The agent can launch, stop, or read only
 the app it installed, never your other apps, and it cannot remove an app,
 change provisioning, or upload anything.
 
+## App Store Connect key
+
+App Store distribution of your own apps is post-preview work, being built in
+stages. Octant uploads, submits, or releases only when you confirm that exact
+build or version in Octant on your Mac; it never does any of them on its own,
+and uploading is not offered yet. The first stage is the key it will use.
+
+Create an API key in App Store Connect under **Users and Access ›
+Integrations**, and download its `.p8` file. Then, in Octant's desktop app on
+the Mac, open **Settings › Device tools** and find **App Store Connect**:
+
+- **Issuer ID**: the ID shown above the keys list.
+- **Key ID**: the ten-character ID of the key.
+- **Private key**: paste the whole contents of the `.p8` file.
+
+Choose **Save key**. Octant keeps the key in the Mac's Keychain, clears the
+form at once, and never shows the key again; the row then says **Saved**.
+Entering another key and choosing **Replace key** replaces it, and **Remove
+key** takes it out of the Keychain. Searching Settings for "App Store Connect"
+finds these rows.
+
+From a terminal on the same Mac you can save the key instead, reading the
+private key from the file so it never appears in a command line:
+
+```sh
+octant apple key set --issuer <issuer id> --key-id <key id> --stdin < AuthKey_<key id>.p8
+octant apple key status
+octant apple key remove
+```
+
+Add `--replace` to `set` to replace a saved key. The key can be entered only
+on the Mac itself: a browser, a paired phone, or another computer sees no
+App Store Connect rows, and the host refuses key entry from them.
+
 ## Honest verification
 
 A coding agent may claim verification only when the surface was actually
@@ -303,9 +337,8 @@ and does not consume Simulator captures.
 
 ## Boundaries
 
-Not in V1: physical devices (post-preview, above), signing, provisioning,
-archive and export, TestFlight, notarization, App Store submission, and
-release automation.
+Not in V1: physical devices and App Store distribution (post-preview, above),
+provisioning, TestFlight testers, notarization, and release automation.
 Octant never silently installs or updates Xcode, SDKs, or Simulator
 runtimes. The Build iOS Apps extension is optional and contributes nothing to
 the core Apple path.

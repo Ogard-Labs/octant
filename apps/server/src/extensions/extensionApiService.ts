@@ -192,6 +192,13 @@ export class ExtensionApiService {
           return await this.#stateUpdated(await this.#lifecycle.setPluginDesired(command), command);
         case "set-source-trust":
           return await this.#stateUpdated(await this.#lifecycle.setSourceTrust(command), command);
+        case "trust-new-publisher":
+          return await this.#stateUpdated(
+            await this.#lifecycle.trustNewPublisher(command),
+            command,
+          );
+        case "forget-publisher":
+          return await this.#stateUpdated(await this.#lifecycle.forgetPublisher(command), command);
         case "set-component-desired":
           return await this.#stateUpdated(
             await this.#lifecycle.setComponentDesired(command),

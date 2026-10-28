@@ -62,6 +62,16 @@ import {
   type DevicectlDevice,
 } from "./devicectl";
 
+/**
+ * Whether the Current Release Boundary admits distribution (decision 7 of
+ * docs/design/apple-devices.md). The maintainer admitted it on 2026-10-28, so
+ * App Store Connect key entry is open on a Mac and upload, submission, and
+ * release are decided by the distribution rows of the device policy; each
+ * still needs a local person's confirmation. Turning this off again refuses
+ * every one of them as `distribution-not-enabled`.
+ */
+export const APPLE_DISTRIBUTION_ADMITTED = true;
+
 const DEVICECTL_TIMEOUT_MS = 30_000;
 /** The largest `--json-output` document the host reads back. */
 const MAX_DEVICECTL_OUTPUT_BYTES = 4 * 1024 * 1024;
@@ -418,8 +428,7 @@ export class AppleDeviceService {
       tooling: this.#layer.tooling,
       devices: this.#layer.devices,
       leases: this.#options.leases.list(),
-      // Decision 7 keeps distribution closed until its own release-boundary change.
-      distributionEnabled: false,
+      distributionEnabled: APPLE_DISTRIBUTION_ADMITTED,
     };
     return {
       decision: evaluateAppleDeviceRequest(request, context, host, this.#holdingsFor(request)),

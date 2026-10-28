@@ -265,3 +265,15 @@ export function admitRemotePushByRate(input: {
 export function remotePushUrgency(kind: RemotePushNotificationKind): "high" | "normal" {
   return kind === "approval-needed" || kind === "waiting" ? "high" : "normal";
 }
+
+/**
+ * What a host signs for one push gateway delivery: `octant-push-delivery-v1`,
+ * the timestamp, and the request body's SHA-256 (unpadded base64url), one per
+ * line. The gateway rebuilds the same text to verify the signature.
+ */
+export function remotePushDeliverySigningText(input: {
+  readonly timestamp: string;
+  readonly bodySha256: string;
+}): string {
+  return `octant-push-delivery-v1\n${input.timestamp}\n${input.bodySha256}`;
+}

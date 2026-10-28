@@ -715,7 +715,13 @@ device.
 `/api/apple/devices` is readable by a paired device, and
 `/api/apple/device-leases`, `/api/apple/device-actions`, and
 `/api/apple/device-screenshots` (the pixels of a thread's latest device
-screenshot) are local-only.
+screenshot) are local-only. The App Store Connect API key for distribution has
+its own credential broker family with no read-back route, entered only
+through the local-only `/api/desktop/app-store-connect-key/` routes from a
+desktop window or `octant apple key`. The Current Release Boundary admits
+distribution since 2026-10-28, so key entry is open on a Mac, and each
+upload, submission, and release is a local person's confirmed act under the
+distribution rules of that specification.
 
 On an approval-gated thread, **Allow input** is the confirmation that opens
 that destination; clicks, typing, Home, and Lock never raise it
@@ -5000,8 +5006,12 @@ the model at another size.
   `refused`) in its message and, for the first three, in the journaled
   `unroutable` decision. A failure that was not retried, or that happened after
   output streamed, never moves the turn.
-- **Session.** `NativeHarnessSessionStore` journals one session per thread:
-  routing decisions, turn records, context reductions, advisor interventions,
+- **Session.** `NativeHarnessSessionStore` journals one session per thread.
+  Turn start and settlement are recorded for every provider so a crash or host
+  restart can expose [conversation recovery](design/workspace.md#continuing-after-a-restart).
+  The same server admission holds a recovered session until a person resumes it;
+  recording lifecycle facts does not enable harness tools, routing, or advisor
+  calls for another provider. The store also keeps routing decisions, turn records, context reductions, advisor interventions,
   the steering notes a person typed (queued, handed to the lead inside a tool
   result, dropped at the turn's end — so a restart keeps an undelivered one).
   A client mints each note's id, and a queue of an id among the thread's
@@ -6610,11 +6620,14 @@ protocol on macOS, and admission (trust at a digest, a provider added off from
 a local window, host-run Verify tools, and the process stopped whenever the
 driver stops being effective) are built, as is moving an instance to a newly
 trusted digest of its driver with its records cleared, and a crash-limit hold
-journaled at the digest that crashed, which a restart does not lift. Publisher signatures
-are not. Only a macOS host admits one. The author kit
-(`@octant/provider-sdk/outside-driver`, `outside-driver-serve`, and
-`outside-driver-conformance`) and an example loopback driver package live in
-the provider SDK; its conformance evidence is advisory and enables nothing.
+journaled at the digest that crashed, which a restart does not lift. Publisher
+signatures are built too: a signature file is verified at inspection, the key is
+pinned per package name and source at first trust, and a version by another key
+is held until the person re-trusts the new publisher at a local window. Only a
+macOS host admits one. The author kit (`@octant/provider-sdk/outside-driver`,
+`outside-driver-serve`, `outside-driver-conformance`, and `outside-driver-sign`)
+and an example loopback driver package live in the provider SDK; its
+conformance evidence is advisory and enables nothing.
 
 The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a
@@ -8382,7 +8395,8 @@ find-identity` and `codesign`, through a port with no network; `codesign`
     (`y` or `yes`); any other answer denies the request, and an input that
     ends without an answer leaves it pending for `octant pair approve`. It
     changes no firewall rule and runs no Tailscale command.
-- **Hosted relay.** Accepted 2026-10-26, not built: a ciphertext-only relay
+- **Hosted relay.** Accepted 2026-10-26; only its wire contract and pure
+  policy exist, and nothing calls them: a ciphertext-only relay
   that splices an already-paired app's pinned TLS session to the host, off by
   default and holding no authority, is specified in [Hosted relay](design/hosted-relay.md);
   until it lands, the listener and client trust rules above are the whole of
@@ -9084,7 +9098,12 @@ owning specification documents its authority, privacy, and release
 boundaries. The authorization covers design and implementation; creating an
 account, spending money, submitting to a store, deploying a hosted service, or
 weakening an invariant in this document each still needs a separate explicit
-maintainer action. The earlier holds and their start gates
+maintainer action. App Store distribution of a person's own apps was admitted
+on 2026-10-28 ([Apple devices, decision 7](design/apple-devices.md#maintainer-decisions)):
+Octant may upload a person's build, submit a version for App Review, and
+release an approved version, each only when a local person confirms that exact
+build or version; admitting it creates no account and submits nothing on its
+own. The earlier holds and their start gates
 remain as rationale in [release-boundary holds](release-boundary-holds.md).
 The connector / OAuth marketplace hold was lifted on 2026-10-20 under the
 [Connectors and user-added MCP servers](#extensions-and-skills) rules: a
