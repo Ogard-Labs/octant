@@ -683,13 +683,22 @@ link draw the board read-only: Play stays in the app.
 The Markdown export writes the flow as its graph — the title, one
 line per screen, then each transition with its hotspot — and the artifact SVG
 thumbnail draws the layout scaled into the band, so no markup travels in a
-reading. The HTML export writes a flow as its **site**: one script-free,
-self-contained section set inside the exported document whose screens move
-by `:target` — the pattern a design's frames already ship inside one page —
-with the hotspot nodes as real anchors to their targets, each mockup screen
-rendered as semantic inert HTML by the pure `canvasMockupHtml` generator, each
-design screen holding the same sandboxed frame page the export writes for a
-design's frames, and the screen-level transitions in the link list. A share
+reading. The HTML export writes a flow as its **site**: one self-contained
+section set inside the exported document whose screens move by `:target`
+alone — the pattern a design's frames already ship inside one page — so
+navigating it needs no script, and the generated markup holds none. Each
+mockup screen is rendered as semantic inert HTML by the pure
+`canvasMockupHtml` generator with its hotspot nodes as real anchors to their
+targets; each design screen holds the same sandboxed frame page the export
+writes for a design's frames, which is the author's markup, so the export card
+says design markup leaves exactly when a flow places a design. Screen-level
+transitions, edges leaving a design screen, and a hotspot the page cannot draw
+(a control on a tab that is not shown) sit in the link list under the screen,
+so every transition has a place to tap. A screen's anchor is scoped by its
+flow's block id and each site's start screen by its own section, so two flows
+in one document never jump into or blank each other. Text the share filter
+would not let leave the host (a secret-shaped label, a host path) reads
+`[redacted]` in the site, as in every other export reading. A share
 carries the flow whole at share version 12, which names
 blocks authored up to Canvas version 23; the flow holds references and typed
 values, so no new markup acknowledgement exists. The `app-flow` recipe starts
