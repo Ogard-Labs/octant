@@ -1,5 +1,5 @@
 ---
-description: How exporting a Canvas or artifact works — to a folder you choose or to a GitHub Gist — what the approval card shows, and what the receipt is.
+description: How exporting a Canvas or artifact works — saving or copying it as one HTML file, or sending it to a folder you choose or a GitHub Gist — what the approval card shows, and what the receipt is.
 ---
 
 # Export a Canvas or artifact
@@ -15,6 +15,35 @@ before anything is sent or written. A destination is called only after you
 approve the card. The Canvas or artifact itself stays in Octant: deleting or
 editing an export does not delete or change anything, and importing it back adds
 a version rather than replacing one.
+
+## Save or copy a Canvas as one HTML file
+
+To take a Canvas into Claude, a document, or anywhere else, open it and choose
+**More Canvas actions** (the `…` button) › **Save as HTML file** or **Copy HTML**.
+Either gives you the version on screen as one `.html` file:
+
+- It opens offline in any browser and looks like the Canvas: charts, diagrams,
+  treemaps, heatmaps, and bar lists are drawn as pictures inside the file, with
+  each one's numbers under a **Data** disclosure; metrics, callouts, tables, and
+  math keep their look; designs are drawn in their frames, and a prototype runs.
+- It loads nothing from the internet: no fonts, scripts, or stylesheets are
+  fetched, and its own policy blocks every load. The only web addresses in it
+  are the links the Canvas itself holds, which open only if you click them.
+- Images a design uses (generated images, Project files, browser captures) are
+  inside the file, up to 4 MB of images in all. An image past that shows a
+  labelled placeholder, and Octant tells you how many were left out. A file
+  over 7 MB is refused rather than cut short.
+- It carries no file paths from this computer and no Project, thread, or
+  Canvas ids. Text Octant would not let leave in any export, such as a path or
+  something shaped like a key, reads as `[redacted]`.
+
+**Save as HTML file** downloads the file, named after the Canvas title.
+**Copy HTML** puts the whole file on your clipboard, ready to paste. Both stay
+on your computer: nothing is uploaded, no destination is called, and there is
+no approval card, because the file goes only to you. A design's markup is
+included exactly as it was written, and Octant does not check markup for
+secrets, so the line under the Canvas tools says so when the file holds one.
+On a paired device the same actions save to, or copy on, that device.
 
 ## Export to a folder
 
@@ -51,6 +80,10 @@ Export renders the document first and shows it to you before anything is
 written. The card carries the rendered payload and the exact file it will write,
 including the folder and the file name. Nothing is written until you approve it,
 and declining writes nothing at all.
+
+An HTML export draws charts and diagrams as pictures, as Save as HTML file
+does. A Canvas too large to fit the card with its pictures is written with each
+picture's numbers in its place instead, rather than refused.
 
 The receipt after a folder export is the path of the file that was written.
 

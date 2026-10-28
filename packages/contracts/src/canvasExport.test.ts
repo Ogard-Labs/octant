@@ -6,6 +6,9 @@ import {
   decodeCanvasExportPrepareRequest,
   decodeCanvasExportReceipt,
   decodeCanvasExportRecorded,
+  decodeCanvasHtmlFileRequest,
+  decodeCanvasHtmlFileResult,
+  CANVAS_HTML_FILE_MAX_BYTES,
 } from "./canvasExport";
 
 const canvasId = "11111111-1111-4111-8111-111111111111";
@@ -252,5 +255,31 @@ describe("canvas export contracts", () => {
       decision: "approved",
     });
     expect(plain.visibility).toBeUndefined();
+  });
+});
+
+describe("a Canvas HTML file", () => {
+  const request = { schemaVersion: 1, kind: "canvas-html-file", canvasId, versionId };
+  const ready = {
+    kind: "ready",
+    canvasId,
+    versionId,
+    fileName: "Launch review.html",
+    html: "<!DOCTYPE html><title>Launch review</title>",
+    writesDesignMarkup: false,
+    imagesLeftOut: 0,
+  };
+
+  it("asks for one version and nothing else", () => {
+    expect(decodeCanvasHtmlFileRequest(request)).toEqual(request);
+    expect(() => decodeCanvasHtmlFileRequest({ ...request, path: "/tmp/out.html" })).toThrow();
+  });
+
+  it("names a bare file, and refuses a body past the file's cap", () => {
+    expect(decodeCanvasHtmlFileResult(ready)).toEqual(ready);
+    expect(() => decodeCanvasHtmlFileResult({ ...ready, fileName: "../Launch.html" })).toThrow();
+    expect(() =>
+      decodeCanvasHtmlFileResult({ ...ready, html: "x".repeat(CANVAS_HTML_FILE_MAX_BYTES + 1) }),
+    ).toThrow();
   });
 });

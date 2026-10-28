@@ -6253,6 +6253,19 @@ the shared Canvas formatter and draw marks to the shared chart specifications
 and the shared squarified treemap layout, so an exported reading matches the
 screen rather than growing a second reading.
 
+**Canvas HTML file.** Save as HTML file and Copy HTML on the Canvas surface are
+not a destination: `POST /api/canvas/html-file` renders the HTML export's
+document for the version the window names, under the same window
+authorization as reading the Canvas (a paired device's read grant included),
+and returns it to that window, which downloads it or puts it on its clipboard.
+No plugin is called, no approval card is held, and nothing is journaled, because
+nothing leaves to anyone but the reader. The file carries its own
+`default-src 'none'` policy and loads nothing; each design's declared images
+that resolve under the version's provenance are written in as `data:` images
+within a per-file image budget, and the file has its own size cap so the answer
+fits the remote gateway. The owning rule is in
+[Canvas: HTML file](design/canvas.md#design-block).
+
 The folder destination ships in-tree on that same port, so it is offered,
 approved, and journaled exactly as a plugin's contribution is. Its folder comes
 from the host folder browser — a renderer sends a candidate the host listed, and
