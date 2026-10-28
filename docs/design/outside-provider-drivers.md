@@ -317,7 +317,10 @@ the fail-closed option.
   path. The other volumes under `/System/Volumes` stay readable, Preboot
   because it holds that cryptex. The escape tests plant a file in the
   person's home and have the driver read it by the data volume's spelling,
-  after the host reads it by the same path, so the refusal is the profile's.
+  after the host reads it by the same path, so the refusal is the profile's;
+  the `macos-15` job passed that case on Bun and Electron's Node on
+  2026-10-28, with drivers still starting and writing their temporary
+  folder ([job][macos-escape-2026-10-28]).
   _Rationale: whether Seatbelt judges a firmlinked path by the spelling it
   was opened through or by the short one was not measured. The denial holds
   either way: if Seatbelt sees the short spelling, the denial matches no file
@@ -902,7 +905,7 @@ put a package in front of the person. Controls marked new are this design's;
 | Exfiltrates prompts, code, or files                                 | New, built (escape tests pass on macOS): no network, read only its package, no Project path; only egress is the brokered call to the configured origin              |
 | Steals or replays a credential                                      | New, built for the brokered call: never holds one; host injects the header per request and strips it from responses; broker coordinates absent from the environment |
 | Uses another instance's or provider's credential                    | New, built: one process and one request channel per instance; the lease is keyed by that instance                                                                   |
-| Escapes to the host (files, processes, other extensions)            | New, built (escape tests pass on macOS): deny-default Seatbelt without exec or fork; `/System/Volumes/Data` denied (unmeasured); Linux refuses to launch            |
+| Escapes to the host (files, processes, other extensions)            | New, built (escape tests pass on macOS): deny-default Seatbelt without exec or fork; `/System/Volumes/Data` denied; Linux refuses to launch                         |
 | Over-claims capabilities (tools, approvals, resume)                 | New, built: host ceiling clamp; `admitTurn` computed by the host; host-run Verify tools                                                                             |
 | Fabricates tool calls or injects instructions in output             | Existing: model output is untrusted; the harness offers, approves, and runs tools under thread authority; taint rules apply                                         |
 | Puts attacker text in Settings or diagnostics                       | New, built: closed reasons only; stderr bounded and kept out of clients                                                                                             |
@@ -1014,3 +1017,4 @@ rogue provider driver abuse case
 ([AC6](../security/security-architecture-threat-model.md#ac6--rogue-outside-provider-driver)).
 
 [macos-escape-2026-10-27]: https://github.com/Ogard-Labs/octant/actions/runs/40537495871/job/122306586053
+[macos-escape-2026-10-28]: https://github.com/Ogard-Labs/octant/actions/runs/40614298800/job/122573502611
