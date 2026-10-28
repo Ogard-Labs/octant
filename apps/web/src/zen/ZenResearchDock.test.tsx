@@ -184,6 +184,8 @@ describe("ZenResearchDock", () => {
           getHostCapabilities: () => ({
             sidebarVibrancySupported: false,
             liveBrowserSupported: false,
+            liveSimulatorFrameSupported: false,
+            liveAndroidFrameSupported: false,
           }),
         })}
         onCollapse={vi.fn()}

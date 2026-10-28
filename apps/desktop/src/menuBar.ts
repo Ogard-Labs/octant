@@ -8,10 +8,8 @@ import { canRunHostAction, type HostAction, type LocalHostSnapshot } from "./hos
 export type MenuBarThreadMode = FleetActivityThread["mode"];
 
 /** A thread a window shows, or the one a menu-bar row opens. */
-export interface MenuBarOpenThread {
-  readonly mode: MenuBarThreadMode;
-  readonly threadId: string;
-}
+export type { MenuBarOpenThread } from "@octant/contracts/desktop-bridge";
+import type { MenuBarOpenThread } from "@octant/contracts/desktop-bridge";
 
 /** A window's report of the thread it shows; `undefined` when it shows none. */
 export function decodeMenuBarOpenThread(value: unknown): MenuBarOpenThread | undefined {
