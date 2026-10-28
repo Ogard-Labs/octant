@@ -15,14 +15,20 @@ network calls
 release scope
 ([Current Release Boundary](../architecture.md#current-release-boundary)).
 
-**Status: approved design 2026-10-28; nothing built.** The maintainer
+**Status: approved design 2026-10-28; the hub role and joining are built.** A
+host can act as hub, make a join code, approve and remove members, and keep the
+roster; another computer can join, change its hub grant, and leave. This works
+from Settings in a desktop window and from `octant hub`, and the hub can run as
+a boot service. The hub uses only the Roster and Status grant items so far.
+Owners, guests, failover, the wake service, push, provisioning, and delegation
+are not built. The maintainer
 asked for this design and authorized it as post-preview, design-first work on
 2026-10-28, and set its shape the same day: a running instance enabled as hub,
 members paired by QR or manual code over a private network such as Tailscale,
 a standby hub for failover, personal devices only, phones as guests that run
 no agents, and a hub that runs as a server without the desktop app and serves
 the web app to a phone or laptop over Tailscale. The maintainer settled the [decisions](#decisions) below
-the same day. Nothing here is in force until its
+the same day. A rule below is in force once its
 slice lands; until then each host is its own authority, paired computers
 federate reads as Architecture describes, and routines are host-local.
 
@@ -145,7 +151,12 @@ the CLI. The hub depends on that:
   - Windows: a Windows service set to start automatically.
 
   Installing it needs administrator approval once. The service restarts the
-  server if it exits, and an update restarts it the same way.
+  server if it exits, and an update restarts it the same way. The CLI never
+  runs an administrator command on its own: it runs the step only when the
+  person passes `--install-service` (or `--remove-service` to undo it), and
+  otherwise prints the one command. Rationale: an administrator step that
+  runs because a command was typed for something else is the surprise the
+  person did not approve.
   - **Secrets at boot.** A platform's login-bound secret store (the macOS
     login keychain, a Linux desktop keyring, Windows Credential Manager) is
     not reliably open before someone logs in. So on every platform the hub
@@ -254,6 +265,23 @@ Joining reuses pairing. It runs on the joining member:
    the roster. For a spoke, the hub becomes a paired principal of a new kind
    `hub`, whose authority is exactly the hub grant; the spoke is a paired
    device of the hub.
+
+A joining spoke needs its own private listener running with a certificate the
+host made itself, as the hub does, so the hub can pin it. The hub and the spoke
+each refuse to join or act while their listener is off, not on a private
+address, or without a pin. Rationale: the join code carries the hub's pin, and
+the hub reaches the spoke back only over a connection held to the spoke's pin.
+
+After joining, members talk to each other on four signed routes on the private
+listener: `/api/hub/join`, `/api/hub/leave`, `/api/hub/roster`, and
+`/api/hub/status`. Each request is signed with the sender's host identity key
+over its method, path, body hash, time, a nonce, and the recipient's member
+id. The receiver accepts only the key the sender joined with, refuses a time
+more than two minutes from its own clock, and refuses a nonce it has seen.
+A request signed this way makes the hub a principal of kind `hub` on that
+route and nowhere else; it never becomes an ordinary device principal and
+carries no window capability. Rationale: a signature over the whole request
+stops a change, a replay, or a forward to another host.
 
 Leaving and removal:
 
@@ -656,6 +684,13 @@ notifications from all of them after joining once:
 | Wake times (routine id, next time, hardware addr) | The hub and standbys, rebuilt from spoke reports           | Holds the routine's prompt, Project, or profile     |
 | Push envelopes in transit                         | Not journaled on the hub; counts and failure category only | Readable by the hub                                 |
 | Credentials                                       | The broker of each host that holds them                    | Copied except by an owner's unlocked act; journaled |
+
+Hub and spoke membership state (the hub's roster and members, and a spoke's
+hub link, grant, and roster) lives in one file in the Octant data folder that
+only the person's account can read; a file that cannot be read back exactly is
+treated as no state. Each change to it is also written to the journal with its
+principal. Rationale: the file is what a restart reads, and the journal is the
+record of who changed what.
 
 All-hosts views stay client-side merges, as Architecture's federation rule
 says. The hub does not serve a merged read model of spokes' threads; a member

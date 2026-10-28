@@ -1076,6 +1076,18 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "pairing code pair phone device single use",
         },
         {
+          id: settingId("hub-role"),
+          label: "Act as hub",
+          scope: "host",
+          keywords: "hub act as hub role roster members spokes add device join code tailscale",
+        },
+        {
+          id: settingId("hub-join"),
+          label: "Join a hub",
+          scope: "host",
+          keywords: "hub join spoke code comparison grant leave roster introduce owners",
+        },
+        {
           id: settingId("paired-computers-code"),
           label: "Pair with another computer",
           scope: "host",

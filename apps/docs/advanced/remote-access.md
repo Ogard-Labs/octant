@@ -351,6 +351,7 @@ commands.
 
 ## Next steps
 
+- [Hub and spokes](/advanced/hub-and-spokes) to turn one computer into a hub for your other devices
 - [Privacy and security](/advanced/privacy-and-security) for the broader security model
 - [Recovery and troubleshooting](/advanced/recovery) for reconnect and replay
 - [Release compatibility](/advanced/release-compatibility) for preview boundaries

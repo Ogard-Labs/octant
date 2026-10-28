@@ -241,11 +241,43 @@ export function sshTargetAdministrationOf(
   return request === undefined ? undefined : { sshTargetRequest: request };
 }
 
+/** What a window asks of this host's hub role and hub membership. */
+export type HubAdministrationOperation =
+  | "status"
+  | "enable"
+  | "disable"
+  | "join-code"
+  | "remove"
+  | "join"
+  | "join-finish"
+  | "grant"
+  | "leave";
+
+/**
+ * The loopback hub administration, which only a local window reaches. Absent
+ * on a remote client, so no hub screen is ever offered to one.
+ */
+export interface HubAdministrationBridge {
+  readonly hubAdministrationRequest: (
+    operation: HubAdministrationOperation,
+    body?: unknown,
+  ) => Promise<{ readonly status: number; readonly body: unknown }>;
+}
+
+/** The hub administration when this window is a local desktop window, else nothing. */
+export function hubAdministrationOf(
+  bridge: OctantHostBridge | undefined,
+): HubAdministrationBridge | undefined {
+  const request = bridge?.hubAdministrationRequest;
+  return request === undefined ? undefined : { hubAdministrationRequest: request };
+}
+
 export interface OctantHostBridge
   extends
     Partial<RemoteAccessAdministrationBridge>,
     Partial<PairedComputersBridge>,
-    Partial<SshTargetAdministrationBridge> {
+    Partial<SshTargetAdministrationBridge>,
+    Partial<HubAdministrationBridge> {
   /**
    * Shows a server another paired computer granted this device, served by
    * the desktop's loopback forwarder, in Octant's browser or the default one.

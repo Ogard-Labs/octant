@@ -15,6 +15,7 @@ import {
   SettingsState,
 } from "../settings/primitives";
 import type {
+  HubAdministrationBridge,
   PrivateListenerEnableRequest,
   PrivateListenerPublicStatus,
   RemoteAccessAdministrationBridge,
@@ -31,6 +32,7 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { HubSettingsSection } from "./HubSettingsSection";
 import { PairedComputersSettingsSection } from "./PairedComputersSettingsSection";
 import { PairingCodeQr } from "./PairingCodeQr";
 
@@ -46,6 +48,8 @@ export interface RemoteAccessSettingsSectionProps {
   readonly bridge: RemoteAccessAdministrationBridge;
   /** Pairing this desktop app with another computer; absent outside the desktop app. */
   readonly pairedComputers?: PairedComputersBridge | undefined;
+  /** The hub role and hub membership; absent unless this is a local window. */
+  readonly hub?: HubAdministrationBridge | undefined;
   /** Reads the clock so a test can freeze ticket expiry. */
   readonly now?: () => number;
 }
@@ -96,6 +100,7 @@ function pairingLink(origin: string, ticket: RemoteMintedPairingTicket): string 
 export function RemoteAccessSettingsSection({
   bridge,
   pairedComputers,
+  hub,
   now,
 }: RemoteAccessSettingsSectionProps) {
   const clock = now ?? (() => Date.now());
@@ -845,6 +850,7 @@ export function RemoteAccessSettingsSection({
           )}
         </div>
       </SettingsPanel>
+      {hub === undefined ? null : <HubSettingsSection hub={hub} pairing={bridge} />}
       {pairedComputers === undefined ? null : (
         <PairedComputersSettingsSection bridge={pairedComputers} />
       )}

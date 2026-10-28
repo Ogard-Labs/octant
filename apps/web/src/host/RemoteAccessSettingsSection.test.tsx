@@ -536,4 +536,21 @@ describe("RemoteAccessSettingsSection", () => {
     expect(screen.queryByRole("button", { name: "Disable listener" })).not.toBeInTheDocument();
     expect(screen.getByText(/Enable the remote listener before pairing/i)).toBeInTheDocument();
   });
+
+  it("offers the hub role only when the window has the loopback hub bridge", async () => {
+    const host = bridge(listening);
+    const hub = {
+      hubAdministrationRequest: vi.fn(async () => ({
+        status: 200,
+        body: { hub: { enabled: false }, spoke: { membership: "none" } },
+      })),
+    };
+    const { unmount } = render(<RemoteAccessSettingsSection bridge={host} />);
+    await screen.findByText("Remote listener");
+    expect(screen.queryByRole("switch", { name: "Act as hub" })).not.toBeInTheDocument();
+    unmount();
+
+    render(<RemoteAccessSettingsSection bridge={host} hub={hub} />);
+    expect(await screen.findByRole("switch", { name: "Act as hub" })).not.toBeChecked();
+  });
 });
