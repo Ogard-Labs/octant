@@ -44,6 +44,7 @@ import { createDesktopHttpsPort } from "../computerUse/desktopHttpsPort";
 import { createDesktopDaemonPort } from "../computerUse/desktopDaemonPort";
 import { leasableProvidersOf } from "../computerUse/computerUseDestination";
 import { readProjectDesktopRecipe } from "../computerUse/projectDesktopRecipe";
+import { createDesktopRecipeKeys } from "../computerUse/desktopRecipeKeys";
 import {
   createHostLocalDesktopProvider,
   HOST_LOCAL_DESKTOP_PROGRAMS,
@@ -339,8 +340,28 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     uuid: randomUUID,
     ...(process.getuid === undefined ? {} : { daemonUserId: process.getuid() }),
   });
+  // A cloud recipe's key, entered from a local window, lives only in the
+  // broker's desktop-provider namespace. A key a recipe stops naming is
+  // deleted once no desktop made with it may still need it for teardown.
+  const desktopRecipeKeys = createDesktopRecipeKeys({
+    store: desktopProviderCredentials,
+    leases: () => persistence.desktopLeaseProjection.list().map((record) => record.lease),
+    holdsCredential: (credentialRef) => desktopLeases.holdsCredential(credentialRef),
+    namedByRecipes: () =>
+      persistence
+        .readProjects({ type: "code" })
+        .flatMap((project) =>
+          project.type === "code" && project.desktopRecipe?.credentialRef !== undefined
+            ? [project.desktopRecipe.credentialRef]
+            : [],
+        ),
+  });
   void desktopLeases.start().catch(() => undefined);
-  const sweepDesktopLeases = () => void desktopLeases.sweep().catch(() => undefined);
+  const sweepDesktopLeases = () =>
+    void desktopLeases
+      .sweep()
+      .then(() => desktopRecipeKeys.settle())
+      .catch(() => undefined);
   const stopDesktopLeaseCommits = persistence.journal.subscribeCommitted(() =>
     queueMicrotask(sweepDesktopLeases),
   );
@@ -512,6 +533,10 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
   const desktopPaneRoutes = createDesktopPaneRouteHandler({
     windowAuthorityStore,
     service: desktopLeases,
+    recipeKey: (projectId) => {
+      const project = persistence.readProject(projectId);
+      return desktopRecipeKeys.view(project?.type === "code" ? project.desktopRecipe : undefined);
+    },
     localActorId: String(OCTANT_LOCAL_ACTOR_ID),
   });
   const machineChangeRoutes = createMachineChangeRouteHandler({
@@ -531,6 +556,8 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     computerUseRuntime,
     computerUseTools,
     desktopPaneRoutes,
+    /** Where a Project's desktop recipe keeps the key a cloud provider reads. */
+    desktopRecipeKeys,
     launchSessionRoutes,
     machineChangeRoutes,
     /** The providers a Project's desktop recipe may name on this host now. */

@@ -6182,7 +6182,9 @@ same. This holds in Chat, Work, and Code.
   Bubblewrap launch, Linux only), artifact transfer, a Code send's binding
   of `octant_computer` to one of its thread's leases, the Code dock's
   Desktop tool, a Code Project's stored desktop recipe with its settings
-  editor, and E2B, the first of the two named cloud providers (E2B and Cua
+  editor (where a local window enters the key a cloud recipe's provider
+  reads, kept only in the host credential store's desktop-provider
+  namespace), and E2B, the first of the two named cloud providers (E2B and Cua
   Spaces), are built; Cua Spaces, reached through the person's local Cua daemon, is
   designed (accepted on 2026-10-27), and its local-daemon port and its driver
   for a Space on this computer or on another of the person's computers that

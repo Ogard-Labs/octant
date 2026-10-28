@@ -63,6 +63,7 @@ import {
   type CacheBackoff,
 } from "@octant/domain";
 import {
+  DESKTOP_CREDENTIAL_REJECTED,
   DESKTOP_SESSION_READABLE,
   type DesktopDaemonDeclaration,
   type DesktopFrame,
@@ -349,6 +350,12 @@ export interface DesktopLeaseService {
   ) => Promise<{ readonly status: "view-closed" } | DesktopPaneRefusal>;
   /** Ends leases whose clock, thread, recipe, provider, or setting ended them; retries failed releases. */
   readonly sweep: () => Promise<void>;
+  /**
+   * Whether teardown may still need the key this reference names: a lease
+   * that recorded it may still hold a desktop, or a desktop made on that
+   * account is not yet verified gone.
+   */
+  readonly holdsCredential: (credentialRef: DesktopCredentialRef) => boolean;
 }
 
 /** What the host holds in memory for a lease that may still have a desktop. */
@@ -729,7 +736,9 @@ export function createDesktopLeaseService(
     leaseId: DesktopLeaseId,
     to: DesktopLeaseState,
     actor: EventActor,
-    extra: Partial<Pick<DesktopLeaseTransitioned, "endReason" | "requestedBy" | "detail">> = {},
+    extra: Partial<
+      Pick<DesktopLeaseTransitioned, "endReason" | "requestedBy" | "detail" | "credentialRejected">
+    > = {},
   ): DesktopLease {
     const record = read(leaseId);
     const from = record.lease.state;
@@ -745,6 +754,7 @@ export function createDesktopLeaseService(
       ...(extra.endReason === undefined ? {} : { endReason: extra.endReason }),
       ...(extra.requestedBy === undefined ? {} : { requestedBy: extra.requestedBy }),
       ...(extra.detail === undefined ? {} : { detail: extra.detail.slice(0, 512) }),
+      ...(extra.credentialRejected === undefined ? {} : { credentialRejected: true }),
     };
     append(record, leaseId, DESKTOP_LEASE_EVENT_NAMES.transitioned, payload, actor);
     return read(leaseId).lease;
@@ -1175,13 +1185,22 @@ export function createDesktopLeaseService(
         // and who asked, as a teardown would; a driver that honours the
         // cancellation otherwise leaves only "cancelled" behind.
         const pending = entry.pendingEnd;
-        // Only Octant-authored text reaches the journal, never the driver's reason.
+        // Only Octant-authored text reaches the journal, never the driver's
+        // reason. A provider refusing the recipe's key is the one reason kept,
+        // as a marker, so the recipe editor can say the key was refused.
+        const keyRejected =
+          result.status === "refused" &&
+          result.reason === DESKTOP_CREDENTIAL_REJECTED &&
+          recipe.credentialRef !== undefined;
         const lease = transition(
           leaseId,
           result.status === "refused" ? "refused" : "failed",
           caller.actor,
           {
-            detail: ACQUIRE_FAILURE_DETAIL[result.status],
+            detail: keyRejected
+              ? "The provider refused the key saved for this recipe."
+              : ACQUIRE_FAILURE_DETAIL[result.status],
+            ...(keyRejected ? { credentialRejected: true as const } : {}),
             ...(pending === undefined ? {} : { endReason: pending.reason }),
             ...(pending?.requestedBy === undefined ? {} : { requestedBy: pending.requestedBy }),
           },
@@ -1809,6 +1828,20 @@ export function createDesktopLeaseService(
         .map((entry) => leasableOf(entry.provider)),
     });
 
+  const holdsCredential = (credentialRef: DesktopCredentialRef): boolean =>
+    projection
+      .list()
+      .some(
+        (record) =>
+          String(record.lease.credentialRef ?? "") === String(credentialRef) &&
+          desktopLeaseHoldsDesktop(record.lease.state),
+      ) ||
+    [...orphans.values()].some(
+      (orphan) =>
+        String(orphan.credentialRef ?? orphan.handle?.credentialRef ?? "") ===
+        String(credentialRef),
+    );
+
   return {
     start,
     destination,
@@ -1826,6 +1859,7 @@ export function createDesktopLeaseService(
     input,
     closeView: closeViewByCaller,
     sweep,
+    holdsCredential,
   };
 }
 

@@ -328,6 +328,38 @@ describe("Project creation and lifecycle", () => {
       ).toEqual(keyed);
     });
 
+    it("lets a person remove a cloud recipe's key in place, but never move to the provider without one", () => {
+      const cloud = decodeLeasableDesktopProvider({
+        providerId: "e2b",
+        displayName: "E2B",
+        locality: "cloud",
+        billed: true,
+      });
+      const keyed = {
+        ...recipe,
+        providerId: cloud.providerId,
+        credentialRef: decodeDesktopCredentialRef("5f0c6f7e-7b0a-4d43-9a3c-2f1d8f4e6a10"),
+      };
+      const { credentialRef: _removed, ...keyless } = keyed;
+      const saved = changeCodeProjectDesktopRecipe(
+        makeProject(ids.code, "0/1", { type: "code" }),
+        keyed,
+        [cloud, hostLocal],
+        updatedAt,
+      );
+      const removed = changeCodeProjectDesktopRecipe(saved, keyless, [cloud], updatedAt);
+      expect(removed.desktopRecipe).toEqual(keyless);
+      // The keyless recipe stays editable on the same provider.
+      const wider = { ...keyless, screen: { width: 1920, height: 1080 } };
+      expect(
+        changeCodeProjectDesktopRecipe(removed, wider, [cloud], updatedAt).desktopRecipe,
+      ).toEqual(wider);
+      const onThisHost = changeCodeProjectDesktopRecipe(saved, recipe, [hostLocal], updatedAt);
+      expect(() =>
+        changeCodeProjectDesktopRecipe(onThisHost, keyless, [cloud, hostLocal], updatedAt),
+      ).toThrow(ProjectPolicyRejected);
+    });
+
     it("refuses a recipe that names a placement its provider does not offer", () => {
       const project = makeProject(ids.code, "0/1", { type: "code" });
       expect(() =>

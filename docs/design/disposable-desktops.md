@@ -39,7 +39,12 @@ or Cua for leasing yet, so a recipe can name only the host-local provider
 built as well: a recipe names the computer a Space on another of the person's
 computers runs on, the pane says when a view is refused because the session
 could be read on its way, and the host refuses network where a placement
-cannot have it ([Built: Cua follow-ups](#built-cua-follow-ups)). Slice 4's real-provider smoke,
+cannot have it ([Built: Cua follow-ups](#built-cua-follow-ups)). Recipe key
+entry is built too: a local window enters, replaces, and removes the key a
+cloud recipe's provider reads, kept only in the host credential store
+([Built: recipe key entry](#built-recipe-key-entry)); it shows only for a
+provider the host offers, so no running host shows it until E2B is offered.
+Slice 4's real-provider smoke,
 slice 6's E2B live smoke, and Cua sub-slices 2 and 3's live smokes are still
 owed by the maintainer.
 
@@ -981,8 +986,9 @@ Rules this delivery resolved:
   reporting gives); a host-local recipe cannot allow network
   ([slice 2](#built-in-slice-2)), nor can one on any placement
   ([Built: Cua follow-ups](#built-cua-follow-ups)), while a cloud recipe
-  with no placement may, and must name a credential reference
-  ([slice 6](#built-in-slice-6)). A save that changes
+  with no placement may, and must name a credential reference when it is
+  set or moved onto its provider ([slice 6](#built-in-slice-6),
+  [recipe key entry](#built-recipe-key-entry)). A save that changes
   nothing, and any change to an archived Project, is refused. Removing is
   always allowed.
 - **Read afresh on every lease command.** The lease service asks for the
@@ -1001,10 +1007,11 @@ Rules this delivery resolved:
   four-hour bound, and a saved value off a list is offered too, so opening
   the editor never changes a recipe by itself. A new recipe starts from
   decision 4's limits: a 30-minute lease, four hours at most, idle after
-  15 minutes. Network is always none. Image and credential reference are for
-  a cloud provider and are not editable until a host offers one (slice 6
-  builds E2B but offers it nowhere yet); a save keeps the ones already stored
-  for the same provider. Remove asks first,
+  15 minutes. Network is always none. Image is for a cloud provider and is
+  not editable yet; a save keeps the one already stored for the same
+  provider. A cloud provider's key is entered in the editor, which never
+  shows or edits the credential reference itself
+  ([Built: recipe key entry](#built-recipe-key-entry)). Remove asks first,
   because it destroys running desktops.
 
 Evidence: `projectDesktopRecipe.test.ts` saves a recipe through
@@ -1081,13 +1088,15 @@ Rules this slice resolved:
 - **Desktop keys have their own broker namespace.** A recipe's credential
   reference names a key in `/v1/desktop-provider-credentials/*`, apart from
   model providers' keys, so neither can stand in for the other. A host with
-  no broker attaches no key. No editor enters a key yet; that arrives with
-  the person's opt-in to a billed provider.
+  no broker attaches no key. A person enters one in the recipe editor
+  ([Built: recipe key entry](#built-recipe-key-entry)).
 - **A cloud recipe must name a credential.** A recipe for a cloud provider
   with no credential reference configures nothing that could run: the lease
   service refuses it `no-provider-configured` before any provider call, and
-  the recipe store refuses to save it
-  ([recipe storage](#built-recipe-storage)). Since
+  the recipe store refuses to set one, or move one onto the provider, without
+  a key ([recipe storage](#built-recipe-storage)). A recipe whose key the
+  person removed stays on its provider with none and starts nothing until
+  they enter another ([Built: recipe key entry](#built-recipe-key-entry)). Since
   [Cua sub-slice 2](#built-in-cua-sub-slice-2) a placement of a provider
   whose daemon holds the person's sign-in stands in for the credential (C4).
 - **Restart lists account by account.** Reconciliation lists each provider
@@ -1105,8 +1114,9 @@ Rules this slice resolved:
   is loaded on every host, so teardown and restart reconciliation reach any
   E2B lease a host ever journaled. It is not effective: no host offers it for
   leasing, reports it as a destination, or lets a recipe name it until the
-  person can choose it and enter its key. A billed provider is never on by
-  default.
+  maintainer's live smoke passes and the person opts in. The key entry the
+  person needs for it is built ([Built: recipe key entry](#built-recipe-key-entry)).
+  A billed provider is never on by default.
 - **E2B.** The control plane is `api.e2b.app` with the key in `X-API-Key`.
   A desktop is a sandbox created from the recipe's template (E2B's public
   `desktop` template when it names none) through `POST /v2/sandboxes` with the
@@ -2067,6 +2077,106 @@ tests each failed against the code before this change.
 Nothing here is owed by the maintainer beyond Cua sub-slices 2 and 3's
 smokes; `cua-other-machine` now names the one machine its setup requires.
 
+### Built: recipe key entry
+
+A person enters, replaces, and removes the API key a cloud recipe's provider
+reads, in the recipe editor of a local window. Offering E2B still waits on
+the maintainer's live smoke, so the key field shows only for a provider the
+host offers for leasing and no running host shows it yet; its tests offer a
+fake cloud provider.
+
+- **Contract.** `DesktopRecipeKeyChange` (`enter` with the key, or `remove`)
+  as `key` on `change-code-project-desktop-recipe`; `DesktopRecipeKeyState`
+  and the pane request and answer `recipe-key`; `credentialRejected` on
+  `desktop.lease-transitioned@1` and `DesktopLease`
+  (`packages/contracts/src/desktopLease.ts`, `projects.ts`).
+- **Seam.** `DESKTOP_CREDENTIAL_REJECTED`, the reason a cloud driver gives
+  when its provider refuses the key; the E2B driver gives it for a 401 or 403
+  (`packages/plugin-api/src/desktopProvider.ts`).
+- **Policy.** `changeCodeProjectDesktopRecipe` lets a recipe on a cloud
+  provider go without a key only when it stays on the provider and placement
+  it was saved on (`packages/domain/src/projectPolicy.ts`).
+- **Host.** `ProjectService` stores an entered key and journals only its
+  reference; `desktopRecipeKeys.ts` keeps keys in the broker's
+  desktop-provider namespace, deletes the ones no recipe names once teardown
+  no longer needs them, and answers `recipe-key`; the lease service records a
+  refused key on the lease and says which keys teardown still needs
+  (`holdsCredential`).
+- **Editor.** **API key** in `ProjectDesktopRecipeSection.tsx`, with **Remove
+  key**, following Settings › Model endpoints: a password field whose value
+  is read once on save and cleared.
+
+Rules this delivery resolved:
+
+- **Entered only from a local window, through the Project route.** The key
+  travels with the recipe change, so the route that already refuses a paired
+  device's recipe change refuses it before the service runs and anything is
+  stored. An agent has no command that reaches it. Model endpoint keys are
+  saved from a desktop window over native IPC; a desktop recipe is set from
+  any local window, a browser on a headless host included, so its key takes
+  the Project route to the broker instead, as a sync bucket's key pair does.
+- **The key lives only in the credential store.** The host stores it in
+  `/v1/desktop-provider-credentials/*` under a reference it mints, then
+  journals the recipe with the reference alone; the journal, the Project, its
+  summary, logs, diagnostics, and exports never carry the key, and no answer
+  echoes it. A window never names a reference: a recipe may keep only the one
+  its Project already has, so it cannot point at another recipe's key. The
+  host judges the recipe before storing anything, deletes a stored key whose
+  change was not journaled, and refuses an entered key outright on a host with
+  no broker, for a removed recipe, and for any provider that is not a cloud
+  provider or that a signed-in daemon runs.
+- **A new key gets a new reference.** Replacing a key changes the recipe's
+  reference, which ends the recipe's running desktops as any reference change
+  does, and those desktops' teardown still reaches the account with the key
+  they were made with.
+- **An old key goes once teardown no longer needs it.** A key no recipe names
+  any more, replaced or removed with its recipe or by itself, is deleted from
+  the store as soon as no lease that recorded it may still hold a desktop and
+  no desktop made with it is waiting to be verified gone. Each sweep retries;
+  after a restart, a key leases recorded that no recipe names is taken in
+  again. The removal confirmation says the key stays until those desktops are
+  gone; the editor shows no standing waiting state yet.
+- **Removing a key keeps the recipe.** The recipe stays on its provider with
+  no reference and starts nothing (`no-provider-configured`) until a key is
+  entered again; a new recipe, or one moved onto a cloud provider, still
+  needs a key.
+- **Honest states.** The editor asks `recipe-key` and says the key is not
+  saved, saved, no longer in the store, or refused by the provider when a
+  desktop last started, and says so when the host has no credential store to
+  keep one. "Refused" comes from the most recent lease that got the
+  provider's answer with that reference, which the lease journals as
+  `credentialRejected` with Octant-authored text alone; a new key has a new
+  reference, so entering one clears it. A paired device may ask, since the
+  answer carries nothing of the key.
+
+Evidence: `projectDesktopRecipe.test.ts`, over a journal on disk and a host
+offering a fake billed cloud provider, refuses a cloud recipe with no key,
+saves one with a key that lands only in the store, sees the provider refuse
+it and the editor's state say so, replaces it under a new reference with the
+old key deleted, leases with the new one, finds neither key anywhere under
+the data directory, and after a restart removes the key, keeps it while the
+running desktop needs it, and deletes it once the sweep ends that desktop;
+it also stores nothing for a refused recipe, a provider the host does not
+offer, a removed recipe, or a reference a window names.
+`projectRoutes.test.ts` refuses a paired device's change carrying a key
+before the service runs, without echoing it; `desktopPaneRoutes.test.ts`
+answers `recipe-key`; `projectPolicy.test.ts` covers a key removed in place
+and a keyless move onto a cloud provider; `desktopLease.test.ts` covers the
+contract; `ProjectDesktopRecipeSection.test.tsx` sets a recipe only with a
+key, sends it once and clears the field, shows a refused key, replaces and
+removes it, and closes the field on a host with no store. The new policy,
+host, route, and editor tests each failed against the code before this
+change. Rendered QA ran the editor in a headless browser, light and dark, at
+1280 and 390 pixels wide, for no key, a saved key, a refused key, a missing
+key, a removed key, and a host with no store, with no console error, no
+horizontal overflow, and the typed key absent from the page after saving.
+
+Nothing here is owed by the maintainer beyond slice 6's E2B live smoke, which
+still gates offering E2B. Left for later: the editor shows the recipe as
+editable on a paired device, which the route refuses, and a key retired
+before any lease recorded it whose deletion fails is left in the store if
+the host restarts before a sweep retries it.
+
 ## Rationale
 
 The original plan leaned on execution capsules for isolation and a cloud
@@ -2092,6 +2202,8 @@ host-local launch through `apps/server/src/process/linuxConfinement.ts`),
 `packages/plugin-api/src/desktopScreenshotControl.ts` (agent control of a
 screen-only desktop), `apps/server/src/computerUse/desktopHttpsPort.ts` and
 `apps/server/src/plugins/e2bDesktop/` (the cloud port and the E2B driver),
+`apps/server/src/computerUse/desktopRecipeKeys.ts` (a recipe's key in the
+credential store),
 `apps/server/src/computerUse/desktopDaemonPort.ts` and
 `packages/plugin-api/src/protobufWire.ts` (the local-daemon port and the
 seam's protobuf wire helper), `apps/server/src/plugins/cuaDesktop/` (the Cua

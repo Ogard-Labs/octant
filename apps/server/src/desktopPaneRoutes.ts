@@ -3,10 +3,13 @@ import {
   decodeDesktopPaneAnswer,
   decodeDesktopPaneRequest,
   decodeEventActor,
+  decodeProjectId,
   type DesktopPaneAnswer,
   type DesktopPaneRequest,
   type EventActor,
+  type ProjectId,
 } from "@octant/contracts";
+import type { DesktopRecipeKeyView } from "./computerUse/desktopRecipeKeys";
 import type { ClientPrincipal } from "./clientPrincipal";
 import { leasableProvidersOf } from "./computerUse/computerUseDestination";
 import type { DesktopLeaseCaller, DesktopLeaseService } from "./computerUse/desktopLeaseService";
@@ -35,6 +38,11 @@ export interface DesktopPaneRouteDependencies {
     | "destination"
     | "recipeMachines"
   >;
+  /**
+   * What a Code Project's recipe editor says about its key. Absent on a host
+   * that wires no desktop keys, which then answers that none is named.
+   */
+  readonly recipeKey?: (projectId: ProjectId) => Promise<DesktopRecipeKeyView>;
   /** The actor id the journal gives a person at a local window. */
   readonly localActorId: string;
   readonly now?: () => number;
@@ -118,6 +126,15 @@ export function createDesktopPaneRouteHandler(dependencies: DesktopPaneRouteDepe
         });
       }
       const paneRequest = decodeDesktopPaneRequest(body);
+      // Whether a recipe has its key says nothing of the key itself, so any
+      // window or device that sees the Project's recipe may ask.
+      if (paneRequest.kind === "recipe-key") {
+        const view = (await dependencies.recipeKey?.(decodeProjectId(paneRequest.projectId))) ?? {
+          key: "none" as const,
+          store: "unavailable" as const,
+        };
+        return encoded({ status: "recipe-key", ...view }, origin);
+      }
       return encoded(await answer(dependencies.service, paneRequest, actor, scopeId), origin);
     } catch {
       return failure("Desktop request is invalid.", 400, origin);
@@ -127,7 +144,7 @@ export function createDesktopPaneRouteHandler(dependencies: DesktopPaneRouteDepe
 
 async function answer(
   service: DesktopPaneRouteDependencies["service"],
-  request: DesktopPaneRequest,
+  request: Exclude<DesktopPaneRequest, { readonly kind: "recipe-key" }>,
   actor: EventActor,
   scopeId: string,
 ): Promise<DesktopPaneAnswer> {
