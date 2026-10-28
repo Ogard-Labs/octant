@@ -763,14 +763,26 @@ on the models you use, and gives you the access portal URL
 (`https://<name>.awsapps.com/start`), the region it runs in, the account ID,
 and the permission set's name. Only the commercial AWS regions are supported.
 
-Settings cannot add this endpoint yet; until it can, use a Bedrock API key
-with an OpenAI-compatible endpoint. An Amazon Bedrock endpoint signs in only
-with [`octant provider sign-in`](../guide/linux-host#sign-in-an-organization-endpoint-with-a-code):
-the command shows a page on `device.sso.<region>.amazonaws.com` or your access
-portal and a code to enter there. Changing the endpoint's region, portal,
-account, or role, or removing it, ends that sign-in. Each model is checked on
-its first request: a model the permission set does not allow reads **No
-access**. The endpoint does not send attached files yet.
+To add one, open **Settings → Octant Harness → Model endpoints**, choose **Add
+endpoint**, then **Amazon Bedrock**. Give it a name, the region your models
+run in, the access portal URL, the portal's region, the 12-digit account ID,
+the permission set's name, and the model IDs you use (Bedrock does not list
+the models a role may use, so name each one). It takes no key and no address.
+Once it's added the row reads **Sign in to use** and names the command to run.
+
+An Amazon Bedrock endpoint signs in only with
+[`octant provider sign-in`](../guide/linux-host#sign-in-an-organization-endpoint-with-a-code)
+in a terminal on the host: the command shows a page on
+`device.sso.<region>.amazonaws.com` or your access portal and a code to enter
+there. Settings never shows the code; after you sign in, choose **Check
+again**. The endpoint's page then says **Signed in as** the role and account,
+and **Sign out** asks your organization's portal to end the session and
+removes the sign-in from this computer. Changing the endpoint's region,
+portal, account, or role, or removing it, ends that sign-in; changing only its
+models keeps it. Each model is checked on its first request: a model the
+permission set does not allow reads **No access**. The endpoint does not send
+attached files yet. A Bedrock API key still works with an OpenAI-compatible
+endpoint.
 
 ### Presets added with a key
 

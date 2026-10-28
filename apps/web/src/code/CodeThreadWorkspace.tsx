@@ -128,6 +128,7 @@ import {
   REMOTE_CODE_THREAD_CONNECTORS_UNAVAILABLE,
   remoteCodeThreadPostureRefusal,
   remoteCodeTurnReadiness,
+  remotePlacedAgentReadiness,
 } from "@octant/domain/ssh-target-recovery";
 import { remoteCodeProjectFor, useRemoteCodeProjects } from "../projects/sshRemoteProjectEntries";
 import { remoteCodeThreadProviderGroups } from "./composer/remoteCodeComposer";
@@ -742,9 +743,22 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // While the host reports the thread's target unable to take this turn,
   // the thread says why and offers no Start. A window that cannot read SSH
   // targets leaves the decision to the host, which refuses the same way.
+  // A thread on an agent placed on the target also needs that runtime
+  // admitted in the posture and its path set there.
+  const runsPlacedAgent = (props.providerGroups ?? []).some(
+    (group) =>
+      String(group.instance.id) === String(thread.providerInstanceId) &&
+      group.runtime !== "octant-harness",
+  );
   const remoteReadiness =
     remoteCheckout && remoteProjects.length > 0
-      ? remoteCodeTurnReadiness(remoteProject?.target, nextTurnAccess)
+      ? runsPlacedAgent
+        ? remotePlacedAgentReadiness(
+            remoteProject?.target,
+            String(thread.providerInstanceId),
+            nextTurnAccess,
+          )
+        : remoteCodeTurnReadiness(remoteProject?.target, nextTurnAccess)
       : undefined;
   const remoteRefusal =
     remoteReadiness?.status === "unavailable" ? remoteReadiness.message : undefined;
@@ -786,7 +800,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       })
     : providerGroups;
   const threadModelGroups = remoteCheckout
-    ? remoteCodeThreadProviderGroups(sessionModelGroups)
+    ? remoteCodeThreadProviderGroups(sessionModelGroups, remoteProject?.target)
     : sessionModelGroups;
   // The provider the conversation's session lives on is the one the last
   // finished reply came from, or the one a switching turn's journaled handoff

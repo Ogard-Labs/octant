@@ -315,7 +315,7 @@ export interface BuildCreateVersionInput {
    * never echoed back into the page as though it were.
    */
   readonly blocks?: ReadonlyArray<CanvasBlock>;
-  /** Where the author asked the thread to show it; the host's inline bound already applied. */
+  /** Where the author asked the thread to show it, recorded as asked; the card applies the inline bound. */
   readonly presentation?: CanvasPresentation;
 }
 

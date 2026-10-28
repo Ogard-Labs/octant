@@ -3113,6 +3113,65 @@
   font-size: var(--oct-text-sm);
 }
 
+/* Import HTML sits under the create form as its own small section. A long
+   address in the summary wraps rather than widening the thread column. */
+.canvas-html-import {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-3);
+  min-width: 0;
+}
+
+.canvas-html-import > [data-testid="canvas-import-html-open"] {
+  align-self: flex-start;
+}
+
+.canvas-html-import__heading {
+  margin: 0;
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+}
+
+.canvas-html-import__label {
+  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
+}
+
+.canvas-html-import__paste {
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-html-import__actions {
+  display: flex;
+  gap: var(--oct-space-2);
+}
+
+.canvas-html-import__line {
+  margin: 0;
+}
+
+.canvas-html-import__drop-list {
+  margin: var(--oct-space-1) 0 0;
+  padding-left: var(--oct-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-1);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-html-import__drop-count {
+  font-weight: 600;
+}
+
+.canvas-html-import__drop-examples {
+  display: block;
+  color: var(--oct-muted);
+  overflow-wrap: anywhere;
+}
+
 .canvas-version-history__title {
   font-size: var(--oct-text-sm);
   margin: 0 0 var(--oct-space-2);
@@ -4789,6 +4848,8 @@
   position: absolute;
   inset: auto 0 var(--oct-space-3);
   display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
   justify-content: center;
 }
 
@@ -4876,6 +4937,35 @@
   width: 320px;
   transform: scale(0.325);
   transform-origin: top left;
+}
+
+/* A Canvas the author asked to show inline that holds a plan, a mockup, or a
+   device-size design: the row becomes a card whose miniature spans the
+   column above its title. The page is laid out at twice the card's width and
+   drawn at half size, so it fits the column at any width without a measured
+   scale; the card's height is bounded and its foot fades like the tile's. */
+.canvas-ref[data-shown-as="preview"] {
+  flex-wrap: wrap;
+}
+
+.canvas-ref[data-shown-as="preview"] .canvas-ref__preview {
+  flex: 1 0 100%;
+  width: 100%;
+  height: auto;
+  max-height: 280px;
+  aspect-ratio: 16 / 9;
+  mask-image: linear-gradient(to bottom, var(--oct-fg) 80%, transparent);
+}
+
+/* The title shares the line under the miniature with the expand control and
+   the chevron, however long its facts run, rather than wrapping them below. */
+.canvas-ref[data-shown-as="preview"] .canvas-ref__text {
+  flex-basis: 0;
+}
+
+.canvas-ref[data-shown-as="preview"] .canvas-ref__preview-page {
+  width: 200%;
+  transform: scale(0.5);
 }
 
 .canvas-ref__progress {

@@ -2628,9 +2628,14 @@ export const CanvasBlock = Schema.Union(
 );
 export type CanvasBlock = typeof CanvasBlock.Type;
 
-// Where the originating thread shows a Canvas. `inline` draws the document in
-// the conversation; `sidebar` shows a card that opens it beside the thread.
-// Either way the Canvas is one journaled object: the hint never copies it.
+// Where the author asked the originating thread to show a Canvas. `inline`
+// asks for the document in the conversation; `sidebar` shows a card that opens
+// it beside the thread. On a definition this is the request as asked, not
+// where the thread shows it: a Canvas asked for inline that holds a block the
+// thread does not draw is a sidebar Canvas, so a reader places it by the
+// effective value (the thread reference card's `presentation`), never by this
+// field alone. Either way the Canvas is one journaled object: the hint never
+// copies it.
 export const CanvasPresentation = Schema.Literal("inline", "sidebar");
 export type CanvasPresentation = typeof CanvasPresentation.Type;
 

@@ -386,3 +386,83 @@ describe("an organization's gateway that signs in at its own issuer", () => {
     });
   });
 });
+
+describe("an Amazon Bedrock endpoint", () => {
+  const bedrock = {
+    id,
+    displayName: "Contoso Bedrock",
+    driverKind: "amazon-bedrock",
+    configuration: {
+      kind: "amazon-bedrock-converse-http",
+      region: "us-west-2" as never,
+      authentication: "cloud-iam",
+      cloudIam: {
+        startUrl: "https://contoso.awsapps.com/start" as never,
+        ssoRegion: "us-east-1" as never,
+        accountId: "123456789012" as never,
+        roleName: "BedrockUser" as never,
+      },
+      manualModelIds: ["anthropic.claude-sonnet-4-20250514-v1:0" as never],
+    },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1 as never,
+    createdAt: "2026-10-08T10:00:00.000Z" as never,
+    updatedAt: "2026-10-08T10:00:00.000Z" as never,
+  } as ModelEndpointInstance;
+  const read = (patch: Partial<ProviderObservedState>) =>
+    endpointStatus({
+      instance: bedrock,
+      observed: observed({ models: [], ...patch }),
+      checking: false,
+      hostPlatform: "linux",
+    });
+
+  it("sends no key and offers only a check once the person signs in from the host's terminal", () => {
+    expect(endpointTakesKey(bedrock)).toBe(false);
+    expect(endpointSubLine(bedrock, undefined, undefined)).toBe(
+      "bedrock-runtime.us-west-2.amazonaws.com · Organization sign-in",
+    );
+    const signIn = read({ readiness: "unauthenticated", unauthenticatedReason: "missing" });
+    expect(signIn).toMatchObject({
+      tone: "needs-you",
+      label: "Sign in to use",
+      fix: { kind: "check-now", label: "Check again" },
+    });
+    expect(signIn.sentence).toContain(
+      'Sign in from a terminal on this computer: run octant provider sign-in "Contoso Bedrock"',
+    );
+    expect(read({ readiness: "unauthenticated", unauthenticatedReason: "expired" })).toMatchObject({
+      label: "Signed out",
+      fix: { kind: "check-now" },
+    });
+    expect(read({ readiness: "incompatible" })).toMatchObject({
+      label: "Sign-in doesn't match",
+      sentence: expect.stringContaining("another portal, account, role, or region"),
+      fix: { kind: "check-now" },
+    });
+  });
+
+  it("names a role the portal does not give with no fix, and the host's sign-in service when it is down", () => {
+    const noAccess = read({
+      readiness: "unauthenticated",
+      unauthenticatedReason: "not-authorized",
+    });
+    expect(noAccess).toMatchObject({ tone: "failed", label: "No access" });
+    expect(noAccess.fix).toBeUndefined();
+    expect(noAccess.sentence).not.toContain("Azure");
+    expect(
+      read({
+        readiness: "unavailable",
+        message: "The cloud sign-in service is unavailable. Try again.",
+      }),
+    ).toMatchObject({
+      label: "Can't connect",
+      sentence: "The cloud sign-in service is unavailable. Try again.",
+      fix: { kind: "try-again" },
+    });
+    expect(read({ readiness: "ready", models: observed().models })).toMatchObject({
+      tone: "ready",
+    });
+  });
+});

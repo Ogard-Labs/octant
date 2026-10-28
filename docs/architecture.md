@@ -613,10 +613,29 @@ document as a future version. Frames follow the
   running frame is not network-contained; that exposure is accepted, bounded
   by what the frame holds, and the Run control there says so. This tier has
   shipped.
+- **A person can bring a page.** **Import HTML…** turns one HTML page a
+  person chooses or pastes (for example, a page an AI assistant made) into a
+  new Canvas holding one `document`-size `design`. It is a create in every
+  respect authority sees: the same window context, Project, and create-policy
+  checks run on the host before the page is read, the server writes the
+  Canvas, and a paired device may not import, as it may not create. The host
+  bounds the page (256 KiB, and one frame and stylesheet after the import)
+  and answers `too-large`, `not-html`, `unparseable`, `empty`, or
+  `unsupported` before anything is journaled. The tier is the design policy's
+  own reading: a page that keeps inline script or an event handler is a
+  running design under the running tier's page, sandbox, policy, bridge, and
+  prototype host; every other page is static. Everything the page would load
+  or leave for is taken out and listed to the person; nothing is fetched. The
+  Canvas carries outside content from its first version, so every agent that
+  reads it is marked, the importing thread included. This has shipped (see
+  [Canvas](design/canvas.md#html-import)).
 - **The thread can hold the whole Canvas.** A person may expand any Canvas in
-  its thread; the agent may ask for `inline` on a reading document, or on a
-  `document`-size design that runs no script, without the 12-block cap; a
-  running frame in the thread starts only on **Run**. Editing,
+  its thread; the agent may ask for `inline` on a visualization (a chart,
+  dashboard, table, math, or diagram) or a reading document, or on a
+  `document`-size design with or without script, without the 12-block cap; a
+  plan, mockup, or device-size design asked for inline stays a sidebar Canvas
+  shown in the thread as a preview card. A running frame in the thread is the
+  sidebar's sandboxed frame and starts only on **Run**. Editing,
   comments, and sharing stay in the sidebar, and nothing drawn in the thread
   writes a version.
 - **Agents are taught and checked.** `describe` presents the tiers with a
@@ -870,7 +889,8 @@ launches with their own proxy on this host are built, and the ACP driver
 declares placement for a profile whose whole launch can be stated on a
 target (its fixed variables and the Project entries it denies included), at
 the runtime path the person set for it there; GitHub Copilot's profile is the
-first that can, and the composer does not offer it for a remote Project yet. SSH
+first that can, and a local window's composer offers it for a remote Project
+where the target's status lists it placeable and its path is set there. SSH
 targets, their runtime paths, their
 attestation digests, remote bindings, managed worktrees, remote terminals'
 starts and ends, and a placed runtime's egress are journaled. Its
@@ -8360,7 +8380,9 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   sign-on portal only this way, with no opt-in, since the portal's device
   authorization is its one flow; the broker accepts a verification page only
   on the portal region's device host or the organization's own access portal
-  host. [Enterprise provider identity](design/enterprise-provider-identity.md)
+  host. Settings' sign-in route answers a Bedrock instance's status and Sign
+  out only, refusing a remote principal's Sign out before the pointer is read.
+  [Enterprise provider identity](design/enterprise-provider-identity.md)
   owns the rules.
 - **Cloud request signing.** The credential broker signs cloud requests
   itself ([`cloudIam.ts`](../packages/host-runtime/src/cloudIam.ts),

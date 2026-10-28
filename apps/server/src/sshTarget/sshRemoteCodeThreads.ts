@@ -8,7 +8,14 @@ import {
   type CodeThread,
 } from "@octant/contracts/code";
 import { decodeBindingRevisionId, type BindingRevisionId } from "@octant/contracts/projects";
+import type { ProviderInstanceId } from "@octant/contracts/providers";
 import type { SshRemoteProject } from "@octant/contracts/ssh-remote-project";
+import {
+  SSH_TARGET_MAX_PLACEABLE_RUNTIMES,
+  type SshConfinedPosture,
+  type SshPlaceableRuntime,
+  type SshTargetId,
+} from "@octant/contracts/ssh-target";
 import type { WindowId } from "@octant/contracts/shell";
 import { isNativeHarnessDriverKind } from "@octant/domain/provider-policy";
 import { describeSshAdmissionRefusal } from "@octant/domain/ssh-target-recovery";
@@ -265,10 +272,7 @@ function bindPlacedAcpTurn(
     return { status: "refused", message: describeSshAdmissionRefusal(decision) };
   }
   const posture = placedPosture(thread.executionPolicy);
-  // The client tools below admit a write or a terminal in every writing
-  // posture without asking; an ACP agent asks the person through its own
-  // permission requests first, so only an ACP agent is given them.
-  if (!isAcpAgentKind(input.driver.kind) || posture === undefined) {
+  if (!isPlacedAcpAgent(input.driver) || posture === undefined) {
     return { status: "refused", message: PLACED_RUNTIME_NOT_ACP };
   }
   const hands = options.composition.remoteHandsForCode({
@@ -318,6 +322,65 @@ function bindPlacedAcpTurn(
     uuid: options.uuid,
   });
   return { status: "bound", tools, placement: placed.placement, release: hands.release };
+}
+
+/**
+ * Whether a remote turn places this driver's runtime at all. The client tools
+ * a placed agent is given admit a write or a terminal in every writing posture
+ * without asking; an ACP agent asks the person through its own permission
+ * requests first, so only an ACP agent is placed.
+ */
+function isPlacedAcpAgent(driver: Pick<ProviderDriver, "kind" | "remotePlacement">): boolean {
+  return isAcpAgentKind(driver.kind) && driver.remotePlacement !== undefined;
+}
+
+/** A provider instance and the driver a turn of it would acquire. */
+export interface RemoteRuntimeSource {
+  readonly providerInstanceId: ProviderInstanceId;
+  readonly driver: Pick<ProviderDriver, "kind" | "remotePlacement">;
+}
+
+const CONFINED_POSTURES: ReadonlyArray<SshConfinedPosture> = [
+  "plan",
+  "approval-gated",
+  "auto-accept-edits",
+];
+
+/**
+ * The agents a window may offer for a thread on this target, from the checks
+ * a turn makes before it binds: an ACP agent that declares placement; its
+ * runtime's own admission in each confined posture, the call the turn makes,
+ * so a macOS target or an unproven runtime canary refuses here as it would
+ * there; and whether the person set its path on the target, without which
+ * the turn's placement refuses. Every other provider is left out, as the
+ * turn refuses it.
+ */
+export function placeableRuntimesOn(
+  options: {
+    readonly connections: Pick<SshTargetConnectionService, "admitProviderRuntime">;
+    readonly store: Pick<SshTargetStore, "runtimeBinaries">;
+    readonly runtimes: () => ReadonlyArray<RemoteRuntimeSource>;
+  },
+  targetId: SshTargetId,
+): ReadonlyArray<SshPlaceableRuntime> {
+  const paths = new Set(
+    options.store.runtimeBinaries(targetId).map((binary) => String(binary.providerInstanceId)),
+  );
+  return options
+    .runtimes()
+    .filter((runtime) => isPlacedAcpAgent(runtime.driver))
+    .slice(0, SSH_TARGET_MAX_PLACEABLE_RUNTIMES)
+    .map((runtime) => ({
+      providerInstanceId: runtime.providerInstanceId,
+      runtimePath: paths.has(String(runtime.providerInstanceId)) ? "set" : "missing",
+      admission: CONFINED_POSTURES.map((posture) => ({
+        posture,
+        decision: options.connections.admitProviderRuntime(targetId, runtime.driver, {
+          posture,
+          permissionPersistence: "current-session",
+        }),
+      })),
+    }));
 }
 
 /** The thread's posture as a placement's, which is never Full access. */

@@ -722,6 +722,18 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
               )}
             </p>
           ) : null}
+          {!searching &&
+          !favoritesActive &&
+          !recentActive &&
+          !octantActive &&
+          activeGroup?.unavailableNote !== undefined ? (
+            <p
+              className="composer-model-picker__runtime-note composer-model-picker__unavailable-note"
+              role="note"
+            >
+              {activeGroup.unavailableNote}
+            </p>
+          ) : null}
           {catalogs.length > 1 ? (
             <div
               aria-label="Catalogs"
@@ -1145,5 +1157,8 @@ function compactUnavailableLabel(reason: string | undefined): string {
   if (/tool calling/i.test(reason)) return "Chat only";
   if (/no longer listed/i.test(reason)) return "Unavailable";
   if (/not available/i.test(reason)) return "Unavailable";
+  // A thread on an SSH target refuses such a model outright (an agent with no
+  // runtime path set there read "Limited" here), so none is partly usable.
+  if (/SSH target/.test(reason)) return "Unavailable";
   return "Limited";
 }

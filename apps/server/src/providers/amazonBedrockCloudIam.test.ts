@@ -32,7 +32,11 @@ import { makeCredentialBrokerClient } from "./credentialBrokerClient";
 import { cloudIamHostFromBroker, makeCloudIamBrokerClient } from "./oauth/cloudIamBroker";
 import type { HostOAuthBrokerPort } from "./oauth/hostOAuthBrokerClient";
 import { createHostOAuthService } from "./oauth/hostOAuthService";
-import { beginCloudIamSignIn, forgetCloudIamGrant } from "./oauth/providerCloudIamSignIn";
+import {
+  answerCloudIamSettingsCommand,
+  beginCloudIamSignIn,
+  forgetCloudIamGrant,
+} from "./oauth/providerCloudIamSignIn";
 import { createProviderDeviceSignInRouteHandler } from "./oauth/providerDeviceSignInRoutes";
 import { createProviderOAuthRouteHandler } from "./oauth/providerOAuthRoutes";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
@@ -170,8 +174,10 @@ async function host(options: { readonly instance?: () => ProviderInstance | unde
       service: hostOAuth,
       windowAuthorityStore: authority,
       credentials,
+      cloudIam,
       readInstance: () => readInstance(),
     }),
+    cloudIam,
     removeInstance: () => {
       current = undefined;
     },
@@ -431,6 +437,75 @@ describe("Amazon Bedrock with cloud single sign-on, end to end", () => {
     expect(begun.view).toEqual({ kind: "refused", reason: "local-host-required" });
     expect(scene.cloud.hosts()).toEqual([]);
     expect(scene.answers).toEqual([]);
+  });
+
+  it("shows Settings who is signed in and signs out there, asking the portal to end the session", async () => {
+    const scene = await host();
+    const settings = async (kind: string) => {
+      const response = await scene.browserRoute(
+        new Request("http://127.0.0.1/api/providers/oauth", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-octant-window-capability": capability,
+          },
+          body: JSON.stringify({
+            kind,
+            instanceId: String(instanceId),
+            descriptorId: AMAZON_BEDROCK_CLOUD_IAM_SIGN_IN.descriptorId,
+          }),
+        }),
+      );
+      return (await response?.json()) as Record<string, unknown> | undefined;
+    };
+    const accountLabel = "BedrockInvoke in account 123456789012";
+
+    expect(await settings("status")).toEqual({
+      kind: "signed-out",
+      termsRequired: true,
+      termsSummary: AMAZON_BEDROCK_CLOUD_IAM_SIGN_IN.termsSummary,
+      accountLabel,
+    });
+    expect(await signIn(scene)).toMatchObject({ outcome: "signed-in" });
+    expect(await settings("status")).toEqual({ kind: "signed-in", accountLabel });
+
+    expect(await settings("sign-out")).toMatchObject({ kind: "signed-out", accountLabel });
+    expect(scene.cloud.logouts()).toBe(1);
+    await expect(scene.credentials.resolve(String(instanceId))).rejects.toBeDefined();
+    expect([...scene.store.values.keys()]).toEqual([]);
+    expect(scene.journal.map((record) => record.name)).toContain("host-oauth.signed-out");
+    expect(await settings("status")).toMatchObject({ kind: "signed-out", termsRequired: false });
+    // Settings' answers name the account and nothing the broker holds.
+    for (const value of [...scene.cloud.secrets(), ...scene.cloud.roleSessionTokens()]) {
+      expect(JSON.stringify(scene.journal)).not.toContain(value);
+    }
+  });
+
+  it("refuses a remote principal's Sign out, and every Settings command but status and Sign out, before any broker call", async () => {
+    const scene = await host();
+    expect(await signIn(scene)).toMatchObject({ outcome: "signed-in" });
+    const answers = scene.answers.length;
+
+    const remote = await answerCloudIamSettingsCommand({
+      dependencies: scene.cloudIam,
+      instanceId,
+      kind: "sign-out",
+      principal: "remote-device",
+    });
+    expect(remote).toEqual({ kind: "refused", reason: "local-host-required" });
+    for (const kind of ["begin", "acknowledge", "poll", "sign-out-locally"] as const) {
+      expect(
+        await answerCloudIamSettingsCommand({
+          dependencies: scene.cloudIam,
+          instanceId,
+          kind,
+          principal: "local-window",
+        }),
+      ).toEqual({ kind: "refused", reason: "terminal-sign-in-only" });
+    }
+    expect(scene.answers).toHaveLength(answers);
+    expect(scene.cloud.logouts()).toBe(0);
+    await expect(scene.credentials.resolve(String(instanceId))).resolves.toBeDefined();
   });
 
   it("never begins a cloud sign-in from Settings' route", async () => {

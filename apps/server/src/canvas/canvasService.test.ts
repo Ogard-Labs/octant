@@ -708,7 +708,7 @@ describe("CanvasService", () => {
     expect(result).toMatchObject({ kind: "denied", denialCode: "invalid-template" });
   });
 
-  it("draws an agent-written reading document inside its thread and shows a card once it gains a board", async () => {
+  it("draws an agent-written reading document or board inside its thread and shows a preview card once it gains a plan", async () => {
     const { service } = createService();
     const tools = createCanvasAgentTools({
       windowId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" as never,
@@ -741,6 +741,14 @@ describe("CanvasService", () => {
       nodes: [{ nodeId: "a", label: "A" }],
       edges: [],
     };
+    const plan = {
+      blockId: "plan",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "plan",
+      title: "Launch plan",
+      phases: [{ phaseId: "build", title: "Build" }],
+      tasks: [{ taskId: "design", phaseId: "build", title: "Design the loop", status: "todo" }],
+    };
     const card = (canvasId: unknown) =>
       service
         .threadReferenceCards({ mode: "chat", threadId: ids.thread, projectId: ids.project })
@@ -760,8 +768,8 @@ describe("CanvasService", () => {
     expect(inline.presentation).toBe("inline");
     expect(card(inline.canvasId)).toMatchObject({ presentation: "inline", canvasCreatedAt: later });
 
-    // A revision that says nothing keeps inline, until its blocks no longer fit the thread.
-    const revised = await tools.execute({
+    // A revision that says nothing keeps inline, and a board is drawn there read-only.
+    const withBoard = await tools.execute({
       name: CANVAS_TOOL_NAME,
       inputJson: JSON.stringify({
         operation: "revise",
@@ -770,33 +778,48 @@ describe("CanvasService", () => {
         blocks: [heading, board],
       }),
     });
+    expect(withBoard.result).toMatchObject({ presentation: "inline" });
+    expect(withBoard.result).not.toHaveProperty("presentationNote");
+
+    // Until its blocks no longer fit the thread: a plan turns it into a sidebar Canvas.
+    const revised = await tools.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "revise",
+        canvasId: inline.canvasId,
+        expectedSequence: 2,
+        blocks: [heading, plan],
+      }),
+    });
     expect(revised.result).toMatchObject({
       presentation: "sidebar",
-      presentationNote: expect.stringContaining("diagram"),
+      presentationNote: expect.stringContaining("preview card"),
     });
     expect(card(inline.canvasId)).toMatchObject({
       presentation: "sidebar",
       canvasCreatedAt: later,
     });
 
-    // Asking for inline with a board records the sidebar and says why.
+    // Asking for inline with a plan says why it is a sidebar Canvas, and keeps
+    // the request so the thread can show it as a preview card.
     const refused = await tools.execute({
       name: CANVAS_TOOL_NAME,
       inputJson: JSON.stringify({
         operation: "create",
-        title: "Architecture",
+        title: "Launch plan",
         presentation: "inline",
-        blocks: [board],
+        blocks: [plan],
       }),
     });
     const sidebar = refused.result as { canvasId: string };
     expect(refused.result).toMatchObject({
       presentation: "sidebar",
-      presentationNote: expect.stringContaining("diagram"),
+      presentationNote: expect.stringContaining("plan block"),
     });
+    expect(card(sidebar.canvasId)).toMatchObject({ presentation: "sidebar" });
     expect(service.get(sidebar.canvasId as never, boardContext, boardProject)).toMatchObject({
       kind: "ready",
-      version: { definition: { presentation: "sidebar" } },
+      version: { definition: { presentation: "inline" } },
     });
 
     // A long reading document is drawn in the thread rather than cut to a teaser's block count.
