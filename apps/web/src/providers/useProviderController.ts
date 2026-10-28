@@ -10,6 +10,7 @@ import {
   type AgentEligibleModelRef,
   type HiddenProviderModelRef,
   type AnthropicCompatibleProviderConfiguration,
+  type AmazonBedrockProviderConfiguration,
   type AzureFoundryProviderConfiguration,
   type BflImageProviderConfiguration,
   type ClaudeProviderConfiguration,
@@ -939,6 +940,18 @@ export function useProviderController(options: ProviderControllerOptions) {
       })),
     [execute],
   );
+  // Amazon Bedrock holds no key: its sign-in begins in a terminal on the host.
+  const createAmazonBedrock = useCallback(
+    (displayName: string, configuration: AmazonBedrockProviderConfiguration) =>
+      execute(() => ({
+        kind: "create-amazon-bedrock-provider",
+        instanceId: decodeProviderInstanceId(crypto.randomUUID()),
+        expectedVersion: 0 as ProviderDefaults["version"],
+        displayName,
+        configuration,
+      })),
+    [execute],
+  );
   const createClaude = useCallback(
     (
       displayName: string,
@@ -1410,6 +1423,22 @@ export function useProviderController(options: ProviderControllerOptions) {
         if (instance?.driverKind !== "ollama") return undefined;
         return {
           kind: "change-ollama-configuration",
+          instanceId,
+          expectedVersion: instance.version,
+          configuration,
+        };
+      }),
+    [execute],
+  );
+  // The host ends the portal session and deletes the sign-in itself when the
+  // region, portal, account, or role changes, before it saves the change.
+  const changeAmazonBedrockConfiguration = useCallback(
+    (instanceId: ProviderInstanceId, configuration: AmazonBedrockProviderConfiguration) =>
+      execute((current) => {
+        const instance = findProvider(current, instanceId);
+        if (instance?.driverKind !== "amazon-bedrock") return undefined;
+        return {
+          kind: "change-amazon-bedrock-configuration",
           instanceId,
           expectedVersion: instance.version,
           configuration,
@@ -2336,6 +2365,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     createOutsideHarnessEndpoint,
     createAnthropicCompatible,
     createAzureFoundry,
+    createAmazonBedrock,
     createOpenAiImage,
     createGeminiImage,
     createBflImage,
@@ -2355,6 +2385,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     changeIdeogramImageConfiguration,
     changeAnthropicCompatibleConfiguration,
     changeAzureFoundryConfiguration,
+    changeAmazonBedrockConfiguration,
     setEnabled,
     setDataTags,
     setModelDataTags,

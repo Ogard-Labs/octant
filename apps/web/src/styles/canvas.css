@@ -4789,6 +4789,8 @@
   position: absolute;
   inset: auto 0 var(--oct-space-3);
   display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
   justify-content: center;
 }
 
@@ -4876,6 +4878,35 @@
   width: 320px;
   transform: scale(0.325);
   transform-origin: top left;
+}
+
+/* A Canvas the author asked to show inline that holds a plan, a mockup, or a
+   device-size design: the row becomes a card whose miniature spans the
+   column above its title. The page is laid out at twice the card's width and
+   drawn at half size, so it fits the column at any width without a measured
+   scale; the card's height is bounded and its foot fades like the tile's. */
+.canvas-ref[data-shown-as="preview"] {
+  flex-wrap: wrap;
+}
+
+.canvas-ref[data-shown-as="preview"] .canvas-ref__preview {
+  flex: 1 0 100%;
+  width: 100%;
+  height: auto;
+  max-height: 280px;
+  aspect-ratio: 16 / 9;
+  mask-image: linear-gradient(to bottom, var(--oct-fg) 80%, transparent);
+}
+
+/* The title shares the line under the miniature with the expand control and
+   the chevron, however long its facts run, rather than wrapping them below. */
+.canvas-ref[data-shown-as="preview"] .canvas-ref__text {
+  flex-basis: 0;
+}
+
+.canvas-ref[data-shown-as="preview"] .canvas-ref__preview-page {
+  width: 200%;
+  transform: scale(0.5);
 }
 
 .canvas-ref__progress {

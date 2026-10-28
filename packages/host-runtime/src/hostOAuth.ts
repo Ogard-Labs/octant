@@ -119,6 +119,14 @@ const DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1_000;
 const DEFAULT_DEVICE_INTERVAL_MS = 5_000;
 const SLOW_DOWN_MS = 5_000;
+// A device-code poll the issuer could not answer (no answer, a 429, or a 5xx)
+// is retried after a wait that doubles with each one in a row, up to this,
+// and never past the code's own expiry.
+const TRANSIENT_POLL_MAX_MS = 60_000;
+// A settled attempt stays readable this long past its deadline, longer than
+// the server follows one, so a late status read still learns how it ended;
+// after that the broker forgets it, so abandoned attempts do not pile up.
+const ATTEMPT_RETENTION_MS = 5 * 60_000;
 const MAX_TOKEN_CHARS = 4_096;
 const MAX_RESPONSE_CHARS = 16 * 1_024;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -450,6 +458,8 @@ interface TenantAuthority extends SignInAuthority {
 interface Attempt {
   status: HostOAuthPublicState;
   readonly descriptorId: string;
+  /** When the attempt's consent window or device code runs out, in epoch milliseconds. */
+  readonly expiresAt: number;
   listener: Server | undefined;
   timer: ReturnType<typeof setTimeout> | undefined;
   closed: boolean;
@@ -1307,6 +1317,8 @@ function isDirectoryVerificationPage(value: string): boolean {
 type DevicePoll =
   | { readonly kind: "tokens"; readonly grant: StoredGrant }
   | { readonly kind: "pending"; readonly slowDown: boolean }
+  /** The issuer could not answer this poll; the code may still be entered. */
+  | { readonly kind: "transient" }
   | { readonly kind: "refused"; readonly reason: HostOAuthRefusalReason };
 
 /**
@@ -1339,14 +1351,14 @@ async function pollDirectoryDevice(input: {
     codeExchange: true,
   });
   if (polled.kind === "pending") return polled;
-  if (polled.kind === "transient") return { kind: "refused", reason: "unavailable" };
+  if (polled.kind === "transient") return polled;
   if (polled.kind === "refused") {
     if (polled.reason === "denied" || polled.error === "authorization_declined") {
       return { kind: "refused", reason: "denied" };
     }
-    if (polled.reason === "timeout" || polled.reason === "unavailable") {
-      return { kind: "refused", reason: polled.reason };
-    }
+    // A code exchange reads no answer at all as `unavailable`.
+    if (polled.reason === "unavailable") return { kind: "transient" };
+    if (polled.reason === "timeout") return { kind: "refused", reason: polled.reason };
     return { kind: "refused", reason: "exchange-refused" };
   }
   return directorySignedInGrant({
@@ -1909,6 +1921,23 @@ export function createHostOAuthRuntime(options: {
     attempt.status = status;
   };
 
+  /**
+   * Keep a new attempt, forgetting settled ones well past their deadline. One
+   * still awaiting an answer is kept: its exchange may yet store a grant,
+   * which must stay named by its attempt.
+   */
+  const track = (attemptId: string, attempt: Attempt) => {
+    for (const [id, prior] of attempts) {
+      if (
+        prior.status.kind !== "awaiting-consent" &&
+        now() > prior.expiresAt + ATTEMPT_RETENTION_MS
+      ) {
+        attempts.delete(id);
+      }
+    }
+    attempts.set(attemptId, attempt);
+  };
+
   const finishListener = (attempt: Attempt) => {
     if (attempt.timer !== undefined) clearTimeout(attempt.timer);
     attempt.timer = undefined;
@@ -1994,8 +2023,9 @@ export function createHostOAuthRuntime(options: {
         authorizationUrl: "http://127.0.0.1/",
         expiresAt: new Date(expiresAt).toISOString(),
       },
+      expiresAt,
     };
-    attempts.set(attemptId, attempt);
+    track(attemptId, attempt);
     let redirectUri = "";
     try {
       const listener = createServer((request, response) => {
@@ -2338,8 +2368,9 @@ export function createHostOAuthRuntime(options: {
       listener: undefined,
       timer: undefined,
       status: awaiting,
+      expiresAt,
     };
-    attempts.set(attemptId, attempt);
+    track(attemptId, attempt);
     void pollDevice({
       attempt,
       attemptId,
@@ -2382,8 +2413,9 @@ export function createHostOAuthRuntime(options: {
       listener: undefined,
       timer: undefined,
       status: awaiting,
+      expiresAt,
     };
-    attempts.set(attemptId, attempt);
+    track(attemptId, attempt);
     void pollDevice({
       attempt,
       attemptId,
@@ -2419,7 +2451,10 @@ export function createHostOAuthRuntime(options: {
       codeExchange: true,
     });
     if (polled.kind === "pending" || polled.kind === "tokens") return polled;
-    if (polled.kind === "transient") return { kind: "refused", reason: "unavailable" };
+    // No answer, a 429, or a 5xx: the code may still be entered.
+    if (polled.kind === "transient" || polled.reason === "unavailable") {
+      return { kind: "transient" };
+    }
     return {
       kind: "refused",
       reason: polled.reason === "verifier-mismatch" ? "timeout" : polled.reason,
@@ -2436,26 +2471,30 @@ export function createHostOAuthRuntime(options: {
     intervalMs: number;
     readonly directory?: DirectoryContext;
   }) => {
-    while (!closed && !session.attempt.closed) {
-      if (now() >= session.expiresAt) {
-        session.attempt.closed = true;
-        publish(
+    // Consecutive polls the issuer could not answer. A code that runs out
+    // while the issuer is still failing reads `unavailable`, not `timeout`:
+    // the person may never have been able to enter it.
+    let transientPolls = 0;
+    const expire = () => {
+      session.attempt.closed = true;
+      publish(
+        session.attemptId,
+        refused(
           session.attemptId,
-          refused(session.attemptId, session.descriptor.descriptorId, "timeout"),
-        );
-        return;
-      }
-      await sleep(session.intervalMs);
-      if (closed || session.attempt.closed || now() >= session.expiresAt) {
-        if (!session.attempt.closed && now() >= session.expiresAt) {
-          session.attempt.closed = true;
-          publish(
-            session.attemptId,
-            refused(session.attemptId, session.descriptor.descriptorId, "timeout"),
-          );
-        }
-        return;
-      }
+          session.descriptor.descriptorId,
+          transientPolls > 0 ? "unavailable" : "timeout",
+        ),
+      );
+    };
+    while (!closed && !session.attempt.closed) {
+      if (now() >= session.expiresAt) return expire();
+      await sleep(
+        transientPolls === 0
+          ? session.intervalMs
+          : Math.min(session.intervalMs * 2 ** transientPolls, TRANSIENT_POLL_MAX_MS),
+      );
+      if (closed || session.attempt.closed) return;
+      if (now() >= session.expiresAt) return expire();
       const polled =
         session.directory === undefined
           ? await pollStandardDevice(session)
@@ -2465,6 +2504,11 @@ export function createHostOAuthRuntime(options: {
               directory: session.directory,
               deviceCode: session.deviceCode,
             });
+      if (polled.kind === "transient") {
+        transientPolls += 1;
+        continue;
+      }
+      transientPolls = 0;
       if (polled.kind === "pending") {
         if (polled.slowDown) session.intervalMs += SLOW_DOWN_MS;
         continue;

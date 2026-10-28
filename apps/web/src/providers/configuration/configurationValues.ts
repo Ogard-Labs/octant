@@ -1,4 +1,5 @@
 import {
+  AmazonBedrockProviderConfiguration,
   DirectoryIssuer,
   DirectoryIssuerClientId,
   DirectoryResourceScope,
@@ -112,6 +113,43 @@ export function foundryConfigurationFrom(data: FormData): AzureFoundryProviderCo
     // Off is the absence of the opt-in; the host stores no `false`.
     ...(data.get("deviceCodeSignIn") === null ? {} : { deviceCodeSignIn: true }),
   };
+}
+
+/**
+ * An Amazon Bedrock configuration from its form, or undefined when a field is
+ * not one the host takes: a commercial-partition region for the models and
+ * for the portal, the access portal address exactly as the organization
+ * publishes it, a twelve-digit account, a permission-set name, and 1 to 64
+ * models. Pasted values are tidied the way they are usually copied (an
+ * account shown as 1234-5678-9012, a portal address with the page's
+ * trailing `/#/`), and nothing else is rewritten.
+ */
+export function bedrockConfigurationFrom(
+  data: FormData,
+): AmazonBedrockProviderConfiguration | undefined {
+  const text = (name: string) => String(data.get(name) ?? "").trim();
+  const candidate = {
+    kind: "amazon-bedrock-converse-http",
+    region: text("region").toLowerCase(),
+    authentication: "cloud-iam",
+    cloudIam: {
+      startUrl: portalAddress(text("startUrl")),
+      ssoRegion: text("ssoRegion").toLowerCase(),
+      accountId: text("accountId").replaceAll("-", "").replaceAll(" ", ""),
+      roleName: text("roleName"),
+    },
+    manualModelIds: parseManualModelIds(text("manualModelIds")),
+  };
+  return Schema.is(AmazonBedrockProviderConfiguration)(candidate) ? candidate : undefined;
+}
+
+/** A portal address without the trailing `/`, `#`, or `#/` a browser's address bar adds. */
+function portalAddress(value: string): string {
+  let address = value;
+  for (const suffix of ["#/", "#", "/"]) {
+    if (address.endsWith(suffix)) address = address.slice(0, -suffix.length);
+  }
+  return address;
 }
 
 /** A pasted directory id as the host compares it: trimmed and lowercase. */

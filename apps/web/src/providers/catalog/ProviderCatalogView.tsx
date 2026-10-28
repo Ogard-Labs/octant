@@ -662,7 +662,7 @@ function CurrentStep(
   };
   const disabled = pending || props.busy || props.status !== "ready";
   // Amazon Bedrock signs in only at the organization's single sign-on portal,
-  // from a terminal on the host, and Add endpoint does not offer it yet.
+  // from a terminal on the host; Settings adds it but never begins its sign-in.
   const signsInFromHostTerminal = entry.driverKind === "amazon-bedrock";
   const retryLabel = (label: string) => (failure === undefined ? label : "Try again");
 
@@ -734,7 +734,8 @@ function CurrentStep(
     }
     case "add-endpoint":
       if (signsInFromHostTerminal) {
-        sentence = `Settings cannot add ${name} with your organization's single sign-on yet. Until it can, use a Bedrock API key with an OpenAI-compatible endpoint.`;
+        sentence = `Add it under Octant Harness › Model endpoints: choose ${name} in Add endpoint and give your organization's access portal, account, role, and models. It takes no key; you sign in from a terminal on this host.`;
+        action = openEndpoints;
         break;
       }
       if (entry.source.kind === "outside") {

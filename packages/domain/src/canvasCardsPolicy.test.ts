@@ -360,6 +360,14 @@ describe("Canvas create version projection", () => {
       nodes: [{ nodeId: "a" as never, label: "A" }],
       edges: [],
     };
+    const plan = {
+      blockId: "inline-plan" as never,
+      schemaVersion: 1 as never,
+      kind: "plan" as const,
+      title: "Launch plan",
+      phases: [{ phaseId: "build", title: "Build" }],
+      tasks: [{ taskId: "design", phaseId: "build", title: "Design the loop", status: "todo" }],
+    };
     const cardFor = (blocks: ReadonlyArray<unknown>) =>
       projectThreadReferenceCardFromVersion({
         version: buildCreateVersion({
@@ -384,15 +392,17 @@ describe("Canvas create version projection", () => {
       presentation: "inline",
       canvasCreatedAt: "2026-08-01T21:00:00.000Z",
     });
-    // A board is worked on in the sidebar, so asking for inline does not put it in the thread.
-    expect(cardFor([heading, board]).presentation).toBe("sidebar");
+    // A board is drawn in the thread read-only; a plan is worked on in the
+    // sidebar, so asking for inline does not put it in the thread.
+    expect(cardFor([heading, board]).presentation).toBe("inline");
+    expect(cardFor([heading, plan]).presentation).toBe("sidebar");
     // A long reading document is no longer cut to a teaser's block count.
     const longDocument = Array.from({ length: 40 }, (_, index) => ({
       ...heading,
       blockId: `heading-${String(index)}`,
     }));
     expect(cardFor(longDocument).presentation).toBe("inline");
-    expect(cardFor([...longDocument, board]).presentation).toBe("sidebar");
+    expect(cardFor([...longDocument, plan]).presentation).toBe("sidebar");
   });
 
   it("rejects a create request bound to another active Project", () => {

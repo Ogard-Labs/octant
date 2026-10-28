@@ -36,10 +36,21 @@ function failureOf<A>(exit: Exit.Exit<A, ProviderFailure>): ProviderFailure | un
 }
 
 describe("where an ACP profile can be placed on a remote target", () => {
-  it("places no shipped profile, because each local launch carries something a placed launch cannot", () => {
-    for (const profile of Object.values(acpProviderProfiles)) {
-      expect(acpRemotePlacement(profile, undefined)).toBeUndefined();
-    }
+  it("places GitHub Copilot alone among shipped profiles, carrying its guard and its Project's denied entries to the target", () => {
+    const placed = Object.values(acpProviderProfiles).filter(
+      (profile) => acpRemotePlacement(profile, undefined) !== undefined,
+    );
+    expect(placed.map((profile) => profile.kind)).toEqual(["copilot"]);
+    expect(acpRemotePlacement(acpProviderProfiles.copilot, "provider-owned")).toEqual({
+      support: {
+        postures: ["plan", "approval-gated", "auto-accept-edits"],
+        appToolTransport: "stdio",
+      },
+      args: ["--acp"],
+      accountState: [{ path: ".copilot", access: "read-write", variable: "COPILOT_HOME" }],
+      fixedVariables: { NO_COLOR: "1" },
+      deniedRootEntries: acpProviderProfiles.copilot.process.forbiddenRootEntries,
+    });
   });
 
   it("states the whole launch of a profile that can be placed, with its sign-in folder under the target user's home", () => {
@@ -52,6 +63,32 @@ describe("where an ACP profile can be placed on a remote target", () => {
       accountState: [
         { path: ".fixture-agent", access: "read-write", variable: "FIXTURE_AGENT_HOME" },
       ],
+      fixedVariables: {},
+      deniedRootEntries: [],
+    });
+  });
+
+  it("carries the local launch's guards and denied root entries, and leaves the home and its default folders to the target's runtime home", () => {
+    expect(
+      acpRemotePlacement(
+        withProcess({
+          guards: { NO_COLOR: "1", AGENT_DISABLE_AUTOUPDATE: "1" },
+          // The target sets HOME to the runtime's own home and no XDG folder,
+          // so these name the same folders there.
+          environment: ({ managedHome }) => ({
+            HOME: managedHome,
+            XDG_CONFIG_HOME: join(managedHome, ".config"),
+            XDG_CACHE_HOME: join(managedHome, ".cache"),
+            XDG_DATA_HOME: join(managedHome, ".local/share"),
+            XDG_STATE_HOME: join(managedHome, ".local/state"),
+          }),
+          forbiddenRootEntries: [".agent/hooks", ".mcp.json"],
+        }),
+        undefined,
+      ),
+    ).toMatchObject({
+      fixedVariables: { NO_COLOR: "1", AGENT_DISABLE_AUTOUPDATE: "1" },
+      deniedRootEntries: [".agent/hooks", ".mcp.json"],
     });
   });
 
@@ -60,14 +97,19 @@ describe("where an ACP profile can be placed on a remote target", () => {
     expect(acpRemotePlacement(placeableAcpProfile, "subscription")).toBeUndefined();
   });
 
-  it("refuses a profile whose local launch would leave a guard, a variable, a managed file, or a host path behind", () => {
+  it("refuses a profile whose local launch would leave a variable, a managed file, a host path, or a denial behind", () => {
     const leftBehind: ReadonlyArray<Partial<AcpProviderProfile["process"]>> = [
-      { guards: { NO_COLOR: "1" } },
-      { environment: ({ managedHome }) => ({ XDG_CONFIG_HOME: join(managedHome, ".config") }) },
+      // A guard that names a path, or one the target sets itself.
+      { guards: { AGENT_CONFIG: join(homedir(), ".config/agent.json") } },
+      { guards: { PATH: "bin" } },
+      // A variable that names anything but the home or one of its default folders.
+      { environment: ({ managedHome }) => ({ XDG_CONFIG_HOME: join(managedHome, "config") }) },
+      { environment: ({ managedHome }) => ({ AGENT_CONFIG_DIR: join(managedHome, ".config") }) },
+      { environment: () => ({ AGENT_TELEMETRY: "off" }) },
       { managedFiles: ({ managedHome }) => [{ path: join(managedHome, "config"), content: "{}" }] },
       { hostReadPaths: [join(homedir(), ".config/agent.json")] },
       { hostDeniedEntries: ["mcp"] },
-      { forbiddenRootEntries: [".agent/hooks"] },
+      { forbiddenRootEntries: ["../hooks"] },
     ];
     for (const changes of leftBehind) {
       expect(acpRemotePlacement(withProcess(changes), undefined)).toBeUndefined();

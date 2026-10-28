@@ -614,9 +614,12 @@ document as a future version. Frames follow the
   by what the frame holds, and the Run control there says so. This tier has
   shipped.
 - **The thread can hold the whole Canvas.** A person may expand any Canvas in
-  its thread; the agent may ask for `inline` on a reading document, or on a
-  `document`-size design that runs no script, without the 12-block cap; a
-  running frame in the thread starts only on **Run**. Editing,
+  its thread; the agent may ask for `inline` on a visualization (a chart,
+  dashboard, table, math, or diagram) or a reading document, or on a
+  `document`-size design with or without script, without the 12-block cap; a
+  plan, mockup, or device-size design asked for inline stays a sidebar Canvas
+  shown in the thread as a preview card. A running frame in the thread is the
+  sidebar's sandboxed frame and starts only on **Run**. Editing,
   comments, and sharing stay in the sidebar, and nothing drawn in the thread
   writes a version.
 - **Agents are taught and checked.** `describe` presents the tiers with a
@@ -852,9 +855,12 @@ commands, and egress for a remote-bound Project's turn are built. A Code
 thread can be created in a remote-bound Project through the Code commands, on
 a `remote-root` checkout no local Files, Git, terminal, test, or checkpoint
 path resolves, and the Code turn runtime runs its turns on the native harness
-with that remote tool set alone; every other provider is refused before
-anything launches, other Code operations on the thread are refused, and Full
-access is not offered there yet. A local desktop window lists such Projects
+with that remote tool set alone, or on an ACP agent placed on the target whose
+client file and terminal requests run as those same calls; every other
+provider is refused before anything launches, other Code operations on the
+thread are refused, and Full access is not offered there yet. A restart
+interrupts a remote turn it cut off, and a target is not removed while a
+thread on it holds a turn. A local desktop window lists such Projects
 in the Code sidebar and the composer and starts their threads: a Code draft
 in one binds the window to it with no folder of this host (`boundRoot` null),
 so root-backed surfaces fail closed, and only the thread's own view opens; a
@@ -865,8 +871,9 @@ admission. The provider-sdk seam for placing a
 runtime on a target, its conformance, and the executor's confined runtime
 launches with their own proxy on this host are built, and the ACP driver
 declares placement for a profile whose whole launch can be stated on a
-target, at the runtime path the person set for it there; no shipped profile
-can be stated there yet, so no provider's runtime runs on a target. SSH
+target (its fixed variables and the Project entries it denies included), at
+the runtime path the person set for it there; GitHub Copilot's profile is the
+first that can, and the composer does not offer it for a remote Project yet. SSH
 targets, their runtime paths, their
 attestation digests, remote bindings, managed worktrees, remote terminals'
 starts and ends, and a placed runtime's egress are journaled. Its
@@ -6527,7 +6534,10 @@ protocol on macOS, and admission (trust at a digest, a provider added off from
 a local window, host-run Verify tools, and the process stopped whenever the
 driver stops being effective) are built, as is moving an instance to a newly
 trusted digest of its driver with its records cleared. Publisher signatures
-are not. Only a macOS host admits one.
+are not. Only a macOS host admits one. The author kit
+(`@octant/provider-sdk/outside-driver`, `outside-driver-serve`, and
+`outside-driver-conformance`) and an example loopback driver package live in
+the provider SDK; its conformance evidence is advisory and enables nothing.
 
 The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a
@@ -7368,7 +7378,7 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   it is seen. Placement on an SSH target is not a capability and has no row:
   it is the driver's own `ProviderDriver.remotePlacement` declaration, never a
   probe. The ACP driver makes it only for a profile whose whole launch can be
-  stated on a target, which no shipped profile is yet.
+  stated on a target, which among shipped profiles is GitHub Copilot's.
 
   | Capability               | Claude Code                                                  | Codex                                                     | OpenCode                                                          | Pi                                                                                      | ACP agents                                                                    | Ollama                                                           | Harness endpoints                                                                 | Outside harness endpoints                                        | Oh My Pi                              |
   | ------------------------ | ------------------------------------------------------------ | --------------------------------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------- |
@@ -8354,7 +8364,9 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   sign-on portal only this way, with no opt-in, since the portal's device
   authorization is its one flow; the broker accepts a verification page only
   on the portal region's device host or the organization's own access portal
-  host. [Enterprise provider identity](design/enterprise-provider-identity.md)
+  host. Settings' sign-in route answers a Bedrock instance's status and Sign
+  out only, refusing a remote principal's Sign out before the pointer is read.
+  [Enterprise provider identity](design/enterprise-provider-identity.md)
   owns the rules.
 - **Cloud request signing.** The credential broker signs cloud requests
   itself ([`cloudIam.ts`](../packages/host-runtime/src/cloudIam.ts),

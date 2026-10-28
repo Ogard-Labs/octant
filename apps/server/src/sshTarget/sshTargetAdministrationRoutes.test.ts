@@ -51,7 +51,7 @@ afterEach(() => {
   rmSync(directory, { recursive: true, force: true });
 });
 
-function setup() {
+function setup(options: { readonly threadRunsOnTarget?: (targetId: SshTargetId) => boolean } = {}) {
   const authority = new WindowAuthorityStore();
   authority.register({ windowId, capability, now: Date.now() });
   const opened = openSshTargetTestStore(directory);
@@ -80,6 +80,7 @@ function setup() {
       connections,
       projects,
       terminals,
+      threadRunsOnTarget: options.threadRunsOnTarget ?? (() => false),
     }),
   };
 }
@@ -151,6 +152,7 @@ describe("SSH target administration routes", () => {
     const unconfigured = createSshTargetAdministrationRouteHandler({
       desktopBridgeSecret: undefined,
       windowAuthorityStore: new WindowAuthorityStore(),
+      threadRunsOnTarget: () => false,
       ...setup(),
     });
     expect((await unconfigured(post(SSH_TARGET_ROUTES.hostKey, body)))?.status).toBe(503);
@@ -173,6 +175,45 @@ describe("SSH target administration routes", () => {
       expect(decision).toMatchObject({ kind: "reject", facts: { surface: "local-only" } });
     }
     expect(existsSync(join(directory, "ssh-ran"))).toBe(false);
+  });
+
+  it("refuses to remove a target while a thread on it runs a turn, and removes it once the turn ended", async () => {
+    let running = true;
+    const asked: string[] = [];
+    const { handle, store, connections } = setup({
+      threadRunsOnTarget: (targetId) => {
+        asked.push(String(targetId));
+        return running;
+      },
+    });
+    const probed = await handle(post(SSH_TARGET_ROUTES.hostKey, { destination: "devbox" }));
+    const probe = (await probed?.json()) as { probeId: string; fingerprint: string };
+    const registered = await handle(
+      post(SSH_TARGET_ROUTES.register, {
+        probeId: probe.probeId,
+        fingerprint: probe.fingerprint,
+        executorPath: "/opt/octant/bin/octant",
+      }),
+    );
+    if (registered === undefined) throw new Error("the register route did not answer");
+    const { target } = (await registered.json()) as { target: { id: string } };
+
+    const refused = await handle(post(SSH_TARGET_ROUTES.remove, { targetId: target.id }));
+    expect(refused?.status).toBe(409);
+    expect(await refused?.json()).toMatchObject({
+      status: "refused",
+      reason: "target-in-use",
+      message: expect.stringContaining("running"),
+    });
+    // The target and its pin stay; nothing was ended.
+    expect(store.get(decodeSshTargetId(target.id))).toBeDefined();
+    expect(asked).toEqual([target.id]);
+
+    running = false;
+    const removed = await handle(post(SSH_TARGET_ROUTES.remove, { targetId: target.id }));
+    expect(removed?.status).toBe(204);
+    expect(store.get(decodeSshTargetId(target.id))).toBeUndefined();
+    connections.close();
   });
 
   it("records where a provider's runtime is on a target for a local window only", async () => {

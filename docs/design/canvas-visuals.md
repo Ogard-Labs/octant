@@ -319,6 +319,23 @@ scrolls sideways. The legend toggles nodes.
 Under forced colours the washes fall away: radar areas and funnel necks become
 outlines, and sankey bands become system-ink outlines told apart by their dash.
 
+**In the thread.** A visualization the agent asks to show inline (any chart,
+a dashboard, a table, math, a diagram, or a document-size design, including one
+that runs script) is drawn by the same blocks in the reply's card, as wide as
+the transcript column at any window width down to 390 px. Nothing in it widens
+the page: a wide table, a long formula, and a board scroll or pan inside their
+own block. Its height rests at 560 px, the part past it fades into
+**Show the whole Canvas** and the Canvas's open control, and the wheel stays
+with the thread until the person focuses the expanded Canvas. A board drawn
+there has no layout runtime, so it pans and zooms but its nodes do not move. A
+plan, a mockup, or a device-size design asked for inline is a preview card
+instead: the row's live miniature drawn across the column (laid out at twice
+the column's width and shown at half size, at most 280 px tall, faded at its
+foot), inert and hidden from assistive technology, with the title and facts
+beneath; the whole card opens the Canvas. Neither adds motion of its own, so
+reduced motion changes nothing about them. The placement rule itself is in
+[Canvas: Presentation](canvas.md#presentation-and-schema-versions).
+
 **Empty and error states.** A chart with no series, a table with no rows, and a
 timeline with no items keep their block's height and say so in `--oct-muted` text
 rather than collapsing, so a document does not jump as data arrives. A block that
