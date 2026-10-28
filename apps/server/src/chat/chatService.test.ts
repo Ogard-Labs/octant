@@ -1,4 +1,5 @@
 import {
+  ThreadWorkItemId,
   EventActor,
   MAX_PROVIDER_TOOLS,
   THREAD_EXTERNAL_CONTENT_AGGREGATE,
@@ -5913,7 +5914,7 @@ describe("ChatService", () => {
     expect(service.read(created.thread.id).turns[0]?.attempts[0]?.outcome).toBe("interrupted");
   });
 
-  it("advances replay across unrelated global journal pages", async () => {
+  it("keeps reading a thread's own aggregate pages until a short batch ends the stream", async () => {
     const { service, persistence } = openFixture();
     const created = await service.execute({
       kind: "create-chat-thread",
@@ -5927,22 +5928,36 @@ describe("ChatService", () => {
       (event) => event.eventName === "chat.thread-created@1",
     );
     if (targetEnvelope === undefined) throw new Error("Expected thread-created envelope.");
-    const unrelatedPage = Array.from({ length: 100 }, (_, index) => ({
-      ...targetEnvelope,
-      globalSequence: (index + 1) as GlobalSequence,
-      eventName: "fixture.unrelated@1",
-    }));
-    const replaySpy = vi.spyOn(persistence.journal, "replay").mockImplementation((cursor) => {
-      if (replaySpy.mock.calls.length === 1) return unrelatedPage as never;
-      if (cursor.afterSequence === 0) {
-        throw new Error("global replay cursor did not advance");
-      }
-      return [{ ...targetEnvelope, globalSequence: 101 as GlobalSequence }] as never;
-    });
+    const ownPage = (start: number, count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        ...targetEnvelope,
+        globalSequence: (start + index) as GlobalSequence,
+      }));
+    const realBySequence = persistence.journal.replayAggregateBySequence.bind(persistence.journal);
+    const bySequenceSpy = vi
+      .spyOn(persistence.journal, "replayAggregateBySequence")
+      .mockImplementation((cursor) => {
+        if (cursor.aggregateType !== "chat-thread") return realBySequence(cursor);
+        const ownCalls = bySequenceSpy.mock.calls.filter(
+          ([call]) => call.aggregateType === "chat-thread",
+        ).length;
+        if (ownCalls === 1) return ownPage(1, 100) as never;
+        if (cursor.afterSequence !== 100) {
+          throw new Error("aggregate replay cursor did not advance past the full page");
+        }
+        return ownPage(101, 1) as never;
+      });
 
-    const first = await service.subscribe(created.thread.id, 0).next();
-    expect(first).toMatchObject({ done: false, value: { event: { kind: "thread-created" } } });
-    expect(replaySpy.mock.calls[1]?.[0].afterSequence).toBe(100);
+    const frames = [];
+    for await (const frame of service.subscribe(created.thread.id, 0)) frames.push(frame);
+    expect(frames.map((frame) => frame.event.kind)).toEqual(
+      Array.from({ length: 101 }, () => "thread-created"),
+    );
+    expect(
+      bySequenceSpy.mock.calls.some(
+        ([call]) => call.aggregateType === "chat-thread" && call.afterSequence === 100,
+      ),
+    ).toBe(true);
   });
 
   it("keeps per-thread replay free of global settings and other-thread citations", async () => {
@@ -9880,6 +9895,50 @@ describe("ChatService streamed delta bodies", () => {
         frame.event.kind === "attempt-response-appended" ? [frame.contents?.[0]?.body] : [],
       ),
     ).toEqual(deltas.slice(1));
+  });
+});
+
+describe("ChatService event stream slices", () => {
+  it("streams the work and follow-up frames that journal on their own aggregates, in journal order", async () => {
+    const { service } = openFixture();
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Slices",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const thread = created.thread;
+    await service.execute({
+      kind: "add-chat-work-item",
+      threadId: thread.id,
+      expectedVersion: 0 as AggregateVersion,
+      itemId: "84000000-0000-4000-8000-0000000000e1" as ThreadWorkItemId,
+      title: "Review the handoff",
+      status: "pending",
+      position: 0,
+      origin: "user",
+    });
+    await service.execute({
+      kind: "open-chat-follow-up",
+      threadId: thread.id,
+      expectedVersion: 0 as AggregateVersion,
+      triggerSequence: 1,
+      reason: "Review the handoff",
+      origin: "manual",
+    });
+
+    const frames = [];
+    for await (const frame of service.subscribe(thread.id, 0)) frames.push(frame);
+    const kinds = frames.map((frame) => frame.event.kind);
+    expect(kinds).toContain("work-updated");
+    expect(kinds).toContain("follow-up-updated");
+    const sequences = frames.map((frame) => frame.sequence);
+    expect([...sequences].sort((left, right) => left - right)).toEqual(sequences);
+    const workItemFrame = frames.find((frame) => frame.event.kind === "work-updated");
+    expect(workItemFrame?.event).toMatchObject({
+      kind: "work-updated",
+      workItem: expect.objectContaining({ id: "84000000-0000-4000-8000-0000000000e1" }),
+    });
   });
 });
 

@@ -11,7 +11,6 @@ import {
   CONTEXT_COMPACTION_EVENT_NAMES,
   CorrelationId,
   EventId,
-  ReplayCursor,
   UtcTimestamp,
   decodeChatAttachment,
   decodeChatAttachmentId,
@@ -310,7 +309,18 @@ const SIDE_CHAT_READ_TOOL_NAMES: ReadonlySet<string> = new Set([
   SIDE_CHAT_SEARCH_FILES_TOOL_NAME,
   SIDE_CHAT_READ_FILE_TOOL_NAME,
 ]);
-const decodeReplayCursor = Schema.decodeUnknownSync(ReplayCursor);
+
+/**
+ * The aggregates whose rows can feed one Chat thread's event stream, all keyed
+ * by the thread id. Chat frames are not confined to the chat-thread aggregate:
+ * work-list and follow-up updates journal on their own aggregates, and a
+ * session's compaction settles on the context ledger.
+ */
+const CHAT_STREAM_AGGREGATE_TYPES = [
+  "chat-thread",
+  "thread-work-list",
+  "thread-follow-up",
+] as const;
 
 const CHAT_EVENT_NAMES = new Set([
   "chat.settings-updated@1",
@@ -1748,11 +1758,29 @@ export class ChatService {
     options?: ChatSubscribeOptions,
   ): AsyncGenerator<ChatEventFrame, number> {
     this.#assertReadableThread(threadId);
+    // The slices that hold this thread's frames, each read through the
+    // (aggregate, sequence) index by the aggregate id the thread keys. A held
+    // stream wakes on every machine change, so a global journal replay would
+    // scan and decode every other thread's events on each wake; these reads
+    // touch only this thread's rows and still merge back to global journal
+    // order.
+    const aggregateTypes =
+      options?.compaction === true
+        ? [...CHAT_STREAM_AGGREGATE_TYPES, "context-ledger"]
+        : CHAT_STREAM_AGGREGATE_TYPES;
     let cursor = afterSequence;
     while (!signal?.aborted) {
-      const events = this.#persistence.journal.replay(
-        decodeReplayCursor({ afterSequence: cursor, limit: 100 }),
+      const batches = aggregateTypes.map((aggregateType) =>
+        this.#persistence.journal.replayAggregateBySequence({
+          aggregateType,
+          aggregateId: String(threadId),
+          afterSequence: cursor,
+          limit: 100,
+        }),
       );
+      const events = batches
+        .flat()
+        .toSorted((left, right) => left.globalSequence - right.globalSequence);
       if (events.length === 0) break;
       for (const [index, envelope] of events.entries()) {
         cursor = envelope.globalSequence;
@@ -1787,11 +1815,11 @@ export class ChatService {
         if (frame === undefined) continue;
         yield frame;
       }
-      if (events.length < 100) break;
+      if (batches.every((batch) => batch.length < 100)) break;
     }
-    // The last journal entry scanned, which is past any entries that belong to
-    // other threads. A held stream that resumed from the last frame it sent
-    // would otherwise re-read that unrelated tail on every wake.
+    // The thread's last scanned row. A held stream that resumes from the last
+    // frame it sent re-reads only this thread's later rows, never the
+    // journal's unrelated tail.
     return cursor;
   }
 
