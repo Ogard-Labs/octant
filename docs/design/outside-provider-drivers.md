@@ -247,7 +247,7 @@ the fail-closed option.
   and sets the environment itself, ignoring whatever environment the caller
   passed. No caller can widen either.
 - **The grants.** Read: the package root, the runtime's install, `/System`,
-  `/usr`, `/private/var/db/timezone`, the time-zone link `/private/etc/localtime`, the
+  `/usr/lib`, `/usr/share`, `/private/var/db/timezone`, the time-zone link `/private/etc/localtime`, the
   data devices `/dev/null`, `/dev/zero`, `/dev/random`,
   and `/dev/urandom`, `/` itself, and metadata of every parent folder of those.
   These are the extension profile's measured roots less `/bin` and `/sbin`
@@ -289,6 +289,11 @@ the fail-closed option.
     the rest is the host's own databases (the local directory's user
     records, installer receipts, diagnostics), none of which a runtime reads
     to start.
+  - `/usr`, apart from `lib` (the dynamic loader and system libraries) and
+    `share` (the system's ICU data and time-zone names): `bin`, `sbin`, and
+    `libexec` hold programs the driver may not exec, and `local` holds
+    whatever the person installed there, on an Intel Mac Homebrew's whole
+    prefix with its services' data.
 - **The runtime's install** is taken from the runtime's own resolved path,
   never a fixed location. For Bun it is the executable's folder, wherever Bun
   is installed. For Electron's Node it is the app bundle that holds the

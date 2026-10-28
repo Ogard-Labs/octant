@@ -316,11 +316,20 @@ async function prepareProcessLaunch(
  * data devices, because the person's own terminals are devices there that
  * their user may read. `/Library/Apple` holds Apple's add-ons outside the
  * sealed system, Rosetta's translator among them, which only an Intel
- * runtime on Apple Silicon loads. Each later narrowing is listed in the
+ * runtime on Apple Silicon loads. `/usr` is narrowed to the loader and
+ * libraries in `lib` and the ICU and zone data in `share`: the rest holds
+ * programs it may not exec and, in `local`, whatever the person installed.
+ * `/private/var/db` is narrowed to the zone data the time-zone link leads
+ * to. Each narrowing is listed in the
  * outside driver specification, so a runtime that fails to start without one
  * can have that one restored.
  */
-const OUTSIDE_DRIVER_SYSTEM_READ_ROOTS = ["/System", "/usr", "/private/var/db/timezone"] as const;
+const OUTSIDE_DRIVER_SYSTEM_READ_ROOTS = [
+  "/System",
+  "/usr/lib",
+  "/usr/share",
+  "/private/var/db/timezone",
+] as const;
 const OUTSIDE_DRIVER_DEVICE_READS = ["/dev/null", "/dev/zero", "/dev/random", "/dev/urandom"];
 /**
  * Of `/private/etc`, only the link naming the host's time zone, which a
