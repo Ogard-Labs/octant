@@ -14,6 +14,8 @@ import type {
 export type CodeForkConversationReader = (input: {
   readonly source: CodeThread;
   readonly throughOperationId: string;
+  /** The fork's target model window, when the caller knows it. */
+  readonly targetContextLimitTokens?: number;
 }) => AgentRunParentContextSelection;
 
 export type CodeForkHandoffRefusal =
@@ -68,6 +70,8 @@ export function selectCodeForkHandoff(
     readonly source: CodeThread;
     readonly origin: CodeThreadForkOrigin;
     readonly projectId: CodeThread["projectId"];
+    /** The fork's target model window; the handoff is bounded by it when known. */
+    readonly targetContextLimitTokens?: number;
   },
 ):
   | {
@@ -85,6 +89,9 @@ export function selectCodeForkHandoff(
     selection = read({
       source: input.source,
       throughOperationId: String(input.origin.throughOperationId),
+      ...(input.targetContextLimitTokens === undefined
+        ? {}
+        : { targetContextLimitTokens: input.targetContextLimitTokens }),
     });
   } catch {
     return { status: "refused", reason: "source-unavailable" };

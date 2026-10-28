@@ -3106,10 +3106,20 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       return { status: "refused", reason: "unsupported" };
     const readable = await this.#readableForkSource(thread, origin, windowId);
     if (readable.status === "refused") return readable;
+    // The fork's handoff is read by the fork's own model, so its bound comes
+    // from that model's window when the probe reported it, exactly as a
+    // provider switch's does.
+    const targetProbe = await this.#options
+      .probeProvider?.(thread.providerInstanceId)
+      .catch(() => undefined);
+    const targetContextLimitTokens = targetProbe?.models.find(
+      (candidate) => String(candidate.id) === String(thread.modelId),
+    )?.contextLimit;
     const selected = selectCodeForkHandoff(this.#options.forkContext, {
       source: readable.source,
       origin,
       projectId: thread.projectId,
+      ...(targetContextLimitTokens === undefined ? {} : { targetContextLimitTokens }),
     });
     if (selected.status === "refused") return selected;
     const { selection } = selected;
