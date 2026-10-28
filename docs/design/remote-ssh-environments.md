@@ -70,11 +70,11 @@ built: a person's terminals and managed worktrees on a remote-bound Project,
 under the same admission
 ([Terminals and managed worktrees](#terminals-and-managed-worktrees)),
 Settings › SSH targets, and the Project picker's listing; its packaged
-desktop smoke on a Mac remains. Slice 8 is built in part: a macOS target
-attests Plan through Seatbelt and is admitted there, for a bound root's
-reads and Git; its writing postures and placed runtimes stay unattested until a
-forwarder for a proxied launch on macOS is designed
-([macOS targets](#macos-targets)), and the run against a second Mac is the
+desktop smoke on a Mac remains. Slice 8 is built: a macOS target attests
+every confined posture through Seatbelt, its proxied launches reaching this
+host's proxy through a per-launch loopback forwarder that admits only that
+launch's egress token (maintainer decision 9,
+[macOS targets](#macos-targets)); the run against a second Mac is the
 maintainer's. Remote SSH
 environments are authorized post-preview work as of 2026-10-26, when the
 maintainer unlocked the parked backlog and accepted the
@@ -564,8 +564,9 @@ details, each in the fail-closed direction:
   the forwarder's own port (3128) cannot show that and is inconclusive. The
   canaries run with the grants the launches use, so attestation follows
   whatever those grants become. On macOS, Seatbelt's `proxied` rule names a
-  loopback port the executor would have to listen on, so the writing postures
-  do not attest on a macOS target until slice 8 settles its forwarder.
+  loopback port, so each proxied probe there gets a loopback forwarder of its
+  own, as a proxied launch does ([macOS targets](#macos-targets)); it admits
+  a token no probe holds, so a probe that reached it would still get nowhere.
 - **macOS probes read as the launches do.** Seatbelt denies by default and
   grants reads by path, where Bubblewrap mounts the system and binds the
   executable, so a probe given only its own folder died before it could
@@ -1262,9 +1263,10 @@ Rejected:
   targets follow in that change.
 - **`none`.** A runtime with no network cannot reach its model.
 
-On macOS targets `proxied` waits for slice 8's forwarder, as the writing
-postures' commands do, so a placed runtime is admitted only on Linux targets
-until then.
+On macOS targets `proxied` reaches this host's proxy through the launch's
+token-gated loopback forwarder ([macOS targets](#macos-targets)), as the
+writing postures' commands do, so a placed runtime is admitted there under
+the same runtime canaries as on Linux.
 
 **Plan, as built: proxied through a nested capsule (maintainer decision,
 2026-10-27).** A Plan runtime runs on `proxied` as R3 says. Linux confinement
@@ -1356,7 +1358,7 @@ Each is its own reviewable change with this section updated in place.
     runtime placed only where its posture's runtime canaries passed, refused
     before any frame elsewhere and without a runtime proxy, and ended with its
     session), `sshTargetAdmissionPolicy.test.ts` and `toolEgressPolicy.test.ts`
-    (the runtime canary table, macOS refused, and the runtime rule),
+    (the runtime canary table and the runtime rule),
     `nativeHarnessEgressProxy.test.ts` (the proxy under the runtime rule), and
     `sshExecutorProtocol.test.ts`.
 - **6c. ACP declares placement.** Container.
@@ -1440,10 +1442,12 @@ fail-closed direction:
   runs, each tied on this host to the proxy that asked. A launch's forwarded
   connections close with it; the dialed ones close with their proxy, or when
   no proxied launch is left.
-- **Admission refuses runtimes on macOS.** The policy refuses a provider
-  runtime on a macOS target `runtime-not-attestable` after the platform
-  fact, and the executor reports the runtime canaries there `inconclusive`
-  and refuses the launch, until slice 8 settles the forwarder.
+- **Runtimes on macOS (as of 2026-10-28).** As built in 6b the policy
+  refused a provider runtime on a macOS target `runtime-not-attestable`, and
+  the executor reported the runtime canaries there `inconclusive`. Since
+  maintainer decision 9 a macOS target runs the runtime canaries through
+  Seatbelt and a loopback forwarder, and admission treats it as a Linux
+  target ([macOS targets](#macos-targets)).
 - **The runtime canary rows.** A placed runtime is admitted only where its
   posture's command probes and these runtime probes all reported a refusal:
   in Plan, writing the root, writing read-only account state, exec, fork,
@@ -1634,8 +1638,8 @@ settle each, in the fail-closed direction:
   driver, built as the Code turn runtime builds it, passes the turn's own
   check (an ACP agent that declares placement), with that runtime's
   admission now in each confined posture (the turn's
-  `admitProviderRuntime` call, so a macOS target, an undeclared posture,
-  and an unproven runtime canary refuse there as in the turn) and whether
+  `admitProviderRuntime` call, so an undeclared posture and an unproven
+  runtime canary refuse there as in the turn) and whether
   the person set its path on the target (`runtimePath`, read from the same
   runtime paths the placement reads). `placeableRuntimesOn` in
   `apps/server/src/sshTarget/sshRemoteCodeThreads.ts` computes it beside
@@ -1687,7 +1691,7 @@ settle each, in the fail-closed direction:
   agent with its path set and one without, each admitted in every posture,
   and no provider that declares no placement or is not an ACP agent; a
   closed connection's agents refused `target-unreachable`; a macOS target's
-  agent refused `runtime-not-attestable` in every posture; and the turn's
+  agent admitted in the postures its driver declares; and the turn's
   placement refusing the pathless agent with the window's sentence),
   `sshTargetRecovery.test.ts` (the offer and the readiness from a status),
   and `CodeComposerAdapter.test.tsx` (the agent offered beside the harness
@@ -1925,6 +1929,17 @@ alternatives considered and the reason for the choice follow it.
    Browser reaches the target's dev servers only at addresses this Mac can
    already open. Deferred: forwarding chosen ports through an authenticated host
    proxy.
+9. **A proxied launch's forwarder on a macOS target** (accepted 2026-10-28).
+   Each proxied launch gets a loopback listener of its own on a random port,
+   which admits a connection only when its first request presents that
+   launch's egress token, and closes with the launch
+   ([macOS targets](#macos-targets)). Seatbelt cannot put a launch in a
+   network namespace of its own, so the token takes the namespace's place:
+   another user of the Mac can reach the port and nothing behind it.
+   Rejected: offline writing postures on macOS, which would leave commands
+   and runtimes there without a network; and a Seatbelt-specific listener
+   out of other users' reach, which Seatbelt's `localhost:<port>` rule cannot
+   express.
 
 ## Delivery plan
 
@@ -2070,41 +2085,87 @@ agent can implement and verify it in a Linux container with OpenSSH installed an
    The projection tables are migration 87.
 8. **macOS targets.** Needs a second Mac reachable by SSH (maintainer). Seatbelt
    canaries and the same end-to-end evidence as slice 3 against a macOS target.
-   Built in part 2026-10-28 ([macOS targets](#macos-targets)).
+   Built 2026-10-28 ([macOS targets](#macos-targets)); the run against a
+   second Mac remains.
 
 #### macOS targets
 
-A macOS target attests Plan: its canaries run through Seatbelt with the
-grants Octant's own launches carry (see the macOS probes rule under
+A macOS target attests every confined posture: its canaries run through
+Seatbelt with the grants Octant's own launches carry (see the macOS probes
+rule under
 [Confinement attestation and admission](#confinement-attestation-and-admission)),
-so binding a root, Files, Git status and diff, and a Plan thread's reads are
-admitted there; a Plan turn on a macOS target is not yet shown end to end. The writing postures report their probes `inconclusive` and
-refuse `not-attested`, and placed runtimes refuse `runtime-not-attestable`,
-because both run `proxied` and Seatbelt's `proxied` rule names a loopback TCP
-port: on a target the executor would have to listen on one, which every user
-of that Mac could reach, where Linux puts its forwarder in a network
-namespace of the launch's own behind an owner-only Unix socket.
+so binding a root, Files, Git status and diff, Plan, approval-gated and
+auto-accept threads, terminals, managed worktrees, and placed runtimes are
+admitted there under the same policy as on a Linux target. A Plan turn and a
+harness turn on a macOS target are not yet shown end to end through the turn
+runtime; the parts they use are, below.
 
-**Open decision (maintainer).** How a proxied launch reaches this host's proxy
-on a macOS target. Each choice changes who on the target can reach the
-proxy, so none is taken here: a loopback listener per launch that admits
-only that launch's egress token (the token a proxied command's proxy
-variables already carry); offline writing postures on macOS, which would
-leave commands and runtimes there without a network; or something
-Seatbelt-specific that keeps the listener out of other users' reach. Until
-it is decided, terminals, managed worktrees, approval-gated and auto-accept
-threads, and provider runtimes are refused on a macOS target.
+**The forwarder (maintainer decision 9, accepted 2026-10-28).** Seatbelt's
+`proxied` rule names one loopback TCP port, and Seatbelt cannot give a launch
+a network namespace of its own, so on macOS the executor
+(`apps/server/src/sshTarget/executorLoopbackForwarder.ts`, used by
+`ExecutorEgress` in `executorLaunches.ts`) gives each proxied launch, a
+command or a placed runtime, this forwarder in place of Linux's Unix socket:
 
-Evidence: `sshTargetMacLoopback.smoke.test.ts` (macOS only: the bundled
-executor behind a stand-in client on this Mac, attesting Plan with this
-Mac's Seatbelt, admitting it and refusing the writing postures
-`not-attested`, binding a root and reading its files, Git status, and diff
-through Seatbelt-confined Git, refusing a root that holds `~/.ssh`, and
-removing its runtime directory with the session; both cases fail without
-the probes' read grant) and `executorAttestation.test.ts` (macOS only: every
-Plan probe refused by Seatbelt, and a capsule granting Plan's write, exec,
-fork, and network reporting each `escaped`). Not yet shown: the same
+- **A port of its own.** A listener on `127.0.0.1` at a port the system
+  picks, opened before the launch starts; the launch's profile allows
+  outbound to `localhost:<that port>` and nothing else, so the launch reaches
+  no other loopback port and no other address.
+- **Its token on every connection.** The launch's egress token, which this
+  host's proxy already requires and which only the launch's proxy variables
+  carry, must be presented as `Proxy-Authorization: Basic octant:<token>` in
+  each connection's first request head, compared in constant time
+  (`timingSafeEqual`, as the host's proxy compares it). A connection with no
+  token, another token, a head that does not parse, or one larger than
+  32 KiB is answered `407` and closed; one that has not sent its head within
+  10 s is dropped; past 32 connections still owing a head, new ones are
+  dropped at once. Nothing of a refused connection reaches this host.
+- **Then forwarding.** An admitted connection becomes the launch's stream to
+  this host, its first head included, where the launch's proxy checks the
+  token again on every request, decides, and journals, as on Linux.
+- **It closes with the launch.** The listener stops and every connection it
+  forwarded or still holds closes when the command ends or the runtime
+  stops, and with the session.
+
+Another user of the target can connect to the port while the launch runs,
+and gets a `407` and nothing else; the token is unguessable (32 random
+bytes) and worthless once the launch ends. Attestation's proxied probes on
+macOS each get a forwarder of their own that admits a token no probe holds,
+so the probe that connects around it (to the SSH server's loopback port)
+proves another port is refused. Linux is unchanged: its forwarder stays a
+Unix socket in an owner-only directory, behind the capsule's own network
+namespace.
+
+Evidence (macOS only; CI runs Linux and skips them):
+`executorAttestation.test.ts` (every Plan probe refused; every probe of the
+writing postures and every runtime probe of each posture refused, the
+network ones through a loopback forwarder; a writing capsule given the
+network reporting the connection around its forwarder `escaped`; a capsule
+granting Plan's write, exec, fork, and network reporting each `escaped`)
+and `sshTargetMacLoopback.smoke.test.ts` (the bundled executor behind a
+stand-in client on this Mac: every confined posture attested and admitted,
+and a placed runtime admitted in each; an approval-gated command run
+proxied, reaching a stand-in for this host's proxy with its token while a
+request with no token or another token is refused `407` before it reaches
+the host and a connection to another loopback port is refused by Seatbelt,
+the forwarder closed with the command; a placed runtime in Plan and
+approval-gated doing the same, Plan unable to write its root; a managed
+worktree and an approval-gated terminal in it that commits there and writes
+nowhere beside it; binding a root and reading its files, Git status, and
+diff through Seatbelt-confined Git; refusing a root that holds `~/.ssh`;
+removing its runtime directory with the session). On every platform,
+`executorLaunches.test.ts` shows the forwarder refusing no token, another
+token, and a malformed head without a frame to the host, forwarding the
+token's connection with its first request as a stream naming the launch,
+and no longer listening once the launch ends. Not yet shown: the same
 through a real `sshd` on a second Mac, which is the maintainer's run.
+
+Known gap: `/usr/bin/git` on macOS is the `xcode-select` shim, which reads
+`/private/var/select/developer_dir`, and a terminal's profile does not grant
+that read, so `git` typed in a terminal on a macOS target fails (observed on
+this Mac's Seatbelt) unless it names the developer Git (`xcrun --find git`),
+as Octant's own Git launches do (`gitShimExtraRules`). Harness commands run
+under the same read rules.
 
 ## Verification
 

@@ -4,7 +4,11 @@ import { homedir, tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { SSH_EXECUTOR_PROTOCOL_VERSION } from "@octant/contracts/ssh-executor-protocol";
-import { SSH_CANARY_PROBES_BY_POSTURE } from "@octant/domain/ssh-target-admission-policy";
+import type { SshConfinedPosture } from "@octant/contracts/ssh-target";
+import {
+  SSH_CANARY_PROBES_BY_POSTURE,
+  SSH_RUNTIME_CANARY_PROBES_BY_POSTURE,
+} from "@octant/domain/ssh-target-admission-policy";
 import {
   makeProcessConfinementLive,
   type ProcessConfinementPort,
@@ -26,6 +30,14 @@ async function sshServerStandIn(): Promise<number> {
 }
 
 async function attestPlan(confinement?: ProcessConfinementPort) {
+  return attest("plan", SSH_CANARY_PROBES_BY_POSTURE.plan, confinement);
+}
+
+async function attest(
+  posture: SshConfinedPosture,
+  probes: (typeof SSH_CANARY_PROBES_BY_POSTURE)[SshConfinedPosture],
+  confinement?: ProcessConfinementPort,
+) {
   const parent = realpathSync(mkdtempSync(join(tmpdir(), "octant-attest-")));
   cleanups.push(() => rmSync(parent, { recursive: true, force: true }));
   const session = join(parent, "session");
@@ -48,7 +60,7 @@ async function attestPlan(confinement?: ProcessConfinementPort) {
       sshServerAddress: { host: "127.0.0.1", port: await sshServerStandIn() },
       ...(confinement === undefined ? {} : { confinement }),
     },
-    { kind: "attest", postures: [{ posture: "plan", probes: SSH_CANARY_PROBES_BY_POSTURE.plan }] },
+    { kind: "attest", postures: [{ posture, probes }] },
   );
   return Object.fromEntries(
     reply.facts.canaries
@@ -66,6 +78,37 @@ describe.skipIf(process.platform !== "darwin")("executor canaries on a macOS tar
       "open-network-socket": "refused",
       "read-sibling-folder": "refused",
       "read-other-session-runtime": "refused",
+    });
+  }, 60_000);
+
+  it("reports every writing posture's probe and every runtime probe refused, the network ones through a loopback forwarder", async () => {
+    for (const posture of ["plan", "approval-gated", "auto-accept-edits"] as const) {
+      const probes = [
+        ...SSH_CANARY_PROBES_BY_POSTURE[posture],
+        ...SSH_RUNTIME_CANARY_PROBES_BY_POSTURE[posture],
+      ];
+      const outcomes = await attest(posture, probes);
+      expect(Object.keys(outcomes).toSorted()).toEqual([...new Set(probes)].toSorted());
+      expect(outcomes, posture).toEqual(
+        Object.fromEntries(probes.map((probe) => [probe, "refused"])),
+      );
+    }
+  }, 120_000);
+
+  it("reports the escape when a writing posture's capsule reaches another loopback port than its forwarder's", async () => {
+    const seatbelt = makeProcessConfinementLive({ platform: "darwin" });
+    const open: ProcessConfinementPort = {
+      prepare: (input) => seatbelt.prepare({ ...input, networkEgress: "allow" }),
+    };
+    expect(
+      await attest(
+        "approval-gated",
+        ["connect-bypassing-forwarder", "runtime-connect-bypassing-proxy"],
+        open,
+      ),
+    ).toEqual({
+      "connect-bypassing-forwarder": "escaped",
+      "runtime-connect-bypassing-proxy": "escaped",
     });
   }, 60_000);
 

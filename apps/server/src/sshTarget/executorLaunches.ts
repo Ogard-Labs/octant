@@ -20,7 +20,9 @@ import {
   makeProcessConfinementLive,
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
+import type { EgressProxyEndpoint } from "../process/threadEgressPolicy";
 import { postureGrants } from "./executorAttestation";
+import { listenForLaunchToken } from "./executorLoopbackForwarder";
 import { ExecutorStreams, joinToStream, type ExecutorStream } from "./executorStreams";
 
 /**
@@ -35,12 +37,15 @@ import { ExecutorStreams, joinToStream, type ExecutorStream } from "./executorSt
  * here on the target; nothing of the host's crosses.
  *
  * A proxied launch, a command or a placed process, reaches only its own
- * forwarder, a Unix socket in a fresh owner-only directory of this session's.
- * Each connection to it becomes a stream to the host that names the launch,
- * where that launch's own egress proxy decides and journals it. The host
- * answers by asking this executor to resolve a name and to open a connection
- * to an address it checked; the executor does both only while a proxied
- * launch runs, and opens no TCP listener at all.
+ * forwarder. On Linux that is a Unix socket in a fresh owner-only directory of
+ * this session's, which the capsule's own forwarder relays to. On macOS,
+ * where Seatbelt can name only a `localhost` port, it is a loopback listener
+ * on a random port that admits only connections presenting the launch's
+ * egress token (`executorLoopbackForwarder.ts`). Each connection it admits
+ * becomes a stream to the host that names the launch, where that launch's own
+ * egress proxy decides and journals it. The host answers by asking this
+ * executor to resolve a name and to open a connection to an address it
+ * checked; the executor does both only while a proxied launch runs.
  */
 
 /** The most connections one launch holds open to its forwarder, as its proxy allows. */
@@ -71,8 +76,8 @@ const unavailable: SshExecutorCommandRanReply = {
 };
 
 interface ProxiedLaunch {
-  readonly server: Server;
-  readonly directory: string;
+  /** Stops the forwarder listening and removes what it left on disk. */
+  readonly close: () => void;
   readonly forwarded: Set<ExecutorStream>;
 }
 
@@ -83,6 +88,7 @@ interface ProxiedLaunch {
  */
 export class ExecutorEgress {
   readonly #send: (frame: SshExecutorFrame) => void;
+  readonly #platform: NodeJS.Platform;
   readonly #forwarded: ExecutorStreams;
   readonly #hostOpened: ExecutorStreams;
   readonly #launches = new Map<number, ProxiedLaunch>();
@@ -93,8 +99,13 @@ export class ExecutorEgress {
    * (even ids): the connections its proxies ask for here, and the placed
    * processes' streams, so an id is never new twice.
    */
-  constructor(send: (frame: SshExecutorFrame) => void, hostOpened: ExecutorStreams) {
+  constructor(
+    send: (frame: SshExecutorFrame) => void,
+    hostOpened: ExecutorStreams,
+    platform: NodeJS.Platform,
+  ) {
     this.#send = send;
+    this.#platform = platform;
     this.#hostOpened = hostOpened;
     this.#forwarded = new ExecutorStreams({
       send,
@@ -104,14 +115,40 @@ export class ExecutorEgress {
   }
 
   /**
-   * Opens the forwarder for proxied launch `launch` (its request id) in a
-   * fresh owner-only directory of the session's, or undefined when it cannot
-   * listen.
+   * Opens the forwarder for proxied launch `launch` (its request id), or
+   * undefined when it cannot listen. `token` is the launch's egress token,
+   * which a macOS forwarder requires of every connection.
    */
-  async open(sessionDirectory: string, launch: number): Promise<string | undefined> {
+  async open(
+    sessionDirectory: string,
+    launch: number,
+    token: string,
+  ): Promise<EgressProxyEndpoint | undefined> {
     if (this.#launches.has(launch) || this.#launches.size >= MAX_PROXIED_LAUNCHES) {
       return undefined;
     }
+    return this.#platform === "darwin"
+      ? this.#openLoopback(launch, token)
+      : this.#openUnixSocket(sessionDirectory, launch);
+  }
+
+  async #openLoopback(launch: number, token: string): Promise<EgressProxyEndpoint | undefined> {
+    const forwarder = await listenForLaunchToken(token, (socket, received) =>
+      this.#forward(socket, launch, received),
+    );
+    if (forwarder === undefined) return undefined;
+    if (this.#launches.has(launch)) {
+      forwarder.close();
+      return undefined;
+    }
+    this.#launches.set(launch, { close: () => forwarder.close(), forwarded: new Set() });
+    return { kind: "loopback", port: forwarder.port };
+  }
+
+  async #openUnixSocket(
+    sessionDirectory: string,
+    launch: number,
+  ): Promise<EgressProxyEndpoint | undefined> {
     let directory: string;
     try {
       directory = mkdtempSync(join(sessionDirectory, "e-"));
@@ -126,12 +163,9 @@ export class ExecutorEgress {
       rmSync(directory, { recursive: true, force: true });
       return undefined;
     }
-    const entry: ProxiedLaunch = {
-      server: createServer({ allowHalfOpen: true }, (socket) => this.#forward(socket, launch)),
-      directory,
-      forwarded: new Set(),
-    };
-    const { server } = entry;
+    const server: Server = createServer({ allowHalfOpen: true }, (socket) =>
+      this.#forward(socket, launch, undefined),
+    );
     const listening = await new Promise<boolean>((resolve) => {
       server.once("error", () => resolve(false));
       server.listen({ path, exclusive: true }, () => resolve(true));
@@ -141,8 +175,14 @@ export class ExecutorEgress {
       rmSync(directory, { recursive: true, force: true });
       return undefined;
     }
-    this.#launches.set(launch, entry);
-    return path;
+    this.#launches.set(launch, {
+      close: () => {
+        server.close();
+        rmSync(directory, { recursive: true, force: true });
+      },
+      forwarded: new Set(),
+    });
+    return { kind: "unix-socket", path };
   }
 
   /**
@@ -155,8 +195,7 @@ export class ExecutorEgress {
     this.#launches.delete(launch);
     if (entry !== undefined) {
       for (const stream of entry.forwarded) stream.destroy();
-      entry.server.close();
-      rmSync(entry.directory, { recursive: true, force: true });
+      entry.close();
     }
     if (this.#launches.size === 0) {
       for (const stream of this.#dialed) stream.destroy();
@@ -167,10 +206,7 @@ export class ExecutorEgress {
   abandon(): void {
     this.#forwarded.abandonAll();
     for (const stream of this.#dialed) stream.abandon();
-    for (const entry of this.#launches.values()) {
-      entry.server.close();
-      rmSync(entry.directory, { recursive: true, force: true });
-    }
+    for (const entry of this.#launches.values()) entry.close();
     this.#launches.clear();
   }
 
@@ -188,7 +224,8 @@ export class ExecutorEgress {
     }
   }
 
-  #forward(socket: Socket, launch: number): void {
+  /** `received` is what a macOS forwarder already read while it checked the token. */
+  #forward(socket: Socket, launch: number, received: Buffer | undefined): void {
     socket.on("error", () => socket.destroy());
     const entry = this.#launches.get(launch);
     const stream =
@@ -202,6 +239,7 @@ export class ExecutorEgress {
     entry.forwarded.add(stream);
     stream.once("close", () => entry.forwarded.delete(stream));
     this.#send({ type: "stream-open", stream: stream.id, launch });
+    if (received !== undefined) stream.write(received);
     joinToStream(socket, stream);
   }
 
@@ -311,10 +349,12 @@ export async function runExecutorCommand(
   } catch {
     return unavailable;
   }
-  let proxyPath: string | undefined;
+  const token = request.egressToken;
+  let endpoint: EgressProxyEndpoint | undefined;
   if (request.network === "proxied") {
-    proxyPath = await egress.open(session, launch);
-    if (proxyPath === undefined) return unavailable;
+    if (token === undefined) return unavailable;
+    endpoint = await egress.open(session, launch, token);
+    if (endpoint === undefined) return unavailable;
   }
   // Once the forwarder is open, every path below must close it and answer:
   // a failure that escaped here would leave no reply, the forwarder and its
@@ -344,16 +384,15 @@ export async function runExecutorCommand(
       harnessShellScriptDirectory: scripts,
       networkEgress: request.network === "none" ? "none" : "allow",
     });
-    const token = request.egressToken;
     const result = await port.executeShellScript(
       {
         script,
         cwd: root,
         environment: { NO_COLOR: "1", TERM: "dumb" },
         timeoutMs: request.timeoutMs,
-        ...(proxyPath === undefined || token === undefined
+        ...(endpoint === undefined || token === undefined
           ? {}
-          : { egressProxy: { endpoint: { kind: "unix-socket", path: proxyPath }, token } }),
+          : { egressProxy: { endpoint, token } }),
       },
       signal,
     );
