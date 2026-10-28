@@ -1665,6 +1665,9 @@ async function startDesktopCredentialBroker(): Promise<CredentialBroker | undefi
     backend.mcpServerCredentials,
     backend.desktopProviderCredentials,
     backend.appStoreConnectKeys,
+    // The host's per-upload key folders; the broker writes the App Store
+    // Connect key only into one of them, for one upload.
+    join(desktopDataDirectory, "apple-runtime", "distribution-keys"),
   );
 }
 

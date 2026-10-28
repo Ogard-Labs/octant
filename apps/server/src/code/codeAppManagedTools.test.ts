@@ -2282,7 +2282,8 @@ describe("Code tool families", () => {
     // usage moved behind help. The budget catches a description growing back.
     // A paired device as an Apple destination added its own operations and
     // parameters (about 250 bytes of schema); its usage lives behind help.
-    expect(JSON.stringify(families).length).toBeLessThanOrEqual(4_600);
+    // The upload operation added its name to the enum; its usage is in help too.
+    expect(JSON.stringify(families).length).toBeLessThanOrEqual(4_620);
   });
 
   it.each(["octant_browser", "octant_terminal", "octant_apple", "octant_android"])(
@@ -2573,6 +2574,101 @@ describe("a paired iPhone or iPad through the Apple tool", () => {
       });
     },
   );
+
+  describe("an upload to App Store Connect", () => {
+    const build = {
+      bundleIdentifier,
+      version: "1.4.0",
+      buildNumber: "12",
+      signing: { teamId: "A1B2C3D4E5", identity: "3".repeat(40) },
+      profileId: "a1000000-0000-4000-8000-0000000000ff",
+    };
+    const uploaded = () =>
+      vi.fn(
+        async () =>
+          ({
+            kind: "apple-upload-evidence",
+            evidence: {
+              actionId: "90000000-0000-4000-8000-000000000001",
+              correlationId: "90000000-0000-4000-8000-000000000002",
+              authority: appleAuthority,
+              kind: "upload",
+              requestedBy: { kind: "agent" },
+              outcome: "succeeded",
+              upload: build,
+              deliveryId: "a1000000-0000-4000-8000-0000000000dd",
+              diagnostics: [],
+              artifacts: [],
+              cleanup: "complete",
+              durationMs: 40,
+              completedAt: "2026-10-28T08:00:01.000Z",
+            },
+          }) as never,
+      );
+    const prepareUpload = () => vi.fn(async () => ({ kind: "prepared", upload: build }) as never);
+
+    it.each(["full-access", "approval-gated"] as const)(
+      "asks the person at the Mac to confirm the exact build under %s before anything runs",
+      async (executionPolicy) => {
+        const declined = deviceTools(
+          { executionPolicy } as never,
+          { check: awaitingConfirmation(), prepareUpload: prepareUpload() },
+          "denied",
+        );
+        const refused = await declined.call({
+          operation: "upload",
+          projectPath: "Fixture.xcodeproj",
+          teamId: "A1B2C3D4E5",
+        });
+        expect(refused).toMatchObject({
+          isError: true,
+          result: { error: "device-approval-denied" },
+        });
+        expect(declined.devices.request).not.toHaveBeenCalled();
+
+        const allowed = deviceTools({ executionPolicy } as never, {
+          check: awaitingConfirmation(),
+          prepareUpload: prepareUpload(),
+          request: uploaded(),
+        });
+        const answer = await allowed.call({
+          operation: "upload",
+          projectPath: "Fixture.xcodeproj",
+          teamId: "A1B2C3D4E5",
+        });
+        // The person is shown exactly the build the host read.
+        expect(allowed.ask.mock.calls[0]?.[0]).toMatchObject({
+          kind: "apple-distribution-upload",
+          request: { kind: "upload", upload: build, requestedBy: { kind: "agent", threadId } },
+        });
+        expect(allowed.sent()).toMatchObject({
+          kind: "upload",
+          upload: build,
+          approval: { kind: "approved", approvalId: "d0000000-0000-4000-8000-000000000001" },
+        });
+        expect(answer).toMatchObject({
+          isError: false,
+          result: { kind: "upload", outcome: "succeeded", buildNumber: "12" },
+        });
+      },
+    );
+
+    it("refuses an upload in Plan before reading the project or asking anyone", async () => {
+      const read = prepareUpload();
+      const { ask, call, devices } = deviceTools({ executionPolicy: "plan" } as never, {
+        prepareUpload: read,
+      });
+      const outcome = await call({
+        operation: "upload",
+        projectPath: "Fixture.xcodeproj",
+        teamId: "A1B2C3D4E5",
+      });
+      expect(outcome).toMatchObject({ isError: true, result: { error: "plan-mode-read-only" } });
+      expect(read).not.toHaveBeenCalled();
+      expect(ask).not.toHaveBeenCalled();
+      expect(devices.request).not.toHaveBeenCalled();
+    });
+  });
 
   it("does not ask again for a device the thread already holds", async () => {
     const { ask, call, sent } = deviceTools({ executionPolicy: "approval-gated" } as never, {

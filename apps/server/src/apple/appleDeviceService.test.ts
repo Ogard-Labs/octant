@@ -24,7 +24,11 @@ import {
 import type { AppleDeviceExecutionScope } from "@octant/domain";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AppleDeviceLeases, APPLE_DEVICE_DISCONNECT_GRACE_MS } from "./appleDeviceLeases";
-import { AppleDeviceService, type AppleDeviceExecutionContext } from "./appleDeviceService";
+import {
+  AppleDeviceService,
+  type AppleDeviceExecutionContext,
+  type AppleDeviceServiceOptions,
+} from "./appleDeviceService";
 import { AppleRuntimeStore } from "./appleRuntimeStore";
 import { parseDevicectlDeviceList, parseDevicectlLockState } from "./devicectl";
 import type { AppleProcessResult } from "./appleToolchainService";
@@ -106,6 +110,18 @@ function scopeFor(
   };
 }
 
+const uploadFields = {
+  projectPath: "SimulatorFixture.xcodeproj",
+  teamId: "A1B2C3D4E5",
+  upload: {
+    bundleIdentifier: "app.octant.simulatorfixture",
+    version: "1.0",
+    buildNumber: "1",
+    signing: { teamId: "A1B2C3D4E5", identity: "3".repeat(40) },
+    profileId: "45000000-0000-4000-8000-000000000001",
+  },
+  approval: { kind: "approved", approvalId: "43000000-0000-4000-8000-000000000002" },
+};
 const confirmed = (thread: typeof firstThread) =>
   scopeFor(thread, { approvalValid: true, approvedBy: person as never });
 const approval = {
@@ -366,7 +382,14 @@ describe("AppleDeviceService", () => {
 
   let idNumber = 0;
   function service(platform: NodeJS.Platform = "darwin", store = new AppleRuntimeStore(root)) {
-    return new AppleDeviceService({
+    return new AppleDeviceService(serviceOptions(platform, store));
+  }
+
+  function serviceOptions(
+    platform: NodeJS.Platform = "darwin",
+    store = new AppleRuntimeStore(root),
+  ): AppleDeviceServiceOptions {
+    return {
       execute: fakeExecute(host),
       executeSigning: fakeSigning(host),
       outputDirectory: join(root, "devicectl"),
@@ -390,7 +413,7 @@ describe("AppleDeviceService", () => {
         return `44000000-0000-4000-8000-${String(idNumber).padStart(12, "0")}`;
       },
       platform,
-    });
+    };
   }
 
   async function discover(devices: AppleDeviceService, thread = firstThread) {
@@ -778,8 +801,55 @@ describe("AppleDeviceService", () => {
       reason: "provisioning-updates-not-offered",
     });
     await expect(
-      devices.request(deviceRequest("upload", firstThread, approval), confirmed(firstThread)),
+      devices.request(deviceRequest("upload", firstThread, uploadFields), confirmed(firstThread)),
     ).resolves.toEqual({ kind: "apple-device-refused", reason: "operation-unavailable" });
+  });
+
+  it("hands only a confirmed upload to the distribution service, even when no device can be listed", async () => {
+    const uploads: AppleDeviceRequest[] = [];
+    const devices = new AppleDeviceService({
+      ...serviceOptions(),
+      distribution: {
+        upload: async (request) => {
+          uploads.push(request);
+          return { kind: "apple-device-refused", reason: "upload-changed" } as AppleDeviceResponse;
+        },
+      },
+    });
+    host.listing = "{";
+    // The thread's agent asked, and no person has confirmed it yet.
+    const asked = deviceRequest("upload", firstThread, {
+      ...uploadFields,
+      requestedBy: {
+        kind: "agent",
+        actorId: "40000000-0000-4000-8000-000000000011",
+        providerInstanceId: authority.providerInstanceId,
+        threadId: firstThread.threadId,
+      },
+      approval: { kind: "pending" },
+    });
+    await expect(
+      devices.request(asked, scopeFor(firstThread, { executionPolicy: "full-access" })),
+    ).resolves.toEqual({ kind: "apple-device-refused", reason: "confirmation-required" });
+    await expect(
+      devices.request(
+        deviceRequest("upload", firstThread, uploadFields),
+        scopeFor(firstThread, {
+          executionPolicy: "plan",
+          approvalValid: true,
+          approvedBy: person as never,
+        }),
+      ),
+    ).resolves.toEqual({ kind: "apple-device-refused", reason: "read-only-policy" });
+    expect(uploads).toEqual([]);
+    const confirmedUpload = deviceRequest("upload", firstThread, uploadFields);
+    await devices.request(confirmedUpload, confirmed(firstThread));
+    expect(uploads).toEqual([confirmedUpload]);
+    // A reused action id is not carried out twice.
+    await expect(devices.request(confirmedUpload, confirmed(firstThread))).resolves.toMatchObject({
+      kind: "apple-device-failure",
+    });
+    expect(uploads).toHaveLength(1);
   });
 
   describe("the thread's own app on a leased device", () => {

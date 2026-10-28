@@ -628,6 +628,14 @@ export function startOctantServer(
       androidInputGrants,
       appleDeviceLeases,
       codeSessionAuthority,
+      ...(options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+        ? {}
+        : {
+            credentialBroker: {
+              url: options.credentialBrokerUrl,
+              token: options.credentialBrokerToken,
+            },
+          }),
       persistence,
       projectService,
       providerDataDirectory,

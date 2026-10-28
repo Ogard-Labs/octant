@@ -33,6 +33,7 @@ import {
   type AppleDeviceThreadHoldings,
 } from "@octant/domain";
 import type { AppleDeviceLeases, EndedAppleDeviceLease } from "./appleDeviceLeases";
+import type { AppleDistributionUpload } from "./appleDistributionUpload";
 import {
   MAX_DEVICE_IDENTITIES,
   readStoredFile,
@@ -172,6 +173,11 @@ export interface AppleDeviceServiceOptions {
   readonly platform?: NodeJS.Platform;
   /** Override for tests; production waits `LAUNCH_SETTLE_MS`. */
   readonly launchSettleMs?: number;
+  /**
+   * The person-confirmed upload to App Store Connect. Absent, an upload the
+   * policy allowed is still refused as not offered on this host.
+   */
+  readonly distribution?: Pick<AppleDistributionUpload, "upload">;
 }
 
 /**
@@ -389,7 +395,11 @@ export class AppleDeviceService {
     // Releasing needs no fresh look at the device: a person may let go of a
     // phone that is already unplugged.
     if (request.kind === "release-device") return undefined;
-    if ((await this.#refresh(signal)) !== "unreadable") return undefined;
+    // An upload targets no device: once the toolchain has answered, a device
+    // listing that failed does not stand in its way.
+    if ((await this.#refresh(signal)) !== "unreadable" || request.kind === "upload") {
+      return undefined;
+    }
     return decodeAppleDeviceResponse({
       kind: "apple-device-failure",
       failure: { category: "unavailable", message: "Paired devices could not be listed." },
@@ -591,9 +601,24 @@ export class AppleDeviceService {
           notes: [],
           artifacts: [],
         });
+      case "upload": {
+        const distribution = this.#options.distribution;
+        if (distribution === undefined) return refused("operation-unavailable");
+        if (this.#actionIds.has(String(request.actionId))) {
+          return decodeAppleDeviceResponse({
+            kind: "apple-device-failure",
+            failure: {
+              category: "invalid",
+              message: "This upload's action id was already used; issue a new one.",
+            },
+          });
+        }
+        this.#actionIds.add(String(request.actionId));
+        return await distribution.upload(request, context, signal);
+      }
       default:
-        // Uninstall arrives in a later slice; until then the host does not
-        // offer what the policy would allow.
+        // Uninstall, submission, and release arrive in later slices; until
+        // then the host does not offer what the policy would allow.
         return refused("operation-unavailable");
     }
   }
