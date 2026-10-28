@@ -496,6 +496,46 @@ describe("ProviderService", () => {
     expect(fixture.append.mock.calls.length).toBe(appends);
   });
 
+  it("still journals the catalogue when a probe really changed what it lists", async () => {
+    const before = observation();
+    const after = observation({
+      models: [
+        ...before.models,
+        {
+          id: "model-2",
+          displayName: "Model Two",
+          source: "discovered",
+          verification: "verified",
+          reasoning: "supported",
+          inputModalities: ["text"],
+          options: [],
+        },
+      ],
+    });
+    const results = [before, after];
+    let probes = 0;
+    const fixture = serviceFixture({
+      instances: [provider()],
+      withCatalogPersistence: true,
+      probe: async () => results[Math.min(probes++, results.length - 1)],
+    });
+
+    await fixture.service.probe(windowId, instanceId);
+    expect(fixture.catalogs()[0]).toMatchObject({ version: 1, invalidated: false });
+    const appends = fixture.append.mock.calls.length;
+
+    await fixture.service.probe(windowId, instanceId);
+    expect(fixture.append.mock.calls.length).toBeGreaterThan(appends);
+    expect(fixture.catalogs()[0]).toMatchObject({
+      version: 2,
+      invalidated: false,
+      models: [
+        expect.objectContaining({ id: "model-1" }),
+        expect.objectContaining({ id: "model-2" }),
+      ],
+    });
+  });
+
   it("persists residency tags on an individual provider model", async () => {
     const fixture = serviceFixture({
       instances: [provider()],
