@@ -136,6 +136,7 @@ export class Journal {
   readonly #aggregateTypeThreadHead: SqliteStatement;
   readonly #replayThreadAnchoredRows: SqliteStatement;
   readonly #replayAggregateRows: SqliteStatement;
+  readonly #replayAggregateBySequenceRows: SqliteStatement;
   readonly #latestThreadKindRows: SqliteStatement;
   readonly #latestThreadResultRows: SqliteStatement;
   readonly #latestThreadKindPerAggregateRows: SqliteStatement;
@@ -403,6 +404,20 @@ export class Journal {
       FROM event_journal
       WHERE aggregate_type = ? AND aggregate_id = ? AND aggregate_version > ?
       ORDER BY aggregate_version ASC
+      LIMIT ?
+    `);
+    // The (type, aggregate, sequence) index (migration 89) returns the rows
+    // after the cursor already in order. Chat event streams resume by journal
+    // sequence across several aggregates keyed by the thread id, so they need
+    // the aggregate scoped by sequence, not by version.
+    this.#replayAggregateBySequenceRows = options.connection.prepare(`
+      SELECT
+        global_sequence, event_id, aggregate_type, aggregate_id, aggregate_version,
+        event_name, event_version, host_id, correlation_id, causation_id, actor_kind,
+        actor_id, ${actorJsonSelect}, occurred_at, payload_json
+      FROM event_journal
+      WHERE aggregate_type = ? AND aggregate_id = ? AND global_sequence > ?
+      ORDER BY global_sequence ASC
       LIMIT ?
     `);
   }
@@ -1020,6 +1035,39 @@ export class Journal {
         cursor.aggregateType,
         cursor.aggregateId,
         cursor.afterVersion,
+        cursor.limit,
+      ) as Array<JournalRow>
+    ).map((row) => this.#decodeRow(row));
+  }
+
+  /**
+   * One aggregate's events in global journal order after a sequence: what a
+   * stream scoped to a single aggregate resumes with, when its cursor is the
+   * journal sequence a frame carried. The (type, aggregate, sequence) index
+   * (migration 89) returns the rows after the cursor already in order.
+   */
+  replayAggregateBySequence(cursor: {
+    readonly aggregateType: string;
+    readonly aggregateId: string;
+    readonly afterSequence: number;
+    readonly limit: number;
+  }): ReadonlyArray<EventEnvelope> {
+    if (
+      cursor.aggregateType.trim().length === 0 ||
+      cursor.aggregateId.trim().length === 0 ||
+      !Number.isSafeInteger(cursor.afterSequence) ||
+      cursor.afterSequence < 0 ||
+      !Number.isSafeInteger(cursor.limit) ||
+      cursor.limit < 1 ||
+      cursor.limit > 1_000
+    ) {
+      throw new JournalInputInvalid({ operation: "replay" });
+    }
+    return (
+      this.#replayAggregateBySequenceRows.all(
+        cursor.aggregateType,
+        cursor.aggregateId,
+        cursor.afterSequence,
         cursor.limit,
       ) as Array<JournalRow>
     ).map((row) => this.#decodeRow(row));

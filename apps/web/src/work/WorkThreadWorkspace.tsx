@@ -15,11 +15,13 @@ import {
   decodeWorkTurnId,
   decodeWorkTurnRequestId,
   type ProviderModelOptionValues,
+  type ThreadDocumentDelivery,
   type UsageResumeThreadState,
   type WorkAttachmentId,
   type WorkRequest,
   type WorkThread,
   type WorkThreadId,
+  type WorkTurnRequestId,
   type WorkTurnId,
   type WorkTurnState,
   type WorkTurnStreamFrame,
@@ -88,6 +90,13 @@ import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
 import { ThreadCanvases } from "../canvas/InlineThreadCanvas";
+import {
+  ThreadArtifactsConfirm,
+  ThreadArtifactsOffer,
+  threadArtifactsOfferRow,
+  threadMayChooseArtifacts,
+} from "../canvas/ThreadArtifactsChoice";
+import { publishedSnapshotRunRuntimeFor } from "../canvas/blocks/designRunningFrame";
 import { placeThreadCanvases, threadTurnSpans } from "../canvas/threadCanvasPlacement";
 import { useThreadCanvasCards } from "../canvas/useThreadCanvasCards";
 import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
@@ -353,13 +362,21 @@ function WorkTurnHeader(props: {
  * runs; a settled turn folds behind "N tool calls" and shows a tool it never
  * saw end as unfinished.
  */
-function WorkToolGroup(props: { readonly turn: WorkTurnState }) {
+function WorkToolGroup(props: {
+  readonly turn: WorkTurnState;
+  readonly canvasClient?: CanvasClient;
+}) {
   const activity = toolStepsActivity(props.turn.toolSteps, props.turn.toolStepsTruncated);
   if (activity === undefined) return null;
   const status = props.turn.status;
+  const canvasClient = props.canvasClient;
+  const threadId = String(props.turn.threadId);
   return (
     <TurnActivityRows
       activity={activity}
+      publishedSnapshotRuntime={(toolCallId) =>
+        publishedSnapshotRunRuntimeFor(canvasClient, { mode: "work", threadId, toolCallId })
+      }
       running={status === "accepted" || status === "running"}
       settled={status === "completed" || status === "failed" || status === "cancelled"}
     />
@@ -557,30 +574,103 @@ async function consumeWorkTurnStream(input: {
 }): Promise<void> {
   let cursor = input.afterSequence;
   let retryMs = 250;
-  while (input.active() && !input.signal.aborted) {
-    try {
-      let received = false;
-      for await (const frame of input.client.subscribe(input.threadId, cursor, input.signal)) {
-        if (!input.active() || input.signal.aborted) return;
-        received = true;
-        if (frame.kind === "snapshot-required") {
-          const snapshot = await readNewestWorkTurns(input.client, input.threadId, input.signal);
-          if (!input.active() || input.signal.aborted) return;
-          input.replace(snapshot);
-          cursor = snapshot.liveCursor;
-          break;
-        }
-        cursor = frame.sequence;
-        input.apply(frame);
-      }
-      retryMs = received ? 50 : Math.min(retryMs * 2, 2_000);
-    } catch {
-      if (!input.active() || input.signal.aborted) return;
-      retryMs = Math.min(retryMs * 2, 2_000);
+  // A streamed response commits on beats, not per delta: every apply
+  // re-renders the workspace and re-flattens the transcript, and a reply's
+  // deltas arrive far faster than a frame paints. Deltas of one request
+  // combine into one apply; a frame that supersedes them drops what it makes
+  // stale, and any other frame flushes them first so fields merge in order.
+  let pending:
+    | { readonly requestId: WorkTurnRequestId; readonly sequence: number; text: string }
+    | undefined;
+  let beat: ReturnType<typeof setTimeout> | undefined;
+  const clearBeat = () => {
+    if (beat !== undefined) {
+      clearTimeout(beat);
+      beat = undefined;
     }
-    await waitForWorkStreamReconnect(input.signal, retryMs);
+  };
+  const flushPending = () => {
+    clearBeat();
+    if (pending === undefined) return;
+    const delta = pending;
+    pending = undefined;
+    input.apply({
+      kind: "response-delta",
+      sequence: delta.sequence,
+      threadId: input.threadId,
+      requestId: delta.requestId,
+      text: delta.text,
+    });
+  };
+  try {
+    while (input.active() && !input.signal.aborted) {
+      try {
+        let received = false;
+        for await (const frame of input.client.subscribe(input.threadId, cursor, input.signal)) {
+          if (!input.active() || input.signal.aborted) return;
+          received = true;
+          if (frame.kind === "snapshot-required") {
+            const snapshot = await readNewestWorkTurns(input.client, input.threadId, input.signal);
+            if (!input.active() || input.signal.aborted) return;
+            // The replaced snapshot is the authority; pending deltas belong
+            // to the stream it replaces.
+            pending = undefined;
+            clearBeat();
+            input.replace(snapshot);
+            cursor = snapshot.liveCursor;
+            break;
+          }
+          cursor = frame.sequence;
+          if (frame.kind === "response-delta") {
+            if (pending !== undefined && String(pending.requestId) === String(frame.requestId)) {
+              pending = { ...pending, text: pending.text + frame.text, sequence: frame.sequence };
+            } else {
+              flushPending();
+              pending = {
+                requestId: frame.requestId,
+                sequence: frame.sequence,
+                text: frame.text,
+              };
+            }
+            if (beat === undefined) {
+              beat = setTimeout(() => {
+                beat = undefined;
+                flushPending();
+              }, STREAM_REPLY_BEAT_MS);
+            }
+            continue;
+          }
+          if (frame.kind === "turn-settled") {
+            // The settled turn carries the whole response; pending deltas of
+            // the same request are what it supersedes.
+            if (
+              pending !== undefined &&
+              String(pending.requestId) === String(frame.turn.requestId)
+            ) {
+              pending = undefined;
+              clearBeat();
+            } else {
+              flushPending();
+            }
+          } else {
+            flushPending();
+          }
+          input.apply(frame);
+        }
+        retryMs = received ? 50 : Math.min(retryMs * 2, 2_000);
+      } catch {
+        if (!input.active() || input.signal.aborted) return;
+        retryMs = Math.min(retryMs * 2, 2_000);
+      }
+      await waitForWorkStreamReconnect(input.signal, retryMs);
+    }
+  } finally {
+    flushPending();
   }
 }
+
+/** How often a streaming Work reply commits its accumulated text: see consumeWorkTurnStream. */
+const STREAM_REPLY_BEAT_MS = 50;
 
 async function waitForWorkStreamReconnect(signal: AbortSignal, delayMs: number): Promise<void> {
   if (signal.aborted) return;
@@ -688,6 +778,38 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   const fileMentionListId = useId();
   const trimmed = prompt.trim();
   const completionLocked = thread?.completionConfirmed === true;
+  const [deliveryChanging, setDeliveryChanging] = useState(false);
+  const [confirmArtifacts, setConfirmArtifacts] = useState(false);
+  // The account must allow Claude artifacts for the thread to choose them; a
+  // thread that already chose them can always go back to Canvas.
+  const artifactsChoosable =
+    thread !== undefined &&
+    thread.lifecycle === "active" &&
+    threadMayChooseArtifacts(props.providerGroups ?? [], thread.providerInstanceId, "work");
+  const changeDocumentDelivery = async (documentDelivery: ThreadDocumentDelivery) => {
+    if (thread === undefined || deliveryChanging) return;
+    setDeliveryChanging(true);
+    setErrorMessage(undefined);
+    try {
+      const result = await props.threadClient.execute({
+        kind: "change-work-thread-document-delivery",
+        threadId: thread.id,
+        expectedVersion: thread.version,
+        documentDelivery,
+      });
+      if (!("kind" in result) || result.kind !== "thread-updated") {
+        setErrorMessage("This task’s document choice could not be saved.");
+        return;
+      }
+      setThread(result.thread);
+      props.onThreadUpdated?.(result.thread);
+    } catch {
+      setErrorMessage("This task’s document choice could not be saved.");
+    } finally {
+      setDeliveryChanging(false);
+      setConfirmArtifacts(false);
+    }
+  };
   // The next turn starts a new session with the conversation handed over as
   // text when the selected provider keeps its own session and the latest turn
   // ran on another provider; the person hears that before sending.
@@ -1711,9 +1833,25 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     threadCanvases.cards,
   );
 
+  // Offered once: an answer either way is the thread's journaled choice.
+  const artifactsOfferRow = threadArtifactsOfferRow({
+    choosable: artifactsChoosable && !completionLocked,
+    documentDelivery: thread?.documentDelivery,
+    rowKeys: transcriptRows.map((row) => row.key),
+    canvasesByRow: canvasPlacement.byRow,
+  });
+
   return (
     <section aria-label="Task workspace" className="work-thread-workspace">
       <h1 className="sr-only">{props.title}</h1>
+
+      {confirmArtifacts ? (
+        <ThreadArtifactsConfirm
+          onCancel={() => setConfirmArtifacts(false)}
+          onConfirm={() => void changeDocumentDelivery("native-artifacts")}
+          pending={deliveryChanging}
+        />
+      ) : null}
 
       {completionFormOpen && thread?.lifecycle === "active" && !completionLocked ? (
         <OctantConfirmDialog
@@ -1747,11 +1885,19 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           ? {}
           : {
               afterItem: (row: WorkTranscriptRow) => (
-                <ThreadCanvases
-                  cards={canvasPlacement.byRow.get(row.key)}
-                  client={canvasClient}
-                  {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
-                />
+                <>
+                  <ThreadCanvases
+                    cards={canvasPlacement.byRow.get(row.key)}
+                    client={canvasClient}
+                    {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
+                  />
+                  {row.key === artifactsOfferRow ? (
+                    <ThreadArtifactsOffer
+                      onChoose={(choice) => void changeDocumentDelivery(choice)}
+                      pending={deliveryChanging}
+                    />
+                  ) : null}
+                </>
               ),
             })}
         renderItem={(row) => {
@@ -1810,7 +1956,12 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                     <HarnessRetryStatus
                       events={workRetryEvents(retries, String(row.head.requestId))}
                     />
-                    <WorkToolGroup turn={row.head} />
+                    <WorkToolGroup
+                      turn={row.head}
+                      {...(props.canvasClient === undefined
+                        ? {}
+                        : { canvasClient: props.canvasClient })}
+                    />
                   </>
                 )}
                 {row.entry.text === "" ? null : (
@@ -1839,7 +1990,12 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                     : { usageResume: thread.usageResume })}
                 />
                 <HarnessRetryStatus events={workRetryEvents(retries, String(row.turn.requestId))} />
-                <WorkToolGroup turn={row.turn} />
+                <WorkToolGroup
+                  turn={row.turn}
+                  {...(props.canvasClient === undefined
+                    ? {}
+                    : { canvasClient: props.canvasClient })}
+                />
               </div>
             );
           }
@@ -2234,8 +2390,29 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                       icon: <Check aria-hidden="true" size={14} />,
                       disabled: completing || providerChanging || creating,
                     },
+                    ...(thread.documentDelivery === "native-artifacts"
+                      ? [
+                          {
+                            value: "canvas",
+                            label: "Use Canvas instead of Claude artifacts",
+                            disabled: deliveryChanging,
+                          },
+                        ]
+                      : artifactsChoosable
+                        ? [
+                            {
+                              value: "native-artifacts",
+                              label: "Use Claude artifacts instead of Canvas",
+                              disabled: deliveryChanging,
+                            },
+                          ]
+                        : []),
                   ]}
-                  onValueChange={() => setCompletionFormOpen(true)}
+                  onValueChange={(value) => {
+                    if (value === "canvas") void changeDocumentDelivery("canvas");
+                    else if (value === "native-artifacts") setConfirmArtifacts(true);
+                    else setCompletionFormOpen(true);
+                  }}
                   selectionMode="action"
                   trigger={<Ellipsis aria-hidden="true" size={16} />}
                   triggerClassName="shell-icon-button"

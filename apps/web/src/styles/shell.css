@@ -1207,7 +1207,7 @@ html[data-octant-native-host="true"]
 }
 
 .sidebar-navigation__thread-status[data-activity="working"] > svg {
-  animation: octant-thread-spin 1.4s linear infinite;
+  animation: octant-thread-spin var(--oct-motion-spin) linear infinite;
 }
 
 @keyframes octant-thread-spin {
@@ -1609,7 +1609,7 @@ html[data-octant-native-host="true"]
   background: var(--oct-fg-soft);
   border-radius: var(--oct-radius-pill);
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   line-height: 1.4;
 }
 
@@ -1623,7 +1623,7 @@ html[data-octant-native-host="true"]
   min-width: 0;
   overflow: hidden;
   color: var(--oct-fg);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1711,7 +1711,7 @@ html[data-octant-native-host="true"]
 
 .thread-row-info-card__pr-title {
   color: var(--oct-fg);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .thread-row-info-card__pr-meta {
@@ -2545,7 +2545,7 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   gap: var(--oct-space-1);
   color: var(--octant-text-muted);
   font-size: var(--oct-text-detail);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   white-space: nowrap;
 }
 
@@ -3004,7 +3004,7 @@ form > .work-composer-adapter__attachments {
   color: var(--octant-text-secondary);
   border-top: 1px solid var(--octant-border);
   font-size: var(--oct-text-detail);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .code-composer-choice__trigger {
@@ -3058,7 +3058,7 @@ form > .work-composer-adapter__attachments {
 
 .code-worktree-source__title {
   font-size: var(--oct-text-detail);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   color: var(--octant-text-primary);
 }
 
@@ -3276,7 +3276,7 @@ form > .work-composer-adapter__attachments {
 }
 
 .browser-workspace__control-state svg {
-  animation: browser-spin 0.9s linear infinite;
+  animation: browser-spin var(--oct-motion-spin) linear infinite;
 }
 
 .browser-workspace__message {

@@ -729,9 +729,18 @@ describe("Canvas share contracts", () => {
     // drops every one, and a design's declared images with them: an asset
     // names a Project file or an image job. A table row's id is what a comment
     // anchors to and a share carries no comments, so a keyed row leaves as its
-    // cells.
+    // cells. A chart's title, subtitle, and point callouts arrived after
+    // share version 11 and the share service refuses a format it does not
+    // know, so a shared chart leaves as its readings.
     const refusedKinds = new Set(["action"]);
-    const flattened = new Set(["table.rows[].id", "table.rows[].cells"]);
+    const flattened = new Set([
+      "table.rows[].id",
+      "table.rows[].cells",
+      "chart.title",
+      "chart.subtitle",
+      "chart.series[].points[].note",
+      "chart.series[].points[].emphasis",
+    ]);
     const dropped = (kind: string, path: string) =>
       /(?:^|\.)sourceIds?$/.test(path) ||
       flattened.has(`${kind}.${path}`) ||

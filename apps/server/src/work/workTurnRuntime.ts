@@ -82,6 +82,8 @@ export interface WorkTurnRuntimePort {
     readonly modelOptionValues?: ProviderModelOptionValues;
     /** The thread's access; absent reads as ask-first, which Work always was. */
     readonly access?: WorkAccess;
+    /** The thread chose the runtime's own artifact tool and this turn offers it. */
+    readonly nativeArtifacts?: boolean;
     readonly appManagedTools?: AppManagedToolSet;
     /**
      * Records that the runtime's own web search, page fetch, or hosted tool
@@ -270,6 +272,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
             ? ("auto-accept-edits" as const)
             : ("approval-gated" as const),
         tools: input.appManagedTools?.definitions ?? [],
+        ...(input.nativeArtifacts === true ? { nativeArtifacts: true } : {}),
       };
       const handle = yield* input.resumeCursor === undefined
         ? connection.start({ ...options, modelId: input.command.authority.modelId })

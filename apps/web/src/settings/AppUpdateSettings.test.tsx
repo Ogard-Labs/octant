@@ -6,18 +6,18 @@ import type { UtcTimestamp } from "@octant/contracts";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AppUpdateSettings } from "./AppUpdateSettings";
-import type { AppUpdateStateView, OctantHostBridge } from "../shell/hostBridge";
+import type { AppUpdateState, OctantHostBridge } from "../shell/hostBridge";
 
-const ready: AppUpdateStateView = {
+const ready: AppUpdateState = {
   status: "ready",
-  currentVersion: "0.1.0" as AppUpdateStateView["currentVersion"],
+  currentVersion: "0.1.0" as AppUpdateState["currentVersion"],
   automaticChecks: true,
   ring: "stable",
 };
 
-function offeredRelease(notes: string): NonNullable<AppUpdateStateView["available"]> {
+function offeredRelease(notes: string): NonNullable<AppUpdateState["available"]> {
   return {
-    version: "0.2.0" as AppUpdateStateView["currentVersion"],
+    version: "0.2.0" as AppUpdateState["currentVersion"],
     platform: "darwin",
     arch: "arm64",
     ring: "stable",
@@ -43,7 +43,7 @@ function bridge(overrides: Partial<OctantHostBridge> = {}): OctantHostBridge {
     })),
     acknowledgeWhatsNew: vi.fn(async () => undefined),
     // The host pushes state; without an emission the surface is correctly idle.
-    subscribeAppUpdateState: vi.fn((listener: (state: AppUpdateStateView) => void) => {
+    subscribeAppUpdateState: vi.fn((listener: (state: AppUpdateState) => void) => {
       listener(ready);
       return () => undefined;
     }),
@@ -271,10 +271,10 @@ describe("AppUpdateSettings", () => {
 
   it("renders signed notes when an update is offered", () => {
     view({
-      subscribeAppUpdateState: vi.fn((listener: (state: AppUpdateStateView) => void) => {
+      subscribeAppUpdateState: vi.fn((listener: (state: AppUpdateState) => void) => {
         listener({
           status: "available",
-          currentVersion: "0.1.0" as AppUpdateStateView["currentVersion"],
+          currentVersion: "0.1.0" as AppUpdateState["currentVersion"],
           automaticChecks: true,
           ring: "stable",
           available: offeredRelease("The dock keeps pins."),
@@ -288,10 +288,10 @@ describe("AppUpdateSettings", () => {
 
   it("shows a portable-image refusal in the Updates group", () => {
     view({
-      subscribeAppUpdateState: vi.fn((listener: (state: AppUpdateStateView) => void) => {
+      subscribeAppUpdateState: vi.fn((listener: (state: AppUpdateState) => void) => {
         listener({
           status: "refused",
-          currentVersion: "0.1.0" as AppUpdateStateView["currentVersion"],
+          currentVersion: "0.1.0" as AppUpdateState["currentVersion"],
           automaticChecks: true,
           ring: "stable",
           refusal: "unsupported-install",
@@ -307,10 +307,10 @@ describe("AppUpdateSettings", () => {
 
   it("does not display notes from a feed that was refused", () => {
     view({
-      subscribeAppUpdateState: vi.fn((listener: (state: AppUpdateStateView) => void) => {
+      subscribeAppUpdateState: vi.fn((listener: (state: AppUpdateState) => void) => {
         listener({
           status: "refused",
-          currentVersion: "0.1.0" as AppUpdateStateView["currentVersion"],
+          currentVersion: "0.1.0" as AppUpdateState["currentVersion"],
           automaticChecks: true,
           ring: "stable",
           refusal: "untrusted-signature",
@@ -327,10 +327,10 @@ describe("AppUpdateSettings", () => {
   it("does not show a remote summary while automatic checking is off and no check has run", () => {
     view(
       {
-        subscribeAppUpdateState: vi.fn((listener: (state: AppUpdateStateView) => void) => {
+        subscribeAppUpdateState: vi.fn((listener: (state: AppUpdateState) => void) => {
           listener({
             status: "idle",
-            currentVersion: "0.1.0" as AppUpdateStateView["currentVersion"],
+            currentVersion: "0.1.0" as AppUpdateState["currentVersion"],
             automaticChecks: false,
             ring: "stable",
           });

@@ -133,6 +133,9 @@ export function markQueueDraftChanged(
       const raw = storage.getItem(candidate);
       if (raw === null) continue;
       const receipt = decode(raw);
+      // The first edit already marked every receipt of this thread; re-marking
+      // an unchanged receipt only spends a write on every keystroke.
+      if (receipt.draftChanged) continue;
       if (!saveQueueReceipt({ ...receipt, draftChanged: true }, storage)) return false;
     }
     return true;

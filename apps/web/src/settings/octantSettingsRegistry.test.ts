@@ -158,6 +158,7 @@ describe("octantSettingsRegistry", () => {
       "provider-manual-model-ids",
       "provider-deployment-ids",
       "provider-claude-account",
+      "provider-claude-artifacts",
     ]);
     const code = octantSettingsRegistry.sections.find((section) => section.id === "code");
     expect(code?.settings.map((setting) => setting.id)).toEqual([
@@ -309,6 +310,7 @@ const COMPUTED_SETTING_ROWS: Readonly<Record<string, string>> = {
   "provider-*-protocol-version": "provider-protocol",
   "provider-*-manual-model-ids": "provider-manual-model-ids",
   "provider-*-deployment-ids": "provider-deployment-ids",
+  "provider-*-claude-artifacts": "provider-claude-artifacts",
   "*-config-directory": "provider-claude-account",
   "*-accent": "provider-claude-account",
   "*-auth-login": "provider-claude-account",

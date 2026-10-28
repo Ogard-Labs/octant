@@ -105,7 +105,7 @@
 .apple-workbench__section h2 {
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .apple-workbench__section > ul,
@@ -135,7 +135,7 @@
 
 .apple-workbench__section li strong {
   font-size: var(--oct-text-sm);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .apple-workbench__section li span {

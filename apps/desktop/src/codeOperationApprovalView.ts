@@ -7,26 +7,17 @@ import type {
 import { CODE_OPERATION_APPROVAL_VIEW_CHANNELS } from "./codeOperationApprovalViewProtocol";
 export { CODE_OPERATION_APPROVAL_VIEW_CHANNELS } from "./codeOperationApprovalViewProtocol";
 
-export interface CodeOperationApprovalBounds {
-  readonly x: number;
-  readonly y: number;
-  readonly width: number;
-  readonly height: number;
-}
+import type {
+  ApprovalSurfacePalette as CodeOperationApprovalPalette,
+  CodeOperationApprovalAnchor,
+  CodeOperationApprovalBounds,
+} from "@octant/contracts/desktop-bridge";
 
-export type CodeOperationApprovalAnchor =
-  | {
-      readonly kind: "thread";
-      readonly projectId: string;
-      readonly threadId: string;
-      readonly bounds: CodeOperationApprovalBounds;
-    }
-  | {
-      readonly kind: "draft";
-      readonly projectId: string;
-      readonly composerId: string;
-      readonly bounds: CodeOperationApprovalBounds;
-    };
+export type {
+  ApprovalSurfacePalette as CodeOperationApprovalPalette,
+  CodeOperationApprovalAnchor,
+  CodeOperationApprovalBounds,
+} from "@octant/contracts/desktop-bridge";
 
 /**
  * The palette a window's resolved theme is showing, as that window's renderer
@@ -34,17 +25,6 @@ export type CodeOperationApprovalAnchor =
  * — eight hex colors and the mode — and anything else falls back to the
  * system palette the view has always drawn.
  */
-export interface CodeOperationApprovalPalette {
-  readonly mode: "light" | "dark";
-  readonly surface: string;
-  readonly text: string;
-  readonly muted: string;
-  readonly border: string;
-  readonly control: string;
-  readonly controlHover: string;
-  readonly accent: string;
-  readonly accentForeground: string;
-}
 
 const APPROVAL_PALETTE_COLOR_KEYS = [
   "accent",

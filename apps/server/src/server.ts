@@ -7,6 +7,8 @@ import { Effect, Scope } from "effect";
 import { WorkFileListingService } from "./work/workFileListingService";
 import { WorkThreadService } from "./work/workThreadService";
 import { WorkTurnService } from "./work/workTurnService";
+import { makePublishedSnapshotSource } from "./publishedSnapshotSource";
+import type { PublishedSnapshotRunRequest, WindowId } from "@octant/contracts";
 import { MAX_CHAT_ATTACHMENT_BYTES } from "./chat/chatAttachmentStore";
 import { MAX_CODE_FILE_BODY_SIZE } from "./codeRoutes";
 import { existsSync } from "node:fs";
@@ -566,6 +568,14 @@ export function startOctantServer(
       resolveCanvasWorkspace,
       snapshotCanvas,
     } = wireCanvas({
+      // Work and Code are wired below; a request only arrives after startup.
+      findPublishedSnapshot: (windowId: WindowId, request: PublishedSnapshotRunRequest) =>
+        makePublishedSnapshotSource({
+          workTurns: (window, threadId) => workTurnService.turns(window, threadId),
+          ...(routeCodeService.conversation === undefined
+            ? {}
+            : { codeConversation: routeCodeService.conversation }),
+        })(windowId, request),
       agentRunPersistence,
       browserCaptures,
       chatDataDirectory,

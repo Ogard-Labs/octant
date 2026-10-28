@@ -7,6 +7,7 @@ import {
   TurnActivityRows,
 } from "./TurnActivityRows";
 import type { TurnActivity } from "./turnActivity";
+import { MarkdownLinkActionsContext } from "../markdown/Markdown";
 
 const mixed: TurnActivity = {
   reasoning: "Check the failing suite first.",
@@ -404,5 +405,40 @@ describe("TurnActivityRows", () => {
     await user.click(folds[0]!);
     expect(folds[0]!.closest("details")).toHaveProperty("open", true);
     expect(folds[1]!.closest("details")).toHaveProperty("open", false);
+  });
+});
+
+describe("a page a tool published", () => {
+  const published: TurnActivity = {
+    reasoning: "",
+    rows: [
+      { kind: "tool", id: "write-1", toolName: "Write", state: "completed" },
+      {
+        kind: "tool",
+        id: "artifact-1",
+        toolName: "Artifact",
+        state: "completed",
+        summary: "Published to claude.ai.",
+        published: { url: "https://claude.ai/artifact/abc123", title: "Quarterly report" },
+      },
+    ],
+  };
+
+  it("stays in view as a link card after the toolchain folds, and opens in the person's browser", async () => {
+    const opened: string[] = [];
+    render(
+      <MarkdownLinkActionsContext.Provider value={{ openExternal: (url) => opened.push(url) }}>
+        <TurnActivityRows activity={published} running={false} settled />
+      </MarkdownLinkActionsContext.Provider>,
+    );
+    const pages = screen.getByRole("list", { name: "Published pages" });
+    const link = within(pages).getByRole("link", { name: /Quarterly report/ });
+    expect(link).toBeVisible();
+    expect(link).toHaveAttribute("href", "https://claude.ai/artifact/abc123");
+    expect(link).toHaveTextContent("Published to claude.ai");
+    // The page is never framed here; the link is the whole presentation.
+    expect(document.querySelector("iframe")).toBeNull();
+    await userEvent.click(link);
+    expect(opened).toEqual(["https://claude.ai/artifact/abc123"]);
   });
 });

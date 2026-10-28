@@ -314,8 +314,13 @@ function cartesian(block: ChartBlock, label: Label): CanvasExportDrawing | undef
         }
         const height = Math.max(0, to - from);
         if (height <= 0) return;
+        // As on screen, a series that emphasizes a reading leaves its other
+        // bars in the muted ink.
+        const muted =
+          series.points.some((point) => point.emphasis === true) &&
+          series.points[index]?.emphasis !== true;
         parts.push(
-          `<rect x="${round(x)}" y="${round(from)}" width="${round(width)}" height="${round(height)}" rx="${String(Math.min(CHART_BAR_RADIUS, width / 2))}" fill="${seriesColor(seriesIndex)}"/>`,
+          `<rect x="${round(x)}" y="${round(from)}" width="${round(width)}" height="${round(height)}" rx="${String(Math.min(CHART_BAR_RADIUS, width / 2))}" fill="${muted ? AXIS : seriesColor(seriesIndex)}"/>`,
         );
       });
     }
@@ -359,6 +364,32 @@ function cartesian(block: ChartBlock, label: Label): CanvasExportDrawing | undef
         );
       });
     });
+  }
+
+  // The author's callouts, in the text ink just above the point they name.
+  if (
+    block.chartType === "line" ||
+    block.chartType === "area" ||
+    block.chartType === "scatter" ||
+    block.chartType === "bar" ||
+    block.chartType === "distribution"
+  ) {
+    const barred = block.chartType === "bar" || block.chartType === "distribution";
+    for (const series of block.series) {
+      series.points.forEach((point, position) => {
+        if (point.note === undefined) return;
+        const x = xAt(position, point.x);
+        const anchor = x > right - 48 ? "end" : x < left + 48 ? "start" : "middle";
+        parts.push(
+          svgText(
+            x,
+            Math.max(top + 10, y(barred ? Math.max(0, point.y) : point.y) - 8),
+            label(point.note),
+            { anchor, fill: EXPORT_INK, weight: 600 },
+          ),
+        );
+      });
+    }
   }
 
   const legend = legendFor(block, label);

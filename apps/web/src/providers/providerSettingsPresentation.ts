@@ -13,7 +13,10 @@ import { isOutsideDriverQuarantined } from "@octant/domain";
 import { thisComputerName } from "../platform";
 
 export const capabilityLabels: ReadonlyArray<
-  readonly [Exclude<keyof ProviderObservedState["capabilities"], "sessionCompaction">, string]
+  readonly [
+    Exclude<keyof ProviderObservedState["capabilities"], "sessionCompaction" | "nativeArtifacts">,
+    string,
+  ]
 > = [
   ["streaming", "Streaming"],
   ["resume", "Resume"],

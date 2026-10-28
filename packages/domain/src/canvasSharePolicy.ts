@@ -15,6 +15,7 @@ import {
   canvasTableRowCells,
   decodeCanvasVersion,
   type CanvasBarListRow,
+  type CanvasChartPoint,
   type CanvasBlock,
   type CanvasDefinition,
   type CanvasVersion,
@@ -266,6 +267,26 @@ function sanitizeBlock(block: CanvasBlock, markupAcknowledged: boolean): CanvasS
     case "plan": {
       const tasks = block.tasks.map(({ sourceIds: _sourceIds, ...task }) => task);
       const shared = { ...block, tasks };
+      assertNoSecretShape(shared, `block.${block.blockId}`);
+      return shared;
+    }
+    case "chart": {
+      // Share version 11 predates a chart's title, subtitle, and point
+      // callouts, and the share service refuses a format it does not know, so
+      // a shared chart leaves as its readings and the Canvas around it names it.
+      const withoutCallout = ({ note: _note, emphasis: _emphasis, ...point }: CanvasChartPoint) =>
+        point;
+      const { title: _title, subtitle: _subtitle, ...rest } = block;
+      const shared = {
+        ...rest,
+        series: rest.series.map((series) => {
+          const [first, ...others] = series.points;
+          return {
+            ...series,
+            points: [withoutCallout(first), ...others.map(withoutCallout)] as const,
+          };
+        }),
+      };
       assertNoSecretShape(shared, `block.${block.blockId}`);
       return shared;
     }

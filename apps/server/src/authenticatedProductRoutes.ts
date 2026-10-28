@@ -167,6 +167,11 @@ export function classifyProductAction(request: Request): string | undefined {
     if (method === "POST" && path === "/api/canvas/design-run") {
       return "project.overview.read";
     }
+    // A published page's snapshot is a read of a thread the device can open:
+    // the route runs that thread's read check before it issues a ticket.
+    if (method === "POST" && path === "/api/canvas/published-snapshot-run") {
+      return "project.overview.read";
+    }
     // The HTML file is a read of the Canvas the device can already open: the
     // route runs the same read check and sends the file to no one else. It is
     // POST because the request carries the theme the window draws designs in.

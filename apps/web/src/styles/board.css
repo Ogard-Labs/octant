@@ -31,7 +31,7 @@
   -webkit-line-clamp: 2;
   font-family: var(--oct-font-display);
   font-size: var(--octant-ui-font-size);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   line-height: var(--oct-leading-snug);
 }
 

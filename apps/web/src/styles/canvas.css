@@ -512,6 +512,44 @@
   filter: brightness(1.12);
 }
 
+/* A series that emphasizes a reading draws its other bars in the neutral ink,
+   so the hue is left on the one the chart is about. */
+.canvas-chart__bar[data-muted="true"] {
+  fill: color-mix(in oklab, var(--oct-fg) 24%, transparent);
+}
+
+/* The chart's own finding and what it measures, above the plot. */
+.canvas-chart__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 0 var(--oct-space-3);
+}
+
+.canvas-chart__title {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-base);
+  font-weight: var(--oct-weight-strong);
+}
+
+.canvas-chart__subtitle {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
+}
+
+/* An author's callout on one reading, in the text ink rather than the hue. */
+.canvas-chart__note {
+  fill: var(--oct-fg);
+  font-family: inherit;
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--oct-weight-strong);
+  paint-order: stroke;
+  stroke: var(--octant-card, var(--oct-surface));
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
 /* Funnel, radar, and sankey charts. A stage, an axis, or a node is named in
    text ink beside its mark, never in the mark's hue; its reading follows in
    the meta ink so the name leads. */
@@ -2189,7 +2227,7 @@
 .canvas-comments__title {
   margin: 0;
   font-size: var(--oct-text-sm);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .canvas-comments__note {
@@ -2884,7 +2922,7 @@
 .canvas-workspace-tab__drawer-header h2 {
   margin: 0;
   font-size: var(--oct-text-sm);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .canvas-workspace-tab__share-dialog {
@@ -3314,7 +3352,7 @@
 }
 
 .canvas-action__spinner {
-  animation: canvas-action-spin 1s linear infinite;
+  animation: canvas-action-spin var(--oct-motion-spin) linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3379,7 +3417,7 @@
 }
 
 .canvas-refresh__spinner {
-  animation: canvas-action-spin 1s linear infinite;
+  animation: canvas-action-spin var(--oct-motion-spin) linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -5082,6 +5120,15 @@
   }
 
   .canvas-chart__dot {
+    fill: CanvasText;
+    stroke: Canvas;
+  }
+
+  .canvas-chart__bar[data-muted="true"] {
+    fill: GrayText;
+  }
+
+  .canvas-chart__note {
     fill: CanvasText;
     stroke: Canvas;
   }

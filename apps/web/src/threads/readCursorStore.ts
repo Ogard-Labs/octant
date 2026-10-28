@@ -172,8 +172,12 @@ export function createReadCursorStore<ThreadId>(options: {
       // flush may persist them when browser storage becomes available again.
     }
   };
+  const settle = () => {
+    flush();
+    announce();
+  };
   const scheduleFlush = () => {
-    if (timer === undefined) timer = setTimeout(flush, PERSIST_DELAY_MS);
+    if (timer === undefined) timer = setTimeout(settle, PERSIST_DELAY_MS);
   };
   const record = (change: PendingChange, immediately: boolean) => {
     const next = applyChange(state, change);
@@ -182,9 +186,16 @@ export function createReadCursorStore<ThreadId>(options: {
     const existing = pending.findIndex((candidate) => candidate.key === change.key);
     if (existing !== -1) pending.splice(existing, 1);
     pending.push(change);
-    if (immediately) flush();
-    else scheduleFlush();
-    announce();
+    if (immediately) {
+      flush();
+      announce();
+    } else {
+      // A deferred mark arrives per streamed frame, and every mounted
+      // controller subscribes to this store: announcing per frame re-rendered
+      // the whole shell per token. The announce coalesces on the same beat the
+      // write already does, while `getSnapshot` stays current between beats.
+      scheduleFlush();
+    }
   };
   const onStorage = (event: StorageEvent) => {
     if (event.key !== options.storageKey || event.storageArea !== storage) return;

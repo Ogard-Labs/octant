@@ -26,6 +26,7 @@ import {
   decodeDesktopLeaseId,
   decodeProjectId,
   decodeProviderInstanceId,
+  decodeProviderModelId,
   decodeProviderSessionId,
   decodeBrowserAutomationSnapshot,
   decodeToolActionAuthority,
@@ -2472,8 +2473,27 @@ describe("CodeOperationRuntime", () => {
             expect.objectContaining({ kind: "provider-session-ready", modelId: "model-b" }),
           );
         } else {
+          // The provider cannot carry the session on to another of its models,
+          // so the turn starts a fresh session with the same disclosed
+          // handoff a provider switch takes, instead of refusing the turn.
           expect(connection.resume).not.toHaveBeenCalled();
-          expect(connection.send).toHaveBeenCalledTimes(1);
+          await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(2));
+          expect(connection.start).toHaveBeenCalledTimes(2);
+          const frames = await fixture.runtime.subscribe(
+            windowId,
+            threadId,
+            operationId(85),
+            0,
+            20,
+          );
+          expect(frames.map((frame) => frame.event)).toContainEqual(
+            expect.objectContaining({
+              kind: "context-handoff-attached",
+              reason: "provider-switch",
+              modelId: "model-b",
+              previousSessionId: sessionId,
+            }),
+          );
         }
       } finally {
         await fixture.runtime.close();
@@ -2536,10 +2556,21 @@ describe("CodeOperationRuntime", () => {
   });
 
   it("tells the model to deliver kept work as a Canvas only when Code offers the Canvas tool", async () => {
-    const sentContext = async (canvas: boolean) => {
-      const provider = providerConnection(Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>()));
+    const turn = async (
+      canvas: boolean,
+      artifactTool?: string,
+      documentDelivery?: "canvas" | "native-artifacts",
+    ) => {
+      const starts: ProviderSessionStart[] = [];
+      const provider = providerConnection(
+        Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>()),
+        starts,
+      );
       const fixture = runtimeFixture({
-        provider: providerDriver(provider),
+        provider:
+          artifactTool === undefined
+            ? providerDriver(provider)
+            : { ...providerDriver(provider), nativeArtifactTool: () => artifactTool },
         supportsAppManagedTools: true,
         ...(canvas
           ? {
@@ -2550,6 +2581,8 @@ describe("CodeOperationRuntime", () => {
             }
           : {}),
       });
+      if (documentDelivery !== undefined)
+        fixture.setThread(decodeCodeThread({ ...thread(), documentDelivery }));
       try {
         await fixture.runtime.execute(windowId, {
           kind: "start-provider-turn",
@@ -2560,19 +2593,45 @@ describe("CodeOperationRuntime", () => {
           prompt: fixture.prompt,
         });
         await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
-        return vi.mocked(provider.send).mock.calls[0]?.[0]?.context ?? [];
+        return {
+          context: vi.mocked(provider.send).mock.calls[0]?.[0]?.context ?? [],
+          start: starts[0],
+        };
       } finally {
         fixture.close();
       }
     };
-    const withCanvas = await sentContext(true);
+    const canvasRule = (context: ReadonlyArray<{ readonly text?: string }>) =>
+      context.filter((block) =>
+        block.text?.includes("as a Canvas with the octant_canvas tool, not as a file"),
+      );
+    const withCanvas = (await turn(true)).context;
     expect(withCanvas).toContainEqual({
       kind: "instructions",
       text: expect.stringContaining("as a Canvas with the octant_canvas"),
     });
     expect(withCanvas.filter((block) => block.text.includes("as a Canvas"))).toHaveLength(1);
-    const withoutCanvas = await sentContext(false);
+    const withoutCanvas = (await turn(false)).context;
     expect(JSON.stringify(withoutCanvas)).not.toContain("octant_canvas");
+
+    // An account that enabled Claude artifacts still delivers Canvases in a
+    // thread that has not chosen them, and its session is not offered the tool.
+    for (const unchosen of [undefined, "canvas"] as const) {
+      const kept = await turn(true, "Artifact", unchosen);
+      expect(canvasRule(kept.context)).toHaveLength(1);
+      expect(JSON.stringify(kept.context)).not.toContain("publish that file with Artifact");
+      expect(kept.start).not.toHaveProperty("nativeArtifacts");
+    }
+
+    // A thread that chose them gets the artifact rule in the Canvas rule's
+    // place, and its session is started with the choice.
+    const chosen = await turn(true, "Artifact", "native-artifacts");
+    expect(chosen.context).toContainEqual({
+      kind: "instructions",
+      text: expect.stringContaining("publish that file with Artifact"),
+    });
+    expect(canvasRule(chosen.context)).toHaveLength(0);
+    expect(chosen.start).toMatchObject({ nativeArtifacts: true });
   });
 
   it("runs a provider turn asynchronously and owns exact input, approval, and cancellation", async () => {
@@ -5610,6 +5669,42 @@ describe("provider switch handoff", () => {
       }
     });
 
+    it("bounds a fork's handoff by the fork's own model window", async () => {
+      const drivers = twoHarnesses();
+      const fixture = runtimeFixture({
+        resolveProviderDriver: drivers.resolveProviderDriver,
+        forkProviderSession: async () => undefined,
+        probeProvider: async () => ({
+          readiness: "ready" as const,
+          models: [
+            {
+              id: decodeProviderModelId("model-a"),
+              displayName: "Model A",
+              contextLimit: 8_000,
+              reasoning: "supported" as const,
+              inputModalities: ["text" as const],
+              options: [],
+              source: "discovered" as const,
+              verification: "verified" as const,
+            },
+          ],
+        }),
+      });
+      try {
+        await finishFirstTurn(fixture, drivers, providerInstance);
+        fixture.setOtherThread(forkOn(providerInstance, "model-a"));
+
+        await sendOnFork(fixture);
+        await vi.waitFor(() => expect(drivers.provider.send).toHaveBeenCalledTimes(2));
+        const context = vi.mocked(drivers.provider.send).mock.calls[1]![0].context ?? [];
+        // The fork's 8,000-token model caps the handoff at four blocks, not 24.
+        expect(context[0]?.text).toContain('"maxBlocks":4');
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+
     it("falls back to the text handoff when the same provider cannot take up the source's session", async () => {
       const drivers = twoHarnesses();
       const fixture = runtimeFixture({
@@ -6578,11 +6673,15 @@ function runtimeFixture(options: {
   const selectForkConversation = (input: {
     readonly source: CodeThread;
     readonly throughOperationId: string;
+    readonly targetContextLimitTokens?: number;
   }) =>
     admittedParentCodeContext({
       threadId: input.source.id,
       purpose: "fork",
       throughOperationId: input.throughOperationId,
+      ...(input.targetContextLimitTokens === undefined
+        ? {}
+        : { targetContextLimitTokens: input.targetContextLimitTokens }),
       externalContentIngested: options.externalContentIngested ?? false,
       readThread,
       readActivity: (id) =>

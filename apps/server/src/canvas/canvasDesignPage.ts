@@ -53,10 +53,14 @@ export function canvasDesignPageHeaders(contentType: string): Record<string, str
   };
 }
 
-/** What one ticket opens: a design in one Canvas version, from one frame. */
+/**
+ * What one ticket opens: a design in one Canvas version, or in the host's
+ * snapshot of a page a thread published (which is no Canvas, so it names no
+ * Canvas or version), from one frame.
+ */
 export interface CanvasDesignRunGrant {
-  readonly canvasId: CanvasId;
-  readonly versionId: CanvasVersionId;
+  readonly canvasId?: CanvasId;
+  readonly versionId?: CanvasVersionId;
   readonly blockId: CanvasBlockId;
   readonly startFrameId: string;
   /** The version is immutable, so the design is kept as it was authorized. */

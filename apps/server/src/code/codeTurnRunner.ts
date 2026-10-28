@@ -9,6 +9,7 @@ import {
   type ProviderRuntimeEvent,
   type ProviderResumeCursor,
   type ProviderUsageLimit,
+  type ThreadPublishedPage,
   type TurnStopReason,
   type UsageCost,
 } from "@octant/contracts";
@@ -57,6 +58,13 @@ export interface CodeTurnFailure {
   readonly retryAfterMs?: number;
   /** The provider's usage-limit signal, when stopping this turn was one. */
   readonly usageLimit?: ProviderUsageLimit;
+  /**
+   * The provider refused to resume this thread's saved session — the session
+   * no longer belongs to this Project. The turn parks `waiting` on it, and
+   * the recovery the transcript offers keys on this fact rather than on the
+   * absence of a request or a limit.
+   */
+  readonly resumeRefused?: true;
 }
 
 export interface CodeProviderAcquireInput extends ProviderAcquireInput {
@@ -122,6 +130,8 @@ export interface CodeTurnEvent {
   readonly taskIds?: ReadonlyArray<string>;
   readonly toolCallId?: string;
   readonly toolName?: string;
+  /** A page a finished tool call published outside this host. */
+  readonly published?: ThreadPublishedPage;
   readonly status?: string;
   readonly path?: string;
   readonly change?: string;
@@ -302,9 +312,10 @@ export class CodeTurnRunner {
         next: Exclude<CodeTurnOutcome, "completed">,
         message: string,
         limit?: Pick<ProviderFailure, "usageLimit" | "retryAfterMs">,
+        resumeRefused?: true,
       ) =>
         Effect.gen(function* () {
-          const failure = codeTurnFailure(next, message, limit);
+          const failure = codeTurnFailure(next, message, limit, resumeRefused);
           yield* persistOutcome(next, failure);
           return yield* Effect.fail(failure);
         });
@@ -353,6 +364,9 @@ export class CodeTurnRunner {
           : { modelOptionValues: input.thread.modelOptionValues }),
         executionPolicy: input.thread.executionPolicy,
         ...(input.harnessAutoReviewEnabled === true ? { autoApprove: true } : {}),
+        // The driver still offers its artifact tool only where it would name
+        // it for this mode and posture.
+        ...(input.thread.documentDelivery === "native-artifacts" ? { nativeArtifacts: true } : {}),
       };
       const handle = yield* (
         input.resumeCursor === undefined
@@ -783,6 +797,7 @@ function normalizeProviderEvent(
           ...normalized,
           toolCallId: text(event.toolCallId),
           status: "provider-claimed-success",
+          ...(event.published === undefined ? {} : { published: event.published }),
         })),
       );
     case "tool-failure":
@@ -1001,6 +1016,7 @@ function failForProvider(
     outcome: Exclude<CodeTurnOutcome, "completed">,
     message: string,
     limit?: Pick<ProviderFailure, "usageLimit" | "retryAfterMs">,
+    resumeRefused?: true,
   ) => Effect.Effect<never, CodeTurnFailure>,
 ): Effect.Effect<never, CodeTurnFailure> {
   if (!isProviderFailure(failure)) return fail("failed", "Provider execution failed.");
@@ -1009,7 +1025,10 @@ function failForProvider(
     ...(failure.retryAfterMs === undefined ? {} : { retryAfterMs: failure.retryAfterMs }),
   };
   if (failure.category === "rate-limited") return fail("waiting", failure.message, limit);
-  if (failure.category === "stale-resume") return fail("waiting", failure.message);
+  // A refused resume parks the turn `waiting` with the provider's sentence,
+  // but the fact that no answer can ever restart this session must survive
+  // the boundary too, or the transcript can only guess at it.
+  if (failure.category === "stale-resume") return fail("waiting", failure.message, undefined, true);
   if (failure.category === "interrupted") return fail("interrupted", failure.message);
   return fail("failed", failure.message, limit);
 }
@@ -1041,12 +1060,14 @@ function codeTurnFailure(
   category: Exclude<CodeTurnOutcome, "completed">,
   message: string,
   limit?: Pick<ProviderFailure, "usageLimit" | "retryAfterMs">,
+  resumeRefused?: true,
 ): CodeTurnFailure {
   return {
     category,
     message,
     ...(limit?.usageLimit === undefined ? {} : { usageLimit: limit.usageLimit }),
     ...(limit?.retryAfterMs === undefined ? {} : { retryAfterMs: limit.retryAfterMs }),
+    ...(resumeRefused === undefined ? {} : { resumeRefused }),
   };
 }
 
