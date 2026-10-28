@@ -69,6 +69,7 @@ export interface NativeHarnessSessionRouteDependencies {
     | "decided"
     | "approval-not-found"
     | "already-settled"
+    | "withdrawn"
     | "host-not-offered"
     | "lost-in-restart";
   readonly steer?: (input: {
@@ -253,6 +254,7 @@ export function createNativeHarnessSessionRouteHandler(
               approvalId: decision.approvalId,
               reason:
                 outcome === "already-settled" ||
+                outcome === "withdrawn" ||
                 outcome === "host-not-offered" ||
                 outcome === "lost-in-restart"
                   ? outcome
@@ -260,11 +262,13 @@ export function createNativeHarnessSessionRouteHandler(
               message:
                 outcome === "already-settled"
                   ? "That approval was already decided."
-                  : outcome === "host-not-offered"
-                    ? "This command can reach only hosts its approval lists. Nothing was decided."
-                    : outcome === "lost-in-restart"
-                      ? "Octant restarted while this was waiting, so the call did not run. Resume the session; the agent asks again if it still needs it."
-                      : "No pending approval has that id on this thread.",
+                  : outcome === "withdrawn"
+                    ? "That approval was withdrawn before anyone answered it, so nothing was decided."
+                    : outcome === "host-not-offered"
+                      ? "This command can reach only hosts its approval lists. Nothing was decided."
+                      : outcome === "lost-in-restart"
+                        ? "Octant restarted while this was waiting, so the call did not run. Resume the session; the agent asks again if it still needs it."
+                        : "No pending approval has that id on this thread.",
             };
       return json(result, result.kind === "approval-decided" ? 200 : 409, origin);
     }

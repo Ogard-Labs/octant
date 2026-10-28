@@ -715,7 +715,12 @@ device.
 `/api/apple/devices` is readable by a paired device, and
 `/api/apple/device-leases`, `/api/apple/device-actions`, and
 `/api/apple/device-screenshots` (the pixels of a thread's latest device
-screenshot) are local-only.
+screenshot) are local-only. The App Store Connect API key for distribution has
+its own credential broker family with no read-back route, entered only
+through the local-only `/api/desktop/app-store-connect-key/` routes from a
+desktop window or `octant apple key`; like every upload, submission, and
+release, a new key is refused until the Current Release Boundary admits
+distribution.
 
 On an approval-gated thread, **Allow input** is the confirmation that opens
 that destination; clicks, typing, Home, and Lock never raise it
@@ -8382,7 +8387,8 @@ find-identity` and `codesign`, through a port with no network; `codesign`
     (`y` or `yes`); any other answer denies the request, and an input that
     ends without an answer leaves it pending for `octant pair approve`. It
     changes no firewall rule and runs no Tailscale command.
-- **Hosted relay.** Accepted 2026-10-26, not built: a ciphertext-only relay
+- **Hosted relay.** Accepted 2026-10-26; only its wire contract and pure
+  policy exist, and nothing calls them: a ciphertext-only relay
   that splices an already-paired app's pinned TLS session to the host, off by
   default and holding no authority, is specified in [Hosted relay](design/hosted-relay.md);
   until it lands, the listener and client trust rules above are the whole of

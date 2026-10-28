@@ -62,6 +62,14 @@ import {
   type DevicectlDevice,
 } from "./devicectl";
 
+/**
+ * Whether the Current Release Boundary admits distribution (decision 7 of
+ * docs/design/apple-devices.md). Until the change that admits it lands in its
+ * own PR, every upload, submission, and release, and every App Store Connect
+ * key entry, is refused as `distribution-not-enabled`.
+ */
+export const APPLE_DISTRIBUTION_ADMITTED = false;
+
 const DEVICECTL_TIMEOUT_MS = 30_000;
 /** The largest `--json-output` document the host reads back. */
 const MAX_DEVICECTL_OUTPUT_BYTES = 4 * 1024 * 1024;
@@ -418,8 +426,7 @@ export class AppleDeviceService {
       tooling: this.#layer.tooling,
       devices: this.#layer.devices,
       leases: this.#options.leases.list(),
-      // Decision 7 keeps distribution closed until its own release-boundary change.
-      distributionEnabled: false,
+      distributionEnabled: APPLE_DISTRIBUTION_ADMITTED,
     };
     return {
       decision: evaluateAppleDeviceRequest(request, context, host, this.#holdingsFor(request)),

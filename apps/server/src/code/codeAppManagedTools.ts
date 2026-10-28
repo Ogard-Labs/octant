@@ -1070,6 +1070,13 @@ const APPLE_DEVICE_INSTALL_TIMEOUT_MS = 5 * 60_000;
 const APPLE_DEVICE_TIMEOUT_MS = 60_000;
 /** The most of an app's console output one `logs` result hands the provider, its latest bytes. */
 const MAX_APPLE_CONSOLE_RESULT_BYTES = 32 * 1024;
+/**
+ * The most the console may weigh once it is a JSON string in the tool answer.
+ * Newlines, quotes and control bytes grow when escaped, and an answer over the
+ * turn-event limit is replaced whole by an error, so the console would be lost
+ * rather than shortened.
+ */
+const MAX_APPLE_CONSOLE_ENCODED_BYTES = 48 * 1024;
 
 type AppleDeviceOperation = Extract<
   AppleDeviceRequest["kind"],
@@ -1425,7 +1432,10 @@ async function appleDeviceEvidenceResult(
       return failure("console-unavailable", "The app's console output could not be read back.");
     }
     const console = new TextDecoder().decode(bytes);
-    const tail = boundedUtf8Tail(console, MAX_APPLE_CONSOLE_RESULT_BYTES);
+    const tail = boundedEncodedTail(
+      boundedUtf8Tail(console, MAX_APPLE_CONSOLE_RESULT_BYTES),
+      MAX_APPLE_CONSOLE_ENCODED_BYTES,
+    );
     return {
       result: {
         ...result,
@@ -2634,6 +2644,19 @@ function boundedUtf8Tail(value: string, maxBytes: number): string {
   while (low < high) {
     const middle = Math.floor((low + high) / 2);
     if (Buffer.byteLength(value.slice(middle), "utf8") <= maxBytes) high = middle;
+    else low = middle + 1;
+  }
+  if (low < value.length && isLowSurrogate(value.charCodeAt(low))) low += 1;
+  return value.slice(low);
+}
+
+function boundedEncodedTail(value: string, maxEncodedBytes: number): string {
+  const encodedBytes = (text: string) => Buffer.byteLength(JSON.stringify(text), "utf8") - 2;
+  let low = 0;
+  let high = value.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (encodedBytes(value.slice(middle)) <= maxEncodedBytes) high = middle;
     else low = middle + 1;
   }
   if (low < value.length && isLowSurrogate(value.charCodeAt(low))) low += 1;

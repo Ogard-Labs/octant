@@ -19,18 +19,19 @@ not redesign it.
 and drops them with the device), slice 2 (the host builds sealed, redacted
 thread notifications), slice 3 (camera and file capture), and slice 4 (voice
 input through the host) are implemented and verified in the container; their
-physical-device passes are maintainer gates. Slice 5 (Android internal
-builds) is built in part: the workflow, the `android-internal` profile, and
-the Android hardening adapters are in the repository and verified in the
-container, and its EAS build and Android device pass wait on the maintainer
-steps in [Android build rules](#android-build-rules). Slice 7's host side (the
+physical-device passes are maintainer gates. Slice 7's host side (the
 Notifications setting and the gateway transport) is implemented and verified
 against a local gateway; the gateway service itself is built in
 `octant-webapp`, and its deployment, platform credentials, and live delivery
-are maintainer gates. Slice 6 is built in part: the phone's enable flow and
-its forgetting of a computer's notifications are implemented and verified in
-the container, and the native pieces wait on the gates in
-[Phone rules](#phone-rules). Slices 8 and 9 are not started. The
+are maintainer gates. Slice 5 (Android internal builds)
+is built in part: the workflow, the `android-internal` profile, and the
+Android hardening adapters are in the repository and verified in the
+container, and its EAS build and Android device pass wait on the maintainer
+steps in [Android build rules](#android-build-rules). Slice 6 is built in
+part: the phone's enable flow and its forgetting of a computer's
+notifications are implemented and verified in the container, and the native
+pieces wait on the gates in [Phone rules](#phone-rules). Slices 8 and 9 are
+not started. The
 maintainer authorized this scope as post-preview work and accepted the
 [maintainer decisions](#maintainer-decisions) below on 2026-10-26. That
 authorizes design, planning, and implementation of the slices below that need
@@ -186,8 +187,11 @@ The operator steps live in the
 ### iOS capture and key storage rules
 
 The iOS side of `modules/octant-device-protection` gives the same two ports
-their iOS answers. The Swift is first compiled by the next TestFlight build,
-and the iOS items in the
+their iOS answers. The `Mobile (iOS native modules)` workflow compiles the
+Swift for the Simulator on a pull request that changes a module, the app
+configuration, or the lockfile (it is not a required check, since path filters
+do not reach the merge queue); the first run on a device is the next
+TestFlight build, and the iOS items in the
 [device acceptance pass](../mobile-testflight.md#device-acceptance-pass) are
 its acceptance.
 
@@ -195,7 +199,9 @@ its acceptance.
   screenshot from showing an app. The module covers each of the app's scenes
   with an opaque window while the scene is not active, which is when iOS
   takes the app switcher's snapshot, and while its screen is captured
-  (recording, AirPlay mirroring, a wired capture). While captured, the cover
+  (recording, AirPlay mirroring, a wired capture; from iOS 17 each scene's own
+  capture state, watched for changes; earlier the screen's flag and
+  notification). While captured, the cover
   says why Octant is hidden and how to show it. Settings names what is covered
   and says that a screenshot is not blocked. Reason: the known way to hide
   content from a screenshot rests on an undocumented UIKit layer that an iOS

@@ -81,6 +81,7 @@
     "./integration": "./src/integration.ts",
     "./linear-issues": "./src/linearIssues.ts",
     "./linear-issue-context": "./src/linearIssueContext.ts",
+    "./hosted-relay": "./src/hostedRelay.ts",
     "./remote-access": "./src/remoteAccess.ts",
     "./remote-push-notifications": "./src/remotePushNotifications.ts",
     "./remote-request-proof": "./src/remoteRequestProof.ts",

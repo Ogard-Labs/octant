@@ -144,8 +144,8 @@ digest }`. The set of outside drivers is data, held by the package store.
 - **The instance arm grows with admission.** The configuration holds only the
   `kind` and the driver reference until the add-provider step lands; the
   address, key placement, and listed model ids join it in that same change.
-  No command creates or reconfigures an outside instance before then, so no
-  journaled instance can lack them. The provider projection's `driver_kind`
+  No command created or reconfigured an outside instance before then, so no
+  journaled instance lacks them. The provider projection's `driver_kind`
   column keeps only a non-empty check and leaves the vocabulary to the
   instance schema, so replay of such an instance needs no migration of its own.
 - **The matrix column's source.** An outside package ships no capability block
@@ -247,9 +247,10 @@ the fail-closed option.
   shared confinement builder (`apps/server/src/process/seatbeltProfile.ts`)
   and sets the environment itself, ignoring whatever environment the caller
   passed. No caller can widen either.
-- **The grants.** Read: the package root, the runtime's install, `/System`,
+- **The grants.** Read: the package root, the runtime's install,
   `/usr/lib`, `/usr/share`, `/private/var/db/timezone`, the time-zone link
-  `/private/etc/localtime`, the data devices `/dev/null`, `/dev/zero`,
+  `/private/etc/localtime` and the root link `/etc` it is opened through,
+  the data devices `/dev/null`, `/dev/zero`,
   `/dev/random`, and `/dev/urandom`, `/` itself, and metadata of every parent
   folder of those. These began as the extension profile's measured roots
   less `/bin` and `/sbin` (programs the driver may not exec) and less the
@@ -285,7 +286,13 @@ the fail-closed option.
     Silicon would load; the runtimes a driver runs on are native.
   - `/private/etc`, apart from the link `/private/etc/localtime`: the host's
     user and group lists, hosts and name-service files, and SSH and sudo
-    configuration are of no use to a driver with no network and no exec.
+    configuration are of no use to a driver with no network and no exec. A
+    runtime opens the zone link as `/etc/localtime`, through the root link
+    `/etc`, so that link itself is readable too, as a single path and never
+    as a folder. Without it both runtimes fell back to UTC (measured
+    2026-10-28). Every other name through it still resolves into the denied
+    `/private/etc`. The escape tests require the driver to report the host's
+    time zone and to be refused `/etc/hosts`.
   - `/private/var/db`, apart from `timezone`, where the time-zone link leads:
     the rest is the host's own databases (the local directory's user
     records, installer receipts, diagnostics), none of which a runtime reads
@@ -295,6 +302,16 @@ the fail-closed option.
     `libexec` hold programs the driver may not exec, and `local` holds
     whatever the person installed there, on an Intel Mac Homebrew's whole
     prefix with its services' data.
+  - `/System`, whole: Bun and Electron's Node read nothing under it to run
+    a driver. The system frameworks they link come from the shared cache,
+    which the loader maps without a file read the profile judges. Measured
+    on an Apple Silicon Mac on 2026-10-28 with both runtimes: with no
+    `/System` grant, the example loopback driver answered its handshake,
+    probe, and a streamed send, and a probe of Intl formatting, collation and
+    segmentation, crypto, zlib, a worker, and `os` gave the same answers as
+    with the grant. The escape tests read
+    `/System/Library/CoreServices/SystemVersion.plist`, which the host reads
+    first, and require the driver to be refused.
   - The system's public TLS files (`/private/etc/ssl`: `openssl.cnf`,
     `cert.pem`, and `certs`), which the confinement builder grants every
     launch so that an offline one fails at the socket rather than before
@@ -306,16 +323,13 @@ the fail-closed option.
   `/Applications`, `/Library`, `/usr/local`) can also be spelled beneath it:
   `/System/Volumes/Data/Users/<name>/notes.txt` is the file
   `/Users/<name>/notes.txt`. The home and `/private` denials name only the
-  short spelling, and `/System` is a read root, so the profile denies
-  `/System/Volumes/Data` whole, reads and writes, through the builder's
-  isolated roots, which come after every grant. A denial among the builder's
-  other extra denials would come before the read roots, and the `/System`
-  grant would open the volume again; the profile test holds that no later
-  grant reopens it. A runtime names nothing by that spelling to start: its
-  loader, libraries, and ICU data are on the system volume and in the
-  cryptex on the Preboot volume, and it reads the zone data by its short
-  path. The other volumes under `/System/Volumes` stay readable, Preboot
-  because it holds that cryptex. The escape tests plant a file in the
+  short spelling. The profile no longer grants any read under `/System`, and
+  it still denies `/System/Volumes/Data` whole, reads and writes, through the
+  builder's isolated roots, which come after every grant, so a `/System`
+  grant restored for some runtime cannot reopen the home folder by that
+  spelling. A denial among the builder's other extra denials would come
+  before the read roots, and such a grant would open the volume again; the
+  profile test holds that no later grant reopens it. The escape tests plant a file in the
   person's home and have the driver read it by the data volume's spelling,
   after the host reads it by the same path, so the refusal is the profile's;
   the `macos-15` job passed that case on Bun and Electron's Node on
@@ -325,8 +339,8 @@ the fail-closed option.
   was opened through or by the short one was not measured. The denial holds
   either way: if Seatbelt sees the short spelling, the denial matches no file
   a runtime needs; if it sees the long one, the denial closes a way into the
-  home folder. Narrowing `/System` itself to the folders a runtime reads
-  would close this and any like it, and is a measurement of its own._
+  home folder. Dropping the `/System` grant, measured on 2026-10-28, closes
+  this and any like it; the denial stays as a backstop._
 - **The runtime's install** is taken from the runtime's own resolved path,
   never a fixed location. For Bun it is the executable's folder, wherever Bun
   is installed. For Electron's Node it is the app bundle that holds the
@@ -552,10 +566,26 @@ implementation; each takes the fail-closed option.
   the address under the endpoint rule (HTTPS, or HTTP on loopback; no
   credentials, query, or fragment), and, as for any endpoint, refuses a
   provider that sends no key unless its address is on loopback. The key goes
-  to the credential broker through the existing per-instance key routes. No
-  command reconfigures an outside instance: its package, address, key
-  placement, and models are fixed when it is added, so its records cannot
-  outlive what they were made for; a change is a removal and a new provider.
+  to the credential broker through the existing per-instance key routes. The
+  driver reference is fixed when it is added; the rest changes under
+  [Reconfiguring](#reconfiguring).
+- **Reconfiguring.** `change-outside-harness-endpoint-configuration` carries
+  the instance, its expected version, and the whole configuration the person
+  now wants: address, key placement, and listed model IDs under the rules for
+  adding. Its driver reference must be the one the instance binds, version and
+  digest included, or the host refuses it; another driver is a new provider,
+  and another digest is a rebind that only the person's trust causes
+  ([Rebind rules](#rebind-rules)). It is local window only, like adding one.
+  It installs, trusts, enables, and starts nothing and consults no admission:
+  the provider's switch, its crash-limit hold, its name, and its threads stay
+  as they are, so an instance that is `driver-not-admitted` stays so. It is
+  refused while a session is active on the provider. What the instance
+  learned under the old configuration goes: the process stops and the next use
+  starts one with the new address and models, the provider catalogue is
+  invalidated with its Verify tools record removed, and the stored key is
+  forgotten when the address changes or the provider stops sending one. A new
+  key header on the same address keeps the key. The change journals as
+  `provider.instance-configuration-changed@1`.
 - **Key placement.** The person chooses the one header the key travels in
   (lowercase, never `proxy-authorization`, `cookie`, `set-cookie`, or `host`)
   and whether it goes as `Bearer`. A brokered request that asks for the key
@@ -623,8 +653,8 @@ the fail-closed option.
 - **What moves.** Only the driver reference's version and digest, as a
   journaled `provider.instance-driver-rebound@1` that only the host writes,
   with the person's trust as its cause; it is its own event so that
-  `provider.instance-configuration-changed@1` still never carries an outside
-  instance. The name, address, key placement, listed models, provider
+  `provider.instance-configuration-changed@1`, which carries only the person's
+  own change, never moves a driver reference. The name, address, key placement, listed models, provider
   switch, threads, and stored key stay as the person set them. The move is idempotent and runs after every extension lifecycle
   change and once at host start, so a host that stopped between a trust and
   its move makes the move on its next pass.
@@ -900,20 +930,20 @@ The attacker is the driver package (malicious or compromised) or whoever can
 put a package in front of the person. Controls marked new are this design's;
 "built" marks one a landed slice has made real.
 
-| Threat                                                              | Control                                                                                                                                                             |
-| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Exfiltrates prompts, code, or files                                 | New, built (escape tests pass on macOS): no network, read only its package, no Project path; only egress is the brokered call to the configured origin              |
-| Steals or replays a credential                                      | New, built for the brokered call: never holds one; host injects the header per request and strips it from responses; broker coordinates absent from the environment |
-| Uses another instance's or provider's credential                    | New, built: one process and one request channel per instance; the lease is keyed by that instance                                                                   |
-| Escapes to the host (files, processes, other extensions)            | New, built (escape tests pass on macOS): deny-default Seatbelt without exec or fork; `/System/Volumes/Data` denied; Linux refuses to launch                         |
-| Over-claims capabilities (tools, approvals, resume)                 | New, built: host ceiling clamp; `admitTurn` computed by the host; host-run Verify tools                                                                             |
-| Fabricates tool calls or injects instructions in output             | Existing: model output is untrusted; the harness offers, approves, and runs tools under thread authority; taint rules apply                                         |
-| Puts attacker text in Settings or diagnostics                       | New, built: closed reasons only; stderr bounded and kept out of clients                                                                                             |
-| Swaps code under a trusted name (update, mirror, typosquat)         | New, built: digest-bound trust and records; held updates and rollbacks that move an instance only on trust and clear its verification. New: publisher key pin       |
-| Points the key at an internal service or attacker host              | Existing endpoint rule, built for the brokered call: HTTPS or loopback HTTP, origin-checked before the key is read; no redirect                                     |
-| Exhausts the host (floods, hangs, crash loops)                      | Existing supervisor bounds; new, built: per-message cap, host-owned deadlines, bounded brokered calls, per-instance crash limit and journaled hold                  |
-| An agent, mention, routine, or paired device installs or trusts one | Existing and new, built: lifecycle, add-provider, and Verify tools only from a local window; structured references stay inert; install stays held until trusted     |
-| Impersonates a bundled provider                                     | New, built: one reserved family; package-name identity with an outside label; no bundled logo, account profile, or sign-in dialect                                  |
+| Threat                                                              | Control                                                                                                                                                              |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Exfiltrates prompts, code, or files                                 | New, built (escape tests pass on macOS): no network, read only its package, no Project path; only egress is the brokered call to the configured origin               |
+| Steals or replays a credential                                      | New, built for the brokered call: never holds one; host injects the header per request and strips it from responses; broker coordinates absent from the environment  |
+| Uses another instance's or provider's credential                    | New, built: one process and one request channel per instance; the lease is keyed by that instance                                                                    |
+| Escapes to the host (files, processes, other extensions)            | New, built (escape tests pass on macOS): deny-default Seatbelt without exec or fork; no read under `/System`; of `/etc`, only the zone link; Linux refuses to launch |
+| Over-claims capabilities (tools, approvals, resume)                 | New, built: host ceiling clamp; `admitTurn` computed by the host; host-run Verify tools                                                                              |
+| Fabricates tool calls or injects instructions in output             | Existing: model output is untrusted; the harness offers, approves, and runs tools under thread authority; taint rules apply                                          |
+| Puts attacker text in Settings or diagnostics                       | New, built: closed reasons only; stderr bounded and kept out of clients                                                                                              |
+| Swaps code under a trusted name (update, mirror, typosquat)         | New, built: digest-bound trust and records; held updates and rollbacks that move an instance only on trust and clear its verification. New: publisher key pin        |
+| Points the key at an internal service or attacker host              | Existing endpoint rule, built for the brokered call: HTTPS or loopback HTTP, origin-checked before the key is read; no redirect                                      |
+| Exhausts the host (floods, hangs, crash loops)                      | Existing supervisor bounds; new, built: per-message cap, host-owned deadlines, bounded brokered calls, per-instance crash limit and journaled hold                   |
+| An agent, mention, routine, or paired device installs or trusts one | Existing and new, built: lifecycle, add-provider, and Verify tools only from a local window; structured references stay inert; install stays held until trusted      |
+| Impersonates a bundled provider                                     | New, built: one reserved family; package-name identity with an outside label; no bundled logo, account profile, or sign-in dialect                                   |
 
 Residual risk: the configured endpoint receives what the person sends it, as
 for any endpoint; a trusted driver can mistranslate (send a different model id,
