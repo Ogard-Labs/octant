@@ -618,7 +618,7 @@ addresses, and platform tokens.
 - Voice uses the host's OpenAI-compatible Voice endpoint and persists no audio
   ([Providers](../architecture.md#providers)).
 - A hosted relay stays out unless reachability evidence opens it
-  ([remote path research](../remote-path-sufficiency.md)); the push gateway
+  ([hosted relay design](hosted-relay.md)); the push gateway
   above carries no product traffic and is not that relay.
 - A maintainer-operated service follows the Canvas public links shape: off by
   default, named in Settings, with a replaceable URL
