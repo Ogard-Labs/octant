@@ -415,9 +415,11 @@ companion, Apple physical devices and then TestFlight and App Store
 distribution of a person's own apps, enterprise directory OAuth and cloud-IAM
 provider identity, disposable Linux desktops for headless hosts, remote SSH
 development environments, third-party provider-driver plugins, and the EU/GDPR
-compliance package (pending legal review). A hub-and-spoke topology, where one
-self-hosted Octant host enrolls a person's other hosts and devices, introduces
-them to each other, and runs their wake, relay, and push services, is
+compliance package (pending legal review). A hub-and-spoke topology on a
+person's own devices, where one Octant server (running without the desktop app
+and serving the web app over a private network such as Tailscale) enrolls the
+person's other computers and phones, introduces them to each other, fails over
+to a standby, and runs their wake and push services, is
 authorized the same way (maintainer decision, 2026-10-28) under
 [Hub and spokes](docs/design/hub-and-spokes.md). Each is design-first: build it only
 once its owning specification documents its authority, privacy, and release
