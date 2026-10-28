@@ -132,10 +132,9 @@ export const CANVAS_SHARE_FRAMES_SCHEMA_VERSION = 10;
 export const CANVAS_SHARE_DESIGN_FIELDS_SCHEMA_VERSION = 11;
 // Version 12 carries the flow block, which places mockup and design screens
 // the same share holds. Version 13 carries the mockup library: its new
-// components, the progress field, and reusable definitions. A mockup's
-// declared images do not leave, like a design's, and a chart's callouts stay
-// stripped as before: the public share service refuses a share format it
-// does not know, and each bump is what teaches it.
+// components, the progress field, and reusable definitions. A chart's
+// callouts stay stripped as before: the public share service refuses a share
+// format it does not know, and each bump is what teaches it.
 export const CANVAS_SHARE_FLOW_SCHEMA_VERSION = 12;
 export const CANVAS_SHARE_MOCKUP_LIBRARY_SCHEMA_VERSION = 13;
 export const CANVAS_SHARE_SCHEMA_VERSION = 13 as const;
@@ -249,12 +248,9 @@ const exportBlockFields = {
   blockId: boundedToken("CanvasBlockId"),
   schemaVersion: CanvasSchemaVersion,
 } as const;
-// A shared mockup carries the library's fields except its declared images,
-// which resolve only under this host's authority, like a design's.
 const {
   blockId: _mockupBlockId,
   schemaVersion: _mockupSchemaVersion,
-  assets: _mockupAssets,
   ...exportMockupFields
 } = CanvasMockupBlock.fields;
 

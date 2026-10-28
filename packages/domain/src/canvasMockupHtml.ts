@@ -235,16 +235,15 @@ function drawNode(
       return { markup: `<p class="oct-mockup-toast">${label}</p>`, headingLevel };
     case "search":
       return {
-        markup: `<p class="oct-mockup-field"><input type="search" disabled aria-label="${label}" placeholder="${escapeHtml(node.value ?? "")}"></p>`,
+        markup: `<p class="oct-mockup-field">${hotspotMarkup}<input type="search" disabled aria-label="${label}" placeholder="${escapeHtml(node.value ?? "")}"></p>`,
         headingLevel,
       };
     case "breadcrumb":
-      return { markup: `<p class="oct-mockup-part">${name}: ${label}</p>`, headingLevel };
     case "pagination":
-      return { markup: `<p class="oct-mockup-part">${name}: ${label}</p>`, headingLevel };
+      return { markup: `<p class="oct-mockup-part">${name}: ${linkOrLabel}</p>`, headingLevel };
     case "stepper":
       return {
-        markup: `<p class="oct-mockup-part">${name}: ${label}${node.progress === undefined ? "" : `, step ${String(node.progress)}`}</p>`,
+        markup: `<p class="oct-mockup-part">${name}: ${linkOrLabel}${node.progress === undefined ? "" : `, step ${String(node.progress)}`}</p>`,
         headingLevel,
       };
     case "progress":
@@ -254,12 +253,12 @@ function drawNode(
       };
     case "slider":
       return {
-        markup: `<p class="oct-mockup-progress"><span>${label}</span><input type="range" disabled min="0" max="100" value="${String(node.progress ?? 0)}" aria-label="${label}"></p>`,
+        markup: `<p class="oct-mockup-progress"><span>${linkOrLabel}</span><input type="range" disabled min="0" max="100" value="${String(node.progress ?? 0)}" aria-label="${label}"></p>`,
         headingLevel,
       };
     case "menu":
       return {
-        markup: `<details class="oct-mockup-part"><summary>${name}: ${label}</summary>${childMarkup}</details>`,
+        markup: `<details class="oct-mockup-part"><summary>${name}: ${linkOrLabel}</summary>${childMarkup}</details>`,
         headingLevel,
       };
     case "footer":
@@ -290,7 +289,7 @@ function drawNode(
       };
     case "instance":
       return {
-        markup: `<div class="oct-mockup-part" data-component="${escapeHtml(node.defId ?? "")}">${hotspotLabel}${childMarkup}</div>`,
+        markup: `<div class="oct-mockup-instance" data-component="instance">${childMarkup}</div>`,
         headingLevel,
       };
   }
