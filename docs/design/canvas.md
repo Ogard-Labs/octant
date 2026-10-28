@@ -665,8 +665,10 @@ domain policy names each refusal (`dangling-flow-screen`,
 `flow-screen-frame-missing`, `flow-screen-design-refused`,
 `duplicate-flow-screen`, `duplicate-flow-edge`, `dangling-flow-edge`,
 `flow-edge-self`, and the screens and edges budgets). A placed block is
-placed once, exactly as a dashboard places its cells: a screen is never also
-a dashboard cell or a tab child (`block-placed-twice` names both placers).
+placed by one block, exactly as a dashboard places its cells: a screen is
+never also a dashboard cell or a tab child (`block-placed-twice` names both
+placers), while one flow may place several frames of one design or several
+variants of one mockup as separate screens.
 
 The board is the diagram board's model with screens instead of boxes: the
 pure `layoutCanvasFlow` (`packages/domain/src/canvasFlowLayout.ts`) ranks

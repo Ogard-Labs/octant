@@ -1267,7 +1267,10 @@ function validatePlacedOnce(definition: CanvasDefinition): void {
     for (const childId of childIds) {
       const id = String(childId);
       const first = placedBy.get(id);
-      if (first !== undefined) {
+      // One placer naming a block again is a second frame or variant of the
+      // same screen (a flow from Home to About of one design); placed once
+      // means one placer, so only a second placer is refused.
+      if (first !== undefined && first !== block) {
         reject(
           "block-placed-twice",
           `Canvas block ${id} is placed by both ${first.kind} ${first.blockId} and ${block.kind} ${block.blockId}; a block is placed once.`,
