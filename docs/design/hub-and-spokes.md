@@ -131,13 +131,30 @@ Octant is server and client. The server is the authority and runs on its own;
 the desktop app is one client of it, as are the web app, the phone app, and
 the CLI. The hub depends on that:
 
-- **Runs without the desktop app.** A hub is normally a headless host:
-  `octant server run`, kept running by the CLI's service manager (a login
-  service on macOS, a user service on Linux), so it starts when the person
-  logs in and keeps running with no window open; a Mac mini hub is set to log
-  in automatically after a restart. A Mac that also runs the desktop
-  app uses the same server; quitting the desktop app does not stop a hub
+- **Runs without the desktop app.** A hub is normally a headless host running
+  `octant server run`. A Mac that also runs the desktop app uses the same
+  server; quitting the desktop app does not stop a hub
   ([decision H13](#decisions)).
+- **Starts and runs unattended.** A hub must come back by itself after a
+  restart, a power cut, or an update, with no one logged in and no window
+  open. Turning the hub role on therefore installs the server as a boot
+  service, not the login service an ordinary host uses: on macOS a system
+  launch daemon that runs the server as the person's own user account, and on
+  Linux a user service with lingering turned on, so systemd starts it at boot.
+  Installing it needs administrator approval once. The service restarts the
+  server if it exits, and an update restarts it the same way.
+  - **Secrets at boot.** The person's login keychain stays locked until they
+    log in, so the hub keeps what it needs to serve (its identity key, roster
+    signing key, listener and web certificates, and owner and member keys)
+    in a store it can open at boot ([decision H18](#decisions)). Credentials
+    held only in the login keychain, such as a provider app's own sign-in,
+    are unavailable until someone logs in, and the hub says which ones.
+  - **The Mac itself.** For a power cut, the hub's setup turns on "start up
+    automatically after a power failure". With FileVault on, macOS asks for
+    the password before it boots, so a planned restart or update uses an
+    authenticated restart that skips that prompt once; after a power cut
+    someone unlocks the Mac once, and the hub's setup says so. A standby
+    keeps the members working meanwhile.
 - **Serves the web app.** The hub's private listener, on its Tailscale or LAN
   address, serves the same web app the desktop window shows. A phone or
   laptop with no Octant installed opens `https://<hub>.<tailnet>.ts.net` in a
@@ -655,25 +672,27 @@ after the person proves presence.
 ## Decisions
 
 The maintainer settled these on 2026-10-28. Where the maintainer left the
-choice to the design, the design's recommendation was taken.
+choice to the design, the design's recommendation was taken. H18 is still open and needs
+the maintainer's answer before slice 3.
 
-| ID  | Question                                                              | Decision                                                                                                                                                                                                                                                                                                         |
-| --- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| H2  | Does a spoke accept new roster members automatically?                 | Yes, as full members: delegation into every Project up to Code approval-gated, and for a guest paired-device authority. Every spoke and owner device alerts on each new member; an optional per-spoke setting holds new members until an owner confirms them. The spoke's person can narrow or revoke any member |
-| H3  | When a member leaves or is removed, are its peer grants dropped?      | Dropped on leave and on a removal seen in a newer roster; kept while the hub is merely unreachable                                                                                                                                                                                                               |
-| H4  | One hub per spoke, or several?                                        | One active hub. A standby takes over the roster and coordination only while the hub is down                                                                                                                                                                                                                      |
-| H5  | May the hub's provisioning offers apply on a spoke without asking?    | Per kind (update channel, untrusted plugin install, profile without secrets), off by default; a routine always asks                                                                                                                                                                                              |
-| H6  | Can a subscription sign-in held by a provider's own app be copied?    | Not yet; each machine signs in to its subscription itself until each provider's terms and token binding are checked. API keys copy already                                                                                                                                                                       |
-| H7  | Which push path does the hub support first?                           | Forward to the push gateway from Mobile maturity; direct sending only once self-building the phone app is documented                                                                                                                                                                                             |
-| H8  | Where do the hub's services live?                                     | In the Octant server (`apps/server`). The roster and failover are on with the hub role; the wake service and push sender are each off until turned on                                                                                                                                                            |
-| H10 | May a standby add or remove members while standing in?                | Yes; the hub takes the changes back on return, and removal wins                                                                                                                                                                                                                                                  |
-| H11 | How is a standby promoted to hub for good?                            | A local action on the standby; spokes whose grant covers the standby follow it, and the rest confirm the new hub locally                                                                                                                                                                                         |
-| H12 | How long without the hub before members fail over?                    | A setting on the hub, carried in the roster, default five minutes                                                                                                                                                                                                                                                |
-| H13 | Does the hub keep running when the desktop app on the same Mac quits? | Yes; the hub always runs as a service, and the desktop app connects to it                                                                                                                                                                                                                                        |
-| H14 | Does a host fetch its own Tailscale certificate for the web app?      | Yes, on the hub and on each spoke a browser reaches directly, through the local Tailscale daemon, off until the person turns it on after the certificate-transparency note                                                                                                                                       |
-| H15 | How does a browser guest reach a spoke?                               | Directly: each spoke serves its own web app at its own Tailscale name, and the hub's web app links to it, so the hub never sees spoke traffic                                                                                                                                                                    |
-| H16 | Do spokes honor owner devices by default?                             | Yes: ticked at join, clearly labeled, and untickable                                                                                                                                                                                                                                                             |
-| H17 | How long does one unlock last?                                        | One Face ID, Touch ID, passcode, or passkey check covers five minutes of administration screens; Full access, merge, credential copy, and owner changes each need their own                                                                                                                                      |
+| ID  | Question                                                                    | Decision                                                                                                                                                                                                                                                                                                         |
+| --- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| H2  | Does a spoke accept new roster members automatically?                       | Yes, as full members: delegation into every Project up to Code approval-gated, and for a guest paired-device authority. Every spoke and owner device alerts on each new member; an optional per-spoke setting holds new members until an owner confirms them. The spoke's person can narrow or revoke any member |
+| H3  | When a member leaves or is removed, are its peer grants dropped?            | Dropped on leave and on a removal seen in a newer roster; kept while the hub is merely unreachable                                                                                                                                                                                                               |
+| H4  | One hub per spoke, or several?                                              | One active hub. A standby takes over the roster and coordination only while the hub is down                                                                                                                                                                                                                      |
+| H5  | May the hub's provisioning offers apply on a spoke without asking?          | Per kind (update channel, untrusted plugin install, profile without secrets), off by default; a routine always asks                                                                                                                                                                                              |
+| H6  | Can a subscription sign-in held by a provider's own app be copied?          | Not yet; each machine signs in to its subscription itself until each provider's terms and token binding are checked. API keys copy already                                                                                                                                                                       |
+| H7  | Which push path does the hub support first?                                 | Forward to the push gateway from Mobile maturity; direct sending only once self-building the phone app is documented                                                                                                                                                                                             |
+| H8  | Where do the hub's services live?                                           | In the Octant server (`apps/server`). The roster and failover are on with the hub role; the wake service and push sender are each off until turned on                                                                                                                                                            |
+| H10 | May a standby add or remove members while standing in?                      | Yes; the hub takes the changes back on return, and removal wins                                                                                                                                                                                                                                                  |
+| H11 | How is a standby promoted to hub for good?                                  | A local action on the standby; spokes whose grant covers the standby follow it, and the rest confirm the new hub locally                                                                                                                                                                                         |
+| H12 | How long without the hub before members fail over?                          | A setting on the hub, carried in the roster, default five minutes                                                                                                                                                                                                                                                |
+| H13 | Does the hub keep running when the desktop app quits, and after a restart?  | Yes; the hub runs as a boot service (a system launch daemon on macOS, a lingering user service on Linux) and starts unattended after a restart, power cut, or update. The desktop app connects to it                                                                                                             |
+| H18 | Where does the hub keep its own keys so it can serve before anyone logs in? | Open: recommended a file store readable only by the person's account inside the Octant data folder, on a FileVault-encrypted disk; the alternative is the System keychain through a small privileged helper, which is stronger but adds a privileged component                                                   |
+| H14 | Does a host fetch its own Tailscale certificate for the web app?            | Yes, on the hub and on each spoke a browser reaches directly, through the local Tailscale daemon, off until the person turns it on after the certificate-transparency note                                                                                                                                       |
+| H15 | How does a browser guest reach a spoke?                                     | Directly: each spoke serves its own web app at its own Tailscale name, and the hub's web app links to it, so the hub never sees spoke traffic                                                                                                                                                                    |
+| H16 | Do spokes honor owner devices by default?                                   | Yes: ticked at join, clearly labeled, and untickable                                                                                                                                                                                                                                                             |
+| H17 | How long does one unlock last?                                              | One Face ID, Touch ID, passcode, or passkey check covers five minutes of administration screens; Full access, merge, credential copy, and owner changes each need their own                                                                                                                                      |
 
 Earlier the same day the maintainer settled that a standby hub exists (was
 H1), and that no member acts as a relay or introducer except the hub and a
@@ -703,7 +722,8 @@ maintainer's hardware, or names the maintainer gate.
    desktop app (H13), Act as hub, Add a device with QR and text codes,
    Join a hub on a computer, Leave, Remove, the hub grant screen, and the
    roster, through the loopback administration channel and `octant hub`.
-   Acceptance: only the member can join, leave, or change its grant; the hub
+   Acceptance: the hub comes back by itself after a restart with no one
+   logged in; only the member can join, leave, or change its grant; the hub
    principal is refused every route outside its grant; joining refuses any
    path that is not private. Verification: route registration, permission
    negatives, a two-host smoke on loopback. **Yes.**
