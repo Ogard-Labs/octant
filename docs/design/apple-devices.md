@@ -560,7 +560,13 @@ id>.p8`, created `0600` and never over an existing file, into that upload's
   ready for. Ready for a submission means a state App Store Connect takes into
   a new review submission (`PREPARE_FOR_SUBMISSION`, `READY_FOR_REVIEW`,
   `DEVELOPER_REJECTED`, `REJECTED`, `METADATA_REJECTED`) with the selected
-  build `VALID`; ready for a release means `PENDING_DEVELOPER_RELEASE`.
+  build `VALID` and the version's `releaseType` `MANUAL`; ready for a release
+  means `PENDING_DEVELOPER_RELEASE`. A version App Store Connect would release
+  on its own once approved (`AFTER_APPROVAL`, `SCHEDULED`, or no release type)
+  is not offered for submission, and its submission is refused
+  (`release-not-manual`) when the step runs, since the confirmation says
+  submitting does not release; Octant does not change the release setting,
+  which stays the person's act in App Store Connect.
   When the step runs, the host reads App Store Connect again and refuses
   (`store-version-changed`) if the version no longer has the confirmed build
   or is no longer ready for that step.
@@ -580,7 +586,11 @@ id>.p8`, created `0600` and never over an existing file, into that upload's
 - A submission is one review submission: Octant creates it for the app and
   platform, adds that one version, and marks it submitted. If App Store
   Connect refuses the item or the submission, Octant withdraws the draft it
-  created, once, so a refusal leaves nothing behind. A release is one release
+  created, once, so a refusal leaves nothing behind. An answer that times
+  out, is lost, or cannot be read says nothing about whether App Store
+  Connect took the submission, so Octant leaves it as it is, journals the
+  step as uncertain (`interrupted`) with the submission's identifier in its
+  note, and tells the person to check App Store Connect. A release is one release
   request for that version. Every request goes to `api.appstoreconnect.apple.com`
   with the step's broker-signed token and follows no redirect.
 - The journal records each submission and release like an upload: actor, app,
@@ -989,14 +999,16 @@ accounts or hardware; its real-hardware acceptance is separate where noted.
    1Password key read once per signing and per key-file write; `op` missing,
    failing, or answering something that is not a key refused as
    `key-source-unavailable` and asked once), the `AppleStoreVersions` suite
-   (the step each state is ready for; exactly the confirmed version submitted
+   (the step each state is ready for; a version set to release on its own
+   neither offered nor submitted, rechecked when the step runs; a lost answer
+   journaled as uncertain; exactly the confirmed version submitted
    with one token; a release only for a version waiting for a manual release;
    nothing sent for another build or an unreadable 1Password key; App Store
    Connect's refusal recorded as not done and not retried; the journaled
    record naming actor, app, version, result, and identifier without the
    token), the App Store Connect client tests (the one API host, the bearer
    token, no redirect; the submission's three requests and the draft
-   withdrawn on a refusal; a release request), the `AppleDeviceService` test
+   withdrawn on a refusal but not after a timed-out answer; a release request), the `AppleDeviceService` test
    that only a confirmed step reaches it and Plan refuses it, the Code
    runtime test that the agent's release asks a person at the Mac under Full
    access, refuses a paired device's answer, and mints a one-use receipt bound

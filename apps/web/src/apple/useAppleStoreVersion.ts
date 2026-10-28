@@ -139,11 +139,14 @@ function stepResult(
       message:
         answer.reason === "store-version-changed"
           ? "App Store Connect no longer holds that version and build ready for this step. Check again to see what it holds now."
-          : answer.reason === "key-source-unavailable"
-            ? "The App Store Connect key could not be read from 1Password. Nothing was sent."
-            : answer.reason === "confirmation-required" || answer.reason === "local-person-required"
-              ? "This is confirmed in Octant on this Mac."
-              : "The Mac refused it.",
+          : answer.reason === "release-not-manual"
+            ? "App Store Connect would release this version on its own once approved. Set it to release manually in App Store Connect, then check again."
+            : answer.reason === "key-source-unavailable"
+              ? "The App Store Connect key could not be read from 1Password. Nothing was sent."
+              : answer.reason === "confirmation-required" ||
+                  answer.reason === "local-person-required"
+                ? "This is confirmed in Octant on this Mac."
+                : "The Mac refused it.",
     };
   }
   if (answer.kind === "apple-device-failure") {

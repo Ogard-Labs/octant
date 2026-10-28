@@ -116,6 +116,12 @@ export class AppleStoreVersions {
         message: `Version ${declared.version} has no build selected in App Store Connect. Select the build there; Octant submits only what App Store Connect already holds.`,
       };
     }
+    if (releasesOnItsOwn(read.version)) {
+      return {
+        kind: "failed",
+        message: `App Store Connect would release ${declared.version} on its own once approved (release ${read.version.releaseType ?? "not set"}). Set the version to release manually in App Store Connect; Octant submits only a version you release yourself.`,
+      };
+    }
     return {
       kind: "prepared",
       storeVersion,
@@ -169,13 +175,15 @@ export class AppleStoreVersions {
       String(confirmed.version),
       read.version,
     );
-    if (
-      current === undefined ||
-      String(current.buildNumber) !== String(confirmed.buildNumber) ||
-      readiness(read.version) !== step
-    ) {
+    if (current === undefined || String(current.buildNumber) !== String(confirmed.buildNumber)) {
       return refused("store-version-changed");
     }
+    // Rechecked here, not only when the step was offered: a version set since
+    // to release after approval would go live without the person's release.
+    if (step === "submit-for-review" && releasesOnItsOwn(read.version)) {
+      return refused("release-not-manual");
+    }
+    if (readiness(read.version) !== step) return refused("store-version-changed");
     const answer =
       step === "submit-for-review"
         ? await this.#options.api.submitForReview(
@@ -204,9 +212,14 @@ export class AppleStoreVersions {
           outcome: "failed",
           message: `App Store Connect refused: ${answer.reason}`,
         });
+      case "uncertain":
+        return this.#record(request, step, confirmed, startedAt, {
+          outcome: "interrupted",
+          message: `App Store Connect's answer to submission ${answer.id} was lost or could not be read, so Octant does not know whether ${label} is in App Review. It left the submission as it is. Check App Store Connect before submitting again.`,
+        });
       case "unclassified":
         return this.#record(request, step, confirmed, startedAt, {
-          outcome: "failed",
+          outcome: "interrupted",
           message:
             step === "submit-for-review"
               ? "App Store Connect's answer could not be read, so Octant does not count the version as submitted. Check App Store Connect before submitting again."
@@ -265,10 +278,28 @@ function readiness(
   if (version.state === AWAITING_MANUAL_RELEASE && version.build !== undefined) {
     return "release-version";
   }
-  if (SUBMITTABLE_STATES.has(version.state) && version.build?.processingState === "VALID") {
+  if (
+    SUBMITTABLE_STATES.has(version.state) &&
+    version.build?.processingState === "VALID" &&
+    version.releaseType === "MANUAL"
+  ) {
     return "submit-for-review";
   }
   return "neither";
+}
+
+/**
+ * A version ready for review that App Store Connect would publish by itself
+ * once approved (`AFTER_APPROVAL`, `SCHEDULED`, or no release type it named).
+ * Octant never submits one: the confirmation says submitting does not
+ * release, and it does not change the release setting for the person.
+ */
+function releasesOnItsOwn(version: AppStoreConnectVersion): boolean {
+  return (
+    SUBMITTABLE_STATES.has(version.state) &&
+    version.build?.processingState === "VALID" &&
+    version.releaseType !== "MANUAL"
+  );
 }
 
 function storeVersionOf(

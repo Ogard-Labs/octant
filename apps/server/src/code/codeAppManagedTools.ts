@@ -1212,6 +1212,8 @@ const APPLE_DEVICE_REFUSALS: Partial<Readonly<Record<AppleDeviceRefusalReason, s
     "The project no longer builds the app, version, build, or signature the person confirmed. Ask to upload again so they can confirm what it builds now.",
   "store-version-changed":
     "App Store Connect no longer holds that version with the confirmed build in a state ready for this step. Ask again so the person can confirm what it holds now.",
+  "release-not-manual":
+    "App Store Connect would release this version on its own once approved. The person sets it to release manually in App Store Connect; Octant never changes that setting.",
   "key-source-unavailable":
     "The App Store Connect key could not be read from 1Password: op is missing or signed out, or the person declined. Nothing was sent; the person can try again when 1Password is ready.",
 };

@@ -64,6 +64,7 @@ function heldVersion(overrides: Partial<AppStoreConnectVersion> = {}): AppStoreC
     versionId: "a1b2c3d4-0000-4000-8000-000000000001",
     state: "PREPARE_FOR_SUBMISSION",
     build: { buildNumber: "7", processingState: "VALID" },
+    releaseType: "MANUAL",
     ...overrides,
   };
 }
@@ -226,6 +227,35 @@ describe("AppleStoreVersions", () => {
     expect(unread.sign).toHaveBeenCalledTimes(1);
     expect(unread.api.readVersion).not.toHaveBeenCalled();
     expect(unread.api.submitForReview).not.toHaveBeenCalled();
+  });
+
+  it("never offers or sends a submission App Store Connect would release on its own after approval", async () => {
+    const context = { checkoutRoot: "/checkout" };
+    for (const releaseType of ["AFTER_APPROVAL", "SCHEDULED", undefined]) {
+      const { releaseType: _manual, ...version } = heldVersion();
+      const automatic = setup({
+        version: releaseType === undefined ? version : { ...version, releaseType },
+      });
+      await expect(
+        automatic.versions.prepare({ projectPath: "App.xcodeproj" }, context),
+      ).resolves.toMatchObject({ kind: "failed" });
+      // Set to release on its own after the person confirmed: rechecked, refused, nothing sent.
+      await expect(automatic.versions.carryOut(stepRequest("submit-for-review"))).resolves.toEqual({
+        kind: "apple-device-refused",
+        reason: "release-not-manual",
+      });
+      expect(automatic.api.submitForReview).not.toHaveBeenCalled();
+      expect(automatic.recorded).toEqual([]);
+    }
+  });
+
+  it("journals a submission whose answer was lost as uncertain and tells the person to check", async () => {
+    const lost = setup({ step: { kind: "uncertain", id: "sub-9" } });
+    await expect(lost.versions.carryOut(stepRequest("submit-for-review"))).resolves.toMatchObject({
+      evidence: { outcome: "interrupted" },
+    });
+    expect(lost.recorded[0]?.diagnostics[0]?.message).toContain("Check App Store Connect");
+    expect(lost.recorded[0]?.appStoreConnectId).toBeUndefined();
   });
 
   it("records App Store Connect's reason for a refused submission as not done and does not retry", async () => {

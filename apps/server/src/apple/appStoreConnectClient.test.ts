@@ -47,7 +47,11 @@ describe("App Store Connect API client", () => {
             {
               type: "appStoreVersions",
               id: "ver-1",
-              attributes: { versionString: "1.2", appVersionState: "PREPARE_FOR_SUBMISSION" },
+              attributes: {
+                versionString: "1.2",
+                appVersionState: "PREPARE_FOR_SUBMISSION",
+                releaseType: "MANUAL",
+              },
               relationships: { build: { data: { type: "builds", id: "build-7" } } },
             },
           ],
@@ -70,6 +74,7 @@ describe("App Store Connect API client", () => {
         versionId: "ver-1",
         state: "PREPARE_FOR_SUBMISSION",
         build: { buildNumber: "7", processingState: "VALID" },
+        releaseType: "MANUAL",
       },
     });
     for (const request of sent) {
@@ -117,6 +122,32 @@ describe("App Store Connect API client", () => {
       data: { type: "reviewSubmissions", id: "sub-1", attributes: { canceled: true } },
     });
     expect(sent).toHaveLength(3);
+  });
+
+  it("keeps a submission whose final answer was lost, and sends no cancellation", async () => {
+    const sent: Array<{ readonly method: string; readonly body: unknown }> = [];
+    const answers = [
+      Response.json({ data: { type: "reviewSubmissions", id: "sub-1" } }, { status: 201 }),
+      Response.json({ data: { type: "reviewSubmissionItems", id: "item-1" } }, { status: 201 }),
+    ];
+    const fetch: AppStoreConnectFetch = async (_url, init) => {
+      sent.push({
+        method: init.method ?? "GET",
+        body: typeof init.body === "string" ? JSON.parse(init.body) : undefined,
+      });
+      const answer = answers.shift();
+      // The PATCH that marks it submitted times out: App Store Connect may have taken it.
+      if (answer === undefined) throw new DOMException("The operation timed out.", "TimeoutError");
+      return answer;
+    };
+    await expect(
+      createAppStoreConnectApi(fetch).submitForReview(TOKEN, {
+        appId: "1234567890",
+        versionId: "ver-1",
+      }),
+    ).resolves.toEqual({ kind: "uncertain", id: "sub-1" });
+    expect(sent).toHaveLength(3);
+    expect(JSON.stringify(sent)).not.toContain("canceled");
   });
 
   it("releases a version with one release request and counts nothing it cannot read", async () => {

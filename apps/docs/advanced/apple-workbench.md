@@ -365,8 +365,11 @@ Connect**. Octant reads the version your project declares
 (`MARKETING_VERSION`) from App Store Connect, with the build selected for it
 and its state, and offers only the step that version is ready for:
 
-- **Submit for App Review…** when the version has not been submitted and its
-  build has finished processing.
+- **Submit for App Review…** when the version has not been submitted, its
+  build has finished processing, and it is set to release manually. If App
+  Store Connect would release the version on its own once approved, Octant
+  says so and does not submit it; change the version's release option in App
+  Store Connect first.
 - **Release…** when App Review approved the version and it is waiting for you
   to release it by hand.
 
@@ -380,7 +383,9 @@ longer ready for that step.
 Octant submits only what App Store Connect already holds: select the build,
 and fill in the metadata, screenshots, pricing, and export-compliance answers
 in App Store Connect first. If App Store Connect refuses the submission, Octant
-shows its reason and changes nothing. A release publishes that one version to
+shows its reason and changes nothing. If App Store Connect's answer is lost,
+Octant leaves the submission as it is and asks you to check App Store Connect
+before submitting again. A release publishes that one version to
 the App Store at the moment you confirm; Octant never sets a version to
 release on its own. Adding testers, answering App Review, and phased release
 stay in App Store Connect.

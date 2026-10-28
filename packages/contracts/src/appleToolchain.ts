@@ -754,6 +754,7 @@ export const AppleDeviceRefusalReason = Schema.Literal(
   "upload-changed",
   "store-version-changed",
   "key-source-unavailable",
+  "release-not-manual",
 );
 export type AppleDeviceRefusalReason = typeof AppleDeviceRefusalReason.Type;
 

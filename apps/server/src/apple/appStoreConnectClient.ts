@@ -22,6 +22,11 @@ export interface AppStoreConnectVersion {
     /** `VALID` once App Store Connect has finished processing it. */
     readonly processingState: string;
   };
+  /**
+   * How App Store Connect releases the version once approved: `MANUAL`,
+   * `AFTER_APPROVAL`, or `SCHEDULED`, as it answered.
+   */
+  readonly releaseType?: string;
 }
 
 export type AppStoreConnectVersionRead =
@@ -36,6 +41,12 @@ export type AppStoreConnectStep =
   /** App Store Connect took the step; its identifier for the submission or release request. */
   | { readonly kind: "done"; readonly id: string }
   | { readonly kind: "refused"; readonly reason: string }
+  /**
+   * A submission App Store Connect may or may not have taken: a request after
+   * the draft was created timed out, was lost, or answered something Octant
+   * cannot read. The draft is left as it is, never withdrawn.
+   */
+  | { readonly kind: "uncertain"; readonly id: string }
   | { readonly kind: "unclassified" };
 
 /**
@@ -145,9 +156,16 @@ export function createAppStoreConnectApi(
       const state = attribute(entry, "appVersionState") ?? attribute(entry, "appStoreState");
       if (state === undefined || !STATE.test(state)) return { kind: "unclassified" };
       const build = selectedBuild(entry, versions.body);
+      const releaseType = attribute(entry, "releaseType");
       return {
         kind: "found",
-        version: { appId, versionId, state, ...(build === undefined ? {} : { build }) },
+        version: {
+          appId,
+          versionId,
+          state,
+          ...(build === undefined ? {} : { build }),
+          ...(releaseType === undefined ? {} : { releaseType }),
+        },
       };
     },
 
@@ -200,8 +218,12 @@ export function createAppStoreConnectApi(
             )
           : item;
       if (submitted.kind === "ok") return { kind: "done", id: submissionId };
-      // The empty draft this left behind is withdrawn, so a refused submission
-      // changes nothing in App Store Connect. That cleanup is not retried.
+      // A timeout, a lost answer, or one Octant cannot read says nothing about
+      // whether App Store Connect took the submission; withdrawing it then
+      // could pull a submission that went through out of review.
+      if (submitted.kind === "unclassified") return { kind: "uncertain", id: submissionId };
+      // App Store Connect refused it: the draft this left behind is withdrawn,
+      // so a refused submission changes nothing. That cleanup is not retried.
       await call(
         token,
         "PATCH",
