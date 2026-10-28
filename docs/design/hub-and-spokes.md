@@ -15,7 +15,7 @@ network calls
 release scope
 ([Current Release Boundary](../architecture.md#current-release-boundary)).
 
-**Status: proposed 2026-10-28; decisions settled, nothing built.** The maintainer
+**Status: approved design 2026-10-28; nothing built.** The maintainer
 asked for this design and authorized it as post-preview, design-first work on
 2026-10-28, and set its shape the same day: a running instance enabled as hub,
 members paired by QR or manual code over a private network such as Tailscale,
@@ -66,8 +66,8 @@ the hub off their private network uses the
 | Spoke        | A computer running Octant, joined to one hub. It runs agents and keeps its own journal, files, credentials, sandbox, and approval policy                                                                |
 | Guest        | A phone app or a browser joined to the hub. It runs no agents, has no files or Projects of its own, and acts on spokes as a paired device. It is a member of the roster like a spoke                    |
 | Member       | The hub, the standby hub, a spoke, or a guest                                                                                                                                                           |
-| Roster       | The hub's signed list of members: each one's name, role, identity key fingerprint, listener pin, private-network host names and addresses, and the standby order                                        |
-| Hub grant    | The closed set of things a spoke lets its hub (and standby hub) do, chosen on the spoke when it joins and changeable only there                                                                         |
+| Roster       | The hub's signed list of members; its fields are listed once, under [Discovery](#spoke-to-spoke-discovery-and-delegation)                                                                               |
+| Hub grant    | The closed set of things a spoke lets its hub do (and a standby, when the spoke ticked Standby), chosen on the spoke when it joins and changeable only there                                            |
 | Peer grant   | The closed set of things a spoke lets another member do to it, chosen on the receiving spoke                                                                                                            |
 | Owner device | A member the person marked as their own. With a fresh unlock it acts on a host that honors owners with the powers of a window on that host                                                              |
 | Unlock       | A signature from a key the device's platform uses only after the person proves presence (biometrics, device passcode, or a passkey with user verification)                                              |
@@ -134,8 +134,9 @@ the CLI. The hub depends on that:
 
 - **Runs without the desktop app.** A hub is normally a headless host:
   `octant server run`, kept running by the CLI's service manager (a login
-  service on macOS, a user service on Linux), so it starts at boot and keeps
-  running with no one signed in to a window. A Mac that also runs the desktop
+  service on macOS, a user service on Linux), so it starts when the person
+  logs in and keeps running with no window open; a Mac mini hub is set to log
+  in automatically after a restart. A Mac that also runs the desktop
   app uses the same server; quitting the desktop app does not stop a hub
   ([decision H13](#decisions)).
 - **Serves the web app.** The hub's private listener, on its Tailscale or LAN
@@ -145,8 +146,8 @@ the CLI. The hub depends on that:
   in that browser.
 - **A certificate the browser trusts.** A browser cannot check a pin, so the
   web app needs a certificate the browser already trusts. On a tailnet with
-  HTTPS turned on, the hub can ask the local Tailscale daemon for its
-  `*.ts.net` certificate and renew it before it expires, instead of the person
+  HTTPS turned on, the hub (and each spoke a browser guest reaches directly) can ask the local
+  Tailscale daemon for its `*.ts.net` certificate and renew it before it expires, instead of the person
   pasting one ([decision H14](#decisions)). Tailscale obtains that
   certificate from a public certificate authority, so the machine's tailnet
   name appears in public certificate-transparency logs; the hub says so
@@ -206,8 +207,11 @@ Joining reuses pairing. It runs on the joining member:
    pairs through one
    ([Hosted relay: decision 5](hosted-relay.md#maintainer-decisions)).
 3. Both sides show the comparison code; the person approves on the hub.
-4. A spoke then shows the **hub grant** screen (below) with nothing ticked
-   beyond the roster entry, and the person chooses what the hub may do. A
+4. A spoke then shows the **hub grant** screen (below) with the roster entry,
+   Introduce, and Owners ticked and everything else off, and the person
+   chooses what the hub may do. If Owners stays ticked, the same screen lists
+   the current owner devices and the person confirms them there
+   ([Owner devices](#owner-devices)). A
    guest has no hub grant to choose, because there is nothing on a phone the
    hub can act on.
 5. The member records the hub's identity key and listener pin, and receives
@@ -217,34 +221,43 @@ Joining reuses pairing. It runs on the joining member:
 
 Leaving and removal:
 
-- **Leave** (on the member, local only) revokes the hub principal, withdraws
-  every peer grant made through the hub, and forgets the roster. A spoke's
+Peer grants run in two directions, and the rules below name them. Grants
+**held for** a member are the ones other spokes gave it. Grants **given by** a
+member are the ones it gave other members on itself.
+
+- **Leave** (on the member) revokes the hub principal, drops every grant given
+  by the member, and forgets the roster. It also tells the hub, when the hub is
+  reachable, so the hub drops the member from the next roster. A spoke's
   threads, Projects, and credentials are untouched.
 - **Remove** (on the hub) revokes the member's device on the hub and drops it
-  from the roster, so other members stop seeing it at the next roster update.
-  The removed spoke keeps working on its own and keeps any peer grant it made
-  until it revokes them; the hub cannot reach into the spoke to remove them
-  ([decision H3](#decisions)).
+  from the roster.
+- **Every spoke drops the grants held for a member** when it sees a newer
+  roster without that member, whether it left or was removed. It keeps them
+  while the hub is merely unreachable ([decision H3](#decisions)).
+- **A removed spoke keeps the grants given by it** until it revokes them or
+  sees itself missing from a newer roster; the hub cannot reach into the spoke
+  to revoke them.
 - Every join, grant change, leave, and removal is journaled on the host where
   it happened, with its principal.
 
 ### What the hub may do on a spoke
 
-The hub grant is a closed list. Each item is off unless the person on the
-spoke turns it on, and the spoke checks it on every hub request. The same
-grant applies to a standby hub while it acts as hub:
+The hub grant is a closed list. Each item is off unless the table says it is
+ticked by default, the person on the spoke can change every item, and the
+spoke checks it on every hub request. A standby hub acting as hub uses the
+same grant only on spokes that ticked Standby:
 
-| Hub grant item  | Lets the hub                                                                                                                                                                                         |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Roster (always) | List the spoke in the roster with its name, role, identity fingerprint, listener pin, private-network names and addresses, and online or asleep state                                                |
-| Status          | Read host resources, running threads' titles and states, waiting approvals (count and kind), and update status, the same read a paired device has                                                    |
-| Introduce       | Introduce other members to this spoke; each becomes a full member here (decision H2). Ticked by default                                                                                              |
-| Wake            | Hold this spoke's routine wake times and wake it (see [Wake service](#wake-service))                                                                                                                 |
-| Owners          | Let the person's owner devices act on this spoke with a window's powers after a fresh unlock (see [Owner devices](#owner-devices)). Ticked by default                                                |
-| Standby         | Let a standby hub the person named use this same grant while it stands in for the hub (see [Failover](#failover))                                                                                    |
-| Push            | Receive this spoke's sealed phone notifications and send them through the hub's push sender                                                                                                          |
-| Provision       | Offer configuration (below). Every offer lands on the spoke as a proposal the person on the spoke applies, unless the person turned on auto-apply for that kind of offer ([decision H5](#decisions)) |
-| Act             | Act on the spoke as a paired device would, within the Projects the person names: create threads, send turns, answer questions. Approvals stay on the spoke (below)                                   |
+| Hub grant item | Lets the hub                                                                                                                                                                                         |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Roster         | The hub's signed list of members; its fields are listed once, under [Discovery](#spoke-to-spoke-discovery-and-delegation)                                                                            |
+| Status         | Read host resources, running threads' titles and states, waiting approvals (count and kind), and update status, the same read a paired device has                                                    |
+| Introduce      | Introduce other members to this spoke; each becomes a full member here (decision H2). Ticked by default                                                                                              |
+| Wake           | Hold this spoke's routine wake times and wake it (see [Wake service](#wake-service))                                                                                                                 |
+| Owners         | Let the person's owner devices act on this spoke with a window's powers after a fresh unlock (see [Owner devices](#owner-devices)). Ticked by default                                                |
+| Standby        | Let a standby hub the person named use this same grant while it stands in for the hub (see [Failover](#failover))                                                                                    |
+| Push           | Receive this spoke's sealed phone notifications and send them through the hub's push sender                                                                                                          |
+| Provision      | Offer configuration (below). Every offer lands on the spoke as a proposal the person on the spoke applies, unless the person turned on auto-apply for that kind of offer ([decision H5](#decisions)) |
+| Act            | Act on the spoke as a paired device would, within the Projects the person names: create threads, send turns, answer questions. Approvals stay on the spoke (below)                                   |
 
 **Provisioning** offers are data, never code paths. The kinds are: an update
 channel (the hub may mirror the signed update feed, because the feed signature,
@@ -285,11 +298,22 @@ from their phone or laptop what they could do sitting at any of them. An
 **owner device** is a member the person marked as their own; with a fresh
 **unlock** it has the powers of a window on every host that honors owners.
 
-- **Marking the first owner.** On the hub itself: in a desktop window, or by
-  making the join code with `octant hub join-code --owner` in a shell on it.
-  The member that joins with that code is an owner. After that, an owner
-  device with a fresh unlock may mark or unmark other members. Each mark and
-  unmark is journaled on the hub and carried in the signed roster.
+- **Each host keeps its own owner list.** A host honors only the owner
+  devices on its own list, each recorded with its identity key and unlock
+  key. The hub's roster may show who the owners are, but an owner mark in the
+  roster never adds anyone to a host's list, so a compromised hub cannot
+  create an owner.
+- **The first owner.** On the hub: in a desktop window, or by making the join
+  code with `octant hub join-code --owner` in a shell on it; the member that
+  joins with that code is the hub's first owner. On a spoke: when the spoke
+  joins with Owners ticked, the person confirms the listed owner devices in
+  the spoke's own window or `octant hub join` prompt, by name and key
+  fingerprint.
+- **Adding later owners.** A host adds an owner to its list only when a
+  window on that host confirms it, or when a device already on that host's
+  list approves it with a fresh unlock that signs the new device's identity
+  key and unlock key. Removing an owner works the same way. Each change is
+  journaled on the host.
 - **Which hosts honor owners.** Each spoke chooses at join, as the hub grant
   item **Owners** ("let my owner devices act as if they were here"). It is
   ticked by default, because every member is the person's own device, and
@@ -301,9 +325,9 @@ from their phone or laptop what they could do sitting at any of them. An
   Touch ID, or the device passcode on a phone (a Secure Enclave key, or an
   Android Keystore key that needs user authentication); Touch ID or the login
   password on a Mac; a passkey with user verification in a browser. The
-  private key never leaves that hardware. The device registers the public key
-  with each host that honors owners, over its authenticated session, and the
-  host shows the person the device's name before it records the key.
+  private key never leaves that hardware. The public key reaches each
+  host only through one of the two ways above that add an owner to its list;
+  a device cannot register its own unlock key.
 - **Using it.** An owner request that needs window authority carries the
   unlock key's signature over a fresh host challenge and the request's command
   id. The host accepts it for that one request, or, for administration screens
@@ -363,11 +387,14 @@ another, so the person signs in once:
 
 ### Spoke-to-spoke discovery and delegation
 
-**Discovery.** Every member holds the latest roster the hub signed: each
-member's name, role, identity fingerprint, listener pin, private-network host
-names (for example a Tailscale name) and addresses, online state, which
-delegation it accepts, and the standby order. A member checks the hub's
-signature and keeps the roster with the highest sequence number it has seen.
+**Discovery.** Every member holds the latest roster the hub signed. The
+roster holds, for each member, its name, role, identity key fingerprint,
+listener pin, private-network host names (for example a Tailscale name) and
+addresses, and owner mark, plus the standby order and a sequence number. A
+member checks the hub's signature and keeps the roster with the highest
+sequence number it has seen. Live data travels beside the roster, unsigned
+and advisory: each member's online or asleep state from the hub, and what
+delegation a spoke accepts, which only that spoke can say and serves itself.
 
 **Introduction and the peer grant.** Before member A can do anything on spoke
 B, A must appear in B's roster and B must accept it. A spoke that ticked Introduce
@@ -445,8 +472,8 @@ are and how to reach them.
   includes Standby, and which the person marked on the hub. The hub sends it
   each new roster and the wake times, so it can take over the hub's services.
   It holds no more authority on other spokes than the hub has: each spoke's
-  hub grant names whether it applies to the standby too, and it does by
-  default only when the spoke's person ticked it at join.
+  hub grant names whether it applies to the standby too, and it does only
+  when the spoke ticked Standby at join (off by default).
 - **When members switch.** A member that cannot reach the active hub for a
   set time (default five minutes) tries the first standby, then the next. A
   standby that sees no hub for that time starts acting as hub: it serves the
@@ -455,8 +482,12 @@ are and how to reach them.
 - **Membership while standing in.** A standby that is standing in may add
   and remove members, signing each roster update with its own key. A member
   accepts a standby-signed roster only from a standby the latest hub-signed
-  roster names, and only while that member cannot reach the hub. A standby
-  never changes the standby order or promotes itself
+  roster names, and only while that member cannot reach the hub. A member
+  that joins for the first time during a stand-in has no hub-signed roster
+  yet, so it trusts the standby the way a device trusts the hub when it
+  joins: it reads the standby's join code and compares codes, and it receives
+  the hub-signed roster that names the standby along with the update. A
+  standby never changes the standby order or promotes itself
   ([decision H10](#decisions)).
 - **Switching back.** When the hub is reachable again, the standby steps down
   and hands back the wake times and membership changes it made, and members
@@ -516,7 +547,9 @@ notifications from all of them after joining once:
 - Spokes whose hub grant includes Push hand their sealed notification
   envelopes to the hub instead of sending them themselves. The content is
   sealed to the phone's key on the spoke, so the hub forwards what it cannot
-  read, exactly as the gateway does.
+  read, exactly as the gateway does. The spoke also signs the delivery request
+  with its own host identity key, as the gateway requires, and the hub passes
+  it on unchanged; the hub never signs for a spoke.
 - The hub then either forwards to the push gateway that
   [Mobile maturity](mobile-maturity.md#delivery-path) describes, or, when the
   person runs their own build of the phone app with their own Apple and
@@ -546,15 +579,15 @@ reads each spoke directly.
 
 ## Threat model
 
-| Party                      | Can                                                                                                                         | Cannot, and why                                                                                                                                                                      |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| A compromised hub          | Use every hub grant each spoke gave it; add a fake member to the roster; drop or delay wakes and push; read roster metadata | Approve on a spoke, read a spoke's credentials, change a hub or peer grant, loosen a sandbox, read sealed push content, or act on a spoke that never granted Act                     |
-| A compromised standby      | While standing in, what a compromised hub can, limited to the spokes whose grant covers the standby                         | Stand in while members still reach the hub, change the standby order, promote itself, or anything a compromised hub cannot                                                           |
-| A compromised spoke        | Use the peer grants other spokes gave it; send bad results back to a delegating spoke; claim to be standing in as hub       | Exceed those grants; answer approvals on another spoke; make another spoke's agent follow its output as instructions; stand in unless it is a named standby in the hub-signed roster |
-| A stolen owner device      | What an ordinary member can, until removed or revoked                                                                       | Use owner powers without the person's face, finger, passcode, or passkey                                                                                                             |
-| A lost or stolen phone     | What each spoke allows that guest, until revoked                                                                            | Run agents, receive delegated work, or outlive Remove on the hub and revocation on each spoke                                                                                        |
-| A spoke's agent            | Ask its own host to delegate within its thread's authority                                                                  | Choose the peer grant, approve on the receiver, widen authority, carry a credential                                                                                                  |
-| Someone on the private net | Reach members' listeners, as today, and send Wake-on-LAN packets, as anyone on that LAN already can                         | Pass device authentication; make a spoke run anything: a wake starts no routine the spoke did not define                                                                             |
+| Party                      | Can                                                                                                                         | Cannot, and why                                                                                                                                                                                         |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A compromised hub          | Use every hub grant each spoke gave it; add a fake member to the roster; drop or delay wakes and push; read roster metadata | Approve on a spoke, read a spoke's credentials, add an owner to any host's owner list, change a hub or peer grant, loosen a sandbox, read sealed push content, or act on a spoke that never granted Act |
+| A compromised standby      | While standing in, what a compromised hub can, limited to the spokes whose grant covers the standby                         | Stand in while members still reach the hub, change the standby order, promote itself, or anything a compromised hub cannot                                                                              |
+| A compromised spoke        | Use the peer grants other spokes gave it; send bad results back to a delegating spoke; claim to be standing in as hub       | Exceed those grants; answer approvals on another spoke; make another spoke's agent follow its output as instructions; stand in unless it is a named standby in the hub-signed roster                    |
+| A stolen owner device      | What an ordinary member can, until removed or revoked                                                                       | Use owner powers without the person's face, finger, passcode, or passkey                                                                                                                                |
+| A lost or stolen phone     | What each spoke allows that guest, until revoked                                                                            | Run agents, receive delegated work, or outlive Remove on the hub and revocation on each spoke                                                                                                           |
+| A spoke's agent            | Ask its own host to delegate within its thread's authority                                                                  | Choose the peer grant, approve on the receiver, widen authority, carry a credential                                                                                                                     |
+| Someone on the private net | Reach members' listeners, as today, and send Wake-on-LAN packets, as anyone on that LAN already can                         | Pass device authentication; make a spoke run anything: a wake starts no routine the spoke did not define                                                                                                |
 
 The biggest risk is the hub as introducer: whoever controls the hub can tell a
 spoke that an attacker's key belongs to another member, and with full
@@ -581,12 +614,12 @@ choice to the design, the design's recommendation was taken.
 | H5  | May the hub's provisioning offers apply on a spoke without asking?    | Per kind (update channel, untrusted plugin install, profile without secrets), off by default; a routine always asks                                                         |
 | H6  | Can a subscription sign-in held by a provider's own app be copied?    | Not yet; each machine signs in to its subscription itself until each provider's terms and token binding are checked. API keys copy already                                  |
 | H7  | Which push path does the hub support first?                           | Forward to the push gateway from Mobile maturity; direct sending only once self-building the phone app is documented                                                        |
-| H8  | Where do the hub's roster, failover, and wake service live?           | In the Octant server (`apps/server`), on when the hub role is on                                                                                                            |
+| H8  | Where do the hub's services live?                                     | In the Octant server (`apps/server`). The roster and failover are on with the hub role; the wake service and push sender are each off until turned on                       |
 | H10 | May a standby add or remove members while standing in?                | Yes; the hub takes the changes back on return, and removal wins                                                                                                             |
 | H11 | How is a standby promoted to hub for good?                            | A local action on the standby; spokes whose grant covers the standby follow it, and the rest confirm the new hub locally                                                    |
 | H12 | How long without the hub before members fail over?                    | A setting on the hub, carried in the roster, default five minutes                                                                                                           |
 | H13 | Does the hub keep running when the desktop app on the same Mac quits? | Yes; the hub always runs as a service, and the desktop app connects to it                                                                                                   |
-| H14 | Does the hub fetch its own Tailscale certificate for the web app?     | Yes, through the local Tailscale daemon, off until the person turns it on after the certificate-transparency note                                                           |
+| H14 | Does a host fetch its own Tailscale certificate for the web app?      | Yes, on the hub and on each spoke a browser reaches directly, through the local Tailscale daemon, off until the person turns it on after the certificate-transparency note  |
 | H15 | How does a browser guest reach a spoke?                               | Directly: each spoke serves its own web app at its own Tailscale name, and the hub's web app links to it, so the hub never sees spoke traffic                               |
 | H16 | Do spokes honor owner devices by default?                             | Yes: ticked at join, clearly labeled, and untickable                                                                                                                        |
 | H17 | How long does one unlock last?                                        | One Face ID, Touch ID, passcode, or passkey check covers five minutes of administration screens; Full access, merge, credential copy, and owner changes each need their own |
@@ -597,9 +630,9 @@ named standby (was H9).
 
 ## Delivery plan
 
-Each slice is one reviewable PR and keeps everything off by default. The
-Linux-container column says whether an agent can verify the slice without the
-maintainer's hardware.
+Each slice is one reviewable PR and keeps everything off by default. Each
+slice says whether an agent can verify it in a Linux container without the
+maintainer's hardware, or names the maintainer gate.
 
 1. **This design and the rule changes.** Release boundary and architecture
    updated to allow a self-hosted wake service and hub-and-spoke work. Docs

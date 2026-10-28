@@ -6657,9 +6657,9 @@ mechanisms are:
   or a proxy that rewrites `Host` reaches the listener but gets no capability
   (the local client context under [Process topology](#process-topology) has
   the flow). The hub-and-spoke design adds one more way, not built: an owner
-  device the person marked holds window authority on a host that honors
-  owners only for a request signed by a key its platform uses after the
-  person proves presence
+  device the person marked holds window authority on a host that put it
+  on its own owner list, for a request signed by a key its platform uses after
+  the person proves presence, or for a short administration window after one
   ([Hub and spokes: owner devices](design/hub-and-spokes.md#owner-devices)).
   Paired remote clients keep their own device-session path, unchanged.
 - **Server-side tool-call policy.** A tool call from a model is a petition, not
@@ -8631,7 +8631,8 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   ready. The hub-and-spoke design keeps this rule: a hub introduces hosts and
   devices to each other, an introduction grants only what the receiving host's
   person allowed when it joined the hub (by default full membership, which
-  never reaches Full access or answers an approval for an agent), each host
+  never reaches Full access, and an agent from another member never answers
+  an approval), each host
   stays the only authority over its own threads and journal, and what one host
   may do on another is only the grant the receiving host keeps
   ([Hub and spokes](design/hub-and-spokes.md#journal-and-authority-boundaries)).
