@@ -180,8 +180,11 @@ The operator steps live in the
 ### iOS capture and key storage rules
 
 The iOS side of `modules/octant-device-protection` gives the same two ports
-their iOS answers. The Swift is first compiled by the next TestFlight build,
-and the iOS items in the
+their iOS answers. The `Mobile (iOS native modules)` workflow compiles the
+Swift for the Simulator on a pull request that changes a module, the app
+configuration, or the lockfile (it is not a required check, since path filters
+do not reach the merge queue); the first run on a device is the next
+TestFlight build, and the iOS items in the
 [device acceptance pass](../mobile-testflight.md#device-acceptance-pass) are
 its acceptance.
 
@@ -189,7 +192,8 @@ its acceptance.
   screenshot from showing an app. The module covers each of the app's scenes
   with an opaque window while the scene is not active, which is when iOS
   takes the app switcher's snapshot, and while its screen is captured
-  (recording, AirPlay mirroring, a wired capture). While captured, the cover
+  (recording, AirPlay mirroring, a wired capture; from iOS 17 each scene's own
+  capture state, earlier the screen's flag). While captured, the cover
   says why Octant is hidden and how to show it. Settings names what is covered
   and says that a screenshot is not blocked. Reason: the known way to hide
   content from a screenshot rests on an undocumented UIKit layer that an iOS

@@ -108,6 +108,16 @@ final class PrivacyCover {
     UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
   }
 
+  /// Recording, AirPlay mirroring, and a wired capture. From iOS 17 the scene
+  /// reports its own capture state, which is what an iPad with several scenes
+  /// needs; earlier systems only have the screen's flag.
+  private func isCaptured(_ scene: UIWindowScene) -> Bool {
+    if #available(iOS 17.0, *) {
+      return scene.traitCollection.sceneCaptureState == .active
+    }
+    return scene.screen.isCaptured
+  }
+
   private func update() {
     let scenes = windowScenes()
     let connected = Set(scenes.map { ObjectIdentifier($0) })
@@ -117,8 +127,7 @@ final class PrivacyCover {
     }
     for scene in scenes {
       let id = ObjectIdentifier(scene)
-      // `isCaptured` covers recording, AirPlay mirroring, and a wired capture.
-      let captured = scene.screen.isCaptured
+      let captured = isCaptured(scene)
       if enabled && (captured || inactive.contains(id)) {
         let cover = covers[id] ?? makeCover(on: scene)
         covers[id] = cover
