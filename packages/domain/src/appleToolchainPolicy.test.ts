@@ -644,6 +644,12 @@ describe("evaluateAppleDeviceRequest", () => {
     });
   }
 
+  const storeVersion = {
+    bundleIdentifier: "app.octant.simulatorfixture",
+    version: "1.0",
+    buildNumber: "1",
+    platform: "ios",
+  };
   const fieldsByKind: Readonly<Record<string, Readonly<Record<string, unknown>>>> = {
     build: { projectPath: "Fixture.xcodeproj", teamId: "A1B2C3D4E5" },
     run: { projectPath: "Fixture.xcodeproj", teamId: "A1B2C3D4E5" },
@@ -663,6 +669,8 @@ describe("evaluateAppleDeviceRequest", () => {
         profileId: "40000000-0000-4000-8000-000000000040",
       },
     },
+    "submit-for-review": { storeVersion },
+    "release-version": { storeVersion },
   };
 
   const distributionKinds: ReadonlyArray<string> = [

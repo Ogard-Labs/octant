@@ -401,6 +401,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       resolveAndroidContext,
       resolveAppleContext,
       prepareAppleUpload,
+      prepareAppleStoreVersion,
       resolveAppleDeviceAgentScope,
       resolveAppleDeviceThread,
     } = bindDeviceApprovals({
@@ -412,6 +413,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         codeOperationRuntime?.validateAppleDeviceAction?.(windowId, request),
       validateAppleDistributionUpload: (windowId, request) =>
         codeOperationRuntime?.validateAppleDistributionUpload?.(windowId, request),
+      validateAppleDistributionVersion: (windowId, request) =>
+        codeOperationRuntime?.validateAppleDistributionVersion?.(windowId, request),
       validateAndroidApproval: (windowId, request) =>
         codeOperationRuntime?.validateAndroidApproval(windowId, request),
     });
@@ -833,6 +836,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               return read.kind === "found" ? read.bytes : undefined;
             },
             prepareUpload: (windowId, input, signal) => prepareAppleUpload(windowId, input, signal),
+            prepareStoreVersion: (windowId, input, signal) =>
+              prepareAppleStoreVersion(windowId, input, signal),
           },
         },
         androidToolchain: {

@@ -28,13 +28,19 @@ The design rests on a small set of invariants that every package obeys:
   Octant operates none of it; an S3-compatible store is contacted only at the
   endpoint the person configured and only while the Settings › Sync switch is
   on. Remote access is host-to-device over the user's
-  own network. Four host-initiated
+  own network. Five host-initiated
   HTTPS calls exist in code: desktop update checks against a signed feed, managed
   device-tool update checks against the npm registry, server marketplace
   fetches when the person searches, inspects, previews, or installs from the
-  catalog, and calls to the public Canvas share service when the person
+  catalog, calls to the public Canvas share service when the person
   publishes, updates, or revokes a public link (and the host retries a revoke
-  it could not complete). All have a Settings off switch: Public links starts
+  it could not complete), and App Store Connect API requests to
+  `api.appstoreconnect.apple.com` only (no other host, no redirect) when a
+  person checks, submits for App Review, or releases a version of their own
+  app, from the Apple workbench or by asking the thread's agent. The first four have a Settings off switch; App Store Connect is
+  reached only from a person's action, and a host with no App Store Connect key
+  makes no request ([Apple physical devices and distribution](design/apple-devices.md#distribution)).
+  The switches: Public links starts
   off and off means no share-service request except finishing a revoke; marketplace off means no catalog
   request; Updates off disables automatic update checks (manual Check for
   updates may still contact the signed feed); device tools' automatic updates
@@ -727,7 +733,14 @@ the local-only `/api/apple/distribution-preparations` and
 the Mac confirms that build, and only then is the project archived unsigned,
 signed by `xcodebuild -exportArchive`, and uploaded with `xcrun altool`, using
 a key file the credential broker writes for that one upload and removes; the
-server never reads the key.
+server never reads the key. The same person, or the agent when the person asks, can submit
+the version App Store Connect holds for the project for App Review, or release
+a version approved and waiting for a manual release: the host reads the
+version from App Store Connect (local-only `/api/apple/distribution-versions`),
+a person at the Mac confirms that exact version, and only then is it submitted
+or released through `/api/apple/distribution`. Each App Store Connect API
+request carries a token the credential broker signs (see "App Store Connect
+request signing" under [security and authority](#security-and-authority)).
 
 On an approval-gated thread, **Allow input** is the confirmation that opens
 that destination; clicks, typing, Home, and Lock never raise it
@@ -8574,6 +8587,21 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   signs nothing without the secret key. Removing the endpoint, or changing its
   region, portal, account, or role, ends the portal session and deletes the
   grant before the change is journaled.
+- **App Store Connect request signing.** The credential broker signs App
+  Store Connect API tokens itself
+  ([`appStoreConnectKeySource.ts`](../packages/host-runtime/src/appStoreConnectKeySource.ts)):
+  an ES256 JSON Web Token with the key ID in its header and the issuer ID, the
+  `appstoreconnect-v1` audience, and an expiry fifteen minutes after issue in
+  its claims, signed with the platform's crypto. The server's sign request
+  names the App Store Connect credential reference and nothing else, so a
+  caller cannot choose the claims, lifetime, or key; the answer is that one
+  token, which the server sends in one step's requests and never keeps. The
+  key comes from the broker's own App Store Connect family or, when the
+  person saved a 1Password secret reference in its place, from the person's
+  `op read` at the moment the broker signs a token or writes an upload's key
+  file, held for that one operation. `op` missing, signed out, or declined
+  refuses the step as `key-source-unavailable`, with no retry. The reference
+  stays in the broker's store and is never journaled.
 - **Artifact replica membership.** Each replica entry carries a detached
   Ed25519 signature from the device signing key the writing host holds for its
   replica instance, in a credential namespace of its own that provider

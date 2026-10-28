@@ -96,6 +96,53 @@ describe("App Store Connect key routes", () => {
     });
   });
 
+  it("stores a 1Password reference in the key's place, and never both or a malformed one", async () => {
+    const { handle, stored } = setup();
+    const reference = "op://Developer/App Store Connect/private key";
+    const answer = await json(
+      await handle(
+        hostLocal(SET, {
+          issuerId: ISSUER,
+          keyId: KEY_ID,
+          onePasswordReference: reference,
+          replace: false,
+        }),
+      ),
+    );
+    expect(answer).toEqual({ status: 200, text: JSON.stringify({ outcome: "stored" }) });
+    expect(JSON.parse(stored.get(APP_STORE_CONNECT_KEY_REF) ?? "")).toEqual({
+      version: 1,
+      issuerId: ISSUER.toLowerCase(),
+      keyId: KEY_ID.toUpperCase(),
+      onePasswordReference: reference,
+    });
+
+    stored.clear();
+    for (const body of [
+      { onePasswordReference: "Developer/App Store Connect/private key" },
+      { onePasswordReference: "op://Developer/item" },
+      { onePasswordReference: "op://Developer/item/field?attribute=otp" },
+    ]) {
+      const refused = await json(
+        await handle(hostLocal(SET, { issuerId: ISSUER, keyId: KEY_ID, ...body, replace: false })),
+      );
+      expect(JSON.parse(refused.text)).toMatchObject({ category: "invalid-key" });
+    }
+    const both = await json(
+      await handle(
+        hostLocal(SET, {
+          issuerId: ISSUER,
+          keyId: KEY_ID,
+          privateKey: pem(),
+          onePasswordReference: reference,
+          replace: false,
+        }),
+      ),
+    );
+    expect(JSON.parse(both.text)).toMatchObject({ category: "invalid" });
+    expect(stored.size).toBe(0);
+  });
+
   it("refuses to overwrite a stored key unless the person asks to replace it", async () => {
     const { handle, stored } = setup();
     const first = pem();

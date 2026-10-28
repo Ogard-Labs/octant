@@ -115,6 +115,48 @@ describe("appleDeviceClient", () => {
     ]);
   });
 
+  it("sends a submission or release to the distribution route and reads the version first", async () => {
+    const storeVersion = {
+      bundleIdentifier: "sh.octant.Fixture",
+      version: "1.0",
+      buildNumber: "2",
+      platform: "ios",
+    };
+    const fetch = vi.fn(async (input: URL | RequestInfo, _init?: RequestInit) =>
+      new URL(String(input)).pathname === "/api/apple/distribution-versions"
+        ? Response.json({
+            kind: "prepared",
+            storeVersion,
+            ready: "release-version",
+            state: "PENDING_DEVELOPER_RELEASE",
+          })
+        : Response.json({ kind: "apple-device-refused", reason: "store-version-changed" }),
+    );
+    const client = createAppleDeviceClient({
+      baseUrl: "http://127.0.0.1:13773",
+      fetch: fetch as typeof globalThis.fetch,
+      windowCapability: capability,
+    });
+    await expect(
+      client.prepareStoreVersion({
+        kind: "apple-store-version-preparation",
+        authority: authority as never,
+        threadId: thread.threadId as never,
+        checkoutId: thread.checkoutId as never,
+        projectPath: "Fixture.xcodeproj" as never,
+      }),
+    ).resolves.toMatchObject({ kind: "prepared", ready: "release-version" });
+    const { deviceId: _deviceId, ...noDevice } = deviceRequest("discover");
+    for (const kind of ["submit-for-review", "release-version"] as const) {
+      await client.request(decodeAppleDeviceRequest({ ...noDevice, kind, storeVersion }));
+    }
+    expect(fetch.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+      "/api/apple/distribution-versions",
+      "/api/apple/distribution",
+      "/api/apple/distribution",
+    ]);
+  });
+
   it("answers a host it cannot reach or understand with a failure instead of throwing", async () => {
     const unreachable = createAppleDeviceClient({
       baseUrl: "http://127.0.0.1:13773",

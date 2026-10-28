@@ -290,8 +290,9 @@ change provisioning, or upload anything.
 App Store distribution of your own apps is post-preview work, being built in
 stages. Octant uploads, submits, or releases only when you confirm that exact
 build or version in Octant on your Mac; it never does any of them on its own.
-Uploading is offered in the Apple workbench and through a Code thread's agent
-(below); submitting for review and releasing are not offered yet. Each needs the key described here.
+Uploading, submitting for App Review, and releasing are offered in the Apple
+workbench and through a Code thread's agent (below). Each needs the key
+described here.
 
 Create an API key in App Store Connect under **Users and Access ›
 Integrations**, and download its `.p8` file. Then, in Octant's desktop app on
@@ -299,10 +300,19 @@ the Mac, open **Settings › Device tools** and find **App Store Connect**:
 
 - **Issuer ID**: the ID shown above the keys list.
 - **Key ID**: the ten-character ID of the key.
-- **Private key**: paste the whole contents of the `.p8` file.
+- **Private key from**: choose **Paste the key** and paste the whole contents
+  of the `.p8` file, or choose **1Password** if you keep the key there.
+- **1Password reference**: with **1Password**, the field that holds the key,
+  as `op://<vault>/<item>/<field>` (copy it from the field's menu in
+  1Password).
 
-Choose **Save key**. Octant keeps the key in the Mac's Keychain, clears the
-form at once, and never shows the key again; the row then says **Saved**.
+Choose **Save key**. A pasted key is kept in the Mac's Keychain; the form is
+cleared at once, and the key is never shown again; the row then says
+**Saved**. With **1Password**, Octant saves only the reference and reads the
+key with your own `op` command each time it uses it (signing an App Store
+Connect request, or handing the key to an upload), so 1Password asks you to
+approve. If `op` is not installed, is signed out, or you decline, that step
+stops with nothing sent and is not retried.
 Entering another key and choosing **Replace key** replaces it, and **Remove
 key** takes it out of the Keychain. Searching Settings for "App Store Connect"
 finds these rows.
@@ -312,6 +322,7 @@ private key from the file so it never appears in a command line:
 
 ```sh
 octant apple key set --issuer <issuer id> --key-id <key id> --stdin < AuthKey_<key id>.p8
+octant apple key set --issuer <issuer id> --key-id <key id> --op-reference op://<vault>/<item>/<field>
 octant apple key status
 octant apple key remove
 ```
@@ -340,12 +351,39 @@ Connect key. It changes no certificate, profile, or build number, and if the
 project would now build anything other than what you confirmed, it stops
 before archiving. Your key is handed to the upload as a file only that upload
 can read, and removed when it ends. The workbench, or the thread, reports
-App Store Connect's delivery identifier when the upload went through. Octant does not submit the
-version for review or release it.
+App Store Connect's delivery identifier when the upload went through.
+Uploading does not submit the version for review or release it.
 
 You need an App Store distribution certificate in your login keychain and an
 App Store provisioning profile for the app installed by Xcode; if either is
 missing, Octant says which step to take in Xcode.
+
+### Submitting for App Review and releasing
+
+Under **App Review and release** in the workbench, choose **Check App Store
+Connect**. Octant reads the version your project declares
+(`MARKETING_VERSION`) from App Store Connect, with the build selected for it
+and its state, and offers only the step that version is ready for:
+
+- **Submit for App Review…** when the version has not been submitted and its
+  build has finished processing.
+- **Release…** when App Review approved the version and it is waiting for you
+  to release it by hand.
+
+You can also ask the agent in a Code thread to submit or release. Either way
+you confirm the exact app, version, and build, in the desktop app's dialog or
+in the thread, under every access setting; Plan refuses the agent's request,
+and only you, in Octant on this Mac, can confirm. Octant then reads App Store
+Connect again and stops if the version no longer has that build or is no
+longer ready for that step.
+
+Octant submits only what App Store Connect already holds: select the build,
+and fill in the metadata, screenshots, pricing, and export-compliance answers
+in App Store Connect first. If App Store Connect refuses the submission, Octant
+shows its reason and changes nothing. A release publishes that one version to
+the App Store at the moment you confirm; Octant never sets a version to
+release on its own. Adding testers, answering App Review, and phased release
+stay in App Store Connect.
 
 ## Honest verification
 

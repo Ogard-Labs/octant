@@ -35,6 +35,13 @@ const uploadBuild = {
   profileId: "50000000-0000-4000-8000-000000000090",
 };
 
+const preparedVersion = {
+  bundleIdentifier: "app.octant.simulatorfixture",
+  version: "1.0",
+  buildNumber: "1",
+  platform: "ios",
+};
+
 function body(kind: AppleDeviceRequest["kind"], requestedBy: unknown = person) {
   return {
     actionId: "50000000-0000-4000-8000-000000000002",
@@ -50,7 +57,15 @@ function body(kind: AppleDeviceRequest["kind"], requestedBy: unknown = person) {
     checkoutId: "50000000-0000-4000-8000-000000000008",
     kind,
     requestedBy,
-    ...(kind === "discover" || kind === "upload" ? {} : { deviceId }),
+    ...(kind === "discover" ||
+    kind === "upload" ||
+    kind === "submit-for-review" ||
+    kind === "release-version"
+      ? {}
+      : { deviceId }),
+    ...(kind === "submit-for-review" || kind === "release-version"
+      ? { storeVersion: preparedVersion }
+      : {}),
     ...(kind === "upload"
       ? {
           projectPath: "SimulatorFixture.xcodeproj",
@@ -132,15 +147,25 @@ function routes() {
   const prepareUpload = vi.fn(
     async () => ({ kind: "prepared" as const, upload: uploadBuild }) as never,
   );
+  const prepareStoreVersion = vi.fn(
+    async () =>
+      ({
+        kind: "prepared" as const,
+        storeVersion: preparedVersion,
+        ready: "submit-for-review" as const,
+        state: "PREPARE_FOR_SUBMISSION",
+      }) as never,
+  );
   const handler = createAppleDeviceRouteHandler({
     windowAuthorityStore: store,
     service,
     resolveScope,
     resolveThread,
     prepareUpload,
+    prepareStoreVersion,
     now: () => 2,
   });
-  return { handler, service, resolveScope, resolveThread, prepareUpload };
+  return { handler, service, resolveScope, resolveThread, prepareUpload, prepareStoreVersion };
 }
 
 describe("Apple device routes", () => {
@@ -246,7 +271,7 @@ describe("Apple device routes", () => {
     ]) {
       expect((await handler(post(path, body("upload"))))?.status).toBe(400);
     }
-    for (const kind of ["build", "use-device", "submit-for-review", "release-version"] as const) {
+    for (const kind of ["build", "use-device"] as const) {
       expect((await handler(post("/api/apple/distribution", body(kind))))?.status).toBe(400);
     }
     for (const requestedBy of [remotePerson, person]) {
@@ -295,6 +320,56 @@ describe("Apple device routes", () => {
     const answer = await handler(post("/api/apple/distribution-preparations", read));
     expect(answer?.status).toBe(200);
     await expect(answer?.json()).resolves.toEqual({ kind: "prepared", upload: uploadBuild });
+  });
+
+  it("takes a submission or release only on the local distribution route, and from no paired device", async () => {
+    for (const kind of ["submit-for-review", "release-version"] as const) {
+      const { handler, service, resolveScope } = routes();
+      for (const path of [
+        "/api/apple/devices",
+        "/api/apple/device-leases",
+        "/api/apple/device-actions",
+      ]) {
+        expect((await handler(post(path, body(kind))))?.status).toBe(400);
+      }
+      for (const requestedBy of [remotePerson, person]) {
+        expect(
+          (await handler(post("/api/apple/distribution", body(kind, requestedBy), true)))?.status,
+        ).toBe(403);
+      }
+      expect(resolveScope).not.toHaveBeenCalled();
+      expect(service.request).not.toHaveBeenCalled();
+      expect((await handler(post("/api/apple/distribution", body(kind))))?.status).toBe(200);
+      expect(service.request).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("reads what App Store Connect holds for the project's version for a local window only", async () => {
+    const { handler, prepareStoreVersion } = routes();
+    const {
+      kind: _kind,
+      requestedBy: _requestedBy,
+      deviceId: _deviceId,
+      actionId: _a,
+      correlationId: _c,
+      timeoutMs: _t,
+      approval: _p,
+      ...scope
+    } = body("status");
+    const read = {
+      kind: "apple-store-version-preparation",
+      ...scope,
+      projectPath: "SimulatorFixture.xcodeproj",
+    };
+    expect((await handler(post("/api/apple/distribution-versions", read, true)))?.status).toBe(403);
+    expect(prepareStoreVersion).not.toHaveBeenCalled();
+    const answer = await handler(post("/api/apple/distribution-versions", read));
+    expect(answer?.status).toBe(200);
+    await expect(answer?.json()).resolves.toMatchObject({
+      kind: "prepared",
+      storeVersion: preparedVersion,
+      ready: "submit-for-review",
+    });
   });
 
   const screenshotRead = (reference = "apple-device-screenshot-1") => {

@@ -70,6 +70,8 @@ import { useAppleWorkbench } from "../apple/useAppleWorkbench";
 import { ApplePhysicalDevices } from "../apple/ApplePhysicalDevices";
 import { AppleUpload } from "../apple/AppleUpload";
 import { useAppleUpload } from "../apple/useAppleUpload";
+import { AppleStoreVersion } from "../apple/AppleStoreVersion";
+import { useAppleStoreVersion } from "../apple/useAppleStoreVersion";
 import { REMOTE_CODE_THREAD_OPERATION_UNAVAILABLE } from "@octant/domain/ssh-target-recovery";
 import { useAppleDevices } from "../apple/useAppleDevices";
 
@@ -121,6 +123,12 @@ export interface CodeWorkspaceApprovals {
    * the person declined.
    */
   readonly appleUpload?: (request: AppleDeviceRequest) => Promise<string | undefined>;
+  /**
+   * The desktop app's confirmation of one submission for App Review or one
+   * release, naming the exact version. Returns the approval the host minted,
+   * or undefined when the person declined.
+   */
+  readonly appleStoreVersion?: (request: AppleDeviceRequest) => Promise<string | undefined>;
   /**
    * Native confirmation for one Android emulator action. Clicks never use this;
    * Allow input does.
@@ -441,6 +449,9 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
           {...(props.approvals?.appleUpload === undefined
             ? {}
             : { requestUpload: props.approvals.appleUpload })}
+          {...(props.approvals?.appleStoreVersion === undefined
+            ? {}
+            : { requestStoreVersion: props.approvals.appleStoreVersion })}
           client={props.appleToolchainClient}
           {...(props.appleDeviceClient === undefined
             ? {}
@@ -463,6 +474,7 @@ function AppleWorkbenchSurface(props: {
   readonly requestApproval?: (request: AppleActionRequest) => Promise<string | undefined>;
   readonly requestDeviceLease?: (request: AppleDeviceRequest) => Promise<string | undefined>;
   readonly requestUpload?: (request: AppleDeviceRequest) => Promise<string | undefined>;
+  readonly requestStoreVersion?: (request: AppleDeviceRequest) => Promise<string | undefined>;
   readonly tab: Extract<CodeTab, { readonly kind: "apple-workbench" }>;
   readonly thread: NonNullable<CodeController["activeView"]>["thread"];
   readonly checkoutId: NonNullable<CodeController["activeView"]>["checkout"]["id"];
@@ -871,6 +883,9 @@ function AppleWorkbenchSurface(props: {
                 {...(props.requestUpload === undefined
                   ? {}
                   : { requestUpload: props.requestUpload })}
+                {...(props.requestStoreVersion === undefined
+                  ? {}
+                  : { requestStoreVersion: props.requestStoreVersion })}
                 {...(props.tab.projectPath === undefined
                   ? {}
                   : { projectPath: props.tab.projectPath })}
@@ -889,6 +904,7 @@ function AppleWorkbenchSurface(props: {
 function ApplePhysicalDevicesSurface(
   props: Parameters<typeof useAppleDevices>[0] & {
     readonly requestUpload?: (request: AppleDeviceRequest) => Promise<string | undefined>;
+    readonly requestStoreVersion?: (request: AppleDeviceRequest) => Promise<string | undefined>;
     readonly projectPath?: string;
     readonly scheme?: string;
   },
@@ -903,6 +919,16 @@ function ApplePhysicalDevicesSurface(
     ...(props.scheme === undefined ? {} : { scheme: props.scheme }),
     team: devices.team,
   });
+  const storeVersion = useAppleStoreVersion({
+    client: props.client,
+    scope: props.scope,
+    createUuid: props.createUuid,
+    ...(props.requestStoreVersion === undefined
+      ? {}
+      : { requestConfirmation: props.requestStoreVersion }),
+    ...(props.projectPath === undefined ? {} : { projectPath: props.projectPath }),
+    ...(props.scheme === undefined ? {} : { scheme: props.scheme }),
+  });
   return (
     <>
       <ApplePhysicalDevicesView devices={devices} />
@@ -914,6 +940,14 @@ function ApplePhysicalDevicesSurface(
           ready={upload.ready}
           state={upload.state}
           team={devices.team}
+        />
+      ) : null}
+      {storeVersion.offered ? (
+        <AppleStoreVersion
+          onCarryOut={() => void storeVersion.carryOut()}
+          onCheck={() => void storeVersion.check()}
+          {...(props.projectPath === undefined ? {} : { projectPath: props.projectPath })}
+          state={storeVersion.state}
         />
       ) : null}
     </>

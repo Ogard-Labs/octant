@@ -112,4 +112,41 @@ describe("octant apple key", () => {
     expect(await run({ action: "status" })).toBe(1);
     expect(err.join("")).toBe("Uploading, submitting, and releasing are not available.\n");
   });
+
+  it("saves a 1Password reference instead of reading a key, and takes only one source", async () => {
+    const ids = { issuer: "issuer", "key-id": "ABCDEFGHIJ" };
+    const reference = "op://Developer/App Store Connect/private key";
+    const command = resolveAppStoreConnectKeyCliCommand(["key", "set"], {
+      ...ids,
+      "op-reference": reference,
+    });
+    expect(command).toEqual({ ...SET, onePasswordReference: reference });
+    expect(
+      resolveAppStoreConnectKeyCliCommand(["key", "set"], {
+        ...ids,
+        stdin: true,
+        "op-reference": reference,
+      }),
+    ).toBe(undefined);
+    expect(
+      resolveAppStoreConnectKeyCliCommand(["key", "set"], { ...ids, "op-reference": true }),
+    ).toBe(undefined);
+    if (command === undefined) throw new Error("expected a set command");
+
+    // Nothing on standard input: a reference needs no key there.
+    const { run, sent } = fixture();
+    await expect(run(command, "")).resolves.toBe(0);
+    expect(sent).toEqual([
+      {
+        path: "/api/desktop/app-store-connect-key/set",
+        method: "POST",
+        body: {
+          issuerId: "issuer",
+          keyId: "ABCDEFGHIJ",
+          onePasswordReference: reference,
+          replace: false,
+        },
+      },
+    ]);
+  });
 });

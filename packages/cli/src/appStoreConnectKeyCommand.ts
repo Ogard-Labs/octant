@@ -16,12 +16,20 @@ export type AppStoreConnectKeyCliCommand =
       readonly issuerId: string;
       readonly keyId: string;
       readonly replace: boolean;
+      /**
+       * Where the key is kept in 1Password, saved in the key's place. A
+       * reference is not a secret, so it may be a flag value; the host reads
+       * the key with the person's `op` only when it uses it.
+       */
+      readonly onePasswordReference?: string;
     }
   | { readonly action: "status" | "remove" };
 
 /**
- * `octant apple key set --issuer <id> --key-id <id> --stdin [--replace]` and
- * `octant apple key status|remove`. The private key is read from standard
+ * `octant apple key set --issuer <id> --key-id <id> --stdin [--replace]`,
+ * `octant apple key set --issuer <id> --key-id <id> --op-reference
+ * op://<vault>/<item>/<field> [--replace]`, and `octant apple key
+ * status|remove`. The private key is read from standard
  * input only (`< AuthKey_<id>.p8`), never from an argument or a flag value,
  * which other processes and shell history can read. `--stdin` is required so
  * a forgotten redirect is refused instead of waiting on a terminal.
@@ -36,17 +44,26 @@ export function resolveAppStoreConnectKeyCliCommand(
     return Object.keys(flags).length === 0 ? { action } : undefined;
   }
   if (action !== "set") return undefined;
-  const { issuer, "key-id": keyId, stdin, replace, ...others } = flags;
+  const { issuer, "key-id": keyId, stdin, "op-reference": reference, replace, ...others } = flags;
+  // Exactly one source: the key on standard input, or its 1Password reference.
+  const fromStdin = stdin === true && reference === undefined;
+  const fromOnePassword = stdin === undefined && typeof reference === "string";
   if (
     Object.keys(others).length !== 0 ||
     typeof issuer !== "string" ||
     typeof keyId !== "string" ||
-    stdin !== true ||
+    !(fromStdin || fromOnePassword) ||
     (replace !== undefined && replace !== true)
   ) {
     return undefined;
   }
-  return { action: "set", issuerId: issuer, keyId, replace: replace === true };
+  return {
+    action: "set",
+    issuerId: issuer,
+    keyId,
+    replace: replace === true,
+    ...(typeof reference === "string" ? { onePasswordReference: reference } : {}),
+  };
 }
 
 export interface RunAppStoreConnectKeyCliCommandInput {
@@ -63,7 +80,14 @@ export async function runAppStoreConnectKeyCliCommand(
 ): Promise<number> {
   const { command, session } = input;
   let body: Record<string, unknown> = {};
-  if (command.action === "set") {
+  if (command.action === "set" && command.onePasswordReference !== undefined) {
+    body = {
+      issuerId: command.issuerId,
+      keyId: command.keyId,
+      onePasswordReference: command.onePasswordReference,
+      replace: command.replace,
+    };
+  } else if (command.action === "set") {
     const privateKey = (await input.readStdin()).trim();
     if (privateKey === "") {
       input.stderr.write(

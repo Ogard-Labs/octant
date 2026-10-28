@@ -852,6 +852,62 @@ describe("AppleDeviceService", () => {
     expect(uploads).toHaveLength(1);
   });
 
+  it("hands only a confirmed submission or release to the App Store Connect steps", async () => {
+    const carried: AppleDeviceRequest[] = [];
+    const devices = new AppleDeviceService({
+      ...serviceOptions(),
+      storeVersions: {
+        carryOut: async (request) => {
+          carried.push(request);
+          return {
+            kind: "apple-device-refused",
+            reason: "store-version-changed",
+          } as AppleDeviceResponse;
+        },
+      },
+    });
+    const versionFields = {
+      storeVersion: {
+        bundleIdentifier: "app.octant.simulatorfixture",
+        version: "1.0",
+        buildNumber: "1",
+        platform: "ios",
+      },
+      approval: { kind: "approved", approvalId: "43000000-0000-4000-8000-000000000003" },
+    };
+    for (const kind of ["submit-for-review", "release-version"] as const) {
+      // The thread's agent asked, and no person has confirmed it yet.
+      const asked = deviceRequest(kind, firstThread, {
+        ...versionFields,
+        requestedBy: {
+          kind: "agent",
+          actorId: "40000000-0000-4000-8000-000000000011",
+          providerInstanceId: authority.providerInstanceId,
+          threadId: firstThread.threadId,
+        },
+        approval: { kind: "pending" },
+      });
+      await expect(
+        devices.request(asked, scopeFor(firstThread, { executionPolicy: "full-access" })),
+      ).resolves.toEqual({ kind: "apple-device-refused", reason: "confirmation-required" });
+      await expect(
+        devices.request(
+          deviceRequest(kind, firstThread, versionFields),
+          scopeFor(firstThread, {
+            executionPolicy: "plan",
+            approvalValid: true,
+            approvedBy: person as never,
+          }),
+        ),
+      ).resolves.toEqual({ kind: "apple-device-refused", reason: "read-only-policy" });
+      expect(carried).toEqual([]);
+      const confirmedStep = deviceRequest(kind, firstThread, versionFields);
+      await devices.request(confirmedStep, confirmed(firstThread));
+      expect(carried).toEqual([confirmedStep]);
+      carried.length = 0;
+    }
+  });
+
   describe("the thread's own app on a leased device", () => {
     const build = { projectPath: "SimulatorFixture.xcodeproj", teamId: TEAM };
     // An approval-gated thread whose window holds this request's one-use approval.

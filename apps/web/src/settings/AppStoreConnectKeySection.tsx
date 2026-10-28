@@ -3,7 +3,11 @@ import type { AppStoreConnectKeyBridge } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
+import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { SettingRow, SettingsSection } from "./primitives";
+
+/** Where the private key lives: pasted into the Keychain, or kept in 1Password. */
+type KeySource = "stored" | "1password";
 
 type Shown =
   | { readonly kind: "loading" }
@@ -35,7 +39,9 @@ function refusalOf(answer: { readonly body: unknown }): string {
  * window on a Mac host whose release boundary admits distribution: anything
  * else answers the status read with a refusal, and the section stays hidden.
  * The key goes to the host once and the fields are cleared at once; nothing
- * here can read it back.
+ * here can read it back. A person who keeps the key in 1Password saves its
+ * secret reference instead, and the host reads the key with their `op` only
+ * when it signs a request or writes an upload's key file.
  */
 export function AppStoreConnectKeySection({
   bridge,
@@ -45,10 +51,13 @@ export function AppStoreConnectKeySection({
   const issuerFieldId = useId();
   const keyFieldId = useId();
   const privateKeyFieldId = useId();
+  const referenceFieldId = useId();
   const [shown, setShown] = useState<Shown>({ kind: "loading" });
   const [issuerId, setIssuerId] = useState("");
   const [keyId, setKeyId] = useState("");
   const [privateKey, setPrivateKey] = useState("");
+  const [source, setSource] = useState<KeySource>("stored");
+  const [reference, setReference] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{
     readonly kind: "status" | "alert";
@@ -84,7 +93,10 @@ export function AppStoreConnectKeySection({
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    const body = { issuerId, keyId, privateKey, replace: shown.stored };
+    const body =
+      source === "stored"
+        ? { issuerId, keyId, privateKey, replace: shown.stored }
+        : { issuerId, keyId, onePasswordReference: reference, replace: shown.stored };
     // The key leaves this window with this one request and is not kept here.
     setPrivateKey("");
     setBusy(true);
@@ -94,6 +106,7 @@ export function AppStoreConnectKeySection({
       if (outcomeOf(answer) === "stored") {
         setIssuerId("");
         setKeyId("");
+        setReference("");
         setShown({ kind: "shown", stored: true });
         setMessage({ kind: "status", text: "Key saved." });
       } else {
@@ -188,26 +201,68 @@ export function AppStoreConnectKeySection({
           />
         </SettingRow>
         <SettingRow
-          settingId="app-store-connect-private-key"
-          label="Private key"
-          description="Paste the contents of the .p8 file App Store Connect gave you."
-          htmlFor={privateKeyFieldId}
+          settingId="app-store-connect-key-source"
+          label="Private key from"
+          description="Paste the key to keep it in this Mac's Keychain, or name where it is in 1Password. A 1Password key is read with your op command each time Octant uses it, so 1Password asks you to approve."
           scope="host"
         >
-          <OctantTextarea
-            id={privateKeyFieldId}
-            value={privateKey}
-            rows={4}
-            autoComplete="off"
-            spellCheck={false}
-            onChange={(event) => setPrivateKey(event.target.value)}
-          />
+          <OctantToggleGroup<KeySource>
+            aria-label="Private key from"
+            onValueChange={(value) => {
+              const selected = value[0];
+              if (selected !== undefined) setSource(selected);
+            }}
+            value={[source]}
+          >
+            <OctantToggleGroupItem value="stored">Paste the key</OctantToggleGroupItem>
+            <OctantToggleGroupItem value="1password">1Password</OctantToggleGroupItem>
+          </OctantToggleGroup>
         </SettingRow>
+        {source === "stored" ? (
+          <SettingRow
+            settingId="app-store-connect-private-key"
+            label="Private key"
+            description="Paste the contents of the .p8 file App Store Connect gave you."
+            htmlFor={privateKeyFieldId}
+            scope="host"
+          >
+            <OctantTextarea
+              id={privateKeyFieldId}
+              value={privateKey}
+              rows={4}
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(event) => setPrivateKey(event.target.value)}
+            />
+          </SettingRow>
+        ) : (
+          <SettingRow
+            settingId="app-store-connect-1password-reference"
+            label="1Password reference"
+            description="The field that holds the .p8 key, as op://vault/item/field. Copy it from the field's menu in 1Password."
+            htmlFor={referenceFieldId}
+            scope="host"
+          >
+            <OctantInput
+              id={referenceFieldId}
+              value={reference}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="op://vault/item/field"
+              onChange={(event) => setReference(event.target.value)}
+            />
+          </SettingRow>
+        )}
         <div className="settings-view__actions app-store-connect-key__save">
           <OctantButton
             type="submit"
             size="sm"
-            disabled={busy || issuerId === "" || keyId === "" || privateKey === ""}
+            disabled={
+              busy ||
+              issuerId === "" ||
+              keyId === "" ||
+              (source === "stored" ? privateKey === "" : reference === "")
+            }
           >
             {shown.stored ? "Replace key" : "Save key"}
           </OctantButton>

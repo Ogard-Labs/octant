@@ -2282,8 +2282,9 @@ describe("Code tool families", () => {
     // usage moved behind help. The budget catches a description growing back.
     // A paired device as an Apple destination added its own operations and
     // parameters (about 250 bytes of schema); its usage lives behind help.
-    // The upload operation added its name to the enum; its usage is in help too.
-    expect(JSON.stringify(families).length).toBeLessThanOrEqual(4_620);
+    // The upload, submit-for-review, and release-version operations added
+    // their names to the enum; their usage is in help too.
+    expect(JSON.stringify(families).length).toBeLessThanOrEqual(4_650);
   });
 
   it.each(["octant_browser", "octant_terminal", "octant_apple", "octant_android"])(
@@ -2667,6 +2668,108 @@ describe("a paired iPhone or iPad through the Apple tool", () => {
       expect(read).not.toHaveBeenCalled();
       expect(ask).not.toHaveBeenCalled();
       expect(devices.request).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("a submission for App Review or a release", () => {
+    const storeVersion = {
+      bundleIdentifier,
+      version: "1.4.0",
+      buildNumber: "12",
+      platform: "ios",
+    };
+    const prepareStoreVersion = (ready: string = "submit-for-review") =>
+      vi.fn(
+        async () =>
+          ({ kind: "prepared", storeVersion, ready, state: "PREPARE_FOR_SUBMISSION" }) as never,
+      );
+    const submitted = () =>
+      vi.fn(
+        async () =>
+          ({
+            kind: "apple-store-version-evidence",
+            evidence: {
+              actionId: "90000000-0000-4000-8000-000000000011",
+              correlationId: "90000000-0000-4000-8000-000000000012",
+              authority: appleAuthority,
+              kind: "submit-for-review",
+              requestedBy: { kind: "agent" },
+              outcome: "succeeded",
+              storeVersion,
+              appStoreConnectId: "sub-1",
+              diagnostics: [],
+              durationMs: 40,
+              completedAt: "2026-10-28T08:00:01.000Z",
+            },
+          }) as never,
+      );
+
+    it("runs nothing until a person at the Mac confirms the exact version, even under Full access", async () => {
+      const declined = deviceTools(
+        { executionPolicy: "full-access" } as never,
+        { check: awaitingConfirmation(), prepareStoreVersion: prepareStoreVersion() },
+        "denied",
+      );
+      const refused = await declined.call({
+        operation: "submit-for-review",
+        projectPath: "Fixture.xcodeproj",
+      });
+      expect(refused).toMatchObject({ isError: true, result: { error: "device-approval-denied" } });
+      expect(declined.devices.request).not.toHaveBeenCalled();
+
+      const allowed = deviceTools({ executionPolicy: "full-access" } as never, {
+        check: awaitingConfirmation(),
+        prepareStoreVersion: prepareStoreVersion(),
+        request: submitted(),
+      });
+      const answer = await allowed.call({
+        operation: "submit-for-review",
+        projectPath: "Fixture.xcodeproj",
+      });
+      expect(allowed.ask.mock.calls[0]?.[0]).toMatchObject({
+        kind: "apple-distribution-version",
+        request: { kind: "submit-for-review", storeVersion, requestedBy: { kind: "agent" } },
+      });
+      expect(allowed.sent()).toMatchObject({
+        kind: "submit-for-review",
+        storeVersion,
+        approval: { kind: "approved", approvalId: "d0000000-0000-4000-8000-000000000001" },
+      });
+      expect(answer).toMatchObject({
+        isError: false,
+        result: { kind: "submit-for-review", outcome: "succeeded", appStoreConnectId: "sub-1" },
+      });
+    });
+
+    it("asks no one to release a version App Store Connect does not hold for a manual release", async () => {
+      const { ask, call, devices } = deviceTools({ executionPolicy: "full-access" } as never, {
+        check: awaitingConfirmation(),
+        prepareStoreVersion: prepareStoreVersion("submit-for-review"),
+      });
+      const outcome = await call({
+        operation: "release-version",
+        projectPath: "Fixture.xcodeproj",
+      });
+      expect(outcome).toMatchObject({
+        isError: true,
+        result: { error: "store-version-not-ready" },
+      });
+      expect(ask).not.toHaveBeenCalled();
+      expect(devices.request).not.toHaveBeenCalled();
+    });
+
+    it("refuses a submission or release in Plan before reading anything", async () => {
+      for (const operation of ["submit-for-review", "release-version"]) {
+        const read = prepareStoreVersion();
+        const { ask, call, devices } = deviceTools({ executionPolicy: "plan" } as never, {
+          prepareStoreVersion: read,
+        });
+        const outcome = await call({ operation, projectPath: "Fixture.xcodeproj" });
+        expect(outcome).toMatchObject({ isError: true, result: { error: "plan-mode-read-only" } });
+        expect(read).not.toHaveBeenCalled();
+        expect(ask).not.toHaveBeenCalled();
+        expect(devices.request).not.toHaveBeenCalled();
+      }
     });
   });
 

@@ -545,6 +545,7 @@ function printUsage(): void {
       "  octant provider remove <instance>",
       "  octant provider sign-in <instance>",
       "  octant apple key set --issuer <issuer-id> --key-id <key-id> --stdin [--replace] < AuthKey_<key-id>.p8",
+      "  octant apple key set --issuer <issuer-id> --key-id <key-id> --op-reference op://<vault>/<item>/<field> [--replace]",
       "  octant apple key status|remove",
       "  octant listener [status]",
       "  octant listener enable --hostname <lan-or-tailscale-address> --port <port> --cert <path> --key <path>",

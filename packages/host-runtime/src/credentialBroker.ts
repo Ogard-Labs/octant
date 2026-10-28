@@ -3,6 +3,11 @@ import { createServer, type IncomingHttpHeaders, type IncomingMessage } from "no
 import type { AddressInfo } from "node:net";
 import { handleAppStoreConnectKeyFileRoute } from "./appStoreConnectKeyFiles";
 import {
+  handleAppStoreConnectTokenRoute,
+  readOnePasswordWithCli,
+  type OnePasswordRead,
+} from "./appStoreConnectKeySource";
+import {
   CredentialPurgeFailure,
   CredentialStoreFailure,
   type CredentialPurgeStore,
@@ -63,6 +68,9 @@ const ROUTES = new Set([
   // upload's private folder and removes after; the answer never carries it.
   "/v1/app-store-connect-keys/write-key-file",
   "/v1/app-store-connect-keys/remove-key-file",
+  // An App Store Connect API request is authorized by a token the broker
+  // signs here; the answer is that one short-lived token, never the key.
+  "/v1/app-store-connect-keys/sign-token",
   "/v1/oauth/begin",
   "/v1/oauth/status",
   "/v1/oauth/refresh",
@@ -154,6 +162,12 @@ export async function startCredentialBroker(
    * key-file routes answer not found.
    */
   appStoreConnectKeyFileRoot?: string,
+  /**
+   * Reads a key the person keeps in 1Password, at the moment a token is
+   * signed or an upload's key file written. Defaults to the person's own `op`
+   * CLI; tests pass a fake.
+   */
+  readOnePassword: OnePasswordRead = readOnePasswordWithCli,
 ): Promise<CredentialBroker> {
   const token = randomBytes(32).toString("base64url");
   const runtime = createHostOAuthRuntime({
@@ -188,6 +202,8 @@ export async function startCredentialBroker(
       desktopProviderCredentials,
       appStoreConnectKeys,
       appStoreConnectKeyFileRoot,
+      readOnePassword,
+      oauth?.now ?? Date.now,
     ).then(
       ({ destroyIncoming, response }) => {
         const headers: Record<string, string> = {};
@@ -264,6 +280,8 @@ export async function startCredentialBroker(
         desktopProviderCredentials,
         appStoreConnectKeys,
         appStoreConnectKeyFileRoot,
+        readOnePassword,
+        oauth?.now ?? Date.now,
       ),
   });
 }
@@ -283,6 +301,8 @@ async function handleIncoming(
   desktopProviderCredentials: CredentialStore | undefined,
   appStoreConnectKeys: CredentialStore | undefined,
   appStoreConnectKeyFileRoot: string | undefined,
+  readOnePassword: OnePasswordRead,
+  now: () => number,
 ): Promise<{ destroyIncoming: boolean; response: ResponseData }> {
   if (brokerUrl === undefined) throw new Error("unavailable");
   const headers = requestHeaders(incoming.headers);
@@ -320,6 +340,8 @@ async function handleIncoming(
         desktopProviderCredentials,
         appStoreConnectKeys,
         appStoreConnectKeyFileRoot,
+        readOnePassword,
+        now,
       ),
     ),
   };
@@ -340,6 +362,8 @@ async function handleBrokerRequest(
   desktopProviderCredentials: CredentialStore | undefined,
   appStoreConnectKeys: CredentialStore | undefined,
   appStoreConnectKeyFileRoot: string | undefined,
+  readOnePassword: OnePasswordRead,
+  now: () => number,
 ): Promise<Response> {
   const url = new URL(request.url);
   if (!isAuthorized(peerAddress, request.headers, token)) {
@@ -422,7 +446,11 @@ async function handleBrokerRequest(
         request,
         appStoreConnectKeys,
         appStoreConnectKeyFileRoot,
+        readOnePassword,
       );
+    }
+    if (operation === "sign-token") {
+      return handleAppStoreConnectTokenRoute(request, appStoreConnectKeys, readOnePassword, now);
     }
     return handleNamespacedRoute(
       url.pathname.slice(APP_STORE_CONNECT_KEY_PREFIX.length),

@@ -786,10 +786,42 @@ describe("Apple physical device contracts", () => {
     upload: uploadBuild,
   };
 
+  const storeVersion = {
+    bundleIdentifier: "app.octant.fixture",
+    version: "1.2",
+    buildNumber: "7",
+    platform: "ios",
+  };
+
+  it("binds a submission or release to exactly one named version, and nothing else carries one", () => {
+    const { deviceId: _deviceId, ...noDevice } = request;
+    for (const kind of ["submit-for-review", "release-version"] as const) {
+      expect(
+        AppleContracts.decodeAppleDeviceRequest({ ...noDevice, kind, storeVersion }).storeVersion,
+      ).toEqual(storeVersion);
+      expect(() => AppleContracts.decodeAppleDeviceRequest({ ...noDevice, kind })).toThrow();
+      expect(() =>
+        AppleContracts.decodeAppleDeviceRequest({
+          ...noDevice,
+          kind,
+          storeVersion: { ...storeVersion, platform: "macos" },
+        }),
+      ).toThrow();
+    }
+    expect(() =>
+      AppleContracts.decodeAppleDeviceRequest({
+        ...noDevice,
+        kind: "upload",
+        ...uploadFields,
+        storeVersion,
+      }),
+    ).toThrow();
+  });
+
   it("names a device for every operation but discovery and distribution", () => {
     const { deviceId: _deviceId, ...noDevice } = request;
     for (const kind of ["discover", "upload", "submit-for-review", "release-version"] as const) {
-      const fields = kind === "upload" ? uploadFields : {};
+      const fields = kind === "upload" ? uploadFields : kind === "discover" ? {} : { storeVersion };
       expect(AppleContracts.decodeAppleDeviceRequest({ ...noDevice, kind, ...fields }).kind).toBe(
         kind,
       );
