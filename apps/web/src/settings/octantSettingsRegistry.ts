@@ -660,6 +660,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords: "claude account config directory folder accent sign in login status",
         },
+        {
+          id: settingId("provider-claude-artifacts"),
+          label: "Deliver documents as Claude artifacts",
+          scope: "host",
+          keywords:
+            "claude artifacts artifact tool publish published page claude.ai link documents reports pages canvas delivery upload leaves this computer",
+        },
       ],
     },
     {

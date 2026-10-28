@@ -1379,11 +1379,6 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
   border-color: var(--oct-border);
 }
 
-.published-page-card:focus-visible {
-  outline: none;
-  box-shadow: var(--oct-focus-ring);
-}
-
 .published-page-card__text {
   display: flex;
   flex: 1 1 0;

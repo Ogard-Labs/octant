@@ -7542,9 +7542,10 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   exactly one column, the leading token of each cell equals the value in the
   driver's static capability block, and the mode columns equal
   `providerCatalogCapabilities`. It cannot see a refinement made at probe time
-  (the words after the first token), nor the compaction rows, which the drivers
-  assign outside the static blocks; the conformance harness covers the
-  compaction claim, and the rest is reviewed with the driver.
+  (the words after the first token), nor the per-mode compaction and native
+  artifact rows, which the drivers assign outside the static blocks; the
+  conformance harness covers the compaction claim, the Claude driver's probe
+  tests cover the artifact claim, and the rest is reviewed with the driver.
 
 - **Host reads of a bound root.** Every read, listing, and search the host
   process makes in a Code checkout or Work folder (file reads, search,

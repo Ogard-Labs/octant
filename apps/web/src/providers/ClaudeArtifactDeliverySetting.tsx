@@ -17,7 +17,6 @@ export interface ClaudeArtifactDeliverySettingProps {
  * refuses it from anywhere but this host's own window.
  */
 export function ClaudeArtifactDeliverySetting(props: ClaudeArtifactDeliverySettingProps) {
-  const settingId = `provider-${props.instance.id}-claude-artifacts`;
   const checked = props.instance.configuration.artifactDelivery === true;
   const unsupportedReason = artifactsUnsupportedReason(props.instance, props.observed);
   return (
@@ -35,11 +34,11 @@ export function ClaudeArtifactDeliverySetting(props: ClaudeArtifactDeliverySetti
       }
       label="Deliver documents as Claude artifacts"
       scope="host"
-      settingId={settingId}
+      settingId={`provider-${props.instance.id}-claude-artifacts`}
     >
       <OctantSwitch
         checked={checked}
-        describedBy={`${settingId}-description`}
+        describedBy={`provider-${props.instance.id}-claude-artifacts-description`}
         disabled={props.disabled || (unsupportedReason !== undefined && !checked)}
         {...(unsupportedReason === undefined ? {} : { disabledReason: unsupportedReason })}
         label={`Deliver documents from ${props.instance.displayName} as Claude artifacts`}
