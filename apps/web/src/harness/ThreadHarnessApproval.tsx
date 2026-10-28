@@ -70,35 +70,44 @@ export function ThreadHarnessApproval(props: ThreadHarnessApprovalProps) {
         kind: "resume-native-harness-session",
         sessionId: view.session.id,
         expectedVersion: view.session.version,
+        continueInterrupted: true,
       });
       setNotice(result.kind === "native-harness-session-refused" ? result.message : undefined);
     } catch {
-      setNotice("The session was not resumed. Try again.");
+      setNotice(
+        "Resume could not be confirmed. Refresh the thread and check its message queue before trying again.",
+      );
     } finally {
       setBusy(false);
       await reload();
     }
   }, [view, busy, client, threadId, reload]);
 
-  if (view === null || view === undefined || approval === undefined) return null;
+  if (view === null || view === undefined) return null;
   // An approval the journal still holds as pending after a restart has no turn
   // waiting on it any more: nothing can run for it, so the card offers no way
   // to approve it, only the Resume that settles it.
   const lostInRestart = view.session.status === "recovery-required";
+  if (approval === undefined && !lostInRestart) return null;
+  const resumeButton = (
+    <OctantButton
+      disabled={busy}
+      onClick={() => void resume()}
+      size="sm"
+      type="button"
+      variant="default"
+    >
+      {busy ? "Resuming…" : "Resume"}
+    </OctantButton>
+  );
   return (
     <div className="thread-harness-approval">
-      {lostInRestart ? (
-        <HarnessApprovalLostPanel approval={approval}>
-          <OctantButton
-            disabled={busy}
-            onClick={() => void resume()}
-            size="sm"
-            type="button"
-            variant="default"
-          >
-            Resume
-          </OctantButton>
-        </HarnessApprovalLostPanel>
+      {approval === undefined ? (
+        <OctantAlert tone="warning" role="status" action={resumeButton}>
+          <p>Octant restarted before this turn finished. Review any changes before continuing.</p>
+        </OctantAlert>
+      ) : lostInRestart ? (
+        <HarnessApprovalLostPanel approval={approval}>{resumeButton}</HarnessApprovalLostPanel>
       ) : (
         <HarnessApprovalPanel
           approval={approval}

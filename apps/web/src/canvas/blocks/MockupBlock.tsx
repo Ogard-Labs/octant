@@ -80,9 +80,6 @@ const CONTAINERS: ReadonlySet<CanvasMockupComponent> = new Set([
   "grid",
   "nav",
   "chat",
-  "menu",
-  "hero",
-  "footer",
   "instance",
 ]);
 
@@ -496,17 +493,6 @@ function Face({ branch }: { readonly branch: CanvasMockupBranch }) {
     case "pagination":
       return <span className="canvas-mockup__label">{node.label}</span>;
     case "stepper":
-      return (
-        <span className="canvas-mockup__progress">
-          <span className="canvas-mockup__label">{node.label}</span>
-          <span className="canvas-mockup__progress-track">
-            <span
-              className="canvas-mockup__progress-fill"
-              style={{ width: `${String(node.progress ?? 0)}%` }}
-            />
-          </span>
-        </span>
-      );
     case "progress":
       return (
         <span className="canvas-mockup__progress">

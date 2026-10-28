@@ -1,4 +1,8 @@
+import { generateKeyPairSync } from "node:crypto";
+import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -13,6 +17,7 @@ import type {
   OutsideDriverImplementation,
   OutsideDriverLineIo,
 } from "@octant/provider-sdk/outside-driver-serve";
+import { signOutsideDriverPackage } from "@octant/provider-sdk/outside-driver-sign";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { LocalPluginFolderRegistry } from "../extensions/localPluginFolderRegistry";
@@ -36,9 +41,11 @@ const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-00000000080
 const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000802");
 const modelId = decodeProviderModelId("local-model");
 const servers: Array<{ readonly close: () => void }> = [];
+const copies: Array<string> = [];
 
-afterEach(() => {
+afterEach(async () => {
   for (const server of servers.splice(0)) server.close();
+  await Promise.all(copies.splice(0).map((copy) => rm(copy, { recursive: true, force: true })));
 });
 
 async function exampleDriver(): Promise<{
@@ -124,6 +131,34 @@ describe("example loopback driver", () => {
     expect(reading.resolved.manifest).toMatchObject({
       components: [{ kind: "provider-driver", entryPoint: "driver.mjs" }],
     });
+  });
+
+  it("is accepted signed by a publisher key made for this test, and refused once a file changes", async () => {
+    const copy = await mkdtemp(join(tmpdir(), "octant-signed-example-"));
+    copies.push(copy);
+    await cp(exampleRoot, copy, { recursive: true });
+    const privateKeyPem = generateKeyPairSync("ed25519")
+      .privateKey.export({ format: "pem", type: "pkcs8" })
+      .toString();
+    const signed = await signOutsideDriverPackage({ root: copy, privateKeyPem });
+    const read = async () => {
+      const folders = new LocalPluginFolderRegistry({ platform: "darwin" });
+      const input = (await folders.register(copy)).packageInput;
+      if (!("layout" in input) || input.layout !== "outside-provider-driver") {
+        throw new Error("The signed example was not read as a provider driver.");
+      }
+      return readOutsideProviderDriverPackage(input);
+    };
+
+    const reading = await read();
+    expect(reading.status).toBe("accepted");
+    if (reading.status !== "accepted") return;
+    expect(reading.resolved.manifest).toMatchObject({
+      provenance: { publisherKey: signed.fingerprint },
+    });
+
+    await writeFile(join(copy, "lib/loopback-chat.mjs"), "export const tampered = true;\n");
+    expect(await read()).toEqual({ status: "refused", reason: "signature-invalid" });
   });
 
   it("passes the harness endpoint conformance kit through the host proxy against a loopback model server", async () => {

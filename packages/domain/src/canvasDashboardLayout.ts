@@ -1,5 +1,6 @@
 import {
   CANVAS_DASHBOARD_CELL_KINDS,
+  CANVAS_DECK_SLIDE_KINDS,
   CANVAS_DEFAULT_DASHBOARD_COLUMNS,
   type CanvasDashboardCellKind,
 } from "@octant/contracts/canvas";
@@ -112,18 +113,11 @@ export function isCanvasFlowScreenKind(kind: string): boolean {
   return kind === "mockup" || kind === "design";
 }
 
+const DECK_SLIDE_KINDS: ReadonlySet<string> = new Set(CANVAS_DECK_SLIDE_KINDS);
+
 /** Whether a deck may show the block. */
 export function isCanvasDeckSlideKind(kind: string): boolean {
-  return [
-    "design",
-    "mockup",
-    "chart",
-    "table",
-    "metric",
-    "progress",
-    "status",
-    "dashboard",
-  ].includes(kind);
+  return DECK_SLIDE_KINDS.has(kind);
 }
 
 function isGroup<B extends BlockShape>(block: B): block is B & (TabsShape | ColumnsShape) {

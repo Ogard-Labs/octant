@@ -28,12 +28,17 @@ import { AutomationNotificationPreferencesStore } from "../automation/automation
 import { AutomationNotificationDeliveryStore } from "../automation/automationNotificationDeliveryStore";
 import { AutomationNotificationDeliveryService } from "../automation/automationNotificationDeliveryService";
 import { createAutomationNotificationRouteHandler } from "../automation/automationNotificationRoutes";
-import { createUnavailablePushDeliveryTransport } from "../automation/pushDeliveryTransport";
 import {
   createPushNotificationTokenStore,
   pushDestinationStands,
 } from "../remote/pushNotificationTokenStore";
-import { privateListenerDisplayName } from "../remote/privateListenerHostIdentity";
+import { createGatewayPushDeliveryTransport } from "../remote/gatewayPushDeliveryTransport";
+import {
+  existingPrivateListenerSigning,
+  privateListenerDisplayName,
+} from "../remote/privateListenerHostIdentity";
+import { createPushGatewaySetting } from "../remote/pushGatewaySetting";
+import type { HostSigningPort } from "../remote/remoteProtocolService";
 import { readDeviceRegistrations } from "../persistence/remoteAccessProjection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { defaultShellSettings } from "@octant/domain";
@@ -88,18 +93,28 @@ export function wireAutomation(deps: AutomationDependencies) {
       projection: persistence.automationProjection,
     }) === "ok";
   // Shared device destinations, opt-in preferences, durable delivery
-  // receipts. Credentialed APNs/FCM remains a named validation residual —
-  // the default transport reports unavailable honestly. Registrations are
-  // kept owner-only under the data directory and survive a restart. One
-  // transport carries sealed envelopes for Automation runs and ordinary
-  // threads alike.
+  // receipts. The host holds no platform push credential: it sends sealed
+  // envelopes through the push gateway the Notifications setting names, and
+  // reports delivery unavailable while that setting is off (the default).
+  // Registrations are kept owner-only under the data directory and survive a
+  // restart. One transport carries sealed envelopes for Automation runs and
+  // ordinary threads alike.
   const pushNotificationTokenStore = createPushNotificationTokenStore({
     dataDirectory: persistence.dataDirectory,
     journal: persistence.journal,
     uuid: randomUUID,
     hostActorId: OCTANT_LOCAL_ACTOR_ID,
   });
-  const pushDeliveryTransport = createUnavailablePushDeliveryTransport();
+  const pushGatewaySetting = createPushGatewaySetting(persistence.dataDirectory);
+  // The key is read once it exists and kept: every send signs with it.
+  let pushSigning: HostSigningPort | undefined;
+  const pushDeliveryTransport = createGatewayPushDeliveryTransport({
+    settings: pushGatewaySetting.current,
+    signing: () => {
+      pushSigning ??= existingPrivateListenerSigning(persistence.dataDirectory);
+      return pushSigning;
+    },
+  });
   const hasPushStanding = (hostId: string, deviceId: string): boolean =>
     pushDestinationStands(readDeviceRegistrations(persistence.connection), {
       hostId,
@@ -152,6 +167,7 @@ export function wireAutomation(deps: AutomationDependencies) {
     windowAuthorityStore,
     preferences: automationNotificationPreferencesStore,
     delivery: automationNotificationDelivery,
+    pushGateway: pushGatewaySetting,
   });
   const automationCommandService = new AutomationCommandService({
     store: automationEventStore,

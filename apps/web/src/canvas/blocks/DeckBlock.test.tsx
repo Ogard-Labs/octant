@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { decodeCanvasBlock, type CanvasDeckBlock } from "@octant/contracts/canvas";
 import { describe, expect, it } from "vitest";
 import { CanvasDocument } from "../CanvasDocument";
+import { DeckBlock } from "./DeckBlock";
 import { canvasFixture } from "../test-fixtures";
 
 const base = { schemaVersion: canvasFixture.schemaVersion };
@@ -58,6 +59,43 @@ describe("deck", () => {
     expect(within(player).getByText("2 / 2")).toBeInTheDocument();
     // The second slide is the data block, drawn as itself.
     expect(within(player).getByText("Signups")).toBeInTheDocument();
+  });
+});
+
+describe("deck keys and edges", () => {
+  it("moves with the arrow keys inside the player", async () => {
+    const user = userEvent.setup();
+    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [chart, mockup, deck] }} />);
+    await user.click(screen.getByRole("button", { name: /Present/ }));
+    const player = screen.getByRole("dialog", { name: "Presenting Launch deck" });
+    await user.click(within(player).getByRole("button", { name: "Next slide" }));
+    expect(within(player).getByText("2 / 2")).toBeInTheDocument();
+    await user.keyboard("{ArrowLeft}");
+    expect(within(player).getByText("1 / 2")).toBeInTheDocument();
+  });
+
+  it("leaves the arrows to a field the presenter is typing in", async () => {
+    const user = userEvent.setup();
+    render(
+      <>
+        <input aria-label="Search the page" />
+        <CanvasDocument definition={{ ...canvasFixture, blocks: [chart, mockup, deck] }} />
+      </>,
+    );
+    await user.click(screen.getByRole("button", { name: /Present/ }));
+    const player = screen.getByRole("dialog", { name: "Presenting Launch deck" });
+    const field = screen.getByRole("textbox", { name: "Search the page", hidden: true });
+    field.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(within(player).getByText("1 / 2")).toBeInTheDocument();
+  });
+
+  it("offers no Present for a deck whose slides name no block it can find", () => {
+    // A snapshot can carry a deck without the blocks it names; the player
+    // would otherwise read "1 / 0" over an empty stage.
+    render(<DeckBlock block={deck} blocks={[]} />);
+    expect(screen.getByText("0 slides")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Present/ })).toBeDisabled();
   });
 });
 

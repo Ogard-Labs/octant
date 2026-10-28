@@ -281,6 +281,21 @@ export function buildBubblewrapLaunch(
   // mount of this capsule, so it reads and writes exactly what it would here.
   const nestedForProcessDenial =
     proxied !== undefined && (input.allowProcessFork === false || input.allowProcessExec === false);
+  const relay = input.inboundRelay;
+  if (
+    relay !== undefined &&
+    (proxied === undefined ||
+      !isAbsolute(relay.socketPath) ||
+      !Number.isInteger(relay.port) ||
+      relay.port < 1 ||
+      relay.port > 65_535 ||
+      relay.port === LINUX_EGRESS_FORWARDER_PORT)
+  ) {
+    throw new ProcessConfinementError(
+      "invalid-configuration",
+      "An inbound relay needs a proxied launch, an absolute socket path, and a port of its own.",
+    );
+  }
   const args: string[] = ["--unshare-all"];
   if (input.networkEgress === "allow") {
     args.push("--share-net");
@@ -581,6 +596,7 @@ export function buildBubblewrapLaunch(
       forwarder.script,
       proxied.endpoint.path,
       String(LINUX_EGRESS_FORWARDER_PORT),
+      ...(relay === undefined ? [] : ["--inbound", relay.socketPath, String(relay.port)]),
     );
     if (nestedForProcessDenial) {
       const filter = buildLinuxProcessDenySeccompFilter({

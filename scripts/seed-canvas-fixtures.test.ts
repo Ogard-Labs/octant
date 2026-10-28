@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync }
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decodeChatThreadId, decodeProjectId } from "@octant/contracts";
+import { validateCanvasDefinition } from "@octant/domain";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CanvasService } from "../apps/server/src/canvas/canvasService";
@@ -65,6 +66,7 @@ describe("seeding Canvas fixtures", () => {
             canvases[0] === undefined ? undefined : String(canvases[0].currentVersion.canvasId),
           canvasCreatedAt: canvases[0]?.versions[0]?.createdAt,
           presentation: canvases[0]?.currentVersion.definition.presentation,
+          definition: canvases[0]?.currentVersion.definition,
         };
       }),
     );
@@ -81,6 +83,12 @@ describe("seeding Canvas fixtures", () => {
       expect(Date.parse(String(read?.canvasCreatedAt))).toBeGreaterThanOrEqual(
         Date.parse(String(read?.turnOpenedAt)),
       );
+    }
+    // Creating a Canvas decodes it; the cross-reference policy (a flow's
+    // screens and hotspots, a deck's slides) is what an agent's write also
+    // passes, so every fixture must pass it too.
+    for (const read of reopened) {
+      expect(() => validateCanvasDefinition(read.definition), read.fixture).not.toThrow();
     }
     expect(reopened.map((read) => read.presentation)).toEqual([
       "inline",

@@ -408,8 +408,8 @@ links across the exported pages. Supersedes D-6.
 | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | -------------------------------------- |
 | 1     | `flow` block: schema 23, policies, pure layout, board drawing (mockup frames and design frames as live nodes), comment anchors, reading order, MD/HTML/SVG export parity, share v12, preview warnings, journaled drags | FR-1, FR-3, NFR-1, NFR-2, NFR-3, NFR-5 | In review (#1830); rendered QA pending |
 | 2     | Click-through Play over the flow; flow HTML export as one linked, script-free page set (D-9: one self-contained site)                                                                                                  | FR-2, FR-7 (flow part), NFR-4, NFR-6   | In review (#1832); rendered QA pending |
-| 3     | Mockup catalog: new components, image fills, reusable definitions — schema 24, share v13                                                                                                                               | FR-4, FR-5, FR-6, NFR-5                | In review (#1839); rendered QA pending |
-| 4     | Per-variant mockup HTML and TSX export; describe guidance and recipes for everything above                                                                                                                             | FR-7 (rest), FR-9                      | In review (#1840); rendered QA pending |
+| 3     | Mockup catalog: new components and reusable definitions — schema 24, share v13 (image fills cut)                                                                                                                       | FR-4, FR-6, NFR-5                      | In review (#1839); rendered QA pending |
+| 4     | Per-variant mockup HTML export (TSX moved to the export-menu slice)                                                                                                                                                    | FR-7 (mockup HTML)                     | In review (#1840); rendered QA pending |
 | 5     | `deck` block: schema 25, share v14, player integration, deck recipes                                                                                                                                                   | FR-8, FR-9                             | In review (#1841); rendered QA pending |
 
 Each slice rides its own `feature/*` branch and PR to `main`, updates the
@@ -421,23 +421,6 @@ version gates and export parity) and comes first; the plan is a sequence of
 independent-outcome PRs, not a stack, unless a slice proves dependent.
 
 ## 8. Open questions
-
-### Maintainer improvement round (2026-10-28, "plan and implement 1-9")
-
-Slices 6–9 below deliver the nine ranked improvements; the same rules apply
-(each slice: specs in the same PR, evidence in the Verification table).
-
-| Slice | Delivers                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Items       |
-| ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| 6     | **Lower the friction**: one table-driven version gate (the inference cliff becomes data), Play in the share snapshot viewer (in-app, so Q-3's ruling holds — public links stay read-only until the service learns the share versions), the person-facing "Save mockup as TSX" control, worked flow/deck examples in describe, and flow/deck seed fixtures                                                                                                                                                                          | #7 #3 #8 #9 |
-| 7     | **Designed screens walk the flow**: an edge from a design screen may name an anchor in its markup (`#octant-flow:<screenId>`); in-app Play renders the design screen same-origin and follows the frame's own anchors, so a finished screen participates in click-through. The exported site keeps the Go-to list (a sandboxed frame cannot reach out without script). Plus **auto-deck**: one pure proposer (`proposeCanvasDeck`) and a host-window action that appends a deck derived from the document's own screens and numbers | #1 #4       |
-| 8     | **Annotate the board**: a flow gains `annotations` pinned to its screens (numbered callouts drawn on the board, comment-anchored through the existing node anchors) at Canvas schema 26, and mockup nodes gain per-node comment markers, so a reader sees where the threads are                                                                                                                                                                                                                                                    | #2          |
-| 9     | **Deck outputs and mockup richness**: a PDF one page per deck slide (data blocks drawn as the thread draws them), and breakpoint-paired mockup variants taught in guidance (the data already supports them)                                                                                                                                                                                                                                                                                                                        | #5 #6       |
-
-A true dual-screen speaker view stays Later (the deck player's Notes toggle
-covers the in-app case), and brand kits feeding mockup `styled` fidelity
-stays Later: it needs the Project's kit plumbed to the renderer, which is its
-own seam decision.
 
 | ID  | Question                                                         | Ruling                                                                              |
 | --- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
@@ -847,33 +830,39 @@ governs over any number written earlier.
   refusals shaped the hotspot: a generated page's button keeps the adapter's
   look, and no surface repaints OctantButton, so the in-app hotspot wears
   the secondary variant as-is. Delivered for review as #1832.
-- 2026-10-28: Slice 3 implemented: the mockup library at Canvas 24 (share 13) — thirteen new closed components, the `progress`/`assetId`/`defId` node
-  fields, declared images under the design-asset rules, and reusable local
-  definitions placed by instance, all gated by one merged version filter
-  (the inference cliff of D-8's delta still stands) and carried by a share
-  whole except its images. The generator, outline readings, hotspot list,
+- 2026-10-28: Slice 3 implemented: the mockup library at Canvas 24 (share 13) — thirteen new closed components, the `progress`/`defId` node
+  fields, and reusable local definitions placed by instance and expanded by
+  the shared tree builder, all gated by one merged version filter (the
+  inference cliff of D-8's delta still stands) and carried by a share whole.
+  Mockup image fills (FR-5) were cut in review: resolving them needs the
+  design-asset resolver, preview, and export paths, so media and map stay
+  placeholder boxes until a later slice builds that. The generator, outline readings, hotspot list,
   renderer faces, and describe guidance grew with the catalog. Delivered for
   review as #1839.
-- 2026-10-28: Slice 4 implemented: the code handoff. The HTML export embeds
+- 2026-10-28: Slice 4 implemented: the HTML handoff. The HTML export embeds
   each mockup variant's generated semantic page (`canvasMockupHtml`, shared
-  with the flow site) ahead of the outline reading, and `canvasMockupTsx`
-  hands the same tree off as a dependency-free component — no imports,
-  inlined styles, byte-identical reruns; braces escape in the shared
-  escaper so both forms render the same text. A person-facing "export one
-  mockup as files" button stays Later: the site and the HTML file carry the
-  HTML form today. Delivered for review as #1840.
+  with the flow site) with its stylesheet ahead of the outline reading,
+  generated from the redacted block. The TSX form moved to the slice that
+  first offers it to a person (the export menu), so no module ships without
+  a caller. Delivered for review as #1840.
 - 2026-10-28: Slice 5 implemented: the `deck` block at Canvas 25 (share 14)
   — slides reference the document's own designs, mockups, and data blocks,
   placed once, walked by a deck player in the design player's anatomy with
   the presenter's notes, which a share never carries. ASM-1 held: the deck
   got its own player rather than a generalized design player, so a plain
   design's Present is untouched. The `data-deck` recipe and describe guidance
-  ship with it. Delivered for review as #1841. All five slices are now in
+  ship with it. Dashboard slides (in FR-8's list) were cut in review: the
+  player, export, and thumbnail had no path that drew a dashboard's cells, so
+  a deck shows those numbers as slides of their own. Delivered for review as
+  #1841. All five slices are now in
   review; rendered QA remains named-pending across the stack.
-- 2026-10-28: Maintainer asked for the nine ranked improvements; folded into
-  slices 6–9 above and implemented the same day (see Verification).
-- 2026-10-28: Slice 9 implemented: the TSX handoff control, the one-click
-  deck proposal (command, policy, service, route, client, menu), the mockup
-  per-node comment markers, and the deck PDF (`slides` picture subject; the
-  renderer draws one preview page per slide and the PDF holds one page per
-  slide). All nine ranked improvements are now built; the plan is complete.
+- 2026-10-28: The Canvas schema version gates became one table in the
+  contract, read by both the definition decode filter and the domain's
+  declared-version check; the policy's supported versions are the contract's
+  own literal list. Share version gates stay a separate filter on the share
+  document. The `app-flow` and `data-deck` seed fixtures were added. Delivered
+  for review as #1843.
+- 2026-10-28: The TSX handoff control in the export menu, the one-click deck
+  proposal (command, policy, service, route, client, menu), per-node comment
+  markers on a mockup, and the deck picture export (one PNG or PDF page per
+  slide). Delivered for review as #1845.

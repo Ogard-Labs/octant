@@ -2320,7 +2320,6 @@
 
 .canvas-flow-board__design-frame {
   position: relative;
-  aspect-ratio: var(--oct-flow-screen-ratio, 16 / 10);
   border: 1px solid var(--oct-border);
   background: var(--oct-surface);
 }
@@ -2456,7 +2455,7 @@
   place-items: center;
   width: 18px;
   height: 18px;
-  border-radius: 999px;
+  border-radius: var(--oct-radius-pill);
   background: var(--oct-fg);
   color: var(--oct-bg);
   font-family: var(--oct-font-mono);
@@ -2564,14 +2563,14 @@
   position: relative;
   display: block;
   height: 4px;
-  border-radius: 999px;
+  border-radius: var(--oct-radius-pill);
   background: var(--oct-fill-2);
 }
 
 .canvas-mockup__progress-fill {
   display: block;
   height: 100%;
-  border-radius: 999px;
+  border-radius: var(--oct-radius-pill);
   background: currentColor;
   opacity: 0.7;
 }
@@ -2581,7 +2580,7 @@
   top: -4px;
   width: 12px;
   height: 12px;
-  border-radius: 999px;
+  border-radius: var(--oct-radius-pill);
   background: var(--oct-surface);
   border: 1px solid currentColor;
 }

@@ -234,7 +234,11 @@ thread's model, the one its cursor's binding records. The session record is
 only a fallback: 1.x does not report a model on it, and the adapter once sent
 each prompt of such a resumed session to a placeholder model that does not
 exist. When neither the resume, its binding, nor the session names a model,
-the resume is refused as `stale-resume` rather than guessed.
+the resume is refused as `stale-resume` rather than guessed. The same rule
+makes `modelSwitch` supported: a follow-up on another model of the same
+instance resumes the same native session on the thread's current model and
+re-records it on the cursor's binding, instead of refusing the session it can
+carry.
 
 ## Pi
 

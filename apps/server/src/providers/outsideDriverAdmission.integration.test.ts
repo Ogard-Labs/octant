@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { generateKeyPairSync, randomUUID } from "node:crypto";
 import { chmod, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -12,6 +12,7 @@ import {
   type ProviderInstanceId,
 } from "@octant/contracts";
 import type { ExtensionCommand, ExtensionCommandResult } from "@octant/contracts/extension-rpc";
+import { signOutsideDriverPackage } from "@octant/provider-sdk/outside-driver-sign";
 import { Effect, ManagedRuntime } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CodexPluginPackageResolver } from "../extensions/codexPluginResolver";
@@ -188,6 +189,7 @@ async function host(
   await store.initialize();
   let stopPackage: ((extensionId: string) => Promise<void>) | undefined;
   let reconcile: (() => Promise<void>) | undefined;
+  let forgetPublisherVerification: ((extensionId: string) => Promise<void>) | undefined;
   const lifecycle = new ExtensionLifecycleService({
     connection: persistence.connection,
     journal: persistence.journal,
@@ -207,7 +209,12 @@ async function host(
   const extensions = new ExtensionApiService({
     lifecycle,
     resolver: new CodexPluginPackageResolver({ localFolderRegistry: folders, platform: "darwin" }),
-    onStateChanged: async () => {
+    // As the server wires it: re-trusting a new publisher clears what its
+    // instances verified, then the drivers reconcile.
+    onStateChanged: async (_snapshot, command) => {
+      if (command.kind === "trust-new-publisher") {
+        await forgetPublisherVerification?.(String(command.extensionId));
+      }
       await reconcile?.();
     },
   });
@@ -294,6 +301,8 @@ async function host(
     clock: () => now,
   });
   quarantineOutsideDriver = (id, digest) => providers.quarantineOutsideDriver(id, digest);
+  forgetPublisherVerification = (extensionId) =>
+    providers.forgetOutsideDriverVerification(extensionId);
   // As the server wires it: a newly trusted digest moves its instances
   // first, then processes that no longer match stop.
   reconcile = async () => {
@@ -389,6 +398,7 @@ async function host(
     );
   return {
     persistence,
+    lifecycle,
     registry,
     providers,
     admission,
@@ -851,6 +861,155 @@ describe("outside driver admission end to end", () => {
     expect((await context.providers.bootstrap(windowId)).outsideDrivers).toBeUndefined();
     await expect(context.addProvider(entry)).rejects.toThrow(/not available/);
     expect(context.starts).toEqual([]);
+  });
+});
+
+/** A throwaway Ed25519 key made for one test; it is never written to disk. */
+function throwawayKey(): string {
+  return generateKeyPairSync("ed25519")
+    .privateKey.export({ format: "pem", type: "pkcs8" })
+    .toString();
+}
+
+describe("outside driver publisher signatures", () => {
+  /** Writes the driver folder at `version` and signs it with `key`. */
+  async function signedFolder(root: string, version: string, key: string) {
+    await writeDriverFolder(root, version);
+    return (await signOutsideDriverPackage({ root, privateKeyPem: key })).fingerprint;
+  }
+
+  function publisher(context: Awaited<ReturnType<typeof host>>) {
+    const [state] = context.lifecycle.snapshot().packages;
+    if (state === undefined) throw new Error("expected the driver package");
+    return state.publisher;
+  }
+
+  it("holds an update signed by another key until the person re-trusts the new publisher, which clears Verify tools", async () => {
+    const context = await host({
+      handlers: { "session/send": () => ({ text: "", toolCalls: [echoToolCall] }) },
+    });
+    const firstKey = await signedFolder(context.driverRoot, "0.1.0", throwawayKey());
+    const entry = await context.install();
+    // Nothing is pinned before the person trusts it.
+    expect(publisher(context)).toEqual({ selected: firstKey });
+    await context.admit(entry.extensionId);
+    expect(publisher(context)).toEqual({ pinned: firstKey, selected: firstKey });
+    await context.addProvider(entry);
+    await context.turnOn();
+    await context.providers.probe(windowId, instanceId);
+    await context.providers.verifyModelTools(windowId, instanceId, localModel);
+    expect(context.persistence.readProviderCatalog?.(instanceId)?.verifiedToolModelIds).toEqual([
+      localModel,
+    ]);
+
+    const secondKey = await signedFolder(context.driverRoot, "0.2.0", throwawayKey());
+    const updated = await context.inspect();
+    await context.extension({
+      kind: "update-package",
+      extensionId: entry.extensionId,
+      packageId: updated.packageId,
+      version: updated.version,
+      digest: updated.digest,
+    });
+    expect(publisher(context)).toEqual({
+      pinned: firstKey,
+      selected: secondKey,
+      held: "publisher-changed",
+    });
+    // Trust alone does not take a new publisher.
+    await expect(
+      context.mutate(entry.extensionId, { kind: "set-source-trust", trusted: true }),
+    ).rejects.toThrow(/set-source-trust failed/);
+    // Nor does confirming a key other than the one that signed it.
+    await expect(
+      context.mutate(entry.extensionId, { kind: "trust-new-publisher", publisherKey: firstKey }),
+    ).rejects.toThrow(/trust-new-publisher failed/);
+    expect(context.instance().configuration).toMatchObject({ driver: { digest: entry.digest } });
+
+    await context.mutate(entry.extensionId, {
+      kind: "trust-new-publisher",
+      publisherKey: secondKey,
+    });
+    expect(publisher(context)).toEqual({ pinned: secondKey, selected: secondKey });
+    expect(
+      context.persistence.readProviderCatalog?.(instanceId)?.verifiedToolModelIds,
+    ).toBeUndefined();
+    // The package is still held for its digest: trusting it is the review step.
+    const [held] = context.lifecycle.snapshot().packages;
+    expect(held?.activation).toMatchObject({ trusted: false, quarantined: true });
+    expect(context.instance().configuration).toMatchObject({ driver: { digest: entry.digest } });
+
+    await context.mutate(entry.extensionId, { kind: "set-source-trust", trusted: true });
+    expect(context.instance().configuration).toMatchObject({
+      driver: { version: updated.version, digest: updated.digest },
+    });
+
+    // The journal holds the pin: a rebuild from it reads back the same publisher state.
+    const before = publisher(context);
+    rebuildAll({
+      connection: context.persistence.connection,
+      journal: context.persistence.journal,
+      projections: context.persistence.projections,
+      clock: () => now,
+    });
+    expect(publisher(context)).toEqual(before);
+  });
+
+  it("keeps the pin through an uninstall, holds a reinstall by another key, and forgets it only when asked", async () => {
+    const context = await host();
+    const firstKey = await signedFolder(context.driverRoot, "0.1.0", throwawayKey());
+    const entry = await context.install();
+    await context.mutate(entry.extensionId, { kind: "set-source-trust", trusted: true });
+    await context.extension({
+      kind: "uninstall-package",
+      extensionId: entry.extensionId,
+      packageId: entry.packageId,
+    });
+
+    const secondKey = await signedFolder(context.driverRoot, "0.1.0", throwawayKey());
+    const reinstalled = await context.install();
+    expect(reinstalled.extensionId).toBe(entry.extensionId);
+    expect(publisher(context)).toEqual({
+      pinned: firstKey,
+      selected: secondKey,
+      held: "publisher-changed",
+    });
+
+    // The pin outlives a rebuild from the journal as well.
+    rebuildAll({
+      connection: context.persistence.connection,
+      journal: context.persistence.journal,
+      projections: context.persistence.projections,
+      clock: () => now,
+    });
+    expect(publisher(context)).toMatchObject({ pinned: firstKey, held: "publisher-changed" });
+
+    await context.mutate(entry.extensionId, { kind: "forget-publisher", publisherKey: firstKey });
+    expect(publisher(context)).toEqual({ selected: secondKey });
+    // Forgetting admits nothing; the next trust pins the key that signed this version.
+    expect(context.lifecycle.snapshot().packages[0]?.activation).toMatchObject({
+      trusted: false,
+      quarantined: true,
+    });
+    await context.mutate(entry.extensionId, { kind: "set-source-trust", trusted: true });
+    expect(publisher(context)).toEqual({ pinned: secondKey, selected: secondKey });
+  });
+
+  it("forgets the pin of an uninstalled package, so a reinstall by another key is not held", async () => {
+    const context = await host();
+    const firstKey = await signedFolder(context.driverRoot, "0.1.0", throwawayKey());
+    const entry = await context.install();
+    await context.mutate(entry.extensionId, { kind: "set-source-trust", trusted: true });
+    await context.extension({
+      kind: "uninstall-package",
+      extensionId: entry.extensionId,
+      packageId: entry.packageId,
+    });
+    await context.mutate(entry.extensionId, { kind: "forget-publisher", publisherKey: firstKey });
+
+    const secondKey = await signedFolder(context.driverRoot, "0.1.0", throwawayKey());
+    await context.install();
+    expect(publisher(context)).toEqual({ selected: secondKey });
   });
 });
 

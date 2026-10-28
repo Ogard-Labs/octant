@@ -433,7 +433,9 @@ export function FlowBoard(props: FlowBoardProps) {
                   blockId={screen.blockId}
                   blocks={props.blocks}
                   {...(screen.frameId === undefined ? {} : { frameId: screen.frameId })}
+                  height={screen.height}
                   scale={screen.scale}
+                  width={screen.width}
                 />
               )}
               <span className="canvas-flow-board__screen-label">{screen.label}</span>
@@ -555,26 +557,48 @@ function FlowPlayer(props: {
   const leaving = block.edges.filter((edge) => String(edge.fromScreenId) === current);
   // A designed screen's own anchors navigate the flow: the frame is drawn
   // same-origin (it still runs nothing), so the page's hash is readable and a
-  // link the author wrote as #octant-flow:<screen> moves the prototype. The
-  // exported site keeps the Go to list — a sandboxed frame there cannot reach
-  // out without script.
-  const designHostRef = useRef<HTMLDivElement>(null);
-  const screenIdSet = useMemo(
-    () => new Set(block.screens.map((screen) => String(screen.screenId))),
-    [block],
-  );
+  // link the author wrote as #octant-flow:<screen> moves the prototype. Only
+  // a target an edge from this screen declares is followed, so the edge stays
+  // the authority. The listener is attached to the frame's window on every
+  // load, because a srcdoc page replaces the window it was first given. The
+  // exported site lists these edges as links: a sandboxed frame there cannot
+  // reach out without script.
+  // The host is state, not a ref: the design screen mounts once the stage is
+  // measured, after the first effect has run.
+  const [designHost, setDesignHost] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
-    if (mockupBlock !== undefined) return;
-    const frame = designHostRef.current?.querySelector("iframe");
-    const win = frame?.contentWindow;
-    if (win === null || win === undefined) return;
+    const host = designHost;
+    if (mockupBlock !== undefined || host === null) return;
+    const declared = new Set(
+      block.edges
+        .filter((edge) => String(edge.fromScreenId) === current && edge.fromNodeId !== undefined)
+        .map((edge) => String(edge.toScreenId)),
+    );
+    let attached: Window | null = null;
     const followAnchor = () => {
-      const target = flowDesignHotspotTarget(win.location.hash);
-      if (target !== undefined && screenIdSet.has(target)) go(target);
+      const target = flowDesignHotspotTarget(attached?.location.hash ?? "");
+      if (target === undefined || !declared.has(target)) return;
+      setHistory((path) => [...path, current]);
+      setCurrent(target);
     };
-    win.addEventListener("hashchange", followAnchor);
-    return () => win.removeEventListener("hashchange", followAnchor);
-  });
+    const attach = (frame: HTMLIFrameElement) => {
+      attached?.removeEventListener("hashchange", followAnchor);
+      attached = frame.contentWindow;
+      attached?.addEventListener("hashchange", followAnchor);
+    };
+    // A frame's load does not bubble, so the host listens in the capture
+    // phase; the frame may mount after this effect, once the stage is sized.
+    const onLoad = (event: Event) => {
+      if (event.target instanceof HTMLIFrameElement) attach(event.target);
+    };
+    const present = host.querySelector("iframe");
+    if (present !== null) attach(present);
+    host.addEventListener("load", onLoad, true);
+    return () => {
+      host.removeEventListener("load", onLoad, true);
+      attached?.removeEventListener("hashchange", followAnchor);
+    };
+  }, [block, current, designHost, mockupBlock]);
   const go = (target: string) => {
     setHistory((path) => [...path, current]);
     setCurrent(target);
@@ -592,7 +616,11 @@ function FlowPlayer(props: {
     // state update already carries, so the map is rebuilt when edges change.
     [block, current],
   );
-  const screenLevel = leaving.filter((edge) => edge.fromNodeId === undefined);
+  // Every edge leaving a design screen is also listed, so its target stays
+  // reachable from the keyboard and when the page's anchor is not followed.
+  const screenLevel = leaving.filter(
+    (edge) => edge.fromNodeId === undefined || mockupBlock === undefined,
+  );
 
   return (
     <OctantDialog
@@ -658,7 +686,7 @@ function FlowPlayer(props: {
             >
               {mockupBlock === undefined ? (
                 screen.frameId === undefined ? null : (
-                  <div ref={designHostRef}>
+                  <div ref={setDesignHost}>
                     <DesignFrameView
                       {...(props.designAssetRuntime === undefined
                         ? {}
@@ -771,20 +799,30 @@ function DesignScreen({
   blockId,
   blocks,
   frameId,
+  height,
   scale,
+  width,
 }: {
   readonly assetRuntime?: DesignAssetRuntime;
   readonly blockId: string;
   readonly blocks: ReadonlyArray<CanvasBlock>;
   readonly frameId?: string | undefined;
+  readonly height: number;
   readonly scale: number;
+  readonly width: number;
 }) {
   const block = blocks.find(
     (candidate) => candidate.kind === "design" && String(candidate.blockId) === blockId,
   );
   if (block === undefined || block.kind !== "design" || frameId === undefined) return null;
   return (
-    <div className="canvas-flow-board__design-frame">
+    // The wrapper takes the frame's own viewport ratio, so a phone or tablet
+    // page is not cropped to a landscape box around its scaled iframe.
+    <div
+      className="canvas-flow-board__design-frame"
+      data-canvas-design={blockId}
+      style={{ aspectRatio: `${String(width)} / ${String(height)}` }}
+    >
       <DesignFrameView
         {...(assetRuntime === undefined ? {} : { assetRuntime })}
         block={block}

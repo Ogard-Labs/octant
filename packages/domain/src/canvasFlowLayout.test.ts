@@ -141,6 +141,41 @@ describe("flow board layout", () => {
     expect(dragged?.y).toBe(120);
   });
 
+  it("leaves every other screen where it was when one screen is nudged", () => {
+    const edges = [{ edgeId: "go", fromScreenId: "search", toScreenId: "results" }];
+    const before = layoutCanvasFlow(
+      flow(
+        [
+          { screenId: "search", blockId: "search" },
+          { screenId: "results", blockId: "results" },
+        ],
+        edges,
+      ),
+      sources,
+    );
+    const search = before.screens.find((screen) => screen.screenId === "search");
+    const results = before.screens.find((screen) => screen.screenId === "results");
+    const after = layoutCanvasFlow(
+      flow(
+        [
+          {
+            screenId: "search",
+            blockId: "search",
+            x: (search?.x ?? 0) + 8,
+            y: search?.y ?? 0,
+            positioned: true,
+          },
+          { screenId: "results", blockId: "results" },
+        ],
+        edges,
+      ),
+      sources,
+    );
+    const resultsAfter = after.screens.find((screen) => screen.screenId === "results");
+    expect(resultsAfter?.x).toBe(results?.x);
+    expect(resultsAfter?.y).toBe(results?.y);
+  });
+
   it("routes a forward transition out of the source's side and a backward one below", () => {
     const forward = layoutCanvasFlow(
       flow(

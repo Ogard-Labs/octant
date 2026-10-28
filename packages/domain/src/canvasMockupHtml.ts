@@ -15,16 +15,12 @@ import type { CanvasMockupBlock, CanvasMockupNode } from "@octant/contracts/canv
  * deterministic, so the app's player and an export generate the same shape.
  */
 
-// Braces escape too: a browser reads `&#123;` as `{`, and the TSX handoff
-// shares this tree, where a bare brace would open a JavaScript expression.
 const escapeHtml = (value: string): string =>
   value
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("{", "&#123;")
-    .replaceAll("}", "&#125;");
+    .replaceAll('"', "&quot;");
 
 export interface CanvasMockupHtmlOptions {
   /** The variant to render; the block's single frame when omitted. */
@@ -79,25 +75,48 @@ function shownChildren(branch: CanvasMockupBranch): ReadonlyArray<CanvasMockupBr
   return branch.node.component === "tabs" ? branch.children.slice(0, 1) : branch.children;
 }
 
+/** The anchor a hotspot node draws: the one thing on the page that goes somewhere. */
+function hotspotLink(node: CanvasMockupNode, anchor: string | undefined): string {
+  return anchor === undefined
+    ? ""
+    : `<a class="oct-mockup-hotspot" href="${escapeHtml(anchor)}">${nodeLabel(node)}</a>`;
+}
+
+/**
+ * One node and its shown children. A node the caller named as a hotspot is
+ * recorded in `linked` only when its anchor was drawn, so a caller can still
+ * offer a link for a hotspot the page could not draw (a child of a tab that is
+ * not the shown one, say).
+ */
 function renderNode(
   branch: CanvasMockupBranch,
   hotspots: ReadonlyMap<string, string>,
   headingLevel: number,
+  linked: Set<string>,
+): Rendered {
+  const rendered = drawNode(branch, hotspots, headingLevel, linked);
+  const link = hotspotLink(branch.node, hotspots.get(String(branch.node.nodeId)));
+  if (link.length > 0 && rendered.markup.includes(link)) linked.add(String(branch.node.nodeId));
+  return rendered;
+}
+
+function drawNode(
+  branch: CanvasMockupBranch,
+  hotspots: ReadonlyMap<string, string>,
+  headingLevel: number,
+  linked: Set<string>,
 ): Rendered {
   const { node } = branch;
   const label = nodeLabel(node);
   const name = CANVAS_MOCKUP_COMPONENT_NAME[node.component];
   const children = shownChildren(branch);
   const childMarkup = children
-    .map((child) => renderNode(child, hotspots, Math.min(headingLevel + 1, 6)).markup)
+    .map((child) => renderNode(child, hotspots, Math.min(headingLevel + 1, 6), linked).markup)
     .join("");
   // A hotspot is the one thing on the page that goes somewhere: the anchor a
   // flow's edge named, so the page's links are exactly the author's transitions.
-  const anchor = hotspots.get(String(node.nodeId));
-  const hotspotMarkup =
-    anchor === undefined
-      ? ""
-      : `<a class="oct-mockup-hotspot" href="${escapeHtml(anchor)}">${label}</a>`;
+  const hotspotMarkup = hotspotLink(node, hotspots.get(String(node.nodeId)));
+  const linkOrLabel = hotspotMarkup.length > 0 ? hotspotMarkup : label;
   const hotspotLabel = `<span class="oct-mockup-part" data-component="${node.component}">${hotspotMarkup.length > 0 ? hotspotMarkup : label}</span>`;
 
   switch (node.component) {
@@ -108,7 +127,7 @@ function renderNode(
         (child) => child.node.component !== "header" && child.node.component !== "sidebar",
       );
       const render = (list: ReadonlyArray<CanvasMockupBranch>) =>
-        list.map((child) => renderNode(child, hotspots, headingLevel).markup).join("");
+        list.map((child) => renderNode(child, hotspots, headingLevel, linked).markup).join("");
       return {
         markup: `<section class="oct-mockup-window" aria-label="${label}">${render(header)}${render(sidebar)}${render(main)}</section>`,
         headingLevel,
@@ -125,7 +144,10 @@ function renderNode(
         headingLevel,
       };
     case "nav":
-      return { markup: `<nav aria-label="${label}">${childMarkup}</nav>`, headingLevel };
+      return {
+        markup: `<nav aria-label="${label}">${hotspotMarkup}${childMarkup}</nav>`,
+        headingLevel,
+      };
     case "list":
       return {
         markup: `<ul class="oct-mockup-list" aria-label="${label}">${childMarkup}</ul>`,
@@ -158,7 +180,7 @@ function renderNode(
     case "form-field":
     case "select":
       return {
-        markup: `<p class="oct-mockup-field"><span>${label}</span>${node.value === undefined ? "" : `<data value="${escapeHtml(node.value)}">${escapeHtml(node.value)}</data>`}</p>`,
+        markup: `<p class="oct-mockup-field"><span>${linkOrLabel}</span>${node.value === undefined ? "" : `<data value="${escapeHtml(node.value)}">${escapeHtml(node.value)}</data>`}</p>`,
         headingLevel,
       };
     case "button":
@@ -172,13 +194,13 @@ function renderNode(
     case "toggle":
     case "checkbox":
       return {
-        markup: `<p class="oct-mockup-check"><input type="checkbox" disabled${node.on === true ? " checked" : ""} aria-label="${label}"> <span>${label}</span></p>`,
+        markup: `<p class="oct-mockup-check"><input type="checkbox" disabled${node.on === true ? " checked" : ""} aria-label="${label}"> <span>${linkOrLabel}</span></p>`,
         headingLevel,
       };
     case "tabs": {
       const strip = branch.children.map((child) => `<li>${nodeLabel(child.node)}</li>`).join("");
       return {
-        markup: `<div class="oct-mockup-tabs"><ul class="oct-mockup-tabstrip">${strip}</ul>${childMarkup}</div>`,
+        markup: `<div class="oct-mockup-tabs">${hotspotMarkup}<ul class="oct-mockup-tabstrip">${strip}</ul>${childMarkup}</div>`,
         headingLevel,
       };
     }
@@ -213,16 +235,15 @@ function renderNode(
       return { markup: `<p class="oct-mockup-toast">${label}</p>`, headingLevel };
     case "search":
       return {
-        markup: `<p class="oct-mockup-field"><input type="search" disabled aria-label="${label}" placeholder="${escapeHtml(node.value ?? "")}"></p>`,
+        markup: `<p class="oct-mockup-field">${hotspotMarkup}<input type="search" disabled aria-label="${label}" placeholder="${escapeHtml(node.value ?? "")}"></p>`,
         headingLevel,
       };
     case "breadcrumb":
-      return { markup: `<p class="oct-mockup-part">${name}: ${label}</p>`, headingLevel };
     case "pagination":
-      return { markup: `<p class="oct-mockup-part">${name}: ${label}</p>`, headingLevel };
+      return { markup: `<p class="oct-mockup-part">${name}: ${linkOrLabel}</p>`, headingLevel };
     case "stepper":
       return {
-        markup: `<p class="oct-mockup-part">${name}: ${label}${node.progress === undefined ? "" : `, step ${String(node.progress)}`}</p>`,
+        markup: `<p class="oct-mockup-part">${name}: ${linkOrLabel}${node.progress === undefined ? "" : `, step ${String(node.progress)}`}</p>`,
         headingLevel,
       };
     case "progress":
@@ -232,12 +253,12 @@ function renderNode(
       };
     case "slider":
       return {
-        markup: `<p class="oct-mockup-progress"><span>${label}</span><input type="range" disabled min="0" max="100" value="${String(node.progress ?? 0)}" aria-label="${label}"></p>`,
+        markup: `<p class="oct-mockup-progress"><span>${linkOrLabel}</span><input type="range" disabled min="0" max="100" value="${String(node.progress ?? 0)}" aria-label="${label}"></p>`,
         headingLevel,
       };
     case "menu":
       return {
-        markup: `<details class="oct-mockup-part"><summary>${name}: ${label}</summary>${childMarkup}</details>`,
+        markup: `<details class="oct-mockup-part"><summary>${name}: ${linkOrLabel}</summary>${childMarkup}</details>`,
         headingLevel,
       };
     case "footer":
@@ -268,7 +289,7 @@ function renderNode(
       };
     case "instance":
       return {
-        markup: `<div class="oct-mockup-part" data-component="${escapeHtml(node.defId ?? "")}">${hotspotLabel}${childMarkup}</div>`,
+        markup: `<div class="oct-mockup-instance" data-component="instance">${childMarkup}</div>`,
         headingLevel,
       };
   }
@@ -282,18 +303,35 @@ export function canvasMockupHtml(
   block: CanvasMockupBlock,
   options: CanvasMockupHtmlOptions = {},
 ): string {
+  return canvasMockupPage(block, options).markup;
+}
+
+/**
+ * The block's page and the hotspot nodes whose anchors it drew. A hotspot the
+ * page could not draw (on a tab that is not shown, or in another variant) is
+ * left out of `linkedNodeIds`, so a flow site lists that transition instead of
+ * leaving its target unreachable.
+ */
+export function canvasMockupPage(
+  block: CanvasMockupBlock,
+  options: CanvasMockupHtmlOptions = {},
+): { readonly markup: string; readonly linkedNodeIds: ReadonlySet<string> } {
   const hotspots = options.hotspots ?? new Map<string, string>();
+  const linked = new Set<string>();
   const frames = canvasMockupFrames(block);
   const frame =
     options.variantId === undefined
       ? frames[0]
       : frames.find((candidate) => candidate.key === String(options.variantId));
-  if (frame === undefined) return "";
-  const body = frame.roots.map((branch) => renderNode(branch, hotspots, 2).markup).join("");
+  if (frame === undefined) return { markup: "", linkedNodeIds: linked };
+  const body = frame.roots.map((branch) => renderNode(branch, hotspots, 2, linked).markup).join("");
   const title = escapeHtml(
     frame.label === undefined ? block.title : `${frame.label}: ${block.title}`,
   );
-  return `<section class="oct-mockup-page" aria-label="${title}"><h2>${title}</h2>${body}</section>`;
+  return {
+    markup: `<section class="oct-mockup-page" aria-label="${title}"><h2>${title}</h2>${body}</section>`,
+    linkedNodeIds: linked,
+  };
 }
 
 /** The small neutral stylesheet a generated mockup page carries. */

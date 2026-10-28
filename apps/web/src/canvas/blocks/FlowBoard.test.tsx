@@ -140,6 +140,33 @@ describe("flow board", () => {
     expect(call?.[1]?.[0]?.x).toBe(10);
     expect(call?.[1]?.[0]?.y).toBe(0);
   });
+
+  it("gives a phone design screen its portrait shape instead of a landscape box", () => {
+    const phoneDesign = decodeCanvasBlock({
+      ...base,
+      blockId: "phone-site",
+      kind: "design",
+      title: "Phone site",
+      size: "phone",
+      frames: [{ frameId: "home", title: "Home", html: "<h1>Home</h1>" }],
+    });
+    const decoded = decodeCanvasBlock({
+      ...base,
+      blockId: "phone-flow",
+      kind: "flow",
+      title: "Phone flow",
+      screens: [{ screenId: "home", blockId: "phone-site", frameId: "home" }],
+      edges: [],
+    });
+    if (decoded.kind !== "flow") throw new Error("expected a flow block");
+    const { container } = render(<FlowBoard block={decoded} blocks={[phoneDesign]} />);
+    const wrapper = container.querySelector<HTMLElement>(".canvas-flow-board__design-frame");
+    const [width, height] = (wrapper?.style.aspectRatio ?? "")
+      .split("/")
+      .map((part) => Number(part.trim()));
+    expect(width).toBeGreaterThan(0);
+    expect(height).toBeGreaterThan(width ?? 0);
+  });
 });
 
 describe("flow click-through Play", () => {
@@ -222,6 +249,70 @@ describe("design hotspots in a flow", () => {
     // it stays unsandboxed-origin, as the document drawing always is.
     const frame = within(player).getByTitle("Home, design screen");
     expect(frame).toHaveAttribute("sandbox", "allow-same-origin");
+  });
+});
+
+describe("following a design screen's anchors in Play", () => {
+  const design = decodeCanvasBlock({
+    ...base,
+    blockId: "site",
+    kind: "design",
+    title: "Site",
+    size: "phone",
+    frames: [{ frameId: "home", title: "Home", html: '<a id="go" href="#octant-flow:s2">Go</a>' }],
+  });
+  const designFlow = decodeCanvasBlock({
+    ...base,
+    blockId: "app-flow",
+    kind: "flow",
+    title: "Site flow",
+    screens: [
+      { screenId: "s1", blockId: "site", frameId: "home" },
+      { screenId: "s2", blockId: "results" },
+      { screenId: "s3", blockId: "search" },
+    ],
+    edges: [{ edgeId: "go", fromScreenId: "s1", toScreenId: "s2", fromNodeId: "go" }],
+  });
+  if (designFlow.kind !== "flow") throw new Error("expected a flow");
+  const playedFlow: CanvasFlowBlock = designFlow;
+
+  async function play() {
+    const user = userEvent.setup();
+    render(<FlowBoard block={playedFlow} blocks={[design, searchMockup, resultsMockup]} />);
+    await user.click(screen.getByRole("button", { name: "Play" }));
+    const player = screen.getByRole("dialog", { name: "Playing Site flow" });
+    const frame = within(player).getByTitle<HTMLIFrameElement>("Home, design screen");
+    return { player, frame };
+  }
+
+  function navigateFrame(frame: HTMLIFrameElement, hash: string) {
+    const window = frame.contentWindow;
+    if (window === null) throw new Error("expected the frame's window");
+    window.location.hash = hash;
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  }
+
+  it("moves to the screen the anchor's edge declares, after the frame loads", async () => {
+    const { player, frame } = await play();
+    // The page load replaces the window's listeners in a browser; the player
+    // attaches again on load.
+    fireEvent.load(frame);
+    navigateFrame(frame, "#octant-flow:s2");
+    await waitFor(() =>
+      expect(within(player).getByRole("tree", { name: "Results" })).toBeInTheDocument(),
+    );
+  });
+
+  it("ignores an anchor naming a screen no edge from this one reaches", async () => {
+    const { player, frame } = await play();
+    navigateFrame(frame, "#octant-flow:s3");
+    expect(within(player).queryByRole("tree", { name: "Search" })).not.toBeInTheDocument();
+    expect(within(player).getByTitle("Home, design screen")).toBeInTheDocument();
+  });
+
+  it("lists the design screen's transition in Go to as well", async () => {
+    const { player } = await play();
+    expect(within(player).getByRole("button", { name: "Continue →" })).toBeInTheDocument();
   });
 });
 

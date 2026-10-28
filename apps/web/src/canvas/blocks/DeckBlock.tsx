@@ -49,6 +49,7 @@ export function DeckBlock(props: {
         <h3 className="canvas-deck__title">{props.block.title}</h3>
         <span className="canvas-deck__meta">{`${String(slides.length)} slides`}</span>
         <OctantButton
+          disabled={slides.length === 0}
           onClick={() => setPresenting(true)}
           ref={presentButton}
           size="sm"
@@ -85,7 +86,7 @@ export function DeckBlock(props: {
           </li>
         ))}
       </ol>
-      {presenting ? (
+      {presenting && slides.length > 0 ? (
         <DeckPlayer
           block={props.block}
           slides={slides}
@@ -124,8 +125,21 @@ function DeckPlayer(props: {
     },
     [last],
   );
+  // The page's keys move the slides while the player is open, so they still
+  // work after the last Next button is disabled and focus falls to the page.
+  // A control that reads arrows itself (a field, a slider, a tab strip) keeps
+  // them.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        (event.target instanceof Element &&
+          event.target.closest(
+            "input, textarea, select, [contenteditable='true'], [role='slider'], [role='tablist'], [role='tab'], [role='grid']",
+          ) !== null)
+      ) {
+        return;
+      }
       if (event.key === "ArrowRight" || event.key === "PageDown") step(1);
       else if (event.key === "ArrowLeft" || event.key === "PageUp") step(-1);
     };
