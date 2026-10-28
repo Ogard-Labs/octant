@@ -272,10 +272,12 @@ workbench is not offered yet.
 A Code thread's agent can use a paired device too, through `octant_apple`.
 It lists the devices, then asks to use one; the thread shows a request that
 names the device and the thread, under every access setting, Full access and
-Plan included. Only you, in Octant on this Mac, can answer it: an answer from
-a paired phone does not count, and the request stays waiting. Once you allow
-it, the agent can capture the device's screen and read the console output of
-the app it launched without asking again. Building the thread's app for the
+Plan included. Only you, in Octant on this Mac, can answer it. A paired
+browser, on a phone or another computer, shows the request without **Approve**
+or **Deny** and says to answer it on the computer running Octant; the request
+stays waiting until you do. Once you allow it, the agent can capture the
+device's screen and read the console output of the app it launched without
+asking again. Building the thread's app for the
 device (signed for development with your own identity for the Team ID it
 names), installing, launching, and stopping it follow the thread's access
 setting: Plan refuses them, Full access runs them, and otherwise each one asks

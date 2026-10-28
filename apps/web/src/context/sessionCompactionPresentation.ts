@@ -29,11 +29,11 @@ export type CompactionOffer =
   | { readonly kind: "not-offered"; readonly note: string };
 
 /**
- * Refusals that come from the runtime itself. Nothing at this window can
- * change them, so there is no button to wait on, but a thread whose runtime
- * keeps a history no one can compact (an ACP agent) says so: with the button
- * simply gone, a person looking for it could not tell a missing feature from
- * a broken one.
+ * Refusals that come from the runtime itself, or from where it runs. Nothing
+ * at this window can change them, so there is no button to wait on, but a
+ * thread whose runtime keeps a history no one can compact (an ACP agent, or
+ * any runtime on an SSH target) says so: with the button simply gone, a
+ * person looking for it could not tell a missing feature from a broken one.
  */
 const RUNTIME_REFUSALS: ReadonlyMap<ContextCompactionRefusalReason, string> = new Map([
   [
@@ -43,6 +43,10 @@ const RUNTIME_REFUSALS: ReadonlyMap<ContextCompactionRefusalReason, string> = ne
   [
     "runtime-version-unsupported",
     "This version of the runtime can't compact; a newer release takes the request.",
+  ],
+  [
+    "runs-on-ssh-target",
+    "This thread runs on an SSH target, and Octant doesn't compact a session there yet.",
   ],
 ]);
 
@@ -87,6 +91,8 @@ export function refusalClause(reason: ContextCompactionRefusalReason): string {
       return "this mode is turned off";
     case "remote-client":
       return "a session is compacted from a window on the host";
+    case "runs-on-ssh-target":
+      return "this thread runs on an SSH target, where sessions aren't compacted yet";
     case "project-unavailable":
       return "the thread or its Project is archived or unavailable";
     case "model-options-unsupported":

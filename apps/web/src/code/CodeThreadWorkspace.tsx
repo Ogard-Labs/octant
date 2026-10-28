@@ -131,6 +131,7 @@ import {
   remotePlacedAgentReadiness,
 } from "@octant/domain/ssh-target-recovery";
 import { remoteCodeProjectFor, useRemoteCodeProjects } from "../projects/sshRemoteProjectEntries";
+import { SSH_TARGET_TIMES } from "../host/sshTargetClient";
 import { remoteCodeThreadProviderGroups } from "./composer/remoteCodeComposer";
 import {
   ComposerSlashTypeahead,
@@ -159,6 +160,12 @@ const UNAVAILABLE_ATTACHMENT_CLIENT: CodeAttachmentClient = {
 
 export interface CodeThreadWorkspaceProps {
   readonly controller: CodeController;
+  /**
+   * Set where a paired device shows the thread. An approval the host takes
+   * only from a window on its own computer is then shown without answer
+   * controls; the host would refuse this device's answer.
+   */
+  readonly pairedDevice?: boolean;
   readonly holdAccessNotice?: CodeThreadControllers["holdAccessNotice"];
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
   /**
@@ -757,8 +764,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             remoteProject?.target,
             String(thread.providerInstanceId),
             nextTurnAccess,
+            SSH_TARGET_TIMES,
           )
-        : remoteCodeTurnReadiness(remoteProject?.target, nextTurnAccess)
+        : remoteCodeTurnReadiness(remoteProject?.target, nextTurnAccess, SSH_TARGET_TIMES)
       : undefined;
   const remoteRefusal =
     remoteReadiness?.status === "unavailable" ? remoteReadiness.message : undefined;
@@ -1824,17 +1832,25 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         >
           {props.controller.providerRequests.map((request) =>
             request.kind === "approval" ? (
-              <ProviderApprovalPrompt
-                key={String(request.approvalId)}
-                onAnswer={(decision) =>
-                  void props.controller.answerProviderRequest({
-                    kind: "approval",
-                    approvalId: request.approvalId,
-                    decision,
-                  })
-                }
-                summary={request.summary}
-              />
+              props.pairedDevice === true && request.localPersonOnly === true ? (
+                <ProviderApprovalPrompt
+                  answeredAtHost
+                  key={String(request.approvalId)}
+                  summary={request.summary}
+                />
+              ) : (
+                <ProviderApprovalPrompt
+                  key={String(request.approvalId)}
+                  onAnswer={(decision) =>
+                    void props.controller.answerProviderRequest({
+                      kind: "approval",
+                      approvalId: request.approvalId,
+                      decision,
+                    })
+                  }
+                  summary={request.summary}
+                />
+              )
             ) : (
               <ProviderQuestionCard
                 key={request.requestId}

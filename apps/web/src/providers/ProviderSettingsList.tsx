@@ -58,6 +58,7 @@ import { ProviderApiKeyEditor, acceptsApiKeyPool } from "./ProviderApiKeyEditor"
 import {
   capabilityLabels,
   driverLabel,
+  outsideDriverHoldGuidance,
   providerRefusalGuidance,
   formatProbeTimestamp,
   incompatibleReadinessFacts,
@@ -2007,6 +2008,15 @@ function guidance(
   const driverKind = instance.driverKind;
   const label = driverLabel(driverKind);
   const message = observed?.message;
+  const held = outsideDriverHoldGuidance(instance);
+  if (held !== undefined) {
+    return (
+      <>
+        <p className="provider-card__guidance">{held.reason}</p>
+        <p className="provider-card__guidance">{held.nextStep}</p>
+      </>
+    );
+  }
   if (readiness === "unauthenticated") {
     const refusal = providerRefusalGuidance(instance, observed);
     return (

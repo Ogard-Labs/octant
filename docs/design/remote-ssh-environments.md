@@ -39,7 +39,10 @@ one, and starts and uses its threads
 ([In a local window](#in-a-local-window)); a paired device reaches them
 under the Project's authority. A restart interrupts a remote turn it cut
 off as `target-disconnected`, and a target is not removed while a thread on
-it holds a turn. Reconnecting on its own is not built. Slice 6 is built in part:
+it holds a turn. When an attested session drops, the host reconnects on its
+own with bounded backoff and re-attests
+([Disconnect, reconnect, and restart](#disconnect-reconnect-and-restart)).
+Slice 6 is built in part:
 the provider-sdk process-placement seam, its conformance harness, and this
 host's admission of a placed runtime from its driver's declaration
 ([Provider runtimes on a target](#provider-runtimes-on-a-target)), and
@@ -250,8 +253,10 @@ for the target's key; `ControlMaster=no` and `ControlPath=none` keep a shared
 master, checked under other rules, from carrying the session;
 `RemoteCommand=none` keeps a configured command from replacing the executor;
 `ForwardX11Trusted=no` and `Tunnel=no` close the remaining forwarding paths;
-`EscapeChar=none` keeps frame bytes from controlling the client; and
-`ServerAliveInterval=15` with `ServerAliveCountMax=3` turns a silent session
+`EscapeChar=none` keeps frame bytes from controlling the client;
+`LogLevel=ERROR` keeps a configured `LogLevel QUIET` from silencing the lines
+that tell a changed key or a refused sign-in from an unreachable host
+([Why a session failed](#transport)); and `ServerAliveInterval=15` with `ServerAliveCountMax=3` turns a silent session
 into a lost one. The known-hosts path is quoted, with `%` doubled, because
 OpenSSH splits that option's value on whitespace into several files and expands
 `%` tokens in it: unquoted, a data directory under macOS's `Application
@@ -346,20 +351,26 @@ leaves open:
   the dialed ones when no proxied launch is left.
 - **Why a session failed.** The client's own message is the only evidence of a
   refused key, so "host key verification failed" or "remote host identification
-  has changed" reads as `host-key-changed`. The remote shell's 126 or 127 reads
-  as `executor-missing`. The client's 255, a session killed, or no introduction
+  has changed" reads as `host-key-changed`. Under `BatchMode` a key or agent
+  that no longer signs in is the client's "Permission denied (…)" and 255,
+  which reads as `authentication-refused`; the remote shell's own permission
+  error exits 126 instead. Both lines print at `LogLevel=ERROR`, which the
+  client is always given: under a configured `LogLevel QUIET` neither printed,
+  so a changed key read as unreachable and was retried as one, which the
+  loopback smoke, whose client configuration is quiet, now refuses. The remote shell's 126 or 127 reads
+  as `executor-missing`. Any other 255 from the client, a session killed, or no introduction
   within a minute (or no attestation within three) reads as `target-unreachable`.
   Any other exit before an introduction means the program at the executor path
   is not an executor this host can speak to, and reads as
   `executor-version-mismatch`. An exit after a matching introduction is a lost
   session and reads as `target-unreachable`.
 - **When it connects.** The host connects on registration, re-pin, and an
-  explicit connect, and a connection that ends is held as `target-unreachable`
-  with no attestation. Reconnecting on its own, with bounded backoff, is not
-  built yet, though remote threads now exist to give it a reason (5b). Until
-  it is, a remote-bound Project whose session was lost refuses reads and new
-  turns `target-unreachable`, and the person connects again
-  (`octant ssh-target connect`); nothing reconnects unasked.
+  explicit connect, and a connection that ends takes its attestation with it.
+  An attested session that drops is reconnected by the host on its own, with
+  bounded backoff, under the rules in
+  [Disconnect, reconnect, and restart](#disconnect-reconnect-and-restart);
+  a connection that never attested, and one this host ended itself (a
+  connect, re-pin, removal, or shutdown), is not.
 
 **Rationale: an executor, not plain `ssh` commands.** Running each operation as
 `ssh target <command>` was rejected. Each call would be a command string parsed
@@ -450,6 +461,8 @@ any effect with one of these reasons, each with the recovery the person sees:
 | `runtime-not-attestable`      | Choose a runtime Octant confines on remote targets (below)                          |
 | `full-access-not-remembered`  | Remember Full access for this Project from a local window, or choose a narrower one |
 | `target-unreachable`          | Reconnect when the target is reachable                                              |
+| `target-reconnecting`         | None needed: names the attempt and when the next starts; connect to try at once     |
+| `authentication-refused`      | Make `ssh` to the target sign in without a prompt from this Mac, then connect       |
 | `target-removed`              | None for new work; the Project's threads stay readable on this host                 |
 
 The attestation result, its facts digest, and the postures it covers are
@@ -759,7 +772,8 @@ These rules settle what the step needs, each in the fail-closed direction:
   bound to ends, the runtime stops the turn as interrupted with
   `target-disconnected`, aborting its calls; a session lost before the turn
   is taken on refuses the start. A new turn binds only to a session that
-  attested anew.
+  attested anew; while the host reconnects one is refused
+  `target-reconnecting` before anything launches, naming the attempt.
 - **A connector or plugin is refused, not dropped.** Its tools run on this
   host, so a send that selects one on a remote thread is refused before any
   extension is resolved or started, and no pinned extension starts for a
@@ -768,20 +782,36 @@ These rules settle what the step needs, each in the fail-closed direction:
   restart reconciliation (`reconcileCodeRestart` in
   `apps/server/src/persistence/codeProjection.ts`) marks a remote-bound
   thread's running or waiting provider turn interrupted with
-  `target-disconnected`, where a local one is left waiting for a resume;
-  nothing reconnects unasked, and the next turn binds only to a session the
-  person connected and that attested anew.
+  `target-disconnected`, where a local one is left waiting for a resume. A
+  restart starts every target at `not-connected` and starts no reconnect, so
+  the next turn binds only to a session the person connected and that
+  attested anew.
+- **A restart withdraws what the turn waited on.** A native-harness
+  approval or question a remote thread's lead left pending is settled
+  `expired` and journaled when the harness session store replays at
+  start-up, the step that already settles a subagent's parked requests
+  (`NativeHarnessSessionStore`, told which threads run on a target by their
+  remote-root checkout). An answer that comes later is refused
+  `already-settled`, so nothing is decided against the interrupted turn, and
+  a second start finds nothing left to settle. A local thread's lead
+  approval still waits for the person's resume, which settles it.
+- **A remote thread's session is not compacted.** Its runtime starts on the
+  target only through the placement a turn binds on the target's session,
+  and a compaction binds none, so a compaction of a remote-bound thread is
+  refused `runs-on-ssh-target` before anything is journaled or reserved, and
+  the Code runtime's compaction session opens nothing for a remote root
+  rather than hand out the target's path with no placement. The context
+  popover says so in place of the button. Rejected for now: compacting
+  through a turn's placement, which would bind the target's session for a
+  request that runs no tool.
 - **A target in use is not removed.** Removal ends the target's session, so
   the administration route refuses it `target-in-use` while a thread on one
   of the target's Projects holds a turn (prepared, running, or waiting on
   the person), checked in the same step as the removal.
-- **Not built.** Reconnecting on its own; withdrawing a native-harness
-  approval a restart left parked on a remote turn (the turn reads
-  interrupted, and the approval stays with the harness session); observing
-  a remote thread's delivery target,
-  so nothing marks one Done from Git evidence; and listing remote threads in
-  the sidebar's activity and status arrangements, which show the Project
-  tree's local Projects only.
+- **Not built.** Compacting a remote thread's session; observing a remote
+  thread's delivery target, so nothing marks one Done from Git evidence; and
+  listing remote threads in the sidebar's activity and status arrangements,
+  which show the Project tree's local Projects only.
 
 #### In a local window
 
@@ -1649,6 +1679,15 @@ settle each, in the fail-closed direction:
   spelled out, and no Start while its runtime is refused in the posture),
   and `CodeThreadWorkspace.test.tsx` (a thread on the agent offers no send
   while its runtime is refused in the posture or its path is missing).
+  The restart withdrawal and the compaction refusal are proved by
+  `leadApprovalAttention.test.ts` (a remote lead's approval and question
+  settled `expired` and journaled at start-up, an answer to either refused,
+  and a second start settling nothing more), `sessionCompaction.test.ts` (a
+  remote thread refused `runs-on-ssh-target` with nothing journaled and no
+  session opened), `codeOperationRuntime.test.ts` (no compaction session
+  opened for a remote root), `contextCompaction.test.ts`, and
+  `ComposerContextMeter.test.tsx` (the popover's line in place of the
+  button).
 
 ### Credential custody
 
@@ -1726,15 +1765,72 @@ This host owns the connection and every process on the target.
   with the reason `target-disconnected`; pending approvals and questions are
   withdrawn; nothing is queued for later delivery. The thread shows the
   interruption, and the person resumes it.
-- **Reconnect is the host's.** The service reconnects with bounded backoff while a
-  remote-bound Project is open or has a thread waiting to resume, and re-attests
-  before admitting anything. A new attestation never inherits the last one.
+- **Reconnect is the host's.** When an attested session drops (the client
+  exits, the network is lost, a request goes unanswered, or the executor
+  breaks the protocol), the connection service reconnects on its own and
+  re-attests before admitting anything. A new attestation never inherits the
+  last one. Built in `apps/server/src/sshTarget/sshTargetConnectionService.ts`,
+  paced by `packages/domain/src/sshTargetReconnectPolicy.ts`. These rules
+  settle it, each in the fail-closed direction:
+  - **Each attempt is a first connection.** It writes the pin file again from
+    the journal's key, starts the same fixed client with
+    `StrictHostKeyChecking=yes`, waits for a matching introduction, and asks
+    for the whole attestation. Nothing of the dropped session (its
+    attestation, its turns' tools, its terminals, a placed runtime) is
+    carried to the new one, and no attempt is made with a weaker pin or
+    fewer probes.
+  - **Bounded, with jitter.** At most eight attempts after one drop, the
+    first after one second and each later wait doubled up to a minute, each
+    varied by up to a fifth either way; about three minutes in all.
+  - **A count survives a flapping target.** A reconnected session must hold a
+    minute before a later drop starts a fresh count; one that drops sooner
+    continues the count that opened it, so a target that attests and drops
+    again and again still stops after eight attempts.
+  - **Honest while it lasts.** The target's status reads `reconnecting` with
+    the attempt and the next attempt's time (`reconnect` in
+    `SshTargetStatus`). Every request on the target, every posture, is
+    refused `target-reconnecting` with the attempt and that time, so a new
+    turn, a tool call, a read, a terminal, or a worktree change is refused
+    before any frame instead of waiting. Turns that were running stopped as
+    interrupted when the session dropped (above). Settings › SSH targets,
+    which reads the targets every five seconds while it lists any (showing
+    no answer to a read sent before a later action or a later shown read, so
+    a removed target never reappears), the
+    sidebar, the composer, and `octant ssh-target list` show the state and
+    the next attempt's time on the reader's clock.
+  - **Stops where only the person can help.** A changed host key, a refused
+    sign-in (`authentication-refused`), or a missing or mismatched executor
+    stops after that attempt, as does a target still unreachable after the
+    last, and an attempt that breaks before it ends in a state (the pin file
+    cannot be written), which also ends any session it opened. The status then reads that state with `reconnect` stopped and the
+    attempts made, and nothing tries again until the person connects. A
+    reconnected session whose attestation refuses (an escaped canary, a
+    missing backend) is a session: it is held, admits nothing its
+    attestation does not prove, and nothing reconnects it.
+  - **The person's action wins.** A connect, re-pin, or removal cancels a
+    reconnect under way or stopped, and its own outcome stands; a connect
+    starts a fresh count. Shutting the server down cancels every reconnect.
+
+  **Rationale.** Reconnecting after any attested session's drop, rather than
+  only while a remote-bound Project is open or a thread waits to resume,
+  needs no knowledge of windows in the connection service, which owns the
+  session; the bound on attempts caps what an idle target costs. A changed
+  key is never retried in the hope that the pinned one returns, which would
+  turn a refused man in the middle into a polling loop. No existing backoff
+  helper fit: the provider endpoint retry is shaped by `Retry-After` and
+  streamed output, the cache backoff starts at thirty seconds with no
+  jitter or bound on attempts, and the service restart backoff has no
+  jitter.
+
 - **Resume.** A provider session with a resume cursor resumes when the runtime's
   own session files survived on the target; otherwise the host rebuilds history in
   a fresh session, as for any host-owned resume.
 - **Host restart** is a disconnect: recovery marks in-flight remote turns
-  interrupted from the journal (built; see
-  [Remote-bound Code threads](#remote-bound-code-threads)).
+  interrupted from the journal and withdraws the native-harness approvals
+  and questions they left pending (built; see
+  [Remote-bound Code threads](#remote-bound-code-threads)). Connection state
+  is not journaled, so a restarted host starts no reconnect; the person
+  connects the target.
 
 ## Different from a paired host and from a hosted relay
 
@@ -1870,8 +1966,21 @@ agent can implement and verify it in a Linux container with OpenSSH installed an
    day as a local window's binding, sidebar, composer, and thread view
    ([In a local window](#in-a-local-window)); restart recovery of remote
    turns and refusing a target's removal while one runs were built before
-   6d ([Before 6d](#before-6d)), and reconnecting on its own remains (see the
-   delivery state). The
+   6d ([Before 6d](#before-6d)), and reconnecting on its own after that
+   ([Disconnect, reconnect, and restart](#disconnect-reconnect-and-restart)),
+   whose evidence is `sshTargetConnectionService.test.ts` (against the
+   stand-in client with an injected clock: a dropped session reconnected,
+   re-attested from the journal's pin, and a turn bound to the new session
+   while the old one's calls stay refused; a turn started while reconnecting
+   refused with the attempt; a changed host key, a refused sign-in, and a
+   reconnected session whose canary escaped each stopping at once; the waits
+   and the stop after eight attempts; a flapping target stopping; and no
+   reconnect after removal or shutdown), `sshTargetReconnectPolicy.test.ts`,
+   `sshTargetAdmissionPolicy.test.ts`, `sshTargetRecovery.test.ts`, the web
+   `SshTargetsSettingsSection.test.tsx`, and `sshTargetLoopback.smoke.test.ts`
+   (a turn stopped when the executor dies, the next refused while the host
+   reconnects, and, once the host reconnected on its own to the loopback
+   `sshd`, the thread's next turn running on the new session). The
    window step's evidence is `shellService.test.ts` (a Code draft binds the
    window with `boundRoot` null, the binding survives bootstrap with Files
    unavailable, a remote thread's view opens and its terminal is refused),

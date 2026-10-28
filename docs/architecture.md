@@ -875,8 +875,9 @@ with that remote tool set alone, or on an ACP agent placed on the target whose
 client file and terminal requests run as those same calls; every other
 provider is refused before anything launches, other Code operations on the
 thread are refused, and Full access is not offered there yet. A restart
-interrupts a remote turn it cut off, and a target is not removed while a
-thread on it holds a turn. A local desktop window lists such Projects
+interrupts a remote turn it cut off and withdraws the approvals and
+questions it left pending, a remote thread's session is not compacted, and
+a target is not removed while a thread on it holds a turn. A local desktop window lists such Projects
 in the Code sidebar and the composer and starts their threads: a Code draft
 in one binds the window to it with no folder of this host (`boundRoot` null),
 so root-backed surfaces fail closed, and only the thread's own view opens; a
@@ -3657,6 +3658,13 @@ server checks it before any side effect:
   - A harness session that is paused (by the advisor, by the person, or for
     recovery) refuses `thread-paused` in every mode, through the same harness
     admission every Chat, Work and Code turn asks before it starts.
+- A Code thread whose root is on an SSH target refuses `runs-on-ssh-target`
+  before any other fact but the principal and the mode. Its runtime starts
+  on the target only through the placement a turn binds on the target's
+  session, and a compaction binds none, so opening its session would start a
+  runtime on this host against the target's path; the Code runtime's
+  compaction session also opens nothing for a remote root
+  ([Remote SSH environments](design/remote-ssh-environments.md#remote-bound-code-threads)).
 - The summarizer is always the thread's own provider instance and model. The
   command carries no summarizer choice, and the domain's
   `cross-vendor-opt-in-required` refusal stays the guard on the host path.
@@ -3922,8 +3930,8 @@ watched has ended.
   Rebuild, and its `compact-range` remedy runs the same command, labelled
   Compact session; choosing a range is not offered.
 - A permanent refusal (`runtime-cannot-compact`,
-  `runtime-version-unsupported`, and `remote-client`, which no window on a
-  paired device can change) hides the button, and the inspector leaves the
+  `runtime-version-unsupported`, `runs-on-ssh-target`, and `remote-client`,
+  which no window on a paired device can change) hides the button, and the inspector leaves the
   `compact-range` remedy out; every other refusal (`turn-running`,
   `compaction-running`, `provider-unavailable`, `no-session`,
   `nothing-to-compact`, `spend-ceiling-reached`, `mode-disabled`,
@@ -5908,8 +5916,8 @@ same. This holds in Chat, Work, and Code.
   server's own runtime (Bun in development, Electron's Node in the packaged
   app, whose app bundle is then the runtime's install) and takes a stricter
   profile from the shared confinement builder (no network, no exec but its
-  runtime, no fork, a read-only package, one temporary folder, and a fixed
-  environment), and on any host but macOS its component is `host-prohibited`
+  runtime, no fork, a read-only package, one temporary folder, of the system
+  only what a runtime reads to start, and a fixed environment), and on any host but macOS its component is `host-prohibited`
   ([Outside provider drivers](design/outside-provider-drivers.md#driver-process-rules)).
 - Skills are discovered only from valid `.agents/skills/` and `.claude/skills/`
   packages between the working directory and the Project or repository root
@@ -6566,7 +6574,8 @@ configured origin only), the confined process per instance that carries that
 protocol on macOS, and admission (trust at a digest, a provider added off from
 a local window, host-run Verify tools, and the process stopped whenever the
 driver stops being effective) are built, as is moving an instance to a newly
-trusted digest of its driver with its records cleared. Publisher signatures
+trusted digest of its driver with its records cleared, and a crash-limit hold
+journaled at the digest that crashed, which a restart does not lift. Publisher signatures
 are not. Only a macOS host admits one. The author kit
 (`@octant/provider-sdk/outside-driver`, `outside-driver-serve`, and
 `outside-driver-conformance`) and an example loopback driver package live in

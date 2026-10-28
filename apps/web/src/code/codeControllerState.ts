@@ -38,6 +38,8 @@ export type CodeProviderRequest =
       readonly kind: "approval";
       readonly approvalId: CodeApprovalId;
       readonly summary: string;
+      /** The host takes an answer only from a window on its own computer. */
+      readonly localPersonOnly?: true;
     }
   | {
       readonly kind: "input";
@@ -96,7 +98,12 @@ export interface CodeConversationMessage {
 
 function providerRequestFromEvent(event: CodeOperationEvent): CodeProviderRequest | undefined {
   if (event.kind === "approval-requested") {
-    return { kind: "approval", approvalId: event.approvalId, summary: event.summary };
+    return {
+      kind: "approval",
+      approvalId: event.approvalId,
+      summary: event.summary,
+      ...(event.localPersonOnly === true ? { localPersonOnly: true } : {}),
+    };
   }
   if (event.kind === "input-requested") {
     return {

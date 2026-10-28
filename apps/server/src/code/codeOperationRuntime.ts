@@ -1575,7 +1575,10 @@ export function createCodeOperationRuntime(
         if (!(await options.windowAccess.canAccessProject(windowId, stored.projectId)))
           return undefined;
         const checkout = options.persistence.readCodeCheckout(stored.checkoutId);
-        if (checkout === undefined) return undefined;
+        // A remote root names the target's folder. A runtime starts there only
+        // through the placement a turn binds on the target's session, and this
+        // acquisition carries none, so it would start here against that path.
+        if (checkout === undefined || checkout.kind === "remote-root") return undefined;
         const root = await options.resolveCheckoutRoot(windowId, stored, checkout);
         if (root === undefined || root === null) return undefined;
         const thread = options.sessionAuthority?.effectiveThread(windowId, stored) ?? stored;
@@ -2281,7 +2284,7 @@ interface ActiveTurn {
  * for a later session, so the person sends again once the target is back.
  */
 const TARGET_DISCONNECTED =
-  "The SSH target's session ended (target-disconnected). Nothing was queued; connect the target again, then send the message again.";
+  "The SSH target's session ended (target-disconnected). Nothing was queued; Octant reconnects to the target on its own, so send the message again once it is connected.";
 
 /** Why a turn carrying conversation merged back from a fork did not start. */
 const FORK_MERGE_UNREADABLE =
@@ -3478,6 +3481,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             approvalId,
             action: "provider-tool",
             summary,
+            // Journaled with the ask so every client reads the same rule the
+            // answer is refused under, and a paired one offers no answer.
+            ...(answer.localPersonOnly === true ? { localPersonOnly: true as const } : {}),
           },
         });
         active.cursor = frame.cursor;

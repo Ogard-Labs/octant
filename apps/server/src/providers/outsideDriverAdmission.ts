@@ -101,7 +101,7 @@ function refusalFailure(reason: OutsideDriverProcessRefusal): ProviderFailure {
     case "quarantined":
       return failure(
         "unavailable",
-        "The provider driver stopped too often, so Octant holds this version until Octant restarts or you trust another version.",
+        "The provider driver stopped too often, so Octant holds this version until you trust another version.",
         "runtime-unavailable",
       );
     case "already-running":

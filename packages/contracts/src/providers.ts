@@ -981,10 +981,25 @@ export const IdeogramImageProviderInstance = Schema.Struct({
 }).annotations(strict);
 export type IdeogramImageProviderInstance = typeof IdeogramImageProviderInstance.Type;
 
+/**
+ * The host's hold on an outside instance's driver at one digest. The process
+ * owner sets it when the driver crashes past its limit (a third crash within
+ * a minute). It is journaled, so a host restart does not hand the driver a
+ * fresh crash budget, and it is not configuration: no command sets or clears
+ * it. Only binding another digest leaves it behind.
+ */
+export const OutsideDriverQuarantine = Schema.Struct({
+  reason: Schema.Literal("crash-limit"),
+  digest: ExtensionContentDigest,
+  quarantinedAt: UtcTimestamp,
+}).annotations(strict);
+export type OutsideDriverQuarantine = typeof OutsideDriverQuarantine.Type;
+
 export const OutsideHarnessEndpointProviderInstance = Schema.Struct({
   ...ProviderInstanceFields,
   driverKind: Schema.Literal("outside-harness-endpoint"),
   configuration: OutsideHarnessEndpointProviderConfiguration,
+  driverQuarantine: Schema.optional(OutsideDriverQuarantine),
 }).annotations(strict);
 export type OutsideHarnessEndpointProviderInstance =
   typeof OutsideHarnessEndpointProviderInstance.Type;
@@ -1113,6 +1128,17 @@ export const ProviderInstanceDriverRebound = Schema.Struct({
   instance: OutsideHarnessEndpointProviderInstance,
 }).annotations(strict);
 export type ProviderInstanceDriverRebound = typeof ProviderInstanceDriverRebound.Type;
+/**
+ * An outside instance's driver crashed past its limit and is held at the
+ * digest it binds. Only the host writes it; the instance it carries holds the
+ * quarantine.
+ */
+export const ProviderInstanceDriverQuarantined = Schema.Struct({
+  instance: OutsideHarnessEndpointProviderInstance.pipe(
+    Schema.filter((instance) => instance.driverQuarantine !== undefined),
+  ),
+}).annotations(strict);
+export type ProviderInstanceDriverQuarantined = typeof ProviderInstanceDriverQuarantined.Type;
 export const ProviderInstanceDataTagsChanged = Schema.Struct({
   instance: ProviderInstance,
 }).annotations(strict);
@@ -1137,6 +1163,7 @@ export const PROVIDER_EVENT_NAMES = [
   "provider.instance-binary-changed@1",
   "provider.instance-configuration-changed@1",
   "provider.instance-driver-rebound@1",
+  "provider.instance-driver-quarantined@1",
   "provider.instance-data-tags-changed@1",
   "provider.instance-enabled-changed@1",
   "provider.instance-removed@1",
@@ -2725,6 +2752,9 @@ export const decodeProviderInstanceConfigurationChanged = Schema.decodeUnknownSy
 );
 export const decodeProviderInstanceDriverRebound = Schema.decodeUnknownSync(
   ProviderInstanceDriverRebound,
+);
+export const decodeProviderInstanceDriverQuarantined = Schema.decodeUnknownSync(
+  ProviderInstanceDriverQuarantined,
 );
 export const decodeProviderInstanceEnabledChanged = Schema.decodeUnknownSync(
   ProviderInstanceEnabledChanged,

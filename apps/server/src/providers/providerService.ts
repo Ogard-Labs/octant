@@ -71,6 +71,8 @@ import {
   createOllamaProvider,
   createOutsideHarnessEndpointProvider,
   rebindOutsideHarnessEndpointDriver,
+  isOutsideDriverQuarantined,
+  quarantineOutsideHarnessEndpointDriver,
   createPiProvider,
   createOhMyPiProvider,
   changeOhMyPiConfiguration,
@@ -437,6 +439,37 @@ export class ProviderService implements ProviderServiceApi {
       if (rebound) moved.push(candidate.id);
     }
     return moved;
+  }
+
+  /**
+   * Journals that an outside instance's driver crashed past its limit at the
+   * digest it binds, so the hold outlives this host. The process owner calls
+   * it the moment the limit is crossed. A report for a digest the instance no
+   * longer binds, or for one already held, journals nothing. Nothing a person
+   * or client sends reaches this: only binding another digest lifts the hold.
+   */
+  async quarantineOutsideDriver(
+    instanceId: ProviderInstanceId,
+    digest: OutsideProviderDriverReference["digest"],
+  ): Promise<void> {
+    await this.#withInstanceOperation(instanceId, async () => {
+      this.#assertReady();
+      const current = this.#persistence.readProviderInstance(instanceId);
+      if (current?.driverKind !== "outside-harness-endpoint") return;
+      if (String(current.configuration.driver.digest) !== String(digest)) return;
+      const instance = quarantineOutsideHarnessEndpointDriver(
+        current,
+        decodeTimestamp(this.#clock()),
+      );
+      if (instance === current) return;
+      this.#appendInstance(current.version, "provider.instance-driver-quarantined@1", instance);
+      this.#authoritativeInstance(instance);
+      if (instance.enabled) {
+        this.#runtime.setObservedState(
+          outsideDriverQuarantinedObservation(instance.id, instance.updatedAt),
+        );
+      }
+    });
   }
 
   pendingInstanceOperationCount(): number {
@@ -1381,6 +1414,20 @@ export class ProviderService implements ProviderServiceApi {
           this.#clearRuntimeUsageLimits?.(instanceId);
           throw this.#unsupported("This provider driver is not available.");
         }
+        if (
+          instance.driverKind === "outside-harness-endpoint" &&
+          isOutsideDriverQuarantined(instance)
+        ) {
+          // Decided from the journal before the driver is asked to start.
+          this.#runtime.setObservedState(
+            outsideDriverQuarantinedObservation(instanceId, decodeTimestamp(this.#clock())),
+          );
+          this.#clearRuntimeUsageLimits?.(instanceId);
+          throw new ProviderServiceError({
+            category: "unavailable",
+            message: OUTSIDE_DRIVER_QUARANTINED_MESSAGE,
+          });
+        }
         if (isImageProfileDriverKind(instance.driverKind)) {
           // Image profiles are generation endpoints with a stored credential,
           // not runtimes to probe — the chat-model driver cannot be built for
@@ -1594,6 +1641,14 @@ export class ProviderService implements ProviderServiceApi {
     // built, so no driver code runs to describe its own block.
     if (!this.#isInstanceDriverAvailable(instance)) {
       return driverNotAdmittedObservation(instance.id, decodeTimestamp(this.#clock()));
+    }
+    // A journaled crash-limit hold is reported without starting the driver,
+    // so a restarted host shows it before anyone checks the connection.
+    if (
+      instance.driverKind === "outside-harness-endpoint" &&
+      isOutsideDriverQuarantined(instance)
+    ) {
+      return outsideDriverQuarantinedObservation(instance.id, decodeTimestamp(this.#clock()));
     }
     if (this.#claudeAccountNeedsOwnConfigDirectory(instance)) {
       return decodeProviderObservedState({
@@ -2799,6 +2854,29 @@ function driverNotAdmittedObservation(
     capabilities: unavailableCapabilities,
     message: "This provider driver is not available.",
     reason: "driver-not-admitted",
+    observedAt,
+  });
+}
+
+const OUTSIDE_DRIVER_QUARANTINED_MESSAGE =
+  "The provider driver stopped too often, so Octant holds this version until you trust another version.";
+
+/**
+ * What an outside instance reports while its driver is held at the digest it
+ * binds: unavailable, Octant's own words, and nothing it could offer.
+ */
+function outsideDriverQuarantinedObservation(
+  instanceId: ProviderInstanceId,
+  observedAt: ProviderObservedState["observedAt"],
+): ProviderObservedState {
+  return decodeProviderObservedState({
+    instanceId,
+    readiness: "unavailable",
+    processState: "stopped",
+    models: [],
+    capabilities: unavailableCapabilities,
+    message: OUTSIDE_DRIVER_QUARANTINED_MESSAGE,
+    reason: "runtime-unavailable",
     observedAt,
   });
 }

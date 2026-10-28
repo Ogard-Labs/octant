@@ -303,8 +303,9 @@ settings:
 **Set recipe** saves it; the next desktop uses it. The desktop never has
 network access. **Remove recipe** asks first: removing it, or changing its
 provider, where it runs, its computer, or its key, ends the Project's running desktops. Only a window on the host
-itself can set or remove a recipe or enter its key; a paired phone or browser
-sees the recipe and whether it has a key, but can't change either. This
+itself can set or remove a recipe or enter its key, so **Disposable desktop**
+appears only there: a paired phone or browser doesn't show a Project's
+settings, and the host refuses a recipe change from either. This
 version offers no cloud provider yet, so the key field doesn't appear.
 
 ## Picture in Picture

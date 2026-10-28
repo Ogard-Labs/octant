@@ -98,6 +98,47 @@ describe("remoteCodeTurnReadiness", () => {
     });
   });
 
+  it("says the host is reconnecting, with the attempt and when the next one starts, rather than that the target is not connected", () => {
+    const reconnecting = {
+      connection: "reconnecting" as const,
+      admission: [
+        {
+          posture: "plan" as const,
+          decision: {
+            status: "refused" as const,
+            reason: "target-reconnecting" as const,
+            attempt: 2,
+            maxAttempts: 8,
+            nextAttemptAt: 1_700_000_004_000,
+          },
+        },
+      ],
+    };
+    expect(
+      remoteCodeTurnReadiness(reconnecting, "plan", {
+        formatTime: (at) => new Date(at).toISOString().slice(11, 19),
+      }),
+    ).toEqual({
+      status: "unavailable",
+      message:
+        "The SSH target's session dropped, and Octant is reconnecting on its own (attempt 2 of 8, next at 22:13:24). Work there waits until it connects and attests again.",
+    });
+    expect(
+      remoteCodeTurnReadiness(
+        {
+          connection: "authentication-refused",
+          admission: [
+            { posture: "plan", decision: { status: "refused", reason: "authentication-refused" } },
+          ],
+        },
+        "plan",
+      ),
+    ).toMatchObject({
+      status: "unavailable",
+      message: expect.stringContaining("SSH key or agent"),
+    });
+  });
+
   it("carries the host's own refusal of the posture", () => {
     expect(
       remoteCodeTurnReadiness(

@@ -14,9 +14,11 @@ import {
   decodeWindowId,
   type DiscoveryCandidate,
   LOCAL_HOST_ID,
+  type OutsideProviderDriverReference,
   type PermissionPersistence,
   type ProviderDriverKind,
   type ProviderInstance,
+  type ProviderInstanceId,
   type ProviderProbeResult,
   type ProviderRuntimeEvent,
   type UtcTimestamp,
@@ -52,6 +54,7 @@ import { OutsideDriverAdmission } from "../providers/outsideDriverAdmission";
 import {
   OutsideDriverProcesses,
   resolveOutsideDriverRuntime,
+  type OutsideDriverProcessesOptions,
 } from "../providers/outsideDriverProcess";
 import {
   makeCredentialBrokerClient,
@@ -443,6 +446,39 @@ function isPathWithin(root: string, candidate: string): boolean {
     confined === "" ||
     (confined !== ".." && !confined.startsWith(`..${sep}`) && !isAbsolute(confined))
   );
+}
+
+/**
+ * How the host keeps an outside driver's crash-limit hold for the process
+ * owner: read from the instance the journal holds, so a start at a held
+ * digest is refused after a restart too, and journaled through the provider
+ * service. That service is built after the owner it depends on, so the owner
+ * asks for it when a driver crosses the limit, not when the owner is built.
+ */
+export function journaledOutsideDriverHold(input: {
+  readonly readProviderInstance: (instanceId: ProviderInstanceId) => ProviderInstance | undefined;
+  readonly journalHold: () =>
+    | ((
+        instanceId: ProviderInstanceId,
+        digest: OutsideProviderDriverReference["digest"],
+      ) => Promise<void>)
+    | undefined;
+}): NonNullable<OutsideDriverProcessesOptions["quarantine"]> {
+  return {
+    holds: (instanceId, digest) => {
+      const instance = input.readProviderInstance(instanceId);
+      const hold =
+        instance?.driverKind === "outside-harness-endpoint" ? instance.driverQuarantine : undefined;
+      return hold !== undefined && String(hold.digest) === String(digest);
+    },
+    // The owner's own hold refuses until this host stops even if the journal
+    // write fails.
+    record: (instanceId, driver) => {
+      void input
+        .journalHold()?.(instanceId, driver.digest)
+        .catch(() => undefined);
+    },
+  };
 }
 
 export type ProvidersDependencies = Pick<
@@ -1118,6 +1154,13 @@ export function wireProviders(deps: ProvidersDependencies) {
           });
     const credentialResolver =
       credentialBroker === undefined ? undefined : makeProviderApiKeyPool(credentialBroker);
+    // Set once the provider service exists, which journals a crash-limit hold.
+    let quarantineOutsideDriver:
+      | ((
+          instanceId: ProviderInstanceId,
+          digest: OutsideProviderDriverReference["digest"],
+        ) => Promise<void>)
+      | undefined;
     // An outside driver runs only under the supervisor this host owns, which
     // builds the driver profile; an injected supervisor starts none.
     const outsideDriverProcesses =
@@ -1127,6 +1170,10 @@ export function wireProviders(deps: ProvidersDependencies) {
             platform: process.platform,
             runtime: outsideDriverRuntime,
             temporaryRoot: tmpdir(),
+            quarantine: journaledOutsideDriverHold({
+              readProviderInstance: (instanceId) => persistence.readProviderInstance(instanceId),
+              journalHold: () => quarantineOutsideDriver,
+            }),
           })
         : {
             start: async () => ({ status: "refused" as const, reason: "start-failed" as const }),
@@ -1307,6 +1354,8 @@ export function wireProviders(deps: ProvidersDependencies) {
       providerService.reconcileConfiguredProviders();
     };
     reconcileOutsideDrivers = reconcileOutsideDriverState;
+    quarantineOutsideDriver = (instanceId, digest) =>
+      providerService.quarantineOutsideDriver(instanceId, digest);
     // A host that stopped between a trust and the move it causes makes the
     // move now; with nothing to move this journals nothing and starts nothing.
     yield* Effect.promise(() => reconcileOutsideDriverState().catch(() => undefined));

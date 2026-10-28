@@ -104,11 +104,50 @@ neither are forks, checkpoints, rewind, `@` file mentions, Browser, Computer,
 or connectors; use the Project's terminal in Settings › SSH targets for
 anything you want to do on the target yourself.
 
-If the target disconnects, the running turn stops as interrupted and the task
-says the target is not connected. It offers no send until the target is
-connected again; nothing reconnects or replays on its own. A restart of
-Octant on this computer ends the target's session too, so a turn it cut off
-reads as interrupted afterwards.
+If the connection drops (the network goes away, the target's `sshd`
+restarts, or the target stops answering), the running turn stops as
+interrupted, and nothing it was doing is replayed. See
+[When the connection drops](#when-the-connection-drops) for what Octant does
+next. A restart of Octant on this computer ends the target's session too, so
+a turn it cut off reads as interrupted afterwards, and an approval or
+question it was waiting on is withdrawn rather than left for an answer that
+could no longer run anything; after a restart, connect the target again
+yourself. A task on a target is not compacted yet; its context popover says
+so in place of **Compact session**.
+
+## When the connection drops
+
+Octant reconnects on its own. It waits about a second, then tries again
+with longer waits between attempts, up to a minute, for at most eight
+attempts (about three minutes). Each attempt is a new connection that checks
+the pinned host key and runs the probes again from the start; nothing the
+lost connection proved is reused.
+
+While it reconnects, the target's row in **Settings › SSH targets**, the
+sidebar, and the composer say **Reconnecting**, with the attempt and when the
+next one starts. Tasks on the target offer no send, and a message, a file
+read, a terminal, or a worktree change is refused with that reason rather
+than waiting. Once a new connection is admitted, the task offers send again;
+send the message again yourself.
+
+Octant stops and waits for you when another attempt cannot help:
+
+- **Host key changed.** Check the new key with the target's administrator,
+  then choose **Check host key…**. Octant never relaxes the pin to get
+  through.
+- **This Mac's SSH key or agent is refused.** Make sure `ssh` to the target
+  signs in from this computer without a prompt (for example, add your key to
+  the agent again), then choose **Connect**.
+- **Octant not found, or another version, on the target.** Install the
+  matching headless Octant there, then choose **Connect**.
+- **Still not reachable after the last attempt.** Choose **Connect** once the
+  target is back.
+
+The row then says how many attempts Octant made. If the new connection's
+probes refuse a posture that was admitted before, the target stays connected
+and that posture stays refused with the reason; Octant does not retry it. To
+try at once instead of waiting, choose **Connect**, or run
+`octant ssh-target connect <target-id>`.
 
 ## Terminals
 
@@ -122,8 +161,9 @@ are not read. The page shows one terminal at a time: opening another, or
 leaving the page, stops the one it showed.
 
 If the connection drops, the shell and everything it started end with it, and
-the terminal says it was interrupted. Nothing reconnects it or replays what
-you typed; connect the target again and open a new terminal.
+the terminal says it was interrupted. Octant reconnects the target on its own,
+but not the shell, and nothing replays what you typed; open a new terminal
+once the target is connected again.
 
 ## Managed worktrees
 

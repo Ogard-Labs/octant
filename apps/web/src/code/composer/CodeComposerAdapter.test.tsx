@@ -12,6 +12,7 @@ import {
   NewTaskDraftsContext,
   NewTaskDraftScopeContext,
 } from "../../composer/useNewTaskPrompt";
+import { SSH_TARGET_TIMES } from "../../host/sshTargetClient";
 
 const twoHosts = [
   {
@@ -1251,6 +1252,38 @@ describe("CodeComposerAdapter interactions", () => {
 
       rerender(<CodeComposerAdapter {...remoteProps} />);
       expect(screen.getByRole("button", { name: "Create thread" })).toBeEnabled();
+    });
+
+    it("says the host is reconnecting to the target, with the attempt and when the next starts, and offers no Start", async () => {
+      const user = userEvent.setup();
+      const nextAttemptAt = Date.UTC(2026, 9, 28, 14, 5, 12);
+      const decision = {
+        status: "refused",
+        reason: "target-reconnecting",
+        attempt: 3,
+        maxAttempts: 8,
+        nextAttemptAt,
+      } as const;
+      const reconnecting = {
+        ...(connected as object),
+        connection: "reconnecting",
+        reconnect: { status: "waiting", attempt: 3, maxAttempts: 8, nextAttemptAt },
+        admission: [
+          { posture: "plan", decision },
+          { posture: "approval-gated", decision },
+        ],
+      } as never;
+      render(
+        <CodeComposerAdapter
+          {...remoteProps}
+          remote={{ location: remoteProps.remote.location, target: reconnecting }}
+        />,
+      );
+      await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the build");
+      expect(screen.getByRole("button", { name: "Create thread" })).toBeDisabled();
+      expect(screen.getByRole("status")).toHaveTextContent(
+        `The SSH target's session dropped, and Octant is reconnecting on its own (attempt 3 of 8, next at ${SSH_TARGET_TIMES.formatTime(nextAttemptAt)}). Work there waits until it connects and attests again.`,
+      );
     });
 
     describe("with an ACP agent the host places on the target", () => {

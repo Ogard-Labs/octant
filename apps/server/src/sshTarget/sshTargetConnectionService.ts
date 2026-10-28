@@ -28,8 +28,8 @@ import {
   type SshTarget,
   type SshTargetAdministrationRefusal,
   type SshTargetAdministrationRefusalReason,
-  type SshTargetConnectionState,
   type SshTargetPlatform,
+  type SshTargetReconnect,
   type SshRuntimeBinarySetRequest,
   type SshTargetRegisterRequest,
   type SshTargetRepinRequest,
@@ -65,6 +65,12 @@ import {
   type SshAdmissionSubject,
   type SshTargetConnection,
 } from "@octant/domain/ssh-target-admission-policy";
+import {
+  SSH_RECONNECT_MAX_ATTEMPTS,
+  SSH_RECONNECT_STABLE_MS,
+  nextSshReconnectStep,
+  type SshTargetLostState,
+} from "@octant/domain/ssh-target-reconnect-policy";
 import {
   describeSshAdmissionRefusal,
   sshTargetRuntimePathMissing,
@@ -106,6 +112,14 @@ import type { SshTargetStore } from "./sshTargetStore";
  * ends takes its attestation with it, and a new one starts from nothing.
  * Connection state lives in memory and is never journaled; each attestation's
  * digest and the decisions made from it are.
+ *
+ * When an attested session drops, the service reconnects on its own with
+ * bounded backoff (`@octant/domain/ssh-target-reconnect-policy`). Each attempt
+ * is a whole connection, the pin written again from the journal and a new
+ * attestation asked for, and admits nothing until it attested. While it
+ * reconnects every request is refused `target-reconnecting`; it stops, and
+ * waits for the person, after its last attempt or at a refusal another attempt
+ * cannot heal.
  */
 
 const CONFINED_POSTURES: ReadonlyArray<SshConfinedPosture> = [
@@ -173,6 +187,13 @@ export interface SshTargetConnectionServiceOptions {
    * lists none, and a window offers none.
    */
   readonly placeableRuntimes?: (targetId: SshTargetId) => ReadonlyArray<SshPlaceableRuntime>;
+  /** Replaces how reconnects are paced; tests do, so no real time passes. */
+  readonly reconnect?: {
+    /** Draws each wait's jitter, in [0, 1). */
+    readonly random?: () => number;
+    /** Runs `run` after `delayMs`; the returned function cancels it. */
+    readonly schedule?: (run: () => void, delayMs: number) => () => void;
+  };
 }
 
 export type SshTargetAdministrationResult<T> =
@@ -278,7 +299,24 @@ interface HeldProbe {
   readonly expiresAt: number;
 }
 
-type LostState = Exclude<SshTargetConnectionState, "connected" | "not-connected">;
+type LostState = SshTargetLostState;
+
+/**
+ * This host reconnecting to a target on its own. `waiting` holds the timer
+ * of the attempt due; `stopped` waits for the person to connect again.
+ */
+type Reconnecting =
+  | {
+      readonly status: "waiting";
+      readonly attempt: number;
+      readonly nextAttemptAt: number;
+      readonly cancel: () => void;
+    }
+  | { readonly status: "attempting"; readonly attempt: number }
+  | { readonly status: "stopped"; readonly attempts: number };
+
+/** How one connection attempt ended: attested, lost, or replaced by a later connect or removal. */
+type ConnectOutcome = "connected" | LostState | "replaced";
 
 type ConnectionRecord =
   | {
@@ -293,6 +331,7 @@ type ConnectionRecord =
       readonly attestation: SshAttestation;
       readonly remoteUser: SshRemoteUser | undefined;
       readonly platform: SshTargetPlatform | undefined;
+      readonly connectedAt: number;
     }
   | { readonly state: LostState };
 
@@ -333,6 +372,15 @@ export class SshTargetConnectionService {
   readonly #placeableRuntimes: SshTargetConnectionServiceOptions["placeableRuntimes"];
   readonly #connections = new Map<string, ConnectionRecord>();
   readonly #probes = new Map<string, HeldProbe>();
+  readonly #reconnects = new Map<string, Reconnecting>();
+  /**
+   * The attempts the reconnect that opened a target's current session used,
+   * carried into the next drop if the session did not hold for
+   * `SSH_RECONNECT_STABLE_MS`.
+   */
+  readonly #reconnectAttemptsUsed = new Map<string, number>();
+  readonly #random: () => number;
+  readonly #schedule: (run: () => void, delayMs: number) => () => void;
 
   constructor(options: SshTargetConnectionServiceOptions) {
     this.#store = options.store;
@@ -347,6 +395,15 @@ export class SshTargetConnectionService {
     this.#readTimeoutMs = options.readTimeoutMs ?? READ_TIMEOUT_MS;
     this.#runtimeEgress = options.runtimeEgress;
     this.#placeableRuntimes = options.placeableRuntimes;
+    this.#random = options.reconnect?.random ?? Math.random;
+    this.#schedule =
+      options.reconnect?.schedule ??
+      ((run, delayMs) => {
+        const timer = setTimeout(run, delayMs);
+        // A reconnect never keeps the server process alive on its own.
+        timer.unref();
+        return () => clearTimeout(timer);
+      });
   }
 
   list(): ReadonlyArray<SshTargetStatus> {
@@ -363,7 +420,7 @@ export class SshTargetConnectionService {
     return decideSshAdmission({
       host: { buildVersion: this.#buildVersion, protocolVersion: SSH_EXECUTOR_PROTOCOL_VERSION },
       target: registered ? "registered" : "removed",
-      connection: domainConnection(record),
+      connection: domainConnection(record, this.#reconnects.get(String(targetId))),
       ...(record?.state === "connected" ? { attestation: record.attestation } : {}),
       posture: request.posture,
       permissionPersistence: request.permissionPersistence,
@@ -941,6 +998,7 @@ export class SshTargetConnectionService {
     }
     const probe = this.#takeProbe(request.probeId, request.fingerprint);
     if (probe.status !== "ok") return probe;
+    this.#stopReconnecting(target.id);
     this.#disconnect(target.id);
     journaled(this.#store.repin(target.id, probe.value.hostKey));
     return this.connect(target.id);
@@ -971,10 +1029,26 @@ export class SshTargetConnectionService {
     return { status: "ok", value: this.#status(target) };
   }
 
-  /** Ends any session to the target and its attestation, then connects and attests anew. */
+  /**
+   * Ends any session to the target and its attestation, then connects and
+   * attests anew. The person's connect replaces any reconnect under way or
+   * stopped, and a session it opens starts a fresh count of attempts.
+   */
   async connect(targetId: SshTargetId): Promise<SshTargetAdministrationResult<SshTargetStatus>> {
     const target = this.#store.get(targetId);
     if (target === undefined) return refusal("unknown-target", "No such SSH target.");
+    this.#stopReconnecting(target.id);
+    await this.#connectOnce(target, 0);
+    return { status: "ok", value: this.#status(target) };
+  }
+
+  /**
+   * One connection and its attestation. `attemptsUsed` is the count of the
+   * reconnect that asked for it (0 for the person's own connect), which a
+   * session that drops soon after continues.
+   */
+  async #connectOnce(target: SshTarget, attemptsUsed: number): Promise<ConnectOutcome> {
+    const targetId = target.id;
     this.#disconnect(targetId);
     const connectionId = decodeConnectionId(randomUUID());
     // The pin is written from the journal each time, so the client trusts
@@ -999,18 +1073,19 @@ export class SshTargetConnectionService {
     // A later connect or a removal replaced this session while it attested.
     if (current?.state !== "connecting" || current.connectionId !== connectionId) {
       channel.close();
-      return { status: "ok", value: this.#status(target) };
+      return "replaced";
     }
     if (established.state !== "connected") {
       channel.close();
       this.#connections.set(key, { state: established.state });
-      return { status: "ok", value: this.#status(target) };
+      return established.state;
     }
     // The session can end in the moment between the reply and this line.
     if (channel.ended) {
       this.#connections.set(key, { state: "unreachable" });
-      return { status: "ok", value: this.#status(target) };
+      return "unreachable";
     }
+    const connectedAt = this.#now();
     this.#connections.set(key, {
       state: "connected",
       connectionId,
@@ -1018,24 +1093,115 @@ export class SshTargetConnectionService {
       attestation: established.attestation,
       remoteUser: established.remoteUser,
       platform: supportedPlatform(established.attestation.facts.platform.operatingSystem),
+      connectedAt,
     });
+    this.#reconnectAttemptsUsed.set(key, attemptsUsed);
     channel.onEnd(() => {
       const latest = this.#connections.get(key);
+      // A session this host ended itself was marked before it closed, so
+      // only a drop (the client exiting, the network lost, a request left
+      // unanswered) finds it still connected.
       if (latest?.state === "connected" && latest.connectionId === connectionId) {
         this.#connections.set(key, { state: "unreachable" });
+        this.#sessionDropped(targetId, connectedAt);
       }
     });
     const status = this.#status(target);
     // The digest and the decisions are journaled so a refusal can be
     // explained after the connection is gone; they never admit anything.
     journaled(this.#store.recordAttestation(target.id, established.attestation, status.admission));
-    return { status: "ok", value: status };
+    return "connected";
+  }
+
+  /**
+   * An attested session dropped: reconnect on its own. A session that held
+   * for `SSH_RECONNECT_STABLE_MS` starts a fresh count; one that dropped
+   * sooner continues the count that opened it, so a target that attests and
+   * drops again and again still stops.
+   */
+  #sessionDropped(targetId: SshTargetId, connectedAt: number): void {
+    const key = String(targetId);
+    const held = this.#now() - connectedAt >= SSH_RECONNECT_STABLE_MS;
+    const carried = held ? 0 : (this.#reconnectAttemptsUsed.get(key) ?? 0);
+    this.#reconnectAttemptsUsed.delete(key);
+    this.#scheduleReconnect(targetId, carried, undefined);
+  }
+
+  #scheduleReconnect(
+    targetId: SshTargetId,
+    attemptsMade: number,
+    lastState: LostState | undefined,
+  ): void {
+    const key = String(targetId);
+    const step = nextSshReconnectStep({
+      attemptsMade,
+      ...(lastState === undefined ? {} : { lastState }),
+      random: this.#random,
+    });
+    if (step.kind === "stop") {
+      this.#reconnects.set(key, { status: "stopped", attempts: Math.max(1, attemptsMade) });
+      return;
+    }
+    const cancel = this.#schedule(() => {
+      void this.#attemptReconnect(targetId, step.attempt);
+    }, step.delayMs);
+    this.#reconnects.set(key, {
+      status: "waiting",
+      attempt: step.attempt,
+      nextAttemptAt: this.#now() + step.delayMs,
+      cancel,
+    });
+  }
+
+  async #attemptReconnect(targetId: SshTargetId, attempt: number): Promise<void> {
+    const key = String(targetId);
+    const due = this.#reconnects.get(key);
+    if (due?.status !== "waiting" || due.attempt !== attempt) return;
+    const target = this.#store.get(targetId);
+    if (target === undefined) {
+      this.#reconnects.delete(key);
+      return;
+    }
+    this.#reconnects.set(key, { status: "attempting", attempt });
+    let outcome: ConnectOutcome;
+    try {
+      outcome = await this.#connectOnce(target, attempt);
+    } catch {
+      // The attempt broke before it could end in a state (the pin file could
+      // not be written, say). Nobody awaits a timer's attempt, so it stops
+      // here, holding no session, and waits for the person rather than
+      // reading `reconnecting` for ever or rejecting into the process.
+      const latest = this.#reconnects.get(key);
+      if (latest?.status !== "attempting" || latest.attempt !== attempt) return;
+      this.#disconnect(targetId);
+      this.#reconnects.set(key, { status: "stopped", attempts: attempt });
+      return;
+    }
+    const latest = this.#reconnects.get(key);
+    // The person connected, re-pinned, or removed the target meanwhile, and
+    // the outcome is theirs.
+    if (latest?.status !== "attempting" || latest.attempt !== attempt) return;
+    if (outcome === "connected" || outcome === "replaced") {
+      this.#reconnects.delete(key);
+      return;
+    }
+    this.#scheduleReconnect(targetId, attempt, outcome);
+  }
+
+  /** Cancels any reconnect of the target, under way or stopped, and its count. */
+  #stopReconnecting(targetId: SshTargetId): void {
+    const key = String(targetId);
+    const reconnecting = this.#reconnects.get(key);
+    if (reconnecting?.status === "waiting") reconnecting.cancel();
+    this.#reconnects.delete(key);
+    this.#reconnectAttemptsUsed.delete(key);
   }
 
   remove(targetId: SshTargetId): SshTargetAdministrationResult<null> {
     if (this.#store.get(targetId) === undefined) {
       return refusal("unknown-target", "No such SSH target.");
     }
+    this.#stopReconnecting(targetId);
     this.#disconnect(targetId);
     this.#connections.delete(String(targetId));
     journaled(this.#store.remove(targetId));
@@ -1044,21 +1210,26 @@ export class SshTargetConnectionService {
 
   /** Ends every session; each executor exits when its input closes. */
   close(): void {
+    for (const key of this.#reconnects.keys()) this.#stopReconnecting(decodeTargetId(key));
     for (const key of this.#connections.keys()) this.#disconnect(decodeTargetId(key));
   }
 
   #status(target: SshTarget): SshTargetStatus {
     const record = this.#connections.get(String(target.id));
     const connected = record?.state === "connected" ? record : undefined;
+    const reconnect = reconnectStatus(this.#reconnects.get(String(target.id)));
     return {
       target,
       fingerprint: sshHostKeyFingerprint(target.hostKey),
       connection:
-        record === undefined
-          ? "not-connected"
-          : record.state === "connecting"
+        connected === undefined && reconnect !== undefined && reconnect.status !== "stopped"
+          ? "reconnecting"
+          : record === undefined
             ? "not-connected"
-            : record.state,
+            : record.state === "connecting"
+              ? "not-connected"
+              : record.state,
+      ...(reconnect === undefined ? {} : { reconnect }),
       ...(connected?.remoteUser === undefined ? {} : { remoteUser: connected.remoteUser }),
       ...(connected?.platform === undefined ? {} : { platform: connected.platform }),
       admission: CONFINED_POSTURES.map((posture) => ({
@@ -1078,8 +1249,10 @@ export class SshTargetConnectionService {
     const key = String(targetId);
     const record = this.#connections.get(key);
     if (record === undefined) return;
-    if (record.state === "connecting" || record.state === "connected") record.channel.close();
+    // Marked first: closing tells the session's listeners at once, and a
+    // session this host ends on purpose is not a drop to reconnect after.
     this.#connections.set(key, { state: "unreachable" });
+    if (record.state === "connecting" || record.state === "connected") record.channel.close();
   }
 
   #takeProbe(
@@ -1234,6 +1407,10 @@ function lostStateFromExit(code: number | null, stderr: string): LostState {
   if (/host key verification failed|remote host identification has changed/iu.test(stderr)) {
     return "host-key-changed";
   }
+  // BatchMode turns a key or agent that no longer signs in into this line
+  // and exit 255, where an unreachable host would have said why it was not
+  // reached; the remote shell's own "Permission denied" exits 126.
+  if (code === 255 && /: Permission denied \(/u.test(stderr)) return "authentication-refused";
   if (code === 126 || code === 127) return "executor-missing";
   if (code === null || code === 255) return "unreachable";
   // The remote command ran and exited without introducing itself as an
@@ -1255,12 +1432,45 @@ function connectToProxy(endpoint: ToolEgressProxyEndpoint): Socket {
   return socket;
 }
 
-function domainConnection(record: ConnectionRecord | undefined): SshTargetConnection {
-  if (record === undefined || record.state === "connecting") return { state: "unreachable" };
-  if (record.state === "connected") {
+function domainConnection(
+  record: ConnectionRecord | undefined,
+  reconnecting: Reconnecting | undefined,
+): SshTargetConnection {
+  if (record?.state === "connected") {
     return { state: "connected", connectionId: record.connectionId };
   }
+  if (reconnecting !== undefined && reconnecting.status !== "stopped") {
+    return {
+      state: "reconnecting",
+      attempt: reconnecting.attempt,
+      maxAttempts: SSH_RECONNECT_MAX_ATTEMPTS,
+      ...(reconnecting.status === "waiting" ? { nextAttemptAt: reconnecting.nextAttemptAt } : {}),
+    };
+  }
+  if (record === undefined || record.state === "connecting") return { state: "unreachable" };
   return { state: record.state };
+}
+
+function reconnectStatus(reconnecting: Reconnecting | undefined): SshTargetReconnect | undefined {
+  switch (reconnecting?.status) {
+    case undefined:
+      return undefined;
+    case "waiting":
+      return {
+        status: "waiting",
+        attempt: reconnecting.attempt,
+        maxAttempts: SSH_RECONNECT_MAX_ATTEMPTS,
+        nextAttemptAt: reconnecting.nextAttemptAt,
+      };
+    case "attempting":
+      return {
+        status: "attempting",
+        attempt: reconnecting.attempt,
+        maxAttempts: SSH_RECONNECT_MAX_ATTEMPTS,
+      };
+    case "stopped":
+      return { status: "stopped", attempts: reconnecting.attempts };
+  }
 }
 
 function supportedPlatform(operatingSystem: string): SshTargetPlatform | undefined {

@@ -2,13 +2,41 @@ import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { spawn as nodeSpawn } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ExtensionSupervisor } from "./extensionSupervisor";
 import { createNodeExtensionProcessPort } from "./nodeExtensionProcessPort";
 
 const receiptDirectories: string[] = [];
 const macosOnly = process.platform === "darwin" ? it : it.skip;
+
+/** The folders a Seatbelt profile lets its process read, each once. */
+function subpathReads(profile: string): ReadonlyArray<string> {
+  const reads = profile
+    .split("\n")
+    .flatMap((rule) => /^\(allow file-read\* \(subpath "(.*)"\)\)$/.exec(rule)?.[1] ?? []);
+  return [...new Set(reads)].sort();
+}
+
+/**
+ * The read grants after a profile's denial of `denied` that open it again.
+ * Seatbelt applies the last matching rule, so a grant of the folder, of
+ * anything inside it, or of a folder above it, emitted after the denial,
+ * undoes it; a grant of `/private/etc` restored below the TLS denial would.
+ */
+function readsReopeningAfterDeny(profile: string, denied: string): ReadonlyArray<string> {
+  const rules = profile.split("\n");
+  const deny = rules.indexOf(`(deny file-read* (subpath "${denied}"))`);
+  expect(deny).toBeGreaterThan(-1);
+  return rules.slice(deny + 1).filter((rule) => {
+    const grant = /^\(allow file-read\S* \((subpath|literal) "(.*)"\)\)$/.exec(rule);
+    if (grant === null) return false;
+    const [, kind, path = ""] = grant;
+    const inside = path === denied || path.startsWith(`${denied}/`);
+    const above = kind === "subpath" && (path === "/" || denied.startsWith(`${path}/`));
+    return inside || above;
+  });
+}
 
 const startInput = {
   extensionId: "42700000-0000-4000-8000-000000000001",
@@ -139,6 +167,39 @@ describe("node extension process port", () => {
     ).toEqual(runtimePaths.map((path) => `(allow process-exec (literal "${path}"))`));
     expect(profile).not.toContain('(allow file-read* (subpath "/dev"))');
     expect(profile).toContain('(allow file-read* (literal "/dev/urandom"))');
+    // Of the host's configuration, only the link naming its time zone.
+    expect(profile).toContain('(allow file-read* (literal "/private/etc/localtime"))');
+    // The builder gives every launch the public TLS files; a driver has no
+    // network, so its profile takes them away again, after that grant.
+    const rules = profile.split("\n");
+    const tlsDenied = rules.indexOf('(deny file-read* (subpath "/private/etc/ssl"))');
+    expect(tlsDenied).toBeGreaterThan(
+      rules.indexOf('(allow file-read* (subpath "/private/etc/ssl/certs"))'),
+    );
+    expect(readsReopeningAfterDeny(profile, "/private/etc/ssl")).toEqual([]);
+    // `/System` is read whole, and the data volume beneath it spells the
+    // person's files a second way (`/System/Volumes/Data/Users/...`), so that
+    // volume is denied after every grant, `/System`'s included.
+    expect(readsReopeningAfterDeny(profile, "/System/Volumes/Data")).toEqual([]);
+    // Every folder the driver may read, and nothing more: its package, its
+    // runtime's own folder, the system roots a runtime reads to start, and
+    // its temporary folder. The macOS escape tests measure that a driver
+    // still starts on each runtime with no more than this.
+    const runtimeFolder = dirname(realpathSync(process.execPath));
+    expect(subpathReads(profile)).toEqual(
+      [
+        ...new Set([
+          ...[packageRoot, temporaryDirectory].flatMap((path) => [path, realpathSync(path)]),
+          runtimeFolder,
+          "/System",
+          "/usr/lib",
+          "/usr/share",
+          "/private/var/db/timezone",
+          // Granted by the builder to every launch, and denied again above.
+          "/private/etc/ssl/certs",
+        ]),
+      ].sort(),
+    );
     expect(profile).toContain(`(allow file-read* (subpath "${packageRoot}"))`);
     expect(profile).toContain(`(deny file-write* (subpath "${packageRoot}"))`);
     expect(profile).toContain(`(allow file-write* (subpath "${temporaryDirectory}"))`);
@@ -199,6 +260,21 @@ describe("node extension process port", () => {
     // The bundle holds the executable, Electron's Frameworks, and its Resources.
     expect(profile).toContain('(allow file-read* (subpath "/Applications/Octant.app"))');
     expect(profile).not.toContain('(allow file-read* (subpath "/Applications"))');
+    expect(subpathReads(profile)).toEqual(
+      [
+        ...new Set([
+          ...[packageRoot, temporaryDirectory].flatMap((path) => [path, realpathSync(path)]),
+          "/Applications/Octant.app",
+          "/System",
+          "/usr/lib",
+          "/usr/share",
+          "/private/var/db/timezone",
+          "/private/etc/ssl/certs",
+        ]),
+      ].sort(),
+    );
+    expect(readsReopeningAfterDeny(profile, "/private/etc/ssl")).toEqual([]);
+    expect(readsReopeningAfterDeny(profile, "/System/Volumes/Data")).toEqual([]);
     expect(profile).not.toContain("(allow network");
     expect(profile).not.toContain("(allow process-fork)");
     expect(profile.split("\n").filter((rule) => rule.startsWith("(allow process-exec"))).toEqual([
@@ -214,6 +290,49 @@ describe("node extension process port", () => {
       TMPDIR: temporaryDirectory,
       ELECTRON_RUN_AS_NODE: "1",
     });
+  });
+
+  it("lets a driver on a Homebrew Bun read that Bun's own folder and none of the prefix's other formulae", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-driver-homebrew-"));
+    receiptDirectories.push(root);
+    const packageRoot = join(root, "package");
+    const temporaryDirectory = join(root, "driver-tmp");
+    await mkdir(packageRoot);
+    await mkdir(temporaryDirectory, { mode: 0o700 });
+    const bun = "/opt/homebrew/Cellar/bun/1.3.0/bin/bun";
+    let profile = "";
+    const spawn = ((...input: Parameters<typeof nodeSpawn>) => {
+      const [, args, options] = input;
+      profile = String(args?.[1]);
+      return nodeSpawn(process.execPath, ["-e", ""], options);
+    }) as typeof nodeSpawn;
+    const port = createNodeExtensionProcessPort({
+      spawn,
+      shutdownTimeoutMs: 100,
+      platform: "darwin",
+      sandboxPath: process.execPath,
+    });
+    const child = await port.start({
+      ...startInput,
+      command: bun,
+      args: [join(packageRoot, "main.mjs")],
+      cwd: packageRoot,
+      readiness: "spawn",
+      sandbox: {
+        kind: "outside-driver",
+        runtime: "bun",
+        instanceId: "instance-a",
+        packageRoot,
+        temporaryDirectory,
+      },
+    });
+    await child.stop().catch(() => undefined);
+
+    // Bun links only the system's libraries, so the formulae and OpenSSL
+    // config a Homebrew Node needs are not the driver's to read.
+    expect(subpathReads(profile).filter((path) => path.startsWith("/opt/homebrew"))).toEqual([
+      "/opt/homebrew/Cellar/bun/1.3.0/bin",
+    ]);
   });
 
   it("refuses an Electron runtime that is not inside an app bundle, since only the bundle was measured", async () => {
