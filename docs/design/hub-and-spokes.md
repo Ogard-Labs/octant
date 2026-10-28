@@ -362,6 +362,29 @@ person is the same. The unlock key keeps what the rule protected: possession
 of a member key alone, or a compromised hub, still cannot reach those powers
 without the person's presence on the device.
 
+### Recovery and approval scenarios
+
+Every power above comes back from a machine the person can sit at, because a
+window on a host always has that host's authority and needs no other device.
+Losing one device never locks the person out, and a lost device is removed
+from any device they still have.
+
+| Situation                                                   | What the person does                                                                                                                                                                                  |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Add a new phone or laptop                                   | Scan the hub's QR code or type its code over the private network. With Confirm new members on, compare the short code and confirm in a spoke's window or on an owner device                           |
+| Approve an agent's risky step                               | Answer it in the spoke's own window, or on a member that spoke lets answer approvals (a guest phone, by default)                                                                                      |
+| Turn on Full access, merge, copy a sign-in, or add an owner | In the host's own window, or on an owner device with its own fresh unlock for that action                                                                                                             |
+| Lose the phone                                              | On a laptop's window, or another owner device: Remove the phone. Confirm and administer from the laptop's window until a new phone joins; mark the new phone as owner there                           |
+| Lose a laptop                                               | Remove it from the hub (from a window on the hub, an owner device, or the hub's shell). Every spoke drops what it held for that laptop at the next roster; revoke anything left from each spoke       |
+| Lose every owner device                                     | Sit at any spoke and use its window. For a headless hub, reach it over SSH on the private network and run `octant hub join-code --owner`; the device that joins with that code is the hub's new owner |
+| The hub is down                                             | Members switch to the standby. Approvals and window powers on each spoke keep working, because they never went through the hub                                                                        |
+| The hub is lost for good                                    | Promote the standby on its own window; spokes follow it as decision H11 says. With no standby, set up a new hub and join each spoke to it from that spoke's window                                    |
+| An alert shows a member the person did not add              | Tap Remove in the alert on any spoke or owner device, then check the hub; a member nobody added means the hub may be compromised                                                                      |
+
+Owner powers on a stolen device still need the person's face, finger,
+passcode, or passkey, so a thief has only ordinary member powers until the
+device is removed.
+
 ### Shared sign-ins
 
 An owner device with a fresh unlock can copy a sign-in from one host to
@@ -407,11 +430,14 @@ the check that the new member is the person's own.
   tap away. The alert comes from each spoke itself, not from the hub, so a
   hub that adds a member cannot hide it.
 - **Confirm new members (optional).** A spoke can turn on a setting that
-  holds each new member at status-only until an owner device confirms it with
-  a fresh unlock, after comparing a short code shown on the new device. The
-  owner device signs the confirmation with its unlock key, and the spoke
-  checks it against its own owner list, so the hub cannot confirm for the
-  person. It is off by default.
+  holds each new member at status-only until the person confirms it, after
+  comparing a short code shown on the new device. They confirm either in that
+  spoke's own window (a window on a host always has its authority) or from an
+  owner device with a fresh unlock, which signs the confirmation with its
+  unlock key; the spoke checks the signature against its own owner list. The
+  hub cannot confirm for the person. It is off by default. Losing a device
+  never locks the person out; see
+  [Recovery and approval scenarios](#recovery-and-approval-scenarios).
 
 A peer grant names:
 
@@ -655,7 +681,10 @@ named standby (was H9).
 
 ## Delivery plan
 
-Each slice is one reviewable PR and keeps everything off by default. Each
+Each slice is one reviewable PR and keeps everything off by default. A slice
+that ships user-visible behavior updates the user guide (`apps/docs`) in the
+same PR; slices 3, 5, and 7 together document every row of
+[Recovery and approval scenarios](#recovery-and-approval-scenarios) there. Each
 slice says whether an agent can verify it in a Linux container without the
 maintainer's hardware, or names the maintainer gate.
 
@@ -691,7 +720,10 @@ maintainer's hardware, or names the maintainer gate.
    and sign-in copy. Acceptance: an owner request without a fresh unlock is
    refused every window power; an agent, routine, hub, or peer request never
    reaches them; a copied key is unreadable by agents on both hosts and never
-   journaled; a headless hub is set up end to end from a browser owner.
+   journaled; a headless hub is set up end to end from a browser owner; with
+   Confirm new members on, a new member stays status-only until a spoke's
+   window or an owner's signed unlock confirms it, and the hub cannot; losing
+   every owner device is recovered from a spoke's window or the hub's shell.
    Verification: server permission negatives and a two-host smoke with a
    software authenticator; phone and Touch ID runs are maintainer gates.
 6. **Delegation.** Remote child runs from A to B with the peer grant, `peer:A`
