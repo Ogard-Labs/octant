@@ -781,17 +781,32 @@ These rules settle what the step needs, each in the fail-closed direction:
   restart starts every target at `not-connected` and starts no reconnect, so
   the next turn binds only to a session the person connected and that
   attested anew.
+- **A restart withdraws what the turn waited on.** A native-harness
+  approval or question a remote thread's lead left pending is settled
+  `expired` and journaled when the harness session store replays at
+  start-up, the step that already settles a subagent's parked requests
+  (`NativeHarnessSessionStore`, told which threads run on a target by their
+  remote-root checkout). An answer that comes later is refused
+  `already-settled`, so nothing is decided against the interrupted turn, and
+  a second start finds nothing left to settle. A local thread's lead
+  approval still waits for the person's resume, which settles it.
+- **A remote thread's session is not compacted.** Its runtime starts on the
+  target only through the placement a turn binds on the target's session,
+  and a compaction binds none, so a compaction of a remote-bound thread is
+  refused `runs-on-ssh-target` before anything is journaled or reserved, and
+  the Code runtime's compaction session opens nothing for a remote root
+  rather than hand out the target's path with no placement. The context
+  popover says so in place of the button. Rejected for now: compacting
+  through a turn's placement, which would bind the target's session for a
+  request that runs no tool.
 - **A target in use is not removed.** Removal ends the target's session, so
   the administration route refuses it `target-in-use` while a thread on one
   of the target's Projects holds a turn (prepared, running, or waiting on
   the person), checked in the same step as the removal.
-- **Not built.** Withdrawing a native-harness
-  approval a restart left parked on a remote turn (the turn reads
-  interrupted, and the approval stays with the harness session); observing
-  a remote thread's delivery target,
-  so nothing marks one Done from Git evidence; and listing remote threads in
-  the sidebar's activity and status arrangements, which show the Project
-  tree's local Projects only.
+- **Not built.** Compacting a remote thread's session; observing a remote
+  thread's delivery target, so nothing marks one Done from Git evidence; and
+  listing remote threads in the sidebar's activity and status arrangements,
+  which show the Project tree's local Projects only.
 
 #### In a local window
 
@@ -1659,6 +1674,15 @@ settle each, in the fail-closed direction:
   spelled out, and no Start while its runtime is refused in the posture),
   and `CodeThreadWorkspace.test.tsx` (a thread on the agent offers no send
   while its runtime is refused in the posture or its path is missing).
+  The restart withdrawal and the compaction refusal are proved by
+  `leadApprovalAttention.test.ts` (a remote lead's approval and question
+  settled `expired` and journaled at start-up, an answer to either refused,
+  and a second start settling nothing more), `sessionCompaction.test.ts` (a
+  remote thread refused `runs-on-ssh-target` with nothing journaled and no
+  session opened), `codeOperationRuntime.test.ts` (no compaction session
+  opened for a remote root), `contextCompaction.test.ts`, and
+  `ComposerContextMeter.test.tsx` (the popover's line in place of the
+  button).
 
 ### Credential custody
 
@@ -1794,7 +1818,8 @@ This host owns the connection and every process on the target.
   own session files survived on the target; otherwise the host rebuilds history in
   a fresh session, as for any host-owned resume.
 - **Host restart** is a disconnect: recovery marks in-flight remote turns
-  interrupted from the journal (built; see
+  interrupted from the journal and withdraws the native-harness approvals
+  and questions they left pending (built; see
   [Remote-bound Code threads](#remote-bound-code-threads)). Connection state
   is not journaled, so a restarted host starts no reconnect; the person
   connects the target.

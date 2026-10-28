@@ -1575,7 +1575,10 @@ export function createCodeOperationRuntime(
         if (!(await options.windowAccess.canAccessProject(windowId, stored.projectId)))
           return undefined;
         const checkout = options.persistence.readCodeCheckout(stored.checkoutId);
-        if (checkout === undefined) return undefined;
+        // A remote root names the target's folder. A runtime starts there only
+        // through the placement a turn binds on the target's session, and this
+        // acquisition carries none, so it would start here against that path.
+        if (checkout === undefined || checkout.kind === "remote-root") return undefined;
         const root = await options.resolveCheckoutRoot(windowId, stored, checkout);
         if (root === undefined || root === null) return undefined;
         const thread = options.sessionAuthority?.effectiveThread(windowId, stored) ?? stored;

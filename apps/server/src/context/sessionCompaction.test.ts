@@ -1247,6 +1247,26 @@ describe("compacting a session a runtime keeps", () => {
       world.close();
     });
 
+    it("refuses a thread on an SSH target before anything is journaled or its session opened", () => {
+      const world = createRuntimeWorld({ answer: { kind: "compacted" } }, "code-thread");
+      world.state.thread = {
+        mode: "code",
+        projectId,
+        providerInstanceId,
+        modelId,
+        runsOnSshTarget: true,
+      };
+      const head = world.fixture.journal.headSequence();
+
+      expect(
+        refusalOf(() => world.service.start(command(codeSubject), "local-window", windowId)),
+      ).toBe("runs-on-ssh-target");
+      expect(world.fixture.journal.headSequence()).toBe(head);
+      expect(world.opened).toEqual([]);
+      expect(world.runtime.acquired).toEqual([]);
+      world.close();
+    });
+
     it("takes the window a compaction since the latest usage report left as its starting point", async () => {
       const world = createRuntimeWorld(
         { answer: { kind: "compacted", tokensAfter: 300 } },

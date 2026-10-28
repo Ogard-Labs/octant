@@ -109,8 +109,11 @@ restarts, or the target stops answering), the running turn stops as
 interrupted, and nothing it was doing is replayed. See
 [When the connection drops](#when-the-connection-drops) for what Octant does
 next. A restart of Octant on this computer ends the target's session too, so
-a turn it cut off reads as interrupted afterwards; after a restart, connect
-the target again yourself.
+a turn it cut off reads as interrupted afterwards, and an approval or
+question it was waiting on is withdrawn rather than left for an answer that
+could no longer run anything; after a restart, connect the target again
+yourself. A task on a target is not compacted yet; its context popover says
+so in place of **Compact session**.
 
 ## When the connection drops
 
