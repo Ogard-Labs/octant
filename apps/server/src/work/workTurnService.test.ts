@@ -3077,8 +3077,19 @@ describe("WorkTurnService", () => {
         prompt: "Continue",
       });
       if (!canSwitch) {
-        await expect(followUp).rejects.toThrow("native session cannot be recovered");
-        expect(run).toHaveBeenCalledTimes(1);
+        // The provider cannot carry the session on to another of its models,
+        // so the turn starts a fresh session with a handoff instead of
+        // refusing: no resume, a new session, and the handoff on the turn.
+        await expect(followUp).resolves.toMatchObject({ kind: "accepted" });
+        await fixture.waitForIdle();
+        expect(run).toHaveBeenCalledTimes(2);
+        expect(run.mock.calls[1]?.[0].providerSessionId).not.toBe(
+          run.mock.calls[0]?.[0].providerSessionId,
+        );
+        expect(run.mock.calls[1]?.[0].resumeCursor).toBeUndefined();
+        expect(
+          (await fixture.service.transcript(ids.window, ids.thread)).turns.at(-1)?.handoff,
+        ).toMatchObject({ reason: "provider-switch" });
         return;
       }
       await expect(followUp).resolves.toMatchObject({ kind: "accepted" });

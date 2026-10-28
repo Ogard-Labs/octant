@@ -890,6 +890,12 @@ export class WorkTurnService {
                     this.#supportsModelSwitch?.(command.authority.providerInstanceId) === true) &&
                 previous.authority.bindingRevisionId === command.authority.bindingRevisionId &&
                 previous.authority.workingDirectory === command.authority.workingDirectory,
+              // A same-provider model swap the provider cannot carry on starts
+              // a fresh session with a handoff instead of refusing the turn.
+              ...(previous.authority.modelId !== command.authority.modelId &&
+              this.#supportsModelSwitch?.(command.authority.providerInstanceId) !== true
+                ? { modelSwitchHandoff: true }
+                : {}),
               // The session cursor is recorded when the session starts, before
               // the provider is sent anything, so a turn that carried a
               // handoff and did not complete may never have delivered it.

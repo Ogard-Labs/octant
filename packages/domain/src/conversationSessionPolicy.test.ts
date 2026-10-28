@@ -48,6 +48,26 @@ describe("decideConversationSession", () => {
     ).toEqual({ kind: "refuse", reason: "session-unrecoverable" });
   });
 
+  it("starts a fresh session with a handoff for a same-provider model swap the provider cannot carry", () => {
+    expect(
+      decideConversationSession({
+        recipient: runtime,
+        previous: { providerInstanceId: "claude", continuable: false, modelSwitchHandoff: true },
+        handoff: "allowed",
+      }),
+    ).toEqual({ kind: "new-session-with-handoff", reason: "provider-switch" });
+  });
+
+  it("refuses a model-swap handoff when this kind of turn may not hand over", () => {
+    expect(
+      decideConversationSession({
+        recipient: runtime,
+        previous: { providerInstanceId: "claude", continuable: false, modelSwitchHandoff: true },
+        handoff: "refused",
+      }),
+    ).toEqual({ kind: "refuse", reason: "handoff-unavailable" });
+  });
+
   it("hands the conversation over when it moves to a provider that keeps its own session", () => {
     for (const previous of ["local", "codex"]) {
       expect(

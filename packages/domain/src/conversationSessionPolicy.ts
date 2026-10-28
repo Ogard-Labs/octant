@@ -32,6 +32,14 @@ export interface ConversationSessionInput {
      */
     readonly continuable: boolean;
     /**
+     * The thread moved to another model of this same provider instance, and
+     * the provider cannot carry the session on to it (`modelSwitch` is
+     * unsupported). A fresh session with a handoff is how the conversation
+     * travels: never resumed, but also never an unrecoverable-session refusal
+     * the person cannot act on.
+     */
+    readonly modelSwitchHandoff?: boolean;
+    /**
      * That attempt started a new session with a handoff and never completed.
      * Its session may have started without the provider ever receiving the
      * handoff, and the person was shown none, so the session is not taken up
@@ -109,7 +117,13 @@ export function decideConversationSession(
     }
     return previous.continuable
       ? { kind: "continue-session" }
-      : { kind: "refuse", reason: "session-unrecoverable" };
+      : previous.modelSwitchHandoff === true
+        ? input.handoff === "allowed"
+          ? // A same-provider model swap the provider cannot carry starts a fresh
+            // session with a handoff, not a dead-end refusal.
+            { kind: "new-session-with-handoff", reason: "provider-switch" }
+          : { kind: "refuse", reason: "handoff-unavailable" }
+        : { kind: "refuse", reason: "session-unrecoverable" };
   }
   return input.handoff === "allowed"
     ? { kind: "new-session-with-handoff", reason: "provider-switch" }

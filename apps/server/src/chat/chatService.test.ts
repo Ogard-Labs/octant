@@ -4940,10 +4940,15 @@ describe("ChatService", () => {
         prompt: "Continue",
       });
       if (!canSwitch) {
-        await expect(followUp).rejects.toMatchObject({
-          failure: { message: expect.stringContaining("native session cannot be recovered") },
-        });
-        expect(fakeDriver.sentTurns).toHaveLength(1);
+        // The provider cannot carry the session on to another of its models,
+        // so the turn starts a fresh session with a handoff instead of
+        // refusing: no resume, a new session, and the handoff on the attempt.
+        await followUp;
+        expect(fakeDriver.startedSessionIds).toHaveLength(2);
+        expect(fakeDriver.resumeInputs).toEqual([]);
+        expect(fakeDriver.sentTurns[1]?.sessionId).not.toBe(fakeDriver.sentTurns[0]?.sessionId);
+        const next = service.read(created.thread.id).turns.at(-1)?.attempts.at(-1);
+        expect(next?.handoff).toMatchObject({ reason: "provider-switch" });
         return;
       }
       await followUp;
