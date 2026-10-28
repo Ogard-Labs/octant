@@ -314,6 +314,77 @@ function pictureRequest(format: "png" | "pdf") {
 }
 
 describe("canvas export service", () => {
+  it("keeps a design the deck does not place as its own sheets after the slides", async () => {
+    const requests: CanvasExportPictureRequest[] = [];
+    const doc: CanvasExportDocument = {
+      ...document(),
+      definition: {
+        schemaVersion: 26,
+        title: "Launch plan",
+        provenance: {
+          mode: "work",
+          hostId: "local",
+          projectId: "22222222-2222-4222-8222-222222222222",
+          threadId: "33333333-3333-4333-8333-333333333333",
+          actor: { kind: "local-user", actorId: "55555555-5555-4555-8555-555555555555" },
+          providerInstanceId: "44444444-4444-4444-8444-444444444444",
+          modelId: "octant-test-model",
+          createdAt: "2026-08-01T21:00:00.000Z",
+        },
+        sourceManifest: [],
+        blocks: [],
+      } as unknown as CanvasDefinition,
+      blocks: [
+        {
+          blockId: "site",
+          schemaVersion: 26,
+          kind: "design",
+          title: "Site",
+          size: "phone",
+          theme: "none",
+          frames: [{ frameId: "home", title: "Home", html: "<h1>Home</h1>" }],
+        },
+        {
+          blockId: "signups",
+          schemaVersion: 1,
+          kind: "metric",
+          label: "Weekly signups",
+          value: 1284,
+        },
+        {
+          blockId: "visits",
+          schemaVersion: 1,
+          kind: "metric",
+          label: "Weekly visits",
+          value: 9021,
+        },
+        {
+          blockId: "deck",
+          schemaVersion: 26,
+          kind: "deck",
+          title: "Launch review",
+          slides: [
+            { slideId: "a", blockId: "signups" },
+            { slideId: "b", blockId: "visits" },
+          ],
+        },
+      ] as unknown as ReadonlyArray<CanvasBlock>,
+    };
+    const { registration } = exportFolder();
+    const { service, connection } = harness(
+      () => canvasExportTargetBindings(registration, canvasId),
+      { doc, renderer: fakeRenderer(requests) },
+    );
+    const prepared = await service.prepare(pictureRequest("png"), true);
+    expect(prepared.kind).toBe("approval");
+    const subject = requests[0]?.subject;
+    if (subject?.kind !== "slides") throw new Error("expected a slides subject");
+    expect(subject.slides).toHaveLength(2);
+    // The design the deck does not place keeps its own sheet after the slides.
+    expect(subject.frames?.[0]).toMatchObject({ width: 390, height: 844 });
+    connection.close();
+  });
+
   it("draws a deck block as one picture per slide, a design slide showing its named frame", async () => {
     const requests: CanvasExportPictureRequest[] = [];
     const doc: CanvasExportDocument = {
@@ -416,7 +487,7 @@ describe("canvas export service", () => {
       kind: "design",
       frames: [{ frameId: "about" }],
     });
-    expect(subject.slides[0]?.designPages).toHaveLength(1);
+    expect(subject.slides[0]).not.toHaveProperty("designPages");
     expect(subject.slides[1]?.definition.blocks[0]).toMatchObject({
       kind: "metric",
       value: 1284,

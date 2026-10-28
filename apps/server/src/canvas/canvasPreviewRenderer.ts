@@ -127,6 +127,12 @@ export interface CanvasExportPictureRequest {
           readonly definition: CanvasDefinition;
           readonly designPages?: ReadonlyArray<CanvasPreviewDesignPage>;
         }>;
+        /**
+         * Device-size design frames the deck does not place, drawn as the
+         * frames subject draws them: full sheets after the deck's slides, so
+         * presenting one Canvas drops no screens it holds beside it.
+         */
+        readonly frames?: ReadonlyArray<CanvasExportPictureFrame>;
       };
 }
 
@@ -499,6 +505,44 @@ export function createPlaywrightCanvasPreviewRenderer(
               height,
             });
             await context.close();
+          }
+          // Designs the deck does not place keep their own full-size sheets,
+          // captured exactly as the frames subject captures them, after the
+          // deck's slides.
+          const looseFrames = subject.frames ?? [];
+          if (looseFrames.length > 0) {
+            const sheetsContext = await openContext(browser, {
+              viewport: {
+                width: Math.max(...looseFrames.map((frame) => frame.width)),
+                height: Math.max(...looseFrames.map((frame) => frame.height)),
+              },
+              theme: request.theme,
+              page: { name: CANVAS_EXPORT_SHEETS_PAGE, html: canvasExportSheetsPage(looseFrames) },
+              designPages: looseFrames.map((frame) => ({ html: frame.page })),
+            });
+            const sheetsTab = await sheetsContext.newPage();
+            await sheetsTab.goto(`${CANVAS_PREVIEW_ORIGIN}/${CANVAS_EXPORT_SHEETS_PAGE}`, {
+              waitUntil: "load",
+              timeout: SETTLE_TIMEOUT_MS,
+            });
+            await sheetsTab.evaluate(() => document.fonts.ready.then(() => undefined));
+            for (let index = 0; index < looseFrames.length; index += 1) {
+              pictures.push(
+                await sheetsTab
+                  .locator(".octant-sheet")
+                  .nth(index)
+                  .screenshot({ type: "png", timeout: SETTLE_TIMEOUT_MS }),
+              );
+            }
+            for (const frame of looseFrames) {
+              sheets.push({
+                page: "",
+                sandbox: frame.sandbox,
+                width: frame.width,
+                height: frame.height,
+              });
+            }
+            await sheetsContext.close();
           }
           if (request.format === "png") return { kind: "rendered", files: pictures };
           const printContext = await openContext(browser, {

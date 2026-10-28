@@ -1,5 +1,5 @@
 import { decodeCanvasDocumentRecipeCatalog } from "@octant/contracts/canvas-skill";
-import { canvasMockupTsx, importCanvasHtmlPage } from "@octant/domain";
+import { canvasMockupTsx, canvasExportStem, importCanvasHtmlPage } from "@octant/domain";
 import {
   type CanvasId,
   decodeCanvasActionResult,
@@ -1934,7 +1934,7 @@ async function renderCanvasHtmlFileForWindow(
       kind: "ready",
       canvasId: input.canvasId,
       versionId: read.version.versionId,
-      fileName: `${canvasExportPlannedName(definition.title, "markdown").replace(/\.md$/, "")}.tsx`,
+      fileName: `${canvasExportStem(definition.title)}.tsx`,
       html: text,
       writesDesignMarkup: false,
       imagesLeftOut: 0,
