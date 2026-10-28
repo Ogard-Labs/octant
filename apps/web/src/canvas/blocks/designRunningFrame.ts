@@ -110,6 +110,33 @@ export function designRunRuntimeFor(
 }
 
 /**
+ * The run runtime for the snapshot of a page a Work or Code thread published,
+ * or `undefined` when the host cannot serve it. The host builds the page from
+ * that thread's own journal; it never runs on open.
+ */
+export function publishedSnapshotRunRuntimeFor(
+  client: Pick<CanvasClient, "runPublishedSnapshot"> | undefined,
+  input: {
+    readonly mode: "work" | "code";
+    readonly threadId: string;
+    readonly toolCallId: string;
+  },
+): DesignRunRuntime | undefined {
+  if (client?.runPublishedSnapshot === undefined) return undefined;
+  const drawnIn = designDrawnInHere();
+  return {
+    start: async () =>
+      (await client.runPublishedSnapshot?.(input)) ?? {
+        kind: "refused",
+        reason: "This host does not run published pages.",
+      },
+    contained: drawnIn === "desktop-surface",
+    drawnIn,
+    runsOnOpen: false,
+  };
+}
+
+/**
  * Asks the desktop to close the network of the surface a prototype is drawn
  * on. Any failure is a refusal with its reason; nothing falls back to a frame.
  */

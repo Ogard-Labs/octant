@@ -35,6 +35,7 @@ import {
   assignedClaudeAccountConfigDirectory,
   effectiveClaudeAccountConfigDirectory,
   createClaudeProvider,
+  setClaudeArtifactDelivery,
   formatClaudeAuthLoginCommand,
   createGeminiImageProvider,
   createIdeogramImageProvider,
@@ -2479,6 +2480,50 @@ describe("provider instance policy", () => {
 
     expect(changed.configuration).toEqual({ ...original.configuration, accent: "rose" });
     expect(changed.version).toBe(2);
+  });
+
+  it("turns Claude artifacts on only by the person's own switch and only for a claude.ai sign-in", () => {
+    const subscription = changeClaudeConfiguration(claudeProvider(), {
+      configuration: { ...claudeProvider().configuration, authentication: "subscription" },
+      activeSessionCount: 0,
+      updatedAt,
+    });
+    // A running session is no reason to refuse: the switch changes no process input.
+    const on = setClaudeArtifactDelivery(subscription, { enabled: true, updatedAt });
+    expect(on.configuration.artifactDelivery).toBe(true);
+    expect(on.version).toBe(subscription.version + 1);
+
+    // An account edit keeps the person's switch and cannot set it itself.
+    const recoloured = changeClaudeConfiguration(on, {
+      configuration: { ...subscription.configuration, accent: "rose" },
+      activeSessionCount: 1,
+      updatedAt,
+    });
+    expect(recoloured.configuration.artifactDelivery).toBe(true);
+    const created = createClaudeProvider({
+      id: ids.other,
+      displayName: "Second Claude",
+      configuration: { ...on.configuration, configDirectory: "/Users/example/.claude-accounts/b" },
+      existingInstances: [],
+      expectedVersion: version(0),
+      createdAt,
+    });
+    expect(created.configuration).not.toHaveProperty("artifactDelivery");
+
+    // An API key has no claude.ai account: moving to one turns the switch off,
+    // and it cannot be turned on there.
+    const keyed = changeClaudeConfiguration(on, {
+      configuration: { ...subscription.configuration, authentication: "api-key" },
+      activeSessionCount: 0,
+      updatedAt,
+    });
+    expect(keyed.configuration).not.toHaveProperty("artifactDelivery");
+    expect(() => setClaudeArtifactDelivery(keyed, { enabled: true, updatedAt })).toThrow(
+      "Claude artifacts need a claude.ai sign-in",
+    );
+
+    const off = setClaudeArtifactDelivery(on, { enabled: false, updatedAt });
+    expect(off.configuration).not.toHaveProperty("artifactDelivery");
   });
 
   it("rejects Claude reconfiguration before changing an instance with active sessions", () => {

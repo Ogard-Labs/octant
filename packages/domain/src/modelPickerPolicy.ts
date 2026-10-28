@@ -251,6 +251,12 @@ export interface PickerGroup {
    * another of its models. Absent when the instance was never probed.
    */
   readonly modelSwitch?: ProviderCapabilitySupport;
+  /**
+   * Whether this account's threads may choose the runtime's own artifact tool
+   * instead of a Canvas, per mode. Absent when the instance was never probed
+   * or has no such tool.
+   */
+  readonly nativeArtifacts?: ProviderObservedState["capabilities"]["nativeArtifacts"];
   readonly unavailableCurrent?: PickerModel;
   /**
    * A model hidden in Settings but still bound to an existing draft/thread.
@@ -430,6 +436,9 @@ export function buildModelPickerGroups(input: ModelPickerInput): ReadonlyArray<P
       ...(observed.capabilities.modelSwitch === undefined
         ? {}
         : { modelSwitch: observed.capabilities.modelSwitch }),
+      ...(observed.capabilities.nativeArtifacts === undefined
+        ? {}
+        : { nativeArtifacts: observed.capabilities.nativeArtifacts }),
       ...(observed.verifiedToolModelIds === undefined
         ? {}
         : { verifiedToolModelIds: observed.verifiedToolModelIds }),
@@ -604,6 +613,9 @@ function maybeAppendUnavailableCurrent(
     ...(observed?.capabilities.modelSwitch === undefined
       ? {}
       : { modelSwitch: observed.capabilities.modelSwitch }),
+    ...(observed?.capabilities.nativeArtifacts === undefined
+      ? {}
+      : { nativeArtifacts: observed.capabilities.nativeArtifacts }),
     ...(observed?.verifiedToolModelIds === undefined
       ? {}
       : { verifiedToolModelIds: observed.verifiedToolModelIds }),

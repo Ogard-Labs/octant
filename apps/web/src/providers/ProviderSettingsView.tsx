@@ -233,6 +233,11 @@ export interface ProviderSettingsViewProps {
     command: import("./ProviderOAuthSignIn").ProviderOAuthCommand,
   ) => Promise<import("./ProviderOAuthSignIn").ProviderOAuthCommandResult | undefined>;
   readonly onSetEnabled: (instanceId: ProviderInstanceId, enabled: boolean) => Promise<boolean>;
+  /** Turns delivering documents as Claude artifacts on or off for one Claude account. */
+  readonly onSetClaudeArtifactDelivery?: (
+    instanceId: ProviderInstanceId,
+    enabled: boolean,
+  ) => Promise<boolean>;
   readonly onDataTagsChange: (
     instanceId: ProviderInstanceId,
     dataTags: ProviderDataTags,
@@ -464,6 +469,9 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onRemove={props.onRemove}
         onRename={props.onRename}
         onSetEnabled={props.onSetEnabled}
+        {...(props.onSetClaudeArtifactDelivery === undefined
+          ? {}
+          : { onSetClaudeArtifactDelivery: props.onSetClaudeArtifactDelivery })}
         onDataTagsChange={props.onDataTagsChange}
         onModelDataTagsChange={props.onModelDataTagsChange}
         {...(props.onModelContextWindowChange === undefined

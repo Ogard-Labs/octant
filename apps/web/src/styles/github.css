@@ -75,11 +75,7 @@
   justify-items: center;
   gap: var(--oct-space-2);
   max-width: 36rem;
-  padding: var(--oct-space-8) var(--oct-space-6);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
   color: var(--oct-muted);
-  background: var(--octant-card);
   text-align: center;
 }
 
@@ -288,7 +284,7 @@
   overflow-wrap: anywhere;
   color: var(--oct-fg);
   font-size: var(--oct-text-lg);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   letter-spacing: var(--oct-tracking-tight);
   line-height: 1.25;
 }

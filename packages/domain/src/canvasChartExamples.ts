@@ -197,6 +197,57 @@ export const trafficSankeyExample = {
   ],
 };
 
+/**
+ * A trend that states its finding: a title that says what happened, a
+ * subtitle that says what was counted, and callouts on the two jumps.
+ */
+export const subscriberTrendExample = {
+  blockId: "subscriber-trend",
+  schemaVersion: CANVAS_SCHEMA_VERSION,
+  kind: "chart" as const,
+  chartType: "line" as const,
+  title: "Up 2,304 subscribers this year, most of it before May",
+  subtitle: "Email subscribers at the end of each month, 2026",
+  series: [
+    {
+      seriesId: "subscribers",
+      label: "Subscribers",
+      points: [
+        { x: "Dec", y: 7_311 },
+        { x: "Jan", y: 7_808, note: "+344 on Jan 25" },
+        { x: "Feb", y: 8_320 },
+        { x: "Mar", y: 8_711, note: "+184 on Mar 15" },
+        { x: "Apr", y: 9_016 },
+        { x: "May", y: 9_130 },
+        { x: "Jun", y: 9_239 },
+      ],
+    },
+  ],
+};
+
+/** A month the reader should look at, emphasized so the others recede. */
+export const monthlyGrowthExample = {
+  blockId: "monthly-growth",
+  schemaVersion: CANVAS_SCHEMA_VERSION,
+  kind: "chart" as const,
+  chartType: "bar" as const,
+  title: "Growth picked up again in September",
+  subtitle: "Net new subscribers per month",
+  series: [
+    {
+      seriesId: "net-new",
+      label: "Net new",
+      points: [
+        { x: "Jun", y: 109 },
+        { x: "Jul", y: 38 },
+        { x: "Aug", y: 32 },
+        { x: "Sep", y: 210, note: "+210", emphasis: true as const },
+        { x: "Oct", y: 96 },
+      ],
+    },
+  ],
+};
+
 export const chartExamples = [
   revenueShareExample,
   costSplitExample,
@@ -206,6 +257,8 @@ export const chartExamples = [
   signupFunnelExample,
   serviceProfileRadarExample,
   trafficSankeyExample,
+  subscriberTrendExample,
+  monthlyGrowthExample,
 ] as const;
 
 function chartBlock(value: unknown): CanvasChartBlock {

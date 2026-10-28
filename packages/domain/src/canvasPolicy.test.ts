@@ -1621,6 +1621,32 @@ describe("design frames", () => {
     ).toMatch(/^design-run-refused: /);
   });
 
+  it("refuses a chart callout inside a document declaring version 21 as a future version", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: 21,
+          blocks: [
+            {
+              blockId: "growth",
+              schemaVersion: 21,
+              kind: "chart",
+              chartType: "bar",
+              series: [
+                {
+                  seriesId: "net",
+                  label: "Net new",
+                  points: [{ x: "Sep", y: 210, note: "+210", emphasis: true }],
+                },
+              ],
+            },
+          ],
+        }),
+      "unsupported-schema-version",
+    );
+  });
+
   it("refuses a running design inside a document declaring version 17", () => {
     expectPolicyCode(
       () =>

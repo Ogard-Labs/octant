@@ -551,12 +551,26 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
                 `${reading(link.source)} → ${reading(link.target)} = ${scalar(link.value, block.format)}`,
             )
           : block.series.flatMap((series) =>
-              series.points.map(
-                (point) =>
+              series.points.map((point) =>
+                [
                   `${reading(series.label)}: ${scalar(point.x, block.format)} = ${scalar(point.y, block.format)}`,
+                  point.note === undefined ? "" : ` — ${reading(point.note)}`,
+                  point.emphasis === true ? " (highlighted)" : "",
+                ].join(""),
               ),
             );
-      return pictured(drawCanvasExportChart(block, reading), [{ kind: "list", items }]);
+      const heading: ReadonlyArray<Piece> = [
+        ...(block.title === undefined
+          ? []
+          : [{ kind: "heading" as const, level: 4, text: reading(block.title) }]),
+        ...(block.subtitle === undefined
+          ? []
+          : [{ kind: "paragraph" as const, text: reading(block.subtitle) }]),
+      ];
+      return [
+        ...heading,
+        ...pictured(drawCanvasExportChart(block, reading), [{ kind: "list", items }]),
+      ];
     }
     case "timeline":
       return [

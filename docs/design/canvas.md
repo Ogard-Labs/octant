@@ -160,6 +160,47 @@ runtime with its own file tools read the tool description and still wrote the
 memo as a Markdown file, then pasted it into the reply after the write was
 denied.
 
+Canvas stays the default delivery everywhere. On a Claude Code account whose
+person enabled **Claude artifacts** (off by default; see
+[Providers and model endpoints](model-endpoints.md#claude-artifacts)), each
+Work or Code thread may choose them instead, and only a thread that chose them
+gets a different rule in that place for its turns outside Plan: write the
+document as one `.html` or `.md` file in the working folder and publish it
+with Claude's own `Artifact` tool, which puts it on the person's claude.ai
+account. The rule keeps a Canvas as the answer when the person asks for one or
+when the runtime leaves the tool out of its session, and `octant_canvas` stays
+offered. The driver names its artifact tool through the provider-neutral
+`nativeArtifactTool` seam and the turn starts its session with the thread's
+`nativeArtifacts` choice, so the host chooses the rule without naming a
+provider; every other thread, every other provider, Chat, and Plan keep the
+Canvas rule. Naming the tool grants nothing: the driver's gate decides each
+call (see [Architecture: security and authority](../architecture.md#security-and-authority)).
+
+The choice is the thread's `documentDelivery`, absent until the person
+decides. The first time a thread that may choose artifacts shows a Canvas, a
+one-time offer sits beneath that first Canvas: "Use Claude artifacts for this
+thread instead?", repeating that it turns on Claude Code's usage telemetry to
+Anthropic for the thread's turns, with **Use Claude artifacts** and **Keep
+Canvas**. Either answer is journaled, so the offer never returns. The thread's
+composer menu (Work's task actions; Code's document control beside the access
+picker) switches it either way at any time; turning artifacts on there asks
+in a confirmation that repeats the warning. A change applies from the next
+turn. A paired device may choose Canvas but not artifacts.
+
+A published page appears in the thread under the turn's tool rows as a link
+card that opens in the person's browser, beside the host's snapshot of the
+file the person approved publishing, labelled as the published snapshot
+(later edits on claude.ai are not reflected). An HTML snapshot is drawn
+through the same importer and design policy as an
+[imported HTML page](#html-import): a static design frame with no
+network, and a page with script waits for Run, whose single-use page the host
+builds from that thread's own journal under the window's read check (never
+from what the request carries). A Markdown snapshot is read as Markdown. A running Work turn shows the link card at once and the
+snapshot once the turn settles. A
+file that is neither, too large, or unreadable keeps only the link card.
+Octant never fetches, frames, or signs in to claude.ai, and the card and
+snapshot stay visible when the settled toolchain folds.
+
 ## Presentation and schema versions
 
 `create` and `revise` take an optional thread `presentation`: `inline` or
@@ -175,7 +216,8 @@ version 16, a design's image `assets` at version 17, a design's
 `runsScript` at version 18, the `tabs` and `columns` layout groups,
 diagram styles, and the plan's `gantt` view at version 19, and a Chat
 Canvas owned by its thread (a chat provenance with no Project) at version
-20, and the design and diagram fields below at version 21, so a document that
+20, the design and diagram fields below at version 21, and a chart's
+`title`, `subtitle`, and point `note` and `emphasis` at version 22, so a document that
 declares an earlier version and carries one is refused as a declared future
 version. Version 20 adds no block or field a share carries, so a share names a
 block authored at 20 as 19 under share version 10. Version 21 adds the
@@ -401,6 +443,13 @@ layout is pure and deterministic in `packages/domain`
 feeds it, every ending lines up in the last column, and one scale sizes every
 band, so the screen and the artifact preview SVG draw the same picture. The
 three types arrive together with Canvas schema version 14.
+From Canvas schema version 22 any chart may carry a `title` (the finding, as a
+sentence) and a `subtitle` (what was measured and over which span), each at
+most 160 characters. On a line, area, scatter, bar, or distribution chart a
+point may also carry a `note` of at most 40 characters, drawn as a callout
+beside it, and `emphasis: true` on the reading the chart is about; a chart
+holds at most 12 notes. Other chart types refuse both, since a slice, stage,
+axis spoke, or stacked segment has no single point to label.
 A `dashboard` block is a KPI layout: a title that names its region, an
 optional `columns` of 1 to 4 (four when absent), and 1 to 24 `cells`, each
 naming the `blockId` of a metric, progress, status, chart, or table block in the
@@ -587,7 +636,11 @@ version 8 carries the version-15 dashboard, so it named blocks up to version
 view, so it names blocks up to version 19. Share version 10 carries a design's
 frames and accompanies no Canvas version, and share version 11 carries the
 version-21 design and diagram fields, so it names blocks up to version 21
-(`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`).
+(`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`). Version 22 adds only a chart's title,
+subtitle, and point callouts, which share version 11 does not carry: a shared
+chart leaves as its readings and is named as version 21. Carrying them is a
+share format bump, which the share service must learn before a desktop
+release publishes it.
 Share documents version independently of Canvas documents: a treemap, a
 heatmap, a bar list, a chart's or a table column's number format, a table
 column's display, and a board's layout arrive with share version 3, and a

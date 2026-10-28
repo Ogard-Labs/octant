@@ -4,6 +4,7 @@ import {
   type PermissionPersistence,
   type ProviderFailure,
   type ProviderInstance,
+  type ProviderInstanceId,
 } from "@octant/contracts";
 import {
   CODEX_ACCOUNT_PROFILE,
@@ -69,6 +70,11 @@ export interface ProviderDriverFactoryOptions {
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
   readonly permissionPersistence: () => PermissionPersistence;
   readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
+  /**
+   * A Claude account's current artifact delivery switch, read from the
+   * journal at each call. Absent leaves artifact delivery off.
+   */
+  readonly claudeArtifactDelivery?: (instanceId: ProviderInstanceId) => boolean;
   /** Host Claude env from the snapshot gate. Omit to use the last gated copy. */
   readonly claudeHostEnvironment?: NodeJS.ProcessEnv;
   readonly codexInstances?: ReadonlyArray<ProviderInstance>;
@@ -241,7 +247,11 @@ export function makeProviderDriver(
       // and resume lookup one folder; the probe otherwise refused such an
       // account as "requires an assigned account directory".
       const configDirectory = effectiveClaudeAccountConfigDirectory(instance, homedir());
+      const readArtifactDelivery = options.claudeArtifactDelivery;
       return makeClaudeDriver({
+        ...(readArtifactDelivery === undefined
+          ? {}
+          : { artifactDelivery: () => readArtifactDelivery(instance.id) }),
         instanceId: instance.id,
         binaryPath: instance.configuration.binaryPath,
         authentication: instance.configuration.authentication,

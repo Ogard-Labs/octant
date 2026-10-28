@@ -276,6 +276,43 @@ describe("planWorkTurnContext", () => {
     expect(JSON.stringify(withoutCanvas.context)).not.toContain("octant_canvas");
   });
 
+  it("puts the artifact rule in the Canvas rule's place when the driver names its artifact tool, keeping Canvas on request", () => {
+    let n = 0;
+    const uuid = () => `aaaaaaaa-aaaa-4aaa-8aaa-${String(++n).padStart(12, "0")}`;
+    const plan = planWorkTurnContext({
+      threadId,
+      providerInstanceId: provider,
+      modelId: model,
+      uuid,
+      createdAt: "2026-08-11T12:00:00.000Z",
+      contributions: [],
+    });
+    if (plan.kind !== "ok") throw new Error("The Work guide fits its budget");
+    const withArtifacts = includeWorkToolDefinitions({
+      plan,
+      uuid,
+      safeInputBudget: 2_000,
+      artifactToolName: "Artifact",
+      tools: [{ name: "octant_canvas", inputSchema: { type: "object" } }],
+    });
+    if (withArtifacts.kind !== "ok") throw new Error("The instructions fit their budget");
+    const delivery = withArtifacts.context[0];
+    expect(delivery).toEqual({
+      kind: "instructions",
+      text: expect.stringContaining("publish that file with Artifact"),
+    });
+    // A Canvas stays the answer when the person asks for one, or when the
+    // runtime leaves its tool out of the session.
+    expect(delivery?.text).toContain("When the person asks for a Canvas");
+    expect(delivery?.text).not.toContain("as a Canvas with the octant_canvas tool, not as a file");
+    expect(withArtifacts.manifest.entries).toContainEqual(
+      expect.objectContaining({
+        category: "octant-policy",
+        source: { kind: "instruction", referenceId: "octant-artifact-delivery" },
+      }),
+    );
+  });
+
   it("refuses required file mentions that cannot fit the context budget", () => {
     let n = 0;
     const huge = "a".repeat(8_000);

@@ -496,6 +496,46 @@ describe("ProviderService", () => {
     expect(fixture.append.mock.calls.length).toBe(appends);
   });
 
+  it("still journals the catalogue when a probe really changed what it lists", async () => {
+    const before = observation();
+    const after = observation({
+      models: [
+        ...before.models,
+        {
+          id: "model-2",
+          displayName: "Model Two",
+          source: "discovered",
+          verification: "verified",
+          reasoning: "supported",
+          inputModalities: ["text"],
+          options: [],
+        },
+      ],
+    });
+    const results = [before, after];
+    let probes = 0;
+    const fixture = serviceFixture({
+      instances: [provider()],
+      withCatalogPersistence: true,
+      probe: async () => results[Math.min(probes++, results.length - 1)],
+    });
+
+    await fixture.service.probe(windowId, instanceId);
+    expect(fixture.catalogs()[0]).toMatchObject({ version: 1, invalidated: false });
+    const appends = fixture.append.mock.calls.length;
+
+    await fixture.service.probe(windowId, instanceId);
+    expect(fixture.append.mock.calls.length).toBeGreaterThan(appends);
+    expect(fixture.catalogs()[0]).toMatchObject({
+      version: 2,
+      invalidated: false,
+      models: [
+        expect.objectContaining({ id: "model-1" }),
+        expect.objectContaining({ id: "model-2" }),
+      ],
+    });
+  });
+
   it("persists residency tags on an individual provider model", async () => {
     const fixture = serviceFixture({
       instances: [provider()],
@@ -1420,7 +1460,19 @@ describe("ProviderService", () => {
       displayName: "Codex personal",
       binaryPath: "/opt/homebrew/bin/codex",
     });
-    fixture.runtime.setObservedState(observation());
+    fixture.runtime.setObservedState(
+      observation({
+        capabilities: {
+          ...capabilities,
+          nativeArtifacts: {
+            chat: "unsupported",
+            work: "unsupported",
+            code: "unsupported",
+            unsupportedReason: "turned-off",
+          },
+        },
+      }),
+    );
     fixture.runtime.setActiveSessionCount(instanceId, 1);
     const invalidate = vi.spyOn(fixture.runtime, "invalidateRuntime");
 
@@ -2034,7 +2086,19 @@ describe("ProviderService", () => {
   it("recolours a Claude account during a session without stopping it, and still refuses a runtime change", async () => {
     const clearRuntimeUsageLimits = vi.fn();
     const fixture = serviceFixture({ instances: [claudeProvider()], clearRuntimeUsageLimits });
-    fixture.runtime.setObservedState(observation());
+    fixture.runtime.setObservedState(
+      observation({
+        capabilities: {
+          ...capabilities,
+          nativeArtifacts: {
+            chat: "unsupported",
+            work: "unsupported",
+            code: "unsupported",
+            unsupportedReason: "turned-off",
+          },
+        },
+      }),
+    );
     fixture.runtime.setActiveSessionCount(instanceId, 1);
     const invalidate = vi.spyOn(fixture.runtime, "invalidateRuntime");
     const configuration = {
@@ -2068,6 +2132,73 @@ describe("ProviderService", () => {
     ).rejects.toMatchObject({
       failure: { message: "Stop active sessions before reconfiguring this provider." },
     });
+  });
+
+  it("records the Claude artifact switch during a session without stopping it, and refuses it for other providers", async () => {
+    const fixture = serviceFixture({
+      instances: [claudeProvider(), provider({ id: otherId, displayName: "OpenCode other" })],
+    });
+    fixture.runtime.setObservedState(
+      observation({
+        capabilities: {
+          ...capabilities,
+          nativeArtifacts: {
+            chat: "unsupported",
+            work: "unsupported",
+            code: "unsupported",
+            unsupportedReason: "turned-off",
+          },
+        },
+      }),
+    );
+    fixture.runtime.setActiveSessionCount(instanceId, 1);
+    const invalidate = vi.spyOn(fixture.runtime, "invalidateRuntime");
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "set-claude-artifact-delivery",
+        instanceId,
+        expectedVersion: 1,
+        enabled: true,
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: { version: 2, configuration: { artifactDelivery: true } },
+    });
+    expect(fixture.persistence.readProviderInstance(instanceId)).toMatchObject({
+      configuration: { artifactDelivery: true },
+    });
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(fixture.runtime.observedState(instanceId)).toMatchObject({ readiness: "ready" });
+    // The account's threads may choose artifacts at once, without a probe.
+    expect(fixture.runtime.observedState(instanceId)?.capabilities.nativeArtifacts).toEqual({
+      chat: "unsupported",
+      work: "supported",
+      code: "supported",
+    });
+
+    const off = await fixture.service.execute(windowId, {
+      kind: "set-claude-artifact-delivery",
+      instanceId,
+      expectedVersion: 2,
+      enabled: false,
+    });
+    expect(
+      off.kind === "provider-updated" ? off.instance.configuration : undefined,
+    ).not.toHaveProperty("artifactDelivery");
+    expect(fixture.runtime.observedState(instanceId)?.capabilities.nativeArtifacts).toMatchObject({
+      work: "unsupported",
+      unsupportedReason: "turned-off",
+    });
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "set-claude-artifact-delivery",
+        instanceId: otherId,
+        expectedVersion: 1,
+        enabled: true,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
   });
 
   it("assigns a separate Claude-owned directory to each additional Claude account", async () => {

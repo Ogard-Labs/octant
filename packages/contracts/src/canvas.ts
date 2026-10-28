@@ -84,6 +84,11 @@ export const CANVAS_MAX_MOCKUP_TEXT_LENGTH = 120;
 export const CANVAS_MAX_MOCKUP_NOTE_LENGTH = 240;
 export const CANVAS_MAX_MOCKUP_VARIANTS = 4;
 export const CANVAS_MAX_MOCKUP_ANNOTATIONS = 12;
+// A chart's callouts point at the few readings the story is about; past a
+// dozen they cover the line they explain.
+export const CANVAS_MAX_CHART_NOTES = 12;
+export const CANVAS_MAX_CHART_NOTE_LENGTH = 40;
+export const CANVAS_MAX_CHART_TITLE_LENGTH = 160;
 // A mockup table shows what a table holds, not its data: a few columns and a
 // handful of rows are enough to read the shape.
 export const CANVAS_MAX_MOCKUP_TABLE_COLUMNS = 6;
@@ -246,6 +251,8 @@ export const CANVAS_THREAD_OWNED_SCHEMA_VERSION = 20;
 // (`theme: "brand"`), a captured page as a design asset, and a diagram node's
 // icon and detail with a group's parent group.
 export const CANVAS_DESIGN_FIELDS_SCHEMA_VERSION = 21;
+// A chart's own title and subtitle, and a point's callout note and emphasis.
+export const CANVAS_CHART_CALLOUTS_SCHEMA_VERSION = 22;
 // The metric's sparkline, goodDirection, and caption arrived with the bar list.
 export const CANVAS_METRIC_TREND_SCHEMA_VERSION = 7;
 
@@ -273,6 +280,27 @@ export function canvasMetricUsesTrendFields(block: {
     (block.sparkline !== undefined ||
       block.goodDirection !== undefined ||
       block.caption !== undefined)
+  );
+}
+
+/** Whether a block uses a chart field introduced at the chart-callouts version. */
+export function canvasChartUsesCallouts(block: {
+  readonly kind?: unknown;
+  readonly title?: unknown;
+  readonly subtitle?: unknown;
+  readonly series?: unknown;
+}): boolean {
+  if (block.kind !== "chart") return false;
+  return (
+    block.title !== undefined ||
+    block.subtitle !== undefined ||
+    (Array.isArray(block.series) &&
+      block.series.some(
+        (series) =>
+          typeof series === "object" &&
+          series !== null &&
+          anyItemCarries((series as Record<string, unknown>)["points"], ["note", "emphasis"]),
+      ))
   );
 }
 
@@ -803,6 +831,10 @@ export type CanvasChartLink = typeof CanvasChartLink.Type;
 export const CanvasChartPoint = Schema.Struct({
   x: Schema.Union(FiniteNumber, CanvasText),
   y: FiniteNumber,
+  /** A short callout drawn beside the point, such as "+344". */
+  note: Schema.optional(boundedNonEmptyText(CANVAS_MAX_CHART_NOTE_LENGTH)),
+  /** Marks the reading the chart is about; the rest of its series recedes. */
+  emphasis: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type CanvasChartPoint = typeof CanvasChartPoint.Type;
 
@@ -829,10 +861,25 @@ export type CanvasChartSeries = typeof CanvasChartSeries.Type;
  * series. Values a reader could still draw (a negative flow, a funnel that
  * widens) are left to the domain policy, which refuses them with a reason.
  */
+// Callouts sit on one value axis drawn at the figure's width; a slice, a
+// stage, an axis spoke, or a stacked segment has no single point to label.
+const CHART_TYPES_WITH_CALLOUTS: ReadonlySet<string> = new Set([
+  "line",
+  "area",
+  "scatter",
+  "bar",
+  "distribution",
+]);
+
 export function canvasChartSeriesIssue(block: {
   readonly chartType: string;
   readonly series: ReadonlyArray<{
-    readonly points: ReadonlyArray<{ readonly x: number | string; readonly y: number }>;
+    readonly points: ReadonlyArray<{
+      readonly x: number | string;
+      readonly y: number;
+      readonly note?: string | undefined;
+      readonly emphasis?: true | undefined;
+    }>;
     readonly mark?: CanvasChartMark | undefined;
   }>;
   readonly links?: ReadonlyArray<{ readonly source: string; readonly target: string }> | undefined;
@@ -840,6 +887,15 @@ export function canvasChartSeriesIssue(block: {
   const marked = block.series.some((item) => item.mark !== undefined);
   if (block.chartType !== "bar-line" && marked) {
     return "Only a bar and line chart names a mark on its series.";
+  }
+  const called = block.series.flatMap((item) =>
+    item.points.filter((point) => point.note !== undefined || point.emphasis !== undefined),
+  );
+  if (called.length > 0 && !CHART_TYPES_WITH_CALLOUTS.has(block.chartType)) {
+    return "Only a line, area, scatter, bar, or distribution chart notes or emphasizes a point.";
+  }
+  if (called.filter((point) => point.note !== undefined).length > CANVAS_MAX_CHART_NOTES) {
+    return `A chart carries at most ${String(CANVAS_MAX_CHART_NOTES)} point notes.`;
   }
   if (block.chartType === "sankey") return sankeyIssue(block.series.length, block.links);
   if (block.links !== undefined) return "Only a sankey chart carries links.";
@@ -1003,6 +1059,10 @@ export const CanvasChartBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("chart"),
   chartType: CanvasChartType,
+  /** The finding the chart shows, as a sentence; the Canvas names the subject. */
+  title: Schema.optional(boundedNonEmptyText(CANVAS_MAX_CHART_TITLE_LENGTH)),
+  /** What is measured and over which span. */
+  subtitle: Schema.optional(boundedNonEmptyText(CANVAS_MAX_CHART_TITLE_LENGTH)),
   series: Schema.Array(CanvasChartSeries).pipe(Schema.maxItems(CANVAS_MAX_SERIES)),
   /** A sankey's flows; every other chart type omits it. */
   links: Schema.optional(
@@ -2415,6 +2475,34 @@ export const CanvasDesignRunOutcome = Schema.Union(
 );
 export type CanvasDesignRunOutcome = typeof CanvasDesignRunOutcome.Type;
 
+/**
+ * Asks to run the page a thread's tool call published (a Claude artifact),
+ * from the host's own snapshot of it. The host finds the snapshot in that
+ * thread's journal under the window's read authority; nothing the request
+ * carries becomes the page.
+ */
+export const PublishedSnapshotRunRequest = Schema.Struct({
+  mode: Schema.Literal("work", "code"),
+  threadId: Schema.UUID,
+  toolCallId: boundedNonEmptyText(255),
+}).annotations(strict);
+export type PublishedSnapshotRunRequest = typeof PublishedSnapshotRunRequest.Type;
+
+/** A published snapshot's running page, offered once, under the design page's rules. */
+export const PublishedSnapshotRunOutcome = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("ready"),
+    page: Schema.String.pipe(
+      Schema.pattern(/^\/api\/canvas\/design-page\?ticket=[A-Za-z0-9_-]{43}$/),
+    ),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("unavailable"),
+    reason: boundedNonEmptyText(512),
+  }).annotations(strict),
+);
+export type PublishedSnapshotRunOutcome = typeof PublishedSnapshotRunOutcome.Type;
+
 export const CanvasPlanBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("plan"),
@@ -2871,6 +2959,15 @@ export const CanvasDefinition = Schema.Struct({
           `Frame notes, brand tokens, captured-page assets, and diagram icons, details, and nested groups require Canvas schema version ${String(CANVAS_DESIGN_FIELDS_SCHEMA_VERSION)}.`,
       },
     ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_CHART_CALLOUTS_SCHEMA_VERSION ||
+        !definition.blocks.some(canvasChartUsesCallouts),
+      {
+        message: () =>
+          `A chart title, subtitle, point note, or point emphasis requires Canvas schema version ${String(CANVAS_CHART_CALLOUTS_SCHEMA_VERSION)}.`,
+      },
+    ),
   );
 export type CanvasDefinition = typeof CanvasDefinition.Type;
 
@@ -2908,6 +3005,12 @@ export const decodeCanvasNodeId = Schema.decodeUnknownSync(CanvasNodeId);
 export const decodeCanvasDesignAssetsOutcome = Schema.decodeUnknownSync(CanvasDesignAssetsOutcome);
 export const decodeCanvasDesignRunRequest = Schema.decodeUnknownSync(CanvasDesignRunRequest);
 export const decodeCanvasDesignRunOutcome = Schema.decodeUnknownSync(CanvasDesignRunOutcome);
+export const decodePublishedSnapshotRunRequest = Schema.decodeUnknownSync(
+  PublishedSnapshotRunRequest,
+);
+export const decodePublishedSnapshotRunOutcome = Schema.decodeUnknownSync(
+  PublishedSnapshotRunOutcome,
+);
 
 // ── Journaled lifecycle events ──────────────────────────────────────────────
 //

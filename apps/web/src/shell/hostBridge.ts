@@ -1,302 +1,99 @@
+import type { CodeOperationApprovalRequest } from "@octant/contracts/code-operations";
+import type { AppReleaseRing, AppUpdateState } from "@octant/contracts/app-updates";
 import type { NativeMenuRequest, NativeMenuOutcome } from "@octant/contracts/shell";
-import type { OpenInApplicationId } from "@octant/contracts/shell";
 
-/** The thread a window shows, or the one a menu-bar row asks it to open. */
-export interface MenuBarOpenThread {
-  readonly mode: "chat" | "work" | "code";
-  readonly threadId: string;
-}
+export type { AppUpdateState };
 
-export type ResolvedSidebarMaterial = "opaque" | "translucent";
-export type BoundProjectType = "work" | "code";
-export type ProviderCredentialStatus = "stored" | "missing" | "unavailable";
-/** A key's label and id. The secret stays with the host and is never returned. */
-export interface ProviderApiKeySummary {
-  readonly id: string;
-  readonly label: string;
-  /** The key a request sends first. Exactly one key per provider is active. */
-  readonly active: boolean;
-}
-export type ProjectRootPickerResult =
-  | Readonly<{ kind: "cancelled" }>
-  | Readonly<{ kind: "selected"; receiptId: string; displayName: string }>;
-export type LocalPluginFolderPickerResult =
-  | Readonly<{ kind: "cancelled" }>
-  | Readonly<{ kind: "selected"; receiptId: string; displayName: string }>;
-export interface CodeExternalEditorRequest {
-  readonly threadId: string;
-  readonly checkoutId: string;
-  readonly fileId: string;
-  readonly line: number;
-  readonly column: number;
-}
-export interface OpenInApplicationDescriptor {
-  readonly id: OpenInApplicationId;
-  readonly label: string;
-  readonly available: boolean;
-}
-export interface CodeCheckoutOpenRequest {
-  readonly threadId: string;
-  readonly applicationId: OpenInApplicationId;
-}
 /**
- * The palette a window's own theme resolved to, reported so the
- * desktop-owned approval view can draw the app the person is looking at
- * instead of the operating system's light or dark preference alone.
+ * The desktop bridge's payload types come from one shared contract,
+ * `@octant/contracts/desktop-bridge`, which the main process, the preload
+ * script, and this renderer all import, so the three bundles can never again
+ * drift apart on the same shape. They are re-exported here for the surfaces
+ * that already reached for them through this module.
  */
-export interface ApprovalSurfacePalette {
-  readonly mode: "light" | "dark";
-  readonly surface: string;
-  readonly text: string;
-  readonly muted: string;
-  readonly border: string;
-  readonly control: string;
-  readonly controlHover: string;
-  readonly accent: string;
-  readonly accentForeground: string;
-}
-
-export type CodeDeepLink =
-  | Readonly<{ kind: "project"; projectId: string }>
-  | Readonly<{ kind: "thread"; threadId: string }>
-  | Readonly<{ kind: "diff"; threadId: string; checkoutId: string }>
-  | Readonly<{ kind: "test"; threadId: string; testRunId: string }>
-  | Readonly<{
-      kind: "file";
-      threadId: string;
-      checkoutId: string;
-      fileId: string;
-      relativePath: string;
-      line: number;
-      column: number;
-    }>
-  | Readonly<{ kind: "new-thread"; projectId: string; checkoutId: string }>;
-
-export interface HostCapabilities {
-  readonly sidebarVibrancySupported: boolean;
-  readonly liveBrowserSupported?: boolean;
-  readonly liveSimulatorFrameSupported?: boolean;
-  readonly liveAndroidFrameSupported?: boolean;
-}
-
-export interface BrowserSurfaceTabState {
-  readonly tabId: string;
-  readonly url: string;
-  readonly title: string;
-}
-
-export interface BrowserSurfaceState {
-  readonly contextId: string;
-  readonly url: string;
-  readonly title: string;
-  readonly loading: boolean;
-  readonly canGoBack: boolean;
-  readonly canGoForward: boolean;
-  readonly control: "idle" | "user" | "agent";
-  /**
-   * Every page open in this context. Older hosts report no tabs at all, so a
-   * rail reads an absent list as the one page it already shows.
-   */
-  readonly tabs?: ReadonlyArray<BrowserSurfaceTabState>;
-  readonly activeTabId?: string;
-}
-
 import type {
-  AppReleaseRing,
-  AppUpdateState as AppUpdateStateView,
-} from "@octant/contracts/app-updates";
+  ApprovalSurfacePalette,
+  AppUpdateInstallOutcome,
+  AttentionNotificationRequest,
+  BoundProjectType,
+  BrowserSurfaceRequest,
+  BrowserSurfaceState,
+  BrowserSurfaceTabCommand,
+  BundledWhatsNew,
+  CanvasPrototypeOpenRequest,
+  CanvasPrototypeOpenResult,
+  CanvasPrototypeSurfacePreparation,
+  CodeCheckoutOpenRequest,
+  CodeDeepLink,
+  CodeExternalEditorRequest,
+  CodeOperationApprovalAnchor,
+  ForgetPairedComputerOutcome,
+  HostCapabilities,
+  LocalPluginFolderPickerResult,
+  MenuBarOpenThread,
+  OpenInApplicationDescriptor,
+  PairedComputer,
+  PairedComputerAnswer,
+  PairedComputerOutcome,
+  PairedComputerRequest,
+  PrivateListenerEnableRequest,
+  PrivateListenerPublicStatus,
+  ProjectRootPickerResult,
+  ProjectWindowTarget,
+  ProviderApiKeySummary,
+  ProviderCredentialStatus,
+  RemoteCredentialOperationReceipt,
+  RemoteDeviceInventoryEntry,
+  RemoteMintedPairingTicket,
+  RemotePendingPairingRequest,
+  RemotePairingTicketSourceClass,
+  ResolvedSidebarMaterial,
+  SettlePairedComputerOutcome,
+  SshTargetOperation,
+} from "@octant/contracts/desktop-bridge";
 
-export type { AppUpdateStateView };
-
-export interface AppUpdateReleaseView {
-  readonly version: string;
-  readonly platform: string;
-  readonly arch: string;
-  readonly ring: AppReleaseRing;
-  readonly url: string;
-  readonly sha256: string;
-  readonly releasedAt: string;
-  readonly notes?: string;
-}
-
-/**
- * What the host is still busy with, as it already reports it for the quit
- * guard. The renderer never supplies this — the host reads it itself.
- */
-export type AppUpdateInstallOutcome =
-  | { readonly kind: "installing" }
-  | {
-      readonly kind: "wait";
-      readonly activeAgentCount: number;
-      readonly activityUnconfirmed: boolean;
-    }
-  | { readonly kind: "not-ready" };
-
-/**
- * Bundled notes for the running desktop build. Absent on a remote client,
- * which must not fetch notes or pretend to update the Machine.
- */
-export type BundledWhatsNewView =
-  | {
-      readonly kind: "notes";
-      readonly version: string;
-      readonly text: string;
-      readonly showAfterApply: boolean;
-    }
-  | {
-      readonly kind: "empty";
-      readonly version: string;
-      readonly showAfterApply: false;
-    };
-
-export type BrowserSurfaceTabCommand =
-  | { readonly kind: "open" }
-  | { readonly kind: "select"; readonly tabId: string }
-  | { readonly kind: "close"; readonly tabId: string };
-
-export type CanvasPrototypeSurfacePreparation =
-  | { readonly status: "ready" }
-  | { readonly status: "unavailable"; readonly reason: string };
-
-export interface CanvasPrototypeOpenRequest {
-  readonly surfaceId: string;
-  readonly src: string;
-  readonly width: number;
-  readonly height: number;
-  readonly scaleFactor: number;
-}
-
-export type CanvasPrototypeOpenResult =
-  | { readonly status: "open" }
-  | { readonly status: "refused"; readonly reason: string };
-
-export interface BrowserSurfaceRequest {
-  readonly contextId: string;
-  readonly threadId: string;
-  readonly bounds: {
-    readonly x: number;
-    readonly y: number;
-    readonly width: number;
-    readonly height: number;
-  };
-}
-
-export type CodeOperationApprovalAnchor =
-  | {
-      readonly kind: "thread";
-      readonly projectId: string;
-      readonly threadId: string;
-      readonly bounds: {
-        readonly x: number;
-        readonly y: number;
-        readonly width: number;
-        readonly height: number;
-      };
-    }
-  | {
-      readonly kind: "draft";
-      readonly projectId: string;
-      readonly composerId: string;
-      readonly bounds: {
-        readonly x: number;
-        readonly y: number;
-        readonly width: number;
-        readonly height: number;
-      };
-    };
-
-export type ProjectWindowTarget =
-  | Readonly<{ kind: "project"; projectId: string }>
-  | Readonly<{
-      kind: "project-thread";
-      projectId: string;
-      mode: "code" | "work";
-      threadId: string;
-    }>;
-
-export type AttentionReason =
-  | "turn-finished"
-  | "approval-required"
-  | "question-asked"
-  | "follow-up-due";
-
-export interface AttentionNotificationRequest {
-  readonly reason: AttentionReason;
-  readonly threadTitle: string;
-  readonly detail?: string;
-}
-
-export type PrivateListenerExposureClass = "lan-private" | "tailscale";
-
-export interface PrivateListenerPublicStatus {
-  readonly enabled: boolean;
-  readonly state: "disabled" | "ready" | "failed";
-  readonly hostname: string | null;
-  readonly port: number | null;
-  readonly origin: string | null;
-  readonly exposureClass: PrivateListenerExposureClass | null;
-  readonly certificateFingerprint: string | null;
-  readonly certificateReady: boolean;
-  /** `self-made`: no browser can verify this listener, so Settings offers no browser link. */
-  readonly certificateSource: "self-made" | "pasted" | null;
-  /** The self-made certificate's key pin, which a pairing code carries; null otherwise. */
-  readonly tlsPin: string | null;
-  readonly errorCode?: string;
-}
-
-export interface PrivateListenerEnableRequest {
-  readonly hostname: string;
-  readonly port: number;
-  readonly origin: string;
-  readonly certificatePem: string;
-  readonly privateKeyPem: string;
-  readonly localConfirmation: true;
-}
-
-export type RemotePairingTicketSourceClass = "loopback" | "lan-private" | "tailscale";
-
-export interface RemoteMintedPairingTicket {
-  readonly ticketId: string;
-  readonly ticketProof: string;
-  /** Epoch milliseconds. */
-  readonly expiresAt: number;
-  readonly sourceClass: RemotePairingTicketSourceClass;
-}
-
-export interface RemotePendingPairingRequest {
-  readonly kind: "pending";
-  readonly ticketId: string;
-  readonly hostId: string;
-  readonly deviceLabel: string;
-  readonly deviceKeyFingerprint: string;
-  readonly origin: string;
-  readonly sourceClass: RemotePairingTicketSourceClass | "unknown";
-  readonly comparisonCode: string;
-  readonly claimedAt: string;
-  readonly expiresAt: string;
-}
-
-export interface RemoteDeviceInventoryEntry {
-  readonly hostId: string;
-  readonly deviceId: string;
-  readonly deviceKeyFingerprint: string;
-  readonly deviceLabel: string;
-  readonly origin: string;
-  readonly protocolFloor: number;
-  readonly credentialGeneration: number;
-  readonly createdAt: string;
-  readonly expiresAt: string;
-  readonly lastSeenAt: string;
-  readonly state: "active" | "revoked" | "expired";
-  readonly revokedAt?: string;
-  readonly revokedReason?: string;
-}
-
-export interface RemoteCredentialOperationReceipt {
-  readonly commandId: string;
-  readonly result: "applied" | "already-applied";
-  readonly occurredAt: string;
-}
+export type {
+  ApprovalSurfacePalette,
+  AppUpdateInstallOutcome,
+  AttentionNotificationRequest,
+  AttentionReason,
+  BoundProjectType,
+  BrowserSurfaceRequest,
+  BrowserSurfaceState,
+  BrowserSurfaceTabCommand,
+  BrowserSurfaceTabState,
+  BundledWhatsNew,
+  CanvasPrototypeOpenRequest,
+  CanvasPrototypeOpenResult,
+  CanvasPrototypeSurfacePreparation,
+  CodeCheckoutOpenRequest,
+  CodeDeepLink,
+  CodeExternalEditorRequest,
+  CodeOperationApprovalAnchor,
+  ForgetPairedComputerOutcome,
+  HostCapabilities,
+  LocalPluginFolderPickerResult,
+  MenuBarOpenThread,
+  OpenInApplicationDescriptor,
+  PairedComputer,
+  PairedComputerAnswer,
+  PairedComputerOutcome,
+  PairedComputerRequest,
+  PrivateListenerEnableRequest,
+  PrivateListenerPublicStatus,
+  ProjectRootPickerResult,
+  ProjectWindowTarget,
+  ProviderApiKeySummary,
+  ProviderCredentialStatus,
+  RemoteCredentialOperationReceipt,
+  RemoteDeviceInventoryEntry,
+  RemoteMintedPairingTicket,
+  RemotePendingPairingRequest,
+  RemotePairingTicketSourceClass,
+  ResolvedSidebarMaterial,
+  SettlePairedComputerOutcome,
+  SshTargetOperation,
+} from "@octant/contracts/desktop-bridge";
 
 /**
  * Listener and paired-device administration. Present only on the packaged
@@ -332,50 +129,6 @@ export interface RemoteAccessAdministrationBridge {
   readonly revokeAllRemoteDevices: () => Promise<RemoteCredentialOperationReceipt>;
 }
 
-/** Another computer this desktop app paired with from its app pairing code. */
-export interface PairedComputer {
-  readonly origin: string;
-  readonly displayName: string;
-}
-
-export type ForgetPairedComputerOutcome =
-  | { readonly status: "forgotten"; readonly warning?: string }
-  | { readonly status: "refused"; readonly message: string };
-
-export type SettlePairedComputerOutcome =
-  | { readonly status: "settled" }
-  | { readonly status: "refused"; readonly message: string };
-
-export type PairedComputerOutcome =
-  | {
-      readonly status: "verified";
-      readonly computer: PairedComputer;
-      /** The single-use ticket the code carried; this window claims it with its own device key. */
-      readonly ticket: { readonly ticketId: string; readonly ticketProof: string };
-      /** The certificate pin the code carried; public, and recorded with the device. */
-      readonly pin: string;
-    }
-  | { readonly status: "refused"; readonly message: string };
-
-/** One request to a listed paired computer; main checks it against a short allow list. */
-export interface PairedComputerRequest {
-  readonly origin: string;
-  readonly method: string;
-  readonly path: string;
-  readonly headers?: Readonly<Record<string, string>>;
-  readonly body?: string | Uint8Array;
-}
-
-export type PairedComputerAnswer =
-  | {
-      readonly status: "answered";
-      readonly httpStatus: number;
-      readonly headers: ReadonlyArray<readonly [string, string]>;
-      readonly body: Uint8Array;
-    }
-  | { readonly status: "refused"; readonly message: string }
-  | { readonly status: "unreachable"; readonly message: string };
-
 /**
  * Pairing this desktop app with another computer from its pasted app pairing
  * code, and reaching it afterwards. Present only in the desktop app, whose
@@ -404,8 +157,8 @@ const pairedComputersByBridge = new WeakMap<OctantHostBridge, PairedComputersBri
 /**
  * The paired-computers bridge when the desktop app exposes every part of it,
  * else nothing. The same host bridge always yields the same object: a pairing
- * in progress keys its client and its device-key cleanup on this identity, so a
- * fresh object per render would delete the key it just claimed with.
+ * in progress keys its client and its device-key cleanup on this identity, so
+ * a fresh object per render would delete the key it just claimed with.
  */
 export function pairedComputersOf(
   bridge: OctantHostBridge | undefined,
@@ -472,26 +225,6 @@ export function remoteAccessAdministrationOf(
     revokeAllRemoteDevices: bridge.revokeAllRemoteDevices,
   };
 }
-
-/**
- * The local administration of SSH targets a desktop window reaches through
- * its main process: each operation is one of the host's own local routes,
- * sent with this window's authority, and the host's answer comes back as it
- * was given for the caller to decode. A paired browser never has it.
- */
-export type SshTargetOperation =
-  | "list"
-  | "probe-host-key"
-  | "register"
-  | "repin"
-  | "connect"
-  | "remove"
-  | "projects"
-  | "bind"
-  | "worktrees"
-  | "create-worktree"
-  | "remove-worktree"
-  | "terminal";
 
 export interface SshTargetAdministrationBridge {
   readonly sshTargetRequest: (
@@ -589,17 +322,17 @@ export interface OctantHostBridge
    * The desktop app's own update path. Absent on a remote client, which is
    * served by a host it does not update.
    */
-  readonly checkForAppUpdate?: () => Promise<AppUpdateStateView>;
-  readonly downloadAppUpdate?: () => Promise<AppUpdateStateView>;
+  readonly checkForAppUpdate?: () => Promise<AppUpdateState>;
+  readonly downloadAppUpdate?: () => Promise<AppUpdateState>;
   readonly installAppUpdate?: () => Promise<AppUpdateInstallOutcome>;
-  readonly setAutomaticAppUpdateChecks?: (enabled: boolean) => Promise<AppUpdateStateView>;
-  readonly setAppUpdateRing?: (ring: AppReleaseRing) => Promise<AppUpdateStateView>;
-  readonly subscribeAppUpdateState?: (listener: (state: AppUpdateStateView) => void) => () => void;
+  readonly setAutomaticAppUpdateChecks?: (enabled: boolean) => Promise<AppUpdateState>;
+  readonly setAppUpdateRing?: (ring: AppReleaseRing) => Promise<AppUpdateState>;
+  readonly subscribeAppUpdateState?: (listener: (state: AppUpdateState) => void) => () => void;
   /**
    * Local What's new for the build on disk. Desktop-owned; never a network
    * fetch. Absent on a remote client.
    */
-  readonly readBundledWhatsNew?: () => Promise<BundledWhatsNewView>;
+  readonly readBundledWhatsNew?: () => Promise<BundledWhatsNew>;
   readonly acknowledgeWhatsNew?: () => Promise<void>;
   readonly openBrowserExternal?: (url: string) => Promise<void>;
   readonly subscribeBrowserSurfaceState?: (
@@ -728,4 +461,3 @@ export function getInjectedHostBridge(
   }
   return bridge as OctantHostBridge;
 }
-import type { CodeOperationApprovalRequest } from "@octant/contracts/code-operations";

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { originAllowed as sameSiteOriginAllowed } from "@octant/domain";
+import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
 import {
   MAX_BROWSER_DIAGNOSTIC_ENTRIES,
   MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS,
@@ -252,7 +253,7 @@ const MAX_USER_GRANTED_ORIGINS = 128;
 export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
   const surfaces = new Map<string, OwnedSurface>();
   const goneListeners = new Set<(contextId: string) => void>();
-  const stateChannel = options.stateChannel ?? "octant:browser-surface:state";
+  const stateChannel = options.stateChannel ?? DESKTOP_IPC_CHANNELS.browserSurfaceState;
 
   const surface = (contextId: string): OwnedSurface => {
     const owned = surfaces.get(contextId);

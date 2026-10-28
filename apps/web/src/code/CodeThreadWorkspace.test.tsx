@@ -520,6 +520,31 @@ describe("CodeThreadWorkspace", () => {
     if (mic !== null) expect(follows(model, mic)).toBe(true);
   });
 
+  it.each(["running", "waiting"])(
+    "disables the model picker while a turn is busy: %s",
+    (turnStatus) => {
+      render(
+        <CodeThreadWorkspace
+          controller={controller({ turnStatus: turnStatus as "running" | "waiting" })}
+          providerGroups={[providerGroup()]}
+          threadId={threadId}
+        />,
+      );
+      expect(screen.getByRole("button", { name: "Provider and model" })).toBeDisabled();
+    },
+  );
+
+  it("leaves the model picker enabled while idle", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller()}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Provider and model" })).toBeEnabled();
+  });
+
   it("renders the conversation center and sends follow-ups through the controller", async () => {
     const user = userEvent.setup();
     const sendFollowUp = vi.fn(async () => true);
@@ -935,6 +960,7 @@ describe("CodeThreadWorkspace", () => {
         controller={controller({
           turnStatus: "waiting",
           turnError: "Mistral Vibe resume identity does not match this Project.",
+          turnErrorCategory: "stale",
         })}
         onNewThreadInProject={onNewThreadInProject}
         threadId={threadId}
@@ -957,6 +983,7 @@ describe("CodeThreadWorkspace", () => {
         controller={controller({
           turnStatus: "waiting",
           turnError: "Mistral Vibe resume identity does not match this Project.",
+          turnErrorCategory: "stale",
         })}
         threadId={threadId}
       />,
@@ -965,6 +992,45 @@ describe("CodeThreadWorkspace", () => {
     await user.type(screen.getByLabelText("Follow-up message"), "Try a different approach");
     expect(screen.getByRole("button", { name: "Send follow-up" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a waiting turn busy when its failure is not a refused resume", async () => {
+    const user = userEvent.setup();
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          turnStatus: "waiting",
+          turnError: "Mistral Vibe resume identity does not match this Project.",
+          turnErrorCategory: "failed",
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "New task in this Project" }),
+    ).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText("Follow-up message"), "Queue this instead");
+    // A busy wait offers to queue the follow-up, where a parked one sends it.
+    expect(screen.getByRole("button", { name: "Queue message" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Send follow-up" })).not.toBeInTheDocument();
+  });
+
+  it("leaves the model picker enabled on a turn parked by a refused resume", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          turnStatus: "waiting",
+          turnError: "Mistral Vibe resume identity does not match this Project.",
+          turnErrorCategory: "stale",
+        })}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+    // A parked turn's operation has ended, so the next model choice is the
+    // next turn's, never the dead one's.
+    expect(screen.getByRole("button", { name: "Provider and model" })).toBeEnabled();
   });
 
   it("says why the host refused an answer while the request stays open", () => {
@@ -2895,6 +2961,75 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByText(/Your next message starts a new session on/)).toHaveTextContent(
       "hidden reasoning and the",
     );
+  });
+
+  it("warns before sending that a thread switched to a model its provider cannot carry the session onto starts a new session", () => {
+    const base = controller();
+    const view = base.activeView!;
+    render(
+      <CodeThreadWorkspace
+        controller={{
+          ...base,
+          activeView: {
+            ...view,
+            thread: {
+              ...view.thread,
+              modelId: alternateModelId,
+            },
+          },
+          conversation: [
+            {
+              id: "turn:assistant-one",
+              role: "assistant",
+              text: "The first pass is complete.",
+              providerInstanceId: providerId,
+              modelId,
+              status: "completed",
+            },
+          ],
+        }}
+        providerGroups={[providerGroup(), alternateProviderGroup()]}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.getByText(/Your next message starts a new session on/)).toBeInTheDocument();
+  });
+
+  it("does not warn of a new session when the provider can carry its session on to the new model", () => {
+    const base = controller();
+    const view = base.activeView!;
+    render(
+      <CodeThreadWorkspace
+        controller={{
+          ...base,
+          activeView: {
+            ...view,
+            thread: {
+              ...view.thread,
+              modelId: alternateModelId,
+            },
+          },
+          conversation: [
+            {
+              id: "turn:assistant-one",
+              role: "assistant",
+              text: "The first pass is complete.",
+              providerInstanceId: providerId,
+              modelId,
+              status: "completed",
+            },
+          ],
+        }}
+        providerGroups={[
+          { ...providerGroup(), modelSwitch: "supported" },
+          alternateProviderGroup(),
+        ]}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.queryByText(/Your next message starts a new session on/)).not.toBeInTheDocument();
   });
 
   it("does not promise another new session after a switching turn opened one and then stopped", () => {

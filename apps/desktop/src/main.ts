@@ -69,6 +69,19 @@ import {
 } from "@octant/contracts/previews";
 import { type AppVersion, isAppReleaseRing } from "@octant/contracts/app-updates";
 import { decodeCodeOperationApprovalRequest } from "@octant/contracts/code-operations";
+import {
+  DESKTOP_IPC_CHANNELS as IPC_CHANNELS,
+  MAX_PROVIDER_CREDENTIAL_BYTES,
+  PROVIDER_INSTANCE_ID_PATTERN,
+  decodeCodeCheckoutOpenRequest,
+  decodeCodeExternalEditorRequest,
+} from "./ipcChannels";
+import type {
+  CodeCheckoutOpenRequest,
+  CodeExternalEditorRequest,
+  CodeOperationApprovalAnchor,
+  HostCapabilities,
+} from "@octant/contracts/desktop-bridge";
 import { createAppUpdateService } from "./appUpdateService";
 import {
   createPortableImagePort,
@@ -114,7 +127,6 @@ import {
   CODE_OPERATION_APPROVAL_VIEW_CHANNELS,
   createCodeOperationApprovalViewController,
   decodeCodeOperationApprovalPalette,
-  type CodeOperationApprovalAnchor,
   type CodeOperationApprovalBounds,
   type CodeOperationApprovalPalette,
 } from "./codeOperationApprovalView";
@@ -256,104 +268,10 @@ import {
   type RemoteServerPages,
 } from "./remoteServerPages";
 
-const IPC_CHANNELS = {
-  nativeMenu: "octant:menu:popup",
-  menuBarOpenThread: "octant:menu:open-thread",
-  menuBarTask: "octant:menu:task",
-  attentionBadge: "octant:attention:badge",
-  attentionNotify: "octant:attention:notify",
-  clearProviderCredential: "octant:provider-credential:clear",
-  listProviderApiKeys: "octant:provider-api-key:list",
-  addProviderApiKey: "octant:provider-api-key:add",
-  renameProviderApiKey: "octant:provider-api-key:rename",
-  replaceProviderApiKey: "octant:provider-api-key:replace",
-  removeProviderApiKey: "octant:provider-api-key:remove",
-  setActiveProviderApiKey: "octant:provider-api-key:set-active",
-  moveProviderApiKey: "octant:provider-api-key:move",
-  browserSurfaceAttach: "octant:browser-surface:attach",
-  browserSurfaceBounds: "octant:browser-surface:bounds",
-  browserSurfaceCommand: "octant:browser-surface:command",
-  browserSurfaceDetach: "octant:browser-surface:detach",
-  browserSurfaceOpenExternal: "octant:browser-surface:open-external",
-  browserSurfaceTab: "octant:browser-surface:tab",
-  canvasPrototypeSurface: "octant:canvas:prototype-surface:prepare",
-  canvasPrototypeOpen: "octant:canvas:prototype:open",
-  canvasPrototypeInput: "octant:canvas:prototype:input",
-  canvasPrototypeResize: "octant:canvas:prototype:resize",
-  canvasPrototypeClose: "octant:canvas:prototype:close",
-  canvasPrototypeDrawn: "octant:canvas:prototype:drawn",
-  canvasPrototypeEvent: "octant:canvas:prototype:event",
-  appUpdateState: "octant:app-update:state",
-  appUpdateCheck: "octant:app-update:check",
-  appUpdateDownload: "octant:app-update:download",
-  appUpdateInstall: "octant:app-update:install",
-  appUpdateAutomatic: "octant:app-update:automatic",
-  computerUseStatus: "octant:computer-use:status",
-  computerUsePermissions: "octant:computer-use:permissions",
-  computerUsePermissionSettings: "octant:computer-use:permission-settings",
-  computerUseCheckUpdates: "octant:computer-use:check-updates",
-  managedToolsStatus: "octant:managed-tools:status",
-  managedToolsCheckUpdates: "octant:managed-tools:check-updates",
-  managedToolsConfigure: "octant:managed-tools:configure",
-  appUpdateRing: "octant:app-update:ring",
-  appUpdateWhatsNew: "octant:app-update:whats-new",
-  appUpdateWhatsNewAck: "octant:app-update:whats-new-ack",
-  codeDeepLink: "octant:code:deep-link",
-  close: "octant:window:close",
-  hostCapabilities: "octant:window:host-capabilities",
-  projectWindowCapability: "octant:window:project-capability",
-  maximizeOrRestore: "octant:window:maximize-or-restore",
-  minimize: "octant:window:minimize",
-  openCodeExternalEditor: "octant:code:open-external-editor",
-  listOpenInApplications: "octant:code:list-open-in-applications",
-  openCodeCheckoutInApplication: "octant:code:open-checkout-in-application",
-  openInNewWindow: "octant:window:open-project",
-  openSettings: "octant:menu:open-settings",
-  previewHandoff: "octant:preview:handoff",
-  requestCodeOperationApproval: "octant:code:request-operation-approval",
-  updateCodeOperationApprovalAnchor: "octant:code:update-operation-approval-anchor",
-  cancelCodeOperationApproval: "octant:code:cancel-operation-approval",
-  startNewAgent: "octant:menu:start-new-agent",
-  providerCredentialStatus: "octant:provider-credential:status",
-  resetBounds: "octant:window:reset-bounds",
-  selectProjectRoot: "octant:project:select-root",
-  selectLocalPluginFolder: "octant:extensions:select-local-plugin-folder",
-  selectRuntimeBinary: "octant:providers:select-runtime-binary",
-  setProviderCredential: "octant:provider-credential:set",
-  resolvedMaterial: "octant:window:resolved-material",
-  resolvedSidebarVibrancy: "octant:window:resolved-sidebar-vibrancy",
-  sidebarMaterialPreference: "octant:window:sidebar-material-preference",
-  sidebarVibrancyMode: "octant:window:sidebar-vibrancy-mode",
-  approvalSurfacePalette: "octant:window:approval-surface-palette",
-  privateListenerStatus: "octant:private-listener:status",
-  privateListenerEnable: "octant:private-listener:enable",
-  privateListenerDisable: "octant:private-listener:disable",
-  privateListenerRestart: "octant:private-listener:restart",
-  remotePairingTicket: "octant:remote-device:pairing-ticket",
-  remotePairingRequests: "octant:remote-device:pairing-requests",
-  remotePairingApprove: "octant:remote-device:pairing-approve",
-  remotePairingDeny: "octant:remote-device:pairing-deny",
-  remoteDeviceInventory: "octant:remote-device:inventory",
-  remoteDeviceRename: "octant:remote-device:rename",
-  remoteDeviceRevoke: "octant:remote-device:revoke",
-  remoteDeviceRevokeAll: "octant:remote-device:revoke-all",
-  remoteDeviceReconcileExpired: "octant:remote-device:reconcile-expired",
-  sshTargetRequest: "octant:ssh-targets:request",
-  remoteHostIdentityStatus: "octant:remote-host-identity:status",
-  remoteHostIdentityRotate: "octant:remote-host-identity:rotate",
-  remoteHostIdentityRecover: "octant:remote-host-identity:recover",
-  remoteServerPageOpen: "octant:remote-server-page:open",
-  remoteServerPageSign: "octant:remote-server-page:sign",
-  remoteServerPageSigned: "octant:remote-server-page:signed",
-  remoteServerPageForgetHost: "octant:remote-server-page:forget-host",
-} as const;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-const MAX_PROVIDER_CREDENTIAL_BYTES = 12 * 1_024;
 // Bounds how long a failed start waits for the child's final stderr bytes.
 const STDERR_DRAIN_TIMEOUT_MS = 500;
-const PROVIDER_INSTANCE_ID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type ProjectWindowTarget =
   | Readonly<{ kind: "project"; projectId: string }>
@@ -491,12 +409,7 @@ export function validateProjectWindowTarget(value: unknown): ProjectWindowTarget
 export function resolveDesktopHostCapabilities(
   platform: NodeJS.Platform,
   liveBrowserSupported = false,
-): {
-  readonly sidebarVibrancySupported: boolean;
-  readonly liveBrowserSupported: boolean;
-  readonly liveSimulatorFrameSupported: boolean;
-  readonly liveAndroidFrameSupported: boolean;
-} {
+): HostCapabilities {
   return {
     sidebarVibrancySupported: platform === "darwin",
     liveBrowserSupported,
@@ -3138,11 +3051,17 @@ function installIpcHandlers(): void {
     if (activeServerUrl === undefined) {
       throw new Error("Octant external editor handoff is unavailable.");
     }
+    let editorRequest: CodeExternalEditorRequest;
+    try {
+      editorRequest = decodeCodeExternalEditorRequest(request);
+    } catch {
+      throw new Error("Octant rejected an invalid external editor request.");
+    }
     await openCodeExternalEditorFromServer({
       serverUrl: activeServerUrl,
       desktopBridgeSecret,
       windowId: context.windowId,
-      request: request as never,
+      request: editorRequest,
       fetch: globalThis.fetch,
       spawn: (executable, arguments_, options) => spawn(executable, [...arguments_], options),
     });
@@ -3160,11 +3079,17 @@ function installIpcHandlers(): void {
     if (activeServerUrl === undefined) {
       throw new Error("Octant Open in is unavailable.");
     }
+    let openRequest: CodeCheckoutOpenRequest;
+    try {
+      openRequest = decodeCodeCheckoutOpenRequest(request);
+    } catch {
+      throw new Error("Octant rejected an invalid Open in request.");
+    }
     await openCodeCheckoutInApplicationFromServer({
       serverUrl: activeServerUrl,
       desktopBridgeSecret,
       windowId: context.windowId,
-      request: request as never,
+      request: openRequest,
       fetch: globalThis.fetch,
       launch: ({ applicationId, checkoutRoot }) =>
         launchOpenInApplication({
