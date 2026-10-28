@@ -228,11 +228,9 @@ function createReplyBeat(commit: () => void) {
         commit();
       }, STREAM_REPLY_BEAT_MS);
     },
-    /** Drops a pending beat without settling: the stream continues on a new base. */
-    discard: () => clear(),
-    settle: () => {
-      settled = true;
-      clear();
+    /** Re-arms a flushed beat: a replayed stream commits on beats again. */
+    reset: () => {
+      settled = false;
     },
     flush: () => {
       if (settled) return;
@@ -1430,6 +1428,10 @@ export function useCodeController(options: CodeControllerOptions) {
             try {
               while (isActive(request, threadGeneration, mounted) && !controller.signal.aborted) {
                 if (snapshotRequired) {
+                  // Commit what arrived before the reload: a failed reload
+                  // must not lose the streamed text, and a successful one
+                  // replaces it.
+                  replyBeat.flush();
                   const hydrated = await hydrateConversation(
                     threadId,
                     request,
@@ -1442,16 +1444,13 @@ export function useCodeController(options: CodeControllerOptions) {
                     await waitForReconnect(controller.signal, 250);
                     continue;
                   }
-                  if (hydrated.incomplete !== true) {
-                    // The hydrated conversation is the authority; a beat still
-                    // carrying the pre-snapshot text would overwrite it later.
-                    replyBeat.settle();
-                    return;
-                  }
+                  if (hydrated.incomplete !== true) return;
                   operationCursor = 0;
                   assistantText = "";
                   reasoningTail = "";
-                  replyBeat.discard();
+                  // The operation replays from its beginning on a fresh base,
+                  // so its deltas commit on beats again.
+                  replyBeat.reset();
                   snapshotRequired = false;
                 }
                 let received = 0;
@@ -1578,10 +1577,10 @@ export function useCodeController(options: CodeControllerOptions) {
                     // reported by now has been read.
                     markRenderedActivity(threadId);
                     if (terminalState !== undefined) {
-                      // The hydrated conversation below is the authority; a
-                      // beat still carrying this stream's text would overwrite
-                      // it a frame later.
-                      replyBeat.settle();
+                      // Commit what arrived before the authoritative reload:
+                      // it replaces this stream's text when it lands, and a
+                      // failed reload must not lose it.
+                      replyBeat.flush();
                       activeTurnOperations.current.delete(String(threadId));
                       if (terminalState !== "waiting") setProviderRequests([]);
                       const hydrated = await hydrateConversation(
