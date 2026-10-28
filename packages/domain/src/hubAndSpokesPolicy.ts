@@ -3,6 +3,8 @@ import type {
   DelegatedAuthority,
   DelegationRequest,
   HostOwnerEntry,
+  HubGrant,
+  HubGrantItem,
   HubMemberId,
   HubRoster,
   NewMemberConfirmation,
@@ -380,4 +382,52 @@ export function honorOwner(input: {
     return { status: "not-owner", kind: "not-in-roster" };
   }
   return { status: "owner", entry };
+}
+
+export type HubRequestAuthorization =
+  | { readonly status: "allowed" }
+  | { readonly status: "refused"; readonly kind: "no-hub-grant" | "item-not-granted" };
+
+/**
+ * Whether a request that arrived from the hub may use one hub grant item. The
+ * hub holds exactly the grant the spoke's person chose: no grant, or an item
+ * left unticked, refuses.
+ */
+export function authorizeHubRequest(input: {
+  readonly grant: HubGrant | undefined;
+  readonly item: HubGrantItem;
+}): HubRequestAuthorization {
+  if (input.grant === undefined) return { status: "refused", kind: "no-hub-grant" };
+  if (!input.grant.items.includes(input.item)) {
+    return { status: "refused", kind: "item-not-granted" };
+  }
+  return { status: "allowed" };
+}
+
+/** The hub grant a spoke starts with: the roster, Introduce, and Owners ticked, the rest off. */
+export function defaultHubGrant(): HubGrant {
+  return { items: ["roster", "introduce", "owners"], actProjects: [] };
+}
+
+/**
+ * The exact text a roster signature covers. Fields are written in a fixed order
+ * so the signer and every verifier agree on the bytes whatever order a decoder
+ * produced them in.
+ */
+export function hubRosterSigningPayload(roster: HubRoster): string {
+  return `octant-hub-roster-v1\n${JSON.stringify({
+    sequence: roster.sequence,
+    members: roster.members.map((member) => ({
+      memberId: member.memberId,
+      name: member.name,
+      role: member.role,
+      identityKeyFingerprint: member.identityKeyFingerprint,
+      listenerPin: member.listenerPin,
+      privateNames: member.privateNames,
+      addresses: member.addresses,
+      owner: member.owner,
+    })),
+    standbyOrder: roster.standbyOrder,
+    failoverAfterSeconds: roster.failoverAfterSeconds,
+  })}`;
 }

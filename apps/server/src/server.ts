@@ -1162,6 +1162,7 @@ export function startOctantServer(
       composeHostDiagnostics,
       externalContentRoutes,
       hostControlRoutes,
+      hubAdministrationRoutes,
       localDeviceAdministrationRoutes,
       privateListenerAdministrationRoutes,
       privateListenerController,
@@ -1277,6 +1278,7 @@ export function startOctantServer(
               }
               return (
                 (await privateListenerAdministrationRoutes(request)) ??
+                (await hubAdministrationRoutes(request)) ??
                 (await sshTargetAdministrationRoutes(request)) ??
                 (await providerCredentialRoutes(request)) ??
                 (await localDeviceAdministrationRoutes(request)) ??
