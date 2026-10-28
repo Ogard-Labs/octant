@@ -663,10 +663,30 @@ so the warning returns whether or not a browser drew the picture. Design
 screens on the board are drawn frames, so the design-frame overflow and
 contrast warnings reach them through the same bridge.
 
-The Markdown and HTML export write the flow as its graph — the title, one
+The board offers **Play**: a dialog in the design player's anatomy that walks
+the flow. Each screen draws at its intrinsic size, scaled to the stage; a
+mockup's hotspot nodes — the interactive components its edges name — are the
+one live thing in the drawing, real buttons that navigate to their target,
+and every other control stays inert; a transition without a hotspot, and
+every edge leaving a design screen, waits in a Go to list under the stage,
+so no transition is left without a place to tap. Back steps the path taken,
+Restart returns to the first screen, and Esc leaves. Where the person is in
+the flow is view state alone: Play journals nothing and grants nothing, and
+it is typed link data the renderer walks (D-2 of the plan doc), so no script,
+ticketed page, or prototype host is involved. The share viewer and a public
+link draw the board read-only: Play stays in the app.
+
+The Markdown export writes the flow as its graph — the title, one
 line per screen, then each transition with its hotspot — and the artifact SVG
 thumbnail draws the layout scaled into the band, so no markup travels in a
-reading. A share carries the flow whole at share version 12, which names
+reading. The HTML export writes a flow as its **site**: one script-free,
+self-contained section set inside the exported document whose screens move
+by `:target` — the pattern a design's frames already ship inside one page —
+with the hotspot nodes as real anchors to their targets, each mockup screen
+rendered as semantic inert HTML by the pure `canvasMockupHtml` generator, each
+design screen holding the same sandboxed frame page the export writes for a
+design's frames, and the screen-level transitions in the link list. A share
+carries the flow whole at share version 12, which names
 blocks authored up to Canvas version 23; the flow holds references and typed
 values, so no new markup acknowledgement exists. The `app-flow` recipe starts
 from typed screens: a mockup slot and a flow slot that names them.

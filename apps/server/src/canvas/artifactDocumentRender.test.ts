@@ -1364,4 +1364,46 @@ describe("a destination export near the approval card's limit", () => {
     if (exported.kind !== "rendered") throw new Error("expected a rendered document");
     expect(exported.body.split("<svg")).toHaveLength(3);
   });
+
+  it("renders a flow as a script-free site whose transitions are real anchors", () => {
+    const mockup = (blockId: string) =>
+      ({
+        blockId,
+        schemaVersion: 23,
+        kind: "mockup",
+        device: "phone",
+        title: blockId,
+        nodes: [
+          { nodeId: "window", component: "window", label: blockId },
+          { nodeId: "go", parentId: "window", component: "button", label: "Go" },
+        ],
+      }) as unknown as CanvasBlock;
+    const flow = {
+      blockId: "app-flow",
+      schemaVersion: 23,
+      kind: "flow",
+      title: "Search flow",
+      screens: [
+        { screenId: "s1", blockId: "search" },
+        { screenId: "s2", blockId: "results" },
+      ],
+      edges: [{ edgeId: "go", fromScreenId: "s1", toScreenId: "s2", fromNodeId: "go" }],
+    } as unknown as CanvasBlock;
+    const exported = renderArtifactHtml(definition([mockup("search"), mockup("results"), flow]));
+    if (exported.kind !== "rendered") throw new Error("expected a rendered document");
+    // The site's screens move by :target, its transitions are anchors, and
+    // nothing it holds is a script.
+    expect(exported.body).toContain('id="oct-flow-s1" data-start=""');
+    expect(exported.body).toContain('<a class="oct-mockup-hotspot" href="#oct-flow-s2">Go</a>');
+    expect(exported.body).toContain(".oct-flow-screen:target");
+    expect(exported.body).not.toContain("<script");
+    expect(exported.writesDesignMarkup).toBe(false);
+    // The Markdown form carries the graph reading instead of the site.
+    const markdown = renderArtifactMarkdown(
+      definition([mockup("search"), mockup("results"), flow]),
+    );
+    if (markdown.kind !== "rendered") throw new Error("expected a rendered document");
+    expect(markdown.body).toContain("search → results");
+    expect(markdown.body).not.toContain("oct-flow-s1");
+  });
 });

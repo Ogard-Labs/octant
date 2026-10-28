@@ -3,6 +3,7 @@ import {
   CANVAS_MOCKUP_DEVICE_NAME,
   canvasMockupCallouts,
   canvasMockupFrames,
+  type CanvasMockupFrame,
 } from "@octant/domain";
 import type { CanvasFlowScreenSourceBlock } from "@octant/domain";
 import { layoutCanvasFlow } from "@octant/domain";
@@ -15,13 +16,16 @@ import {
   useState,
   type KeyboardEvent,
   type PointerEvent,
+  type RefObject,
 } from "react";
+import { ChevronLeft, Play, RotateCcw, X } from "lucide-react";
 import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantButton } from "../../ui/base/OctantButton";
+import { OctantDialog } from "../../ui/base/OctantDialog";
 import type { DesignAssetRuntime } from "./designDocument";
-import { DesignFrameView } from "./DesignBlock";
+import { DesignFrameView, FullscreenButton, useFullscreen, useSize } from "./DesignBlock";
 import type { DiagramBoardLayoutRuntime } from "./DiagramBoard";
-import { MockupFrame } from "./MockupBlock";
+import { MockupFrame, type MockupHotspots } from "./MockupBlock";
 
 /**
  * A flow block as a board: the screens it names, drawn at board scale and
@@ -124,6 +128,8 @@ export function FlowBoard(props: FlowBoardProps) {
   const fitViewport = (): Viewport => ({ x: -FIT_MARGIN, y: -FIT_MARGIN, zoom: 1 });
   const [viewport, setViewport] = useState<Viewport>(fitViewport);
   const [message, setMessage] = useState<string>();
+  const [playing, setPlaying] = useState<string | undefined>(undefined);
+  const playButton = useRef<HTMLButtonElement>(null);
   const markerScope = useId().replace(/[^A-Za-z0-9_-]/g, "");
   const [pending, setPending] = useState(false);
   const dragRef = useRef<Drag | undefined>(undefined);
@@ -324,6 +330,16 @@ export function FlowBoard(props: FlowBoardProps) {
         <span aria-live="polite" className="canvas-board__zoom">
           {Math.round(viewport.zoom * 100)}%
         </span>
+        <OctantButton
+          onClick={() => setPlaying(String(props.block.screens[0]?.screenId ?? ""))}
+          ref={playButton}
+          size="sm"
+          type="button"
+          variant="secondary"
+        >
+          <Play aria-hidden="true" size={12} strokeWidth={2} />
+          Play
+        </OctantButton>
       </div>
       <svg
         className="canvas-board__svg"
@@ -433,7 +449,212 @@ export function FlowBoard(props: FlowBoardProps) {
           {message}
         </OctantAlert>
       )}
+      {playing === undefined ? null : (
+        <FlowPlayer
+          block={props.block}
+          blocks={props.blocks}
+          {...(props.designAssetRuntime === undefined
+            ? {}
+            : { designAssetRuntime: props.designAssetRuntime })}
+          onClose={() => setPlaying(undefined)}
+          restoreFocus={playButton}
+          startScreenId={playing}
+        />
+      )}
     </div>
+  );
+}
+
+/** The frame a mockup without variants names; a validated block always holds one. */
+const EMPTY_MOCKUP_FRAME: CanvasMockupFrame = { key: "screen", label: undefined, roots: [] };
+
+/**
+ * A flow's click-through prototype: each screen drawn at its own size and
+ * scaled to the stage, its named hotspots real buttons, every screen-level
+ * transition an explicit Go to link, Back over the path taken, and no script
+ * anywhere. Where the person is, and how they got there, is view state alone.
+ */
+function FlowPlayer(props: {
+  readonly block: CanvasFlowBlock;
+  readonly blocks: ReadonlyArray<CanvasBlock>;
+  readonly designAssetRuntime?: DesignAssetRuntime;
+  readonly onClose: () => void;
+  readonly restoreFocus: RefObject<HTMLButtonElement | null>;
+  readonly startScreenId: string;
+}) {
+  const { block, blocks } = props;
+  const [current, setCurrent] = useState(props.startScreenId);
+  const [history, setHistory] = useState<ReadonlyArray<string>>([]);
+  const [stageRef, stage] = useSize();
+  const fullscreen = useFullscreen<HTMLDivElement>();
+  const sources = useMemo(() => flowScreenSources(block, blocks), [block, blocks]);
+  const layout = useMemo(() => layoutCanvasFlow(block, sources), [block, sources]);
+  const box = layout.screens.find((screen) => screen.screenId === current);
+  const screen = block.screens.find((candidate) => String(candidate.screenId) === current);
+  const mockupBlock =
+    screen === undefined
+      ? undefined
+      : blocks.find(
+          (candidate): candidate is CanvasMockupBlock =>
+            candidate.kind === "mockup" && String(candidate.blockId) === String(screen.blockId),
+        );
+  // The player draws a screen at its intrinsic size — the device's viewport,
+  // not the board's capped thumbnail width — scaled to fit the stage.
+  const intrinsic =
+    box === undefined || box.scale === 0
+      ? undefined
+      : { width: box.width / box.scale, height: box.height / box.scale };
+  const scale =
+    intrinsic === undefined || stage === undefined
+      ? 1
+      : Math.min(1, stage.width / intrinsic.width, stage.height / Math.max(intrinsic.height, 1));
+
+  // The edges leaving the current screen: the ones with a hotspot reach their
+  // target from inside the mockup's own drawing; the rest wait in the Go to
+  // list, so no transition is left without a place to tap.
+  const leaving = block.edges.filter((edge) => String(edge.fromScreenId) === current);
+  const go = (target: string) => {
+    setHistory((path) => [...path, current]);
+    setCurrent(target);
+  };
+  const hotspots: MockupHotspots = useMemo(
+    () =>
+      new Map(
+        leaving.flatMap((edge) =>
+          edge.fromNodeId === undefined
+            ? []
+            : ([[String(edge.fromNodeId), () => go(String(edge.toScreenId))]] as const),
+        ),
+      ),
+    // The handlers close over the current screen only through `go`, which the
+    // state update already carries, so the map is rebuilt when edges change.
+    [block, current],
+  );
+  const screenLevel = leaving.filter((edge) => edge.fromNodeId === undefined);
+
+  return (
+    <OctantDialog
+      className="canvas-flow-player"
+      label={`Playing ${block.title}`}
+      onClose={props.onClose}
+      open
+      restoreFocus={props.restoreFocus}
+    >
+      <div className="canvas-flow-player__body" ref={fullscreen.ref}>
+        <header className="canvas-flow-player__bar">
+          <span className="canvas-flow-player__title">{block.title}</span>
+          <span className="canvas-flow-player__hint">Tap a control to move between screens</span>
+          <div className="canvas-flow-player__actions">
+            <OctantButton
+              aria-label="Go back"
+              disabled={history.length === 0}
+              onClick={() =>
+                setHistory((path) => {
+                  const last = path.at(-1);
+                  if (last !== undefined) setCurrent(last);
+                  return path.slice(0, -1);
+                })
+              }
+              size="icon-sm"
+              type="button"
+              variant="ghost"
+            >
+              <ChevronLeft aria-hidden="true" size={16} strokeWidth={1.8} />
+            </OctantButton>
+            <OctantButton
+              onClick={() => {
+                setHistory([]);
+                setCurrent(props.startScreenId);
+              }}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              <RotateCcw aria-hidden="true" size={12} strokeWidth={2} />
+              Restart
+            </OctantButton>
+            <FullscreenButton fullscreen={fullscreen} />
+            <OctantButton
+              aria-label="Close"
+              onClick={props.onClose}
+              size="icon-sm"
+              type="button"
+              variant="ghost"
+            >
+              <X aria-hidden="true" size={16} strokeWidth={1.8} />
+            </OctantButton>
+          </div>
+        </header>
+        <div className="canvas-flow-player__stage" ref={stageRef}>
+          {box === undefined || screen === undefined ? null : (
+            <div
+              className="canvas-flow-player__screen"
+              style={{
+                width: (intrinsic?.width ?? 0) * scale,
+                height: (intrinsic?.height ?? 0) * scale,
+              }}
+            >
+              {mockupBlock === undefined ? (
+                screen.frameId === undefined ? null : (
+                  <DesignFrameView
+                    {...(props.designAssetRuntime === undefined
+                      ? {}
+                      : { assetRuntime: props.designAssetRuntime })}
+                    block={
+                      blocks.find(
+                        (candidate) =>
+                          candidate.kind === "design" &&
+                          String(candidate.blockId) === String(screen.blockId),
+                      ) as never
+                    }
+                    frameId={screen.frameId}
+                    scale={scale}
+                  />
+                )
+              ) : (
+                <div
+                  className="canvas-flow-player__mockup"
+                  style={{ width: (intrinsic?.width ?? 0) * scale }}
+                >
+                  <MockupFrame
+                    block={mockupBlock}
+                    callouts={canvasMockupCallouts(mockupBlock)}
+                    deviceDetail={
+                      mockupBlock.size === undefined
+                        ? CANVAS_MOCKUP_DEVICE_NAME[mockupBlock.device]
+                        : `${String(mockupBlock.size.width)} × ${String(mockupBlock.size.height)}`
+                    }
+                    frame={
+                      canvasMockupFrames(mockupBlock).find(
+                        (candidate) =>
+                          candidate.key ===
+                          (screen?.variantId === undefined ? "screen" : String(screen.variantId)),
+                      ) ?? EMPTY_MOCKUP_FRAME
+                    }
+                    hotspots={hotspots}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+          {screenLevel.length === 0 ? null : (
+            <nav aria-label="Continue" className="canvas-flow-player__links">
+              {screenLevel.map((edge) => (
+                <OctantButton
+                  key={String(edge.edgeId)}
+                  onClick={() => go(String(edge.toScreenId))}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  {`${edge.label ?? "Continue"} →`}
+                </OctantButton>
+              ))}
+            </nav>
+          )}
+        </div>
+      </div>
+    </OctantDialog>
   );
 }
 

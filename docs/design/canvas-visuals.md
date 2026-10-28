@@ -439,6 +439,15 @@ forced colours every edge falls to system ink and the arrowhead keeps the
 direction; the outline under the board lists each screen and each transition
 with its hotspot, so a reader who cannot use the board still walks the flow.
 
+Play opens the design player's anatomy over the flow: a bar, a stage that
+scales the current screen to fit, and a Go to list. A hotspot is the one live
+control in an otherwise inert drawing — a button in the accent that keeps
+the ordinary focus outline — and it says what it does: the control's own
+label. The Go to list reads in the secondary ink with each transition's label
+and an arrow, so a reader who cannot tap a wireframe still reaches every
+screen. The player keeps the workspace's one neutral focus edge and adds no
+motion of its own.
+
 ## Verification
 
 - Marks, scales, and number reading: `packages/theme/src/chartMarks.test.ts`,
