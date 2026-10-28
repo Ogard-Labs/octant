@@ -34,9 +34,9 @@ import {
   type CanvasDeckProposeCommand,
 } from "@octant/contracts/canvas-board";
 import { proposeCanvasDeck } from "./canvasDeckProposal";
-import { decodeCanvasVersionId } from "@octant/contracts/canvas";
+import { CANVAS_SCHEMA_VERSION, decodeCanvasVersionId } from "@octant/contracts/canvas";
 import type { UtcTimestamp } from "@octant/contracts/events";
-import { validateCanvasDefinition } from "./canvasPolicy";
+import { CanvasPolicyRejected, validateCanvasDefinition } from "./canvasPolicy";
 
 export type CanvasBoardRejectionCode =
   | "malformed-request"
@@ -654,25 +654,27 @@ export function admitCanvasDeckProposal(
       "This Canvas has too little to present: a deck needs at least two screens or readings that nothing else already places.",
     );
   }
-  const taken = new Set(current.definition.blocks.map((block) => String(block.blockId)));
-  let blockId = deck.blockId;
-  for (let index = 2; taken.has(blockId); index += 1) {
-    blockId = `${deck.blockId}-${String(index)}`;
-  }
-  const deckBlock = {
-    schemaVersion: current.definition.schemaVersion,
-    ...deck,
-    blockId,
-  };
+  // The proposer already chose a block id the document has not taken and
+  // kept to the deck's budgets; the whole definition revalidates, so the
+  // proposal journals only what the person could have written by hand.
+  const { omitted: _omitted, ...proposed } = deck;
   let validatedDefinition: typeof current.definition;
   try {
+    // A deck exists from its own schema version on, so a document written
+    // before it is declared at the current version once it holds one.
     validatedDefinition = validateCanvasDefinition({
       ...current.definition,
-      blocks: [...current.definition.blocks, deckBlock as never],
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      blocks: [...current.definition.blocks, { schemaVersion: CANVAS_SCHEMA_VERSION, ...proposed }],
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Canvas definition validation failed.";
-    return reject("oversized-payload", message);
+    if (error instanceof CanvasPolicyRejected && error.code === "payload-budget-exceeded") {
+      return reject("oversized-payload", error.message);
+    }
+    return reject(
+      "malformed-request",
+      error instanceof Error ? error.message : "Canvas deck proposal failed validation.",
+    );
   }
   const next: CanvasVersion = {
     schemaVersion: current.schemaVersion,

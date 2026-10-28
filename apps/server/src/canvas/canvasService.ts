@@ -539,9 +539,10 @@ export class CanvasService {
   }
 
   /**
-   * Record a person's change to one plan task's status as a new version. Like
-   * a drag, it comes from the person's own window, so the host records it as
-   * that person whatever actor the request names.
+   * Record a person's one-click deck proposal as a new version: the host
+   * derives the deck from the head it holds, so the request carries no deck,
+   * and like a drag it comes from the person's own window, so the host records
+   * it as that person whatever actor the request names.
    */
   proposeDeck(
     requestInput: unknown,
@@ -567,6 +568,11 @@ export class CanvasService {
     );
   }
 
+  /**
+   * Record a person's change to one plan task's status as a new version. Like
+   * a drag, it comes from the person's own window, so the host records it as
+   * that person whatever actor the request names.
+   */
   revisePlanTask(
     requestInput: unknown,
     context: CanvasAuthorizationContext,

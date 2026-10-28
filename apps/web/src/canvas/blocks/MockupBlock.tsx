@@ -310,6 +310,7 @@ function MockupItem({
             <CalloutMark number={callout} />
           </span>
         )}
+        {marker}
         <WindowBody
           branches={branch.children}
           callouts={callouts}
@@ -327,10 +328,12 @@ function MockupItem({
             <CalloutMark number={callout} />
             <span className="canvas-mockup__modal-title">{node.label}</span>
           </span>
+          {marker}
           <MockupGroup
             branches={branch.children}
             callouts={callouts}
             {...(hotspots === undefined ? {} : { hotspots })}
+            {...(nodeComments === undefined ? {} : { nodeComments })}
           />
         </div>
       </li>

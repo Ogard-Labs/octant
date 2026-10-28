@@ -98,6 +98,8 @@ function createRevisionRoute(
     readonly findPublishedSnapshot?: Parameters<
       typeof createCanvasRouteHandler
     >[0]["findPublishedSnapshot"];
+    /** Blocks the seeded Canvas holds after its heading and diagram. */
+    readonly extraBlocks?: ReadonlyArray<unknown>;
   } = {},
 ) {
   const canvasProjectId = options.threadOwned === true ? null : projectId;
@@ -141,6 +143,7 @@ function createRevisionRoute(
           ],
           edges: [{ edgeId: "api-db" as never, source: "api" as never, target: "db" as never }],
         },
+        ...(options.extraBlocks ?? []),
       ],
     },
     createdBy: {
@@ -149,7 +152,7 @@ function createRevisionRoute(
     },
     createdAt: now as never,
   };
-  seedProjection(projection, canvasProjectId);
+  seedProjection(projection, canvasProjectId, options.extraBlocks);
   const directory = mkdtempSync(join(tmpdir(), "octant-canvas-route-"));
   directories.push(directory);
   const connection = openSqlite(join(directory, "events.sqlite3"));
@@ -507,6 +510,7 @@ function bootstrapFor(project: typeof projectId): ShellBootstrap {
 function seedProjection(
   projection: CanvasProjection,
   canvasProjectId: typeof projectId | null = projectId,
+  extraBlocks: ReadonlyArray<unknown> = [],
 ) {
   projection.applyCreated({
     canvasId,
@@ -550,6 +554,7 @@ function seedProjection(
             ],
             edges: [{ edgeId: "api-db" as never, source: "api" as never, target: "db" as never }],
           },
+          ...(extraBlocks as ReadonlyArray<never>),
         ],
       },
       createdBy: {
@@ -1290,6 +1295,131 @@ describe("canvas routes", () => {
     );
     expect(board.layout).toBe("manual");
     expect(board.nodes[1]).toMatchObject({ nodeId: "db", x: 320, y: 40, positioned: true });
+  });
+
+  it("journals a proposed deck for the host window and refuses it without a window, on a stale head, or with too little to present", async () => {
+    const metric = (blockId: string, label: string) => ({
+      blockId,
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "metric",
+      label,
+      value: 12,
+    });
+    const route = createRevisionRoute(new CanvasProjection(), {
+      extraBlocks: [metric("signups", "Signups"), metric("churn", "Churn")],
+    });
+    const command = (overrides: Record<string, unknown> = {}) => ({
+      kind: "canvas-deck-propose",
+      canvasId,
+      versionId: "44444444-4444-4444-8444-444444444444",
+      actor: { kind: "local-user", actorId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" },
+      expectedSequence: 1,
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      issuedAt: now,
+      ...overrides,
+    });
+    const propose = (body: unknown, capability: string | null = windowCapability) =>
+      route(
+        new Request("http://127.0.0.1/api/canvas/deck-propose", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...(capability === null ? {} : { "x-octant-window-capability": capability }),
+          },
+          body: JSON.stringify(body),
+        }),
+      );
+
+    expect((await propose(command(), null))?.status).toBe(401);
+    const malformed = await propose({ ...command(), deck: { slides: [] } });
+    expect(JSON.parse(await malformed!.text())).toMatchObject({
+      kind: "denied",
+      denialCode: "malformed-request",
+    });
+    const stale = await propose(command({ expectedSequence: 7 }));
+    expect(JSON.parse(await stale!.text())).toMatchObject({
+      kind: "denied",
+      denialCode: "stale-version",
+    });
+
+    const accepted = await propose(command());
+    expect(JSON.parse(await accepted!.text())).toMatchObject({ kind: "accepted", sequence: 2 });
+    const reread = await route(
+      new Request(`http://127.0.0.1/api/canvas/get?canvasId=${String(canvasId)}`, {
+        method: "GET",
+        headers: { "x-octant-window-capability": windowCapability },
+      }),
+    );
+    const body = JSON.parse(await reread!.text());
+    // The host derived the deck from its own head and records it as its person.
+    expect(body.version.createdBy).toEqual({
+      kind: "local-user",
+      actorId: "00000000-0000-4000-8000-000000000002",
+    });
+    const deck = body.version.definition.blocks.find(
+      (block: { kind: string }) => block.kind === "deck",
+    );
+    expect(deck.slides.map((slide: { blockId: string }) => slide.blockId)).toEqual([
+      "signups",
+      "churn",
+    ]);
+
+    // The two readings now sit in the deck, so a second proposal has nothing to present.
+    const again = await propose(
+      command({ versionId: "55555555-5555-4555-8555-555555555555", expectedSequence: 2 }),
+    );
+    expect(JSON.parse(await again!.text())).toMatchObject({
+      kind: "denied",
+      denialCode: "nothing-to-present",
+    });
+  });
+
+  it("hands a Canvas's mockups off as one TSX file, redacted, and refuses a Canvas with none", async () => {
+    const mockup = {
+      blockId: "screen",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "mockup",
+      device: "phone",
+      title: "Settings",
+      nodes: [
+        { nodeId: "window", component: "window", label: "Settings" },
+        {
+          nodeId: "key",
+          parentId: "window",
+          component: "form-field",
+          label: "Key",
+          value: "token sk-proj-abcdefghij0123456789",
+        },
+      ],
+    };
+    const ask = async (route: ReturnType<typeof createRevisionRoute>) => {
+      const response = await route(
+        new Request("http://127.0.0.1/api/canvas/html-file", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-octant-window-capability": windowCapability,
+          },
+          body: JSON.stringify({
+            schemaVersion: 1,
+            kind: "canvas-html-file",
+            canvasId: String(canvasId),
+            versionId: "22222222-2222-4222-8222-222222222222",
+            form: "mockups-tsx",
+          }),
+        }),
+      );
+      return JSON.parse((await response?.text()) ?? "{}");
+    };
+    const ready = await ask(createRevisionRoute(new CanvasProjection(), { extraBlocks: [mockup] }));
+    expect(ready).toMatchObject({ kind: "ready-tsx", fileName: "Quarterly summary.tsx" });
+    expect(ready.tsx).toContain("export function Settings() {");
+    expect(ready.tsx).toContain("[redacted]");
+    expect(ready.tsx).not.toContain("sk-proj-");
+    expect(await ask(createRevisionRoute())).toMatchObject({
+      kind: "refused",
+      code: "unavailable",
+    });
   });
 
   it("refreshes an approved recipe through the authenticated route", async () => {

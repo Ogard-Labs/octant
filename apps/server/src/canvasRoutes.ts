@@ -1,5 +1,5 @@
 import { decodeCanvasDocumentRecipeCatalog } from "@octant/contracts/canvas-skill";
-import { canvasMockupTsx, canvasExportStem, importCanvasHtmlPage } from "@octant/domain";
+import { canvasMockupsTsx, canvasExportStem, importCanvasHtmlPage } from "@octant/domain";
 import {
   type CanvasId,
   decodeCanvasActionResult,
@@ -52,6 +52,7 @@ import {
 } from "@octant/contracts";
 import {
   CANVAS_HTML_FILE_MAX_BYTES,
+  canvasExportBodyByteLength,
   decodeCanvasHtmlFileRequest,
   decodeCanvasHtmlFileResult,
   type CanvasHtmlFileRequest,
@@ -70,7 +71,7 @@ import {
   filterCanvasInventoryEntries,
   projectInventoryEntryFromProjection,
 } from "@octant/domain";
-import { renderCanvasHtmlFile } from "./canvas/artifactDocumentRender";
+import { readableMockup, renderCanvasHtmlFile } from "./canvas/artifactDocumentRender";
 import type { CanvasService } from "./canvas/canvasService";
 import type { CanvasCommentService } from "./canvas/canvasCommentService";
 import type { CanvasShareService } from "./canvas/canvasShareService";
@@ -229,6 +230,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
       route !== "revise" &&
       route !== "layout-revise" &&
       route !== "plan-revise" &&
+      route !== "deck-propose" &&
       route !== "comments" &&
       route !== "comment" &&
       route !== "refresh" &&
@@ -519,10 +521,21 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         return jsonResponse(decodeCanvasReviseResult(result), 200, origin);
       }
 
-      // A drag on a diagram and a person's change to a plan task are both board
-      // revisions: the same authorization, the same answer shape.
-      if ((route === "layout-revise" || route === "plan-revise") && request.method === "POST") {
-        const what = route === "plan-revise" ? "plan revision" : "layout revision";
+      // A drag on a diagram, a person's change to a plan task, and a person's
+      // one-click deck proposal are all board revisions: the same
+      // authorization, the same answer shape. None is admitted for a paired
+      // device (the remote classifier names none of them), so each is the
+      // host window's own act.
+      if (
+        (route === "layout-revise" || route === "plan-revise" || route === "deck-propose") &&
+        request.method === "POST"
+      ) {
+        const what =
+          route === "plan-revise"
+            ? "plan revision"
+            : route === "deck-propose"
+              ? "deck proposal"
+              : "layout revision";
         const body = await readJson(request);
         const malformed = () =>
           jsonResponse(
@@ -578,11 +591,13 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         const result =
           route === "plan-revise"
             ? dependencies.canvasService.revisePlanTask(body.value, authorization, context.project)
-            : dependencies.canvasService.reviseDiagramLayout(
-                body.value,
-                authorization,
-                context.project,
-              );
+            : route === "deck-propose"
+              ? dependencies.canvasService.proposeDeck(body.value, authorization, context.project)
+              : dependencies.canvasService.reviseDiagramLayout(
+                  body.value,
+                  authorization,
+                  context.project,
+                );
         return jsonResponse(decodeCanvasDiagramLayoutReviseResult(result), 200, origin);
       }
 
@@ -1901,29 +1916,20 @@ async function renderCanvasHtmlFileForWindow(
   }
   const definition = read.version.definition;
   // The TSX handoff names no destination and journals nothing, exactly as the
-  // document form: the file goes back to the window that asked.
+  // document form: the file goes back to the window that asked, generated
+  // from the share-filtered mockups as the HTML form is.
   if (input.form === "mockups-tsx") {
-    const parts: string[] = [];
-    for (const block of definition.blocks) {
-      if (block.kind !== "mockup") continue;
-      const variants =
-        block.variants === undefined
-          ? [undefined]
-          : block.variants.map((variant) => String(variant.variantId));
-      for (const variant of variants) {
-        const tsx = canvasMockupTsx(block, variant);
-        if (tsx !== "") parts.push(tsx);
-      }
-    }
-    if (parts.length === 0) {
+    const tsx = canvasMockupsTsx(
+      definition.blocks.map((block) => (block.kind === "mockup" ? readableMockup(block) : block)),
+    );
+    if (tsx === undefined) {
       return {
         kind: "refused",
         code: "unavailable",
         message: "This Canvas holds no mockup to hand off.",
       };
     }
-    const text = parts.join("\n");
-    if (text.length > CANVAS_HTML_FILE_MAX_BYTES) {
+    if (canvasExportBodyByteLength(tsx) > CANVAS_HTML_FILE_MAX_BYTES) {
       return {
         kind: "refused",
         code: "too-large",
@@ -1931,13 +1937,11 @@ async function renderCanvasHtmlFileForWindow(
       };
     }
     return {
-      kind: "ready",
+      kind: "ready-tsx",
       canvasId: input.canvasId,
       versionId: read.version.versionId,
       fileName: `${canvasExportStem(definition.title)}.tsx`,
-      html: text,
-      writesDesignMarkup: false,
-      imagesLeftOut: 0,
+      tsx,
     };
   }
   const designAssets = new Map<string, ReadonlyArray<CanvasDesignAssetResolution>>();

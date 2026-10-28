@@ -563,6 +563,16 @@ export class CanvasExportService {
     if (byteLength > CANVAS_EXPORT_PICTURES_MAX_BYTES) {
       return refused("too-large", "The rendered pictures are too large to export.");
     }
+    // A PDF is one page per design frame, or one per deck slide followed by
+    // the design frames the deck does not place.
+    const pages =
+      format !== "pdf"
+        ? undefined
+        : subject.kind === "frames"
+          ? subject.frames.length
+          : subject.kind === "slides"
+            ? subject.slides.length + (subject.frames?.length ?? 0)
+            : undefined;
     return {
       kind: "pictures",
       format,
@@ -571,10 +581,7 @@ export class CanvasExportService {
       payloadDigest: decodeCanvasExportPayloadDigest(digestOfFiles(files)),
       card: {
         files: files.map((file) => ({ name: file.name, byteLength: file.bytes.length })),
-        ...(format === "pdf" && subject.kind === "frames" ? { pages: subject.frames.length } : {}),
-        ...((format === "pdf" && subject.kind === "slides"
-          ? { pages: subject.slides.length + (subject.frames?.length ?? 0) }
-          : {}) as { pages?: number }),
+        ...(pages === undefined ? {} : { pages }),
         ...(subject.kind === "frames" ? { drawsDesignFrames: true as const } : {}),
         ...(subject.kind === "slides" &&
         subject.slides.some((slide) =>

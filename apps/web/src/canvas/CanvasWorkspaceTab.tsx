@@ -661,29 +661,36 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     if (deckPropose === undefined || selectedVersionId === undefined) return;
     setHtmlFileBusy(true);
     setHtmlFileMessage(undefined);
-    const result = await deckPropose({
-      kind: "canvas-deck-propose",
-      canvasId: props.tab.canvasId,
-      versionId: decodeCanvasVersionId(globalThis.crypto.randomUUID()),
-      actor: LOCAL_PERSON,
-      expectedSequence,
-      schemaVersion: CANVAS_SCHEMA_VERSION,
-      issuedAt: decodeUtcTimestamp(new Date().toISOString()),
-    });
-    if (result.kind === "accepted") {
-      await loadCanvas();
-      await loadHistory();
-      await loadExportOffers();
-      setHtmlFileMessage("A deck was added from this Canvas's screens and numbers.");
-    } else {
-      setHtmlFileMessage(result.message);
-      if (result.denialCode === "stale-version") {
+    // A failed request or reload still frees the menu and says so; the busy
+    // flag never outlives the attempt.
+    try {
+      const result = await deckPropose({
+        kind: "canvas-deck-propose",
+        canvasId: props.tab.canvasId,
+        versionId: decodeCanvasVersionId(globalThis.crypto.randomUUID()),
+        actor: LOCAL_PERSON,
+        expectedSequence,
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        issuedAt: decodeUtcTimestamp(new Date().toISOString()),
+      });
+      if (result.kind === "accepted") {
         await loadCanvas();
         await loadHistory();
         await loadExportOffers();
+        setHtmlFileMessage("A deck was added from this Canvas's screens and numbers.");
+      } else {
+        setHtmlFileMessage(result.message);
+        if (result.denialCode === "stale-version") {
+          await loadCanvas();
+          await loadHistory();
+          await loadExportOffers();
+        }
       }
+    } catch {
+      setHtmlFileMessage("The deck could not be proposed. Try again.");
+    } finally {
+      setHtmlFileBusy(false);
     }
-    setHtmlFileBusy(false);
   }, [
     expectedSequence,
     loadCanvas,

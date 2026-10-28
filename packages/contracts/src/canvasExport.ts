@@ -668,6 +668,20 @@ export const CanvasHtmlFileResult = Schema.Union(
     /** Declared images that resolved but were drawn as placeholders to keep the file in budget. */
     imagesLeftOut: Schema.Int.pipe(Schema.nonNegative()),
   }).annotations(strict),
+  // The mockups' TSX handoff: one module of dependency-free components, named
+  // `.tsx`, which a window saves as text rather than as a page.
+  Schema.Struct({
+    kind: Schema.Literal("ready-tsx"),
+    canvasId: CanvasId,
+    versionId: CanvasVersionId,
+    fileName: CanvasExportFileName,
+    tsx: Schema.String.pipe(
+      Schema.minLength(1),
+      Schema.filter((value) => canvasExportBodyByteLength(value) <= CANVAS_HTML_FILE_MAX_BYTES, {
+        message: () => "A mockup TSX file must fit the HTML file's byte cap.",
+      }),
+    ),
+  }).annotations(strict),
   CanvasExportRefusal,
 );
 export type CanvasHtmlFileResult = typeof CanvasHtmlFileResult.Type;

@@ -465,6 +465,13 @@ describe("authenticated product route dispatch", () => {
     expect(dispatch).toHaveBeenCalledOnce();
   });
 
+  it("keeps a one-click deck proposal to the host's own window", async () => {
+    const dispatch = vi.fn(async () => Response.json({ ok: true }));
+    const product = createAuthenticatedProductDispatch({ dispatch });
+    expect((await product(handoff("/api/canvas/deck-propose", "POST")))?.status).toBe(403);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
   it("classifies watching the host's browser as a read and acting in it as its own action", () => {
     for (const path of [
       "/api/browser/scope",
