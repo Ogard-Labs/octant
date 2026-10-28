@@ -11,7 +11,6 @@ import {
   CONTEXT_COMPACTION_EVENT_NAMES,
   CorrelationId,
   EventId,
-  ReplayCursor,
   UtcTimestamp,
   decodeChatAttachment,
   decodeChatAttachmentId,
@@ -310,7 +309,18 @@ const SIDE_CHAT_READ_TOOL_NAMES: ReadonlySet<string> = new Set([
   SIDE_CHAT_SEARCH_FILES_TOOL_NAME,
   SIDE_CHAT_READ_FILE_TOOL_NAME,
 ]);
-const decodeReplayCursor = Schema.decodeUnknownSync(ReplayCursor);
+
+/**
+ * The aggregates whose rows can feed one Chat thread's event stream, all keyed
+ * by the thread id. Chat frames are not confined to the chat-thread aggregate:
+ * work-list and follow-up updates journal on their own aggregates, and a
+ * session's compaction settles on the context ledger.
+ */
+const CHAT_STREAM_AGGREGATE_TYPES = [
+  "chat-thread",
+  "thread-work-list",
+  "thread-follow-up",
+] as const;
 
 const CHAT_EVENT_NAMES = new Set([
   "chat.settings-updated@1",
@@ -333,6 +343,17 @@ const COMPACTION_SETTLED_EVENT_NAMES = new Set<string>([
   CONTEXT_COMPACTION_EVENT_NAMES.completed,
   CONTEXT_COMPACTION_EVENT_NAMES.failed,
 ]);
+
+/**
+ * How long streamed deltas share one journal append, so the authoritative
+ * journal commits — and fsyncs, under `synchronous = FULL` — once per burst
+ * instead of once per token: a 775-delta reply used to commit 775 times, and
+ * one fsync per delta was the cost that pushed the store to NORMAL. A burst
+ * is also flushed by every full attempt persist, so no delta outlives the
+ * turn that streamed it; a crash loses at most this window's unflushed
+ * deltas, never an fsynced one.
+ */
+const STREAMED_DELTA_BATCH_WINDOW_MS = 100;
 
 /**
  * The thread as one route actually runs it.
@@ -1748,11 +1769,29 @@ export class ChatService {
     options?: ChatSubscribeOptions,
   ): AsyncGenerator<ChatEventFrame, number> {
     this.#assertReadableThread(threadId);
+    // The slices that hold this thread's frames, each read through the
+    // (aggregate, sequence) index by the aggregate id the thread keys. A held
+    // stream wakes on every machine change, so a global journal replay would
+    // scan and decode every other thread's events on each wake; these reads
+    // touch only this thread's rows and still merge back to global journal
+    // order.
+    const aggregateTypes =
+      options?.compaction === true
+        ? [...CHAT_STREAM_AGGREGATE_TYPES, "context-ledger"]
+        : CHAT_STREAM_AGGREGATE_TYPES;
     let cursor = afterSequence;
     while (!signal?.aborted) {
-      const events = this.#persistence.journal.replay(
-        decodeReplayCursor({ afterSequence: cursor, limit: 100 }),
+      const batches = aggregateTypes.map((aggregateType) =>
+        this.#persistence.journal.replayAggregateBySequence({
+          aggregateType,
+          aggregateId: String(threadId),
+          afterSequence: cursor,
+          limit: 100,
+        }),
       );
+      const events = batches
+        .flat()
+        .toSorted((left, right) => left.globalSequence - right.globalSequence);
       if (events.length === 0) break;
       for (const [index, envelope] of events.entries()) {
         cursor = envelope.globalSequence;
@@ -1787,11 +1826,11 @@ export class ChatService {
         if (frame === undefined) continue;
         yield frame;
       }
-      if (events.length < 100) break;
+      if (batches.every((batch) => batch.length < 100)) break;
     }
-    // The last journal entry scanned, which is past any entries that belong to
-    // other threads. A held stream that resumed from the last frame it sent
-    // would otherwise re-read that unrelated tail on every wake.
+    // The thread's last scanned row. A held stream that resumes from the last
+    // frame it sent re-reads only this thread's later rows, never the
+    // journal's unrelated tail.
     return cursor;
   }
 
@@ -3901,6 +3940,12 @@ export class ChatService {
                 : previous.resumeCursor !== undefined &&
                   (previous.modelId === thread.modelId ||
                     probe.capabilities.modelSwitch === "supported"),
+              // A same-provider model swap the provider cannot carry on starts
+              // a fresh session with a handoff instead of refusing the turn.
+              ...(previous.modelId !== thread.modelId &&
+              probe.capabilities.modelSwitch !== "supported"
+                ? { modelSwitchHandoff: true }
+                : {}),
               // The session cursor is recorded when the session starts, before
               // the provider is sent anything, so an attempt that carried a
               // handoff and did not complete may never have delivered it.
@@ -5556,6 +5601,64 @@ export class ChatService {
     this.#activeAttempts.set(String(input.attempt.id), controller);
     this.#activeThreadExecutions.add(String(input.thread.id));
     const pendingContent = new Map<string, PreparedChatContent>();
+    // Streamed deltas after the first journal only the reference each one
+    // appended; the full attempt went out once when it turned `streaming`.
+    // Deltas inside one batch window share a single journal append — one
+    // commit, and one fsync of the authoritative journal, per burst instead
+    // of per token. Every full attempt persist folds the batch in ahead of
+    // its own event, in the same transaction, so the journal still shows each
+    // reference appended before any whole attempt carries it; a burst that
+    // outgrows the window commits on its own.
+    const appendedBatch: Array<{
+      readonly attempt: ChatAttempt;
+      readonly responseRef: ChatContentReference;
+      readonly content: PreparedChatContent | undefined;
+    }> = [];
+    let appendedBatchStartedAtMs: number | undefined;
+    const appendedEvent = (attempt: ChatAttempt, responseRef: ChatContentReference) =>
+      this.#pending("chat.attempt-response-appended@1", {
+        kind: "attempt-response-appended",
+        threadId: attempt.threadId,
+        turnId: attempt.turnId,
+        attemptId: attempt.id,
+        responseRef,
+        updatedAt: attempt.updatedAt,
+      });
+    const takeAppendedBatch = () => {
+      const batch = [...appendedBatch];
+      appendedBatch.length = 0;
+      appendedBatchStartedAtMs = undefined;
+      return batch;
+    };
+    const journalAppendedBatch = () => {
+      const batch = takeAppendedBatch();
+      if (batch.length === 0) return;
+      this.#persistence.journal.append(
+        {
+          aggregate: { aggregateType: "chat-thread", aggregateId: input.thread.id },
+          expectedVersion: readAggregateVersion(
+            this.#persistence.connection,
+            "chat-thread",
+            input.thread.id,
+          ),
+          events: batch.map(({ attempt, responseRef }) => appendedEvent(attempt, responseRef)),
+        },
+        batch.every(({ content }) => content === undefined)
+          ? undefined
+          : {
+              beforeEvents: (connection) => {
+                for (const { content } of batch) {
+                  if (content !== undefined) this.#writePreparedContent(connection, content);
+                }
+              },
+            },
+      );
+      for (const { content } of batch) {
+        if (content !== undefined) {
+          pendingContent.delete(String(content.reference.contentId));
+        }
+      }
+    };
     const persistAttempt = async (
       attempt: ChatAttempt,
       terminalFailure?: ProviderFailure | ChatFailure,
@@ -5569,11 +5672,20 @@ export class ChatService {
       const referencedContent = attempt.responseRefs
         .map((reference) => pendingContent.get(String(reference.contentId)))
         .filter((content): content is PreparedChatContent => content !== undefined);
+      // The batch's content is still in `pendingContent`, so the references
+      // above already cover it; only its events need folding in, ahead of the
+      // attempt's own event, or the projection would append those references
+      // a second time.
+      const batch = takeAppendedBatch();
+      const batchedEvents = batch.map(({ attempt: batched, responseRef }) =>
+        appendedEvent(batched, responseRef),
+      );
       this.#persistence.journal.append(
         {
           aggregate: { aggregateType: "chat-thread", aggregateId: input.thread.id },
           expectedVersion: version,
           events: [
+            ...batchedEvents,
             this.#pending(
               "chat.attempt-updated@1",
               { kind: "attempt-updated", attempt },
@@ -5614,44 +5726,22 @@ export class ChatService {
         pendingContent.delete(String(content.reference.contentId));
       }
     };
-    // Streamed deltas after the first journal only the reference each one
-    // appended; the full attempt went out once when it turned `streaming`.
     const persistAppendedResponse = async (
       attempt: ChatAttempt,
       responseRef: ChatContentReference,
     ) => {
-      const version = readAggregateVersion(
-        this.#persistence.connection,
-        "chat-thread",
-        input.thread.id,
-      );
-      const content = pendingContent.get(String(responseRef.contentId));
-      this.#persistence.journal.append(
-        {
-          aggregate: { aggregateType: "chat-thread", aggregateId: input.thread.id },
-          expectedVersion: version,
-          events: [
-            this.#pending("chat.attempt-response-appended@1", {
-              kind: "attempt-response-appended",
-              threadId: attempt.threadId,
-              turnId: attempt.turnId,
-              attemptId: attempt.id,
-              responseRef,
-              updatedAt: attempt.updatedAt,
-            }),
-          ],
-        },
-        content === undefined
-          ? undefined
-          : {
-              beforeEvents: (connection) => {
-                this.#writePreparedContent(connection, content);
-              },
-            },
-      );
-      if (content !== undefined) {
-        pendingContent.delete(String(content.reference.contentId));
+      appendedBatch.push({
+        attempt,
+        responseRef,
+        content: pendingContent.get(String(responseRef.contentId)),
+      });
+      const nowMs = Date.parse(this.#clock());
+      if (appendedBatchStartedAtMs === undefined) {
+        appendedBatchStartedAtMs = nowMs;
+        return;
       }
+      if (nowMs - appendedBatchStartedAtMs < STREAMED_DELTA_BATCH_WINDOW_MS) return;
+      journalAppendedBatch();
     };
 
     try {
@@ -5879,6 +5969,9 @@ export class ChatService {
         );
       }
     } finally {
+      // The turn's terminal persist folds the batch in; this guards a path
+      // that ends without one, so no streamed delta is left unjournaled.
+      journalAppendedBatch();
       this.#activeAttempts.delete(String(input.attempt.id));
       this.#activeThreadExecutions.delete(String(input.thread.id));
     }

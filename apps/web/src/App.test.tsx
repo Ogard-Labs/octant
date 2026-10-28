@@ -4434,7 +4434,12 @@ describe("App", () => {
     const hostBridge: OctantHostBridge = {
       ...credentialHostOperations(),
       close: vi.fn(),
-      getHostCapabilities: () => ({ sidebarVibrancySupported: true }),
+      getHostCapabilities: () => ({
+        sidebarVibrancySupported: true,
+        liveBrowserSupported: false,
+        liveSimulatorFrameSupported: false,
+        liveAndroidFrameSupported: false,
+      }),
       maximizeOrRestore: vi.fn(),
       minimize: vi.fn(),
       projectWindowCapability,
