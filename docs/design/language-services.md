@@ -1025,7 +1025,8 @@ frame ends the session. Each request has a 10-second deadline and reports
   and does not debug the child; with debugpy's `subProcess` on, a Python child
   then waits for a client that never comes, so a debugpy package sets
   `subProcess: false` in its `launch` body. Debugging child processes needs
-  its own rule.
+  its own rule, proposed under [Child processes](#child-processes-proposed)
+  and not yet decided.
 - **Events accepted.** `initialized`, `stopped`, `continued`, `exited`,
   `terminated`, `thread`, `output` (`console`, `stdout`, `stderr`,
   `important`), `breakpoint`, `capabilities`, `invalidated`, `process`, and
@@ -1331,6 +1332,133 @@ the addendum left a choice open.
   reference and shown read-only in the panel.
 - **Evaluate.** The console sends what the person typed as `repl` in the
   selected frame; the adapter's error answer is a console line.
+
+### Child processes (proposed)
+
+**Status: proposed on 2026-10-28; waits on the maintainer's decision DB9.
+Not built.** Until DB9 is decided, the [Protocol](#protocol) rule stands: an
+adapter's child announcement is dropped, and the child runs undebugged.
+
+The outcome: a program that starts another program (Python's `subprocess` or
+`multiprocessing`, a test runner's workers) stops at the person's breakpoints
+in the child too, and the panel lists each child under the session.
+
+**Why the accepted rules do not cover it.** Measured in 8b with debugpy
+1.8.22, debugpy announces a child with its `debugpyAttach` event. The event's
+body is the configuration for a second DAP connection: an `attach` request
+naming the child, and a `connect` host and port where the adapter listens for
+that connection. Answering it needs three things the addendum refuses: the host
+opening a connection to a listener the adapter holds (DB4 rejects an adapter
+reached over TCP), the `attach` request (DB4), and on macOS loopback ports
+beyond the session's one debug port (DB6). DB4 left this open: a later slice
+may add `attach` to a process the session itself started, with its own
+decision.
+
+The proposed rule, which is the recommended answer to DB9:
+
+- **Declared, not assumed.** An adapter that debugs children declares
+  `childSessions: 1` (default `0`) in `debugAdapter` and names how it
+  announces a child: the standard DAP `startDebugging` request, or one event
+  name of its own (`debugpyAttach` for debugpy). Raising `childSessions` or
+  changing the announcement is a capability expansion: quarantine, trust, and
+  switches cleared. The review card says the adapter also debugs the child
+  processes of the program it starts. An adapter that declares nothing keeps
+  today's behaviour.
+- **Discovery is the announcement, on the session's own connection.** The
+  host never scans processes, reads another process's state, or attaches by
+  process id. An announcement counts only while its parent session runs and
+  is not ending. A session holds at most 8 children at once and 32 over its
+  life; past either bound the announcement is dropped and the panel says a
+  child ran undebugged.
+- **The host chooses the port.** A session whose adapter declares children
+  gets one host-chosen child port, set by the host as
+  `OCTANT_DEBUG_CHILD_PORT` in the capsule's environment after the person's
+  entries, as `HOME` and `TMPDIR` are. The adapter's package makes its child
+  listener use that port. An announcement whose host is not loopback, or whose
+  port is not the session's child port, is refused, and the host connects
+  nowhere. Reason: under Full access on Linux the capsule shares the host's
+  network, so a port the adapter named could be any local service, Octant's
+  own listener included.
+- **Reaching the child port.** On Linux under `proxied`, the capsule's private
+  namespace hides its loopback from the host, so a relay started inside the
+  capsule beside the egress forwarder listens on a Unix socket in the
+  session's state folder and connects only to the child port inside the
+  namespace; the host connects to that socket. On Linux under Full access the
+  host connects to the child port on loopback. On macOS the profile allows
+  binding, inbound, and outbound on `localhost:<child port>`, as DB6 allows
+  the debug port.
+- **The child reaching the adapter.** Before it is announced, a debugpy child
+  connects back to the adapter on a second listener. On Linux that connection
+  stays inside the capsule's namespace, or on the open loopback under Full
+  access. On macOS Seatbelt denies it unless that listener also uses a
+  host-chosen port, so an adapter that declares children gets a second one,
+  `OCTANT_DEBUG_CHILD_SERVER_PORT`, on the same terms. Whether debugpy's
+  package wrapper can pin both listeners to host-chosen ports is unmeasured
+  and is the slice's first measurement. If it cannot, children are refused on
+  macOS as `unsupported-platform`; loopback is not opened further.
+- **What the host sends on a child connection.** The closed list is
+  unchanged, except that `attach` takes the place of `launch`, sent once. Its
+  body is the announced configuration, bounded at 8 KiB, with `connect`
+  removed; the host adds nothing. The `attach` reaches the same adapter in the
+  same capsule, so it reaches only processes the capsule already reaches: on
+  Linux the PID namespace hides every other process, and on macOS Seatbelt
+  grants no task port. A parent session still refuses `attach`.
+- **Approval.** The configuration's approval covers the children of the
+  program it starts, with no prompt per child. Reason: the child is code the
+  confirmed program chose to run, in the same capsule and network, and it can
+  already run undebugged. A child session is not a Start: it counts toward
+  neither the per-thread nor the per-host session limit.
+- **Same confinement.** A child runs in its parent's capsule, with the same
+  filesystem, environment, network level, egress proxy and rules, and
+  receipt. The host launches nothing for a child; the Linux relay is one per
+  session.
+- **Ending.** A child session ends when its process exits, when the adapter
+  closes the child connection, or when the person stops that child, with
+  `disconnect` and `terminateDebuggee: true`. Every end of the parent ends its
+  children first; a child's end never ends the parent. The parent's
+  `code.debug-session-ended@1` record adds how many children were attached,
+  as a count only.
+- **Authority and data.** As the parent: a local window only, no paired
+  device, no agent, and nothing from a child journaled or exported. The panel
+  lists children under the session; the window's breakpoints apply to the
+  parent and every child.
+
+**Decision DB9 (open).** The maintainer decides whether the host may open a
+connection into a running session's capsule (the Linux relay and the macOS
+child listener), whether `attach` may be sent at all, and whether macOS gets
+up to two more loopback ports per session. Recommended: the rule above.
+Alternatives:
+
+1. Leave children undebugged, as today. Nothing new is granted, a debugpy
+   package keeps `subProcess: false`, and a program that does its work in a
+   child cannot be debugged in Octant.
+2. The rule above on Linux only, with children refused on macOS until 8d has
+   measured the one debug port's Seatbelt rules. Grants no new loopback on
+   macOS now.
+3. The rule above with a prompt at each child. Not recommended: it repeats
+   the confirmation's act, a worker pool would prompt many times, and
+   repeated prompts train people to accept them unread.
+4. The standard `startDebugging` request only, never an adapter's own event.
+   Provider-neutral, but it does nothing for debugpy, the one adapter
+   measured.
+
+| Threat                                               | Mitigation in the proposed rule                                                                                                     | Residual                                                                                 |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| The adapter points the host at another local service | The host connects only to the session's own host-chosen child port; any other host or port is refused before a connection is opened | None                                                                                     |
+| `attach` reaches a process outside the session       | Sent only on a child connection to the same adapter in the same capsule; Linux PID namespace; no task port on macOS                 | As for the parent: same-user processes on macOS stay visible to the capsule's broad read |
+| A child escapes the parent's confinement or network  | The child runs in the parent's capsule; the host launches nothing for it                                                            | None beyond the parent's                                                                 |
+| Another local process drives a child port on macOS   | Host-chosen ports, held only while the session runs                                                                                 | A same-user process can connect to them during the session, as to the debug port         |
+| A program floods the host with children              | At most 8 at once and 32 per session; the rest run undebugged                                                                       | None                                                                                     |
+| A child outlives its session                         | Every end of the parent ends its children, then the capsule's group as today                                                        | As for the parent: a process that calls `setsid()` leaves the group                      |
+
+_Verify, if accepted:_ a fixture adapter that announces a child by event and
+by `startDebugging`, under Bubblewrap in an approval-gated thread: the child
+stops at a breakpoint and answers its stack; an announcement naming another
+port is refused and nothing connects; an announcement after the parent ended,
+past the bounds, or from an adapter that declared nothing is dropped; a
+parent's Stop ends its children; the child cannot write outside the checkout
+and its connection to a host no rule allows is refused by the session's
+proxy. Then real debugpy under Bubblewrap, and on a Mac with 8d.
 
 ### Debugger delivery
 
@@ -1768,7 +1896,8 @@ accounts or hardware.
    - _State:_ the [Debugger addendum](#debugger-addendum) was accepted on
      2026-10-27; its sub-slices 8a to 8d are the delivery plan. 8a to 8c are
      built; 8d needs a Mac. Debugging a program's child processes (debugpy's
-     `debugpyAttach`) needs its own rule and is not built.
+     `debugpyAttach`) is [proposed](#child-processes-proposed), waits on
+     decision DB9, and is not built.
 
 The extension host is not planned (D7). Each slice is reviewable and leaves
 the editor working when the companion is off or refused.
