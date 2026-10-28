@@ -48,7 +48,7 @@ export function ArtifactTags(props: ArtifactTagsProps) {
               type="button"
               variant="bare"
             >
-              <X aria-hidden="true" size={10} strokeWidth={2} />
+              <X aria-hidden="true" size={12} strokeWidth={1.8} />
             </OctantButton>
           )}
         </span>
@@ -86,7 +86,7 @@ export function ArtifactTags(props: ArtifactTagsProps) {
           type="button"
           variant="ghost"
         >
-          <Plus aria-hidden="true" size={10} strokeWidth={2} />
+          <Plus aria-hidden="true" size={12} strokeWidth={1.8} />
           Tag
         </OctantButton>
       )}
