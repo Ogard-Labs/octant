@@ -266,12 +266,31 @@ describe("desktop lease contract", () => {
     expect(
       decodeDesktopLeaseTransitioned({ ...transition, credentialRejected: true }),
     ).toMatchObject({ credentialRejected: true });
+    expect(
+      decodeDesktopLeaseTransitioned({ ...transition, credentialMissing: true }),
+    ).toMatchObject({ credentialMissing: true });
     expect(() =>
       decodeDesktopLeaseTransitioned({ ...transition, credentialRejected: "e2b_abc" }),
     ).toThrow();
     expect(
       decodeDesktopPaneAnswer({ status: "recipe-key", key: "rejected", store: "available" }),
     ).toEqual({ status: "recipe-key", key: "rejected", store: "available" });
+    expect(
+      decodeDesktopPaneAnswer({
+        status: "recipe-key",
+        key: "none",
+        store: "available",
+        releasing: true,
+      }),
+    ).toMatchObject({ releasing: true });
+    expect(() =>
+      decodeDesktopPaneAnswer({
+        status: "recipe-key",
+        key: "none",
+        store: "available",
+        releasing: false,
+      }),
+    ).toThrow();
     expect(() =>
       decodeDesktopPaneAnswer({
         status: "recipe-key",

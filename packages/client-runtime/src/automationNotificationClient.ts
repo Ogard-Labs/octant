@@ -2,6 +2,8 @@ import {
   AutomationNotificationDeliveryQueryResponse,
   AutomationNotificationDeliveryStatus,
   AutomationNotificationPreferences,
+  RemotePushGatewaySettingsV1,
+  type SetRemotePushGatewaySettingsV1,
   type UpdateAutomationNotificationPreferences,
   decodeHostAnswer,
 } from "@octant/contracts";
@@ -33,6 +35,11 @@ export interface AutomationNotificationClient {
   readonly update: (
     input: UpdateAutomationNotificationPreferences,
   ) => Promise<AutomationNotificationPreferences>;
+  /** Whether this host sends phone notifications, and through which push gateway. */
+  readonly pushGateway: () => Promise<RemotePushGatewaySettingsV1>;
+  readonly setPushGateway: (
+    input: SetRemotePushGatewaySettingsV1,
+  ) => Promise<RemotePushGatewaySettingsV1>;
 }
 
 export class AutomationNotificationClientFailure extends Error {
@@ -116,6 +123,32 @@ export function createAutomationNotificationClient(
           return decodeHostAnswer(AutomationNotificationPreferences)(value.preferences);
         },
         "update",
+        maxAttempts,
+      );
+    },
+    async pushGateway() {
+      return request(
+        fetchImpl,
+        new URL("/api/push-notifications/gateway", options.baseUrl).toString(),
+        { method: "GET", headers: headers() },
+        (body) => {
+          const value = body as { readonly settings?: unknown };
+          return decodeHostAnswer(RemotePushGatewaySettingsV1)(value.settings);
+        },
+        "gateway settings",
+        maxAttempts,
+      );
+    },
+    async setPushGateway(input) {
+      return request(
+        fetchImpl,
+        new URL("/api/push-notifications/gateway", options.baseUrl).toString(),
+        { method: "PUT", headers: headers(), body: JSON.stringify(input) },
+        (body) => {
+          const value = body as { readonly settings?: unknown };
+          return decodeHostAnswer(RemotePushGatewaySettingsV1)(value.settings);
+        },
+        "gateway settings",
         maxAttempts,
       );
     },

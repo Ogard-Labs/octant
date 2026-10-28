@@ -98,7 +98,8 @@ beforeAll(async () => {
   fixtureRoot = await mkdtemp(join(tmpdir(), "octant-code-helper-test-"));
   helperPath = join(fixtureRoot, "octant-code-file-helper");
   await buildCodeFileHelper(undefined, helperPath);
-}, 30_000);
+  // A cold Swift compile on hosted macOS runners has taken over 30s.
+}, 120_000);
 
 afterAll(async () => {
   if (fixtureRoot === "") return;

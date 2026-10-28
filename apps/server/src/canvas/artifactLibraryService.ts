@@ -7,9 +7,10 @@ import {
   type ArtifactLibraryListing,
   type ArtifactLibraryQuery,
 } from "@octant/contracts/artifact-library";
-import type { CanvasId, ProjectId, UtcTimestamp } from "@octant/contracts";
+import type { CanvasId, CanvasTagName, ProjectId, UtcTimestamp } from "@octant/contracts";
 import {
   artifactKindForBlocks,
+  artifactTagRoster,
   selectArtifactLibraryEntries,
   selectSyncedArtifactLibraryEntries,
 } from "@octant/domain";
@@ -46,6 +47,17 @@ export interface ArtifactLibraryServiceDependencies {
   readonly syncFacts?: (
     entry: CanvasLibrarySnapshotEntry,
   ) => Pick<ArtifactLibraryEntry, "writtenOn" | "syncStatus" | "deletedOn">;
+  /**
+   * The person's own tags on a held Canvas, from the tag aggregate. Optional:
+   * a host without the tag service lists none.
+   */
+  readonly tags?: (canvasId: CanvasId) => ReadonlyArray<CanvasTagName>;
+  /**
+   * Whether the Chat thread that owns a Project-less Canvas still holds it.
+   * Optional: without it such a Canvas is not listed at all, which keeps a
+   * host that cannot judge the thread from listing what it cannot open.
+   */
+  readonly threadHoldsCanvas?: (entry: CanvasLibrarySnapshotEntry) => boolean;
   readonly clock: () => UtcTimestamp;
 }
 
@@ -84,9 +96,30 @@ export class ArtifactLibraryService {
     const all: ArtifactLibraryEntry[] = [];
     for (const entry of snapshot.values()) {
       const definition = entry.currentVersion.definition;
-      // The library lists artifacts by Project; a Canvas owned by a Chat
-      // thread outside every Project is reached from its thread instead.
-      if (definition.provenance.projectId === null) continue;
+      const tags = this.#dependencies.tags?.(entry.canvasId) ?? [];
+      const tagField = tags.length === 0 ? {} : { tags };
+      if (definition.provenance.projectId === null) {
+        // A Canvas a Chat thread owns outside every Project belongs to the
+        // person's thread, not to a Project a paired device could be clamped
+        // to, so only a window on this host sees it — and only while its
+        // thread still holds it, the same rule that authorizes its tab.
+        if (principal.kind !== "local-window") continue;
+        if (this.#dependencies.threadHoldsCanvas?.(entry) !== true) continue;
+        all.push({
+          canvasId: entry.canvasId as CanvasId,
+          mode: definition.provenance.mode,
+          kind: artifactKindForBlocks(definition.blocks),
+          title: definition.title,
+          versionCount: entry.versionCount,
+          currentVersionId: entry.currentVersion.versionId,
+          currentSequence: entry.currentVersion.sequence,
+          updatedAt: entry.updatedAt,
+          shared: shared.has(String(entry.canvasId)),
+          ...tagField,
+          ...this.#dependencies.syncFacts?.(entry),
+        });
+        continue;
+      }
       const project = projects.get(String(definition.provenance.projectId));
       // An artifact whose Project this caller may not see is absent, not
       // greyed out: the library must not disclose that it exists.
@@ -103,6 +136,7 @@ export class ArtifactLibraryService {
         currentSequence: entry.currentVersion.sequence,
         updatedAt: entry.updatedAt,
         shared: shared.has(String(entry.canvasId)),
+        ...tagField,
         ...this.#dependencies.syncFacts?.(entry),
       });
     }
@@ -118,8 +152,12 @@ export class ArtifactLibraryService {
 
     const counts = new Map<string, number>();
     for (const entry of all) {
+      // Only a Project's artifacts count toward that Project: a thread-owned
+      // entry names no Project, so it counts toward none.
+      if (entry.projectId === undefined) continue;
       counts.set(String(entry.projectId), (counts.get(String(entry.projectId)) ?? 0) + 1);
     }
+    const roster = artifactTagRoster(all);
 
     // Synced artifacts belong to no Project here, so only a window on this
     // host, which already sees every Project's artifacts, sees them.
@@ -143,6 +181,7 @@ export class ArtifactLibraryService {
           artifactCount: counts.get(String(project.id)) ?? 0,
         }))
         .sort((left, right) => left.name.localeCompare(right.name, "en-US")),
+      ...(roster.length === 0 ? {} : { tags: roster }),
       matchCount: matched.length,
       truncated: page.length < matched.length,
       generatedAt: this.#dependencies.clock(),

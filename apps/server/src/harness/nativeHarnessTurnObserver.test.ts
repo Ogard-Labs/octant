@@ -15,11 +15,13 @@ function observer(
   session?: { status: string; detail?: string },
   goal?: Record<string, unknown>,
 ) {
-  const recorded: { turns: unknown[]; interventions: unknown[]; settled: number } = {
-    turns: [],
-    interventions: [],
-    settled: 0,
-  };
+  const recorded: { turns: unknown[]; interventions: unknown[]; settled: number; started: number } =
+    {
+      turns: [],
+      interventions: [],
+      settled: 0,
+      started: 0,
+    };
   let counter = 0;
   const subject = new NativeHarnessTurnObserver({
     sessions: {
@@ -32,7 +34,9 @@ function observer(
           leadSlotId: "default",
           turnsRun: recorded.turns.length,
         }) as never,
-      markRunning: () => undefined,
+      markRunning: () => {
+        recorded.started += 1;
+      },
       settleTurn: () => {
         recorded.settled += 1;
       },
@@ -58,6 +62,23 @@ function observer(
 }
 
 describe("native harness turn observer", () => {
+  it("tracks a runtime provider's unfinished turn for restart recovery without invoking the advisor", () => {
+    const { subject, recorded } = observer(false);
+    subject.turnStarted(scope);
+    expect(recorded.started).toBe(1);
+    subject.turnEnded(scope);
+    expect(recorded.settled).toBe(1);
+    expect(recorded.interventions).toEqual([]);
+  });
+
+  it("refuses a runtime provider's new turn until its restart recovery is resumed", () => {
+    expect(
+      observer(false, { status: "recovery-required", detail: "Restarted." }).subject.admitTurn(
+        scope,
+      ),
+    ).toEqual({ kind: "paused", status: "recovery-required", detail: "Restarted." });
+  });
+
   it("puts the stable instructions in front of a harness turn and nothing in front of others", () => {
     const harness = observer(true).subject.contextFor(scope);
     expect(harness[0]?.kind).toBe("instructions");
@@ -99,7 +120,7 @@ describe("native harness turn observer", () => {
     expect(subject.contextFor(scope)).toEqual(subject.contextFor(scope));
   });
 
-  it("refuses the next turn while a pause stands and admits it for other providers", () => {
+  it("refuses the next turn while a pause stands for every provider", () => {
     const paused = observer(true, { status: "paused-by-advisor", detail: "Spending ahead." });
     expect(paused.subject.admitTurn(scope)).toEqual({
       kind: "paused",
@@ -111,7 +132,7 @@ describe("native harness turn observer", () => {
     });
     expect(
       observer(false, { status: "paused-by-advisor", detail: "x" }).subject.admitTurn(scope),
-    ).toEqual({ kind: "admitted" });
+    ).toEqual({ kind: "paused", status: "paused-by-advisor", detail: "x" });
   });
 
   it("records the turn a reply completes", async () => {
@@ -266,12 +287,15 @@ describe("native harness turn observer", () => {
       expect(recorded.settled).toBe(1);
     });
 
-    it("records nothing for a provider the harness does not drive", async () => {
+    it("keeps a runtime provider's final usage without invoking the advisor", async () => {
       const { subject, recorded } = observer(false);
 
       subject.turnEnded(scope, summary({ stopReason: "failed" }));
 
-      expect(recorded.turns).toEqual([]);
+      expect(recorded.turns).toEqual([
+        expect.objectContaining({ usage: summary().usage, metrics: summary().metrics }),
+      ]);
+      expect(recorded.interventions).toEqual([]);
     });
   });
 

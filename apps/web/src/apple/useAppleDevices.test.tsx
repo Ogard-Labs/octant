@@ -54,6 +54,7 @@ function fakeClient(answer: (request: AppleDeviceRequest) => AppleDeviceResponse
       status: "succeeded" as const,
       blob: new Blob([new Uint8Array([0x89, 0x50])], { type: "image/png" }),
     })),
+    prepareUpload: vi.fn(async () => ({ kind: "failed" as const, message: "Not offered here." })),
   };
   return { client, sent };
 }

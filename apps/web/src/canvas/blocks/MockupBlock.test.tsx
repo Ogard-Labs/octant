@@ -250,6 +250,21 @@ describe("mockup library", () => {
     expectInert(mockup);
   });
 
+  it("draws the component an instance places, and a hero's title and lede", () => {
+    draw({
+      ...libraryBlock,
+      nodes: [
+        ...libraryBlock.nodes,
+        { nodeId: "intro", parentId: "window", component: "hero", label: "Welcome", value: "Lede" },
+      ],
+    });
+    const mockup = screen.getByRole("region", { name: "Search, Phone mockup" });
+    const instance = within(mockup).getByRole("treeitem", { name: "Component, Result row" });
+    expect(within(instance).getByRole("treeitem", { name: "List row, One" })).toBeInTheDocument();
+    expect(within(mockup).getByText("Welcome")).toBeInTheDocument();
+    expect(within(mockup).getByText("Lede")).toBeInTheDocument();
+  });
+
   it("pins a callout to a library component and to an instance, and lists the notes", () => {
     draw({
       ...libraryBlock,

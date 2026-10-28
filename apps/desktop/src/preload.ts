@@ -1,6 +1,7 @@
 import type { NativeMenuRequest, NativeMenuOutcome } from "@octant/contracts/shell";
 import { decodeMenuBarOpenThread, type MenuBarOpenThread } from "./menuBar";
 import { isSshTargetOperation } from "./sshTargetControls";
+import { isAppStoreConnectKeyOperation } from "./appStoreConnectKeyControls";
 import { contextBridge, ipcRenderer } from "electron";
 import type { CodeApprovalId, CodeOperationApprovalRequest } from "@octant/contracts";
 import type { CodeOperationApprovalPalette } from "./codeOperationApprovalView";
@@ -897,6 +898,20 @@ export function createHostBridge(
       };
       ipc.on(IPC_CHANNELS.remoteServerPageSign, receive);
       return () => ipc.removeListener(IPC_CHANNELS.remoteServerPageSign, receive);
+    },
+    appStoreConnectKeyRequest: async (operation: string, body?: unknown) => {
+      if (!isAppStoreConnectKeyOperation(operation)) {
+        throw new TypeError("Invalid App Store Connect key request.");
+      }
+      const answer = (await ipc.invoke(
+        IPC_CHANNELS.appStoreConnectKeyRequest,
+        operation,
+        body,
+      )) as { readonly status?: unknown; readonly body?: unknown } | null;
+      if (typeof answer?.status !== "number") {
+        throw new Error("Octant could not reach the host.");
+      }
+      return { status: answer.status, body: answer.body };
     },
     sshTargetRequest: async (operation: string, body?: unknown) => {
       if (!isSshTargetOperation(operation)) {

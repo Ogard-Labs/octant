@@ -271,14 +271,6 @@ function sanitizeBlock(block: CanvasBlock, markupAcknowledged: boolean): CanvasS
       assertNoSecretShape(shared, `block.${block.blockId}`);
       return shared as CanvasStaticExportBlock;
     }
-    case "mockup": {
-      // A mockup's declared images name a Project file or an image job, which
-      // resolve only under this host's authority, so they stay behind like a
-      // design's and a node that names one draws a placeholder.
-      const { assets: _assets, ...rest } = block;
-      assertNoSecretShape(rest, `block.${block.blockId}`);
-      return rest as CanvasStaticExportBlock;
-    }
     case "plan": {
       const tasks = block.tasks.map(({ sourceIds: _sourceIds, ...task }) => task);
       const shared = { ...block, tasks };

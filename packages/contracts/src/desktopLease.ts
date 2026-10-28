@@ -277,6 +277,8 @@ export const DesktopLease = Schema.Struct({
   endReason: Schema.optional(DesktopLeaseEndReason),
   /** The provider refused the recipe's key when this lease asked for a desktop. */
   credentialRejected: Schema.optional(Schema.Literal(true)),
+  /** The host's credential store no longer held the recipe's key when this lease asked for a desktop. */
+  credentialMissing: Schema.optional(Schema.Literal(true)),
   updatedAt: UtcTimestamp,
 }).annotations(strict);
 export type DesktopLease = typeof DesktopLease.Type;
@@ -336,6 +338,8 @@ export const DesktopLeaseTransitioned = Schema.Struct({
    * never appears here.
    */
   credentialRejected: Schema.optional(Schema.Literal(true)),
+  /** On a refused acquisition: the credential store held no key for the lease's reference. */
+  credentialMissing: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type DesktopLeaseTransitioned = typeof DesktopLeaseTransitioned.Type;
 
@@ -619,6 +623,8 @@ export const DesktopPaneAnswer = Schema.Union(
     key: DesktopRecipeKeyState,
     /** Whether this host has a credential store a key can be saved in. */
     store: Schema.Literal("available", "unavailable"),
+    /** A key the Project's recipe stopped naming stays until its desktops are gone. */
+    releasing: Schema.optional(Schema.Literal(true)),
   }).annotations(strict),
   DesktopPaneRefusal,
 );

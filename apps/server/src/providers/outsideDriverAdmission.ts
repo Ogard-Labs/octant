@@ -257,6 +257,9 @@ export class OutsideDriverAdmission {
           source: "local-folder",
           installed: activation.installed,
           trusted: activation.trusted,
+          ...(packageState.publisher?.selected === undefined
+            ? {}
+            : { publisherKey: packageState.publisher.selected }),
         });
         return listing._tag === "Right" ? [listing.right] : [];
       }),
