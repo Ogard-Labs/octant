@@ -335,6 +335,7 @@ export function provisioningProfile(
       applicationIdentifier,
       getTaskAllow: entitlements["get-task-allow"] === true,
       provisionsAllDevices: document.ProvisionsAllDevices === true,
+      listsDevices: Array.isArray(document.ProvisionedDevices),
       expiresAtMs: expiration.getTime(),
       certificates: Array.isArray(certificates)
         ? (certificates as ReadonlyArray<PropertyListValue>).flatMap((certificate) =>

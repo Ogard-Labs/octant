@@ -1416,6 +1416,64 @@ export function useProviderController(options: ProviderControllerOptions) {
       }),
     [execute],
   );
+  /**
+   * Changes an outside driver provider. The host forgets the saved key when
+   * the address changes or the provider stops sending one, so a key the
+   * person entered is stored after the change, as for adding one. A refusal
+   * (an active session, an address the host won't use, a paired device) shows
+   * the host's own message.
+   */
+  const changeOutsideHarnessEndpointConfiguration = useCallback(
+    (
+      instanceId: ProviderInstanceId,
+      configuration: OutsideHarnessEndpointProviderConfiguration,
+      credential: TransientProviderCredential,
+    ) =>
+      queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
+        withTransientCredential(credential, async (credentialValue) => {
+          const sendsKey = configuration.key !== undefined && credentialValue.length > 0;
+          if (sendsKey && hostBridge === undefined) {
+            if (mounted.current) setMessage(BROWSER_CANNOT_SAVE_KEYS);
+            return false;
+          }
+          const current = authoritative.current;
+          const instance = current === undefined ? undefined : findProvider(current, instanceId);
+          if (
+            client === undefined ||
+            current === undefined ||
+            instance?.driverKind !== "outside-harness-endpoint"
+          ) {
+            return false;
+          }
+          try {
+            applyResult(
+              await client.execute({
+                kind: "change-outside-harness-endpoint-configuration",
+                instanceId,
+                expectedVersion: instance.version,
+                configuration,
+              }),
+              current,
+              install,
+            );
+          } catch (error) {
+            await recoverRegistryFailure(error);
+            return false;
+          }
+          if (!sendsKey || hostBridge === undefined) return true;
+          try {
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
+            return true;
+          } catch {
+            if (mounted.current) {
+              setMessage("The provider was changed, but its credential could not be stored.");
+            }
+            return false;
+          }
+        }),
+      ),
+    [client, hostBridge, install, recoverRegistryFailure],
+  );
   const changeOllamaConfiguration = useCallback(
     (instanceId: ProviderInstanceId, configuration: OllamaProviderConfiguration) =>
       execute((current) => {
@@ -2393,6 +2451,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     changePiConfiguration,
     changeOhMyPiConfiguration,
     changeOllamaConfiguration,
+    changeOutsideHarnessEndpointConfiguration,
     changeOpenAiCompatibleConfiguration,
     changeOpenAiImageConfiguration,
     changeGeminiImageConfiguration,

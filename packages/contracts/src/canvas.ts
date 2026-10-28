@@ -2117,41 +2117,6 @@ const CanvasMockupFrameEdge = Schema.Int.pipe(
  * policy names; none of them carries markup, a style, or an image source.
  */
 
-/**
- * The name markup gives a declared asset after the scheme: `octant-asset:hero`.
- * Letters, digits, dots, dashes, and underscores, so a reference ends at the
- * quote, parenthesis, or space around it wherever it is written.
- */
-export const CanvasDesignAssetId = Schema.String.pipe(
-  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/),
-  Schema.brand("CanvasDesignAssetId"),
-);
-export type CanvasDesignAssetId = typeof CanvasDesignAssetId.Type;
-
-export const CanvasDesignAssetSource = Schema.Union(
-  Schema.Struct({
-    kind: Schema.Literal("generated-image"),
-    imageId: ImageArtifactId,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("project-file"),
-    path: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024)),
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("browser-capture"),
-    captureId: BrowserCaptureId,
-  }).annotations(strict),
-);
-export type CanvasDesignAssetSource = typeof CanvasDesignAssetSource.Type;
-
-export const CanvasDesignAsset = Schema.Struct({
-  assetId: CanvasDesignAssetId,
-  source: CanvasDesignAssetSource,
-  /** What the image shows, for the author's own reference and the warnings. */
-  description: Schema.optional(CanvasMockupText),
-}).annotations(strict);
-export type CanvasDesignAsset = typeof CanvasDesignAsset.Type;
-
 export const CanvasMockupNode = Schema.Struct({
   nodeId: CanvasMockupNodeId,
   component: CanvasMockupComponent,
@@ -2186,8 +2151,6 @@ export const CanvasMockupNode = Schema.Struct({
   ),
   /** A progress bar's or slider's reading, or a stepper's current step, 0 to 100. */
   progress: Schema.optional(Schema.Int.pipe(Schema.nonNegative(), Schema.lessThanOrEqualTo(100))),
-  /** A declared image drawn inside an image-capable component. */
-  assetId: Schema.optional(CanvasDesignAssetId),
   /** The reusable definition an instance places. */
   defId: Schema.optional(boundedToken("CanvasMockupDefId")),
 }).annotations(strict);
@@ -2242,10 +2205,6 @@ export const CanvasMockupBlock = Schema.Struct({
   nodes: Schema.Array(CanvasMockupNode).pipe(Schema.maxItems(CANVAS_MAX_MOCKUP_NODES)),
   annotations: Schema.optional(
     Schema.Array(CanvasMockupAnnotation).pipe(Schema.maxItems(CANVAS_MAX_MOCKUP_ANNOTATIONS)),
-  ),
-  /** Images the frame may draw, resolved like a design's assets. */
-  assets: Schema.optional(
-    Schema.Array(CanvasDesignAsset).pipe(Schema.maxItems(CANVAS_MAX_DESIGN_ASSETS)),
   ),
   /** Local components this block's instances place. */
   definitions: Schema.optional(
@@ -2367,6 +2326,17 @@ export const CanvasDesignFrame = Schema.Struct({
 export type CanvasDesignFrame = typeof CanvasDesignFrame.Type;
 
 /**
+ * The name markup gives a declared asset after the scheme: `octant-asset:hero`.
+ * Letters, digits, dots, dashes, and underscores, so a reference ends at the
+ * quote, parenthesis, or space around it wherever it is written.
+ */
+export const CanvasDesignAssetId = Schema.String.pipe(
+  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/),
+  Schema.brand("CanvasDesignAssetId"),
+);
+export type CanvasDesignAssetId = typeof CanvasDesignAssetId.Type;
+
+/**
  * Where a declared image comes from. A `generated-image` is a completed image
  * an image job made in a thread of the Canvas's own Project, named by its
  * attachment id. A `project-file` is a path relative to the folder a Work
@@ -2377,6 +2347,29 @@ export type CanvasDesignFrame = typeof CanvasDesignFrame.Type;
  * names a screenshot the Browser kept for the Canvas's own thread; the Browser
  * is a Work and Code tool, so a Chat Canvas refuses it.
  */
+export const CanvasDesignAssetSource = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("generated-image"),
+    imageId: ImageArtifactId,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("project-file"),
+    path: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024)),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("browser-capture"),
+    captureId: BrowserCaptureId,
+  }).annotations(strict),
+);
+export type CanvasDesignAssetSource = typeof CanvasDesignAssetSource.Type;
+
+export const CanvasDesignAsset = Schema.Struct({
+  assetId: CanvasDesignAssetId,
+  source: CanvasDesignAssetSource,
+  /** What the image shows, for the author's own reference and the warnings. */
+  description: Schema.optional(CanvasMockupText),
+}).annotations(strict);
+export type CanvasDesignAsset = typeof CanvasDesignAsset.Type;
 
 /**
  * Screens of an app or site, or the slides of a deck, written as HTML and CSS.
@@ -2493,40 +2486,27 @@ export type CanvasDesignAssetsOutcome = typeof CanvasDesignAssetsOutcome.Type;
 
 /**
  * Whether a mockup uses anything the library wave added: one of its
- * components, an image or definition reference, or a declared asset. Reads
- * loose fields so the domain's declared-version check can ask the same
- * question of a document that did not decode.
+ * components, a node's progress reading or definition reference, or reusable
+ * definitions. Reads loose fields so the domain's declared-version check can
+ * ask the same question of a document that did not decode.
  */
 export function canvasMockupUsesLibrary(block: {
   readonly kind?: unknown;
   readonly nodes?: unknown;
-  readonly assets?: unknown;
   readonly definitions?: unknown;
 }): boolean {
   if (block.kind !== "mockup") return false;
+  if (block.definitions !== undefined) return true;
   const library = new Set<string>(CANVAS_MOCKUP_LIBRARY_COMPONENTS);
-  const usesField = (
-    nodes: ReadonlyArray<{
-      component?: unknown;
-      assetId?: unknown;
-      defId?: unknown;
-      progress?: unknown;
-    }>,
-  ) =>
-    nodes.some(
-      (node) =>
-        (typeof node.component === "string" && library.has(node.component)) ||
-        node.assetId !== undefined ||
-        node.defId !== undefined ||
-        node.progress !== undefined,
-    );
-  if (Array.isArray(block.nodes) && usesField(block.nodes as never)) return true;
-  if (block.assets !== undefined || block.definitions !== undefined) return true;
-  for (const definition of Array.isArray(block.definitions) ? (block.definitions as never) : []) {
-    const nodes = (definition as { nodes?: unknown }).nodes;
-    if (Array.isArray(nodes) && usesField(nodes as never)) return true;
-  }
-  return false;
+  const nodes: ReadonlyArray<unknown> = Array.isArray(block.nodes) ? block.nodes : [];
+  return nodes.some(
+    (node) =>
+      typeof node === "object" &&
+      node !== null &&
+      (("component" in node && typeof node.component === "string" && library.has(node.component)) ||
+        ("defId" in node && node.defId !== undefined) ||
+        ("progress" in node && node.progress !== undefined)),
+  );
 }
 
 /**

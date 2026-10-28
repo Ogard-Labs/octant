@@ -63,6 +63,7 @@ import {
   type CacheBackoff,
 } from "@octant/domain";
 import {
+  DESKTOP_CREDENTIAL_MISSING,
   DESKTOP_CREDENTIAL_REJECTED,
   DESKTOP_SESSION_READABLE,
   type DesktopDaemonDeclaration,
@@ -643,20 +644,25 @@ function sameDaemon(
   return declared?.socketPath === recorded.socketPath && userId === recorded.userId;
 }
 
+/** A driver's name cut at the contract's 128 characters never ends in the space it was cut at. */
+function cutName(name: string): string {
+  return name.trim().slice(0, 128).trim();
+}
+
 function leasableOf(
   provider: DesktopProvider,
   terms: Pick<DesktopLeaseTerms, "locality" | "billed"> = provider,
 ): LeasableDesktopProvider {
   const placements = (provider.placements ?? []).slice(0, 16).map((placement) => ({
     placementId: placement.id,
-    displayName: placement.displayName.trim().slice(0, 128) || String(placement.id),
+    displayName: cutName(placement.displayName) || String(placement.id),
     locality: placement.locality,
     billed: placement.billed,
     ...(placement.choosesMachine === true ? { choosesMachine: true as const } : {}),
   }));
   return {
     providerId: provider.id,
-    displayName: provider.displayName.trim().slice(0, 128) || String(provider.id),
+    displayName: cutName(provider.displayName) || String(provider.id),
     locality: terms.locality,
     billed: terms.billed,
     ...(placements.length === 0 ? {} : { placements }),
@@ -737,7 +743,10 @@ export function createDesktopLeaseService(
     to: DesktopLeaseState,
     actor: EventActor,
     extra: Partial<
-      Pick<DesktopLeaseTransitioned, "endReason" | "requestedBy" | "detail" | "credentialRejected">
+      Pick<
+        DesktopLeaseTransitioned,
+        "endReason" | "requestedBy" | "detail" | "credentialRejected" | "credentialMissing"
+      >
     > = {},
   ): DesktopLease {
     const record = read(leaseId);
@@ -755,6 +764,7 @@ export function createDesktopLeaseService(
       ...(extra.requestedBy === undefined ? {} : { requestedBy: extra.requestedBy }),
       ...(extra.detail === undefined ? {} : { detail: extra.detail.slice(0, 512) }),
       ...(extra.credentialRejected === undefined ? {} : { credentialRejected: true }),
+      ...(extra.credentialMissing === undefined ? {} : { credentialMissing: true }),
     };
     append(record, leaseId, DESKTOP_LEASE_EVENT_NAMES.transitioned, payload, actor);
     return read(leaseId).lease;
@@ -1192,6 +1202,10 @@ export function createDesktopLeaseService(
           result.status === "refused" &&
           result.reason === DESKTOP_CREDENTIAL_REJECTED &&
           recipe.credentialRef !== undefined;
+        const keyMissing =
+          result.status === "refused" &&
+          result.reason === DESKTOP_CREDENTIAL_MISSING &&
+          recipe.credentialRef !== undefined;
         const lease = transition(
           leaseId,
           result.status === "refused" ? "refused" : "failed",
@@ -1199,8 +1213,11 @@ export function createDesktopLeaseService(
           {
             detail: keyRejected
               ? "The provider refused the key saved for this recipe."
-              : ACQUIRE_FAILURE_DETAIL[result.status],
+              : keyMissing
+                ? "The key saved for this recipe is no longer in the credential store."
+                : ACQUIRE_FAILURE_DETAIL[result.status],
             ...(keyRejected ? { credentialRejected: true as const } : {}),
+            ...(keyMissing ? { credentialMissing: true as const } : {}),
             ...(pending === undefined ? {} : { endReason: pending.reason }),
             ...(pending?.requestedBy === undefined ? {} : { requestedBy: pending.requestedBy }),
           },

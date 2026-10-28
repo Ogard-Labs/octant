@@ -408,7 +408,7 @@ links across the exported pages. Supersedes D-6.
 | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | -------------------------------------- |
 | 1     | `flow` block: schema 23, policies, pure layout, board drawing (mockup frames and design frames as live nodes), comment anchors, reading order, MD/HTML/SVG export parity, share v12, preview warnings, journaled drags | FR-1, FR-3, NFR-1, NFR-2, NFR-3, NFR-5 | In review (#1830); rendered QA pending |
 | 2     | Click-through Play over the flow; flow HTML export as one linked, script-free page set (D-9: one self-contained site)                                                                                                  | FR-2, FR-7 (flow part), NFR-4, NFR-6   | In review (#1832); rendered QA pending |
-| 3     | Mockup catalog: new components, image fills, reusable definitions — schema 24, share v13                                                                                                                               | FR-4, FR-5, FR-6, NFR-5                | In review (#1839); rendered QA pending |
+| 3     | Mockup catalog: new components and reusable definitions — schema 24, share v13 (image fills cut)                                                                                                                       | FR-4, FR-6, NFR-5                      | In review (#1839); rendered QA pending |
 | 4     | Per-variant mockup HTML and TSX export; describe guidance and recipes for everything above                                                                                                                             | FR-7 (rest), FR-9                      | In review (#1840); rendered QA pending |
 | 5     | `deck` block: schema 25, share v14, player integration, deck recipes                                                                                                                                                   | FR-8, FR-9                             | Planned                                |
 
@@ -830,11 +830,13 @@ governs over any number written earlier.
   refusals shaped the hotspot: a generated page's button keeps the adapter's
   look, and no surface repaints OctantButton, so the in-app hotspot wears
   the secondary variant as-is. Delivered for review as #1832.
-- 2026-10-28: Slice 3 implemented: the mockup library at Canvas 24 (share 13) — thirteen new closed components, the `progress`/`assetId`/`defId` node
-  fields, declared images under the design-asset rules, and reusable local
-  definitions placed by instance, all gated by one merged version filter
-  (the inference cliff of D-8's delta still stands) and carried by a share
-  whole except its images. The generator, outline readings, hotspot list,
+- 2026-10-28: Slice 3 implemented: the mockup library at Canvas 24 (share 13) — thirteen new closed components, the `progress`/`defId` node
+  fields, and reusable local definitions placed by instance and expanded by
+  the shared tree builder, all gated by one merged version filter (the
+  inference cliff of D-8's delta still stands) and carried by a share whole.
+  Mockup image fills (FR-5) were cut in review: resolving them needs the
+  design-asset resolver, preview, and export paths, so media and map stay
+  placeholder boxes until a later slice builds that. The generator, outline readings, hotspot list,
   renderer faces, and describe guidance grew with the catalog. Delivered for
   review as #1839.
 - 2026-10-28: Slice 4 implemented: the code handoff. The HTML export embeds

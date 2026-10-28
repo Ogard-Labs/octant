@@ -20,6 +20,7 @@ import {
 } from "@octant/contracts";
 import { decodeComputerControlCommand } from "@octant/contracts/computer-use-plugin";
 import {
+  DESKTOP_CREDENTIAL_MISSING,
   DESKTOP_SESSION_READABLE,
   type DesktopFrame,
   type DesktopProvider,
@@ -2057,6 +2058,60 @@ describe("desktop lease service for a person's Desktop tab", () => {
     await expect(service.frame({ ...at(threadA), leaseId, viewId })).resolves.toEqual({
       status: "no-frame",
     });
+  });
+
+  it("names a provider and a placement without the space a long name was cut at", async () => {
+    const fake = createFakeDesktopProvider({ id: "spaces.example" });
+    const cut = (name: string) => `${name}${"n".repeat(127 - name.length)} cut here`;
+    const spaces: DesktopProvider = {
+      ...fake.provider,
+      displayName: cut("p"),
+      daemon: { socketPath: ".spaces/spaces.sock", methods: [] },
+      placements: [
+        {
+          id: decodeDesktopPlacementId("here"),
+          displayName: cut("q"),
+          locality: "host-local",
+          billed: false,
+        },
+      ],
+    };
+    const { service, state } = host({ providers: [{ provider: spaces }] });
+    state.daemonUserId = 1_000;
+
+    expect(service.destination()).toMatchObject({
+      status: "leasable",
+      leasable: [
+        {
+          displayName: `p${"n".repeat(126)}`,
+          placements: [{ displayName: `q${"n".repeat(126)}` }],
+        },
+      ],
+    });
+  });
+
+  it("says a key missing from the credential store is why a cloud desktop did not start", async () => {
+    const fake = createFakeDesktopProvider({ id: "fake-cloud", locality: "cloud", billed: true });
+    const lostKey: DesktopProvider = {
+      ...fake.provider,
+      acquire: async () => ({ status: "refused", reason: DESKTOP_CREDENTIAL_MISSING }),
+    };
+    const { service } = host({ providers: [{ provider: lostKey }] });
+
+    const result = await service.acquire({
+      owner: code(threadA),
+      actor: agentOf(threadA),
+      confirmedProvider: decodeDesktopProviderId("fake-cloud"),
+    });
+    expect(result).toMatchObject({
+      status: "not-acquired",
+      lease: {
+        state: "refused",
+        credentialRef: cloudCredential,
+        credentialMissing: true,
+      },
+    });
+    expect(result).not.toMatchObject({ lease: { credentialRejected: true } });
   });
 
   it("lists the person's machines for a placement that chooses one, only to a local window", async () => {

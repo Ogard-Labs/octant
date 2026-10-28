@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   desktopKeyIntent,
   desktopPaneState,
+  endedMessage,
   screenPoint,
   type DesktopOverview,
 } from "./desktopPaneModel";
@@ -41,6 +42,14 @@ describe("desktop pane model", () => {
     expect(desktopPaneState({ overview, acquiring: false, view: "none" }).kind).toBe("not-shown");
     expect(desktopPaneState({ overview, acquiring: false, view: "open" }).kind).toBe("live");
     expect(desktopPaneState({ overview, acquiring: false, view: "lost" }).kind).toBe("interrupted");
+  });
+
+  it("says a key gone from the credential store is why a desktop did not start", () => {
+    const refused = { ...ready, state: "refused" } as const;
+    expect(endedMessage(refused)).toBe("The desktop could not be started.");
+    expect(endedMessage({ ...refused, credentialMissing: true })).toMatch(
+      /key saved for it is no longer in this computer's credential store/,
+    );
   });
 
   it("types printable characters as text and sends named keys, and never sends Mod+Escape", () => {

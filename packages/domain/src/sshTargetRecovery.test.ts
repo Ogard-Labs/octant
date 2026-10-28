@@ -52,8 +52,8 @@ describe("remoteCodeProviderOffer and remotePlacedAgentReadiness", () => {
       remoteCodeProviderOffer(status("set", admitted), "81000000-0000-4000-8000-000000000002"),
     ).toEqual({ status: "unavailable", message: REMOTE_CODE_THREAD_PROVIDER_UNAVAILABLE });
     expect(remoteCodeProviderOffer(undefined, agent)).toMatchObject({ status: "unavailable" });
-    // A macOS target refuses a placed runtime in every posture, so the agent
-    // is not offered there at all, whatever its path.
+    // A runtime refused in every posture is not offered there at all,
+    // whatever its path.
     expect(
       remoteCodeProviderOffer(
         status("set", { status: "refused", reason: "runtime-not-attestable" }),

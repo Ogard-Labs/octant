@@ -69,6 +69,52 @@ describe("appleDeviceClient", () => {
     });
   });
 
+  it("sends an upload to the distribution route and reads what it would send first", async () => {
+    const build = {
+      bundleIdentifier: "sh.octant.Fixture",
+      version: "1.0",
+      buildNumber: "2",
+      signing: { teamId: "A1B2C3D4E5", identity: "3".repeat(40) },
+      profileId: "81000000-0000-4000-8000-0000000000aa",
+    };
+    const fetch = vi.fn(async (input: URL | RequestInfo, _init?: RequestInit) =>
+      new URL(String(input)).pathname === "/api/apple/distribution-preparations"
+        ? Response.json({ kind: "prepared", upload: build })
+        : Response.json({ kind: "apple-device-refused", reason: "upload-changed" }),
+    );
+    const client = createAppleDeviceClient({
+      baseUrl: "http://127.0.0.1:13773",
+      fetch: fetch as typeof globalThis.fetch,
+      windowCapability: capability,
+    });
+    await expect(
+      client.prepareUpload({
+        kind: "apple-upload-preparation",
+        authority: authority as never,
+        threadId: thread.threadId as never,
+        checkoutId: thread.checkoutId as never,
+        projectPath: "Fixture.xcodeproj" as never,
+        teamId: "A1B2C3D4E5" as never,
+      }),
+    ).resolves.toEqual({ kind: "prepared", upload: build });
+    const { deviceId: _deviceId, ...noDevice } = deviceRequest("discover");
+    await expect(
+      client.request(
+        decodeAppleDeviceRequest({
+          ...noDevice,
+          kind: "upload",
+          projectPath: "Fixture.xcodeproj",
+          teamId: "A1B2C3D4E5",
+          upload: build,
+        }),
+      ),
+    ).resolves.toEqual({ kind: "apple-device-refused", reason: "upload-changed" });
+    expect(fetch.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+      "/api/apple/distribution-preparations",
+      "/api/apple/distribution",
+    ]);
+  });
+
   it("answers a host it cannot reach or understand with a failure instead of throwing", async () => {
     const unreachable = createAppleDeviceClient({
       baseUrl: "http://127.0.0.1:13773",

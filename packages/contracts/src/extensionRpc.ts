@@ -23,6 +23,7 @@ import {
   ExtensionSkillCollision,
   ExtensionSource,
   ExtensionProvenance,
+  ExtensionPublisherKeyFingerprint,
   SourceQualifiedSkill,
   StandaloneSkillRecord,
 } from "./extensions";
@@ -374,6 +375,22 @@ export const ExtensionCommand = Schema.Union(
     ...desiredStateMutation,
     trusted: Schema.Boolean,
   }).annotations(strict),
+  /**
+   * Re-trusts an outside provider driver held because a key other than the
+   * pinned one signed it. `publisherKey` is the new key the person saw beside
+   * the pinned one; the host refuses any other.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("trust-new-publisher"),
+    ...desiredStateMutation,
+    publisherKey: ExtensionPublisherKeyFingerprint,
+  }).annotations(strict),
+  /** Forgets the publisher key pinned for a package, installed or not. */
+  Schema.Struct({
+    kind: Schema.Literal("forget-publisher"),
+    ...desiredStateMutation,
+    publisherKey: ExtensionPublisherKeyFingerprint,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("set-plugin-desired"),
     ...desiredStateMutation,
@@ -462,13 +479,16 @@ export const decodeExtensionPackageReviewLanguageServer = Schema.decodeUnknownSy
 /**
  * What a person reviews before a debug adapter can run: the binary the host
  * will start, that file's own digest, the runtimes it labels, the `launch`
- * body it sends with its placeholders, and whether it takes a debug port.
+ * body it sends with its placeholders, whether it takes a debug port, and
+ * whether it also debugs the child processes of the program it starts.
  */
 export const ExtensionPackageReviewDebugAdapter = Schema.Struct({
   runtimes: ExtensionDebugAdapterDeclaration.from.fields.runtimes,
   launchArguments: ExtensionDebugAdapterDeclaration.from.fields.launchArguments,
   importTypes: ExtensionDebugAdapterDeclaration.from.fields.importTypes,
   debugPorts: ExtensionDebugAdapterDeclaration.from.fields.debugPorts,
+  childSessions: ExtensionDebugAdapterDeclaration.from.fields.childSessions,
+  childAnnouncement: ExtensionDebugAdapterDeclaration.from.fields.childAnnouncement,
   binary: PackageRelativePath,
   binaryDigest: ExtensionContentDigest,
 }).annotations(strict);

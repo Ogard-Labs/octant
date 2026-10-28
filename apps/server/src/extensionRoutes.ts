@@ -639,6 +639,8 @@ function isLifecycleCommand(command: ExtensionCommand): boolean {
     command.kind === "rollback-package" ||
     command.kind === "uninstall-package" ||
     command.kind === "set-source-trust" ||
+    command.kind === "trust-new-publisher" ||
+    command.kind === "forget-publisher" ||
     command.kind === "set-plugin-desired" ||
     command.kind === "set-component-desired" ||
     command.kind === "review-skill" ||
