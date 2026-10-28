@@ -3961,11 +3961,17 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     let endedTurn: TurnEndSummary | undefined;
     const browserSelected = active.extensionSelections?.some(isBrowserUseSelection) === true;
     const appManagedTools = this.#appManagedTools(active);
+    // Only a thread whose person chose the runtime's artifact tool is told to
+    // use it; the turn runner starts that thread's session with the same
+    // choice, and every other thread keeps Canvas.
     const deliveryInstructions = documentDeliveryInstructions({
-      artifactToolName: active.driver.nativeArtifactTool?.({
-        mode: "code",
-        executionPolicy: active.thread.executionPolicy,
-      }),
+      artifactToolName:
+        active.thread.documentDelivery === "native-artifacts"
+          ? active.driver.nativeArtifactTool?.({
+              mode: "code",
+              executionPolicy: active.thread.executionPolicy,
+            })
+          : undefined,
       canvasOffered: offersCanvasTool(appManagedTools?.definitions),
     });
     const hostGuidance = [

@@ -10,6 +10,7 @@ import type {
   ProviderExecutionPolicy,
   ProviderFailure,
   ProviderToolDefinition,
+  ThreadPublishedSnapshot,
 } from "@octant/contracts";
 import { withClaudeAccountDirectory } from "./claudeAccountDirectory";
 import { createManagedMcpTools, type ManagedToolAnswer } from "./managedMcpTools";
@@ -280,7 +281,12 @@ export type ClaudeDecodedMessage =
          * from a message that settles one call. The mapper keeps it only for
          * an Artifact call.
          */
-        readonly publishedPage?: { readonly url: string; readonly title?: string };
+        readonly publishedPage?: {
+          readonly url: string;
+          readonly title?: string;
+          /** Attached by the driver from the file the person approved publishing. */
+          readonly snapshot?: ThreadPublishedSnapshot;
+        };
       }[];
     }
   | {
@@ -927,11 +933,6 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                 // `TodoWrite`, which restates the whole list in every call,
                 // so the task panel never has to piece it together.
                 CLAUDE_CODE_ENABLE_TASKS: "false",
-                // Claude Code 2.1.211 keeps its Artifact tool out of an Agent
-                // SDK launch unless this opts in (read from the bundled
-                // binary, 2026-10-27), so it is set only for a session the
-                // driver asked to offer the tool.
-                ...(input.tools.includes("Artifact") ? { CLAUDE_CODE_ARTIFACT: "1" } : {}),
               },
               model: input.model,
               // Claude Code upgrades Haiku to Sonnet in Plan unless Sonnet is

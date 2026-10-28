@@ -662,10 +662,10 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("provider-claude-artifacts"),
-          label: "Deliver documents as Claude artifacts",
+          label: "Enable Claude artifacts",
           scope: "host",
           keywords:
-            "claude artifacts artifact tool publish published page claude.ai link documents reports pages canvas delivery upload leaves this computer",
+            "claude artifacts artifact tool publish published page claude.ai link documents reports pages canvas delivery upload leaves this computer telemetry usage anthropic privacy",
         },
       ],
     },

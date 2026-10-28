@@ -78,6 +78,41 @@ export function hostDisableOnlySwitches(hostEnvironment: NodeJS.ProcessEnv): Nod
     : {};
 }
 
+/** Whether a launch environment carries the host's own umbrella switch. */
+export function disablesNonessentialTraffic(environment: NodeJS.ProcessEnv): boolean {
+  return environment[HOST_DISABLE_ONLY_SWITCH] === "1";
+}
+
+/**
+ * The one guard a launch offered Claude's Artifact tool goes without.
+ *
+ * Claude Code 2.1.211 reads claude.ai's switch for the tool
+ * (`tengu_cobalt_plinth`) through its feature-flag service, and that service
+ * runs only when the runtime's telemetry is on: `kol()` reads
+ * `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DISABLE_TELEMETRY`, and
+ * `DO_NOT_TRACK`, and any of them makes `Yee()` false, so the switch reads its
+ * default, off, and the tool is never listed. No other guard in
+ * {@link ISOLATED_CLAUDE_LAUNCH_GUARDS} is read on that path; error reports
+ * keep their own switch (read from the bundled binary, 2026-10-28). Lifting it
+ * turns on the runtime's usage telemetry to Anthropic for that launch, which
+ * the person accepted when they enabled Claude artifacts (maintainer decision,
+ * 2026-10-28).
+ */
+export const CLAUDE_ARTIFACT_LIFTED_GUARD = "DISABLE_TELEMETRY";
+
+/**
+ * The environment of a launch that offers Claude's Artifact tool: the
+ * runtime's opt-in for an Agent SDK launch, and every guard but
+ * {@link CLAUDE_ARTIFACT_LIFTED_GUARD}. A host that exports the umbrella keeps
+ * its launch exactly as it was: the umbrella would keep the flag service off
+ * anyway, and the person's own switch is never weakened.
+ */
+export function claudeArtifactLaunchEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  if (disablesNonessentialTraffic(environment)) return environment;
+  const { [CLAUDE_ARTIFACT_LIFTED_GUARD]: _lifted, ...kept } = environment;
+  return { ...kept, CLAUDE_CODE_ARTIFACT: "1" };
+}
+
 export interface IsolatedClaudeAccountEnvironmentInput {
   readonly hostEnvironment: NodeJS.ProcessEnv;
   readonly configDirectory: string;

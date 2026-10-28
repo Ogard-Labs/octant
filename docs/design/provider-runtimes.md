@@ -82,27 +82,59 @@ umbrella and without it alike. Reading the bundled 2.1.211 binary
 launch lists `Artifact` once `CLAUDE_CODE_ARTIFACT` is set, and then only for
 a claude.ai sign-in on a Pro, Max, Team, or Enterprise plan whose
 organization allows it, on the first-party API, with nonessential traffic
-allowed, and while claude.ai's own feature switch is on. The runtime reads
-that feature switch only through its feature-flag service, which it turns off
-whenever `DISABLE_TELEMETRY` is set, and every Octant launch sets it
-(`ISOLATED_CLAUDE_LAUNCH_GUARDS`); the switch then reads as its default, off,
-so 2.1.211 lists no `Artifact` for any Octant launch today (binary read
-2026-10-28), and a turn with the person's switch on delivers as a Canvas
-through the rule's fallback. `CLAUDE_CODE_ARTIFACT` is an internal switch of
-the runtime, not a documented interface: a runtime that ignores or renames it
-leaves the tool out, and Octant never admits a tool its own list did not
-request. Octant sets
-`CLAUDE_CODE_ARTIFACT=1` and adds `Artifact` to the tool list only for a Work
-or Code session outside Plan on an account whose person turned on
-[Claude artifacts](model-endpoints.md#claude-artifacts); every other launch
-is unchanged. No probe can read claude.ai's plan checks without a turn, so
-the account reports `nativeArtifacts` supported in Work and Code for a
-claude.ai sign-in (unsupported for an API key, and in Chat everywhere), and
-a session whose runtime leaves the tool out delivers as a Canvas. The tool
-publishes a local `.html` or `.md` file and answers with the page's claude.ai
-address; the decoder keeps that address and title from the structured
-result (an `https` claude.ai address only), the mapper attaches it to the
-call's `tool-success` as `published`, and the call is reported as outside
+allowed, and while claude.ai's own feature switch is on.
+
+Which launch variables gate that feature switch was measured from the bundled
+2.1.211 binary (2026-10-28) by evaluating its own gate functions, copied
+verbatim from the binary, under each launch environment. The switch is read by
+`et("tengu_cobalt_plinth")` through `rRc`, which returns the shipped default
+(off) when `!Yee() && !$Fh()`. `Yee()` is `!DISABLE_GROWTHBOOK && !lY()`, and
+`lY()` is true when the provider is not first-party, a gateway sign-in is in
+use, or `wve()` is true; `wve()` is true when `kol()` reads
+`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DISABLE_TELEMETRY`, or a truthy
+`DO_NOT_TRACK`. (`$Fh()`, a disk-cache path for telemetry-off launches, needs
+`CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF`, which Octant never sets.) Of
+Octant's guards only `DISABLE_TELEMETRY` is read on that path: removing any
+other one from the full set leaves the service off, and removing
+`DISABLE_TELEMETRY` alone turns it on. `DISABLE_ERROR_REPORTING` gates error
+reports (`xe()`) and the issue explainer on its own, not the flag service, so
+it stays set. `Yee()` also gates the runtime's usage telemetry (first-party
+event logging, its metrics exporter, and Datadog batches), which is why the
+one lifted guard turns telemetry on; the feedback survey keeps its own switch.
+The umbrella keeps the service off and, through `V7c()`, the tool too.
+
+So Octant lifts exactly `DISABLE_TELEMETRY` (`CLAUDE_ARTIFACT_LIFTED_GUARD`)
+and sets `CLAUDE_CODE_ARTIFACT=1` and adds `Artifact` to the tool list, all
+three only for a launch that offers the tool: a Work or Code session outside
+Plan, on a claude.ai sign-in, on an account whose person enabled
+[Claude artifacts](model-endpoints.md#claude-artifacts), for a thread that
+chose them, on a host that does not export the umbrella. Every other launch
+of every account keeps the full guard set, and a host's umbrella is never
+removed. The decision rests with the person, because that launch sends the
+runtime's usage telemetry to Anthropic
+([Architecture: security and authority](../architecture.md#security-and-authority)).
+The launch environment is fixed when the runtime starts, and Octant starts
+it once per turn (start or resume, then stop when the turn ends), reading
+the account setting and the thread's choice at each start, so turning either
+off reaches the next turn with every guard; nothing restarts a running turn,
+and its next publish is refused at once. `CLAUDE_CODE_ARTIFACT` is an internal
+switch of the runtime, not a documented interface: a runtime that ignores or
+renames it leaves the tool out, and Octant never admits a tool its own list
+did not request.
+
+The account reports `nativeArtifacts` per mode from the setting and the
+probe's launch: supported in Work and Code once enabled on a claude.ai
+sign-in, otherwise unsupported with `unsupportedReason` (`turned-off`,
+`no-publishing-account` for an API key, `host-traffic-disabled` for the
+umbrella), and unsupported in Chat everywhere; the provider service reports a
+change of the setting at once, without a probe. No probe can read claude.ai's
+own plan checks without a turn, so a session whose runtime still leaves the
+tool out delivers as a Canvas. The tool publishes a local `.html` or `.md`
+file and answers with the page's claude.ai address; the decoder keeps that
+address and title from the structured result (an `https` claude.ai address
+only), the driver adds the snapshot it read when the person approved the
+publish, the mapper attaches both to the call's `tool-success` as
+`published`, and the call is reported as outside
 content (`hosted-tool`), because claude.ai's answer reaches the model. The
 same probe showed that
 `strictMcpConfig: true`, which every Octant query sets, keeps the account's

@@ -7,7 +7,9 @@ description: Local-first storage, credentials, approvals, confinement, host-init
 Octant is local-first. Projects, threads, memory, events, credential
 references, and layouts stay on your host. The preview has **no telemetry,
 analytics, crash reporting, or cloud dependency** by default, and no
-credential storage inside the event store.
+credential storage inside the event store. The one opt-in exception is
+Claude Code's own usage telemetry in a thread where you choose
+[Claude artifacts](/advanced/providers#claude-artifacts).
 
 Most network traffic is yours to configure: provider API requests for Chat,
 Work, and Code, a Canvas export to a GitHub Gist that you approve, and remote
@@ -210,7 +212,8 @@ non-essential channel at once was stricter than Octant needs. What Octant
 turns off in Claude Code, it turns off by name on every launch:
 
 - usage metrics and error reports (`DISABLE_TELEMETRY`,
-  `DISABLE_ERROR_REPORTING`)
+  `DISABLE_ERROR_REPORTING`), except usage metrics in a thread that uses
+  Claude artifacts (below)
 - the runtime updating itself (`DISABLE_AUTOUPDATER`)
 - the `/bug` and `/feedback` commands, which upload the conversation
   (`DISABLE_BUG_COMMAND`, `DISABLE_FEEDBACK_COMMAND`), and the session
@@ -220,18 +223,26 @@ turns off in Claude Code, it turns off by name on every launch:
 What the runtime may do on its own, under your Anthropic account: check
 for release notes, pull-request badges, and service availability. None of
 those carry Project content. It does not fetch feature flags: turning
-telemetry off also turns that off. Plugins, skills, and
+telemetry off also turns that off, except in a thread that uses Claude
+artifacts. Plugins, skills, and
 Remote Control stay out because Octant starts the runtime without them. If
 you export `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` yourself, Octant
 passes it through.
 
 Claude's own **Artifact** tool, which publishes a page to your claude.ai
 account, stays off unless you turn on
-[Deliver documents as Claude artifacts](/advanced/providers#claude-artifacts)
-for a Claude account. With it on, a page Claude publishes is uploaded to
-claude.ai and stored there under your account: it leaves this computer.
-Octant keeps only the page's address and title and shows a link to it; it
-never downloads the page.
+[Enable Claude artifacts](/advanced/providers#claude-artifacts) for a Claude
+account and then choose artifacts for a thread. Claude artifacts are a
+per-thread choice, and **telemetry is sent only for those threads**: Claude
+Code needs its usage telemetry on to learn whether claude.ai offers the tool,
+so a thread that uses artifacts runs Claude Code with its usage telemetry to
+Anthropic on. Error reports, the `/bug` and `/feedback` uploads, the survey,
+and the runtime's self-update stay off, and every other thread keeps
+telemetry off. If you export `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`,
+it keeps telemetry and artifacts off everywhere. A page Claude publishes is
+uploaded to claude.ai and stored there under your account: it leaves this
+computer. Octant keeps the page's address and title and a local snapshot of
+the file you approved publishing, and never downloads the page.
 
 ## Remote transport
 

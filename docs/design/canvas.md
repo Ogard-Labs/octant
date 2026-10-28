@@ -160,23 +160,45 @@ runtime with its own file tools read the tool description and still wrote the
 memo as a Markdown file, then pasted it into the reply after the write was
 denied.
 
-A Claude Code account whose person turned on **Deliver documents as Claude
-artifacts** (off by default; see
-[Providers and model endpoints](model-endpoints.md#claude-artifacts)) gets a
-different rule in that place for its Work and Code turns outside Plan: write
-the document as one `.html` or `.md` file in the working folder and publish it
+Canvas stays the default delivery everywhere. On a Claude Code account whose
+person enabled **Claude artifacts** (off by default; see
+[Providers and model endpoints](model-endpoints.md#claude-artifacts)), each
+Work or Code thread may choose them instead, and only a thread that chose them
+gets a different rule in that place for its turns outside Plan: write the
+document as one `.html` or `.md` file in the working folder and publish it
 with Claude's own `Artifact` tool, which puts it on the person's claude.ai
 account. The rule keeps a Canvas as the answer when the person asks for one or
 when the runtime leaves the tool out of its session, and `octant_canvas` stays
 offered. The driver names its artifact tool through the provider-neutral
-`nativeArtifactTool` seam, so the host chooses the rule without naming a
-provider, and every other provider, Chat, and Plan keep the Canvas rule.
-Naming the tool grants nothing: the driver's gate decides each call (see
-[Architecture: security and authority](../architecture.md#security-and-authority)).
-A published page appears in the thread as a link card under the turn's tool
-rows that opens in the person's browser. Octant never fetches, stores, or
-frames the page: the tool returns only its claude.ai address and title, and
-the card stays visible when the settled toolchain folds.
+`nativeArtifactTool` seam and the turn starts its session with the thread's
+`nativeArtifacts` choice, so the host chooses the rule without naming a
+provider; every other thread, every other provider, Chat, and Plan keep the
+Canvas rule. Naming the tool grants nothing: the driver's gate decides each
+call (see [Architecture: security and authority](../architecture.md#security-and-authority)).
+
+The choice is the thread's `documentDelivery`, absent until the person
+decides. The first time a thread that may choose artifacts shows a Canvas, a
+one-time offer sits beneath that first Canvas: "Use Claude artifacts for this
+thread instead?", repeating that it turns on Claude Code's usage telemetry to
+Anthropic for the thread's turns, with **Use Claude artifacts** and **Keep
+Canvas**. Either answer is journaled, so the offer never returns. The thread's
+composer menu (Work's task actions; Code's document control beside the access
+picker) switches it either way at any time; turning artifacts on there asks
+in a confirmation that repeats the warning. A change applies from the next
+turn. A paired device may choose Canvas but not artifacts.
+
+A published page appears in the thread under the turn's tool rows as a link
+card that opens in the person's browser, beside the host's snapshot of the
+file the person approved publishing, labelled as the published snapshot
+(later edits on claude.ai are not reflected). An HTML snapshot is drawn
+through the same importer and design policy as an
+[imported HTML page](#html-import): a static design frame with no
+network, and a page with script waits for Run, whose single-use page the host
+builds from that thread's own journal under the window's read check (never
+from what the request carries). A Markdown snapshot is read as Markdown. A
+file that is neither, too large, or unreadable keeps only the link card.
+Octant never fetches, frames, or signs in to claude.ai, and the card and
+snapshot stay visible when the settled toolchain folds.
 
 ## Presentation and schema versions
 

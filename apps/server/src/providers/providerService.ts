@@ -19,6 +19,7 @@ import {
   type ProviderInstance,
   type ProviderInstanceId,
   type ProviderCatalogSnapshot,
+  type ClaudeAuthentication,
   type ClaudeProviderConfiguration,
   type ProviderObservedState,
   type ProviderProbeResult,
@@ -106,6 +107,7 @@ import type { PersistenceService } from "../persistence/persistenceService";
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { snapshotClaudeHostEnvironment } from "./claudeAccountDirectory";
+import { claudeNativeArtifactsSupport } from "./claudeNativeArtifacts";
 import { PROVIDER_DEFAULTS_AGGREGATE_ID } from "./providerProjection";
 import {
   carryModelContextWindowFacts,
@@ -1058,9 +1060,9 @@ export class ProviderService implements ProviderServiceApi {
             }
             instance = setClaudeArtifactDelivery(current, { enabled: command.enabled, updatedAt });
             // The process, its sign-in, and its models stay as they are: the
-            // driver reads this switch at each session it opens and again at
-            // every Artifact call, so turning it off holds for a session
-            // that is already running.
+            // driver reads this setting at each launch (one per turn) and
+            // again at every Artifact call, so turning it off refuses a
+            // publish at once and the next turn launches with every guard.
             keepsRuntime = true;
             eventName = "provider.instance-configuration-changed@1";
           } else if (command.kind === "rename-provider") {
@@ -1313,6 +1315,16 @@ export class ProviderService implements ProviderServiceApi {
           }
           this.#appendInstance(command.expectedVersion, eventName, instance);
           const authoritative = this.#authoritativeInstance(instance);
+          if (
+            command.kind === "set-claude-artifact-delivery" &&
+            authoritative.driverKind === "claude"
+          ) {
+            this.#reportClaudeArtifactsSetting(
+              authoritative.id,
+              authoritative.configuration.authentication,
+              authoritative.configuration.artifactDelivery === true,
+            );
+          }
           if (
             !keepsRuntime &&
             eventName !== "provider.instance-renamed@1" &&
@@ -2185,6 +2197,32 @@ export class ProviderService implements ProviderServiceApi {
       aggregate: { aggregateType: "provider-instance", aggregateId: instance.id },
       expectedVersion: expectedVersion as never,
       events: [this.#pendingEvent(eventName, { instance })],
+    });
+  }
+
+  /**
+   * Reports the account's Claude artifacts as the setting now reads, without
+   * a probe: the capability follows the person's setting, and the host switch
+   * the last probe's launch carried still holds.
+   */
+  #reportClaudeArtifactsSetting(
+    instanceId: ProviderInstanceId,
+    authentication: ClaudeAuthentication,
+    enabled: boolean,
+  ): void {
+    const observed = this.#runtime.observedState(instanceId);
+    const current = observed?.capabilities.nativeArtifacts;
+    if (observed === undefined || current === undefined) return;
+    this.#runtime.setObservedState({
+      ...observed,
+      capabilities: {
+        ...observed.capabilities,
+        nativeArtifacts: claudeNativeArtifactsSupport({
+          authentication,
+          artifactDelivery: enabled,
+          hostTrafficDisabled: current.unsupportedReason === "host-traffic-disabled",
+        }),
+      },
     });
   }
 

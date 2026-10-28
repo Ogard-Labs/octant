@@ -25,23 +25,43 @@ function claude(configuration: Record<string, unknown> = {}): ClaudeProviderInst
   return instance;
 }
 
-const label = "Deliver documents from Claude personal as Claude artifacts";
+const label = "Enable Claude artifacts for Claude personal";
+const telemetry = /usage telemetry to Anthropic/;
 
-describe("Deliver documents as Claude artifacts", () => {
-  it("starts off, says the page leaves this computer, and asks the host to turn it on", async () => {
+describe("Enable Claude artifacts", () => {
+  it("starts off and warns under the switch that it turns on Claude Code's usage telemetry", () => {
+    render(
+      <ClaudeArtifactDeliverySetting
+        disabled={false}
+        instance={claude()}
+        onChange={vi.fn(async () => true)}
+      />,
+    );
+    const toggle = screen.getByRole("switch", { name: label });
+    expect(toggle).not.toBeChecked();
+    expect(screen.getByText(telemetry)).toBeVisible();
+    expect(screen.getByText(/Error reports and conversation uploads stay off/)).toBeVisible();
+    expect(toggle).toHaveAccessibleDescription(telemetry);
+  });
+
+  it("asks before enabling, repeating the warning, and stays off when the person cancels", async () => {
     const onChange = vi.fn(async () => true);
     render(
       <ClaudeArtifactDeliverySetting disabled={false} instance={claude()} onChange={onChange} />,
     );
-    const toggle = screen.getByRole("switch", { name: label });
-    expect(toggle).not.toBeChecked();
-    expect(toggle).toHaveAccessibleDescription(/leaves this computer/);
-    expect(screen.getByText(/claude\.ai account instead of making a Canvas/)).toBeVisible();
-    await userEvent.click(toggle);
+    await userEvent.click(screen.getByRole("switch", { name: label }));
+    const dialog = await screen.findByRole("dialog", { name: /Enable Claude artifacts/ });
+    expect(dialog).toHaveTextContent(telemetry);
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    await userEvent.click(screen.getByRole("switch", { name: label }));
+    await userEvent.click(await screen.findByRole("button", { name: "Enable Claude artifacts" }));
     expect(onChange).toHaveBeenCalledWith(true);
   });
 
-  it("shows the recorded switch and turns it off", async () => {
+  it("turns off at once, without a dialog", async () => {
     const onChange = vi.fn(async () => true);
     render(
       <ClaudeArtifactDeliverySetting
@@ -53,22 +73,54 @@ describe("Deliver documents as Claude artifacts", () => {
     const toggle = screen.getByRole("switch", { name: label });
     expect(toggle).toBeChecked();
     await userEvent.click(toggle);
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(onChange).toHaveBeenCalledWith(false);
   });
 
-  it("cannot be turned on for an API-key account, and says why", async () => {
+  it("cannot be enabled for an API-key account or where the host keeps the runtime's traffic off, and says why", async () => {
     const onChange = vi.fn(async () => true);
-    render(
+    const { unmount } = render(
       <ClaudeArtifactDeliverySetting
         disabled={false}
         instance={claude({ authentication: "api-key" })}
         onChange={onChange}
       />,
     );
-    const toggle = screen.getByRole("switch", { name: label });
-    expect(toggle).toHaveAttribute("title", expect.stringContaining("claude.ai sign-in"));
-    expect(toggle).toHaveAccessibleDescription(/need a claude\.ai sign-in/);
-    await userEvent.click(toggle);
+    const keyed = screen.getByRole("switch", { name: label });
+    expect(keyed).toHaveAccessibleDescription(/need a claude\.ai sign-in/);
+    await userEvent.click(keyed);
+    unmount();
+
+    render(
+      <ClaudeArtifactDeliverySetting
+        disabled={false}
+        instance={claude()}
+        observed={{
+          capabilities: {
+            appManagedTools: "supported",
+            approvals: "supported",
+            streaming: "supported",
+            reasoning: "supported",
+            images: "supported",
+            fileAttachments: "unsupported",
+            webSearch: "unsupported",
+            subagents: "unsupported",
+            citations: "unsupported",
+            harnessAutoReview: "unsupported",
+            nativeArtifacts: {
+              chat: "unsupported",
+              work: "unsupported",
+              code: "unsupported",
+              unsupportedReason: "host-traffic-disabled",
+            },
+          } as never,
+        }}
+        onChange={onChange}
+      />,
+    );
+    const umbrella = screen.getByRole("switch", { name: label });
+    expect(umbrella).toHaveAccessibleDescription(/CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC/);
+    await userEvent.click(umbrella);
     expect(onChange).not.toHaveBeenCalled();
   });
 });

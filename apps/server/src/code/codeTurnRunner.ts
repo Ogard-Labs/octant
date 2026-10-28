@@ -356,6 +356,9 @@ export class CodeTurnRunner {
           : { modelOptionValues: input.thread.modelOptionValues }),
         executionPolicy: input.thread.executionPolicy,
         ...(input.harnessAutoReviewEnabled === true ? { autoApprove: true } : {}),
+        // The driver still offers its artifact tool only where it would name
+        // it for this mode and posture.
+        ...(input.thread.documentDelivery === "native-artifacts" ? { nativeArtifacts: true } : {}),
       };
       const handle = yield* (
         input.resumeCursor === undefined

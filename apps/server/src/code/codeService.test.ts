@@ -2009,6 +2009,34 @@ describe("CodeService commands", () => {
     });
   });
 
+  it("records the thread's choice of Claude artifacts and refuses it on an archived thread", async () => {
+    const fixture = serviceFixture();
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "change-code-thread-document-delivery",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        documentDelivery: "native-artifacts",
+      }),
+    ).resolves.toEqual({
+      kind: "thread-updated",
+      thread: expect.objectContaining({ documentDelivery: "native-artifacts", version: 2 }),
+    });
+    const stored =
+      fixture.persistence.journal.append.mock.calls.at(-1)?.[0].events[0].payload.thread;
+    expect(stored).toMatchObject({ documentDelivery: "native-artifacts" });
+
+    const archived = serviceFixture({ threads: [thread({ lifecycle: "archived" })] });
+    await expect(
+      archived.service.execute(ids.window, {
+        kind: "change-code-thread-document-delivery",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        documentDelivery: "native-artifacts",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+  });
+
   it("pins a thread and erases the pin again rather than storing a false", async () => {
     const fixture = serviceFixture();
 

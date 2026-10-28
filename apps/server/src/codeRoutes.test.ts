@@ -210,6 +210,45 @@ describe("Code routes", () => {
     expect(executeOperation).toHaveBeenCalledOnce();
   });
 
+  it("refuses a paired device turning on Claude artifacts for a thread, and lets it choose Canvas", async () => {
+    const execute = vi.fn(async () => ({ kind: "thread-updated" }));
+    const route = routeFixture({ execute });
+    const remoteDeviceId = "00000000-0000-4000-8000-000000000930";
+    const fromDevice = (documentDelivery: "canvas" | "native-artifacts") => {
+      const remote = request("/api/code/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "change-code-thread-document-delivery",
+          threadId,
+          expectedVersion: 1,
+          documentDelivery,
+        }),
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "00000000-0000-4000-8000-000000000931" as never,
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remote;
+    };
+
+    const refused = await route(fromDevice("native-artifacts"));
+    expect(refused?.status).toBe(403);
+    expect(await refused?.json()).toMatchObject({ category: "unauthorized" });
+    expect(execute).not.toHaveBeenCalled();
+
+    expect((await route(fromDevice("canvas")))?.status).toBe(200);
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
   it("never lets a paired device ask for a terminal Browser grant as the person", async () => {
     // The host mints a grant only for the person at a local window; a request
     // that reaches it as anything else is refused and starts no terminal.

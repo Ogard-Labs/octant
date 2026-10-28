@@ -1,4 +1,5 @@
 import { MAX_PROVIDER_TOOLS } from "./providers";
+import { MAX_THREAD_PUBLISHED_SNAPSHOT_BYTES } from "./threadToolSteps";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
@@ -3233,6 +3234,20 @@ describe("provider runtime contracts", () => {
     expect(() =>
       decodeProviderRuntimeEvent({ ...success, published: { ...page, html: "<script>" } }),
     ).toThrow();
+    // The host's snapshot of the published file is bounded and only HTML or Markdown.
+    const snapshot = { format: "html", content: "<h1>Report</h1>" } as const;
+    expect(
+      decodeProviderRuntimeEvent({ ...success, published: { ...page, snapshot } }),
+    ).toMatchObject({ published: { snapshot } });
+    for (const refused of [
+      { format: "html", content: "a".repeat(MAX_THREAD_PUBLISHED_SNAPSHOT_BYTES + 1) },
+      { format: "pdf", content: "%PDF" },
+      { format: "markdown", content: "" },
+    ]) {
+      expect(() =>
+        decodeProviderRuntimeEvent({ ...success, published: { ...page, snapshot: refused } }),
+      ).toThrow();
+    }
   });
 
   it("refuses an outside-content read of an unknown source or with an unbounded target", () => {

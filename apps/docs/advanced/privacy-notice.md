@@ -70,7 +70,10 @@ owner-only filesystem permissions plus host storage protection.
 ## What leaves the machine, and why
 
 Octant has **no telemetry, analytics, or crash reporting**. The journal is
-never synchronized through a cloud service. Network traffic is limited to
+never synchronized through a cloud service. The one opt-in exception is not
+Octant's own: in a Work or Code thread where you choose Claude artifacts,
+Claude Code runs with its usage telemetry to Anthropic on (see
+[Claude artifacts](/advanced/providers#claude-artifacts)). Network traffic is limited to
 the following.
 
 ### Provider API calls you configure
@@ -200,11 +203,15 @@ makes no network call. See
 [Export a Canvas or artifact](/guide/export#export-to-a-github-gist).
 
 A Claude artifact goes to your claude.ai account. Only once you turn on
-**Deliver documents as Claude artifacts** for a Claude account does Claude
-Code publish a page from the thread's folder to claude.ai, where Anthropic
-stores it under that account; Claude asks before every publish, Full access
-included, and Plan and Chat never publish. Octant keeps the page's address and
-title and never downloads the page. Take a page down on claude.ai. See
+**Enable Claude artifacts** for a Claude account and choose artifacts for a
+thread does Claude Code publish a page from that thread's folder to
+claude.ai, where Anthropic stores it under that account; Claude asks before
+every publish, Full access included, and Plan and Chat never publish. While a
+thread uses Claude artifacts, Claude Code also sends its usage telemetry to
+Anthropic for that thread's turns; error reports and conversation uploads
+stay off, and other threads send none. Octant keeps the page's address and
+title and a local snapshot of the file you approved publishing, and never
+downloads the page. Take a page down on claude.ai. See
 [Claude artifacts](/advanced/providers#claude-artifacts).
 
 A Canvas published as a public link goes to the public Canvas share service.

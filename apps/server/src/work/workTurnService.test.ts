@@ -264,6 +264,33 @@ describe("WorkTurnService", () => {
     }
   });
 
+  it("offers the runtime's artifact tool only to a thread that chose it, and keeps Canvas for the rest", async () => {
+    const seen: Array<{ readonly nativeArtifacts: boolean; readonly context: string }> = [];
+    for (const documentDelivery of [undefined, "canvas", "native-artifacts"] as const) {
+      const fixture = serviceFixture({
+        ...(documentDelivery === undefined ? {} : { documentDelivery }),
+        resolveDriver: (_id, fallback) => ({ ...fallback, nativeArtifactTool: () => "Artifact" }),
+        turnRuntime: {
+          run: async (input) => {
+            seen.push({
+              nativeArtifacts: input.nativeArtifacts === true,
+              context: JSON.stringify(input.context ?? []),
+            });
+            return { kind: "completed", response: "Done" };
+          },
+        },
+      });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await fixture.waitForIdle();
+    }
+    expect(seen.map((turn) => turn.nativeArtifacts)).toEqual([false, false, true]);
+    expect(seen.map((turn) => turn.context.includes("publish that file with Artifact"))).toEqual([
+      false,
+      false,
+      true,
+    ]);
+  });
+
   it("does not announce a host-dispatched limit recovery as a person's turn request", async () => {
     const onTurnRequested = vi.fn();
     const fixture = serviceFixture({ onTurnRequested });
@@ -3685,6 +3712,7 @@ function serviceFixture(
     readonly turnFileObserver?: WorkTurnServiceDependencies["turnFileObserver"];
     readonly readProviderModel?: WorkTurnServiceDependencies["persistence"]["readProviderModel"];
     readonly threadAccess?: "ask-first" | "auto-accept-edits";
+    readonly documentDelivery?: "canvas" | "native-artifacts";
     readonly onTurnRequested?: WorkTurnServiceDependencies["onTurnRequested"];
     readonly agentRuns?: WorkTurnServiceDependencies["agentRuns"];
     readonly runningAccess?: RunningWorkTurnAccess;
@@ -3808,6 +3836,9 @@ function serviceFixture(
         workingDirectory: ".",
         ...(options.threadAccess === undefined ? {} : { access: options.threadAccess }),
         ...(options.completionConfirmed?.() === true ? { completionConfirmed: true } : {}),
+        ...(options.documentDelivery === undefined
+          ? {}
+          : { documentDelivery: options.documentDelivery }),
         version: 1,
         createdAt: now,
         updatedAt: now,

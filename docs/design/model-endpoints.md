@@ -257,16 +257,24 @@ keeping every input and the submit action reachable without horizontal clipping.
 
 ### Claude artifacts
 
-Every Claude Code card's details carry one host-scoped switch, **Deliver
-documents as Claude artifacts**, off for every account until the person turns
-it on (maintainer request, 2026-10-27). Its help says what it does before it
-is flipped: Claude in Work and Code publishes documents, reports, and pages
-to the person's claude.ai account instead of making a Canvas; each page is
-uploaded to claude.ai and leaves this computer, and Octant shows a link to
-it; Claude asks before every publish, in Full access too; Plan never
-publishes; asking for a Canvas still makes one; and the person's Claude plan
-decides whether the tool is offered at all. An API-key account cannot turn it
-on, and the switch says why ("Claude artifacts need a claude.ai sign-in").
+Every Claude Code card's details carry one host-scoped switch, **Enable
+Claude artifacts**, off for every account until the person enables it
+(maintainer requests, 2026-10-27 and 2026-10-28). It makes the choice
+available; it switches no thread. Its help says what it does: the account's
+Work and Code threads may publish documents, reports, and pages to the
+person's claude.ai account instead of making a Canvas; Canvas stays the
+default and each thread chooses for itself; a published page leaves this
+computer; Claude asks before every publish; Plan never publishes. Under the
+switch a standing warning (a warning-tone notice read with the switch, not an
+interrupting alert) says: "Enabling Claude artifacts also turns on Claude
+Code's usage telemetry to Anthropic for this account's Work and Code threads
+that use them. Error reports and conversation uploads stay off." The wording
+states only what the setting changes. Turning the switch on opens a
+confirmation that repeats the warning, with Cancel focused; cancelling leaves
+it off. Turning it off needs no confirmation. An API-key account cannot
+enable it ("Claude artifacts need a claude.ai sign-in"), nor can a host that
+exports `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` (the card names that
+switch and says it keeps Claude Code's telemetry and Claude artifacts off).
 
 The switch is the account's `artifactDelivery` field, changed only by the
 `set-claude-artifact-delivery` provider command and journaled as an ordinary
@@ -274,12 +282,13 @@ The switch is the account's `artifactDelivery` field, changed only by the
 its configuration never sets it; a saved change to API-key authentication
 clears it. The provider route refuses the command from anything but this
 host's own window, and remote forwarding never admits provider commands. The
-command keeps the running runtime, its readiness, and its models: the driver
-reads the switch when it opens a session and again at every Artifact call, so
-turning it off holds for a session already running. The runtime, delivery
-rule, and authority are in
-[Provider runtimes](provider-runtimes.md#claude-code),
-[Canvas](canvas.md), and
+command keeps the running runtime, its readiness, and its models, and reports
+the account's `nativeArtifacts` capability again at once; the driver reads
+the setting at every launch (one per turn) and every Artifact call. Each
+thread's own choice, its offer, and its controls are in [Canvas](canvas.md);
+the runtime and its launch in
+[Provider runtimes](provider-runtimes.md#claude-code); the authority and the
+telemetry exception in
 [Architecture: security and authority](../architecture.md#security-and-authority).
 
 ### Add endpoint

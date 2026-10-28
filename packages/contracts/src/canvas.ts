@@ -2415,6 +2415,34 @@ export const CanvasDesignRunOutcome = Schema.Union(
 );
 export type CanvasDesignRunOutcome = typeof CanvasDesignRunOutcome.Type;
 
+/**
+ * Asks to run the page a thread's tool call published (a Claude artifact),
+ * from the host's own snapshot of it. The host finds the snapshot in that
+ * thread's journal under the window's read authority; nothing the request
+ * carries becomes the page.
+ */
+export const PublishedSnapshotRunRequest = Schema.Struct({
+  mode: Schema.Literal("work", "code"),
+  threadId: Schema.UUID,
+  toolCallId: boundedNonEmptyText(255),
+}).annotations(strict);
+export type PublishedSnapshotRunRequest = typeof PublishedSnapshotRunRequest.Type;
+
+/** A published snapshot's running page, offered once, under the design page's rules. */
+export const PublishedSnapshotRunOutcome = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("ready"),
+    page: Schema.String.pipe(
+      Schema.pattern(/^\/api\/canvas\/design-page\?ticket=[A-Za-z0-9_-]{43}$/),
+    ),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("unavailable"),
+    reason: boundedNonEmptyText(512),
+  }).annotations(strict),
+);
+export type PublishedSnapshotRunOutcome = typeof PublishedSnapshotRunOutcome.Type;
+
 export const CanvasPlanBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("plan"),
@@ -2908,6 +2936,12 @@ export const decodeCanvasNodeId = Schema.decodeUnknownSync(CanvasNodeId);
 export const decodeCanvasDesignAssetsOutcome = Schema.decodeUnknownSync(CanvasDesignAssetsOutcome);
 export const decodeCanvasDesignRunRequest = Schema.decodeUnknownSync(CanvasDesignRunRequest);
 export const decodeCanvasDesignRunOutcome = Schema.decodeUnknownSync(CanvasDesignRunOutcome);
+export const decodePublishedSnapshotRunRequest = Schema.decodeUnknownSync(
+  PublishedSnapshotRunRequest,
+);
+export const decodePublishedSnapshotRunOutcome = Schema.decodeUnknownSync(
+  PublishedSnapshotRunOutcome,
+);
 
 // ── Journaled lifecycle events ──────────────────────────────────────────────
 //

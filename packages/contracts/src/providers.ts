@@ -77,6 +77,20 @@ export type ProviderDataTags = typeof ProviderDataTags.Type;
 
 export const ProviderCapabilitySupport = Schema.Literal("supported", "unsupported", "unavailable");
 export type ProviderCapabilitySupport = typeof ProviderCapabilitySupport.Type;
+/**
+ * Why a runtime's own artifact tool is not available to an account's threads:
+ * the person has not enabled it (`turned-off`), the account signs in with no
+ * account to publish to (`no-publishing-account`), or the host's own switch
+ * for the runtime's non-essential traffic keeps it off
+ * (`host-traffic-disabled`).
+ */
+export const ProviderNativeArtifactsUnsupportedReason = Schema.Literal(
+  "turned-off",
+  "no-publishing-account",
+  "host-traffic-disabled",
+);
+export type ProviderNativeArtifactsUnsupportedReason =
+  typeof ProviderNativeArtifactsUnsupportedReason.Type;
 export const ProviderInputModality = Schema.Literal("text", "image", "audio", "document");
 export type ProviderInputModality = typeof ProviderInputModality.Type;
 const UniqueInputModalities = Schema.Array(ProviderInputModality).pipe(
@@ -851,10 +865,11 @@ export const ClaudeProviderConfiguration = Schema.Struct({
   configDirectory: Schema.optional(ClaudeConfigDirectory),
   accent: Schema.optional(ClaudeAccountAccent),
   /**
-   * The person turned on delivering Work and Code documents with Claude's own
-   * Artifact tool, which publishes them to their claude.ai account. Absent is
-   * off. Only `set-claude-artifact-delivery` changes it; a configuration
-   * change or a new account never carries it.
+   * The person enabled Claude artifacts for this account: its Work and Code
+   * threads may each choose Claude's own Artifact tool, which publishes to
+   * their claude.ai account, instead of a Canvas. Absent is off. Only
+   * `set-claude-artifact-delivery` changes it; a configuration change or a
+   * new account never carries it.
    */
   artifactDelivery: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
@@ -1410,17 +1425,20 @@ export const ProviderCapabilities = Schema.Struct({
   citations: ProviderCapabilitySupport,
   harnessAutoReview: ProviderCapabilitySupport,
   /**
-   * Whether the runtime has its own tool that publishes a document to the
-   * person's account with the model's provider, outside this host, per mode.
-   * Absent reads as unsupported in every mode. Supported means Octant can
-   * offer the tool once the person turns it on; the runtime may still leave it
-   * out of a session, and such a turn delivers as a Canvas instead.
+   * Whether a thread may choose the runtime's own tool that publishes a
+   * document to the person's account with the model's provider, outside this
+   * host, per mode. Absent reads as unsupported in every mode. Supported means
+   * the person enabled it for this account and nothing on the host keeps it
+   * off; the runtime may still leave the tool out of a session (the
+   * provider's own plan checks), and such a turn delivers a Canvas instead.
+   * `unsupportedReason` says why Work and Code read unsupported.
    */
   nativeArtifacts: Schema.optional(
     Schema.Struct({
       chat: ProviderCapabilitySupport,
       work: ProviderCapabilitySupport,
       code: ProviderCapabilitySupport,
+      unsupportedReason: Schema.optional(ProviderNativeArtifactsUnsupportedReason),
     }).annotations(strict),
   ),
 }).annotations(strict);
@@ -2044,8 +2062,8 @@ export const ProviderRegistryCommand = Schema.Union(
     enabled: Schema.Boolean,
   }).annotations(strict),
   /**
-   * Turns delivering documents as Claude artifacts on or off for one Claude
-   * account. Only a person at the Octant window on this host sends it.
+   * Enables or disables Claude artifacts for one Claude account. Only a person
+   * at the Octant window on this host sends it.
    */
   Schema.Struct({
     kind: Schema.Literal("set-claude-artifact-delivery"),

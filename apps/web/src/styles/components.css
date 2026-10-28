@@ -1407,6 +1407,48 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
   color: var(--oct-meta);
 }
 
+.turn-activity__published-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+  min-width: 0;
+}
+
+/* The host's snapshot of the published file, drawn as a design or as
+   Markdown under the link card; it is never the live page. */
+.published-snapshot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+  min-width: 0;
+}
+
+.published-snapshot__label,
+.published-snapshot__note {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
+}
+
+.published-snapshot__markdown {
+  min-width: 0;
+  padding: var(--oct-space-2) var(--oct-space-3);
+  border: 1px solid var(--oct-border-soft);
+  border-radius: var(--oct-radius-sm);
+}
+
+/* The one-time offer under a thread's first Canvas, and the account card's
+   telemetry warning, read as part of the surface they sit in. */
+.thread-artifacts-offer {
+  margin: var(--oct-space-2) 0 0;
+}
+
+.claude-artifacts-setting {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .turn-activity__chevron {
     transition: none;

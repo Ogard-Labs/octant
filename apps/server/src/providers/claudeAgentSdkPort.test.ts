@@ -251,20 +251,6 @@ describe("Claude Agent SDK port", () => {
     expect(harness.query.close).toHaveBeenCalledOnce();
   });
 
-  test("opts the runtime into its Artifact tool only for a launch that offers it", async () => {
-    const env = async (tools: ReadonlyArray<string>) => {
-      const harness = makeHarness();
-      await Effect.runPromise(
-        Effect.scoped(harness.port.openQuery({ ...openInput, tools: [...tools] })),
-      );
-      return harness.invocation?.options.env;
-    };
-    expect(await env(openInput.tools)).not.toHaveProperty("CLAUDE_CODE_ARTIFACT");
-    expect(await env([...openInput.tools, "Artifact"])).toMatchObject({
-      CLAUDE_CODE_ARTIFACT: "1",
-    });
-  });
-
   test("tolerates the runtime's built-in commands and agents and its chosen output style", async () => {
     const harness = makeHarness();
     harness.query.initializationResult.mockResolvedValueOnce({

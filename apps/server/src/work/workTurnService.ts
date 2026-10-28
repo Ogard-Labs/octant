@@ -1476,12 +1476,18 @@ export class WorkTurnService {
         return;
       }
     }
-    // A Work turn never runs in Plan: it runs ask-first or auto-accepting edits.
-    const artifactToolName = input.driver.nativeArtifactTool?.({
-      mode: "work",
-      executionPolicy:
-        input.access === "auto-accept-edits" ? "auto-accept-edits" : "approval-gated",
-    });
+    // Only a thread whose person chose the runtime's artifact tool is offered
+    // it; every other thread of the account keeps Canvas and its launch keeps
+    // every guard. A Work turn never runs in Plan: it runs ask-first or
+    // auto-accepting edits.
+    const artifactToolName =
+      input.thread?.documentDelivery === "native-artifacts"
+        ? input.driver.nativeArtifactTool?.({
+            mode: "work",
+            executionPolicy:
+              input.access === "auto-accept-edits" ? "auto-accept-edits" : "approval-gated",
+          })
+        : undefined;
     const finalPlan = includeWorkToolDefinitions({
       plan: input.contextPlan,
       tools: appManagedTools?.definitions ?? [],
@@ -1577,6 +1583,7 @@ export class WorkTurnService {
           ? {}
           : { outsideContentMarks: this.#outsideContentMarks }),
         ...(input.access === undefined ? {} : { access: input.access }),
+        ...(artifactToolName === undefined ? {} : { nativeArtifacts: true }),
         ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),
         ...(input.driver.conversationOwnership !== "provider" &&
         input.driver.conversationOwnership !== "host-resumable"

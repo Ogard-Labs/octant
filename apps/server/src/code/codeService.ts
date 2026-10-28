@@ -2021,6 +2021,17 @@ export class CodeService {
           );
         }
       }
+      // The choice takes effect when the next turn launches its provider; a
+      // running turn keeps the launch it started with.
+      if (
+        command.kind === "change-code-thread-document-delivery" &&
+        current.lifecycle === "archived"
+      ) {
+        throw this.#failure(
+          "invalid",
+          "An archived Code thread cannot change how it delivers documents.",
+        );
+      }
       if (command.kind === "propose-code-delivery-outcome") {
         // An agent proposal is advisory: it records a pending proposal but must
         // never redefine or lower the confirmed outcome. A no-op proposal has
@@ -2207,12 +2218,19 @@ export class CodeService {
                                 version: command.expectedVersion + 1,
                                 updatedAt,
                               }
-                            : {
-                                ...current,
-                                workingDirectory: command.workingDirectory,
-                                version: command.expectedVersion + 1,
-                                updatedAt,
-                              },
+                            : command.kind === "change-code-thread-document-delivery"
+                              ? {
+                                  ...current,
+                                  documentDelivery: command.documentDelivery,
+                                  version: command.expectedVersion + 1,
+                                  updatedAt,
+                                }
+                              : {
+                                  ...current,
+                                  workingDirectory: command.workingDirectory,
+                                  version: command.expectedVersion + 1,
+                                  updatedAt,
+                                },
       );
       const next =
         command.kind === "change-code-thread-access" &&

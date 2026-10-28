@@ -19,6 +19,7 @@ import {
   type ProviderModelOptionValues,
   type ProviderRuntimeEvent,
   type ProviderSessionId,
+  type ThreadPublishedSnapshot,
   type UtcTimestamp,
 } from "@octant/contracts";
 import type {
@@ -59,7 +60,11 @@ import {
   type ClaudePendingApproval,
   type ClaudePendingQuestion,
 } from "./claudeEventMapper";
-import { canonicalClaudeAccountDirectory } from "./claudeAccountIsolation";
+import {
+  canonicalClaudeAccountDirectory,
+  claudeArtifactLaunchEnvironment,
+  disablesNonessentialTraffic,
+} from "./claudeAccountIsolation";
 import {
   makeClaudeEnvironmentScope,
   type ClaudeEnvironmentScope,
@@ -72,6 +77,8 @@ import {
   type ClaudeProcessPort,
 } from "./claudeProcess";
 import { claudeProcessPlanUsageLimits, decodeClaudeProcessPlanUsage } from "./claudeProcessUsage";
+import { claudeNativeArtifactsSupport } from "./claudeNativeArtifacts";
+import { readClaudePublishedSnapshot } from "./claudePublishedSnapshot";
 import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 import { providerResumeBinding, resumeBindingRefuses } from "./resumeBinding";
 
@@ -157,22 +164,36 @@ export function claudeExecutionOptions(
 
 /**
  * Whether a session is offered Claude's Artifact tool. Only a Work or Code
- * turn outside Plan, on a claude.ai sign-in, with the person's switch on:
- * publishing sends a Project file to claude.ai, an outward side effect Plan's
- * read-only rule refuses, and Chat runs in Plan.
+ * session outside Plan, on a claude.ai sign-in, whose account the person
+ * enabled Claude artifacts for and whose thread chose them, on a host that
+ * does not turn the runtime's non-essential traffic off: publishing sends a
+ * Project file to claude.ai, an outward side effect Plan's read-only rule
+ * refuses, and Chat runs in Plan. Such a launch goes without the telemetry
+ * guard ({@link claudeArtifactLaunchEnvironment}); every other launch keeps
+ * every guard.
  */
 export function claudeOffersArtifacts(input: {
   readonly authentication: ClaudeAuthentication;
   readonly artifactDelivery: boolean;
+  readonly threadChoseArtifacts: boolean;
+  readonly hostTrafficDisabled: boolean;
   readonly mode: ProviderAcquireInput["mode"];
   readonly executionPolicy: ProviderExecutionPolicy;
 }): boolean {
   return (
-    input.artifactDelivery &&
-    input.authentication === "subscription" &&
+    input.threadChoseArtifacts &&
+    !input.hostTrafficDisabled &&
+    claudeArtifactsAvailable(input) &&
     (input.mode === "work" || input.mode === "code") &&
     input.executionPolicy !== "plan"
   );
+}
+
+function claudeArtifactsAvailable(input: {
+  readonly authentication: ClaudeAuthentication;
+  readonly artifactDelivery: boolean;
+}): boolean {
+  return input.artifactDelivery && input.authentication === "subscription";
 }
 
 /**
@@ -451,6 +472,8 @@ interface SessionState {
   readonly pendingQuestions: Map<string, ClaudePendingQuestionState>;
   readonly preToolRequests: Map<string, ClaudePreToolGrant>;
   readonly approvalReuse: Set<string>;
+  /** What each approved publish sent, by tool use, until its result arrives. */
+  readonly publishedSnapshots: Map<string, ThreadPublishedSnapshot>;
   readonly observedToolUseIds: Set<string>;
   readonly settledToolUseIds: Set<string>;
   readonly turnToolUseIds: Set<string>;
@@ -736,6 +759,8 @@ function observation(
     readonly models?: readonly ProviderModel[];
     /** The runtime announced `compact` when the probe opened it. */
     readonly compactAnnounced?: boolean;
+    /** The probe's launch carried the host's own non-essential traffic switch. */
+    readonly hostTrafficDisabled?: boolean;
     readonly credentialStatus?: "stored" | "missing" | "unavailable";
     readonly message?: string;
   },
@@ -745,10 +770,14 @@ function observation(
   // Claude Code keeps every mode's session, so `/compact` reaches all of them
   // alike; an install that does not announce the command cannot be asked.
   const sessionCompaction = input.compactAnnounced === true ? "supported" : "unavailable";
-  // Only a claude.ai sign-in has an account to publish to. Chat runs in Plan,
-  // which never publishes. Whether the runtime then lists the tool rests on
-  // claude.ai's own plan checks, which no probe can read without a turn.
-  const nativeArtifacts = options.authentication === "subscription" ? "supported" : "unsupported";
+  // Whether the runtime then lists the tool rests on claude.ai's own plan
+  // checks, which no probe can read without a turn. The provider service
+  // reports a change of the person's setting at once, without a probe.
+  const nativeArtifacts = claudeNativeArtifactsSupport({
+    authentication: options.authentication,
+    artifactDelivery: options.artifactDelivery?.() === true,
+    hostTrafficDisabled: input.hostTrafficDisabled === true,
+  });
   const result = decodeProviderProbeResult({
     instanceId: options.instanceId,
     readiness: input.readiness,
@@ -765,11 +794,7 @@ function observation(
               work: sessionCompaction,
               code: sessionCompaction,
             },
-            nativeArtifacts: {
-              chat: "unsupported",
-              work: nativeArtifacts,
-              code: nativeArtifacts,
-            },
+            nativeArtifacts,
           }
         : unavailableCapabilities,
     ...(input.message === undefined ? {} : { message: input.message }),
@@ -906,11 +931,13 @@ function makeProbe(
     return Effect.gen(function* () {
       const version = yield* options.process.probeVersion(options.binaryPath);
       let apiKey: string | undefined;
+      let hostTrafficDisabled = false;
       if (options.authentication === "subscription") {
         const environment = yield* environmentFactory(
           "subscription",
           options.configDirectory === undefined ? {} : { configDirectory: options.configDirectory },
         );
+        hostTrafficDisabled = disablesNonessentialTraffic(environment.environment);
         const status = yield* options.process.probeSubscription(
           options.binaryPath,
           environment.environment,
@@ -1012,6 +1039,7 @@ function makeProbe(
           version,
           models: sdkResult.models,
           compactAnnounced: sdkResult.compactAnnounced,
+          hostTrafficDisabled,
           ...(options.authentication === "api-key" ? { credentialStatus: "stored" as const } : {}),
         },
         clock,
@@ -1086,10 +1114,16 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
   return {
     kind: "claude",
     conversationOwnership: "provider",
+    // The host switch is the one the last probe's launch carried; the
+    // session's own launch reads it again before offering the tool.
     nativeArtifactTool: ({ mode, executionPolicy }) =>
       claudeOffersArtifacts({
         authentication: options.authentication,
         artifactDelivery: options.artifactDelivery?.() === true,
+        threadChoseArtifacts: true,
+        hostTrafficDisabled:
+          options.runtimeRegistry.observedState(options.instanceId)?.capabilities.nativeArtifacts
+            ?.unsupportedReason === "host-traffic-disabled",
         mode,
         executionPolicy,
       })
@@ -1391,7 +1425,10 @@ function makeConnection(
         closeAfterPublishedTerminal(state);
         return;
       }
-      for (const mapped of mapClaudeMessage(state.context, message)) {
+      for (const mapped of mapClaudeMessage(
+        state.context,
+        withPublishedSnapshots(state, message),
+      )) {
         if (mapped.kind === "ignored") continue;
         if (mapped.kind === "failure") {
           terminal(state, { kind: "failed", failure: mapped.failure });
@@ -1494,6 +1531,7 @@ function makeConnection(
         readonly autoApprove?: boolean;
         readonly modelOptionValues?: ProviderModelOptionValues;
         readonly singleUse?: boolean;
+        readonly nativeArtifacts?: boolean;
       },
       signal: AbortSignal,
       resumeSessionId?: string,
@@ -1586,9 +1624,14 @@ function makeConnection(
           input.autoApprove,
           mode,
         );
+        // Read at each launch: one launch per turn means the next turn after
+        // the person turns the setting or the thread's choice off launches
+        // with every guard again.
         const offersArtifacts = claudeOffersArtifacts({
           authentication: options.authentication,
           artifactDelivery: options.artifactDelivery?.() === true,
+          threadChoseArtifacts: input.nativeArtifacts === true,
+          hostTrafficDisabled: disablesNonessentialTraffic(environment.environment),
           mode,
           executionPolicy: input.executionPolicy,
         });
@@ -1760,7 +1803,7 @@ function makeConnection(
           activeState.pendingApprovals.set(pending.requestId, pending);
           publish(pending.event);
           activeState.outputAccepted = true;
-          return waitForClaudeAuthorityValue({
+          const decision = await waitForClaudeAuthorityValue({
             promise: pending.decision.promise,
             signal: request.signal,
             cancelledValue: {
@@ -1774,6 +1817,20 @@ function makeConnection(
               activeState.settledToolUseIds.add(pending.providerToolUseId);
             },
           });
+          // The snapshot is read the moment the person approves, just before
+          // the runtime reads the same file to publish it, so the thread
+          // shows what they approved sending.
+          if (
+            decision.behavior === "allow" &&
+            request.toolName === CLAUDE_ARTIFACT_TOOL &&
+            typeof request.input.file_path === "string"
+          ) {
+            const snapshot = await readClaudePublishedSnapshot(request.input.file_path);
+            if (snapshot !== undefined) {
+              activeState.publishedSnapshots.set(request.toolUseId, snapshot);
+            }
+          }
+          return decision;
         };
         const preToolUse: ClaudeOpenQueryInput["preToolUse"] = async (request) => {
           const activeState = callbackState;
@@ -1923,7 +1980,9 @@ function makeConnection(
             .openQuery({
               binaryPath: options.binaryPath,
               projectRoot,
-              authEnvironment: environment.environment,
+              authEnvironment: offersArtifacts
+                ? claudeArtifactLaunchEnvironment(environment.environment)
+                : environment.environment,
               model: input.modelId,
               ...(effort === undefined ? {} : { effort }),
               executionPolicy: input.executionPolicy,
@@ -1975,6 +2034,7 @@ function makeConnection(
           pendingQuestions: new Map(),
           preToolRequests: new Map(),
           approvalReuse: new Set(),
+          publishedSnapshots: new Map(),
           observedToolUseIds: new Set(),
           settledToolUseIds: new Set(),
           turnToolUseIds: new Set(),
@@ -2175,6 +2235,7 @@ function makeConnection(
               ...(input.modelOptionValues === undefined
                 ? {}
                 : { modelOptionValues: input.modelOptionValues }),
+              ...(input.nativeArtifacts === true ? { nativeArtifacts: true } : {}),
             },
             signal,
             input.resumeCursor.value,
@@ -2517,4 +2578,23 @@ function promiseWithTimeout<A>(
       },
     );
   });
+}
+
+/** Puts each approved publish's snapshot beside the page its result names. */
+function withPublishedSnapshots(
+  state: SessionState,
+  message: ClaudeDecodedMessage,
+): ClaudeDecodedMessage {
+  if (message.kind !== "tool-results" || state.publishedSnapshots.size === 0) return message;
+  return {
+    ...message,
+    results: message.results.map((result) => {
+      const snapshot = state.publishedSnapshots.get(result.toolUseId);
+      if (snapshot === undefined) return result;
+      state.publishedSnapshots.delete(result.toolUseId);
+      return result.publishedPage === undefined
+        ? result
+        : { ...result, publishedPage: { ...result.publishedPage, snapshot } };
+    }),
+  };
 }

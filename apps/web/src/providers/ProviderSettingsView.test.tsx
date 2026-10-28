@@ -4409,18 +4409,19 @@ describe("browser key setup before the host reports its platform", () => {
   });
 });
 
-describe("a Claude account's artifact switch", () => {
-  it("sits in the Claude card's details, off, and sends the switch for that account only", async () => {
+describe("a Claude account's artifact setting", () => {
+  it("sits in the Claude card's details, off, and is enabled for that account only after the person confirms", async () => {
     const onSetClaudeArtifactDelivery = vi.fn(async () => true);
     renderProviderListExpanded({
       ...fixture({ instance: claudeProvider() }),
       onSetClaudeArtifactDelivery,
     });
     const toggle = screen.getByRole("switch", {
-      name: "Deliver documents from Claude local as Claude artifacts",
+      name: "Enable Claude artifacts for Claude local",
     });
     expect(toggle).not.toBeChecked();
     await userEvent.click(toggle);
+    await userEvent.click(await screen.findByRole("button", { name: "Enable Claude artifacts" }));
     expect(onSetClaudeArtifactDelivery).toHaveBeenCalledWith(id, true);
   });
 
@@ -4429,7 +4430,7 @@ describe("a Claude account's artifact switch", () => {
       ...fixture(),
       onSetClaudeArtifactDelivery: vi.fn(async () => true),
     });
-    expect(screen.queryByRole("switch", { name: /as Claude artifacts/ })).toBeNull();
+    expect(screen.queryByRole("switch", { name: /Claude artifacts/ })).toBeNull();
   });
 });
 

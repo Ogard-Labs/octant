@@ -16,6 +16,7 @@ import {
   ThreadProviderHandoff,
 } from "./providers";
 import { UsageResumeThreadState } from "./usageResume";
+import { ThreadDocumentDelivery } from "./threadToolSteps";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -73,6 +74,13 @@ export const WorkThread = Schema.Struct({
    * this thread's own stream; absent means no recovery is pending.
    */
   usageResume: Schema.optional(UsageResumeThreadState),
+  /**
+   * How this thread delivers documents: absent until the person chooses (it
+   * delivers Canvases meanwhile). `native-artifacts` is the person's choice to
+   * publish with the provider's own artifact tool instead; see
+   * {@link ThreadDocumentDelivery}.
+   */
+  documentDelivery: Schema.optional(ThreadDocumentDelivery),
   /** Completed and snoozed rest, shared with Chat and Code; see {@link ThreadRestFields}. */
   ...ThreadRestFields,
   version: AggregateVersion,
@@ -193,6 +201,20 @@ export const ChangeWorkThreadProviderCommand = Schema.Struct({
 export type ChangeWorkThreadProviderCommand = typeof ChangeWorkThreadProviderCommand.Type;
 
 /**
+ * Chooses how this thread delivers documents. Turning on `native-artifacts`
+ * enables the provider runtime's usage telemetry for the thread's turns, so
+ * only a person at a window on this host may choose it; a paired device may
+ * choose Canvas.
+ */
+export const ChangeWorkThreadDocumentDeliveryCommand = Schema.Struct({
+  kind: Schema.Literal("change-work-thread-document-delivery"),
+  ...WorkThreadCommandFields,
+  documentDelivery: ThreadDocumentDelivery,
+}).annotations(strict);
+export type ChangeWorkThreadDocumentDeliveryCommand =
+  typeof ChangeWorkThreadDocumentDeliveryCommand.Type;
+
+/**
  * Opts this thread into resuming a usage-limited turn when the provider's
  * declared reset arrives. The server reads the limit and reset from the
  * journaled turn rather than trusting the command, and journals the opt-in on
@@ -267,6 +289,7 @@ export const WorkThreadCommand = Schema.Union(
   ConfirmWorkThreadCompletionCommand,
   ChangeWorkThreadWorkingDirectoryCommand,
   ChangeWorkThreadProviderCommand,
+  ChangeWorkThreadDocumentDeliveryCommand,
   ScheduleWorkUsageResumeCommand,
   CancelWorkUsageResumeCommand,
   UpdateWorkSettingsCommand,
