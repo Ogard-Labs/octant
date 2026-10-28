@@ -669,9 +669,10 @@ In a thread that uses Claude artifacts:
 Whether Claude offers its Artifact tool also depends on your Claude plan and
 organization. When it doesn't, documents stay Canvases. An account that uses an
 Anthropic API key has no claude.ai account to publish to, so the setting is
-unavailable there. If your Mac exports
-`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, that switch keeps Claude Code's
-telemetry and Claude artifacts off, and the card says so. Turning the setting
+unavailable there. If your computer exports
+`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, `DISABLE_TELEMETRY=1` or
+`DO_NOT_TRACK=1`, that opt-out keeps Claude Code's telemetry and Claude
+artifacts off, and the card says so. Turning the setting
 or a thread's choice off refuses Claude's next publish at once, and the
 thread's next turn runs with telemetry off again.
 

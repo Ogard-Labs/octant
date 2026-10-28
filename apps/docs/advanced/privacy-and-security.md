@@ -239,7 +239,8 @@ so a thread that uses artifacts runs Claude Code with its usage telemetry to
 Anthropic on. Error reports, the `/bug` and `/feedback` uploads, the survey,
 and the runtime's self-update stay off, and every other thread keeps
 telemetry off. If you export `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`,
-it keeps telemetry and artifacts off everywhere. A page Claude publishes is
+`DISABLE_TELEMETRY=1` or `DO_NOT_TRACK=1`, your own setting wins: it keeps
+telemetry and artifacts off everywhere. A page Claude publishes is
 uploaded to claude.ai and stored there under your account: it leaves this
 computer. Octant keeps the page's address and title and a local snapshot of
 the file you approved publishing, and never downloads the page.

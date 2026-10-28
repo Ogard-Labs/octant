@@ -71,7 +71,10 @@ umbrella and names each channel it keeps off, as
 [Architecture: security and authority](../architecture.md#security-and-authority)
 lists them (maintainer decision, 2026-10-20: the blanket block was stricter
 than Octant needs); a person's own `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`
-in the host environment still passes through. The decision changes no
+in the host environment still passes through, and a host that exports a
+truthy `DISABLE_TELEMETRY` or `DO_NOT_TRACK` keeps it as `DO_NOT_TRACK=1`, a
+switch the Claude artifacts launch never removes (maintainer decision,
+2026-10-28: the person's own opt-out always wins over the artifacts setting). The decision changes no
 session's tool list. Measured with the Agent SDK (`query({ tools: ["Read",
 "Artifact"] })`, reading the `system/init` message's `tools`) on Claude Code
 2.1.211 (bundled) and 2.1.304 (on `PATH`), 2026-10-20, the runtime offers its
@@ -126,7 +129,7 @@ The account reports `nativeArtifacts` per mode from the setting and the
 probe's launch: supported in Work and Code once enabled on a claude.ai
 sign-in, otherwise unsupported with `unsupportedReason` (`turned-off`,
 `no-publishing-account` for an API key, `host-traffic-disabled` for the
-umbrella), and unsupported in Chat everywhere; the provider service reports a
+host's own umbrella or telemetry opt-out), and unsupported in Chat everywhere; the provider service reports a
 change of the setting at once, without a probe. No probe can read claude.ai's
 own plan checks without a turn, so a session whose runtime still leaves the
 tool out delivers as a Canvas. The tool publishes a local `.html` or `.md`

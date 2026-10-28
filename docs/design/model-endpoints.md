@@ -273,8 +273,9 @@ states only what the setting changes. Turning the switch on opens a
 confirmation that repeats the warning, with Cancel focused; cancelling leaves
 it off. Turning it off needs no confirmation. An API-key account cannot
 enable it ("Claude artifacts need a claude.ai sign-in"), nor can a host that
-exports `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` (the card names that
-switch and says it keeps Claude Code's telemetry and Claude artifacts off).
+exports its own opt-out: `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, or a
+truthy `DISABLE_TELEMETRY` or `DO_NOT_TRACK` (the card says the computer's own
+telemetry opt-out keeps Claude Code's telemetry and Claude artifacts off).
 
 The switch is the account's `artifactDelivery` field, changed only by the
 `set-claude-artifact-delivery` provider command and journaled as an ordinary

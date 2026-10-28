@@ -114,6 +114,20 @@ describe("claudeArtifactLaunchEnvironment", () => {
     });
     expect(environment).not.toHaveProperty("CLAUDE_CODE_ARTIFACT");
   });
+
+  it.each([{ DISABLE_TELEMETRY: "1" }, { DISABLE_TELEMETRY: "true" }, { DO_NOT_TRACK: "1" }])(
+    "keeps telemetry off when the host opted out with %o",
+    (optOut) => {
+      const environment = launch({ PATH: "/usr/bin", ...optOut });
+      expect(environment).toMatchObject({ ...ISOLATED_CLAUDE_LAUNCH_GUARDS, DO_NOT_TRACK: "1" });
+      expect(environment).not.toHaveProperty("CLAUDE_CODE_ARTIFACT");
+    },
+  );
+
+  it("carries no opt-out the host did not set", () => {
+    const environment = launch({ PATH: "/usr/bin", DO_NOT_TRACK: "0" });
+    expect(environment).not.toHaveProperty("DO_NOT_TRACK");
+  });
 });
 
 describe("Claude account isolation source", () => {

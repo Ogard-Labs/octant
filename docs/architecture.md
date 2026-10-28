@@ -7145,8 +7145,10 @@ mechanisms are:
   `CLAUDE_CODE_ARTIFACT` opts in, which Octant sets only under the exception
   below, so every other launch is without it, umbrella or not. A
   host that exports `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` itself keeps
-  the umbrella on every launch; only that disabling value crosses (the
-  runtime then withholds `Artifact` as well).
+  the umbrella on every launch, and one that exports a truthy
+  `DISABLE_TELEMETRY` or `DO_NOT_TRACK` keeps `DO_NOT_TRACK=1` on every
+  launch; only those disabling values cross (the runtime then withholds
+  `Artifact` as well).
   **Claude artifacts (a person-authorized external publish and an opt-in
   telemetry exception).** The one place a Claude launch sends Project content
   to Anthropic other than as inference, and the one place it sends the
@@ -7171,9 +7173,10 @@ mechanisms are:
   exception is the minimum that measurement allows: error reports, the
   self-update, `/bug` and `/feedback`, the survey, auto-memory, built-in
   agents, and marketplace auto-install stay off on that launch too, and a
-  host that exports `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` keeps it and
-  every guard on every launch, so the account reports artifacts unavailable
-  there. The rationale for allowing it at all: without the flag service the
+  host that exports its own opt-out (`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`,
+  or a truthy `DISABLE_TELEMETRY` or `DO_NOT_TRACK`) keeps it and every guard
+  on every launch, so the account reports artifacts unavailable there: the
+  person's own opt-out always wins (maintainer decision, 2026-10-28). The rationale for allowing it at all: without the flag service the
   person's setting does nothing, and the alternative (waiting for a runtime
   that reads the switch without telemetry) leaves the feature inert; the
   person accepts the telemetry knowingly, because the setting's warning and
