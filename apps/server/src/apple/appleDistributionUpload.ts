@@ -14,6 +14,7 @@ import {
   type AppleUploadBuild,
   type AppleUploadEvidence,
 } from "@octant/contracts";
+import type { AppleUploadPreparation } from "@octant/contracts/apple-toolchain-rpc";
 import { chooseAppleAppStoreSigning, type AppleDevelopmentSigningGap } from "@octant/domain";
 import type { AppStoreConnectKeyFiles } from "../providers/credentialBrokerClient";
 import type { AppleDeviceExecutionContext } from "./appleDeviceService";
@@ -76,9 +77,7 @@ export interface AppleDistributionUploadOptions {
 }
 
 /** What the host read from the project before anyone is asked to confirm an upload. */
-export type AppleUploadPreparation =
-  | { readonly kind: "prepared"; readonly upload: AppleUploadBuild }
-  | { readonly kind: "failed"; readonly message: string };
+export type { AppleUploadPreparation };
 
 const READ_TIMEOUT_MS = 2 * 60_000;
 const EXPORT_TIMEOUT_MS = 20 * 60_000;

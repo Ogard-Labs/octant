@@ -16,8 +16,8 @@ console logs) and 4 (device pane and screenshots) are built and wait on their
 native smoke on a Mac with a paired device, slice 6 (App Store Connect key
 custody) is built and open since the maintainer admitted distribution on
 2026-10-28 (decision 7), slice 7 (person-confirmed upload) is built from
-fakes for the agent's request and waits on a maintainer-run upload and on
-the workbench's own upload button, and slice 8 waits on the open choice
+fakes, from the workbench and for the agent's request, and waits on a
+maintainer-run upload, and slice 8 waits on the open choice
 recorded under it in the delivery plan.** The maintainer
 authorized this scope as post-preview work and accepted the decisions below on
 2026-10-26. That authorizes this design and its slices; it does not by itself
@@ -832,7 +832,8 @@ accounts or hardware; its real-hardware acceptance is separate where noted.
    named build; an agent's request runs nothing until a local person
    confirms, and no remote path reaches it. _Verify:_ server tests with
    a stubbed uploader, plus a maintainer-run upload of a test app.
-   _State:_ built from fakes for the agent's request, per decision 8. The
+   _State:_ built from fakes, per decision 8, from the workbench and for the
+   agent's request. The
    contracts (`AppleUploadBuild`, the `upload` request's fields,
    `upload-changed`, `AppleUploadEvidence`) and `chooseAppleAppStoreSigning`
    are in contracts and domain; the host's part is `AppleDistributionUpload`,
@@ -840,7 +841,16 @@ accounts or hardware; its real-hardware acceptance is separate where noted.
    local person's confirmation; the broker's key-file routes; the
    `apple-distribution-upload` approval, asked in the thread as
    `localPersonOnly` under every posture; and `octant_apple` `upload`, which
-   the agent uses only when the person asked. The upload is journaled as an
+   the agent uses only when the person asked. The workbench's **Upload to App
+   Store Connect…** (in the Apple workbench beside **Physical devices**, for a
+   window that can raise the desktop app's confirmation) takes the same path:
+   the local-only `POST /api/apple/distribution-preparations` reads the build
+   in the window's thread scope, the desktop app confirms that build as an
+   `apple-distribution-upload` approval, and the local-only
+   `POST /api/apple/distribution` sends the `upload` request with that
+   receipt, which the device policy and the host's re-read then decide as
+   for the agent. A paired device reaches neither route, and the private
+   listener forwards neither. The upload is journaled as an
    `apple-distribution-upload` validation step whose record names who asked,
    the app, version, build, team, result, and delivery identifier. Its
    evidence is the `AppleDistributionUpload` suite (the exact build read
@@ -857,9 +867,14 @@ accounts or hardware; its real-hardware acceptance is separate where noted.
    person at the Mac under Full access, refuses a paired device's answer,
    and mints a one-use receipt bound to that build, the scope test that the
    receipt is what counts as the confirmation, and the Apple tool's upload
-   tests. No test calls App Store Connect or uses a real key. Still open:
-   the workbench's **Upload to App Store Connect…** button and the
-   local-only route it calls; a maintainer-run upload of a test app on a
+   tests, the routes' tests (an upload only on the distribution route, the
+   preparation for a local window only, neither from a paired device), the
+   device client's routing test, and the `AppleUpload` component tests (the
+   build read, the exact build confirmed, the upload sent only with the
+   answer; nothing sent on a decline or an unreadable build; no button
+   without a Team ID and project, or in a window that cannot confirm). No
+   test calls App Store Connect or uses a real key. Still open: a
+   maintainer-run upload of a test app on a
    Mac with an App Store Connect app, which also measures whether the export
    needs network under the no-network signing launch and which egress
    `altool` needs, and records any grant beside the Apple `test` rule.

@@ -1,6 +1,10 @@
 import { decodeHostAnswer } from "@octant/contracts";
 import { AppleDeviceResponse, type AppleDeviceRequest } from "@octant/contracts/apple-toolchain";
-import type { AppleArtifactRequest } from "@octant/contracts/apple-toolchain-rpc";
+import {
+  AppleUploadPreparation,
+  type AppleArtifactRequest,
+  type AppleUploadPreparationRequest,
+} from "@octant/contracts/apple-toolchain-rpc";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface AppleDeviceClientOptions {
@@ -27,9 +31,18 @@ export interface AppleDeviceClient {
     request: AppleArtifactRequest,
     signal?: AbortSignal,
   ): Promise<AppleDeviceScreenshotRead>;
+  /**
+   * What an upload of the project to App Store Connect would send, read
+   * before the person is asked to confirm it; for a local window only.
+   */
+  prepareUpload(
+    request: AppleUploadPreparationRequest,
+    signal?: AbortSignal,
+  ): Promise<AppleUploadPreparation>;
 }
 
 const decodeAnswer = decodeHostAnswer(AppleDeviceResponse);
+const decodePreparation = decodeHostAnswer(AppleUploadPreparation);
 
 export function createAppleDeviceClient(options: AppleDeviceClientOptions): AppleDeviceClient {
   const resolved = { ...options, fetch: bindFetchPort(options.fetch) };
@@ -41,6 +54,18 @@ export function createAppleDeviceClient(options: AppleDeviceClientOptions): Appl
         return decodeAnswer(await sent.response.json());
       } catch {
         return failure("invalid", "Apple device service returned an invalid response.");
+      }
+    },
+    prepareUpload: async (request, signal) => {
+      const sent = await send(resolved, "/api/apple/distribution-preparations", request, signal);
+      if (sent.kind === "failed") return { kind: "failed", message: sent.message };
+      if (!sent.response.ok) {
+        return { kind: "failed", message: "This window can't upload for this thread." };
+      }
+      try {
+        return decodePreparation(await sent.response.json());
+      } catch {
+        return { kind: "failed", message: "Apple device service returned an invalid response." };
       }
     },
     readScreenshot: async (request, signal) => {
@@ -62,6 +87,7 @@ export function createAppleDeviceClient(options: AppleDeviceClientOptions): Appl
 function routeFor(kind: AppleDeviceRequest["kind"]): string {
   if (kind === "discover" || kind === "status") return "/api/apple/devices";
   if (kind === "use-device" || kind === "release-device") return "/api/apple/device-leases";
+  if (kind === "upload") return "/api/apple/distribution";
   return "/api/apple/device-actions";
 }
 

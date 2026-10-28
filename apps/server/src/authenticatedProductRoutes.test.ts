@@ -566,6 +566,8 @@ describe("authenticated product route dispatch", () => {
       "/api/apple/device-leases",
       "/api/apple/device-actions",
       "/api/apple/device-screenshots",
+      "/api/apple/distribution",
+      "/api/apple/distribution-preparations",
     ]) {
       expect(
         classifyProductAction(new Request(`https://octant.example${path}`, { method: "POST" })),

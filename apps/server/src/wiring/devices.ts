@@ -613,6 +613,29 @@ export function wireDevices(deps: DevicesDependencies) {
           ? undefined
           : { threadId: resolved.thread.id, checkoutId: resolved.checkout.id };
       };
+      // What an upload of this project would send, read in the thread's own
+      // checkout before anyone is asked to confirm it.
+      const prepareAppleUpload = async (
+        windowId: WindowId,
+        input: Parameters<typeof resolveAppleThread>[1] & {
+          readonly projectPath: string;
+          readonly scheme?: string | undefined;
+          readonly teamId: import("@octant/contracts").AppleTeamId;
+        },
+        signal?: AbortSignal,
+      ) => {
+        const resolved = await resolveAppleThread(windowId, input);
+        if (resolved === undefined || process.platform !== "darwin") return undefined;
+        return await appleDistributionUpload.prepare(
+          {
+            projectPath: input.projectPath,
+            ...(input.scheme === undefined ? {} : { scheme: input.scheme }),
+            teamId: input.teamId,
+          },
+          { checkoutRoot: resolved.rootPath },
+          signal,
+        );
+      };
       const appleDeviceRoutes = createAppleDeviceRouteHandler({
         windowAuthorityStore,
         service: appleDeviceService,
@@ -620,6 +643,9 @@ export function wireDevices(deps: DevicesDependencies) {
         // A screenshot's pixels are read in the same thread scope, by a local
         // window only; the route refuses every other principal first.
         resolveThread: resolveAppleDeviceThread,
+        // The workbench's upload reads what it would send in the same thread
+        // scope, from a local window only; the route refuses anyone else first.
+        prepareUpload: prepareAppleUpload,
       });
       const appleToolchainRoutes = createAppleToolchainRouteHandler({
         windowAuthorityStore,
@@ -771,29 +797,6 @@ export function wireDevices(deps: DevicesDependencies) {
           })),
         maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
       });
-      // What an upload of this project would send, read in the thread's own
-      // checkout before anyone is asked to confirm it.
-      const prepareAppleUpload = async (
-        windowId: WindowId,
-        input: Parameters<typeof resolveAppleThread>[1] & {
-          readonly projectPath: string;
-          readonly scheme?: string;
-          readonly teamId: import("@octant/contracts").AppleTeamId;
-        },
-        signal?: AbortSignal,
-      ) => {
-        const resolved = await resolveAppleThread(windowId, input);
-        if (resolved === undefined || process.platform !== "darwin") return undefined;
-        return await appleDistributionUpload.prepare(
-          {
-            projectPath: input.projectPath,
-            ...(input.scheme === undefined ? {} : { scheme: input.scheme }),
-            teamId: input.teamId,
-          },
-          { checkoutRoot: resolved.rootPath },
-          signal,
-        );
-      };
       return {
         androidToolchainRoutes,
         appleDeviceRoutes,
