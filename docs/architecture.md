@@ -7594,8 +7594,8 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   - **Codex** has no user questions, so a question the model would ask is not
     offered. It takes image input only when a model reports it. Compaction
     needs Codex 0.162.1 or newer.
-  - **OpenCode** reports no file changes, has no model switch inside a session
-    and no runtime compaction, and offers Octant's tools only on macOS in the
+  - **OpenCode** reports no file changes and no runtime compaction, carries a
+    session on to another of its models, and offers Octant's tools only on macOS in the
     verified isolated configuration. A 2.x runtime whose confined jail cannot
     serve a Git work tree is listing-only: models show, no turn is offered.
   - **Pi** reports no user questions, file changes, diffs, or task progress,
