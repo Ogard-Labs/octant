@@ -52,6 +52,8 @@ describe("flow site", () => {
     // Navigation is CSS alone: no script anywhere in the site.
     expect(site.toLowerCase()).not.toContain("<script");
     expect(site).toContain(".oct-flow-screen:target");
+    // The generated mockup pages carry their own stylesheet.
+    expect(site).toContain(".oct-mockup-page {");
     // The first screen opens the site before any anchor is followed.
     expect(site).toContain(".oct-flow-screen[data-start] { display: block; }");
   });

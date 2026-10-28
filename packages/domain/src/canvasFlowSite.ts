@@ -1,4 +1,4 @@
-import { canvasMockupPage } from "./canvasMockupHtml";
+import { CANVAS_MOCKUP_HTML_STYLES, canvasMockupPage } from "./canvasMockupHtml";
 import type { CanvasDesignBlock, CanvasMockupBlock } from "@octant/contracts/canvas";
 import type { CanvasFlowShape } from "./canvasFlowLayout";
 
@@ -49,8 +49,9 @@ export const CANVAS_FLOW_SITE_STYLES = [
   ".oct-flow-links a { padding: 6px 12px; border: 1px solid #18181b; border-radius: 6px; background: #18181b; color: #fff; text-decoration: none; }",
 ] as const;
 
+/** The navigation rules and the generated mockup pages' own stylesheet. */
 function flowSiteStyles(): string {
-  return `<style>${CANVAS_FLOW_SITE_STYLES.join("")}</style>`;
+  return `<style>${[...CANVAS_FLOW_SITE_STYLES, ...CANVAS_MOCKUP_HTML_STYLES].join("")}</style>`;
 }
 
 /**
