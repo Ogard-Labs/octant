@@ -1,5 +1,8 @@
 import {
   decodeAppleArtifactRequest,
+  decodeAppleUploadPreparationRequest,
+  type AppleUploadPreparation,
+  type AppleUploadPreparationRequest,
   decodeAppleDeviceRequest,
   decodeAppleDeviceResponse,
   type AppleArtifactRequest,
@@ -19,6 +22,8 @@ const DEVICES_PATH = "/api/apple/devices";
 const LEASES_PATH = "/api/apple/device-leases";
 const ACTIONS_PATH = "/api/apple/device-actions";
 const SCREENSHOTS_PATH = "/api/apple/device-screenshots";
+const DISTRIBUTION_PATH = "/api/apple/distribution";
+const UPLOAD_PREPARATIONS_PATH = "/api/apple/distribution-preparations";
 
 // Each route takes only its own kinds, so the remote listener's split between
 // the readable device route and the local-only lease and action routes cannot
@@ -40,6 +45,10 @@ const ROUTE_KINDS: ReadonlyMap<string, ReadonlySet<AppleDeviceRequest["kind"]>> 
       "screenshot",
     ]),
   ],
+  // An upload of the person's own app to App Store Connect: it targets no
+  // device and runs only on a local person's confirmation of exactly the
+  // build the preparation route read.
+  [DISTRIBUTION_PATH, new Set<AppleDeviceRequest["kind"]>(["upload"])],
 ]);
 /**
  * Routes only a person at a local window may call. The screenshot read is one
@@ -50,6 +59,8 @@ const LOCAL_ONLY_PATHS: ReadonlySet<string> = new Set([
   LEASES_PATH,
   ACTIONS_PATH,
   SCREENSHOTS_PATH,
+  DISTRIBUTION_PATH,
+  UPLOAD_PREPARATIONS_PATH,
 ]);
 
 export interface AppleDeviceRouteDependencies {
@@ -74,6 +85,15 @@ export interface AppleDeviceRouteDependencies {
     request: Pick<AppleArtifactRequest, "authority" | "threadId" | "checkoutId">,
     principal: ClientPrincipal,
   ) => Promise<Pick<AppleDeviceExecutionScope, "threadId" | "checkoutId"> | undefined>;
+  /**
+   * What an upload of this project would send, read in the window's thread
+   * scope before anyone is asked. Undefined refuses the read.
+   */
+  readonly prepareUpload?: (
+    windowId: WindowId,
+    request: AppleUploadPreparationRequest,
+    signal?: AbortSignal,
+  ) => Promise<AppleUploadPreparation | undefined>;
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
 }
@@ -94,7 +114,13 @@ export function createAppleDeviceRouteHandler(dependencies: AppleDeviceRouteDepe
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
     const kinds = ROUTE_KINDS.get(url.pathname);
-    if (kinds === undefined && url.pathname !== SCREENSHOTS_PATH) return undefined;
+    if (
+      kinds === undefined &&
+      url.pathname !== SCREENSHOTS_PATH &&
+      url.pathname !== UPLOAD_PREPARATIONS_PATH
+    ) {
+      return undefined;
+    }
     const origin = request.headers.get("origin");
     if (
       !isLoopbackHostname(url.hostname) ||
@@ -139,6 +165,16 @@ export function createAppleDeviceRouteHandler(dependencies: AppleDeviceRouteDepe
       parsed = JSON.parse(text);
     } catch {
       return failure("invalid", "Apple device request is invalid.", 400, origin);
+    }
+    if (url.pathname === UPLOAD_PREPARATIONS_PATH) {
+      return await uploadPreparation({
+        parsed,
+        principal,
+        windowId,
+        origin,
+        dependencies,
+        signal: request.signal,
+      });
     }
     if (kinds === undefined) {
       return await screenshotPixels({ parsed, principal, windowId, origin, dependencies });
@@ -223,6 +259,40 @@ async function screenshotPixels(input: {
   } catch {
     return failure("unavailable", "Apple device service is unavailable.", 503, origin);
   }
+}
+
+/**
+ * What an upload would send, for a window on this Mac only. It reads the
+ * project and the keychain's identities and runs nothing that writes.
+ */
+async function uploadPreparation(input: {
+  readonly parsed: unknown;
+  readonly principal: ClientPrincipal;
+  readonly windowId: WindowId;
+  readonly origin: string | null;
+  readonly dependencies: AppleDeviceRouteDependencies;
+  readonly signal: AbortSignal;
+}): Promise<Response> {
+  const { origin } = input;
+  let read: AppleUploadPreparationRequest;
+  try {
+    read = decodeAppleUploadPreparationRequest(input.parsed);
+  } catch {
+    return failure("invalid", "Apple device request is invalid.", 400, origin);
+  }
+  if (input.principal.kind !== "local-window") {
+    return failure("unauthorized", "Apple device request is unauthorized.", 403, origin);
+  }
+  let answer: AppleUploadPreparation | undefined;
+  try {
+    answer = await input.dependencies.prepareUpload?.(input.windowId, read, input.signal);
+  } catch {
+    answer = undefined;
+  }
+  if (answer === undefined) {
+    return failure("unauthorized", "Apple device request is unauthorized.", 403, origin);
+  }
+  return Response.json(answer, { status: 200, headers: corsHeaders(origin) });
 }
 
 /**

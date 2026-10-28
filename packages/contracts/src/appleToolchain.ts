@@ -562,6 +562,51 @@ export const AppleDeviceToolingOperation = Schema.Literal(
 );
 export type AppleDeviceToolingOperation = typeof AppleDeviceToolingOperation.Type;
 
+/**
+ * A signing identity's SHA-1 certificate fingerprint, as `security
+ * find-identity` prints it. It names the public certificate, not the key, and
+ * with the team ID it is the only signing fact Octant records.
+ */
+export const AppleSigningIdentityFingerprint = Schema.String.pipe(
+  Schema.pattern(/^[0-9A-F]{40}$/),
+  Schema.brand("AppleSigningIdentityFingerprint"),
+);
+export type AppleSigningIdentityFingerprint = typeof AppleSigningIdentityFingerprint.Type;
+
+/** Which of the person's keychain identities signed a product, and for which team. */
+export const AppleDeviceSigning = Schema.Struct({
+  teamId: AppleTeamId,
+  identity: AppleSigningIdentityFingerprint,
+}).annotations(strict);
+export type AppleDeviceSigning = typeof AppleDeviceSigning.Type;
+
+/**
+ * A version or build number as App Store Connect takes it: one to three
+ * period-separated integers (`CFBundleShortVersionString`, `CFBundleVersion`).
+ */
+export const AppleBundleVersion = Schema.String.pipe(
+  Schema.pattern(/^[0-9]{1,9}(\.[0-9]{1,9}){0,2}$/),
+  Schema.brand("AppleBundleVersion"),
+);
+export type AppleBundleVersion = typeof AppleBundleVersion.Type;
+
+/**
+ * The exact build a person confirms uploading, as the host read it from the
+ * project before anything ran: the app, its version and build number, and the
+ * App Store signature the export will apply (the team, the keychain identity's
+ * fingerprint, and the provisioning profile's UUID). The upload's approval is
+ * bound to these values, and the host refuses an upload whose project no
+ * longer builds them.
+ */
+export const AppleUploadBuild = Schema.Struct({
+  bundleIdentifier: AppleBundleIdentifier,
+  version: AppleBundleVersion,
+  buildNumber: AppleBundleVersion,
+  signing: AppleDeviceSigning,
+  profileId: Schema.UUID,
+}).annotations(strict);
+export type AppleUploadBuild = typeof AppleUploadBuild.Type;
+
 export const AppleDeviceRequest = Schema.Struct({
   actionId: ToolActionId,
   correlationId: CorrelationId,
@@ -594,6 +639,8 @@ export const AppleDeviceRequest = Schema.Struct({
   /** `install` only: a product an Octant build held for this thread, by reference. */
   artifact: Schema.optional(AppleEvidenceReference),
   bundleIdentifier: Schema.optional(AppleBundleIdentifier),
+  /** `upload` only: the build the person confirms, read from the project beforehand. */
+  upload: Schema.optional(AppleUploadBuild),
   timeoutMs: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(60 * 60 * 1000)),
   approval: ToolActionApproval,
 })
@@ -607,6 +654,15 @@ export const AppleDeviceRequest = Schema.Struct({
         request.kind === "release-version";
       if (targetsNoDevice !== (request.deviceId === undefined)) return false;
       if (request.fromThreadId !== undefined && request.kind !== "use-device") return false;
+      if ((request.kind === "upload") !== (request.upload !== undefined)) return false;
+      if (request.upload !== undefined) {
+        // An upload archives one project for the team its signature names.
+        return (
+          request.projectPath !== undefined &&
+          request.teamId !== undefined &&
+          String(request.upload.signing.teamId) === String(request.teamId)
+        );
+      }
       if (request.kind === "build" || request.kind === "run") {
         return request.projectPath !== undefined && request.teamId !== undefined;
       }
@@ -676,6 +732,7 @@ export const AppleDeviceRefusalReason = Schema.Literal(
   "invalid-artifact",
   "foreign-bundle",
   "process-not-owned",
+  "upload-changed",
 );
 export type AppleDeviceRefusalReason = typeof AppleDeviceRefusalReason.Type;
 
@@ -713,24 +770,6 @@ export const AppleDeviceDiscovery = Schema.Struct({
   discoveredAt: UtcTimestamp,
 }).annotations(strict);
 export type AppleDeviceDiscovery = typeof AppleDeviceDiscovery.Type;
-
-/**
- * A signing identity's SHA-1 certificate fingerprint, as `security
- * find-identity` prints it. It names the public certificate, not the key, and
- * with the team ID it is the only signing fact Octant records.
- */
-export const AppleSigningIdentityFingerprint = Schema.String.pipe(
-  Schema.pattern(/^[0-9A-F]{40}$/),
-  Schema.brand("AppleSigningIdentityFingerprint"),
-);
-export type AppleSigningIdentityFingerprint = typeof AppleSigningIdentityFingerprint.Type;
-
-/** Which of the person's keychain identities signed a product, and for which team. */
-export const AppleDeviceSigning = Schema.Struct({
-  teamId: AppleTeamId,
-  identity: AppleSigningIdentityFingerprint,
-}).annotations(strict);
-export type AppleDeviceSigning = typeof AppleDeviceSigning.Type;
 
 /** The device operations that leave evidence: the effects, the console read, and a screenshot. */
 export const AppleDeviceEvidenceKind = Schema.Literal(
@@ -779,6 +818,35 @@ export const AppleDeviceEvidence = Schema.Struct({
 export type AppleDeviceEvidence = typeof AppleDeviceEvidence.Type;
 
 /**
+ * What one upload to App Store Connect did: the build the person confirmed,
+ * and, once App Store Connect took it, the delivery identifier it answered
+ * with. Never the key, the issuer secret, a host path, or the archive's bytes.
+ */
+export const AppleUploadEvidence = Schema.Struct({
+  actionId: ToolActionId,
+  correlationId: CorrelationId,
+  authority: ToolActionAuthority,
+  kind: Schema.Literal("upload"),
+  requestedBy: EventActor,
+  outcome: AppleBuildOutcome,
+  upload: AppleUploadBuild,
+  deliveryId: Schema.optional(Schema.UUID),
+  diagnostics: Schema.Array(AppleDiagnostic).pipe(Schema.maxItems(64)),
+  artifacts: Schema.Array(AppleEvidenceArtifact).pipe(Schema.maxItems(16)),
+  cleanup: AppleCleanupState,
+  durationMs: Schema.Int.pipe(Schema.nonNegative()),
+  completedAt: UtcTimestamp,
+})
+  .annotations(strict)
+  // App Store Connect's delivery identifier is what says it took the build.
+  .pipe(
+    Schema.filter(
+      (evidence) => (evidence.outcome === "succeeded") === (evidence.deliveryId !== undefined),
+    ),
+  );
+export type AppleUploadEvidence = typeof AppleUploadEvidence.Type;
+
+/**
  * The device routes' answers. A refusal carries the policy's reason and
  * nothing else, so a request another thread's lease refused learns only that.
  */
@@ -804,6 +872,10 @@ export const AppleDeviceResponse = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("apple-device-evidence"),
     evidence: AppleDeviceEvidence,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("apple-upload-evidence"),
+    evidence: AppleUploadEvidence,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("apple-device-refused"),
@@ -847,6 +919,9 @@ export const decodeAppleDeviceRecord = Schema.decodeUnknownSync(AppleDeviceRecor
 export const decodeAppleDeviceRequest = Schema.decodeUnknownSync(AppleDeviceRequest);
 export const decodeAppleDeviceLease = Schema.decodeUnknownSync(AppleDeviceLease);
 export const decodeAppleDeviceResponse = Schema.decodeUnknownSync(AppleDeviceResponse);
+export const decodeAppleUploadBuild = Schema.decodeUnknownSync(AppleUploadBuild);
+export const decodeAppleTeamId = Schema.decodeUnknownSync(AppleTeamId);
+export const decodeAppleUploadEvidence = Schema.decodeUnknownSync(AppleUploadEvidence);
 export const decodeAppleSigningIdentityFingerprint = Schema.decodeUnknownSync(
   AppleSigningIdentityFingerprint,
 );

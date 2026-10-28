@@ -2029,7 +2029,7 @@ Rules this delivery resolved:
   device, an agent, and `system` are refused `not-permitted`. It asks only a
   provider offered for leasing now, on a placement that chooses a machine,
   bounded like a teardown call. The driver is untrusted: an id that is not
-  one is left out, names are cut to 128 characters, and at most 64 machines
+  one is left out, names are cut to 128 characters and trimmed again after the cut, for provider and placement names alike, and at most 64 machines
   are shown. Listing asks the person's daemon, so the editor asks only while
   such a placement is chosen, never on opening.
 - **Names say "computer", never the host's platform.** The placement names
@@ -2144,7 +2144,10 @@ Rules this delivery resolved:
   failed before the restart is retried even for a key no desktop used. Only
   those references are deleted: the store is never listed, so nothing Octant
   did not store for a recipe is touched. The removal confirmation says the key stays until those desktops are
-  gone; the editor shows no standing waiting state yet.
+  gone, and the editor keeps saying so (`releasing` on the `recipe-key` answer)
+  for as long as a desktop made with a key the Project's recipe stopped naming
+  may still need it. The host remembers which Project's recipe named each
+  retired key, from the journaled recipe changes after a restart.
 - **Removing a key keeps the recipe.** The recipe stays on its provider with
   no reference and starts nothing (`no-provider-configured`) until a key is
   entered again; a new recipe, or one moved onto a cloud provider, still
@@ -2155,7 +2158,12 @@ Rules this delivery resolved:
   keep one. "Refused" comes from the most recent lease that got the
   provider's answer with that reference, which the lease journals as
   `credentialRejected` with Octant-authored text alone; a new key has a new
-  reference, so entering one clears it. A paired device may ask, since the
+  reference, so entering one clears it. A key deleted from the store outside
+  Octant is `missing` in the editor, and the lease that needed it ends refused
+  with `credentialMissing`, which the pane turns into a sentence saying the key
+  is no longer in the credential store. The driver passes on the HTTPS port's
+  `credential-missing` (`DESKTOP_CREDENTIAL_MISSING`); the refusal text itself
+  stays Octant-authored. A paired device may ask, since the
   answer carries nothing of the key.
 
 Evidence: `projectDesktopRecipe.test.ts`, over a journal on disk and a host

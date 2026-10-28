@@ -746,7 +746,7 @@ describe("Canvas share contracts", () => {
     const dropped = (kind: string, path: string) =>
       /(?:^|\.)sourceIds?$/.test(path) ||
       flattened.has(`${kind}.${path}`) ||
-      ((kind === "design" || kind === "mockup") && /^assets(?:$|\[|\.)/.test(path));
+      (kind === "design" && /^assets(?:$|\[|\.)/.test(path));
     const missing: string[] = [];
     for (const [kind, paths] of live) {
       const sharedPaths = shared.get(kind);

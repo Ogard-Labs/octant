@@ -32,7 +32,7 @@ import { AutomationNotificationDeliveryService } from "./automationNotificationD
 import {
   createRecordingPushDeliveryTransport,
   createUnavailablePushDeliveryTransport,
-} from "./pushDeliveryTransport";
+} from "./pushDeliveryTransport.test-support";
 import {
   automationRunFixture,
   AUTOMATION_TEST_IDS,

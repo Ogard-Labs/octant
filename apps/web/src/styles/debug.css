@@ -285,6 +285,12 @@
   overflow: auto;
 }
 
+/* A session whose adapter debugs children lists its processes first; the
+   console stays the row that takes the rest of the height. */
+.run-debug__panes:has(> .run-debug__processes) {
+  grid-template-rows: auto auto auto minmax(160px, 1fr);
+}
+
 /* The button recipe centres its content; a row reads from the left. */
 .run-debug__frame {
   display: flex;

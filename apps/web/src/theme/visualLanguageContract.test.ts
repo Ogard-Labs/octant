@@ -304,6 +304,7 @@ describe("the public-block visual language", () => {
       ".composer-model-picker__search input",
       ".code-branch-selector__search input",
       ".artifact-library__search-input",
+      ".artifact-tags__input",
       ".browser-workspace__omnibox input",
     ]);
     const resets: string[] = [];

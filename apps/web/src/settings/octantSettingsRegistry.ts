@@ -93,6 +93,19 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         "notifications notify alerts push phone waiting approval failure completion automation routines",
       settings: [
         {
+          id: settingId("host-phone-notifications"),
+          label: "Phone notifications",
+          scope: "host",
+          keywords:
+            "phone notifications push paired phone mobile lock screen sealed gateway apns fcm",
+        },
+        {
+          id: settingId("host-push-gateway"),
+          label: "Push gateway",
+          scope: "host",
+          keywords: "push gateway address url self-host phone notifications delivery",
+        },
+        {
           id: settingId("host-automation-notifications"),
           label: "Automation notifications",
           scope: "host",
@@ -863,7 +876,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Device tools",
       scope: "host",
       keywords:
-        "device tools simulator emulator serve-sim serve-avd ios android stream updates upgrade bundled",
+        "device tools simulator emulator serve-sim serve-avd ios android stream updates upgrade bundled app store connect distribution",
       settings: [
         {
           id: settingId("managed-tools-automatic-updates"),
@@ -876,6 +889,37 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Update check",
           scope: "host",
           keywords: "check updates device tools",
+        },
+        // The App Store Connect key is entered only from a desktop window, so
+        // search offers these rows only where the section can appear.
+        {
+          id: settingId("app-store-connect-key-state"),
+          label: "App Store Connect API key",
+          scope: "host",
+          keywords:
+            "app store connect api key apple distribution upload testflight remove replace keychain",
+          nativeRequired: "nativeBoundsAvailable",
+        },
+        {
+          id: settingId("app-store-connect-issuer"),
+          label: "App Store Connect issuer ID",
+          scope: "host",
+          keywords: "app store connect issuer id api key apple distribution",
+          nativeRequired: "nativeBoundsAvailable",
+        },
+        {
+          id: settingId("app-store-connect-key-id"),
+          label: "App Store Connect key ID",
+          scope: "host",
+          keywords: "app store connect key id api key apple distribution",
+          nativeRequired: "nativeBoundsAvailable",
+        },
+        {
+          id: settingId("app-store-connect-private-key"),
+          label: "App Store Connect private key",
+          scope: "host",
+          keywords: "app store connect private key p8 authkey api key apple distribution",
+          nativeRequired: "nativeBoundsAvailable",
         },
       ],
     },

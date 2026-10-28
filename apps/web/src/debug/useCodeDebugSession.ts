@@ -1,6 +1,8 @@
 import type { CodeDebugClient } from "@octant/client-runtime/code-debug-client";
 import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts/code";
 import type {
+  CodeDebugChildId,
+  CodeDebugChildSummary,
   CodeDebugOutputEntry,
   CodeDebugScope,
   CodeDebugSessionId,
@@ -55,6 +57,10 @@ export interface DebugSessionView {
   readonly notice: string | undefined;
   /** A request the panel sent is waiting for its answer. */
   readonly pending: string | undefined;
+  /** The child processes the session debugs now; undefined when its adapter declares none. */
+  readonly childProcesses: ReadonlyArray<CodeDebugChildSummary> | undefined;
+  /** Children the adapter announced that ran undebugged. */
+  readonly undebuggedChildren: number;
 }
 
 export interface DebugSessionControls {
@@ -73,19 +79,27 @@ export interface DebugSessionControls {
  * and decides every answer; the panel polls its state, reads the stopped
  * program's stack and variables at each new stop, and sends the person's
  * steps and expressions. Nothing read here is kept after the session.
+ *
+ * With `child` set, every request but the console's output is for that child
+ * process; when the child ends, `onChildGone` hands the view back to the
+ * program, and the session goes on.
  */
 export function useCodeDebugSession(input: {
   readonly client: CodeDebugClient;
   readonly threadId: CodeThreadId;
   readonly checkoutId: CodeCheckoutId;
   readonly sessionId: CodeDebugSessionId;
+  /** The child process the view shows; undefined for the program the session started. */
+  readonly child?: CodeDebugChildId;
+  /** The child the view shows has ended. */
+  readonly onChildGone?: () => void;
   /** The session reached the program and stopped in a checkout file, or left it. */
   readonly onStoppedAt: (frame: CodeDebugStackFrame | undefined) => void;
   /** The session is over; the words say why. */
   readonly onEnded: (text: string) => void;
   readonly pollMs?: { readonly running?: number; readonly stopped?: number };
 }): readonly [DebugSessionView, DebugSessionControls] {
-  const { client, threadId, checkoutId, sessionId } = input;
+  const { client, threadId, checkoutId, sessionId, child } = input;
   const [state, setState] = useState<CodeDebugSessionState>();
   const [frames, setFrames] = useState<ReadonlyArray<CodeDebugStackFrame>>([]);
   const [framesTruncated, setFramesTruncated] = useState(false);
@@ -95,13 +109,29 @@ export function useCodeDebugSession(input: {
   const [consoleLines, setConsoleLines] = useState<ReadonlyArray<DebugConsoleLine>>([]);
   const [notice, setNotice] = useState<string>();
   const [pending, setPending] = useState<string>();
+  const [childProcesses, setChildProcesses] = useState<ReadonlyArray<CodeDebugChildSummary>>();
+  const [undebuggedChildren, setUndebuggedChildren] = useState(0);
   const mounted = useRef(true);
   const ended = useRef(false);
   const afterOutput = useRef(0);
   const loadedRevision = useRef<number>(undefined);
   const lineId = useRef(0);
-  const callbacks = useRef({ onStoppedAt: input.onStoppedAt, onEnded: input.onEnded });
-  callbacks.current = { onStoppedAt: input.onStoppedAt, onEnded: input.onEnded };
+  /**
+   * Moves when another process is selected. A read sent for the last one
+   * that answers after the switch is dropped, so its stack, scopes, or
+   * stopped line never overwrite the new process's.
+   */
+  const target = useRef(0);
+  const callbacks = useRef({
+    onStoppedAt: input.onStoppedAt,
+    onEnded: input.onEnded,
+    onChildGone: input.onChildGone,
+  });
+  callbacks.current = {
+    onStoppedAt: input.onStoppedAt,
+    onEnded: input.onEnded,
+    onChildGone: input.onChildGone,
+  };
   const runningPoll = input.pollMs?.running ?? RUNNING_POLL_MS;
   const stoppedPoll = input.pollMs?.stopped ?? STOPPED_POLL_MS;
 
@@ -128,6 +158,27 @@ export function useCodeDebugSession(input: {
     callbacks.current.onEnded(text);
   }, []);
 
+  // A child's end is not the session's: the view goes back to the program.
+  const endTarget = useCallback(
+    (text: string) => {
+      if (child === undefined) end(text);
+      else callbacks.current.onChildGone?.();
+    },
+    [child, end],
+  );
+
+  // Another process selected: what the last one's stop showed no longer holds.
+  useEffect(() => {
+    target.current += 1;
+    loadedRevision.current = undefined;
+    setState(undefined);
+    setFrames([]);
+    setScopes([]);
+    setChildren(new Map());
+    setSelectedFrameId(undefined);
+    callbacks.current.onStoppedAt(undefined);
+  }, [child]);
+
   /**
    * Sends one request. An answer that says the session is over ends it here
    * too; a refusal or an adapter that did not answer becomes the notice.
@@ -141,7 +192,13 @@ export function useCodeDebugSession(input: {
       if (ended.current) return undefined;
       let answer: CodeDebugSessionResult;
       try {
-        answer = await client.session({ threadId, checkoutId, sessionId, request });
+        answer = await client.session({
+          threadId,
+          checkoutId,
+          sessionId,
+          ...(child === undefined ? {} : { child }),
+          request,
+        });
       } catch (error) {
         if (!mounted.current) return undefined;
         if (error instanceof CodeDebugClientFailure && error.kind === "local-only") {
@@ -156,10 +213,10 @@ export function useCodeDebugSession(input: {
       setNotice((current) => (current === UNREACHABLE_TEXT ? undefined : current));
       switch (answer.status) {
         case "ended":
-          end(endReasonText(answer.endReason));
+          endTarget(endReasonText(answer.endReason));
           return answer;
         case "refused":
-          if (answer.reason === "no-session") end(refusalText(answer.reason));
+          if (answer.reason === "no-session") endTarget(refusalText(answer.reason));
           else setNotice(refusalText(answer.reason));
           return answer;
         case "unavailable":
@@ -177,7 +234,7 @@ export function useCodeDebugSession(input: {
           return answer;
       }
     },
-    [checkoutId, client, end, sessionId, threadId],
+    [checkoutId, child, client, end, endTarget, sessionId, threadId],
   );
 
   const loadVariables = useCallback(
@@ -190,9 +247,11 @@ export function useCodeDebugSession(input: {
 
   const loadFrame = useCallback(
     async (frameId: number) => {
+      const at = target.current;
       setSelectedFrameId(frameId);
       setChildren(new Map());
       const answer = await ask({ kind: "scopes", frameId });
+      if (at !== target.current) return;
       if (answer?.status !== "scopes") {
         setScopes([]);
         return;
@@ -204,7 +263,7 @@ export function useCodeDebugSession(input: {
       const first = answer.scopes.find((scope) => !scope.expensive && scope.variablesReference > 0);
       if (first === undefined) return;
       const variables = await loadVariables(first.variablesReference);
-      if (variables === undefined || !mounted.current) return;
+      if (variables === undefined || !mounted.current || at !== target.current) return;
       setScopes((current) =>
         current.map((view) =>
           view.scope.variablesReference === first.variablesReference
@@ -218,10 +277,18 @@ export function useCodeDebugSession(input: {
 
   const loadStop = useCallback(
     async (programThreadId: number) => {
+      const at = target.current;
       const answer = await ask({ kind: "stack-trace", programThreadId });
       // A Stop that landed while the stack was read has already cleared the
       // editor's stopped line; marking it again would outlive the session.
-      if (answer?.status !== "stack" || !mounted.current || ended.current) return;
+      if (
+        answer?.status !== "stack" ||
+        !mounted.current ||
+        ended.current ||
+        at !== target.current
+      ) {
+        return;
+      }
       setFrames(answer.frames);
       setFramesTruncated(answer.truncated);
       const top = answer.frames[0];
@@ -244,6 +311,12 @@ export function useCodeDebugSession(input: {
       if (stopped || !mounted.current) return;
       let wait = runningPoll;
       if (answer?.status === "state") {
+        setChildProcesses(answer.children);
+        setUndebuggedChildren(answer.undebuggedChildren ?? 0);
+        if (answer.state.status === "ended" && child !== undefined) {
+          callbacks.current.onChildGone?.();
+          return;
+        }
         setState(answer.state);
         const lastOutput = answer.output.at(-1);
         if (lastOutput !== undefined) afterOutput.current = lastOutput.sequence;
@@ -282,7 +355,7 @@ export function useCodeDebugSession(input: {
       stopped = true;
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [appendConsole, ask, end, loadStop, runningPoll, stoppedPoll]);
+  }, [appendConsole, ask, child, end, loadStop, runningPoll, stoppedPoll]);
 
   const act = useCallback(
     async (label: string, request: CodeDebugSessionRequest, quiet = false) => {
@@ -320,8 +393,9 @@ export function useCodeDebugSession(input: {
       void loadFrame(frameId);
     },
     loadScope: (variablesReference) => {
+      const at = target.current;
       void loadVariables(variablesReference).then((variables) => {
-        if (variables === undefined || !mounted.current) return;
+        if (variables === undefined || !mounted.current || at !== target.current) return;
         setScopes((current) =>
           current.map((view) =>
             view.scope.variablesReference === variablesReference
@@ -332,8 +406,9 @@ export function useCodeDebugSession(input: {
       });
     },
     expand: (variablesReference) => {
+      const at = target.current;
       void loadVariables(variablesReference).then((variables) => {
-        if (variables === undefined || !mounted.current) return;
+        if (variables === undefined || !mounted.current || at !== target.current) return;
         setChildren((current) =>
           new Map(current).set(variablesReference, {
             variables: variables.variables,
@@ -389,6 +464,8 @@ export function useCodeDebugSession(input: {
       console: consoleLines,
       notice,
       pending,
+      childProcesses,
+      undebuggedChildren,
     },
     controls,
   ] as const;

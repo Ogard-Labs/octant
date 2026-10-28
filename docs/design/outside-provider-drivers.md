@@ -37,12 +37,14 @@ keep the provider blocked, and the provider catalog lists effective outside
 drivers in their own group (see [Admission rules](#admission-rules)). Its
 product acceptance, the live loopback smoke on macOS with a local model
 server, is the maintainer's to run; on Linux every outside driver stays
-`host-prohibited`. Slice 6 (provenance) is half built: an instance moves to a
+`host-prohibited`. Slice 6 (provenance) is built: an instance moves to a
 newly trusted digest of its driver, and only then, with its records cleared
-(see [Rebind rules](#rebind-rules)); publisher signatures are not built,
-because the rules listed under
-[Signature rules not yet settled](#signature-rules-not-yet-settled) are open,
-and until they are no source but an unsigned local folder yields a driver.
+(see [Rebind rules](#rebind-rules)); and publisher signatures are verified at
+inspection, the publisher key is pinned at first trust and journaled, a
+version by another key is held until the person re-trusts the new publisher
+or forgets the pin, and the author kit signs a package (see
+[Signature rules](#signature-rules)). No source but a local folder yields a
+driver until the npm source (slice 8) lands.
 Slice 7 (author kit and example driver) is built: the author-facing protocol
 re-export, the serve helper, the out-of-process conformance kit, and an
 example loopback driver package that passes the kit and the host proxy's
@@ -144,8 +146,8 @@ digest }`. The set of outside drivers is data, held by the package store.
 - **The instance arm grows with admission.** The configuration holds only the
   `kind` and the driver reference until the add-provider step lands; the
   address, key placement, and listed model ids join it in that same change.
-  No command creates or reconfigures an outside instance before then, so no
-  journaled instance can lack them. The provider projection's `driver_kind`
+  No command created or reconfigured an outside instance before then, so no
+  journaled instance lacks them. The provider projection's `driver_kind`
   column keeps only a non-empty check and leaves the vocabulary to the
   instance schema, so replay of such an instance needs no migration of its own.
 - **The matrix column's source.** An outside package ships no capability block
@@ -247,9 +249,10 @@ the fail-closed option.
   shared confinement builder (`apps/server/src/process/seatbeltProfile.ts`)
   and sets the environment itself, ignoring whatever environment the caller
   passed. No caller can widen either.
-- **The grants.** Read: the package root, the runtime's install, `/System`,
+- **The grants.** Read: the package root, the runtime's install,
   `/usr/lib`, `/usr/share`, `/private/var/db/timezone`, the time-zone link
-  `/private/etc/localtime`, the data devices `/dev/null`, `/dev/zero`,
+  `/private/etc/localtime` and the root link `/etc` it is opened through,
+  the data devices `/dev/null`, `/dev/zero`,
   `/dev/random`, and `/dev/urandom`, `/` itself, and metadata of every parent
   folder of those. These began as the extension profile's measured roots
   less `/bin` and `/sbin` (programs the driver may not exec) and less the
@@ -285,7 +288,13 @@ the fail-closed option.
     Silicon would load; the runtimes a driver runs on are native.
   - `/private/etc`, apart from the link `/private/etc/localtime`: the host's
     user and group lists, hosts and name-service files, and SSH and sudo
-    configuration are of no use to a driver with no network and no exec.
+    configuration are of no use to a driver with no network and no exec. A
+    runtime opens the zone link as `/etc/localtime`, through the root link
+    `/etc`, so that link itself is readable too, as a single path and never
+    as a folder. Without it both runtimes fell back to UTC (measured
+    2026-10-28). Every other name through it still resolves into the denied
+    `/private/etc`. The escape tests require the driver to report the host's
+    time zone and to be refused `/etc/hosts`.
   - `/private/var/db`, apart from `timezone`, where the time-zone link leads:
     the rest is the host's own databases (the local directory's user
     records, installer receipts, diagnostics), none of which a runtime reads
@@ -295,6 +304,16 @@ the fail-closed option.
     `libexec` hold programs the driver may not exec, and `local` holds
     whatever the person installed there, on an Intel Mac Homebrew's whole
     prefix with its services' data.
+  - `/System`, whole: Bun and Electron's Node read nothing under it to run
+    a driver. The system frameworks they link come from the shared cache,
+    which the loader maps without a file read the profile judges. Measured
+    on an Apple Silicon Mac on 2026-10-28 with both runtimes: with no
+    `/System` grant, the example loopback driver answered its handshake,
+    probe, and a streamed send, and a probe of Intl formatting, collation and
+    segmentation, crypto, zlib, a worker, and `os` gave the same answers as
+    with the grant. The escape tests read
+    `/System/Library/CoreServices/SystemVersion.plist`, which the host reads
+    first, and require the driver to be refused.
   - The system's public TLS files (`/private/etc/ssl`: `openssl.cnf`,
     `cert.pem`, and `certs`), which the confinement builder grants every
     launch so that an offline one fails at the socket rather than before
@@ -306,16 +325,13 @@ the fail-closed option.
   `/Applications`, `/Library`, `/usr/local`) can also be spelled beneath it:
   `/System/Volumes/Data/Users/<name>/notes.txt` is the file
   `/Users/<name>/notes.txt`. The home and `/private` denials name only the
-  short spelling, and `/System` is a read root, so the profile denies
-  `/System/Volumes/Data` whole, reads and writes, through the builder's
-  isolated roots, which come after every grant. A denial among the builder's
-  other extra denials would come before the read roots, and the `/System`
-  grant would open the volume again; the profile test holds that no later
-  grant reopens it. A runtime names nothing by that spelling to start: its
-  loader, libraries, and ICU data are on the system volume and in the
-  cryptex on the Preboot volume, and it reads the zone data by its short
-  path. The other volumes under `/System/Volumes` stay readable, Preboot
-  because it holds that cryptex. The escape tests plant a file in the
+  short spelling. The profile no longer grants any read under `/System`, and
+  it still denies `/System/Volumes/Data` whole, reads and writes, through the
+  builder's isolated roots, which come after every grant, so a `/System`
+  grant restored for some runtime cannot reopen the home folder by that
+  spelling. A denial among the builder's other extra denials would come
+  before the read roots, and such a grant would open the volume again; the
+  profile test holds that no later grant reopens it. The escape tests plant a file in the
   person's home and have the driver read it by the data volume's spelling,
   after the host reads it by the same path, so the refusal is the profile's;
   the `macos-15` job passed that case on Bun and Electron's Node on
@@ -325,8 +341,8 @@ the fail-closed option.
   was opened through or by the short one was not measured. The denial holds
   either way: if Seatbelt sees the short spelling, the denial matches no file
   a runtime needs; if it sees the long one, the denial closes a way into the
-  home folder. Narrowing `/System` itself to the folders a runtime reads
-  would close this and any like it, and is a measurement of its own._
+  home folder. Dropping the `/System` grant, measured on 2026-10-28, closes
+  this and any like it; the denial stays as a backstop._
 - **The runtime's install** is taken from the runtime's own resolved path,
   never a fixed location. For Bun it is the executable's folder, wherever Bun
   is installed. For Electron's Node it is the app bundle that holds the
@@ -552,10 +568,26 @@ implementation; each takes the fail-closed option.
   the address under the endpoint rule (HTTPS, or HTTP on loopback; no
   credentials, query, or fragment), and, as for any endpoint, refuses a
   provider that sends no key unless its address is on loopback. The key goes
-  to the credential broker through the existing per-instance key routes. No
-  command reconfigures an outside instance: its package, address, key
-  placement, and models are fixed when it is added, so its records cannot
-  outlive what they were made for; a change is a removal and a new provider.
+  to the credential broker through the existing per-instance key routes. The
+  driver reference is fixed when it is added; the rest changes under
+  [Reconfiguring](#reconfiguring).
+- **Reconfiguring.** `change-outside-harness-endpoint-configuration` carries
+  the instance, its expected version, and the whole configuration the person
+  now wants: address, key placement, and listed model IDs under the rules for
+  adding. Its driver reference must be the one the instance binds, version and
+  digest included, or the host refuses it; another driver is a new provider,
+  and another digest is a rebind that only the person's trust causes
+  ([Rebind rules](#rebind-rules)). It is local window only, like adding one.
+  It installs, trusts, enables, and starts nothing and consults no admission:
+  the provider's switch, its crash-limit hold, its name, and its threads stay
+  as they are, so an instance that is `driver-not-admitted` stays so. It is
+  refused while a session is active on the provider. What the instance
+  learned under the old configuration goes: the process stops and the next use
+  starts one with the new address and models, the provider catalogue is
+  invalidated with its Verify tools record removed, and the stored key is
+  forgotten when the address changes or the provider stops sending one. A new
+  key header on the same address keeps the key. The change journals as
+  `provider.instance-configuration-changed@1`.
 - **Key placement.** The person chooses the one header the key travels in
   (lowercase, never `proxy-authorization`, `cookie`, `set-cookie`, or `host`)
   and whether it goes as `Bearer`. A brokered request that asks for the key
@@ -597,8 +629,8 @@ implementation; each takes the fail-closed option.
   The setup adds a provider in place (name, address, how the key is sent, the
   key, the model IDs); the provider's card on Providers & Models holds its
   key, its facts, and Verify tools, since it has no Model endpoints page. The
-  Package facts say "Local folder, unsigned", trusted by the person at this
-  digest. A driver that is not effective is not listed; its instances show
+  Package facts say "Local folder, unsigned", or "Local folder, signed" with
+  the publisher key, trusted by the person at this digest. A driver that is not effective is not listed; its instances show
   the block on their cards.
 
 ### Rebind rules
@@ -623,8 +655,8 @@ the fail-closed option.
 - **What moves.** Only the driver reference's version and digest, as a
   journaled `provider.instance-driver-rebound@1` that only the host writes,
   with the person's trust as its cause; it is its own event so that
-  `provider.instance-configuration-changed@1` still never carries an outside
-  instance. The name, address, key placement, listed models, provider
+  `provider.instance-configuration-changed@1`, which carries only the person's
+  own change, never moves a driver reference. The name, address, key placement, listed models, provider
   switch, threads, and stored key stay as the person set them. The move is idempotent and runs after every extension lifecycle
   change and once at host start, so a host that stopped between a trust and
   its move makes the move on its next pass.
@@ -662,10 +694,12 @@ the fail-closed option.
 - **Digest pinning.** Inspection and install pin `name@version` and its
   content digest; trust and Verify tools records bind that digest.
 - **Signing.** A package from a marketplace source carries a publisher
-  signature over its manifest and digest; first trust pins the publisher key,
-  and a later version signed by another key is refused until the person
-  re-trusts it as a new publisher. A local-folder package is unsigned developer
-  input, labelled so in review ([decision 3](#maintainer-decisions)).
+  signature over its name, version, protocol versions, and files; first trust
+  pins the publisher key, and a later version signed by another key is held
+  until the person re-trusts it as a new publisher. A local-folder package may
+  be unsigned developer input, labelled so in review; a signed one is verified
+  the same way ([decision 3](#maintainer-decisions),
+  [Signature rules](#signature-rules)).
 - **Updates are never automatic.** No background check runs. An update is an
   inspect and install of the new digest, which arrives held and untrusted.
   Trust binds a digest, so the earlier version does not keep serving under
@@ -679,28 +713,98 @@ the fail-closed option.
   admission rules built in slice 5 hold the package whenever its selection
   changes, which is the fail-closed reading, and this bullet follows them._
 
-### Signature rules not yet settled
+### Signature rules
 
-Signature verification is not built, because these consequential rules are
-open; until a maintainer settles them, no source but a local folder yields a
-driver, so no package is admitted on a signature Octant cannot check.
+The maintainer accepted these on 2026-10-28, settling what decision 3 left
+open. Each takes the fail-closed option.
 
-- **What is signed, and where it travels.** "Its manifest and digest" does not
-  name the bytes: the host derives the manifest's identity, source, and
-  digest itself, so a publisher cannot sign them as the host writes them, and
-  the digest algorithm and its canonical encoding are not a published format.
-  Nor is it settled whether the signature and public key travel in the
-  package (a file beside the driver document), in the driver document, or in
-  the npm registry's metadata.
-- **What the pin belongs to.** Whether the first-trust pin is kept per
-  extension, per package name, or per source; where it is stored (a journaled
-  lifecycle fact or the package store); and whether an uninstall forgets it.
-- **Re-trusting a new publisher.** Which action it is: a separate command, a
-  flag on `set-source-trust`, or an uninstall and fresh install, and what it
-  clears.
-- **Refused or held.** Whether a missing signature, a signature that does not
-  verify, and a valid signature by an unpinned key are refused at inspection
-  or installed held, and with which closed reasons.
+- **What is signed, and where it travels.** The publisher signs a small file,
+  `octant-signature.json`, kept at the package root beside
+  `octant-provider-driver.json`; the same file and format serve a local
+  folder, an npm package, and any later source. It holds `format`
+  (`octant-signature/1`), `name`, `version`, `protocolVersions`, `files` (each
+  `{ path, sha256 }`: every file in the package except the signature file,
+  with its lowercase hex SHA-256), `publicKey` (the 32 raw bytes of an
+  Ed25519 key, standard base64), and `signature` (64 bytes, standard base64),
+  and nothing else (`OutsideProviderDriverSignatureDocument` in
+  `@octant/plugin-api`). The signature is Ed25519 over the UTF-8 bytes of
+  these lines, each ended by one LF (0x0A) and nothing else:
+
+  ```text
+  octant-signature/1
+  name <name>
+  version <version>
+  protocol <version>          one line per protocol version, sorted, no repeats
+  file <sha256> <path>        one line per file, sorted by the path's UTF-8 bytes
+  ```
+
+  A path is `/`-separated and package-relative, with no empty, `.` or `..`
+  segment, no leading `/`, no backslash, and no control character, so each
+  path is one line. Sorting by UTF-8 bytes is sorting by code point.
+  `outsideProviderDriverSignedMessage` builds these bytes for the host.
+
+- **What the host checks.** It hashes every file itself and builds the
+  message from its own reading, never from the file's list: the list must
+  name exactly those files with those hashes; `name` must be the package's
+  name in its source (the slug for a local folder), and `version` and the
+  protocol versions must be the driver document's; a link or any other
+  non-file entry cannot be covered; and the signature must verify under the
+  key the file carries. Any failure refuses the package at inspection as
+  `signature-invalid`. A verified key is recorded in the manifest's
+  provenance as `publisherKey`, a fingerprint `ed25519:<hex SHA-256 of the
+raw key>` that the host sets and a document that states it is refused, so
+  the review and Settings show which key signed what the person trusts.
+- **Missing.** A package from any source other than a local folder without a
+  signature file is refused at inspection as `signature-missing`. A verified
+  marketplace package is still refused as `source-unsupported` until the npm
+  source lands (slice 8). An unsigned local folder stays allowed as labelled
+  developer input ([decision 3](#maintainer-decisions)); a signed one is held
+  to every check above.
+- **What the pin belongs to.** One key per package name per source (for
+  example `npm:@scope/name`). It is pinned when the person first trusts a
+  signed version, journaled as a `publisher-pinned` lifecycle fact in the
+  same append as that trust, and kept on the package's lifecycle record,
+  whose identity the host derives from the source and the name. An uninstall
+  keeps it, so reinstalling the same name from the same source under another
+  key is held; only the forget action clears it. Replay restores it like any
+  projection.
+- **Held for a new publisher.** A selected version (install, update, or
+  rollback) whose key is not the pinned one, including an unsigned version of
+  a pinned package, installs held with the closed reason `publisher-changed`
+  (`ExtensionPublisherHoldReason` in contracts; the package state carries the
+  pinned key, the selected key, and the hold). Trusting the source refuses
+  and does not lift it.
+- **Re-trusting a new publisher.** `trust-new-publisher` is its own command,
+  local window only (the lifecycle route refuses it from a paired device, and
+  remote forwarding never admits it). Settings shows the pinned and the new
+  key fingerprints side by side, and the command carries the new key the
+  person saw; the host refuses any other key, a version that is not held,
+  and an unsigned one. It journals `publisher-replaced` (old and new key),
+  replaces the pin, keeps the package held and untrusted for its digest, and
+  clears the Verify tools records and observations of every instance added
+  from the package. Trusting the source then admits it and moves the
+  instances as for any digest ([Rebind rules](#rebind-rules)).
+- **Forgetting a publisher.** `forget-publisher`, local window only, carries
+  the pinned key and journals `publisher-forgotten`; it works on an installed
+  or an uninstalled package. It changes no trust: a package held for its
+  publisher stays held for admission, and the next trust pins the key that
+  signed the selected version.
+- **Signing.** The author kit's signing tool
+  (`@octant/provider-sdk/outside-driver-sign`, plain `.mjs`) writes the file.
+  It reads a PKCS #8 Ed25519 private key from a file or from standard input,
+  never writes or prints it, and prints only the key's fingerprint.
+
+_Rationale: a file beside the driver document is the one place every source
+can carry unchanged, so a local folder and an npm package are checked
+identically; signing a line-based message the host rebuilds from its own
+hashes avoids trusting a JSON canonical form or the file's own list. The pin
+follows the name rather than one install so a removal cannot launder a key
+change, and a separate command that shows both keys keeps "trust this
+digest" from also meaning "accept a new publisher". Rejected: a signature
+inside the driver document (it would sign itself), registry metadata only
+(a local folder has none), refusing a different key at inspection (the
+person could not then compare the keys before deciding), and a flag on
+`set-source-trust` (one click would accept both)._
 
 ### Marketplace and catalog
 
@@ -751,9 +855,11 @@ takes the fail-closed option.
   used. The host derives the identity from the folder and the slug, so a
   package cannot name itself into another package's identity, and records a
   local folder as unreviewed.
-- **Source.** Only a `local-folder` source yields a driver until publisher
-  signatures exist ([decision 4](#maintainer-decisions)); a driver document
-  in any other source is refused as `source-unsupported`.
+- **Source.** Only a `local-folder` source yields a driver until the npm
+  source lands ([decision 4](#maintainer-decisions)). A driver document in
+  any other source is refused as `signature-missing` without a signature, as
+  `signature-invalid` with one that fails, and as `source-unsupported`
+  otherwise ([Signature rules](#signature-rules)).
 - **Protocol.** A package that declares no version the host speaks
   (`harness-endpoint/1` today) is refused at inspection as
   `protocol-incompatible`, as an incompatible app range or platform already
@@ -807,12 +913,15 @@ Conformance is enforced by the host, not trusted from the author:
 
 These rules resolve what slice 7 left to implementation.
 
-- **What the kit is.** Three provider SDK entry points:
+- **What the kit is.** Four provider SDK entry points:
   `@octant/provider-sdk/outside-driver` re-exports the protocol schemas a
   driver reads and writes from `@octant/contracts`;
-  `@octant/provider-sdk/outside-driver-serve` is the serve helper; and
+  `@octant/provider-sdk/outside-driver-serve` is the serve helper;
   `@octant/provider-sdk/outside-driver-conformance` is the out-of-process
-  conformance kit (`runOutsideDriverConformance`). The user guide's
+  conformance kit (`runOutsideDriverConformance`); and
+  `@octant/provider-sdk/outside-driver-sign` is the signing tool
+  ([Signature rules](#signature-rules)). CI signs a copy of the example
+  driver with a key made at test time; the repository holds no signing key. The user guide's
   [Build a provider driver](../../apps/docs/advanced/provider-drivers.md) page
   is the author's how-to.
 - **The serve helper is plain JavaScript a package carries.** A driver can
@@ -900,20 +1009,20 @@ The attacker is the driver package (malicious or compromised) or whoever can
 put a package in front of the person. Controls marked new are this design's;
 "built" marks one a landed slice has made real.
 
-| Threat                                                              | Control                                                                                                                                                             |
-| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Exfiltrates prompts, code, or files                                 | New, built (escape tests pass on macOS): no network, read only its package, no Project path; only egress is the brokered call to the configured origin              |
-| Steals or replays a credential                                      | New, built for the brokered call: never holds one; host injects the header per request and strips it from responses; broker coordinates absent from the environment |
-| Uses another instance's or provider's credential                    | New, built: one process and one request channel per instance; the lease is keyed by that instance                                                                   |
-| Escapes to the host (files, processes, other extensions)            | New, built (escape tests pass on macOS): deny-default Seatbelt without exec or fork; `/System/Volumes/Data` denied; Linux refuses to launch                         |
-| Over-claims capabilities (tools, approvals, resume)                 | New, built: host ceiling clamp; `admitTurn` computed by the host; host-run Verify tools                                                                             |
-| Fabricates tool calls or injects instructions in output             | Existing: model output is untrusted; the harness offers, approves, and runs tools under thread authority; taint rules apply                                         |
-| Puts attacker text in Settings or diagnostics                       | New, built: closed reasons only; stderr bounded and kept out of clients                                                                                             |
-| Swaps code under a trusted name (update, mirror, typosquat)         | New, built: digest-bound trust and records; held updates and rollbacks that move an instance only on trust and clear its verification. New: publisher key pin       |
-| Points the key at an internal service or attacker host              | Existing endpoint rule, built for the brokered call: HTTPS or loopback HTTP, origin-checked before the key is read; no redirect                                     |
-| Exhausts the host (floods, hangs, crash loops)                      | Existing supervisor bounds; new, built: per-message cap, host-owned deadlines, bounded brokered calls, per-instance crash limit and journaled hold                  |
-| An agent, mention, routine, or paired device installs or trusts one | Existing and new, built: lifecycle, add-provider, and Verify tools only from a local window; structured references stay inert; install stays held until trusted     |
-| Impersonates a bundled provider                                     | New, built: one reserved family; package-name identity with an outside label; no bundled logo, account profile, or sign-in dialect                                  |
+| Threat                                                              | Control                                                                                                                                                              |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Exfiltrates prompts, code, or files                                 | New, built (escape tests pass on macOS): no network, read only its package, no Project path; only egress is the brokered call to the configured origin               |
+| Steals or replays a credential                                      | New, built for the brokered call: never holds one; host injects the header per request and strips it from responses; broker coordinates absent from the environment  |
+| Uses another instance's or provider's credential                    | New, built: one process and one request channel per instance; the lease is keyed by that instance                                                                    |
+| Escapes to the host (files, processes, other extensions)            | New, built (escape tests pass on macOS): deny-default Seatbelt without exec or fork; no read under `/System`; of `/etc`, only the zone link; Linux refuses to launch |
+| Over-claims capabilities (tools, approvals, resume)                 | New, built: host ceiling clamp; `admitTurn` computed by the host; host-run Verify tools                                                                              |
+| Fabricates tool calls or injects instructions in output             | Existing: model output is untrusted; the harness offers, approves, and runs tools under thread authority; taint rules apply                                          |
+| Puts attacker text in Settings or diagnostics                       | New, built: closed reasons only; stderr bounded and kept out of clients                                                                                              |
+| Swaps code under a trusted name (update, mirror, typosquat)         | New, built: digest-bound trust and records; held updates and rollbacks that move an instance only on trust and clear its verification; publisher key pin             |
+| Points the key at an internal service or attacker host              | Existing endpoint rule, built for the brokered call: HTTPS or loopback HTTP, origin-checked before the key is read; no redirect                                      |
+| Exhausts the host (floods, hangs, crash loops)                      | Existing supervisor bounds; new, built: per-message cap, host-owned deadlines, bounded brokered calls, per-instance crash limit and journaled hold                   |
+| An agent, mention, routine, or paired device installs or trusts one | Existing and new, built: lifecycle, add-provider, and Verify tools only from a local window; structured references stay inert; install stays held until trusted      |
+| Impersonates a bundled provider                                     | New, built: one reserved family; package-name identity with an outside label; no bundled logo, account profile, or sign-in dialect                                   |
 
 Residual risk: the configured endpoint receives what the person sends it, as
 for any endpoint; a trusted driver can mistranslate (send a different model id,

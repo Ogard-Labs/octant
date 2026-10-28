@@ -602,6 +602,23 @@ describe("ProviderCatalogView outside drivers", () => {
     expect(screen.queryByRole("button", { name: "Open Model endpoints" })).toBeNull();
   });
 
+  it("names the publisher key of a signed driver folder", () => {
+    const publisherKey = `ed25519:${"e".repeat(64)}`;
+    render(
+      <ProviderCatalogView
+        {...props({
+          outsideDrivers: [{ ...listing, publisherKey: publisherKey as never }],
+          instances: [outsideInstance(listing.driver.digest)],
+        })}
+      />,
+    );
+    openSetup(/^Loopback chat, off/);
+    const pkg = screen.getByRole("heading", { name: "Package" }).closest("section");
+    if (pkg === null) throw new Error("expected the package section");
+    expect(within(pkg).getByText("Source").nextSibling?.textContent).toBe("Local folder, signed");
+    expect(within(pkg).getByText("Publisher key").nextSibling?.textContent).toBe(publisherKey);
+  });
+
   it("does not count a provider bound to another digest of the same driver", () => {
     render(
       <ProviderCatalogView

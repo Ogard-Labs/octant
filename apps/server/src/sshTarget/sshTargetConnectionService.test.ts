@@ -1191,7 +1191,7 @@ describe("SSH target connection service", () => {
     });
   });
 
-  it("reports an agent a macOS target cannot place refused in every posture, as its turn would be", async () => {
+  it("reports an agent on a macOS target admitted in the postures its driver declares, as on Linux", async () => {
     const facts = passingFacts();
     const connections = service({
       facts: {
@@ -1216,8 +1216,8 @@ describe("SSH target connection service", () => {
     expect(
       connections.list()[0]?.placeableRuntimes[0]?.admission.map((entry) => entry.decision),
     ).toEqual([
-      { status: "refused", reason: "runtime-not-attestable" },
-      { status: "refused", reason: "runtime-not-attestable" },
+      { status: "admitted" },
+      { status: "admitted" },
       { status: "refused", reason: "runtime-not-attestable" },
     ]);
     connections.close();

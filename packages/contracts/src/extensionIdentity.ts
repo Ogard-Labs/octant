@@ -37,3 +37,14 @@ export const ExtensionContentDigest = Schema.String.pipe(
   Schema.brand("ExtensionContentDigest"),
 );
 export type ExtensionContentDigest = typeof ExtensionContentDigest.Type;
+
+/**
+ * A publisher's Ed25519 public key as Octant names it: `ed25519:` and the
+ * lowercase hex SHA-256 of the key's 32 raw bytes. The host computes it from
+ * the key in a package's verified signature; a package never states it.
+ */
+export const ExtensionPublisherKeyFingerprint = Schema.String.pipe(
+  Schema.pattern(/^ed25519:[a-f0-9]{64}$/),
+  Schema.brand("ExtensionPublisherKeyFingerprint"),
+);
+export type ExtensionPublisherKeyFingerprint = typeof ExtensionPublisherKeyFingerprint.Type;

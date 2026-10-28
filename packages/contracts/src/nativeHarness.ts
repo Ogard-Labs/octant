@@ -1134,6 +1134,7 @@ export const NativeHarnessApprovalDecisionResult = Schema.Union(
     reason: Schema.Literal(
       "approval-not-found",
       "already-settled",
+      "withdrawn",
       "not-authorized",
       "host-not-offered",
       "lost-in-restart",
@@ -1312,6 +1313,8 @@ export const NativeHarnessSessionCommand = Schema.Union(
   Schema.Struct({
     ...SessionCommandFields,
     kind: Schema.Literal("resume-native-harness-session"),
+    /** Explicitly continue a restart-interrupted turn, not just lift a pause. */
+    continueInterrupted: Schema.optional(Schema.Literal(true)),
   }).annotations(strict),
   Schema.Struct({
     ...SessionCommandFields,
@@ -1379,6 +1382,13 @@ export const NativeHarnessSessionView = Schema.Struct({
   tasks: Schema.optional(
     Schema.Array(NativeHarnessTodoItem).pipe(Schema.maxItems(MAX_NATIVE_HARNESS_TODO_ITEMS)),
   ),
+  /**
+   * Whether a note queued during a turn can reach the lead. Only the Octant
+   * harness delivers notes, inside its tool results; a Codex or Claude Code
+   * runtime keeps its own session bookkeeping here but never reads them. Absent
+   * means not steerable.
+   */
+  steerable: Schema.optional(Schema.Boolean),
   /** Notes typed during the running turn; not journaled. */
   steering: Schema.optional(
     Schema.Array(NativeHarnessSteeringNote).pipe(

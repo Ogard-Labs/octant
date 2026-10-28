@@ -69,6 +69,21 @@ They can originate from attachment cards, the Work file browser, artifact
 entries, the Code file tree, test and diagnostic evidence, search results,
 deep links, and recent items.
 
+## The Artifacts library
+
+The **Artifacts** destination gathers every Canvas made on this computer
+across all your Projects and modes. It opens grouped by Project; **All** is
+the flat reading, **Shared** shows what has a live share, and **By tag**
+shows your own folders. Switch between the gallery of preview cards and a
+compact list; the window remembers your choice. Search and the kind,
+Project, mode, and tag filters all run on the host, which decides what you
+may see.
+
+You can put your own **tags** on any artifact — a short label, added and
+removed from the artifact's card or row. Tags are your filing, on this
+computer only: they never enter the artifact, its history, its shares, or
+its exports, and they can group work that belongs to no Project at all.
+
 ## Artifact files on disk
 
 An artifact can also be mirrored to plain files for other tools to read.
@@ -100,8 +115,9 @@ Canvas has the same limits as any Chat Canvas (no files, shell, Git, or
 network, and a design can show only images generated in that thread), stays
 with its thread even if you later move the thread into a Project, is erased
 when you purge the thread, exports to the host's export folder, and is not
-mirrored, synced, or shared, and does not appear in the Project-grouped
-library; open it from its thread. A managed child run in Chat mode is not
+mirrored, synced, or shared. It appears in your Artifacts library under **No
+Project**, on this computer only, while its thread still holds it; open it
+there or from its thread. A managed child run in Chat mode is not
 offered the tool. When the answer is
 something you will keep, share, present, or come back to (a report, memo, plan,
 slide deck, dashboard, web page, design, or prototype, or any reply long enough

@@ -146,7 +146,8 @@ export function classifyProductAction(request: Request): string | undefined {
     // The library gathers artifacts across every Project on this host, which is
     // wider than a window's own Project scope. A paired device is admitted to
     // read it and to nothing else here: the service clamps which Projects it
-    // may see, and there is no write on this surface at all.
+    // may see, and the one write on this surface — tagging a Canvas from a
+    // window on this host — is not admitted for a remote device.
     if (method === "POST" && path === "/api/artifacts/library") {
       return "project.overview.read";
     }
