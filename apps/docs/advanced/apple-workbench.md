@@ -289,8 +289,9 @@ change provisioning, or upload anything.
 
 App Store distribution of your own apps is post-preview work, being built in
 stages. Octant uploads, submits, or releases only when you confirm that exact
-build or version in Octant on your Mac; it never does any of them on its own,
-and uploading is not offered yet. The first stage is the key it will use.
+build or version in Octant on your Mac; it never does any of them on its own.
+Uploading is offered through a Code thread's agent (below); submitting for
+review and releasing are not offered yet. Each needs the key described here.
 
 Create an API key in App Store Connect under **Users and Access ›
 Integrations**, and download its `.p8` file. Then, in Octant's desktop app on
@@ -318,6 +319,30 @@ octant apple key remove
 Add `--replace` to `set` to replace a saved key. The key can be entered only
 on the Mac itself: a browser, a paired phone, or another computer sees no
 App Store Connect rows, and the host refuses key entry from them.
+
+### Uploading a build
+
+Ask the agent in a Code thread to upload the app, naming your Team ID. It
+reads what it would send from the project — the bundle identifier, the
+version (`MARKETING_VERSION`) and build number (`CURRENT_PROJECT_VERSION`),
+and the App Store signing identity and provisioning profile it would use —
+and asks you, in the thread, to confirm exactly that build. It asks under
+every access setting, Full access included; Plan refuses an upload, and only
+you, in Octant on this Mac, can confirm it.
+
+After you confirm, Octant archives that revision, signs it for the App Store
+with the identity and profile you saw, and uploads it with your App Store
+Connect key. It changes no certificate, profile, or build number, and if the
+project would now build anything other than what you confirmed, it stops
+before archiving. Your key is handed to the upload as a file only that upload
+can read, and removed when it ends. The thread reports App Store Connect's
+delivery identifier when the upload went through. Octant does not submit the
+version for review or release it.
+
+You need an App Store distribution certificate in your login keychain and an
+App Store provisioning profile for the app installed by Xcode; if either is
+missing, the agent says which step to take in Xcode. An **Upload to App Store
+Connect…** button in the workbench is not offered yet.
 
 ## Honest verification
 

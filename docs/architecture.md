@@ -721,7 +721,12 @@ through the local-only `/api/desktop/app-store-connect-key/` routes from a
 desktop window or `octant apple key`. The Current Release Boundary admits
 distribution since 2026-10-28, so key entry is open on a Mac, and each
 upload, submission, and release is a local person's confirmed act under the
-distribution rules of that specification.
+distribution rules of that specification. The thread's agent can ask to upload
+its app: the host reads the exact build and App Store signature, a person at
+the Mac confirms that build, and only then is the project archived unsigned,
+signed by `xcodebuild -exportArchive`, and uploaded with `xcrun altool`, using
+a key file the credential broker writes for that one upload and removes; the
+server never reads the key.
 
 On an approval-gated thread, **Allow input** is the confirmation that opens
 that destination; clicks, typing, Home, and Lock never raise it

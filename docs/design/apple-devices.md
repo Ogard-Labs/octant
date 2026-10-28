@@ -15,8 +15,10 @@ built, slices 3 (development-signed build, install, launch, terminate, and
 console logs) and 4 (device pane and screenshots) are built and wait on their
 native smoke on a Mac with a paired device, slice 6 (App Store Connect key
 custody) is built and open since the maintainer admitted distribution on
-2026-10-28 (decision 7), and slices 7 and 8 wait on the open choices recorded
-under them in the delivery plan.** The maintainer
+2026-10-28 (decision 7), slice 7 (person-confirmed upload) is built from
+fakes for the agent's request and waits on a maintainer-run upload and on
+the workbench's own upload button, and slice 8 waits on the open choice
+recorded under it in the delivery plan.** The maintainer
 authorized this scope as post-preview work and accepted the decisions below on
 2026-10-26. That authorizes this design and its slices; it does not by itself
 authorize spending, creating developer accounts,
@@ -103,6 +105,13 @@ TestFlight track for its mobile client is a separate operator runbook
   `/api/desktop/app-store-connect-key/` routes
   ([`appStoreConnectKeyRoutes.ts`](../../apps/server/src/apple/appStoreConnectKeyRoutes.ts)),
   which refuse a new key on a host that is not a Mac.
+- An upload to App Store Connect
+  ([`appleDistributionUpload.ts`](../../apps/server/src/apple/appleDistributionUpload.ts))
+  is reached through the device service's `upload` request, which the agent's
+  `octant_apple` `upload` makes after the host has read the exact build
+  (`AppleUploadBuild`) and a person at the Mac has confirmed it. The broker
+  writes the key file for it
+  ([`appStoreConnectKeyFiles.ts`](../../packages/host-runtime/src/appStoreConnectKeyFiles.ts)).
 
 ## Three layers, three authorities
 
@@ -448,6 +457,33 @@ find-identity -v -p codesigning` lists and the profiles Xcode installed in
   names the app, bundle id, version, build number, team, signing identity, and
   the checkout revision, and is bound to exactly those; it asks under every
   posture. One confirmation covers one archive, export, and upload.
+- Before anyone is asked, the host reads what an upload would send, without
+  running anything that writes: the scheme's `PRODUCT_BUNDLE_IDENTIFIER`,
+  `MARKETING_VERSION`, and `CURRENT_PROJECT_VERSION` from `xcodebuild
+-showBuildSettings` (Release, `generic/platform=iOS`), and the App Store
+  signature by `chooseAppleAppStoreSigning`: the development rule's ordering
+  over profiles that are the team's, for iOS, without `get-task-allow`,
+  without a device list, not for every device, unexpired, and covering the
+  bundle, with the first keychain identity the profile admits. A scheme that
+  does not declare those three settings is not uploaded: Octant could not say
+  exactly what it would send. The request carries that build
+  (`AppleUploadBuild`: bundle, version, build number, team, identity
+  fingerprint, profile UUID), and the confirmation's receipt is bound to it
+  and to the checkout revision.
+- When the upload runs, the host reads the project again and refuses
+  (`upload-changed`) if it would now send anything else. It then archives the
+  scheme unsigned (`CODE_SIGNING_ALLOWED=NO`, Release, into the upload's own
+  `0700` folder under `apple-runtime/distribution-uploads`), checks the
+  archive's `ApplicationProperties` name the confirmed bundle, version, and
+  build, has `xcodebuild -exportArchive` sign it under the launch with no
+  network (manual signing with exactly the confirmed identity and profile,
+  `method` `app-store-connect`, `destination` `export`,
+  `manageAppVersionAndBuildNumber` false, never `-allowProvisioningUpdates`),
+  and uploads the one `.ipa` the export left with `xcrun altool
+--upload-package --api-key --api-issuer --p8-file-path --output-format
+json`. The upload counts only when `altool` exits cleanly and answers with
+  App Store Connect's delivery identifier; anything else is recorded as not
+  done and is not retried.
 - The App Store Connect API key is a person-entered secret in its own broker
   family (`/v1/app-store-connect-keys/`), entered from the desktop renderer or
   the host-local `octant` CLI on the same terms as provider keys. A host keeps
@@ -468,13 +504,19 @@ find-identity -v -p codesigning` lists and the profiles Xcode installed in
   shows no key entry; `remove` always runs, so a stored key can always be
   taken out. The desktop's key entry is the **App Store Connect** group in
   Settings › Device tools, and its rows are in Settings search only where a
-  desktop window can show them. The family serves `has`, `set`, and `delete` only:
-  nothing reads the key back until the upload slice decides how the key
-  reaches its launch (see slices 7 and 8). Linux and Windows broker stores
-  have no such family, because distribution needs a Mac. For one
-  upload the host writes it to a `0600` file in a host-private directory that
-  the confinement profile denies to every launch but the upload's own, and
-  removes it when the launch ends; a startup sweep removes any left behind.
+  desktop window can show them. The family serves `has`, `set`, and `delete`,
+  and two file routes, and never answers with the key: for one upload the
+  server asks the broker (`write-key-file`) to write it as `AuthKey_<key
+id>.p8`, created `0600` and never over an existing file, into that upload's
+  `upload-<action id>` folder under `apple-runtime/distribution-keys`; the
+  broker answers with the file's path, the issuer ID, and the key ID, and
+  refuses any folder that is not a real `0700` directory of this user
+  directly in that root. Every Apple launch but the upload's own `altool` is
+  denied that root. When the launch ends, whatever happened, the server asks
+  the broker to remove the file (`remove-key-file`) and removes the folder,
+  and a startup sweep removes any folder left behind. The server never reads
+  the key's bytes. Linux and Windows broker stores have no such family,
+  because distribution needs a Mac.
 - The journal records the upload: actor, app, version, build, team, result,
   and App Store Connect's delivery identifier. Never the key, its issuer
   secret, or the signed archive's bytes. The archive stays in host-private
@@ -621,6 +663,24 @@ alternatives considered and the reason for the choice follow it.
    distribution makes the steps available to a local person; it does not
    create an account, spend money, or upload, submit, or release anything by
    itself, and each such step stays the person's confirmed act.
+8. **Distribution signing, the upload tool, and key custody.** _Accepted
+   2026-10-28._ An upload archives the project unsigned and lets
+   `xcodebuild -exportArchive` sign it for the App Store, with manual
+   signing pinned to the identity and profile the person confirmed; the
+   archive's own build never signs, so no Run Script phase has a keychain
+   grant. Rejected: a host-owned `codesign` step for distribution, which
+   would have to reproduce the App Store export's packaging (Swift support,
+   symbols, the `.ipa`) that `-exportArchive` already does. The upload tool
+   is `xcrun altool --upload-package` with an API key, which Xcode 27.1 on
+   the maintainer's Mac ships (`altool` 27.0.5); it takes the key as a file
+   path and answers with a delivery identifier in JSON. Rejected:
+   `-exportArchive` with `destination` `upload`, which would put the key in
+   reach of the signing launch and gives no delivery identifier, and the
+   separate Transporter app, which Xcode does not install. The key reaches
+   the upload as a file the broker writes and removes (above), so the server
+   never reads the key's bytes; this follows the same principle as the open
+   choice of who signs App Store Connect API requests, which only slice 8
+   needs.
 
 ## Delivery plan
 
@@ -723,7 +783,7 @@ accounts or hardware; its real-hardware acceptance is separate where noted.
    when it names a `deviceId`, `destination: "device"`, or a device-only
    operation, and its help text covers the device operations; Simulator input,
    `boot`, `open`, and `test` are refused on a device (`not-offered-on-device`),
-   and uninstall, provisioning, and distribution are not offered to the agent.
+   and uninstall, provisioning, submission, and release are not offered to the agent (its `upload` arrived with slice 7).
    On the host, `AppleDeviceService.check` answers the policy without carrying
    anything out and `readConsole` hands a thread back its own console read; the
    Code runtime asks a device lease or effect in the thread and accepts only a
@@ -772,16 +832,37 @@ accounts or hardware; its real-hardware acceptance is separate where noted.
    named build; an agent's request runs nothing until a local person
    confirms, and no remote path reaches it. _Verify:_ server tests with
    a stubbed uploader, plus a maintainer-run upload of a test app.
-   _Waits on:_ two choices this specification leaves open (the decision-7
-   gate opened on 2026-10-28). First, how the distribution signature is made: decision 2
-   covers development signing only, and its fallback (letting `xcodebuild`
-   sign with keychain access) needs its own maintainer approval, so it is
-   undecided whether export signs in a host-owned `codesign` step with an
-   App Store profile the host chooses (and by which rule) or in
-   `xcodebuild -exportArchive`, and which tool uploads. Second, which
-   process reads the key out of the broker to write the per-launch `0600`
-   file: a resolve route the server calls, or a broker route that writes
-   the file itself, so the key never crosses the server.
+   _State:_ built from fakes for the agent's request, per decision 8. The
+   contracts (`AppleUploadBuild`, the `upload` request's fields,
+   `upload-changed`, `AppleUploadEvidence`) and `chooseAppleAppStoreSigning`
+   are in contracts and domain; the host's part is `AppleDistributionUpload`,
+   reached through `AppleDeviceService`'s `upload` once the policy has a
+   local person's confirmation; the broker's key-file routes; the
+   `apple-distribution-upload` approval, asked in the thread as
+   `localPersonOnly` under every posture; and `octant_apple` `upload`, which
+   the agent uses only when the person asked. The upload is journaled as an
+   `apple-distribution-upload` validation step whose record names who asked,
+   the app, version, build, team, result, and delivery identifier. Its
+   evidence is the `AppleDistributionUpload` suite (the exact build read
+   before anything runs; archive, export, and upload in order with the
+   confirmed signature and no `-allowProvisioningUpdates`; the key file
+   `0600` during the upload, denied to every earlier launch, removed after,
+   and never in the evidence; `upload-changed` before archiving; an archive
+   of another build not exported; no delivery counted without an
+   identifier; the key removed when App Store Connect refuses), the broker
+   test of the key-file routes (only an `upload-<uuid>` `0700` folder in the
+   root, no link, no overwrite, no key in the answer), the `AppleDeviceService`
+   test that only a confirmed upload reaches the distribution service and
+   Plan refuses it, the Code runtime test that the agent's upload asks a
+   person at the Mac under Full access, refuses a paired device's answer,
+   and mints a one-use receipt bound to that build, the scope test that the
+   receipt is what counts as the confirmation, and the Apple tool's upload
+   tests. No test calls App Store Connect or uses a real key. Still open:
+   the workbench's **Upload to App Store Connect…** button and the
+   local-only route it calls; a maintainer-run upload of a test app on a
+   Mac with an App Store Connect app, which also measures whether the export
+   needs network under the no-network signing launch and which egress
+   `altool` needs, and records any grant beside the Apple `test` rule.
 8. **Person-confirmed submission and release** (maintainer account, a real app,
    and the decision-7 gate). Submit a processed build's version for App Review
    and release an approved version, each as one confirmed local action with a

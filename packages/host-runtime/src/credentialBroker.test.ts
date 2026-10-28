@@ -1,4 +1,15 @@
 import { randomUUID } from "node:crypto";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CredentialStoreFailure, type CredentialStore } from "./credentialStore";
 import { startCredentialBroker } from "./credentialBroker";
@@ -695,6 +706,92 @@ describe("startCredentialBroker", () => {
       expect(await appStoreConnectKeys.has(credentialRef)).toBe(false);
     } finally {
       await broker.close();
+    }
+  });
+
+  it("writes an upload's App Store Connect key file into that upload's private folder only, and removes it", async () => {
+    const credentialRef = randomUUID();
+    const root = mkdtempSync(join(tmpdir(), "octant-asc-key-files-"));
+    const keys = memoryStore();
+    const privateKey = "-----BEGIN PRIVATE KEY-----\nTEST\n-----END PRIVATE KEY-----\n";
+    await keys.set(
+      credentialRef,
+      JSON.stringify({
+        version: 1,
+        issuerId: "30000000-0000-4000-8000-000000000001",
+        keyId: "ABCDE12345",
+        privateKey,
+      }),
+    );
+    const broker = await startCredentialBroker(
+      memoryStore(),
+      undefined,
+      undefined,
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      keys,
+      root,
+    );
+    const call = async (path: string, body: Record<string, string>) =>
+      broker.fetchForTest(
+        brokerRequest(broker.url, broker.token, path, { body: JSON.stringify(body) }),
+      );
+    try {
+      const folder = join(root, `upload-${randomUUID()}`);
+      mkdirSync(folder, { mode: 0o700 });
+      const written = await call("/v1/app-store-connect-keys/write-key-file", {
+        credentialRef,
+        directory: folder,
+      });
+      const answer = (await written.json()) as Record<string, string>;
+      // The answer names the file and the key's public IDs, never the key.
+      expect(answer).toEqual({
+        file: join(folder, "AuthKey_ABCDE12345.p8"),
+        issuerId: "30000000-0000-4000-8000-000000000001",
+        keyId: "ABCDE12345",
+      });
+      expect(JSON.stringify(answer)).not.toContain("PRIVATE KEY");
+      expect(readFileSync(join(folder, "AuthKey_ABCDE12345.p8"), "utf8")).toBe(privateKey);
+      expect(statSync(join(folder, "AuthKey_ABCDE12345.p8")).mode & 0o777).toBe(0o600);
+      // A second write does not replace a file already there.
+      expect(
+        (
+          await call("/v1/app-store-connect-keys/write-key-file", {
+            credentialRef,
+            directory: folder,
+          })
+        ).status,
+      ).toBe(409);
+      expect(
+        await (
+          await call("/v1/app-store-connect-keys/remove-key-file", { directory: folder })
+        ).json(),
+      ).toEqual({ removed: true });
+      expect(readdirSync(folder)).toEqual([]);
+
+      // Nowhere else: outside the root, a folder others can read, a link, or a
+      // folder not named for an upload.
+      const outside = mkdtempSync(join(tmpdir(), "upload-"));
+      const open = join(root, `upload-${randomUUID()}`);
+      mkdirSync(open, { mode: 0o755 });
+      const linked = join(root, `upload-${randomUUID()}`);
+      symlinkSync(outside, linked);
+      const misnamed = join(root, "checkout");
+      mkdirSync(misnamed, { mode: 0o700 });
+      for (const directory of [outside, open, linked, misnamed]) {
+        expect(
+          (await call("/v1/app-store-connect-keys/write-key-file", { credentialRef, directory }))
+            .status,
+        ).toBe(400);
+      }
+      expect(readdirSync(outside)).toEqual([]);
+      rmSync(outside, { recursive: true, force: true });
+    } finally {
+      await broker.close();
+      rmSync(root, { recursive: true, force: true });
     }
   });
 

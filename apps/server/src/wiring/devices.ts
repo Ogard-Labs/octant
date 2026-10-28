@@ -24,6 +24,9 @@ import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { ValidationEventStore } from "../validation/validationEventStore";
 import { AppleRuntimeStore } from "../apple/appleRuntimeStore";
 import { AppleDeviceService, type AppleDeviceExecutionContext } from "../apple/appleDeviceService";
+import { AppleDistributionUpload } from "../apple/appleDistributionUpload";
+import { APP_STORE_CONNECT_KEY_REF } from "../apple/appStoreConnectKeyRoutes";
+import { makeAppStoreConnectKeyFileBrokerClient } from "../providers/credentialBrokerClient";
 import { createAppleDeviceRouteHandler } from "../appleDeviceRoutes";
 import type { ClientPrincipal } from "../clientPrincipal";
 import {
@@ -133,6 +136,11 @@ export interface DeviceApprovalChecks {
     windowId: WindowId,
     request: AppleDeviceRequest,
   ) => Promise<boolean> | undefined;
+  /** Whether a person at this window confirmed exactly this upload. */
+  readonly validateAppleDistributionUpload: (
+    windowId: WindowId,
+    request: AppleDeviceRequest,
+  ) => Promise<boolean> | undefined;
 }
 
 // Device effects a thread's posture decides, one approval per request.
@@ -175,7 +183,7 @@ export function createAppleDeviceScopes(deps: {
   readonly effectiveThread: (windowId: WindowId, thread: CodeThread) => CodeThread;
   readonly approvals: Pick<
     DeviceApprovalChecks,
-    "validateAppleDeviceLease" | "validateAppleDeviceAction"
+    "validateAppleDeviceLease" | "validateAppleDeviceAction" | "validateAppleDistributionUpload"
   >;
 }) {
   const { approvals } = deps;
@@ -187,11 +195,15 @@ export function createAppleDeviceScopes(deps: {
     const resolved = await deps.resolveThread(windowId, request);
     if (resolved === undefined) return undefined;
     const effectiveThread = deps.effectiveThread(windowId, resolved.thread);
+    // A lease start and an upload count only as a person's confirmation, which
+    // a receipt minted for a window on this Mac carries.
     const confirmed =
-      request.kind === "use-device" &&
       request.approval.kind === "approved" &&
       mayCarryReceipt &&
-      ((await approvals.validateAppleDeviceLease(windowId, request)) ?? false);
+      ((request.kind === "use-device" &&
+        ((await approvals.validateAppleDeviceLease(windowId, request)) ?? false)) ||
+        (request.kind === "upload" &&
+          ((await approvals.validateAppleDistributionUpload(windowId, request)) ?? false)));
     const effectApproved =
       APPLE_DEVICE_EFFECT_KINDS.has(request.kind) &&
       mayCarryReceipt &&
@@ -237,7 +249,10 @@ export type DevicesDependencies = Pick<ServerStart, "persistence"> &
   > &
   Pick<WorkspaceWiring, "projectService"> &
   Pick<CodeWiring, "roots"> &
-  Pick<ProvidersWiring, "providerDataDirectory">;
+  Pick<ProvidersWiring, "providerDataDirectory"> & {
+    /** The credential broker the App Store Connect key file is written through. */
+    readonly credentialBroker?: { readonly url: string; readonly token: string };
+  };
 
 export function wireDevices(deps: DevicesDependencies) {
   const {
@@ -250,6 +265,7 @@ export function wireDevices(deps: DevicesDependencies) {
     roots,
     simulatorInputGrants,
     windowAuthorityStore,
+    credentialBroker,
   } = deps;
   return Effect.gen(function* () {
     const appleRuntimeStore = new AppleRuntimeStore(join(providerDataDirectory, "apple-runtime"));
@@ -275,6 +291,19 @@ export function wireDevices(deps: DevicesDependencies) {
     // The entitlements a device signature reads. Private like the others: no
     // build, Simulator, or `devicectl` launch reaches it.
     const appleSigningDirectory = join(providerDataDirectory, "apple-runtime", "signing");
+    // One folder per App Store upload for its archive and export, and one per
+    // upload the credential broker writes the App Store Connect key into. The
+    // key folders are denied to every Apple launch but the upload's own.
+    const appleUploadDirectory = join(
+      providerDataDirectory,
+      "apple-runtime",
+      "distribution-uploads",
+    );
+    const appleUploadKeyDirectory = join(
+      providerDataDirectory,
+      "apple-runtime",
+      "distribution-keys",
+    );
     // The signing step runs `security` and `codesign` with no network
     // (decision 2 of docs/design/apple-devices.md); every other Apple launch
     // keeps the toolchain port's own egress.
@@ -311,7 +340,12 @@ export function wireDevices(deps: DevicesDependencies) {
         : { injectSimulatorInput: simulatorInputThroughDesktop(simulatorDevice) }),
       observeSimulators: (simulators) => simulatorInputGrants.closeUnlessBooted(simulators),
       captureDirectory: appleCaptureDirectory,
-      isolatedRoots: [devicectlOutputDirectory, deviceCaptureDirectory, appleSigningDirectory],
+      isolatedRoots: [
+        devicectlOutputDirectory,
+        deviceCaptureDirectory,
+        appleSigningDirectory,
+        appleUploadKeyDirectory,
+      ],
       // A host sweeps only the captures named for its own data directory, so
       // two hosts pointed at one directory never clear each other's files.
       captureOwner: createHash("sha256").update(providerDataDirectory).digest("hex").slice(0, 16),
@@ -346,7 +380,8 @@ export function wireDevices(deps: DevicesDependencies) {
     const recordAppleEvidence = (
       evidence:
         | import("@octant/contracts").AppleBuildEvidence
-        | import("@octant/contracts").AppleDeviceEvidence,
+        | import("@octant/contracts").AppleDeviceEvidence
+        | import("@octant/contracts").AppleUploadEvidence,
       startedAt: string,
     ) => {
       const composed = composeAppleValidationEvents({ evidence, startedAt, newId: randomUUID });
@@ -354,6 +389,33 @@ export function wireDevices(deps: DevicesDependencies) {
       appleValidationEvents.appendEvidence({ evidence: composed.record, expectedVersion: 1 });
       appleValidationEvents.appendReport({ report: composed.report, expectedVersion: 2 });
     };
+    const appleDistributionUpload = new AppleDistributionUpload({
+      execute: (input, signal) => appleProcess.execute(input, signal),
+      executeSigning: (input, signal) => appleSigningProcess.execute(input, signal),
+      // altool reaches App Store Connect under the toolchain port's egress.
+      executeUpload: (input, signal) => appleProcess.execute(input, signal),
+      keyFiles:
+        credentialBroker === undefined
+          ? undefined
+          : makeAppStoreConnectKeyFileBrokerClient(credentialBroker, APP_STORE_CONNECT_KEY_REF),
+      uploadRoot: appleUploadDirectory,
+      keyRoot: appleUploadKeyDirectory,
+      isolatedRoots: [
+        devicectlOutputDirectory,
+        deviceCaptureDirectory,
+        appleCaptureDirectory,
+        appleSigningDirectory,
+      ],
+      provisioningProfileDirectories: [
+        join(homedir(), "Library", "Developer", "Xcode", "UserData", "Provisioning Profiles"),
+        join(homedir(), "Library", "MobileDevice", "Provisioning Profiles"),
+      ],
+      realpath,
+      recordEvidence: recordAppleEvidence,
+      now: () => new Date().toISOString(),
+    });
+    // A key file left by an upload the host did not see end is removed now.
+    yield* Effect.promise(() => appleDistributionUpload.sweepKeyFolders());
     const appleDeviceService = new AppleDeviceService({
       execute: (input, signal) => appleProcess.execute(input, signal),
       executeSigning: (input, signal) => appleSigningProcess.execute(input, signal),
@@ -367,13 +429,14 @@ export function wireDevices(deps: DevicesDependencies) {
         join(homedir(), "Library", "Developer", "Xcode", "UserData", "Provisioning Profiles"),
         join(homedir(), "Library", "MobileDevice", "Provisioning Profiles"),
       ],
-      isolatedRoots: [appleCaptureDirectory],
+      isolatedRoots: [appleCaptureDirectory, appleUploadKeyDirectory],
       identities: appleRuntimeStore,
       leases: appleDeviceLeases,
       realpath,
       writeArtifact: (reference, bytes) => appleRuntimeStore.writeArtifact(reference, bytes),
       readArtifact: (reference) => appleRuntimeStore.readArtifact(reference),
       recordEvidence: recordAppleEvidence,
+      distribution: appleDistributionUpload,
       now: () => new Date().toISOString(),
       newId: randomUUID,
     });
@@ -708,10 +771,34 @@ export function wireDevices(deps: DevicesDependencies) {
           })),
         maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
       });
+      // What an upload of this project would send, read in the thread's own
+      // checkout before anyone is asked to confirm it.
+      const prepareAppleUpload = async (
+        windowId: WindowId,
+        input: Parameters<typeof resolveAppleThread>[1] & {
+          readonly projectPath: string;
+          readonly scheme?: string;
+          readonly teamId: import("@octant/contracts").AppleTeamId;
+        },
+        signal?: AbortSignal,
+      ) => {
+        const resolved = await resolveAppleThread(windowId, input);
+        if (resolved === undefined || process.platform !== "darwin") return undefined;
+        return await appleDistributionUpload.prepare(
+          {
+            projectPath: input.projectPath,
+            ...(input.scheme === undefined ? {} : { scheme: input.scheme }),
+            teamId: input.teamId,
+          },
+          { checkoutRoot: resolved.rootPath },
+          signal,
+        );
+      };
       return {
         androidToolchainRoutes,
         appleDeviceRoutes,
         appleToolchainRoutes,
+        prepareAppleUpload,
         resolveAndroidContext,
         resolveAppleContext,
         resolveAppleDeviceAgentScope,
