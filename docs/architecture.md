@@ -1537,7 +1537,9 @@ thread it creates could not do.
   reaches the routes.
 - **Asleep or offline.** The scheduler is an in-process timer in the running
   host over journaled definitions. Nothing wakes the computer or runs in a
-  cloud. On return it reconciles missed occurrences by the routine's policy:
+  cloud today. A self-hosted wake service on a person's hub, which only wakes
+  a spoke and never holds or runs its routines, is designed in
+  [Hub and spokes](design/hub-and-spokes.md#wake-service) and not built. On return it reconciles missed occurrences by the routine's policy:
   `skip` records them as skipped; `run-once` records all but the newest as
   skipped and runs the newest once. No catch-up burst. More than the missed-run
   cap blocks the routine as `missed-run-cap-exceeded`. A routine with an active
@@ -7946,7 +7948,11 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   Remote requests are classified fail-closed by an admission policy and route
   classifier. A remote principal can never exceed host, mode, provider, Project,
   or thread authority, cannot mint local receipts, and every remote mutation is
-  journaled with its principal. The listener, pairing tickets, pairing
+  journaled with its principal. A hub acting on its spoke, or a spoke
+  delegating to another spoke, is such a remote principal on the receiving
+  host, held to the hub or peer grant that host's person chose there; it can
+  never approve, read credentials, or loosen confinement on it
+  ([Hub and spokes](design/hub-and-spokes.md), designed and not built). The listener, pairing tickets, pairing
   decisions, and device inventory are administered only over the host's
   loopback administration channel — the desktop bridge secret plus a
   registered window capability — which both Settings → Remote access and the
@@ -8616,7 +8622,11 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   into authority on another. An all-hosts list keeps every registered host;
   an unreachable host's cached items stay listed as stale and read-only, and
   an authority-bearing mutation is allowed only on a host whose read model is
-  ready.
+  ready. The hub-and-spoke design keeps this rule: a hub introduces hosts and
+  devices to each other, but an introduction authorizes nothing, each host
+  stays the only authority over its own threads and journal, and what one host
+  may do on another is only the grant the receiving host's person chose
+  ([Hub and spokes](design/hub-and-spokes.md#journal-and-authority-boundaries)).
 - **Host platform in copy.** The host's identity report (`GET /api/hosts`)
   carries the host's `platform`, set from `process.platform`; it is optional
   in the contract because an older host does not send it. Only the loopback
@@ -9079,7 +9089,11 @@ TestFlight and App Store distribution of a person's own apps, enterprise
 directory OAuth and cloud-IAM provider identity, disposable Linux desktops for
 headless hosts, remote SSH development environments, third-party
 provider-driver plugins, and the EU/GDPR compliance package (pending legal
-review). None of them is part of the technical preview, whose ship boundary
+review). On 2026-10-28 the maintainer added a hub-and-spoke topology under the
+same terms ([Hub and spokes](design/hub-and-spokes.md)), including a
+self-hosted wake service that runs in the Octant server on the person's own
+hub; an Octant-operated wake service is not in scope. None of them is part of
+the technical preview, whose ship boundary
 above is unchanged. Each is design-first: implementation starts only once its
 owning specification documents its authority, privacy, and release
 boundaries. The authorization covers design and implementation; creating an

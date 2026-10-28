@@ -155,7 +155,8 @@ test count.
 - A Code thread is Done only when its user-confirmed delivery target is
   objectively satisfied. A Work thread is Done when a person marks it Done. An
   agent cannot mark any thread Done. Remote clients never exceed host, mode,
-  provider, Project, or thread authority.
+  provider, Project, or thread authority. A hub or peer host acting on another
+  host is a remote client there, held to the grant that host's person chose.
 
 ## Originality, Privacy, And Architecture
 
@@ -414,7 +415,11 @@ companion, Apple physical devices and then TestFlight and App Store
 distribution of a person's own apps, enterprise directory OAuth and cloud-IAM
 provider identity, disposable Linux desktops for headless hosts, remote SSH
 development environments, third-party provider-driver plugins, and the EU/GDPR
-compliance package (pending legal review). Each is design-first: build it only
+compliance package (pending legal review). A hub-and-spoke topology, where one
+self-hosted Octant host enrolls a person's other hosts and devices, introduces
+them to each other, and runs their wake, relay, and push services, is
+authorized the same way (maintainer decision, 2026-10-28) under
+[Hub and spokes](docs/design/hub-and-spokes.md). Each is design-first: build it only
 once its owning specification documents its authority, privacy, and release
 boundaries. The authorization covers design and implementation; creating an
 account, spending money, submitting to a store, deploying a hosted service, or
@@ -426,8 +431,12 @@ are in scope under the architecture's
 through the published seams and the credential broker, never a hosted service. The person's confirmed pull-request merge from
 a local window and host-local routines (Automation Center) are in scope under the
 [architecture's rules](docs/architecture.md#modes-chat-work-and-code); other
-pull-request mutation, agent-initiated merge, cloud scheduling, and a hosted
-wake service are not. The public Canvas share service is in scope under
+pull-request mutation, agent-initiated merge, and cloud scheduling are not. A
+self-hosted wake service that runs in the Octant server on a person's hub and
+wakes their own spokes is in scope under
+[Hub and spokes](docs/design/hub-and-spokes.md#wake-service); an
+Octant-operated hosted service, deploying anything, creating an account, or
+spending money still needs a separate explicit maintainer action. The public Canvas share service is in scope under
 [Canvas public links](docs/design/canvas-public-links.md); its code lives in the
 `octant-webapp` repository.
 Existing scoped exceptions remain documented in the architecture.
