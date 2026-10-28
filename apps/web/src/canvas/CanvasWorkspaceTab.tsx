@@ -64,7 +64,12 @@ import {
 } from "./CanvasRefreshPanel";
 import { CanvasVersionHistoryPanel, ReviseCanvasDraft } from "./CanvasRevisionPanel";
 import type { DiagramBoardLayoutRuntime } from "./blocks/DiagramBoard";
-import { withWorkspaceFrameTheme, type DesignAssetRuntime } from "./blocks/designDocument";
+import {
+  readWorkspaceFrameTheme,
+  withWorkspaceFrameTheme,
+  type DesignAssetRuntime,
+} from "./blocks/designDocument";
+import { copyCanvasHtml, saveCanvasHtmlFile } from "./canvasHtmlFile";
 import { designRunRuntimeFor } from "./blocks/designRunningFrame";
 import type { PlanTaskRuntime } from "./blocks/PlanBlock";
 import { createCanvasActionRuntime } from "./canvasActionRuntime";
@@ -617,6 +622,34 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     [holdsDesign, prepareExport],
   );
 
+  // Save and Copy take one self-contained HTML file of the version on screen.
+  // The file reaches only this window, so it names no destination and needs
+  // no card; like an HTML export it carries the theme designs are drawn in.
+  const htmlFile = props.client?.htmlFile;
+  const [htmlFileMessage, setHtmlFileMessage] = useState<string | undefined>(undefined);
+  const [htmlFileBusy, setHtmlFileBusy] = useState(false);
+  const takeHtmlFile = useCallback(
+    async (action: "save-html" | "copy-html") => {
+      if (htmlFile === undefined || selectedVersionId === undefined) return;
+      setHtmlFileBusy(true);
+      setHtmlFileMessage(undefined);
+      const request = {
+        schemaVersion: 1 as const,
+        kind: "canvas-html-file" as const,
+        canvasId: props.tab.canvasId,
+        versionId: selectedVersionId,
+        ...(holdsDesign ? { frameTheme: readWorkspaceFrameTheme(document.documentElement) } : {}),
+      };
+      setHtmlFileMessage(
+        action === "save-html"
+          ? await saveCanvasHtmlFile(htmlFile, request)
+          : await copyCanvasHtml(htmlFile, request),
+      );
+      setHtmlFileBusy(false);
+    },
+    [holdsDesign, htmlFile, props.tab.canvasId, selectedVersionId],
+  );
+
   const handleOpenShare = useCallback(
     async (request: CanvasShareAccessRequest) => {
       const accessShare = props.client?.accessShare;
@@ -779,6 +812,19 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
           },
         ]
       : []),
+    // One file of the version on screen, to this device only.
+    ...(htmlFile !== undefined && selectedVersionId !== undefined
+      ? (["save-html", "copy-html"] as const).map((value) => ({
+          label: value === "save-html" ? "Save as HTML file" : "Copy HTML",
+          value,
+          ...(htmlFileBusy || !versionSettled
+            ? {
+                disabled: true,
+                description: htmlFileBusy ? "Making the HTML file…" : "Loading this version…",
+              }
+            : {}),
+        }))
+      : []),
   ];
 
   const openCommentsOn = (blockId: string | undefined, rowId?: string) => {
@@ -898,6 +944,10 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
           <OctantMenu
             items={overflowItems}
             onValueChange={(value) => {
+              if (value === "save-html" || value === "copy-html") {
+                void takeHtmlFile(value);
+                return;
+              }
               const chosen = CANVAS_TOOL_DIALOGS.find((candidate) => candidate === value);
               if (chosen === undefined) return;
               setExportTargetId(undefined);
@@ -909,6 +959,15 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
             triggerLabel="More Canvas actions"
             value=""
           />
+        )}
+        {htmlFileMessage === undefined ? null : (
+          <p
+            className="canvas-workspace-tab__notice"
+            data-testid="canvas-html-file-status"
+            role="status"
+          >
+            {htmlFileMessage}
+          </p>
         )}
       </header>
       <div className="canvas-workspace-tab__body">

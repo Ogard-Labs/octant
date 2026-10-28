@@ -976,6 +976,120 @@ describe("CanvasWorkspaceTab", () => {
     }
   });
 
+  it("saves and copies the version on screen as one HTML file, saying only what happened", async () => {
+    const ready = {
+      kind: "ready" as const,
+      canvasId: quarterlyCanvasId,
+      versionId: quarterlyInventoryEntry.currentVersionId,
+      fileName: "Signed Q3 report.html",
+      html: "<!DOCTYPE html><html><body><h1>Signed Q3 report</h1></body></html>\n",
+      writesDesignMarkup: false,
+      imagesLeftOut: 0,
+    };
+    const htmlFile = vi.fn(async () => ready as never);
+    render(
+      <CanvasWorkspaceTab
+        tab={canvasTab}
+        client={createCanvasClient(readyVersion, undefined, {
+          htmlFile,
+        } as unknown as Partial<CanvasClient>)}
+      />,
+    );
+
+    // Copy writes the host's file to the clipboard and nowhere else. The user
+    // is set up first, because setting one up installs its own clipboard.
+    const user = userEvent.setup();
+    const choose = async (label: string) => {
+      await user.click(await screen.findByRole("button", { name: "More Canvas actions" }));
+      await user.click(await screen.findByRole("menuitem", { name: label }));
+    };
+    const writeText = vi.fn(async (_value: string) => undefined);
+    const clipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    try {
+      await choose("Copy HTML");
+      expect(await screen.findByTestId("canvas-html-file-status")).toHaveTextContent(
+        "Copied the Canvas as HTML.",
+      );
+      expect(writeText).toHaveBeenCalledWith(ready.html);
+      expect(htmlFile).toHaveBeenLastCalledWith({
+        schemaVersion: 1,
+        kind: "canvas-html-file",
+        canvasId: quarterlyCanvasId,
+        versionId: quarterlyInventoryEntry.currentVersionId,
+      });
+
+      // A refused clipboard is reported, never claimed as a copy.
+      writeText.mockRejectedValueOnce(new Error("denied"));
+      await choose("Copy HTML");
+      await waitFor(() =>
+        expect(screen.getByTestId("canvas-html-file-status")).toHaveTextContent(
+          "The clipboard refused the HTML.",
+        ),
+      );
+    } finally {
+      if (clipboard === undefined) Reflect.deleteProperty(navigator, "clipboard");
+      else Object.defineProperty(navigator, "clipboard", clipboard);
+    }
+
+    // Save downloads the same file under the Canvas's own name.
+    const createObjectURL = vi.fn((_blob: Blob) => "blob:canvas-html");
+    const revokeObjectURL = vi.fn();
+    const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = createObjectURL;
+    URL.revokeObjectURL = revokeObjectURL;
+    const clicked: Array<{ readonly download: string; readonly href: string }> = [];
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        clicked.push({ download: this.download, href: this.href });
+      });
+    try {
+      await openCanvasTool("Save as HTML file");
+      await waitFor(() =>
+        expect(screen.getByTestId("canvas-html-file-status")).toHaveTextContent(
+          "Saved Signed Q3 report.html.",
+        ),
+      );
+      expect(clicked).toEqual([{ download: "Signed Q3 report.html", href: "blob:canvas-html" }]);
+      const blob = createObjectURL.mock.calls[0]?.[0];
+      expect(blob?.type).toBe("text/html;charset=utf-8");
+      expect(await blob?.text()).toBe(ready.html);
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob:canvas-html");
+
+      // A host refusal is the host's own words.
+      htmlFile.mockResolvedValueOnce({
+        kind: "refused",
+        code: "too-large",
+        message: "This Canvas is too large for one HTML file (over 7 MB).",
+      } as never);
+      await openCanvasTool("Save as HTML file");
+      await waitFor(() =>
+        expect(screen.getByTestId("canvas-html-file-status")).toHaveTextContent(
+          "This Canvas is too large for one HTML file (over 7 MB).",
+        ),
+      );
+      expect(clicked).toHaveLength(1);
+    } finally {
+      click.mockRestore();
+      URL.createObjectURL = originalCreate;
+      URL.revokeObjectURL = originalRevoke;
+    }
+  });
+
+  it("offers no HTML file actions on a host without the route", async () => {
+    const user = userEvent.setup();
+    render(<CanvasWorkspaceTab tab={canvasTab} client={createCanvasClient(readyVersion)} />);
+    await screen.findByText("Q3 Overview");
+    const more = screen.queryByRole("button", { name: "More Canvas actions" });
+    if (more !== null) {
+      await user.click(more);
+      expect(screen.queryByRole("menuitem", { name: "Copy HTML" })).toBeNull();
+      expect(screen.queryByRole("menuitem", { name: "Save as HTML file" })).toBeNull();
+    }
+  });
+
   it("resets an open export review when the canvas advances to a new version", async () => {
     const nextVersionId = "99999999-9999-4999-8999-999999999999";
     const offerFor = (versionId: string, sequence: number) => ({

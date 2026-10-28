@@ -314,6 +314,7 @@ export function startOctantServer(
       computerUseRuntime,
       computerUseTools,
       desktopPaneRoutes,
+      desktopRecipeKeys,
       launchSessionRoutes,
       machineChangeRoutes,
       offeredDesktopProviders,
@@ -373,6 +374,7 @@ export function startOctantServer(
       bindingReceiptStore,
       githubCapabilityService,
       githubIntegrationIsEffective,
+      desktopRecipeKeys,
       offeredDesktopProviders,
       options,
       persistence,
@@ -444,6 +446,7 @@ export function startOctantServer(
       workThreadProjection,
     });
     const { sshTargetConnections, sshTargetStore } = wireSshTargets({
+      configuredDriverOptions,
       persistence,
       providerDataDirectory,
       version,

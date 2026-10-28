@@ -155,7 +155,13 @@ with "Your organization asks you to sign in again in person…" (multi-factor or
 a consent prompt; the sign-in is kept), Signed out (the sign-in ended), No
 access (signed in without a role on the resource; no fix, a sentence naming
 the role to ask for), and Sign-in doesn't match (the sign-in is for another
-tenant, client, or address; Sign in again). None offers a key.
+tenant, client, or address; Sign in again). None offers a key. The row's
+sub-line names the account ("Signed in as" the account the directory named)
+once the endpoint's page has read its sign-in in this window; the list never
+asks for it, because that status renews the token at the directory, so each
+row would cost a request to the organization's issuer. Until then, and
+whenever the last check found the sign-in gone, the sub-line is the host and
+"Organization sign-in".
 
 ### Organization sign-in (a gateway's own issuer)
 
@@ -198,7 +204,13 @@ gets one sentence naming every field. The strip of steps shows Kind and
 Connect only: the models are named on Connect and checking their tools needs
 the sign-in, so after Check and add the dialog offers Check again and Finish.
 
-Its row's sub-line is the runtime host and "Organization sign-in". Row states
+Its row's sub-line names the role and account ("Signed in as <role> in
+account <id>") when the host holds a sign-in for the endpoint, and otherwise
+is the runtime host and "Organization sign-in". The row asks the host the
+same status question the detail page does, whose answer comes from the
+endpoint's stored sign-in and configuration with no broker call; as on the
+page, a last check refused for want of a sign-in (it ended, or the broker no
+longer holds it) keeps the host and "Organization sign-in". Row states
 read the host's reason: Sign in to use and Signed out each say, in one
 sentence, to run the command in a terminal on the host and enter the code at
 the organization's access portal, with Check again as the fix; Sign-in

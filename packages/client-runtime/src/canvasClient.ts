@@ -15,6 +15,8 @@ import {
   CanvasExportOfferList,
   type CanvasExportPrepareRequest,
   CanvasExportPrepareResult,
+  type CanvasHtmlFileRequest,
+  CanvasHtmlFileResult,
   type CanvasCommentCommand,
   CanvasCommentCommandResult,
   CanvasCommentsOutcome,
@@ -136,6 +138,12 @@ export interface CanvasClient {
   exportOffers?(canvasId: CanvasId): Promise<CanvasExportOfferList>;
   prepareExport?(request: CanvasExportPrepareRequest): Promise<CanvasExportPrepareResult>;
   decideExport?(request: CanvasExportDecideRequest): Promise<CanvasExportDecideResult>;
+  /**
+   * The Canvas as one self-contained HTML file for this window to save or
+   * copy. The host renders it under the read check; it goes to no
+   * destination. A host without the route omits it.
+   */
+  htmlFile?(request: CanvasHtmlFileRequest): Promise<CanvasHtmlFileResult>;
   /**
    * The folder a Canvas exports to, and the host identity and browse mode a
    * person chooses one with. A host without the route offers no folder
@@ -453,6 +461,18 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
           body: JSON.stringify(body),
         },
         decodeHostAnswer(CanvasExportDecideResult),
+      );
+    },
+    htmlFile(body) {
+      return request(
+        options.fetch,
+        new URL("/api/canvas/html-file", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        decodeHostAnswer(CanvasHtmlFileResult),
       );
     },
     publicShares(canvasId) {

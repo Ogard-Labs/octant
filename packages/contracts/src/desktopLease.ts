@@ -31,6 +31,38 @@ export type DesktopProviderId = typeof DesktopProviderId.Type;
 export const DesktopCredentialRef = Schema.UUID.pipe(Schema.brand("DesktopCredentialRef"));
 export type DesktopCredentialRef = typeof DesktopCredentialRef.Type;
 
+/** The credential broker's own bound on one stored value; a larger key is refused before it is sent. */
+export const DESKTOP_RECIPE_KEY_MAXIMUM_BYTES = 12 * 1024;
+
+/**
+ * A person entering or removing the API key a cloud recipe's provider reads.
+ * It travels only from a local window to the host, which stores an entered
+ * key in the credential broker under a fresh reference and journals the
+ * recipe with that reference alone. Nothing echoes the key back.
+ */
+export const DesktopRecipeKeyChange = Schema.Union(
+  Schema.Struct({
+    action: Schema.Literal("enter"),
+    key: Schema.NonEmptyTrimmedString.pipe(
+      Schema.filter(
+        (key) =>
+          new TextEncoder().encode(key).byteLength <= DESKTOP_RECIPE_KEY_MAXIMUM_BYTES ||
+          "The key is larger than the credential store accepts.",
+      ),
+    ),
+  }).annotations(strict),
+  Schema.Struct({ action: Schema.Literal("remove") }).annotations(strict),
+);
+export type DesktopRecipeKeyChange = typeof DesktopRecipeKeyChange.Type;
+
+/**
+ * What the recipe editor says about a recipe's key: none named, saved in the
+ * host credential store, named but no longer there, or refused by the
+ * provider when a desktop last started with it.
+ */
+export const DesktopRecipeKeyState = Schema.Literal("none", "saved", "missing", "rejected");
+export type DesktopRecipeKeyState = typeof DesktopRecipeKeyState.Type;
+
 /**
  * One place a provider that declares placements runs a desktop, such as this
  * machine or the person's own cloud account. The driver declares its
@@ -243,6 +275,8 @@ export const DesktopLease = Schema.Struct({
   maximumExpiresAt: UtcTimestamp,
   idleMinutes: leaseMinutes,
   endReason: Schema.optional(DesktopLeaseEndReason),
+  /** The provider refused the recipe's key when this lease asked for a desktop. */
+  credentialRejected: Schema.optional(Schema.Literal(true)),
   updatedAt: UtcTimestamp,
 }).annotations(strict);
 export type DesktopLease = typeof DesktopLease.Type;
@@ -296,6 +330,12 @@ export const DesktopLeaseTransitioned = Schema.Struct({
   endReason: Schema.optional(DesktopLeaseEndReason),
   requestedBy: Schema.optional(EventActor),
   detail: Schema.optional(text(512)),
+  /**
+   * On a refused acquisition: the provider said the key the lease recorded
+   * was not accepted. The lease's reference names the key; the key itself
+   * never appears here.
+   */
+  credentialRejected: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type DesktopLeaseTransitioned = typeof DesktopLeaseTransitioned.Type;
 
@@ -506,6 +546,12 @@ export const DesktopPaneRequest = Schema.Union(
     providerId: DesktopProviderId,
     placementId: DesktopPlacementId,
   }).annotations(strict),
+  /**
+   * Whether a Code Project's recipe has its key, for the recipe editor. The
+   * Project id is a plain UUID here because the Project contract imports
+   * this one.
+   */
+  Schema.Struct({ kind: Schema.Literal("recipe-key"), projectId: Schema.UUID }).annotations(strict),
 );
 export type DesktopPaneRequest = typeof DesktopPaneRequest.Type;
 
@@ -568,6 +614,12 @@ export const DesktopPaneAnswer = Schema.Union(
       }).annotations(strict),
     ).pipe(Schema.maxItems(64)),
   }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("recipe-key"),
+    key: DesktopRecipeKeyState,
+    /** Whether this host has a credential store a key can be saved in. */
+    store: Schema.Literal("available", "unavailable"),
+  }).annotations(strict),
   DesktopPaneRefusal,
 );
 export type DesktopPaneAnswer = typeof DesktopPaneAnswer.Type;
@@ -579,6 +631,7 @@ export const decodeDesktopCredentialRef = Schema.decodeUnknownSync(DesktopCreden
 export const decodeDesktopPlacementId = Schema.decodeUnknownSync(DesktopPlacementId);
 export const decodeDesktopMachineId = Schema.decodeUnknownSync(DesktopMachineId);
 export const decodeDesktopRecipe = Schema.decodeUnknownSync(DesktopRecipe);
+export const decodeDesktopRecipeKeyChange = Schema.decodeUnknownSync(DesktopRecipeKeyChange);
 export const decodeLeasableDesktopProvider = Schema.decodeUnknownSync(LeasableDesktopProvider);
 export const decodeDesktopLeaseDaemon = Schema.decodeUnknownSync(DesktopLeaseDaemon);
 export const decodeDesktopLease = Schema.decodeUnknownSync(DesktopLease);

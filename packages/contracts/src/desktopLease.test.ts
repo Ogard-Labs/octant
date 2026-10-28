@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DESKTOP_ARTIFACT_MAXIMUM_BYTES,
+  DESKTOP_RECIPE_KEY_MAXIMUM_BYTES,
   decodeComputerUseDestinationSelection,
   decodeDesktopArtifactSent,
   decodeDesktopLeaseOperated,
@@ -10,7 +11,9 @@ import {
   decodeDesktopPaneAnswer,
   decodeDesktopPaneRequest,
   decodeDesktopRecipe,
+  decodeDesktopRecipeKeyChange,
 } from "./desktopLease";
+import { decodeProjectCommand } from "./projects";
 
 const leaseId = "d1000000-0000-4000-8000-000000000001";
 const threadId = "d1000000-0000-4000-8000-000000000002";
@@ -225,6 +228,56 @@ describe("desktop lease contract", () => {
       decodeDesktopPaneAnswer({
         status: "recipe-machines",
         machines: Array.from({ length: 65 }, () => machine),
+      }),
+    ).toThrow();
+  });
+
+  it("takes a recipe key only as a trimmed value the credential store accepts, and a journal marker never holds one", () => {
+    expect(decodeDesktopRecipeKeyChange({ action: "enter", key: "e2b_abc" })).toEqual({
+      action: "enter",
+      key: "e2b_abc",
+    });
+    expect(decodeDesktopRecipeKeyChange({ action: "remove" })).toEqual({ action: "remove" });
+    for (const refused of [
+      { action: "enter", key: "" },
+      { action: "enter", key: " e2b_abc" },
+      { action: "enter", key: "k".repeat(DESKTOP_RECIPE_KEY_MAXIMUM_BYTES + 1) },
+      { action: "remove", key: "e2b_abc" },
+    ]) {
+      expect(() => decodeDesktopRecipeKeyChange(refused)).toThrow();
+    }
+    expect(
+      decodeProjectCommand({
+        kind: "change-code-project-desktop-recipe",
+        projectId: threadId,
+        expectedVersion: 2,
+        recipe,
+        key: { action: "enter", key: "e2b_abc" },
+      }),
+    ).toMatchObject({ key: { action: "enter" } });
+
+    const transition = {
+      leaseId,
+      owner: { mode: "code", threadId },
+      providerId: "cloud.example",
+      from: "provisioning",
+      to: "refused",
+    } as const;
+    expect(
+      decodeDesktopLeaseTransitioned({ ...transition, credentialRejected: true }),
+    ).toMatchObject({ credentialRejected: true });
+    expect(() =>
+      decodeDesktopLeaseTransitioned({ ...transition, credentialRejected: "e2b_abc" }),
+    ).toThrow();
+    expect(
+      decodeDesktopPaneAnswer({ status: "recipe-key", key: "rejected", store: "available" }),
+    ).toEqual({ status: "recipe-key", key: "rejected", store: "available" });
+    expect(() =>
+      decodeDesktopPaneAnswer({
+        status: "recipe-key",
+        key: "saved",
+        store: "available",
+        credential: "e2b_abc",
       }),
     ).toThrow();
   });

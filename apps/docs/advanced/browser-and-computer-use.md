@@ -286,12 +286,26 @@ settings:
 - **Lasts**, **Longest**, and **Idle** set how long a desktop lasts at first,
   the most it can be extended to, and how long it may sit unused. They start
   at 30 minutes, four hours, and 15 minutes.
+- **API key** appears for a cloud provider that bills your own account, such
+  as E2B. Type the provider's API key; a cloud recipe can't be set without
+  one. Octant keeps it only in this computer's credential store (Keychain on
+  a Mac, Secret Service on Linux) and sends it only to that provider: the
+  recipe holds a reference to it, and the key never appears in the Project,
+  its history, logs, diagnostics, or an export. The line under the field says
+  whether a key is saved, whether the saved key is no longer in the
+  credential store, and whether the provider refused it the last time a
+  desktop started. To replace it, type a new key and choose **Save recipe**.
+  **Remove key** asks first, then keeps the recipe but ends its running
+  desktops; no desktop starts until you enter a key again. A key you replace
+  or remove is deleted from the credential store once every desktop started
+  with it is gone, because Octant needs it to end them.
 
 **Set recipe** saves it; the next desktop uses it. The desktop never has
 network access. **Remove recipe** asks first: removing it, or changing its
-provider, where it runs, or its computer, ends the Project's running desktops. Only a window on the host
-itself can set or remove a recipe; a paired phone or browser sees it but
-can't change it.
+provider, where it runs, its computer, or its key, ends the Project's running desktops. Only a window on the host
+itself can set or remove a recipe or enter its key; a paired phone or browser
+sees the recipe and whether it has a key, but can't change either. This
+version offers no cloud provider yet, so the key field doesn't appear.
 
 ## Picture in Picture
 

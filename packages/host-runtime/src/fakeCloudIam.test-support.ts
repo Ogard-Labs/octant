@@ -1,6 +1,7 @@
 import { createHmac, randomBytes } from "node:crypto";
 import type { CloudIamDescriptor } from "./cloudIam";
 import { sha256Hex, sigV4CanonicalRequest, sigV4SigningKey } from "./sigV4";
+import { stalledAnswer, type StalledAnswer } from "./stalledIssuer.test-support";
 
 /**
  * An in-memory stand-in for the cloud's single sign-on (the portal's OIDC
@@ -59,8 +60,8 @@ export type FakeRefreshAnswer =
   | "server-error"
   | "unreachable";
 
-/** `hangs` never answers; only the request's own abort signal ends it, as with a stalled connection. */
-export type FakeDevicePollFailure = "server-error" | "throttled" | "unreachable" | "hangs";
+/** A stalled answer ends only with the request's own abort signal; see {@link StalledAnswer}. */
+export type FakeDevicePollFailure = "server-error" | "throttled" | "unreachable" | StalledAnswer;
 
 export type FakeMintAnswer = "credentials" | "forbidden" | "unauthorized" | "server-error";
 
@@ -323,10 +324,9 @@ export class FakeCloud {
         if (failure === "unreachable") throw new TypeError("fetch failed");
         if (failure === "throttled") return new Response("", { status: 429 });
         if (failure === "server-error") return new Response("", { status: 503 });
-        if (failure === "hangs") {
-          return new Promise<Response>((_resolve, reject) => {
-            signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
-          });
+        if (failure === "hangs" || failure === "stalls-mid-answer") {
+          // A pending poll is a 400, so the body is what would say so.
+          return stalledAnswer(failure, signal, 400);
         }
         const entry = [...this.#devices].find(([key]) =>
           key.startsWith(`${String(fields.deviceCode)}|`),

@@ -98,6 +98,14 @@ export type DesktopFrameResult =
  */
 export const DESKTOP_SESSION_READABLE = "session-readable" as const;
 
+/**
+ * The refusal reason a cloud driver gives when its provider answers that the
+ * key the host attached is not accepted. The host records it on the lease, so
+ * the recipe editor can tell the person the key was refused; the key itself
+ * never reaches the driver.
+ */
+export const DESKTOP_CREDENTIAL_REJECTED = "credential-rejected" as const;
+
 export type DesktopInputResult = { readonly status: "delivered" } | Unavailable;
 
 /** A bounded frame source and an input sink the host streams on its own channel. */

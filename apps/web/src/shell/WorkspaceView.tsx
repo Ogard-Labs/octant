@@ -43,7 +43,7 @@ import type {
 } from "@octant/contracts/projects";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
-import type { DesktopRecipe } from "@octant/contracts/desktop-lease";
+import type { DesktopRecipe, DesktopRecipeKeyChange } from "@octant/contracts/desktop-lease";
 import type { PreviewClient } from "@octant/client-runtime/preview-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
@@ -427,6 +427,7 @@ export interface WorkspaceViewProps {
   readonly onDesktopRecipeChange?: (
     projectId: ProjectId,
     recipe: DesktopRecipe | null,
+    key?: DesktopRecipeKeyChange,
   ) => Promise<boolean>;
   /** The theme's ground behind the welcome and draft-thread surfaces, when one is set. */
   readonly welcomeBackdrop?: ReactNode;
