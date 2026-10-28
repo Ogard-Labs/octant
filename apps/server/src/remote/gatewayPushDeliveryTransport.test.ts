@@ -9,10 +9,10 @@ import {
   REMOTE_PUSH_GATEWAY_DEFAULT_URL,
   decodeRemotePushDeliveryRequestV1,
   decodeRemotePushEnvelopeV1,
-  remotePushDeliverySigningText,
   type RemotePushEnvelopeV1,
 } from "@octant/contracts/remote-push-notifications";
 import { afterEach, describe, expect, it } from "vitest";
+import { remotePushDeliverySigningText } from "@octant/domain/push-notification-policy";
 import { createGatewayPushDeliveryTransport } from "./gatewayPushDeliveryTransport";
 import { PUSH_GATEWAY_SETTING_FILE, createPushGatewaySetting } from "./pushGatewaySetting";
 import type { HostSigningPort } from "./remoteProtocolService";

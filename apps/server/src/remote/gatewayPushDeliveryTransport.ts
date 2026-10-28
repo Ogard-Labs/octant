@@ -12,10 +12,10 @@ import { createHash } from "node:crypto";
 import {
   REMOTE_PUSH_DELIVERY_HEADERS,
   decodeRemotePushGatewayRefusalV1,
-  remotePushDeliverySigningText,
   type RemotePushGatewaySettingsV1,
   type RemotePushGatewayRefusalCode,
 } from "@octant/contracts/remote-push-notifications";
+import { remotePushDeliverySigningText } from "@octant/domain/push-notification-policy";
 import type {
   PushDeliverySendResult,
   PushDeliveryTransport,

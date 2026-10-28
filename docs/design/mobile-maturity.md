@@ -434,7 +434,8 @@ sender holding it. The sender is a minimal Octant push gateway
 
 #### Gateway rules
 
-The wire shapes are in `packages/contracts/src/remotePushNotifications.ts`; the
+The wire shapes are in `packages/contracts/src/remotePushNotifications.ts` and
+the signing text in `packages/domain/src/pushNotificationPolicy.ts`; the
 gateway service implements them in `octant-webapp` (`apps/push`).
 
 - **Capability.** The phone posts `RemotePushCapabilityRequestV1` (platform,

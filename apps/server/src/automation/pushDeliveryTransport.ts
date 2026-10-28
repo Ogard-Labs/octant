@@ -23,8 +23,8 @@ export interface PushDeliveryDestination {
 /**
  * Host-side push transport, shared by ordinary threads and Automation runs. It
  * is handed only the sealed envelope, never the notification's content.
- * Credentialed APNs/FCM remains a named validation gate: the default transport
- * reports `unavailable` and never invents success.
+ * The host's transport sends through the push gateway the Notifications
+ * setting names (`remote/gatewayPushDeliveryTransport.ts`).
  */
 export interface PushDeliveryTransport {
   readonly providerDelivery: () => AutomationNotificationProviderDelivery;
@@ -32,42 +32,4 @@ export interface PushDeliveryTransport {
     readonly destination: PushDeliveryDestination;
     readonly envelope: RemotePushEnvelopeV1;
   }) => Promise<PushDeliverySendResult>;
-}
-
-export function createUnavailablePushDeliveryTransport(): PushDeliveryTransport {
-  return {
-    providerDelivery: () => "unavailable",
-    async send() {
-      return {
-        kind: "failed",
-        retryable: false,
-        category: "provider-unavailable",
-      };
-    },
-  };
-}
-
-/** Test double that records sends without requiring APNs/FCM credentials. */
-export function createRecordingPushDeliveryTransport(options?: {
-  readonly providerDelivery?: AutomationNotificationProviderDelivery;
-  readonly send?: PushDeliveryTransport["send"];
-}): PushDeliveryTransport & {
-  readonly sent: Array<{
-    readonly destination: PushDeliveryDestination;
-    readonly envelope: RemotePushEnvelopeV1;
-  }>;
-} {
-  const sent: Array<{
-    readonly destination: PushDeliveryDestination;
-    readonly envelope: RemotePushEnvelopeV1;
-  }> = [];
-  return {
-    sent,
-    providerDelivery: () => options?.providerDelivery ?? "available",
-    async send(input) {
-      sent.push(input);
-      if (options?.send !== undefined) return options.send(input);
-      return { kind: "delivered" };
-    },
-  };
 }

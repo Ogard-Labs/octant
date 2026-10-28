@@ -298,7 +298,8 @@ export type RemotePushDeliveryRequestV1 = typeof RemotePushDeliveryRequestV1.Typ
 
 /**
  * The headers that sign a delivery request. The signature is ECDSA P-256 with
- * SHA-256 (IEEE P1363, unpadded base64url) over the signing text below, made
+ * SHA-256 (IEEE P1363, unpadded base64url) over the signing text the domain's
+ * push notification policy builds (`remotePushDeliverySigningText`), made
  * with the host's listener identity key; the key header carries that key's
  * SPKI DER so the gateway can check it against the capability's fingerprint.
  */
@@ -310,14 +311,6 @@ export const REMOTE_PUSH_DELIVERY_HEADERS = {
 
 /** How far a signed request's timestamp may stray from the gateway's clock. */
 export const REMOTE_PUSH_DELIVERY_SKEW_MS = 300_000;
-
-/** `octant-push-delivery-v1`, the timestamp, and the body's SHA-256 (unpadded base64url), one per line. */
-export function remotePushDeliverySigningText(input: {
-  readonly timestamp: string;
-  readonly bodySha256: string;
-}): string {
-  return `octant-push-delivery-v1\n${input.timestamp}\n${input.bodySha256}`;
-}
 
 /** Why a gateway refused a request; never a platform's own message. */
 export const RemotePushGatewayRefusalCode = Schema.Literal(
