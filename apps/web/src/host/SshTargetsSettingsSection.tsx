@@ -15,6 +15,7 @@ import { OctantSelectField } from "../ui/base/OctantSelect";
 import { ZenProjectTerminalCard } from "../zen/ZenProjectTerminalCard";
 import type { SshTargetAdministrationBridge } from "../shell/hostBridge";
 import {
+  SSH_TARGET_TIMES,
   createSshTargetClient,
   type SshTargetAnswer,
   type SshTargetClient,
@@ -52,12 +53,21 @@ const POSTURE_LABELS: Readonly<Record<string, string>> = {
 
 const CONNECTION_LABELS: Readonly<Record<SshTargetStatus["connection"], string>> = {
   "not-connected": "Not connected",
+  reconnecting: "Reconnecting",
   unreachable: "Not reachable",
+  "authentication-refused": "This Mac's SSH key or agent is refused",
   "host-key-changed": "Host key changed",
   "executor-missing": "Octant not found on the target",
   "executor-version-mismatch": "Another Octant version on the target",
   connected: "Connected",
 };
+
+/**
+ * A dropped session's target reconnects on its own, which no request of this
+ * page starts, so the page reads the targets again on this cadence while it
+ * lists any, as a window's remote Projects do.
+ */
+const TARGET_REFRESH_MS = 5_000;
 
 export const PIN_LIMITS_NOTICE =
   "The pin proves only that later sessions reach this key. Whoever administers the target can read its files and alter the Octant there, whose attestation is its own report.";
@@ -140,6 +150,17 @@ export function SshTargetsSettingsSection({
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const listsTargets = targets.length > 0;
+  useEffect(() => {
+    if (!listsTargets) return;
+    const timer = setInterval(() => {
+      void client.list().then((listed) => {
+        if (listed.status === "ok") setTargets(listed.value);
+      });
+    }, TARGET_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [client, listsTargets]);
 
   /** Runs one request, says how it went, and reads the page's state again. */
   const act = async <T,>(
@@ -625,17 +646,35 @@ function TargetDescription({ status }: { readonly status: SshTargetStatus }) {
     <>
       {CONNECTION_LABELS[status.connection]}
       {reached === "" ? "" : ` as ${reached}`} · {status.fingerprint}
+      {status.reconnect === undefined ? null : (
+        <>
+          <br />
+          {reconnectSentence(status.reconnect)}
+        </>
+      )}
       {status.admission.map((entry) => (
         <span key={entry.posture}>
           <br />
           {POSTURE_LABELS[entry.posture] ?? entry.posture}:{" "}
           {entry.decision.status === "admitted"
             ? "admitted"
-            : describeSshAdmissionRefusal(entry.decision)}
+            : describeSshAdmissionRefusal(entry.decision, SSH_TARGET_TIMES)}
         </span>
       ))}
     </>
   );
+}
+
+/** Where this host's own reconnect stands, as the host reported it. */
+function reconnectSentence(reconnect: NonNullable<SshTargetStatus["reconnect"]>): string {
+  switch (reconnect.status) {
+    case "waiting":
+      return `The session dropped. Reconnecting on its own: attempt ${String(reconnect.attempt)} of ${String(reconnect.maxAttempts)} at ${SSH_TARGET_TIMES.formatTime(reconnect.nextAttemptAt)}.`;
+    case "attempting":
+      return `The session dropped. Reconnecting on its own: attempt ${String(reconnect.attempt)} of ${String(reconnect.maxAttempts)} under way.`;
+    case "stopped":
+      return `Stopped reconnecting after ${String(reconnect.attempts)} ${reconnect.attempts === 1 ? "attempt" : "attempts"}. Connect it again once the reason below is fixed.`;
+  }
 }
 
 /** One sentence on what a target admits after a connection. */

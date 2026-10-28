@@ -371,6 +371,10 @@ function reportStatus(
 const RECOVERY: Readonly<Record<SshAdmissionRefusalReason, string>> = {
   "target-removed": "The target was removed; its Projects' threads stay readable here.",
   "target-unreachable": "Reconnect when the target is reachable: octant ssh-target connect <id>.",
+  "target-reconnecting":
+    "Octant is reconnecting on its own; to try now instead: octant ssh-target connect <id>.",
+  "authentication-refused":
+    "Check that ssh to the target signs in without a prompt, then: octant ssh-target connect <id>.",
   "host-key-changed":
     "The target presented another host key. After checking it, confirm it: octant ssh-target repin <id>.",
   "executor-missing": "Install the headless Octant of this version on the target.",
@@ -582,6 +586,18 @@ function writeStatus(
   stdout.write(
     `${String(status.target.id)}  ${status.target.destination}  ${status.connection}${who === "" ? "" : `  (${who})`}\n`,
   );
+  const { reconnect } = status;
+  if (reconnect?.status === "waiting") {
+    stdout.write(
+      `  reconnecting on its own: attempt ${String(reconnect.attempt)} of ${String(reconnect.maxAttempts)} at ${new Date(reconnect.nextAttemptAt).toISOString()}\n`,
+    );
+  } else if (reconnect?.status === "attempting") {
+    stdout.write(
+      `  reconnecting on its own: attempt ${String(reconnect.attempt)} of ${String(reconnect.maxAttempts)} under way\n`,
+    );
+  } else if (reconnect?.status === "stopped") {
+    stdout.write(`  stopped reconnecting after ${String(reconnect.attempts)} attempts\n`);
+  }
   stdout.write(`  host key ${status.fingerprint}\n`);
   stdout.write(`  executor ${status.target.executorPath}\n`);
   for (const binary of status.runtimeBinaries) {

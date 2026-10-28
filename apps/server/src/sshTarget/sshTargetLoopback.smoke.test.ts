@@ -123,6 +123,7 @@ import { SshRemoteProjectService } from "./sshRemoteProjectService";
 import { SshRemoteTerminalService } from "./sshRemoteTerminalService";
 import {
   SshTargetConnectionService,
+  type SshTargetConnectionServiceOptions,
   type SshTargetPlacementInput,
 } from "./sshTargetConnectionService";
 import type { SshTargetStore } from "./sshTargetStore";
@@ -258,13 +259,27 @@ function openedStore(): SshTargetStore {
   return store;
 }
 
-function service(buildVersion = developmentBuild, runtimeEgress?: ProviderRuntimeEgress) {
+/**
+ * A reconnect here waits until the test runs it, so a test that kills a
+ * session sees exactly the state it asserts; the one that proves reconnecting
+ * runs its attempt itself.
+ */
+const HELD_RECONNECTS: NonNullable<SshTargetConnectionServiceOptions["reconnect"]> = {
+  schedule: () => () => undefined,
+};
+
+function service(
+  buildVersion = developmentBuild,
+  runtimeEgress?: ProviderRuntimeEgress,
+  reconnect = HELD_RECONNECTS,
+) {
   return new SshTargetConnectionService({
     store: openedStore(),
     buildVersion,
     sshExecutable: join(root, "ssh"),
     environment: { PATH: "/usr/bin:/bin" },
     ...(runtimeEgress === undefined ? {} : { runtimeEgress }),
+    reconnect,
   });
 }
 
@@ -2853,9 +2868,16 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
     }
   }, 240_000);
 
-  it("stops a remote-bound thread's turn as target-disconnected when the session ends, and queues nothing", async () => {
+  it("stops a remote-bound thread's turn as target-disconnected when the session ends, queues nothing, and runs the next turn once the host reconnected on its own", async () => {
     const checkout = harnessCheckout("product-disconnect-app");
-    const connections = service();
+    const due: Array<() => void> = [];
+    const connections = service(developmentBuild, undefined, {
+      random: () => 0.5,
+      schedule: (run) => {
+        due.push(run);
+        return () => undefined;
+      },
+    });
     const status = await register(connections, target("product-disconnect", asNobody()));
     try {
       const bound = await projectsOn(connections).bind({
@@ -2897,13 +2919,50 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
       }
       expect(processRunning("sleep 41")).toBe(false);
 
-      // While the target is away, a new turn is refused before it launches.
+      // While the host reconnects, a new turn is refused before it launches,
+      // saying so.
+      expect(connections.list()[0]).toMatchObject({
+        connection: "reconnecting",
+        reconnect: { status: "waiting", attempt: 1 },
+      });
       const refused = await product.runTurn(productWindow, thread, "Again.");
-      expect(JSON.stringify(refused.started)).toContain("not connected");
+      expect(JSON.stringify(refused.started)).toContain("reconnecting on its own (attempt 1 of 8)");
 
-      // A new session attests afresh, and nothing of the stopped turn arrives.
-      expect((await connections.connect(status.target.id)).status).toBe("ok");
+      // The host reconnects on its own: a new session to the same pinned key
+      // attests afresh, and nothing of the stopped turn arrives.
+      expect(due).toHaveLength(1);
+      due[0]?.();
+      for (
+        let attempt = 0;
+        attempt < 600 && connections.list()[0]?.connection !== "connected";
+        attempt += 1
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect(connections.list()[0]).toMatchObject({ connection: "connected" });
+      expect(connections.list()[0]?.reconnect).toBeUndefined();
       await new Promise((resolve) => setTimeout(resolve, 1_000));
+      expect(existsSync(join(checkout, "ran-after-disconnect"))).toBe(false);
+
+      // The thread is usable again: its next turn runs on the new session.
+      // The interrupted turn left its model reply unread; this turn has its own.
+      product.script.splice(0);
+      product.script.push(
+        {
+          text: "Back.",
+          toolCalls: [
+            {
+              toolCallId: "back-1",
+              toolName: "bash",
+              argumentsJson: JSON.stringify({ command: "touch ran-after-reconnect" }),
+            },
+          ],
+        },
+        { text: "Done.", toolCalls: [] },
+      );
+      const again = await product.runTurn(productWindow, thread, "Run it now.");
+      expect(again.state).toBe("completed");
+      expect(existsSync(join(checkout, "ran-after-reconnect"))).toBe(true);
       expect(existsSync(join(checkout, "ran-after-disconnect"))).toBe(false);
     } finally {
       connections.close();
