@@ -3,6 +3,7 @@ import type { ExtensionSource } from "@octant/contracts/extensions";
 import { HOST_HARNESS_ENDPOINT_PROTOCOL_VERSIONS } from "@octant/contracts/outside-driver-protocol";
 import {
   OUTSIDE_PROVIDER_DRIVER_DOCUMENT_PATH,
+  OUTSIDE_PROVIDER_DRIVER_SIGNATURE_PATH,
   readOutsideProviderDriverEntry,
   type OutsideProviderDriverRefusalReason,
 } from "@octant/plugin-api/outside-provider-driver";
@@ -11,6 +12,7 @@ import {
   type ExtensionArchiveEntry,
   type ResolvedExtensionPackage,
 } from "./packageInspector";
+import { readOutsideDriverSignature } from "./outsideDriverSignature";
 
 /**
  * A folder holding an outside provider driver, as the local folder registry
@@ -33,12 +35,13 @@ export type OutsideProviderDriverPackageReading =
 
 /**
  * Manifest facts only the host can state: where the package came from, what
- * its content hashes to, the identity it is stored under, and whether anyone
- * reviewed it. An author who writes one is refused rather than overwritten,
- * so the document a person reads is the document the host used.
+ * its content hashes to, the identity it is stored under, whether anyone
+ * reviewed it, and which publisher key signed it. An author who writes one is
+ * refused rather than overwritten, so the document a person reads is the
+ * document the host used.
  */
 const HOST_ASSIGNED_MANIFEST_FIELDS = ["extensionId", "packageId", "digest", "source"] as const;
-const HOST_ASSIGNED_PROVENANCE_FIELDS = ["reviewed", "reviewedAt"] as const;
+const HOST_ASSIGNED_PROVENANCE_FIELDS = ["reviewed", "reviewedAt", "publisherKey"] as const;
 
 /**
  * npm lifecycle scripts that run when a package or its dependents are
@@ -58,16 +61,25 @@ const INSTALL_LIFECYCLE_SCRIPTS = [
 /**
  * Reads a local folder as an outside provider driver package: its document
  * must be a valid outside entry once the host adds the facts only it can
- * state, it must speak a protocol version the host speaks, and its files must
+ * state, it must speak a protocol version the host speaks, its files must
  * be data and ES modules only, with no program, native code, or install
- * script, because the host runs the one entry module on its own runtime.
+ * script, because the host runs the one entry module on its own runtime, and
+ * a signature it carries must verify.
+ *
+ * A package from any other source must carry a signature that verifies. A
+ * local folder may be unsigned developer input; when it is signed, its
+ * signature is held to the same check, and the key is recorded.
  */
 export function readOutsideProviderDriverPackage(
   input: OutsideProviderDriverPackageInput,
 ): OutsideProviderDriverPackageReading {
-  // Local folders are the only outside driver source until publisher
-  // signatures exist; a marketplace package needs one.
-  if (input.source.kind !== "local-folder") return refused("source-unsupported");
+  const marketplace = input.source.kind !== "local-folder";
+  if (
+    marketplace &&
+    !input.entries.some((entry) => entry.path === OUTSIDE_PROVIDER_DRIVER_SIGNATURE_PATH)
+  ) {
+    return refused("signature-missing");
+  }
   const document = parseJsonFile(input.entries, OUTSIDE_PROVIDER_DRIVER_DOCUMENT_PATH);
   if (!isRecord(document) || !isRecord(document.manifest)) return refused("document-invalid");
   const authored = document.manifest;
@@ -79,10 +91,14 @@ export function readOutsideProviderDriverPackage(
     return refused("host-assigned-field");
   }
   const slug = typeof authored.slug === "string" ? authored.slug : "";
+  const sourceRef =
+    "sourceRef" in input.source
+      ? input.source.sourceRef
+      : `${input.source.catalogId}:${input.source.entryId}`;
   const manifest = {
     ...authored,
-    extensionId: stableUuid(`extension:${input.source.sourceRef}:${slug}`),
-    packageId: stableUuid(`package:${input.source.sourceRef}:${slug}`),
+    extensionId: stableUuid(`extension:${sourceRef}:${slug}`),
+    packageId: stableUuid(`package:${sourceRef}:${slug}`),
     digest: `sha256:${"0".repeat(64)}`,
     source: input.source,
     provenance: { ...authoredProvenance, reviewed: false },
@@ -98,16 +114,32 @@ export function readOutsideProviderDriverPackage(
   ) {
     return refused("protocol-incompatible");
   }
+  const signature = readOutsideDriverSignature(input.entries, {
+    name: slug,
+    version: reading.entry.manifest.version,
+    protocolVersions: reading.entry.protocolVersions,
+  });
+  if (signature.status === "invalid") return refused("signature-invalid");
+  // A verified signature from a marketplace is still refused until that
+  // source can be fetched at an exact name, version, and digest.
+  if (marketplace) return refused("source-unsupported");
   const entryPoint = reading.entry.manifest.components[0]?.entryPoint;
   const filesRefusal = packageFilesRefusal(input.entries, entryPoint);
   if (filesRefusal !== undefined) return refused(filesRefusal);
-  const digest = calculateExtensionPackageDigest(manifest, input.entries);
+  const signedManifest =
+    signature.status === "signed"
+      ? {
+          ...manifest,
+          provenance: { ...manifest.provenance, publisherKey: signature.publisherKey },
+        }
+      : manifest;
+  const digest = calculateExtensionPackageDigest(signedManifest, input.entries);
   return {
     status: "accepted",
     resolved: {
       format: input.format,
       archiveBytes: input.archiveBytes,
-      manifest: { ...manifest, digest },
+      manifest: { ...signedManifest, digest },
       entries: input.entries,
       expectedDigest: input.expectedDigest ?? digest,
       appVersion: input.appVersion,
@@ -165,6 +197,10 @@ export function outsideProviderDriverRefusalMessage(
       return "This provider driver has an install script; Octant runs no install step for a provider driver.";
     case "package-metadata-invalid":
       return "A package description in this provider driver is not valid JSON.";
+    case "signature-missing":
+      return "This provider driver is not signed by its publisher; Octant installs a provider driver from this source only when it is.";
+    case "signature-invalid":
+      return "This provider driver's signature does not match its files, name, or version, or does not verify.";
   }
 }
 

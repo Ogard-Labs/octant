@@ -10,6 +10,7 @@
     "./agent-run-workspace-policy": "./src/agentRunWorkspacePolicy.ts",
     "./agent-run-forest": "./src/agentRunForest.ts",
     "./automation-policy": "./src/automationPolicy.ts",
+    "./outside-driver-publisher-policy": "./src/outsideDriverPublisherPolicy.ts",
     "./linked-thread-policy": "./src/linkedThreadPolicy.ts",
     ".": "./src/index.ts",
     "./chat-policy": "./src/chatPolicy.ts",
