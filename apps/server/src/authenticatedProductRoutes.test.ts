@@ -426,6 +426,19 @@ describe("authenticated product route dispatch", () => {
     expect(dispatch).toHaveBeenCalledOnce();
   });
 
+  it("refuses a paired device an HTML import exactly as it refuses creating a Canvas", async () => {
+    const dispatch = vi.fn(async () => Response.json({ ok: true }));
+    const product = createAuthenticatedProductDispatch({ dispatch });
+
+    for (const path of ["/api/canvas/create", "/api/canvas/import-html"]) {
+      expect(
+        classifyProductAction(new Request(`https://octant.example${path}`, { method: "POST" })),
+      ).toBeUndefined();
+      expect((await product(handoff(path, "POST")))?.status).toBe(403);
+    }
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
   it("dispatches a Canvas share read for a paired device but not a share mutation", async () => {
     const dispatch = vi.fn(async () => Response.json({ ok: true }));
     const product = createAuthenticatedProductDispatch({ dispatch });

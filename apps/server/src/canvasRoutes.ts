@@ -13,6 +13,8 @@ import {
   decodeCanvasOriginThreadId,
   decodeCanvasThreadReferenceCardsOutcome,
   decodeCanvasCreateResult,
+  decodeCanvasHtmlImportResult,
+  CANVAS_HTML_IMPORT_MAX_BYTES,
   decodeCanvasCommentCommandResult,
   decodeCanvasCommentsOutcome,
   decodeCanvasDiagramLayoutReviseResult,
@@ -219,6 +221,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
       route !== "action" &&
       route !== "action-cancel" &&
       route !== "create" &&
+      route !== "import-html" &&
       route !== "recipes" &&
       route !== "share" &&
       route !== "share-revoke" &&
@@ -880,6 +883,63 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
           context.project,
         );
         return jsonResponse(decodeCanvasCreateResult(result), 200, origin);
+      }
+
+      // A person's page, imported into a new Canvas. It is a create in every
+      // respect the window's authority sees: the same context, the same Project
+      // check, and no route a create does not have. The page is read and
+      // bounded on the host before anything is journaled.
+      if (route === "import-html" && request.method === "POST") {
+        const body = await readJson(request);
+        if (body.kind === "too-large") {
+          return jsonResponse(
+            decodeCanvasHtmlImportResult({
+              kind: "refused",
+              reason: "too-large",
+              message: `This page is larger than ${String(CANVAS_HTML_IMPORT_MAX_BYTES / 1024)} KB, the most Octant imports.`,
+            }),
+            200,
+            origin,
+          );
+        }
+        if (body.kind === "invalid") {
+          return jsonResponse(
+            decodeCanvasHtmlImportResult({
+              kind: "denied",
+              denialCode: "malformed-request",
+              message: "Canvas import request is malformed.",
+            }),
+            200,
+            origin,
+          );
+        }
+        const context = await resolveCreateContext(dependencies, authenticatedWindowId);
+        if (context.kind !== "ok") {
+          return jsonResponse(
+            decodeCanvasHtmlImportResult({
+              kind: "denied",
+              denialCode: context.kind,
+              message:
+                context.kind === "unavailable"
+                  ? context.reason
+                  : "Canvas create is not authorized in this workspace.",
+            }),
+            200,
+            origin,
+          );
+        }
+        const result = dependencies.canvasService.importHtml(
+          body.value,
+          {
+            mode: context.activeContext.mode,
+            projectId:
+              context.activeContext.projectId === null
+                ? null
+                : String(context.activeContext.projectId),
+          },
+          context.project,
+        );
+        return jsonResponse(decodeCanvasHtmlImportResult(result), 200, origin);
       }
 
       if (route === "share" && request.method === "GET") {

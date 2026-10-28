@@ -40,6 +40,7 @@ import {
   CANVAS_OUTSIDE_CONTENT_AGGREGATE_TYPE,
   CANVAS_OUTSIDE_CONTENT_CARRIED,
   canvasOutsideContentWriters,
+  importedPageWriter,
   isReplicaWriter,
   canvasVersionWriters,
   decodeCanvasOutsideContentCarried,
@@ -91,6 +92,11 @@ export interface AppendCanvasCreateInput {
   readonly canvasId: CanvasId;
   readonly version: CanvasVersion;
   readonly occurredAt: UtcTimestamp;
+  /**
+   * The version holds a page a person imported from outside Octant. The
+   * Canvas's record of that commits with the version, or neither does.
+   */
+  readonly importedPage?: true;
 }
 
 export interface AppendCanvasVersionInput {
@@ -180,22 +186,26 @@ export class CanvasEventStore {
 
     let committed;
     try {
-      committed = this.#carryingOutsideContent(version, input.occurredAt, () =>
-        this.#journal.append({
-          aggregate: { aggregateType: CANVAS_AGGREGATE_TYPE, aggregateId },
-          expectedVersion: 0,
-          events: [
-            {
-              eventId,
-              eventName: CANVAS_CREATED,
-              eventVersion: 1,
-              correlationId,
-              actor: this.#actor,
-              occurredAt: input.occurredAt,
-              payload,
-            },
-          ],
-        }),
+      committed = this.#carryingOutsideContent(
+        version,
+        input.occurredAt,
+        () =>
+          this.#journal.append({
+            aggregate: { aggregateType: CANVAS_AGGREGATE_TYPE, aggregateId },
+            expectedVersion: 0,
+            events: [
+              {
+                eventId,
+                eventName: CANVAS_CREATED,
+                eventVersion: 1,
+                correlationId,
+                actor: this.#actor,
+                occurredAt: input.occurredAt,
+                payload,
+              },
+            ],
+          }),
+        input.importedPage === true ? [importedPageWriter(version.versionId)] : [],
       );
     } catch (error) {
       throw this.#wrapConcurrency(error);
@@ -547,28 +557,38 @@ export class CanvasEventStore {
    * Commits a version, and first, in the same journal unit, the Canvas's
    * record of each writer that is marked with outside content now and that the
    * Canvas does not already name. A mark that cannot be read or recorded
-   * refuses the version rather than letting it land unmarked.
+   * refuses the version rather than letting it land unmarked. `outside`
+   * names writers recorded whatever their marks, such as an imported page.
    */
-  #carryingOutsideContent<A>(version: CanvasVersion, occurredAt: UtcTimestamp, commit: () => A): A {
+  #carryingOutsideContent<A>(
+    version: CanvasVersion,
+    occurredAt: UtcTimestamp,
+    commit: () => A,
+    outside: ReadonlyArray<string> = [],
+  ): A {
     const writerMarked = this.#writerMarked;
-    if (writerMarked === undefined) return commit();
+    if (writerMarked === undefined && outside.length === 0) return commit();
     const journal = this.#journal;
     const canvasId = String(version.canvasId);
     let recorded: ReadonlyArray<string>;
     let marked: ReadonlyArray<string>;
     try {
       recorded = recordsMarks(journal) ? canvasOutsideContentWriters(journal, canvasId) : [];
-      marked = canvasVersionWriters(version).filter(
-        (writerId) =>
-          !recorded.includes(writerId) &&
-          // A synced version has no thread of its own to be marked: it is as
-          // marked as the thread it lands in, which took it as outside content.
-          writerMarked(
-            isReplicaWriter(version, writerId)
-              ? String(version.definition.provenance.threadId)
-              : writerId,
-          ),
-      );
+      marked = [
+        ...outside.filter((writerId) => !recorded.includes(writerId)),
+        ...canvasVersionWriters(version).filter(
+          (writerId) =>
+            !recorded.includes(writerId) &&
+            writerMarked !== undefined &&
+            // A synced version has no thread of its own to be marked: it is as
+            // marked as the thread it lands in, which took it as outside content.
+            writerMarked(
+              isReplicaWriter(version, writerId)
+                ? String(version.definition.provenance.threadId)
+                : writerId,
+            ),
+        ),
+      ];
     } catch {
       throw unreadableMark();
     }
