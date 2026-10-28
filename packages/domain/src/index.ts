@@ -53,6 +53,7 @@ export * from "./canvasMockupOutline";
 export * from "./canvasMockupHtml";
 export * from "./canvasMockupTsx";
 export * from "./canvasFlowSite";
+export * from "./canvasDeckProposal";
 export * from "./canvasFlowLayout";
 export * from "./canvasDesignPolicy";
 export * from "./canvasDesignFrameKit";

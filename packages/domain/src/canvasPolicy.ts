@@ -1,3 +1,4 @@
+import type { CanvasFlowScreen } from "@octant/contracts/canvas";
 import {
   CANVAS_MAX_BLOCKS,
   CANVAS_MAX_BAR_LIST_ROWS,
@@ -33,6 +34,10 @@ import {
   CANVAS_DECK_SCHEMA_VERSION,
   CANVAS_MAX_DECK_SLIDES,
   CANVAS_DECK_SLIDE_KINDS,
+  CANVAS_FLOW_ANNOTATIONS_SCHEMA_VERSION,
+  CANVAS_MAX_FLOW_ANNOTATIONS,
+  CANVAS_MAX_FLOW_ANNOTATION_LENGTH,
+  canvasFlowUsesAnnotations,
   CANVAS_MAX_MOCKUP_TEXT_LENGTH,
   CANVAS_MAX_PAYLOAD_BYTES,
   CANVAS_MAX_SERIES,
@@ -140,6 +145,7 @@ const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
   CANVAS_FLOW_SCHEMA_VERSION,
   CANVAS_MOCKUP_LIBRARY_SCHEMA_VERSION,
   CANVAS_DECK_SCHEMA_VERSION,
+  CANVAS_FLOW_ANNOTATIONS_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
 ];
 // A block kind that a document may only carry from the version that
@@ -293,6 +299,9 @@ export type CanvasPolicyRejectionCode =
   | "dangling-flow-edge"
   | "flow-edge-self"
   | "flow-hotspot-refused"
+  | "flow-annotations-budget-exceeded"
+  | "dangling-flow-annotation"
+  | "duplicate-flow-annotation"
   | "mockup-definitions-budget-exceeded"
   | "duplicate-mockup-definition"
   | "dangling-mockup-definition"
@@ -575,6 +584,8 @@ function declaredSchemaRejection(input: unknown): CanvasPolicyRejectionCode | un
             canvasChartUsesCallouts(block as Record<string, unknown>)) ||
           (declared < CANVAS_MOCKUP_LIBRARY_SCHEMA_VERSION &&
             canvasMockupUsesLibrary(block as Record<string, unknown>)) ||
+          (declared < CANVAS_FLOW_ANNOTATIONS_SCHEMA_VERSION &&
+            canvasFlowUsesAnnotations(block as Record<string, unknown>)) ||
           (declared < CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION &&
             (canvasDiagramUsesStyles(block as Record<string, unknown>) ||
               canvasPlanUsesGantt(block as Record<string, unknown>)))),
@@ -1568,6 +1579,10 @@ function validateFlow(
   const byId = new Map(blocks.map((candidate) => [String(candidate.blockId), candidate]));
   const screenIds = new Set<string>();
   const mockupByScreenId = new Map<string, Extract<CanvasBlock, { readonly kind: "mockup" }>>();
+  const screensById = new Map<
+    string,
+    { screen: CanvasFlowScreen; design?: Extract<CanvasBlock, { readonly kind: "design" }> }
+  >();
   for (const screen of block.screens) {
     const screenId = String(screen.screenId);
     if (screenIds.has(screenId)) {
@@ -1590,6 +1605,10 @@ function validateFlow(
         `Canvas flow ${block.blockId} cannot place a ${placed.kind} block; a screen is a mockup or a design.`,
       );
     }
+    screensById.set(screenId, {
+      screen,
+      ...(placed.kind === "design" ? { design: placed } : {}),
+    });
     if (placed.kind === "mockup") {
       mockupByScreenId.set(screenId, placed);
       if (placed.variants !== undefined && screen.variantId === undefined) {
@@ -1650,15 +1669,72 @@ function validateFlow(
     if (String(edge.fromScreenId) === String(edge.toScreenId)) {
       reject("flow-edge-self", `Canvas flow ${block.blockId} has an edge from a screen to itself.`);
     }
-    if (edge.fromNodeId !== undefined) {
-      const mockup = mockupByScreenId.get(String(edge.fromScreenId));
-      const hotspot = mockup?.nodes.find((node) => String(node.nodeId) === String(edge.fromNodeId));
+    if (edge.fromNodeId === undefined) continue;
+    const fromScreen = screensById.get(String(edge.fromScreenId));
+    const mockup = mockupByScreenId.get(String(edge.fromScreenId));
+    if (fromScreen === undefined) continue;
+    if (mockup !== undefined) {
+      const hotspot = mockup.nodes.find((node) => String(node.nodeId) === String(edge.fromNodeId));
       if (hotspot === undefined || !FLOW_HOTSPOT_COMPONENTS.has(hotspot.component)) {
         reject(
           "flow-hotspot-refused",
           `Canvas flow ${block.blockId} edge ${edgeId} names a hotspot the screen's mockup does not offer; a hotspot is a button, list row, navigation item, tab, select, checkbox, or toggle.`,
         );
       }
+      continue;
+    }
+    // A design screen's hotspot is an anchor in its frame's own markup: the
+    // author writes href="#octant-flow:<screenId>" on an element whose id the
+    // edge names, so a finished screen participates in the click-through. A
+    // rolled-back runtime refuses this edge whole (fail closed), so no schema
+    // bump is needed for the widening.
+    const design = fromScreen?.design;
+    if (design === undefined) {
+      reject(
+        "flow-hotspot-refused",
+        `Canvas flow ${block.blockId} edge ${edgeId} names a hotspot on a screen that is neither a mockup nor a design.`,
+      );
+    }
+    const frame =
+      design?.frames.find(
+        (authored) => String(authored.frameId) === String(fromScreen.screen.frameId),
+      ) ?? undefined;
+    if (frame === undefined || !frame.html.includes(`id="${String(edge.fromNodeId)}"`)) {
+      reject(
+        "flow-hotspot-refused",
+        `Canvas flow ${block.blockId} edge ${edgeId} names the anchor ${String(edge.fromNodeId)}, which the screen's design frame does not hold; write id="${String(edge.fromNodeId)}" on the element the person taps.`,
+      );
+    }
+  }
+  // Callouts pin to a flow's screens: the marker draws on the board node and
+  // a comment on it anchors to the screen's node.
+  if ((block.annotations ?? []).length > CANVAS_MAX_FLOW_ANNOTATIONS) {
+    reject(
+      "flow-annotations-budget-exceeded",
+      `Canvas flow ${block.blockId} pins more than ${String(CANVAS_MAX_FLOW_ANNOTATIONS)} callouts.`,
+    );
+  }
+  const annotated = new Set<string>();
+  for (const annotation of block.annotations ?? []) {
+    const id = String(annotation.nodeId);
+    if (!screenIds.has(id)) {
+      reject(
+        "dangling-flow-annotation",
+        `Canvas flow ${block.blockId} pins a callout to ${id}, which it does not hold.`,
+      );
+    }
+    if (annotated.has(id)) {
+      reject(
+        "duplicate-flow-annotation",
+        `Canvas flow ${block.blockId} pins two callouts to ${id}.`,
+      );
+    }
+    annotated.add(id);
+    if (annotation.note.length > CANVAS_MAX_FLOW_ANNOTATION_LENGTH) {
+      reject(
+        "mockup-text-budget-exceeded",
+        `Canvas flow ${block.blockId} has a callout longer than ${String(CANVAS_MAX_FLOW_ANNOTATION_LENGTH)} characters.`,
+      );
     }
   }
 }

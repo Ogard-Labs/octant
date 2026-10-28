@@ -125,6 +125,15 @@ export function FlowBoard(props: FlowBoardProps) {
     [committedLayout, overrides, props.block, sources],
   );
   const byId = new Map(layout.screens.map((screen) => [screen.screenId, screen]));
+  // A flow's callouts are numbered in the order the author wrote, like a
+  // mockup's; the marker draws on the screen's node and the note lists under
+  // the outline, where a comment on the callout anchors to the screen.
+  const callouts = new Map(
+    (props.block.annotations ?? []).map((annotation, index) => [
+      String(annotation.nodeId),
+      index + 1,
+    ]),
+  );
   const fitViewport = (): Viewport => ({ x: -FIT_MARGIN, y: -FIT_MARGIN, zoom: 1 });
   const [viewport, setViewport] = useState<Viewport>(fitViewport);
   const [message, setMessage] = useState<string>();
@@ -425,10 +434,32 @@ export function FlowBoard(props: FlowBoardProps) {
                 />
               )}
               <span className="canvas-flow-board__screen-label">{screen.label}</span>
+              {callouts.get(screen.screenId) === undefined ? null : (
+                <span aria-hidden="true" className="canvas-flow-board__callout">
+                  {String(callouts.get(screen.screenId))}
+                </span>
+              )}
             </div>
           </foreignObject>
         ))}
       </svg>
+      {(props.block.annotations ?? []).length === 0 ? null : (
+        <ol className="canvas-flow-board__callouts" aria-label={`Callouts on ${props.block.title}`}>
+          {(props.block.annotations ?? []).map((annotation, index) => (
+            <li className="canvas-flow-board__callout-note" key={String(annotation.nodeId)}>
+              <span aria-hidden="true" className="canvas-flow-board__callout">
+                {String(index + 1)}
+              </span>
+              <span>
+                <span className="canvas-flow-board__callout-target">
+                  {byId.get(String(annotation.nodeId))?.label ?? String(annotation.nodeId)}
+                </span>
+                {` — ${annotation.note}`}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
       <details className="canvas-flow-board__outline">
         <summary>Outline</summary>
         <ul>
@@ -467,6 +498,12 @@ export function FlowBoard(props: FlowBoardProps) {
 
 /** The frame a mockup without variants names; a validated block always holds one. */
 const EMPTY_MOCKUP_FRAME: CanvasMockupFrame = { key: "screen", label: undefined, roots: [] };
+
+/** The screen a design frame's own anchor names, when it names one: `#octant-flow:results` → `results`. */
+export function flowDesignHotspotTarget(hash: string): string | undefined {
+  const match = /^#octant-flow:([A-Za-z0-9][A-Za-z0-9._:-]*)$/.exec(hash);
+  return match === null ? undefined : (match[1] ?? undefined);
+}
 
 /**
  * A flow's click-through prototype: each screen drawn at its own size and
@@ -513,6 +550,28 @@ function FlowPlayer(props: {
   // target from inside the mockup's own drawing; the rest wait in the Go to
   // list, so no transition is left without a place to tap.
   const leaving = block.edges.filter((edge) => String(edge.fromScreenId) === current);
+  // A designed screen's own anchors navigate the flow: the frame is drawn
+  // same-origin (it still runs nothing), so the page's hash is readable and a
+  // link the author wrote as #octant-flow:<screen> moves the prototype. The
+  // exported site keeps the Go to list — a sandboxed frame there cannot reach
+  // out without script.
+  const designHostRef = useRef<HTMLDivElement>(null);
+  const screenIdSet = useMemo(
+    () => new Set(block.screens.map((screen) => String(screen.screenId))),
+    [block],
+  );
+  useEffect(() => {
+    if (mockupBlock !== undefined) return;
+    const frame = designHostRef.current?.querySelector("iframe");
+    const win = frame?.contentWindow;
+    if (win === null || win === undefined) return;
+    const followAnchor = () => {
+      const target = flowDesignHotspotTarget(win.location.hash);
+      if (target !== undefined && screenIdSet.has(target)) go(target);
+    };
+    win.addEventListener("hashchange", followAnchor);
+    return () => win.removeEventListener("hashchange", followAnchor);
+  });
   const go = (target: string) => {
     setHistory((path) => [...path, current]);
     setCurrent(target);
@@ -596,20 +655,23 @@ function FlowPlayer(props: {
             >
               {mockupBlock === undefined ? (
                 screen.frameId === undefined ? null : (
-                  <DesignFrameView
-                    {...(props.designAssetRuntime === undefined
-                      ? {}
-                      : { assetRuntime: props.designAssetRuntime })}
-                    block={
-                      blocks.find(
-                        (candidate) =>
-                          candidate.kind === "design" &&
-                          String(candidate.blockId) === String(screen.blockId),
-                      ) as never
-                    }
-                    frameId={screen.frameId}
-                    scale={scale}
-                  />
+                  <div ref={designHostRef}>
+                    <DesignFrameView
+                      {...(props.designAssetRuntime === undefined
+                        ? {}
+                        : { assetRuntime: props.designAssetRuntime })}
+                      block={
+                        blocks.find(
+                          (candidate) =>
+                            candidate.kind === "design" &&
+                            String(candidate.blockId) === String(screen.blockId),
+                        ) as never
+                      }
+                      frameId={screen.frameId}
+                      sandboxOverride="allow-same-origin"
+                      scale={scale}
+                    />
+                  </div>
                 )
               ) : (
                 <div

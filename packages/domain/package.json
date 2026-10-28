@@ -38,6 +38,7 @@
     "./canvas-dashboard-layout": "./src/canvasDashboardLayout.ts",
     "./canvas-flow-layout": "./src/canvasFlowLayout.ts",
     "./canvas-flow-site": "./src/canvasFlowSite.ts",
+    "./canvas-deck-proposal": "./src/canvasDeckProposal.ts",
     "./canvas-mockup-html": "./src/canvasMockupHtml.ts",
     "./canvas-mockup-tsx": "./src/canvasMockupTsx.ts",
     "./canvas-comparison-matrix": "./src/canvasComparisonMatrix.ts",
