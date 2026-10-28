@@ -166,9 +166,14 @@ the CLI. The hub depends on that:
     restart on macOS), and after a power cut someone unlocks the machine once.
     BitLocker with a TPM, and LUKS unlocked by a TPM, boot unattended. A
     standby keeps the members working meanwhile.
-  - **Windows.** A Windows hub runs the hub role, the web app, and the hub's
-    services. Running agents on Windows waits for the approved Windows
-    confinement design, as the release boundary says.
+  - **Windows.** Windows has no Octant design yet. The Windows parts of
+    this design (the Windows service and the access-list key file) are built
+    only when the Windows track starts, after the macOS preview and Linux
+    self-update evidence, as the
+    [release boundary](../architecture.md#current-release-boundary) orders.
+    Even then, a Windows hub runs the hub role, the web app, and the hub's
+    services; running agents on Windows waits for an approved Windows
+    confinement design.
 
 - **Serves the web app.** The hub's private listener, on its Tailscale or LAN
   address, serves the same web app the desktop window shows. A phone or
