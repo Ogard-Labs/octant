@@ -3929,6 +3929,12 @@ export class ChatService {
                 : previous.resumeCursor !== undefined &&
                   (previous.modelId === thread.modelId ||
                     probe.capabilities.modelSwitch === "supported"),
+              // A same-provider model swap the provider cannot carry on starts
+              // a fresh session with a handoff instead of refusing the turn.
+              ...(previous.modelId !== thread.modelId &&
+              probe.capabilities.modelSwitch !== "supported"
+                ? { modelSwitchHandoff: true }
+                : {}),
               // The session cursor is recorded when the session starts, before
               // the provider is sent anything, so an attempt that carried a
               // handoff and did not complete may never have delivered it.

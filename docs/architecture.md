@@ -4328,7 +4328,10 @@ session only when it is the same provider instance with a recorded resume
 cursor (and, for another model, the `modelSwitch` capability; in Work also the
 same folder binding). Any other provider instance starts a new session with a
 disclosed text handoff built by the same selector as Code's (purpose
-`provider-switch`, or `branch` for a branch): the thread's own active
+`provider-switch`, or `branch` for a branch), and so does another model of the
+same provider whose driver cannot carry the session on to it: a same-provider
+model swap without `modelSwitch` starts a fresh session with that handoff
+instead of refusing the turn as unrecoverable. the thread's own active
 conversation, at most 24 blocks of 4,000 characters including the summary,
 each message attributed to its provider and model, with the thread's taint and
 every omission counted (earlier messages, purged or oversized or empty bodies,
