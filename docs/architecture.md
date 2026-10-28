@@ -5006,8 +5006,12 @@ the model at another size.
   `refused`) in its message and, for the first three, in the journaled
   `unroutable` decision. A failure that was not retried, or that happened after
   output streamed, never moves the turn.
-- **Session.** `NativeHarnessSessionStore` journals one session per thread:
-  routing decisions, turn records, context reductions, advisor interventions,
+- **Session.** `NativeHarnessSessionStore` journals one session per thread.
+  Turn start and settlement are recorded for every provider so a crash or host
+  restart can expose [conversation recovery](design/workspace.md#continuing-after-a-restart).
+  The same server admission holds a recovered session until a person resumes it;
+  recording lifecycle facts does not enable harness tools, routing, or advisor
+  calls for another provider. The store also keeps routing decisions, turn records, context reductions, advisor interventions,
   the steering notes a person typed (queued, handed to the lead inside a tool
   result, dropped at the turn's end — so a restart keeps an undelivered one).
   A client mints each note's id, and a queue of an id among the thread's

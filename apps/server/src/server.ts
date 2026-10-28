@@ -456,6 +456,7 @@ export function startOctantServer(
     remoteCodeProjectStore.store = sshTargetStore;
     const {
       followUpCreation,
+      restartContinuation,
       followUpSuggestionRoutes,
       nativeHarnessComposition,
       nativeHarnessEgressRoutes,
@@ -833,6 +834,8 @@ export function startOctantServer(
       workTurnService,
       workflowService,
     } = yield* wireWork({
+      nativeHarnessSessions,
+      restartContinuation,
       guardChatAttachmentPurge,
       workTurnProjection,
       threadAwaitsHarnessApproval,

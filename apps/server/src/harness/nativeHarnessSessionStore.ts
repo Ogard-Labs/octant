@@ -71,6 +71,7 @@ export interface NativeHarnessSessionStoreOptions {
 
 interface SessionRecord {
   session: NativeHarnessSession;
+  recoveryIdentity?: string;
   routes: NativeHarnessRouteDecision[];
   turns: NativeHarnessTurnRecord[];
   reductions: NativeHarnessContextReduction[];
@@ -112,6 +113,7 @@ export class NativeHarnessSessionStore {
    * turn it let finish is still running.
    */
   readonly #turnsInFlight = new Set<string>();
+  readonly #openTurnVersions = new Map<string, number>();
 
   constructor(options: NativeHarnessSessionStoreOptions) {
     this.#journal = options.journal;
@@ -126,6 +128,13 @@ export class NativeHarnessSessionStore {
   /** Whether the thread's turn is still running, paused or not. */
   turnInFlight(threadId: string): boolean {
     return this.#turnsInFlight.has(threadId);
+  }
+
+  /** Stable across reads, question expiry, and another restart of the same lost turn. */
+  recoveryIdentity(threadId: string): string | undefined {
+    const record = this.#records.get(threadId);
+    if (record?.session.status !== "recovery-required") return undefined;
+    return record.recoveryIdentity;
   }
 
   read(threadId: string): NativeHarnessSessionView | undefined {
@@ -299,6 +308,7 @@ export class NativeHarnessSessionStore {
       startedAt: now,
     });
     this.#turnsInFlight.add(threadId);
+    this.#openTurnVersions.set(threadId, record.version);
     if (record.session.status !== "idle") return;
     this.#setSession(record, {
       ...record.session,
@@ -667,6 +677,7 @@ export class NativeHarnessSessionStore {
         record.approvals.some((entry) => entry.status === "pending") ||
         record.questions.some((entry) => entry.status === "pending");
       if (!cutOff && !waiting) continue;
+      record.recoveryIdentity = `${record.session.id}:${cutOff ? this.#openTurnVersions.get(threadId) : record.version}`;
       record.session = {
         ...record.session,
         status: "recovery-required",
@@ -737,6 +748,7 @@ export class NativeHarnessSessionStore {
       push(record.routes, body.decision as NativeHarnessRouteDecision);
     } else if (eventName === names.turnStarted) {
       this.#turnsInFlight.add(threadId);
+      this.#openTurnVersions.set(threadId, record.version);
     } else if (eventName === names.turnSettled) {
       this.#turnsInFlight.delete(threadId);
     } else if (eventName === names.turnCompleted) {
