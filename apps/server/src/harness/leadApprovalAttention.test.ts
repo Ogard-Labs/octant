@@ -219,6 +219,9 @@ describe("a pending harness approval across a host restart", () => {
   it("withdraws what a lead on an SSH target left parked, so no answer reaches its ended turn", () => {
     const before = fixture();
     void before.ask({ mode: "code" });
+    // A local Code thread restarted beside it keeps its lead's approval for
+    // the person's resume.
+    void before.ask({ mode: "code", threadId: otherThread });
     void before.questions.ask({
       threadId: thread,
       mode: "code",
@@ -249,6 +252,8 @@ describe("a pending harness approval across a host restart", () => {
     expect(after.approvals.decide(thread, approvalId, "approve")).toBe("already-settled");
     expect(after.questions.answer(thread, questionId, "Q4")).toBe("already-settled");
     expect(after.sessions.read(thread)?.approvals?.[0]?.status).toBe("expired");
+    expect(after.sessions.read(otherThread)?.approvals?.[0]?.status).toBe("pending");
+    expect(leadApprovalFor(after, otherThread)).toMatchObject({ lostInRestart: true });
 
     // Replayed again, the withdrawal is already in the journal: nothing more is settled.
     const again = openStores(before.connection, onTarget);
