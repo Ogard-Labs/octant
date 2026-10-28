@@ -335,7 +335,7 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
 .thread-activity-pip__permission-title h3 {
   margin: 0;
   font-size: var(--oct-text-detail);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .thread-activity-pip__permission p {
@@ -863,7 +863,7 @@ h6 {
   border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   text-align: left;
   transition:
     background-color var(--oct-motion-fast) ease,
@@ -929,7 +929,7 @@ h6 {
 
 .octant-menu__item-label {
   font-size: var(--oct-text-detail);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .octant-menu__item-description {
@@ -968,7 +968,7 @@ h6 {
   border: 1px solid transparent;
   border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-detail);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   text-align: left;
 }
 
@@ -1547,7 +1547,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   cursor: grab;
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   user-select: none;
   -webkit-user-select: none;
   transition:
@@ -1812,7 +1812,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   color: var(--oct-meta);
   border-top: 1px solid var(--oct-border-soft);
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .dock-utility-launcher__reference {
@@ -1916,7 +1916,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border-radius: var(--oct-radius-md);
   cursor: pointer;
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   transition:
     background-color var(--oct-motion-fast) var(--oct-ease-standard),
     border-color var(--oct-motion-fast) var(--oct-ease-standard),
@@ -3251,7 +3251,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   margin: 0;
   color: var(--octant-text-primary);
   font-size: var(--oct-text-sm);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 .provider-details__section--capabilities h4 {
   margin: 0 0 var(--oct-space-2);
@@ -3461,7 +3461,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   margin-bottom: 4px;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   letter-spacing: 0.01em;
   text-transform: none;
 }
@@ -4465,7 +4465,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   align-items: center;
   margin: var(--oct-space-3) 0 0;
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   color: var(--oct-muted);
 }
 
@@ -4557,7 +4557,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .chat-project-overview__section h2 {
   margin: 0;
   font-size: var(--oct-text-sm);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .chat-project-overview__section p,
@@ -4629,7 +4629,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .chat-project-overview__quick-start h2 {
   margin: 0;
   font-size: var(--oct-text-xl);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   letter-spacing: -0.03em;
   line-height: 1.2;
 }
@@ -5337,7 +5337,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   cursor: pointer;
   font: inherit;
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   white-space: nowrap;
 }
 
@@ -5558,7 +5558,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   overflow: hidden;
   min-width: 0;
   color: var(--oct-fg);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -5978,7 +5978,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   min-width: 0;
   color: var(--octant-text-primary);
   font-size: var(--oct-text-sm);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
@@ -6100,7 +6100,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   margin-left: auto;
   color: var(--octant-text-muted);
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .agent-eligible-models__disclosure-icon {
@@ -6362,7 +6362,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 .composer-tray .host-selector__select,
 .draft-thread__context-strip .host-selector__select {
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .host-selector__dot {
@@ -6835,7 +6835,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 .code-board__filter-fields label > span:first-child {
   margin-bottom: var(--oct-space-1);
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   letter-spacing: 0;
   text-transform: none;
   color: var(--oct-muted);
@@ -7508,6 +7508,16 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   min-height: 0;
 }
 
+/* The pane's empty reports on the pane itself — quiet, like the shell state,
+   not a card over the list (DESIGN.md: empty states are never cards). */
+.linear-issues__list-pane > [data-slot="empty"] {
+  margin: clamp(36px, 8vh, 72px) auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
 .linear-issues__list {
   display: grid;
   gap: 0;
@@ -7574,7 +7584,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   margin: 0;
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .linear-issues__status {

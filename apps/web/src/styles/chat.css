@@ -597,7 +597,7 @@
   display: block;
   color: var(--oct-fg);
   font-size: var(--oct-text-detail);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   line-height: 1.35;
 }
 
@@ -1010,7 +1010,7 @@ html[data-octant-increased-contrast="true"] .thread-work-shelf form button {
   margin: 0;
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .side-chat__notice {
@@ -1050,7 +1050,7 @@ html[data-octant-increased-contrast="true"] .thread-work-shelf form button {
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-sm);
   font-size: inherit;
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
   line-height: 1.35;
   text-decoration: none;
   vertical-align: baseline;
@@ -1071,7 +1071,7 @@ html[data-octant-increased-contrast="true"] .thread-work-shelf form button {
 .tracker-reference-chip__meta {
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .tracker-reference-chip__tooltip {
@@ -1082,7 +1082,7 @@ html[data-octant-increased-contrast="true"] .thread-work-shelf form button {
 
 .tracker-reference-chip__title {
   color: var(--oct-fg);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .tracker-reference-chip__state {

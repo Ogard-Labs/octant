@@ -2227,7 +2227,7 @@
 .canvas-comments__title {
   margin: 0;
   font-size: var(--oct-text-sm);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .canvas-comments__note {
@@ -2922,7 +2922,7 @@
 .canvas-workspace-tab__drawer-header h2 {
   margin: 0;
   font-size: var(--oct-text-sm);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .canvas-workspace-tab__share-dialog {
@@ -3352,7 +3352,7 @@
 }
 
 .canvas-action__spinner {
-  animation: canvas-action-spin 1s linear infinite;
+  animation: canvas-action-spin var(--oct-motion-spin) linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3417,7 +3417,7 @@
 }
 
 .canvas-refresh__spinner {
-  animation: canvas-action-spin 1s linear infinite;
+  animation: canvas-action-spin var(--oct-motion-spin) linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
