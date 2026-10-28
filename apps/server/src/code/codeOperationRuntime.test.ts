@@ -2472,8 +2472,27 @@ describe("CodeOperationRuntime", () => {
             expect.objectContaining({ kind: "provider-session-ready", modelId: "model-b" }),
           );
         } else {
+          // The provider cannot carry the session on to another of its models,
+          // so the turn starts a fresh session with the same disclosed
+          // handoff a provider switch takes, instead of refusing the turn.
           expect(connection.resume).not.toHaveBeenCalled();
-          expect(connection.send).toHaveBeenCalledTimes(1);
+          await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(2));
+          expect(connection.start).toHaveBeenCalledTimes(2);
+          const frames = await fixture.runtime.subscribe(
+            windowId,
+            threadId,
+            operationId(85),
+            0,
+            20,
+          );
+          expect(frames.map((frame) => frame.event)).toContainEqual(
+            expect.objectContaining({
+              kind: "context-handoff-attached",
+              reason: "provider-switch",
+              modelId: "model-b",
+              previousSessionId: sessionId,
+            }),
+          );
         }
       } finally {
         await fixture.runtime.close();
