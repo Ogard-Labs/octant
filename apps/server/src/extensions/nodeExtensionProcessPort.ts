@@ -320,7 +320,7 @@ async function prepareProcessLaunch(
  * outside driver specification, so a runtime that fails to start without one
  * can have that one restored.
  */
-const OUTSIDE_DRIVER_SYSTEM_READ_ROOTS = ["/System", "/usr", "/private/var/db"] as const;
+const OUTSIDE_DRIVER_SYSTEM_READ_ROOTS = ["/System", "/usr", "/private/var/db/timezone"] as const;
 const OUTSIDE_DRIVER_DEVICE_READS = ["/dev/null", "/dev/zero", "/dev/random", "/dev/urandom"];
 /**
  * Of `/private/etc`, only the link naming the host's time zone, which a
