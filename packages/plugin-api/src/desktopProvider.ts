@@ -106,6 +106,13 @@ export const DESKTOP_SESSION_READABLE = "session-readable" as const;
  */
 export const DESKTOP_CREDENTIAL_REJECTED = "credential-rejected" as const;
 
+/**
+ * The refusal reason a cloud driver passes on when the host's HTTPS port
+ * reports it holds no key for the recipe's reference, such as one deleted from
+ * the credential store outside Octant. The lease says so in plain words.
+ */
+export const DESKTOP_CREDENTIAL_MISSING = "credential-missing" as const;
+
 export type DesktopInputResult = { readonly status: "delivered" } | Unavailable;
 
 /** A bounded frame source and an input sink the host streams on its own channel. */

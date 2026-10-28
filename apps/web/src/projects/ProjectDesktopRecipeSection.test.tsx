@@ -294,6 +294,7 @@ describe("ProjectDesktopRecipeSection", () => {
     function keyClient(key: {
       readonly key: "none" | "saved" | "missing" | "rejected";
       readonly store: "available" | "unavailable";
+      readonly releasing?: true;
     }) {
       const request = vi.fn<DesktopPaneClient["request"]>(async (asked) =>
         decodeDesktopPaneAnswer(
@@ -367,6 +368,19 @@ describe("ProjectDesktopRecipeSection", () => {
       expect(onChange).toHaveBeenCalledTimes(1);
       await user.click(await screen.findByRole("button", { name: "Remove key" }));
       await waitFor(() => expect(onChange).toHaveBeenLastCalledWith(keyed, { action: "remove" }));
+    });
+
+    it("says a replaced key stays in the store until its desktops are gone", async () => {
+      render(
+        <ProjectDesktopRecipeSection
+          client={keyClient({ key: "none", store: "available", releasing: true })}
+          onChange={vi.fn(async () => true)}
+          project={project(decodeDesktopRecipe(savedRecipe))}
+        />,
+      );
+      expect(
+        await screen.findByText(/A previous key stays in .* until the desktops made/),
+      ).toBeTruthy();
     });
 
     it("keeps the key field closed on a host with no credential store", async () => {

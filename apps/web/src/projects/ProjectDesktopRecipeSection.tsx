@@ -125,6 +125,7 @@ type SavedKey =
       readonly status: "loaded";
       readonly key: RecipeKeyAnswer["key"];
       readonly store: RecipeKeyAnswer["store"];
+      readonly releasing: boolean;
     }
   | { readonly status: "failed" };
 
@@ -448,7 +449,12 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
           if (controller.signal.aborted) return;
           setSavedKey(
             answer.status === "recipe-key"
-              ? { status: "loaded", key: answer.key, store: answer.store }
+              ? {
+                  status: "loaded",
+                  key: answer.key,
+                  store: answer.store,
+                  releasing: answer.releasing === true,
+                }
               : { status: "failed" },
           );
         },
@@ -477,6 +483,7 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
             : keyState === "rejected"
               ? `${providerName} refused this key when a desktop last started. Enter a new one.`
               : `No key saved. Desktops can't start until you enter your ${providerName} API key.`;
+  const keyReleasing = savedKey.status === "loaded" && savedKey.releasing;
   const keyReady = !takesKey || keyCarries || keyTyped;
   const limitsRefusal =
     draft.leaseMinutes > draft.maximumLeaseMinutes
@@ -655,6 +662,12 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
               <p className="project-provider-policy__hint" role="status">
                 {keyMessage}
               </p>
+              {keyReleasing ? (
+                <p className="project-provider-policy__hint" role="status">
+                  A previous key stays in {hostCredentialStore(hostPlatform)} until the desktops
+                  made with it are gone, then Octant deletes it.
+                </p>
+              ) : null}
             </>
           ) : null}
           {limitsRefusal === undefined ? null : (

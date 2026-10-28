@@ -539,7 +539,10 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     service: desktopLeases,
     recipeKey: (projectId) => {
       const project = persistence.readProject(projectId);
-      return desktopRecipeKeys.view(project?.type === "code" ? project.desktopRecipe : undefined);
+      return desktopRecipeKeys.view(
+        projectId,
+        project?.type === "code" ? project.desktopRecipe : undefined,
+      );
     },
     localActorId: String(OCTANT_LOCAL_ACTOR_ID),
   });

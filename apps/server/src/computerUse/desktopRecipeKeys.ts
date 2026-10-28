@@ -4,6 +4,7 @@ import {
   type DesktopLease,
   type DesktopRecipe,
   type DesktopRecipeKeyState,
+  type ProjectId,
 } from "@octant/contracts";
 import type { Journal } from "../persistence/journal";
 import type { ProviderCredentialStore } from "../providers/credentialBrokerClient";
@@ -24,12 +25,23 @@ export interface DesktopRecipeKeysOptions {
    * Every credential reference a journaled recipe change ever named: the keys
    * Octant itself stored, replaced and removed ones included.
    */
-  readonly namedEver: () => ReadonlyArray<DesktopCredentialRef>;
+  readonly namedEver: () => ReadonlyArray<DesktopRecipeKeyNaming>;
+}
+
+/** A key reference a journaled recipe change named, and the Project whose recipe named it. */
+export interface DesktopRecipeKeyNaming {
+  readonly credentialRef: DesktopCredentialRef;
+  readonly projectId: ProjectId;
 }
 
 export interface DesktopRecipeKeyView {
   readonly key: DesktopRecipeKeyState;
   readonly store: "available" | "unavailable";
+  /**
+   * A key this Project's recipe stopped naming is still in the store, because
+   * a desktop made with it may need it for teardown.
+   */
+  readonly releasing?: true;
 }
 
 export interface DesktopRecipeKeys {
@@ -44,11 +56,14 @@ export interface DesktopRecipeKeys {
    * A key no recipe names any more. It is deleted once no desktop made with it
    * may still be running, because teardown reaches the account with it.
    */
-  readonly retire: (credentialRef: DesktopCredentialRef) => Promise<void>;
+  readonly retire: (credentialRef: DesktopCredentialRef, projectId: ProjectId) => Promise<void>;
   /** Deletes the retired keys teardown no longer needs. */
   readonly settle: () => Promise<void>;
   /** What the recipe editor says about a recipe's key. Never the key. */
-  readonly view: (recipe: DesktopRecipe | undefined) => Promise<DesktopRecipeKeyView>;
+  readonly view: (
+    projectId: ProjectId,
+    recipe: DesktopRecipe | undefined,
+  ) => Promise<DesktopRecipeKeyView>;
 }
 
 /**
@@ -61,6 +76,7 @@ export interface DesktopRecipeKeys {
 export function createDesktopRecipeKeys(options: DesktopRecipeKeysOptions): DesktopRecipeKeys {
   const retired = new Set<string>();
   const refs = new Map<string, DesktopCredentialRef>();
+  const owners = new Map<string, ProjectId>();
   // A key retired before a restart may still be in the store when its
   // deletion failed or had not run yet. The first settle after a start takes
   // in every key a lease recorded or a journaled recipe ever named that no
@@ -68,9 +84,10 @@ export function createDesktopRecipeKeys(options: DesktopRecipeKeysOptions): Desk
   let adopted = false;
   let settling: Promise<void> | undefined;
 
-  const retireLater = (credentialRef: DesktopCredentialRef): void => {
+  const retireLater = (credentialRef: DesktopCredentialRef, projectId?: ProjectId): void => {
     retired.add(String(credentialRef));
     refs.set(String(credentialRef), credentialRef);
+    if (projectId !== undefined) owners.set(String(credentialRef), projectId);
   };
 
   const settleOnce = async (): Promise<void> => {
@@ -81,15 +98,20 @@ export function createDesktopRecipeKeys(options: DesktopRecipeKeysOptions): Desk
     if (adopted && retired.size === 0) return;
     const named = new Set(options.namedByRecipes().map(String));
     if (!adopted) {
-      const known = [
+      const known: ReadonlyArray<{
+        readonly credentialRef: DesktopCredentialRef;
+        readonly projectId?: ProjectId;
+      }> = [
         ...options
           .leases()
-          .flatMap((lease) => (lease.credentialRef === undefined ? [] : [lease.credentialRef])),
+          .flatMap((lease) =>
+            lease.credentialRef === undefined ? [] : [{ credentialRef: lease.credentialRef }],
+          ),
         ...options.namedEver(),
       ];
       adopted = true;
-      for (const credentialRef of known) {
-        if (!named.has(String(credentialRef))) retireLater(credentialRef);
+      for (const { credentialRef, projectId } of known) {
+        if (!named.has(String(credentialRef))) retireLater(credentialRef, projectId);
       }
     }
     for (const key of retired) {
@@ -103,6 +125,7 @@ export function createDesktopRecipeKeys(options: DesktopRecipeKeysOptions): Desk
         await store.delete(key);
         retired.delete(key);
         refs.delete(key);
+        owners.delete(key);
       } catch {
         // The store could not be reached; the next settle tries again.
       }
@@ -147,16 +170,26 @@ export function createDesktopRecipeKeys(options: DesktopRecipeKeysOptions): Desk
     discard: async (credentialRef) => {
       await options.store?.delete(String(credentialRef)).catch(() => undefined);
     },
-    retire: async (credentialRef) => {
-      retireLater(credentialRef);
+    retire: async (credentialRef, projectId) => {
+      retireLater(credentialRef, projectId);
       await settle();
     },
     settle,
-    view: async (recipe) => {
+    view: async (projectId, recipe) => {
       const store = options.store;
       const storeState = store === undefined ? "unavailable" : "available";
+      // A retired key waits only while a desktop made with it may still need it.
+      const waiting = [...retired].some((key) => {
+        const credentialRef = refs.get(key);
+        return (
+          credentialRef !== undefined &&
+          String(owners.get(key) ?? "") === String(projectId) &&
+          options.holdsCredential(credentialRef)
+        );
+      });
+      const releasing = waiting ? ({ releasing: true } as const) : {};
       const credentialRef = recipe?.credentialRef;
-      if (credentialRef === undefined) return { key: "none", store: storeState };
+      if (credentialRef === undefined) return { key: "none", store: storeState, ...releasing };
       // The most recent lease that got an answer from the provider with this
       // key says whether the provider took it. A new key has a new reference,
       // so entering one clears a refusal.
@@ -169,15 +202,17 @@ export function createDesktopRecipeKeys(options: DesktopRecipeKeysOptions): Desk
             lease.state !== "provisioning",
         )
         .sort((left, right) => right.requestedAt.localeCompare(left.requestedAt))[0];
-      if (answered?.credentialRejected === true) return { key: "rejected", store: storeState };
-      if (store === undefined) return { key: "missing", store: "unavailable" };
+      if (answered?.credentialRejected === true)
+        return { key: "rejected", store: storeState, ...releasing };
+      if (store === undefined) return { key: "missing", store: "unavailable", ...releasing };
       try {
         return {
           key: (await store.has(String(credentialRef))) ? "saved" : "missing",
           store: "available",
+          ...releasing,
         };
       } catch {
-        return { key: "missing", store: "unavailable" };
+        return { key: "missing", store: "unavailable", ...releasing };
       }
     },
   };
@@ -191,8 +226,8 @@ const RECIPE_HISTORY_BATCH = 1_000;
  */
 export function credentialRefsRecipesNamed(
   journal: Pick<Journal, "replayAggregateType">,
-): ReadonlyArray<DesktopCredentialRef> {
-  const named = new Map<string, DesktopCredentialRef>();
+): ReadonlyArray<DesktopRecipeKeyNaming> {
+  const named = new Map<string, DesktopRecipeKeyNaming>();
   let afterSequence = 0;
   for (;;) {
     const batch = journal.replayAggregateType({
@@ -203,9 +238,11 @@ export function credentialRefsRecipesNamed(
     });
     for (const envelope of batch) {
       afterSequence = envelope.globalSequence;
-      const credentialRef = decodeCodeProjectDesktopRecipeChanged(envelope.payload).project
-        .desktopRecipe?.credentialRef;
-      if (credentialRef !== undefined) named.set(String(credentialRef), credentialRef);
+      const { project } = decodeCodeProjectDesktopRecipeChanged(envelope.payload);
+      const credentialRef = project.desktopRecipe?.credentialRef;
+      if (credentialRef !== undefined) {
+        named.set(String(credentialRef), { credentialRef, projectId: project.id });
+      }
     }
     if (batch.length < RECIPE_HISTORY_BATCH) return [...named.values()];
   }
