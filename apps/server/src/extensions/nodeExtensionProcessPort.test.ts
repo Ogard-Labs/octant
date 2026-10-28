@@ -18,6 +18,26 @@ function subpathReads(profile: string): ReadonlyArray<string> {
   return [...new Set(reads)].sort();
 }
 
+/**
+ * The read grants after a profile's denial of `denied` that open it again.
+ * Seatbelt applies the last matching rule, so a grant of the folder, of
+ * anything inside it, or of a folder above it, emitted after the denial,
+ * undoes it; a grant of `/private/etc` restored below the TLS denial would.
+ */
+function readsReopeningAfterDeny(profile: string, denied: string): ReadonlyArray<string> {
+  const rules = profile.split("\n");
+  const deny = rules.indexOf(`(deny file-read* (subpath "${denied}"))`);
+  expect(deny).toBeGreaterThan(-1);
+  return rules.slice(deny + 1).filter((rule) => {
+    const grant = /^\(allow file-read\S* \((subpath|literal) "(.*)"\)\)$/.exec(rule);
+    if (grant === null) return false;
+    const [, kind, path = ""] = grant;
+    const inside = path === denied || path.startsWith(`${denied}/`);
+    const above = kind === "subpath" && (path === "/" || denied.startsWith(`${path}/`));
+    return inside || above;
+  });
+}
+
 const startInput = {
   extensionId: "42700000-0000-4000-8000-000000000001",
   packageId: "42700000-0000-4000-8000-000000000002",
@@ -156,9 +176,7 @@ describe("node extension process port", () => {
     expect(tlsDenied).toBeGreaterThan(
       rules.indexOf('(allow file-read* (subpath "/private/etc/ssl/certs"))'),
     );
-    expect(rules.slice(tlsDenied).filter((rule) => rule.includes('"/private/etc/ssl'))).toEqual([
-      '(deny file-read* (subpath "/private/etc/ssl"))',
-    ]);
+    expect(readsReopeningAfterDeny(profile, "/private/etc/ssl")).toEqual([]);
     // Every folder the driver may read, and nothing more: its package, its
     // runtime's own folder, the system roots a runtime reads to start, and
     // its temporary folder. The macOS escape tests measure that a driver
@@ -251,6 +269,7 @@ describe("node extension process port", () => {
         ]),
       ].sort(),
     );
+    expect(readsReopeningAfterDeny(profile, "/private/etc/ssl")).toEqual([]);
     expect(profile).not.toContain("(allow network");
     expect(profile).not.toContain("(allow process-fork)");
     expect(profile.split("\n").filter((rule) => rule.startsWith("(allow process-exec"))).toEqual([
