@@ -1481,9 +1481,13 @@ The spend-cap rules:
   hourly cost and estimate in `desktop.lease-requested@1` (`spend`), so the
   month's spend is rebuilt from the journal after a restart. The month is the
   UTC calendar month the lease was requested in, the month the clouds bill
-  by. A lease that may still hold a desktop counts its whole estimate; one
-  released, refused, or failed counts its time from request to end at the
-  hourly cost, rounded up and never above its estimate.
+  by. A lease that may still hold a desktop counts its whole estimate, and so
+  does a refused or failed one whose leftover desktop the host has not yet
+  verified gone, from before the first destroy until a destroy is verified,
+  so another billed provider cannot take room it may still be spending. A
+  lease released, or refused or failed with nothing left, counts its time
+  from request to end at the hourly cost, rounded up and never above its
+  estimate.
 - **Reaching the cap ends nothing running.** It refuses new billed leases and
   tells the person: the pane says the cap stopped the start and Settings
   shows the month's spend against it. Lowering the cap below what runs ends
@@ -1502,7 +1506,10 @@ The spend-cap rules:
   placement, the placement's worst case if this computer stops ("your
   account can keep billing for up to 8 hours by its own default, longer if
   you changed that limit"), the estimate, and the month's spend against the
-  cap.
+  cap. The pane's acquire carries the estimate the person saw
+  (`confirmedEstimateUsdCents`); a lease whose estimate is now different,
+  because another window changed the recipe's cost or limits, is declined
+  before anything is journaled.
 
 Rejected: counting the daemon's lifetime as provider-side expiry, which is
 exactly the guarantee a dead host loses; waiting until Cua's
@@ -2067,7 +2074,7 @@ offered on no host.
   `desktop-spend` aggregate with `desktop.spend-cap-changed@1` and
   `desktop.billed-lease-refused@1`; `DesktopSpendSummary`; the pane requests
   `spend` and `set-spend-cap` and the answer `spend`; `spend` on an available
-  Start; and the refusals `spend-unestimated`, `spend-cap-unset`,
+  Start; `confirmedEstimateUsdCents` on the pane's `acquire`; and the refusals `spend-unestimated`, `spend-cap-unset`,
   `spend-cap-reached`, and `spend-cap-local-only`
   (`packages/contracts/src/desktopLease.ts`).
 - **Seam.** `billedIfHostStopsMinutes` on `DesktopPlacement`
@@ -2118,8 +2125,11 @@ October and a lease on 1 November starts from zero, and a restarted host
 rebuilds the same figures and cap; an agent, a paired device, and the system
 actor changing or reading the cap are refused with nothing journaled, and the
 person clearing it turns billed desktops off; a billed recipe with no hourly
-cost is refused before any provider call; and a billed placement with a
-declared stop is kept without a provider expiry and estimated over that stop.
+cost is refused before any provider call; a billed placement with a
+declared stop is kept without a provider expiry and estimated over that stop;
+a person's billed Start without the estimate they saw is declined; and a
+failed acquire whose leftover desktop keeps running holds its whole estimate,
+refusing another billed provider, until a destroy is verified.
 `desktopLeasePolicy.test.ts` covers the decision, the estimate, what a lease
 counts, the month, who may change the cap, and the expiry exception;
 `projectPolicy.test.ts` the hourly-cost rule; `desktopPaneRoutes.test.ts` the

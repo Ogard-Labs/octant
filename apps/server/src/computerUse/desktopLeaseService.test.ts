@@ -340,9 +340,18 @@ describe("desktop lease service", () => {
     ).resolves.toEqual({ status: "refused", reason: "declined" });
     expect(cloud.backend.calls()).not.toContain("acquire");
 
+    // The estimate the person saw must still be the host's: $1.00 an hour
+    // over four hours.
+    await expect(
+      service.acquire({
+        ...caller,
+        confirmedProvider: decodeDesktopProviderId("cloud.example"),
+      }),
+    ).resolves.toEqual({ status: "refused", reason: "declined" });
     const started = await service.acquire({
       ...caller,
       confirmedProvider: decodeDesktopProviderId("cloud.example"),
+      confirmedEstimateUsdCents: 400,
     });
     expect(started).toMatchObject({ status: "acquired", lease: { billed: true } });
     // The person answered in their own tab; the host asks nobody else.
@@ -2424,6 +2433,46 @@ describe("desktop lease service spend cap for billed desktops", () => {
     await expect(
       service.acquire({ owner: code(threadA), actor: agentOf(threadA) }),
     ).resolves.toEqual({ status: "refused", reason: "spend-cap-unset" });
+  });
+
+  it("keeps a failed acquire's leftover desktop at its whole estimate until it is verified gone", async () => {
+    const leaky = createFakeDesktopProvider({
+      id: "leaky.example",
+      locality: "cloud",
+      billed: true,
+      behaviour: { omitProviderExpiry: true, lingerAfterRelease: true },
+    });
+    const other = createFakeDesktopProvider({
+      id: "other.example",
+      locality: "cloud",
+      billed: true,
+    });
+    const { service, state } = host({ providers: [leaky, other], spendCap: 600 });
+    state.recipes.set(threadB, recipeFor("other.example", cloudCredential, HOURLY_COST));
+
+    // The provider set no expiry, so the host fails the lease and destroys
+    // the desktop, which keeps running.
+    await expect(
+      service.acquire({ owner: code(threadA), actor: agentOf(threadA) }),
+    ).resolves.toMatchObject({ status: "not-acquired", lease: { state: "failed" } });
+    expect(runningDesktops(leaky.backend)).toBe(1);
+    expect(service.spend({ actor: person })).toMatchObject({
+      summary: { spentUsdCents: ESTIMATE },
+    });
+    // Another billed provider cannot take the room it may still be spending.
+    await expect(
+      service.acquire({ owner: code(threadB), actor: agentOf(threadB) }),
+    ).resolves.toEqual({ status: "refused", reason: "spend-cap-reached" });
+
+    // Once a destroy is verified, the lease counts only its running time.
+    leaky.backend.behaviour.lingerAfterRelease = false;
+    state.now += 60 * MINUTE;
+    await service.sweep();
+    expect(runningDesktops(leaky.backend)).toBe(0);
+    expect(service.spend({ actor: person })).toMatchObject({ summary: { spentUsdCents: 0 } });
+    await expect(
+      service.acquire({ owner: code(threadB), actor: agentOf(threadB) }),
+    ).resolves.toMatchObject({ status: "acquired" });
   });
 
   it("refuses a billed recipe with no hourly cost before any provider call", async () => {

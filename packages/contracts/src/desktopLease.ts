@@ -625,6 +625,8 @@ export const DesktopPaneRequest = Schema.Union(
     confirmedProvider: Schema.optional(DesktopProviderId),
     confirmedPlacement: Schema.optional(DesktopPlacementId),
     confirmedMachine: Schema.optional(DesktopMachineId),
+    /** For a billed desktop: the estimate the person saw, which must still be the host's. */
+    confirmedEstimateUsdCents: Schema.optional(usdCents),
   }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("release"), ...paneLease }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("retry-release"), ...paneLease }).annotations(strict),

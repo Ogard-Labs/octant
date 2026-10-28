@@ -230,6 +230,10 @@ export function DesktopPane(props: {
           ...(confirmed?.machine === undefined
             ? {}
             : { confirmedMachine: confirmed.machine.machineId }),
+          // The estimate the person saw; the host declines if it changed since.
+          ...(confirmed?.spend === undefined
+            ? {}
+            : { confirmedEstimateUsdCents: confirmed.spend.estimateUsdCents }),
         });
         if (answer?.status === "acquired") await show(answer.lease.leaseId);
         else if (answer?.status === "not-acquired") {

@@ -280,6 +280,13 @@ export interface DesktopLeaseService {
       readonly confirmedProvider?: DesktopProviderId;
       readonly confirmedPlacement?: DesktopPlacementId;
       readonly confirmedMachine?: DesktopMachineId;
+      /**
+       * The estimate a person saw when confirming a billed lease. A lease
+       * whose estimate is now different, because the recipe's hourly cost or
+       * limits changed meanwhile, is declined rather than started at a price
+       * nobody confirmed.
+       */
+      readonly confirmedEstimateUsdCents?: number;
     },
   ) => Promise<DesktopLeaseAcquireResult>;
   /**
@@ -733,6 +740,8 @@ export function createDesktopLeaseService(
   const viewIdleMs = options.viewIdleMs ?? DEFAULT_VIEW_IDLE_MS;
   const live = new Map<string, LiveLease>();
   const orphans = new Map<string, Orphan>();
+  /** Leases with a leftover desktop a destroy has not yet verified gone. */
+  const unverifiedDesktops = new Set<string>();
   const serial = new Map<string, Promise<unknown>>();
   /** Leases with a transfer between its read and its delivery. */
   const transferring = new Set<string>();
@@ -984,6 +993,10 @@ export function createDesktopLeaseService(
   }
 
   async function destroyOrphan(key: string, orphan: Orphan): Promise<boolean> {
+    // Counted against the month's cap from before the first attempt until a
+    // destroy is verified, so no other billed lease takes room this desktop
+    // may still be spending.
+    unverifiedDesktops.add(String(orphan.leaseId));
     const destroyed = await destroy(
       orphan.teardown,
       orphan.leaseId,
@@ -992,6 +1005,7 @@ export function createDesktopLeaseService(
     );
     if (destroyed.kind === "gone") {
       orphans.delete(key);
+      unverifiedDesktops.delete(String(orphan.leaseId));
       return true;
     }
     orphan.backoff = extendCacheBackoff(orphan.backoff, options.now());
@@ -1114,6 +1128,7 @@ export function createDesktopLeaseService(
         requestedAt: Date.parse(lease.requestedAt),
         updatedAt: Date.parse(lease.updatedAt),
         ...(lease.spend === undefined ? {} : { spend: lease.spend }),
+        unverifiedDesktop: unverifiedDesktops.has(String(lease.leaseId)),
       })),
     });
     return {
@@ -1294,7 +1309,9 @@ export function createDesktopLeaseService(
         gate.asks !== "in-thread" && isPerson(caller.actor)
           ? String(caller.confirmedProvider ?? "") === String(first.provider.id) &&
             String(caller.confirmedPlacement ?? "") === String(first.terms.placementId ?? "") &&
-            String(caller.confirmedMachine ?? "") === String(first.terms.machine?.machineId ?? "")
+            String(caller.confirmedMachine ?? "") ===
+              String(first.terms.machine?.machineId ?? "") &&
+            caller.confirmedEstimateUsdCents === first.spend?.lease.estimateUsdCents
             ? "approved"
             : "declined"
           : await options

@@ -188,6 +188,9 @@ async function answer(
         ...(request.confirmedMachine === undefined
           ? {}
           : { confirmedMachine: request.confirmedMachine }),
+        ...(request.confirmedEstimateUsdCents === undefined
+          ? {}
+          : { confirmedEstimateUsdCents: request.confirmedEstimateUsdCents }),
       });
     case "release":
       return service.release({ ...caller, leaseId: request.leaseId });

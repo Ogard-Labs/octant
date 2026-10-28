@@ -395,6 +395,8 @@ describe("E2B desktop provider", () => {
         actor: person,
         scopeId: "window-1",
         confirmedProvider: decodeDesktopProviderId("e2b"),
+        // $0.40 an hour over the recipe's four-hour maximum.
+        confirmedEstimateUsdCents: 160,
       });
       if (killedWhile === "ready") {
         await expect(started).resolves.toMatchObject({ status: "acquired" });

@@ -365,7 +365,12 @@ function runCloudHost<A>(
 describe("a cloud desktop recipe's key", () => {
   // A billed recipe carries the person's own hourly figure.
   const cloudRecipe = { ...recipe, providerId: "fake-cloud", hourlyCostUsdCents: 40 } as const;
-  const billedCaller = { ...caller, confirmedProvider: decodeDesktopProviderId("fake-cloud") };
+  // The estimate the person saw: $0.40 an hour over the recipe's two-hour maximum.
+  const billedCaller = {
+    ...caller,
+    confirmedProvider: decodeDesktopProviderId("fake-cloud"),
+    confirmedEstimateUsdCents: 80,
+  };
   const createProject = {
     kind: "create-code-project",
     projectId,

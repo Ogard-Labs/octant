@@ -337,6 +337,16 @@ describe("desktop lease policy", () => {
     expect(at("release-failed", 5)).toBe(240);
     expect(at("released", 5)).toBe(5);
     expect(at("failed", 0)).toBe(0);
+    // A failed lease whose leftover desktop is not yet verified gone keeps its estimate.
+    expect(
+      desktopLeaseSpent({
+        state: "failed",
+        requestedAt: 0,
+        updatedAt: 0,
+        spend,
+        unverifiedDesktop: true,
+      }),
+    ).toBe(240);
     expect(at("released", 10_000)).toBe(240);
     expect(desktopLeaseSpent({ state: "ready", requestedAt: 0, updatedAt: 0 })).toBe(0);
   });

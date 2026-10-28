@@ -224,7 +224,7 @@ describe("Desktop pane", () => {
         },
       ],
     } as const;
-    const { client } = fakeClient({
+    const { client, requests } = fakeClient({
       overview: overviewOf([], {
         status: "available",
         provider: { ...aws, billed: true },
@@ -244,6 +244,17 @@ describe("Desktop pane", () => {
     expect(dialog.textContent).toContain("keep billing for up to 8 hours");
     expect(dialog.textContent).toContain("could cost up to $3.20");
     expect(dialog.textContent).toContain("$12.50 of this month's $50.00 cap");
+    // The host starts it only at the estimate the person saw.
+    fireEvent.click(within(dialog).getByRole("button", { name: "Start desktop" }));
+    await waitFor(() =>
+      expect(requests).toContainEqual({
+        kind: "acquire",
+        threadId,
+        confirmedProvider: "cua",
+        confirmedPlacement: "aws",
+        confirmedEstimateUsdCents: 320,
+      }),
+    );
   });
 
   it("says the monthly cap stopped a desktop that bills, and offers no Start", async () => {

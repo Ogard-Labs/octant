@@ -210,19 +210,28 @@ export interface DesktopSpendHolding {
   /** Epoch milliseconds of the lease's last transition. */
   readonly updatedAt: number;
   readonly spend?: { readonly hourlyCostUsdCents: number; readonly estimateUsdCents: number };
+  /**
+   * A desktop made for the lease that the host has not yet verified gone,
+   * such as one left by an acquire that failed after the provider created it.
+   */
+  readonly unverifiedDesktop?: boolean;
 }
 
 /**
  * What one billed lease counts against its month. A lease that may still
  * hold a desktop counts its whole estimate, because the host cannot know it
- * stops billing sooner. One verified gone, or never made, counts the time
- * from its request to its end at the hourly cost, rounded up and never more
- * than its estimate.
+ * stops billing sooner; so does a refused or failed one whose leftover
+ * desktop is not yet verified gone, or another billed lease could take the
+ * room it may still be spending. One verified gone, or never made, counts the
+ * time from its request to its end at the hourly cost, rounded up and never
+ * more than its estimate.
  */
 export function desktopLeaseSpent(holding: DesktopSpendHolding): number {
   const { spend } = holding;
   if (spend === undefined) return 0;
-  if (desktopLeaseHoldsDesktop(holding.state)) return spend.estimateUsdCents;
+  if (desktopLeaseHoldsDesktop(holding.state) || holding.unverifiedDesktop === true) {
+    return spend.estimateUsdCents;
+  }
   const minutes = Math.max(0, holding.updatedAt - holding.requestedAt) / 60_000;
   return Math.min(spend.estimateUsdCents, Math.ceil((spend.hourlyCostUsdCents * minutes) / 60));
 }
