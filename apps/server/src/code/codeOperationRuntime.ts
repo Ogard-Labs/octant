@@ -4231,7 +4231,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                     message === undefined
                       ? undefined
                       : {
-                          category: "failed",
+                          // A refused resume keeps its own category: the
+                          // transcript's parked-turn recovery keys on it, and
+                          // a plain "failed" would make it indistinguishable
+                          // from every other provider failure.
+                          category: failure?.resumeRefused === true ? "stale" : "failed",
                           message,
                           ...(failure?.usageLimit === undefined
                             ? {}

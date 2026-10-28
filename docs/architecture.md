@@ -1630,6 +1630,13 @@ turn's `rate-limited` failure category; in Code it rides the journaled turn
 failure and parks the turn as `waiting`. Drafts, queued input, and completed
 tool results are untouched.
 
+A refused resume is the other fact that parks a Code turn as `waiting`: the
+provider's `stale-resume` failure journals as Code's own `stale` failure
+category, and the transcript's recovery — the waiting status row offering a
+new task in the Project, the composer left ready to send — keys on that
+stated category, never on the absence of a request or a limit, which a
+different parked wait could also satisfy.
+
 A stop that disclosed `resetsAt` additionally offers an explicit per-thread
 opt-in: Resume when the limit resets. A billing stop never offers it, and a
 stop that preserved no resumable provider state — the parked Chat attempt's or

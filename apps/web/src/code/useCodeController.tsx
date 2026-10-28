@@ -35,6 +35,7 @@ import {
   type CodeConversationTurn,
   type CodeProviderLimit,
   type CodeOperationEvent,
+  type CodeOperationFailure,
   type CodeOperationId,
   type CodeThreadCheckoutRebindOutcome,
   type CodeForkMergeBack,
@@ -380,6 +381,11 @@ export function useCodeController(options: CodeControllerOptions) {
   // about. Kept separate so arbitrary failure text can never grow a
   // countdown; only a contract fact the host journaled can.
   const [turnUsageLimit, setTurnUsageLimit] = useState<ProviderUsageLimit>();
+  // The category of the failure `turnError` carries, when the host stated
+  // one. A refused resume parks the turn as `stale`, and the transcript's
+  // recovery keys on that journaled fact instead of guessing from what the
+  // failure did not come with.
+  const [turnErrorCategory, setTurnErrorCategory] = useState<CodeOperationFailure["category"]>();
   // The conversation-tail provider turn's operationId, kept beside
   // `turnUsageLimit`: a resume opt-in names exactly this operation.
   const [latestProviderTurnOperationId, setLatestProviderTurnOperationId] =
@@ -394,13 +400,20 @@ export function useCodeController(options: CodeControllerOptions) {
   const setTurnError = useCallback(
     (
       next: string | undefined | ((current: string | undefined) => string | undefined),
-      options?: { readonly inTranscript?: boolean },
+      options?: {
+        readonly inTranscript?: boolean;
+        /** The host's stated category for this failure, when it carried one. */
+        readonly category?: CodeOperationFailure["category"];
+      },
     ) => {
       setTurnErrorMessage(next);
       // An updater revises whichever failure is already showing, so it keeps
       // that failure's provenance; a plain message is a new failure and is not
       // in the transcript unless its caller says so.
-      if (typeof next !== "function") setTurnErrorInTranscript(options?.inTranscript === true);
+      if (typeof next !== "function") {
+        setTurnErrorInTranscript(options?.inTranscript === true);
+        setTurnErrorCategory(options?.category);
+      }
     },
     [],
   );
@@ -1475,6 +1488,7 @@ export function useCodeController(options: CodeControllerOptions) {
 
                   let terminalState: "completed" | "waiting" | "interrupted" | "failed" | undefined;
                   let terminalMessage: string | undefined;
+                  let terminalFailureCategory: CodeOperationFailure["category"] | undefined;
                   let terminalUsageLimit: ProviderUsageLimit | undefined;
                   // Only a provider-turn-state result is the journaled stop a
                   // resume opt-in can bind to; other terminal frames show the
@@ -1483,6 +1497,7 @@ export function useCodeController(options: CodeControllerOptions) {
                   if (event.kind === "operation-state" && event.state !== "running") {
                     terminalState = event.state;
                     terminalMessage = event.failure?.message;
+                    terminalFailureCategory = event.failure?.category;
                     terminalUsageLimit = event.failure?.usageLimit;
                   } else if (
                     event.kind === "operation-result" &&
@@ -1498,6 +1513,7 @@ export function useCodeController(options: CodeControllerOptions) {
                   ) {
                     terminalState = "failed";
                     terminalMessage = event.result.failure.message;
+                    terminalFailureCategory = event.result.failure.category;
                     terminalUsageLimit = event.result.failure.usageLimit;
                   }
 
@@ -1545,7 +1561,12 @@ export function useCodeController(options: CodeControllerOptions) {
                           (terminalState === "waiting"
                             ? "Reply to continue."
                             : `Provider turn ${terminalState}.`),
-                        { inTranscript: true },
+                        {
+                          inTranscript: true,
+                          ...(terminalFailureCategory === undefined
+                            ? {}
+                            : { category: terminalFailureCategory }),
+                        },
                       );
                     }
                     return;
@@ -2611,6 +2632,7 @@ export function useCodeController(options: CodeControllerOptions) {
         const settleActiveTurn = (
           status: "waiting" | "interrupted" | "failed",
           message: string,
+          category?: CodeOperationFailure["category"],
         ) => {
           setTurnStatus(
             status === "waiting" ? "waiting" : status === "interrupted" ? "interrupted" : "failed",
@@ -2618,7 +2640,10 @@ export function useCodeController(options: CodeControllerOptions) {
           if (status !== "waiting") setProviderRequests([]);
           // The same sentence lands on this turn's assistant row below when
           // the provider did not already leave a partial reply.
-          setTurnError(message, { inTranscript: assistantText.trim().length === 0 });
+          setTurnError(message, {
+            inTranscript: assistantText.trim().length === 0,
+            ...(category === undefined ? {} : { category }),
+          });
           restoreFailedPrompt();
           setConversation((current) =>
             current.map((entry) =>
@@ -2742,6 +2767,7 @@ export function useCodeController(options: CodeControllerOptions) {
                       (event.state === "waiting"
                         ? "Reply to continue."
                         : `Provider turn ${event.state}.`),
+                    event.failure?.category,
                   );
                   return false;
                 }
@@ -2760,12 +2786,17 @@ export function useCodeController(options: CodeControllerOptions) {
                     event.result.state === "waiting"
                       ? "Reply to continue."
                       : `Provider turn ${event.result.state}.`,
+                    event.result.failure?.category,
                   );
                   return false;
                 }
               } else if (event.result.kind === "operation-failed") {
                 terminal = true;
-                settleActiveTurn("failed", event.result.failure.message);
+                settleActiveTurn(
+                  "failed",
+                  event.result.failure.message,
+                  event.result.failure.category,
+                );
                 return false;
               } else {
                 terminal = event.result.kind !== "operation-accepted";
@@ -2985,6 +3016,7 @@ export function useCodeController(options: CodeControllerOptions) {
     threadUsage,
     turnActivity,
     turnError,
+    turnErrorCategory,
     turnErrorInTranscript,
     turnStatus,
     turnUsageLimit,
