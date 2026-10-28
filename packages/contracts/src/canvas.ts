@@ -2609,7 +2609,6 @@ export const CANVAS_DECK_SLIDE_KINDS = [
   "metric",
   "progress",
   "status",
-  "dashboard",
 ] as const;
 export type CanvasDeckSlideKind = (typeof CANVAS_DECK_SLIDE_KINDS)[number];
 

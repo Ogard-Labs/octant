@@ -487,7 +487,7 @@ const BLOCK_GUIDANCE: Readonly<Record<string, { readonly use: string; readonly d
     deck: {
       use: "A presentation that mixes screens with data blocks, as slides.",
       detail:
-        "A deck presents the document's own blocks as one ordered set of slides: a design's frame (with its frameId), a mockup's screen (with its variantId when it declares variants), or a chart, table, metric, progress, status, or dashboard block. Each slide may carry presenter notes (never carried by a share). A block is placed once in the whole Canvas, so a slide is never also a dashboard cell or a flow screen; Present walks the set across blocks, and a plain design block keeps its own Present.",
+        "A deck presents the document's own blocks as one ordered set of slides: a design's frame (with its frameId), a mockup's screen (with its variantId when it declares variants), or a chart, table, metric, progress, or status block (a dashboard is not a slide; place its numbers as slides of their own). Each slide may carry presenter notes (never carried by a share). A block is placed once in the whole Canvas, so a slide is never also a dashboard cell or a flow screen; Present walks the set across blocks, and a plain design block keeps its own Present.",
     },
     flow: {
       use: "An app or site's screens connected by their transitions, on a board.",

@@ -742,30 +742,42 @@ as one ordered set of 2 to 24 slides: a design's frame (named by `frameId`; a
 design that runs script is refused, exactly as a flow's screen refuses one —
 a deck presents finished screens, and a running frame keeps its own Run), a
 mockup's screen (named by `variantId` when the mockup declares variants),
-or a chart, table, metric, progress, status, or dashboard block, each with
-optional presenter notes of at most 2,000 characters. The slide list names
-the frame or variant each slide shows beside its block's title. A slide references
-rather than copies, so a block keeps its one definition, comments, and
-identity, and a block is placed once — a slide is never also a dashboard
-cell, a tab child, or a flow screen (`block-placed-twice`). The domain policy
-names each refusal (`dangling-deck-slide`, `deck-slide-kind-refused`,
-`duplicate-deck-slide`, `deck-slide-frame-missing`,
-`deck-slide-variant-missing`, and the slides budget). The reading order
-places a deck's slides inside it, so a placed block never reads twice.
+or a chart, table, metric, progress, or status block, each with optional
+presenter notes of at most 2,000 characters. A dashboard is not a slide: it
+places blocks of its own, and a deck shows those numbers as slides instead.
+The slide list names the frame or variant each slide shows beside its block's
+title. A slide references rather than copies, so a block keeps its one
+definition, comments, and identity. A block is placed by one block: a slide
+is never also a dashboard cell, a tab child, or a flow screen
+(`block-placed-twice`), while one deck may show several frames of one design
+or several variants of one mockup; the same frame or variant twice is a
+`duplicate-deck-slide`. The domain policy names each refusal
+(`dangling-deck-slide`, `deck-slide-kind-refused`, `duplicate-deck-slide`,
+`deck-slide-frame-missing`, `deck-slide-variant-missing`,
+`deck-slide-design-refused`, and the slides budget). The reading order places
+a deck's slides inside it, so a placed block never reads twice; the Markdown
+and HTML export read the deck's title and then each shown block, and the
+artifact thumbnail and SVG sidecar draw each shown block as it would draw it
+alone.
 
 The deck lists its slides with their notes — each naming the frame or variant
 it shows — and **Present** walks the set across blocks in the design player's
 anatomy, a mockup slide drawing the variant the deck names and a design slide
-its named frame, scaled to fit the stage as the design player scales a slide: arrows and Page keys move, the
-position reads in tabular numerals, fullscreen is offered where the browser
-has it, and the Notes toggle (off by default, remembered for the browser
-session, absent when no slide has notes) shows the current slide's notes —
-which, like a design's frame notes, are the presenter's and never leave the
-host. A design frame slide draws its live page; a mockup slide its frame
-drawing; a data block the surface it already is. Present on a plain design
-block keeps today's behavior. A share carries the deck whole at share
-version 14 except its notes, which a shared deck walks without; the
-`data-deck` recipe starts from the document's own numbers.
+its named frame, scaled to fit the stage as the design player scales a slide:
+arrows and Page keys move (a field, slider, or tab strip that reads arrows
+keeps them), the position reads in tabular numerals, fullscreen is offered
+where the browser has it, and the Notes toggle (off each time Present opens,
+absent when no slide has notes) shows the current slide's notes — which, like
+a design's frame notes, are the presenter's and never leave the host. A design
+frame slide draws its static page; a mockup slide its frame drawing; a data
+block the surface it already is. A deck whose slides name no block the reader
+holds offers no Present. Present on a plain design block keeps today's
+behavior. A share carries the deck whole at share version 14 except its
+notes, which a shared deck walks without; the `data-deck` recipe starts from
+the document's own numbers. Share versions 12 (flow), 13 (mockup library), and
+14 (deck) each need the share kit synced and the public share service deployed
+before a desktop release publishes them, as
+[Canvas public links](canvas-public-links.md#the-service) requires.
 
 ## Shares
 

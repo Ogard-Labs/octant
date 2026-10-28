@@ -4251,8 +4251,54 @@ describe("deck slides", () => {
             ]),
           ]),
         ),
+      "duplicate-deck-slide",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            chart,
+            mockupBlock("screen"),
+            {
+              blockId: "board",
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              kind: "dashboard",
+              title: "Board",
+              cells: [{ blockId: "signups" }],
+            },
+            deck([
+              { slideId: "a", blockId: "signups" },
+              { slideId: "b", blockId: "screen" },
+            ]),
+          ]),
+        ),
       "block-placed-twice",
     );
+  });
+
+  it("shows several frames of one design as several slides", () => {
+    const design = {
+      blockId: "site",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "design" as const,
+      title: "Site",
+      size: "slide" as const,
+      frames: [
+        { frameId: "intro", title: "Intro", html: "<h1>Intro</h1>" },
+        { frameId: "plan", title: "Plan", html: "<h1>Plan</h1>" },
+      ],
+    };
+    expect(() =>
+      validateCanvasDefinition(
+        withBlocks([
+          design,
+          deck([
+            { slideId: "a", blockId: "site", frameId: "intro" },
+            { slideId: "b", blockId: "site", frameId: "plan" },
+          ]),
+        ]),
+      ),
+    ).not.toThrow();
   });
 
   it("refuses a deck in a document that declares the version before it", () => {

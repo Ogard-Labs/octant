@@ -106,7 +106,11 @@ import {
 import { canvasDesignMarkupRefusal, canvasDesignStylesheetRefusal } from "./canvasDesignPolicy";
 import { designBrandTokenRefusal } from "./canvasDesignFrameKit";
 import { canvasMathSourceRefusal } from "./canvasMathPolicy";
-import { canvasDashboardColumns, isCanvasDashboardCellKind } from "./canvasDashboardLayout";
+import {
+  canvasDashboardColumns,
+  isCanvasDashboardCellKind,
+  isCanvasDeckSlideKind,
+} from "./canvasDashboardLayout";
 import { canonicalizeWorkRelativePath, WorkConfinementRejected } from "./workConfinementPolicy";
 
 const encoder = new TextEncoder();
@@ -1486,12 +1490,27 @@ function validateDeck(
   }
   const kinds = new Map(blocks.map((candidate) => [String(candidate.blockId), candidate.kind]));
   const slideIds = new Set<string>();
+  const shown = new Set<string>();
   for (const slide of block.slides) {
     const slideId = String(slide.slideId);
     if (slideIds.has(slideId)) {
       reject("duplicate-deck-slide", `${name} has two slides with the id ${slideId}.`);
     }
     slideIds.add(slideId);
+    // Several frames of one design, or variants of one mockup, are several
+    // slides; the same view twice is one slide written twice.
+    const view = JSON.stringify([
+      String(slide.blockId),
+      slide.frameId === undefined ? null : String(slide.frameId),
+      slide.variantId === undefined ? null : String(slide.variantId),
+    ]);
+    if (shown.has(view)) {
+      reject(
+        "duplicate-deck-slide",
+        `${name} shows block ${String(slide.blockId)} at the same frame or variant twice.`,
+      );
+    }
+    shown.add(view);
     const kind = kinds.get(String(slide.blockId));
     if (kind === undefined) {
       reject(
@@ -1499,10 +1518,10 @@ function validateDeck(
         `${name} shows block ${String(slide.blockId)}, which the Canvas does not hold.`,
       );
     }
-    if (!(kind === undefined || (CANVAS_DECK_SLIDE_KINDS as readonly string[]).includes(kind))) {
+    if (kind !== undefined && !isCanvasDeckSlideKind(kind)) {
       reject(
         "deck-slide-kind-refused",
-        `${name} cannot show a ${String(kind)} block; a slide is a design, mockup, chart, table, metric, progress, status, or dashboard.`,
+        `${name} cannot show a ${kind} block; a slide is a ${CANVAS_DECK_SLIDE_KINDS.join(", ")} block.`,
       );
     }
     const placed = blocks.find((candidate) => String(candidate.blockId) === String(slide.blockId));

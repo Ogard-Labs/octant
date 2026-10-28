@@ -851,5 +851,8 @@ governs over any number written earlier.
   the presenter's notes, which a share never carries. ASM-1 held: the deck
   got its own player rather than a generalized design player, so a plain
   design's Present is untouched. The `data-deck` recipe and describe guidance
-  ship with it. Delivered for review as #1841. All five slices are now in
+  ship with it. Dashboard slides (in FR-8's list) were cut in review: the
+  player, export, and thumbnail had no path that drew a dashboard's cells, so
+  a deck shows those numbers as slides of their own. Delivered for review as
+  #1841. All five slices are now in
   review; rendered QA remains named-pending across the stack.

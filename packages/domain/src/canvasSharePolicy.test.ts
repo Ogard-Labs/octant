@@ -314,6 +314,56 @@ describe("Canvas share policy", () => {
     ).toThrow();
   });
 
+  it("shares a deck's slides without the presenter's notes", () => {
+    const metric = {
+      blockId: "signups",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "metric",
+      label: "Signups",
+      value: 1200,
+    };
+    const chartBlock = {
+      blockId: "trend",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "chart",
+      chartType: "line",
+      series: [{ seriesId: "s", label: "Signups", points: [{ x: "Q1", y: 3 }] }],
+    };
+    const deck = {
+      blockId: "talk",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "deck",
+      title: "Review",
+      slides: [
+        { slideId: "one", blockId: "signups", notes: "Pause here for questions." },
+        { slideId: "two", blockId: "trend" },
+      ],
+    };
+    const receipt = buildCanvasStaticExportReceipt({
+      request,
+      current: decodeCanvasVersion({
+        ...current,
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        definition: {
+          ...current.definition,
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          blocks: [metric, chartBlock, deck],
+        },
+      }),
+      context,
+    });
+    const shared = receipt.document.blocks.find((block) => block.blockId === "talk");
+    expect(shared).toEqual({
+      ...deck,
+      schemaVersion: Math.min(deck.schemaVersion, CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION),
+      slides: [
+        { slideId: "one", blockId: "signups" },
+        { slideId: "two", blockId: "trend" },
+      ],
+    });
+    expect(JSON.stringify(receipt.document)).not.toContain("Pause here");
+  });
+
   it("shares a dashboard with the blocks it places, so a reader draws the same grid", () => {
     const blocks = [...opsDashboardExample];
     const receipt = buildCanvasStaticExportReceipt({
