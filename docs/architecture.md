@@ -8629,9 +8629,11 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   an unreachable host's cached items stay listed as stale and read-only, and
   an authority-bearing mutation is allowed only on a host whose read model is
   ready. The hub-and-spoke design keeps this rule: a hub introduces hosts and
-  devices to each other, but an introduction authorizes nothing, each host
+  devices to each other, an introduction grants only what the receiving host's
+  person allowed when it joined the hub (by default full membership, which
+  never reaches Full access or answers an approval for an agent), each host
   stays the only authority over its own threads and journal, and what one host
-  may do on another is only the grant the receiving host's person chose
+  may do on another is only the grant the receiving host keeps
   ([Hub and spokes](design/hub-and-spokes.md#journal-and-authority-boundaries)).
 - **Host platform in copy.** The host's identity report (`GET /api/hosts`)
   carries the host's `platform`, set from `process.platform`; it is optional
