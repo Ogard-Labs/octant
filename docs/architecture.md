@@ -3728,7 +3728,10 @@ carrying only the reference it appended and the attempt's `updatedAt`, so
 journal bytes per reply are linear in its length. The appended frame goes only
 to a subscriber that asks with `appended=1`; every other subscriber still
 receives each delta as a full `attempt-updated` frame read back from the
-projection, which already holds the attempt's current state. The receipt is
+projection, which already holds the attempt's current state. An opt-in
+parameter the host does not know is ignored rather than refused, so a newer
+client on an older host still streams: a bad value on a known opt-in is a 400,
+but a future opt-in degrades to the frames it would have had without it. The receipt is
 also on the inspector snapshot as
 `latestCompaction`:
 

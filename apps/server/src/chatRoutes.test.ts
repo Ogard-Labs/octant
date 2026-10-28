@@ -320,17 +320,23 @@ describe("Chat routes", () => {
       appended: true,
     });
 
-    for (const query of [
-      "compaction=yes",
-      "compaction=1&compaction=1",
-      "compaction=1&other=1",
-      "appended=yes",
-    ]) {
+    for (const query of ["compaction=yes", "compaction=1&compaction=1", "appended=yes"]) {
       const refused = await route(
         request(`/api/chat/threads/${threadId}/events?afterSequence=41&${query}`),
       );
       expect(refused?.status).toBe(400);
     }
+
+    // An opt-in this host does not know is ignored, not refused, so a newer
+    // client on an older host still streams instead of failing on skew.
+    await collectFrames(
+      route(request(`/api/chat/threads/${threadId}/events?afterSequence=41&futureoptin=1`)),
+    );
+    expect(subscribe).toHaveBeenCalledWith(threadId, 41, expect.any(AbortSignal), {
+      contents: false,
+      compaction: false,
+      appended: false,
+    });
   });
 
   it("holds an idle events stream open and continues from its cursor after the next commit", async () => {
