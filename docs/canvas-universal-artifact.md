@@ -873,6 +873,7 @@ governs over any number written earlier.
 - 2026-10-28: Maintainer asked for the nine ranked improvements; folded into
   slices 6–9 above and implemented the same day (see Verification).
 - 2026-10-28: Slice 9 implemented: the TSX handoff control, the one-click
-  deck proposal (command, policy, service, route, client, menu), and the
-  mockup per-node comment markers. The deck PDF is the single item left in
-  the plan, with its exact path recorded above.
+  deck proposal (command, policy, service, route, client, menu), the mockup
+  per-node comment markers, and the deck PDF (`slides` picture subject; the
+  renderer draws one preview page per slide and the PDF holds one page per
+  slide). All nine ranked improvements are now built; the plan is complete.

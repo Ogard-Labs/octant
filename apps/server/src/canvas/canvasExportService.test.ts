@@ -12,7 +12,12 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Schema } from "effect";
-import { decodeCanvasId, decodeCanvasVersionId, type CanvasBlock } from "@octant/contracts/canvas";
+import {
+  decodeCanvasId,
+  decodeCanvasVersionId,
+  type CanvasBlock,
+  type CanvasDefinition,
+} from "@octant/contracts/canvas";
 import {
   CANVAS_EXPORT_APPROVAL_TTL_MS,
   CANVAS_EXPORT_MAX_PENDING_PER_CANVAS,
@@ -284,7 +289,12 @@ function fakeRenderer(requests: CanvasExportPictureRequest[]): CanvasExportRende
     available: async () => true,
     renderPictures: async (request) => {
       requests.push(request);
-      const count = request.subject.kind === "frames" ? request.subject.frames.length : 1;
+      const count =
+        request.subject.kind === "frames"
+          ? request.subject.frames.length
+          : request.subject.kind === "slides"
+            ? request.subject.slides.length
+            : 1;
       return {
         kind: "rendered",
         files:
@@ -304,6 +314,116 @@ function pictureRequest(format: "png" | "pdf") {
 }
 
 describe("canvas export service", () => {
+  it("draws a deck block as one picture per slide, a design slide showing its named frame", async () => {
+    const requests: CanvasExportPictureRequest[] = [];
+    const doc: CanvasExportDocument = {
+      ...document(),
+      definition: {
+        schemaVersion: 26,
+        title: "Launch plan",
+        provenance: {
+          mode: "work",
+          hostId: "local",
+          projectId: "22222222-2222-4222-8222-222222222222",
+          threadId: "33333333-3333-4333-8333-333333333333",
+          actor: { kind: "local-user", actorId: "55555555-5555-4555-8555-555555555555" },
+          providerInstanceId: "44444444-4444-4444-8444-444444444444",
+          modelId: "octant-test-model",
+          createdAt: "2026-08-01T21:00:00.000Z",
+        },
+        sourceManifest: [],
+        blocks: [
+          {
+            blockId: "site",
+            schemaVersion: 26,
+            kind: "design",
+            title: "Site",
+            size: "phone",
+            theme: "none",
+            frames: [
+              { frameId: "home", title: "Home", html: "<h1>Home</h1>" },
+              { frameId: "about", title: "About", html: "<h1>About</h1>" },
+            ],
+          },
+          {
+            blockId: "signups",
+            schemaVersion: 1,
+            kind: "metric",
+            label: "Weekly signups",
+            value: 1284,
+          },
+          {
+            blockId: "deck",
+            schemaVersion: 26,
+            kind: "deck",
+            title: "Launch review",
+            slides: [
+              { slideId: "a", blockId: "site", frameId: "about" },
+              { slideId: "b", blockId: "signups" },
+            ],
+          },
+        ] as unknown as CanvasDefinition["blocks"],
+      } as unknown as CanvasDefinition,
+      blocks: [
+        {
+          blockId: "site",
+          schemaVersion: 26,
+          kind: "design",
+          title: "Site",
+          size: "phone",
+          theme: "none",
+          frames: [
+            { frameId: "home", title: "Home", html: "<h1>Home</h1>" },
+            { frameId: "about", title: "About", html: "<h1>About</h1>" },
+          ],
+        },
+        {
+          blockId: "signups",
+          schemaVersion: 1,
+          kind: "metric",
+          label: "Weekly signups",
+          value: 1284,
+        },
+        {
+          blockId: "deck",
+          schemaVersion: 26,
+          kind: "deck",
+          title: "Launch review",
+          slides: [
+            { slideId: "a", blockId: "site", frameId: "about" },
+            { slideId: "b", blockId: "signups" },
+          ],
+        },
+      ] as unknown as ReadonlyArray<CanvasBlock>,
+    };
+    const { registration } = exportFolder();
+    const { service, connection } = harness(
+      () => canvasExportTargetBindings(registration, canvasId),
+      { doc, renderer: fakeRenderer(requests) },
+    );
+
+    const prepared = await service.prepare(pictureRequest("png"), true);
+    expect(prepared).toMatchObject({ kind: "approval" });
+    if (prepared.kind !== "approval") {
+      connection.close();
+      return;
+    }
+    // The subject is the deck's slides, in deck order.
+    const subject = requests[0]?.subject;
+    if (subject?.kind !== "slides") throw new Error("expected a slides subject");
+    expect(subject.slides).toHaveLength(2);
+    expect(subject.slides[0]?.definition.blocks[0]).toMatchObject({
+      kind: "design",
+      frames: [{ frameId: "about" }],
+    });
+    expect(subject.slides[0]?.designPages).toHaveLength(1);
+    expect(subject.slides[1]?.definition.blocks[0]).toMatchObject({
+      kind: "metric",
+      value: 1284,
+    });
+    connection.close();
+  });
+
   it("writes one PNG per slide into the folder once the person approves", async () => {
     const { folder, registration } = exportFolder();
     const requests: CanvasExportPictureRequest[] = [];
@@ -313,7 +433,7 @@ describe("canvas export service", () => {
     );
 
     const prepared = await service.prepare(pictureRequest("png"), true);
-    expect(prepared.kind).toBe("approval");
+    expect(prepared).toMatchObject({ kind: "approval" });
     if (prepared.kind !== "approval") {
       connection.close();
       return;
@@ -353,7 +473,10 @@ describe("canvas export service", () => {
     );
 
     const prepared = await service.prepare(pictureRequest("pdf"), true);
-    expect(prepared.kind).toBe("approval");
+    if (prepared.kind === "refused") {
+      console.log("REFUSAL:", prepared.code, prepared.message);
+    }
+    expect(prepared).toMatchObject({ kind: "approval" });
     if (prepared.kind !== "approval") {
       connection.close();
       return;
@@ -422,7 +545,10 @@ describe("canvas export service", () => {
     const { calls, service, eventStore, connection } = harness();
 
     const prepared = await service.prepare(prepareRequest(), true);
-    expect(prepared.kind).toBe("approval");
+    if (prepared.kind === "refused") {
+      console.log("REFUSAL:", prepared.code, prepared.message);
+    }
+    expect(prepared).toMatchObject({ kind: "approval" });
     expect(calls).toHaveLength(0);
     expect(eventStore.replay()).toEqual([]);
 
@@ -496,7 +622,10 @@ describe("canvas export service", () => {
   it("calls the destination only after approval and journals the receipt under the local actor", async () => {
     const { calls, service, eventStore, envelopes, connection } = harness();
     const prepared = await service.prepare(prepareRequest(), true);
-    expect(prepared.kind).toBe("approval");
+    if (prepared.kind === "refused") {
+      console.log("REFUSAL:", prepared.code, prepared.message);
+    }
+    expect(prepared).toMatchObject({ kind: "approval" });
     if (prepared.kind !== "approval") {
       connection.close();
       return;
@@ -523,7 +652,10 @@ describe("canvas export service", () => {
   it("journals a remote approval as that device, never as the local user", async () => {
     const { service, envelopes, connection } = harness();
     const prepared = await service.prepare(prepareRequest(), true);
-    expect(prepared.kind).toBe("approval");
+    if (prepared.kind === "refused") {
+      console.log("REFUSAL:", prepared.code, prepared.message);
+    }
+    expect(prepared).toMatchObject({ kind: "approval" });
     if (prepared.kind !== "approval") {
       connection.close();
       return;
@@ -606,7 +738,10 @@ describe("canvas export service", () => {
   it("refuses an approval answered after its deadline and releases it", async () => {
     const { calls, service, connection, advanceClock } = harness();
     const prepared = await service.prepare(prepareRequest(), true);
-    expect(prepared.kind).toBe("approval");
+    if (prepared.kind === "refused") {
+      console.log("REFUSAL:", prepared.code, prepared.message);
+    }
+    expect(prepared).toMatchObject({ kind: "approval" });
     if (prepared.kind !== "approval") {
       connection.close();
       return;
@@ -643,7 +778,10 @@ describe("canvas export service", () => {
     const approvalIds: string[] = [];
     for (let index = 0; index < CANVAS_EXPORT_MAX_PENDING_PER_CANVAS; index += 1) {
       const prepared = await service.prepare(prepareRequest(), true);
-      expect(prepared.kind).toBe("approval");
+      if (prepared.kind === "refused") {
+        console.log("REFUSAL:", prepared.code, prepared.message);
+      }
+      expect(prepared).toMatchObject({ kind: "approval" });
       if (prepared.kind === "approval") {
         approvalIds.push(String(prepared.card.approvalId));
       }
@@ -679,7 +817,10 @@ describe("canvas export service", () => {
   it("answering the same approval twice delivers once and journals once", async () => {
     const { calls, service, eventStore, connection } = harness();
     const prepared = await service.prepare(prepareRequest(), true);
-    expect(prepared.kind).toBe("approval");
+    if (prepared.kind === "refused") {
+      console.log("REFUSAL:", prepared.code, prepared.message);
+    }
+    expect(prepared).toMatchObject({ kind: "approval" });
     if (prepared.kind !== "approval") {
       connection.close();
       return;
@@ -708,7 +849,10 @@ describe("canvas export service", () => {
   it("reports a delivered export the journal could not record instead of failing it", async () => {
     const { calls, service, eventStore, connection } = harness();
     const prepared = await service.prepare(prepareRequest(), true);
-    expect(prepared.kind).toBe("approval");
+    if (prepared.kind === "refused") {
+      console.log("REFUSAL:", prepared.code, prepared.message);
+    }
+    expect(prepared).toMatchObject({ kind: "approval" });
     if (prepared.kind !== "approval") {
       connection.close();
       return;
@@ -743,7 +887,10 @@ describe("canvas export service", () => {
   it("measures the payload in UTF-8 bytes, not code units", async () => {
     const { service, connection } = harness(undefined, { doc: document("Préparons 🚀 le Café") });
     const prepared = await service.prepare(prepareRequest(), true);
-    expect(prepared.kind).toBe("approval");
+    if (prepared.kind === "refused") {
+      console.log("REFUSAL:", prepared.code, prepared.message);
+    }
+    expect(prepared).toMatchObject({ kind: "approval" });
     if (prepared.kind !== "approval") {
       connection.close();
       return;
@@ -781,7 +928,10 @@ describe("canvas export service", () => {
     );
 
     const prepared = await service.prepare(prepareRequest(FOLDER_EXPORT_TARGET_ID), true);
-    expect(prepared.kind).toBe("approval");
+    if (prepared.kind === "refused") {
+      console.log("REFUSAL:", prepared.code, prepared.message);
+    }
+    expect(prepared).toMatchObject({ kind: "approval" });
     if (prepared.kind !== "approval") {
       connection.close();
       return;
@@ -817,7 +967,10 @@ describe("canvas export service", () => {
     );
 
     const prepared = await service.prepare(prepareRequest(FOLDER_EXPORT_TARGET_ID), true);
-    expect(prepared.kind).toBe("approval");
+    if (prepared.kind === "refused") {
+      console.log("REFUSAL:", prepared.code, prepared.message);
+    }
+    expect(prepared).toMatchObject({ kind: "approval" });
     if (prepared.kind !== "approval") {
       connection.close();
       return;
@@ -919,7 +1072,10 @@ describe("canvas export service", () => {
     );
 
     const prepared = await service.prepare(prepareRequest(GIST_EXPORT_TARGET_ID), true);
-    expect(prepared.kind).toBe("approval");
+    if (prepared.kind === "refused") {
+      console.log("REFUSAL:", prepared.code, prepared.message);
+    }
+    expect(prepared).toMatchObject({ kind: "approval" });
     if (prepared.kind !== "approval") {
       connection.close();
       return;
@@ -1006,7 +1162,10 @@ describe("canvas export service", () => {
     };
     const { service, connection } = harness(() => [silent]);
     const prepared = await service.prepare(prepareRequest("silent-destination"), true);
-    expect(prepared.kind).toBe("approval");
+    if (prepared.kind === "refused") {
+      console.log("REFUSAL:", prepared.code, prepared.message);
+    }
+    expect(prepared).toMatchObject({ kind: "approval" });
     if (prepared.kind !== "approval") {
       connection.close();
       return;

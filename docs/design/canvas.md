@@ -747,7 +747,11 @@ session, absent when no slide has notes) shows the current slide's notes —
 which, like a design's frame notes, are the presenter's and never leave the
 host. A design frame slide draws its live page; a mockup slide its frame
 drawing; a data block the surface it already is. Present on a plain design
-block keeps today's behavior. A share carries the deck whole at share
+block keeps today's behavior. A picture export of a Canvas that holds a deck
+draws the deck: one PNG per slide, or one PDF page per slide at each slide's
+drawn height — the design slide shows the one frame the deck names (drawn
+from the frame's own page), and a mockup or data slide shows the block as the
+thread draws it. A Canvas with no deck keeps today's picture behaviour. A share carries the deck whole at share
 version 14 except its notes, which a shared deck walks without; the
 `data-deck` recipe starts from the document's own numbers.
 

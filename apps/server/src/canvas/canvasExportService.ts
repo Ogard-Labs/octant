@@ -572,7 +572,14 @@ export class CanvasExportService {
       card: {
         files: files.map((file) => ({ name: file.name, byteLength: file.bytes.length })),
         ...(format === "pdf" && subject.kind === "frames" ? { pages: subject.frames.length } : {}),
+        ...(format === "pdf" && subject.kind === "slides" ? { pages: subject.slides.length } : {}),
         ...(subject.kind === "frames" ? { drawsDesignFrames: true as const } : {}),
+        ...(subject.kind === "slides" &&
+        subject.slides.some((slide) =>
+          slide.definition.blocks.some((block) => block.kind === "design"),
+        )
+          ? { drawsDesignFrames: true as const }
+          : {}),
       },
     };
   }
@@ -654,6 +661,50 @@ function pictureSubject(
   document: CanvasExportDocument,
   frameTheme: CanvasExportFrameTheme | undefined,
 ): CanvasExportPictureRequest["subject"] | CanvasExportRefusal {
+  // A Canvas that holds a deck presents it: the deck's slides are the
+  // subject, one sheet each, so a picture export is one deck page per slide.
+  const deck = document.blocks.find(
+    (block): block is Extract<CanvasBlock, { kind: "deck" }> => block.kind === "deck",
+  );
+  if (deck !== undefined && document.definition !== undefined) {
+    const byId = new Map(
+      document.blocks.map((block) => [String(block.blockId), block as CanvasBlock]),
+    );
+    const slides: Array<{
+      definition: CanvasDefinition;
+      designPages?: ReadonlyArray<{ blockId: string; html: string }>;
+    }> = [];
+    for (const slide of deck.slides) {
+      const placed = byId.get(String(slide.blockId));
+      if (placed === undefined) continue;
+      let block = placed;
+      let designPages: ReadonlyArray<{ blockId: string; html: string }> | undefined;
+      if (placed.kind === "design" && slide.frameId !== undefined) {
+        // A design slide shows the one frame the deck names, so the block the
+        // slide's page draws carries that frame alone.
+        block = {
+          ...placed,
+          frames: placed.frames.filter((frame) => String(frame.frameId) === String(slide.frameId)),
+        };
+        const pages = renderCanvasDesignExportFrames(block, frameTheme);
+        if (pages !== undefined && pages.length > 0) {
+          designPages = pages.map((page, index) => ({
+            blockId: `${String(placed.blockId)}-${String(index)}`,
+            html: page.page,
+          }));
+        }
+      }
+      slides.push({
+        definition: {
+          ...document.definition,
+          title: placed.kind === "design" || placed.kind === "mockup" ? placed.title : deck.title,
+          blocks: [block],
+        },
+        ...(designPages === undefined ? {} : { designPages }),
+      });
+    }
+    if (slides.length > 0) return { kind: "slides", slides };
+  }
   const frames: CanvasExportPictureFrame[] = [];
   for (const block of document.blocks) {
     if (block.kind !== "design" || block.size === "document") continue;
