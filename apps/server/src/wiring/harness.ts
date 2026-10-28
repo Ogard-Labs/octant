@@ -8,6 +8,7 @@ import {
   decodeNativeHarnessTurnId,
   LOCAL_HOST_ID,
   type OctantMode,
+  type ProviderInstanceId,
   ToolEgressLaunchId,
 } from "@octant/contracts";
 import { Schema } from "effect";
@@ -314,13 +315,21 @@ export function wireHarness(deps: HarnessDependencies) {
   const restartContinuation: {
     current: NativeHarnessSessionRouteDependencies["continueRecovery"];
   } = { current: undefined };
+  const leadDeliversSteering = (providerInstanceId: ProviderInstanceId): boolean => {
+    const instance = persistence.readProviderInstance(providerInstanceId);
+    return instance !== undefined && isNativeHarnessDriverKind(instance.driverKind);
+  };
   const nativeHarnessSessionRoutes = createNativeHarnessSessionRouteHandler({
     windowAuthorityStore,
     store: {
       read: (threadId) => {
         nativeHarnessApprovals.expireOverdue();
         nativeHarnessQuestions.expireOverdue();
-        const view = nativeHarnessSessions.read(threadId);
+        const read = nativeHarnessSessions.read(threadId);
+        const view =
+          read === undefined
+            ? undefined
+            : { ...read, steerable: leadDeliversSteering(read.session.lead.providerInstanceId) };
         const suggestions = threadFollowUpSuggestions.read(threadId);
         return view === undefined || suggestions === undefined
           ? view
@@ -386,6 +395,8 @@ export function wireHarness(deps: HarnessDependencies) {
       if (command.kind === "take") {
         return { taken: nativeHarnessSessions.takeSteering(threadId) };
       }
+      const lead = nativeHarnessSessions.read(threadId)?.session.lead;
+      if (lead !== undefined && !leadDeliversSteering(lead.providerInstanceId)) return "no-session";
       return nativeHarnessSessions.queueSteering(threadId, {
         id: command.noteId ?? randomUUID(),
         text: command.text,
