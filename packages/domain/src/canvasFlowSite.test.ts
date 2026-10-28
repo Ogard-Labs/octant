@@ -158,6 +158,37 @@ describe("flow site navigation", () => {
   });
 });
 
+describe("a design screen's hotspot in the exported site", () => {
+  it("lists the transition as a link, since a sandboxed frame cannot follow its own anchor", () => {
+    const site = canvasFlowSite({
+      flow: {
+        title: "Site flow",
+        screens: [
+          { screenId: "s1", blockId: "site", frameId: "home" },
+          { screenId: "s2", blockId: "results" },
+        ],
+        edges: [
+          { edgeId: "go", fromScreenId: "s1", toScreenId: "s2", fromNodeId: "go", label: "Go" },
+        ],
+      },
+      blocks: [
+        results,
+        {
+          blockId: "site",
+          schemaVersion: 26,
+          kind: "design",
+          title: "Site",
+          size: "desktop",
+          frames: [
+            { frameId: "home", title: "Home", html: '<a id="go" href="#octant-flow:s2">Go</a>' },
+          ],
+        } as never,
+      ],
+    });
+    expect(site).toContain('<a href="#oct-flow-s2">Go →</a>');
+  });
+});
+
 describe("mockup page generator", () => {
   it("draws an anchor for every component a flow may start a transition from", () => {
     for (const component of CANVAS_FLOW_HOTSPOT_COMPONENTS) {

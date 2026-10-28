@@ -2455,7 +2455,7 @@
   place-items: center;
   width: 18px;
   height: 18px;
-  border-radius: 999px;
+  border-radius: var(--oct-radius-pill);
   background: var(--oct-fg);
   color: var(--oct-bg);
   font-family: var(--oct-font-mono);

@@ -4344,7 +4344,7 @@ describe("flow design hotspots", () => {
       {
         frameId: "home",
         title: "Home",
-        html: '<a id="go" href="#octant-flow:results">Go</a>',
+        html: '<a id="go" href="#octant-flow:s2">Go</a><p data-id="other" id="note">id="fake"</p>',
       },
     ],
   };
@@ -4372,6 +4372,32 @@ describe("flow design hotspots", () => {
     expect(() =>
       validateCanvasDefinition(withBlocks([designScreen, wireframe("screen"), withTarget])),
     ).not.toThrow();
+  });
+
+  it("refuses an anchor that is not a link to the edge's own target", () => {
+    const edgeTo = (fromNodeId: string) =>
+      validateCanvasDefinition(
+        withBlocks([
+          designScreen,
+          wireframe("screen"),
+          wireframe("other-screen"),
+          {
+            ...flowOverDesign(fromNodeId),
+            screens: [
+              { screenId: "s1", blockId: "site", frameId: "home" },
+              { screenId: "s2", blockId: "screen" },
+              { screenId: "s3", blockId: "other-screen" },
+            ],
+            edges: [{ edgeId: "go", fromScreenId: "s1", toScreenId: "s3", fromNodeId }],
+          },
+        ]),
+      );
+    // The anchor links to s2, so an edge to s3 from it is refused.
+    expectPolicyCode(() => edgeTo("go"), "flow-hotspot-refused");
+    // An element that only carries the id, or text that reads like one, is not a link.
+    expectPolicyCode(() => edgeTo("note"), "flow-hotspot-refused");
+    expectPolicyCode(() => edgeTo("fake"), "flow-hotspot-refused");
+    expectPolicyCode(() => edgeTo("other"), "flow-hotspot-refused");
   });
 
   it("refuses a hotspot naming an anchor the frame does not hold", () => {

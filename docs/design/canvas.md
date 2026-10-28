@@ -664,8 +664,18 @@ prototype tier and keeps its own Play. Up to 96 `edges` carry `fromScreenId`,
 (the diagram tones), and optionally `fromNodeId`: the hotspot the person taps,
 a node of the from-screen's mockup from the closed interactive list (button,
 list-row, nav, tabs, select, checkbox, toggle), so a link is data the
-renderer can draw without a script; an edge from a design screen carries no
-hotspot, and an inert mockup part is refused (`flow-hotspot-refused`). The
+renderer can draw without a script, and an inert mockup part is refused
+(`flow-hotspot-refused`). An edge from a design screen may name as its
+hotspot the `id` of an anchor in that frame's own markup, written
+`<a id="<fromNodeId>" href="#octant-flow:<toScreenId>">`; the policy reads the
+frame's anchors attribute by attribute and refuses an edge whose anchor is
+missing or links anywhere but the edge's own target, so the declared edge
+stays the authority. In Play a design screen is drawn same-origin (it still
+runs nothing; see the HTML frames threat model) so the player can read the
+page's hash and follow only an anchor a declared edge from that screen
+names; every edge leaving a design screen is also listed in Go to. The
+exported site lists those edges as links under the screen, because a
+sandboxed frame there cannot reach out without script. The
 domain policy names each refusal (`dangling-flow-screen`,
 `flow-screen-kind-refused`, `flow-screen-variant-missing`,
 `flow-screen-frame-missing`, `flow-screen-design-refused`,
@@ -758,10 +768,7 @@ definition, comments, and identity. A block is placed by one block: a slide
 is never also a dashboard cell, a tab child, or a flow screen
 (`block-placed-twice`), while one deck may show several frames of one design
 or several variants of one mockup; the same frame or variant twice is a
-`duplicate-deck-slide`. The pure `proposeCanvasDeck` derives a deck from the
-document's own screens and readings — designs' frames with their notes,
-mockups, then data blocks, and nothing another placer already holds — so a
-person's one click and an agent's proposal agree. The domain policy names each refusal
+`duplicate-deck-slide`. The domain policy names each refusal
 (`dangling-deck-slide`, `deck-slide-kind-refused`, `duplicate-deck-slide`,
 `deck-slide-frame-missing`, `deck-slide-variant-missing`,
 `deck-slide-design-refused`, and the slides budget). The reading order places

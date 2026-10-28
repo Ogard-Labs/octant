@@ -1453,6 +1453,29 @@ function validateDeck(
   }
 }
 
+/**
+ * Whether a design frame's markup holds an anchor with this id that links to
+ * the screen: `<a id="go" href="#octant-flow:results">`. Attributes are read
+ * whole, in either quote style, so `data-id="go"` or the text `id="go"` in a
+ * paragraph is not mistaken for the anchor.
+ */
+function designFrameLinksTo(html: string, id: string, screenId: string): boolean {
+  for (const tag of html.matchAll(/<a\b[^>]*>/gi)) {
+    const attributes = new Map<string, string>();
+    for (const attribute of tag[0].matchAll(
+      /([^\s"'<>/=]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g,
+    )) {
+      const name = attribute[1]?.toLowerCase();
+      if (name !== undefined)
+        attributes.set(name, attribute[2] ?? attribute[3] ?? attribute[4] ?? "");
+    }
+    if (attributes.get("id") === id && attributes.get("href") === `#octant-flow:${screenId}`) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function validateFlow(
   block: Extract<CanvasBlock, { readonly kind: "flow" }>,
   blocks: ReadonlyArray<CanvasBlock>,
@@ -1577,10 +1600,11 @@ function validateFlow(
       continue;
     }
     // A design screen's hotspot is an anchor in its frame's own markup: the
-    // author writes href="#octant-flow:<screenId>" on an element whose id the
-    // edge names, so a finished screen participates in the click-through. A
-    // rolled-back runtime refuses this edge whole (fail closed), so no schema
-    // bump is needed for the widening.
+    // author writes <a id="<fromNodeId>" href="#octant-flow:<toScreenId>">, so
+    // a finished screen participates in the click-through and the edge stays
+    // the authority on where the anchor goes. A rolled-back runtime refuses
+    // this edge whole (fail closed), so no schema bump is needed for the
+    // widening.
     const design = fromScreen?.design;
     if (design === undefined) {
       reject(
@@ -1592,10 +1616,13 @@ function validateFlow(
       design?.frames.find(
         (authored) => String(authored.frameId) === String(fromScreen.screen.frameId),
       ) ?? undefined;
-    if (frame === undefined || !frame.html.includes(`id="${String(edge.fromNodeId)}"`)) {
+    if (
+      frame === undefined ||
+      !designFrameLinksTo(frame.html, String(edge.fromNodeId), String(edge.toScreenId))
+    ) {
       reject(
         "flow-hotspot-refused",
-        `Canvas flow ${block.blockId} edge ${edgeId} names the anchor ${String(edge.fromNodeId)}, which the screen's design frame does not hold; write id="${String(edge.fromNodeId)}" on the element the person taps.`,
+        `Canvas flow ${block.blockId} edge ${edgeId} names the anchor ${String(edge.fromNodeId)}, which the screen's design frame does not hold as a link to ${String(edge.toScreenId)}; write <a id="${String(edge.fromNodeId)}" href="#octant-flow:${String(edge.toScreenId)}"> on the element the person taps.`,
       );
     }
   }
