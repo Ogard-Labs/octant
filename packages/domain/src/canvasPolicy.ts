@@ -1,4 +1,6 @@
 import {
+  canvasCarriesNoLaterFloor,
+  CanvasSchemaVersion,
   CANVAS_MAX_BLOCKS,
   CANVAS_MAX_BAR_LIST_ROWS,
   CANVAS_MAX_DIAGRAM_EDGES,
@@ -29,8 +31,6 @@ import {
   CANVAS_MAX_MOCKUP_NODES,
   CANVAS_MAX_MOCKUP_DEFINITIONS,
   CANVAS_MAX_MOCKUP_DEFINITION_NODES,
-  CANVAS_MOCKUP_LIBRARY_SCHEMA_VERSION,
-  CANVAS_DECK_SCHEMA_VERSION,
   CANVAS_MAX_DECK_SLIDES,
   CANVAS_DECK_SLIDE_KINDS,
   CANVAS_MAX_MOCKUP_TEXT_LENGTH,
@@ -41,44 +41,15 @@ import {
   CANVAS_MAX_TEXT_BYTES,
   CANVAS_MAX_TREEMAP_DEPTH,
   CANVAS_MAX_TREEMAP_LEAVES,
-  CANVAS_BAR_LIST_SCHEMA_VERSION,
-  CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION,
-  CANVAS_METRIC_TREND_SCHEMA_VERSION,
-  CANVAS_HEATMAP_SCHEMA_VERSION,
-  CANVAS_MOCKUP_SCHEMA_VERSION,
-  CANVAS_PRESENTATION_SCHEMA_VERSION,
-  CANVAS_SCHEMA_VERSION,
-  CANVAS_TREEMAP_SCHEMA_VERSION,
-  CANVAS_DESIGN_SCHEMA_VERSION,
-  CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION,
-  CANVAS_MATH_SCHEMA_VERSION,
-  CANVAS_TABLE_ROW_ID_SCHEMA_VERSION,
-  CANVAS_FLOW_CHARTS_SCHEMA_VERSION,
-  CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION,
   CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION,
-  CANVAS_THREAD_OWNED_SCHEMA_VERSION,
-  CANVAS_DESIGN_FIELDS_SCHEMA_VERSION,
-  CANVAS_CHART_CALLOUTS_SCHEMA_VERSION,
-  CANVAS_FLOW_SCHEMA_VERSION,
   CANVAS_MAX_FLOW_EDGES,
   CANVAS_MAX_FLOW_SCREENS,
   CANVAS_FLOW_HOTSPOT_COMPONENTS,
-  canvasChartUsesCallouts,
-  canvasMockupUsesLibrary,
   CANVAS_MAX_DIAGRAM_GROUP_DEPTH,
-  canvasProvenanceIsThreadOwned,
-  canvasDesignUsesDesignFields,
-  canvasDiagramUsesRichFields,
-  canvasDiagramUsesStyles,
-  canvasPlanUsesGantt,
   isCanvasDiagramNodeRole,
   canvasLayoutGroupChildIds,
   isCanvasLayoutGroup,
-  CANVAS_DASHBOARD_SCHEMA_VERSION,
   CANVAS_MAX_DASHBOARD_CELLS,
-  CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION,
-  CANVAS_DESIGN_ASSET_SCHEMA_VERSION,
-  CANVAS_DESIGN_RUNNING_SCHEMA_VERSION,
   CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH,
   CANVAS_MAX_FUNNEL_STAGES,
   CANVAS_MAX_RADAR_AXES,
@@ -86,19 +57,12 @@ import {
   CANVAS_MAX_SANKEY_NODES,
   CANVAS_MIN_RADAR_AXES,
   CanvasBlock,
-  canvasChartUsesFlowTypes,
   CanvasDefinition,
-  canvasDesignUsesAssets,
-  canvasDesignRunsScript,
-  canvasDesignUsesDocumentFields,
-  canvasMockupUsesCatalog,
   type CanvasMockupComponent,
   type CanvasMockupNode,
   CanvasVersion,
-  canvasMetricUsesTrendFields,
   canvasTableRowCells,
   canvasTableRowId,
-  canvasTableUsesRowIds,
   decodeCanvasDefinition,
   decodeCanvasVersion,
   type CanvasSourceId,
@@ -118,55 +82,9 @@ const encoder = new TextEncoder();
 // Versions this runtime decodes: every historical version plus the current
 // one. A document declaring anything else is refused as a future version,
 // before its blocks are read, so a newer contract never reaches a renderer.
-const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
-  1,
-  2,
-  3,
-  CANVAS_PRESENTATION_SCHEMA_VERSION,
-  CANVAS_TREEMAP_SCHEMA_VERSION,
-  CANVAS_HEATMAP_SCHEMA_VERSION,
-  CANVAS_BAR_LIST_SCHEMA_VERSION,
-  CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION,
-  CANVAS_DESIGN_SCHEMA_VERSION,
-  CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION,
-  CANVAS_MATH_SCHEMA_VERSION,
-  CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION,
-  CANVAS_TABLE_ROW_ID_SCHEMA_VERSION,
-  CANVAS_FLOW_CHARTS_SCHEMA_VERSION,
-  CANVAS_DASHBOARD_SCHEMA_VERSION,
-  CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION,
-  CANVAS_DESIGN_ASSET_SCHEMA_VERSION,
-  CANVAS_DESIGN_RUNNING_SCHEMA_VERSION,
-  CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION,
-  CANVAS_THREAD_OWNED_SCHEMA_VERSION,
-  CANVAS_DESIGN_FIELDS_SCHEMA_VERSION,
-  CANVAS_CHART_CALLOUTS_SCHEMA_VERSION,
-  CANVAS_FLOW_SCHEMA_VERSION,
-  CANVAS_MOCKUP_LIBRARY_SCHEMA_VERSION,
-  CANVAS_DECK_SCHEMA_VERSION,
-  CANVAS_SCHEMA_VERSION,
-];
-// A block kind that a document may only carry from the version that
-// introduced it. A document declaring an older version but carrying the kind
-// fails closed as a declared future version rather than a corrupt document.
-const VERSION_GATED_BLOCK_KINDS: ReadonlyArray<{ readonly kind: string; readonly since: number }> =
-  [
-    { kind: "mockup", since: CANVAS_MOCKUP_SCHEMA_VERSION },
-    { kind: "treemap", since: CANVAS_TREEMAP_SCHEMA_VERSION },
-    { kind: "heatmap", since: CANVAS_HEATMAP_SCHEMA_VERSION },
-    { kind: "bar-list", since: CANVAS_BAR_LIST_SCHEMA_VERSION },
-    { kind: "er", since: CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION },
-    { kind: "swimlane", since: CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION },
-    { kind: "mindmap", since: CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION },
-    { kind: "design", since: CANVAS_DESIGN_SCHEMA_VERSION },
-    { kind: "comparison-matrix", since: CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION },
-    { kind: "math", since: CANVAS_MATH_SCHEMA_VERSION },
-    { kind: "dashboard", since: CANVAS_DASHBOARD_SCHEMA_VERSION },
-    { kind: "tabs", since: CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION },
-    { kind: "columns", since: CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION },
-    { kind: "flow", since: CANVAS_FLOW_SCHEMA_VERSION },
-    { kind: "deck", since: CANVAS_DECK_SCHEMA_VERSION },
-  ];
+// Every version the contract decodes, from its own literal list, so a bump
+// cannot leave the policy refusing a version the decoder admits.
+const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = CanvasSchemaVersion.literals;
 
 export type CanvasPolicyRejectionCode =
   | "invalid-schema"
@@ -509,15 +427,12 @@ function calculateBudgetUsage(
 
 /**
  * A document a newer runtime declared with a version this runtime has never
- * seen — either a future schema version or a version-gated field (a mockup
- * block from version 3, a thread presentation from version 4, a treemap from
- * version 5, a heatmap from version 6, a design block from version 9, a design
- * document or theme from version 16, design assets from version 17, a
- * design that runs script from version 18, frame notes, brand tokens, and the
- * richer diagram fields from version 21) inside a
- * document that declares an older version — must fail closed as an
+ * seen — either a future schema version or a version-gated kind or field
+ * inside a document that declares an older version — must fail closed as an
  * unsupported schema version, before any content is read, rather than
- * collapsing into a generic "corrupt" decode failure. Works on both a
+ * collapsing into a generic "corrupt" decode failure. The gated kinds and
+ * fields are the contract's one version-gate table, read loosely so a
+ * document that did not decode is asked the same question. Works on both a
  * definition (`blocks` at the top level) and a version envelope (blocks under
  * `definition`).
  */
@@ -534,60 +449,21 @@ function declaredSchemaRejection(input: unknown): CanvasPolicyRejectionCode | un
   if (typeof declared !== "number") return undefined;
   if (!SUPPORTED_CANVAS_SCHEMA_VERSIONS.includes(declared)) return "unsupported-schema-version";
   const presentation = envelope.presentation ?? envelope.definition?.presentation;
-  if (declared < CANVAS_PRESENTATION_SCHEMA_VERSION && presentation !== undefined) {
-    return "unsupported-schema-version";
-  }
   const provenance = envelope.provenance ?? envelope.definition?.provenance;
-  if (
-    declared < CANVAS_THREAD_OWNED_SCHEMA_VERSION &&
-    typeof provenance === "object" &&
-    provenance !== null &&
-    canvasProvenanceIsThreadOwned(provenance)
-  ) {
-    return "unsupported-schema-version";
-  }
   const blocks = Array.isArray(envelope.blocks)
     ? envelope.blocks
     : Array.isArray(envelope.definition?.blocks)
       ? envelope.definition?.blocks
       : undefined;
-  if (
-    blocks?.some(
-      (block) =>
-        typeof block === "object" &&
-        block !== null &&
-        (VERSION_GATED_BLOCK_KINDS.some(
-          (gated) => gated.kind === (block as { kind?: unknown }).kind && declared < gated.since,
-        ) ||
-          (declared < CANVAS_METRIC_TREND_SCHEMA_VERSION &&
-            canvasMetricUsesTrendFields(block as Record<string, unknown>)) ||
-          (declared < CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION &&
-            canvasMockupUsesCatalog(block as Record<string, unknown>)) ||
-          (declared < CANVAS_TABLE_ROW_ID_SCHEMA_VERSION &&
-            canvasTableUsesRowIds(block as Record<string, unknown>)) ||
-          (declared < CANVAS_FLOW_CHARTS_SCHEMA_VERSION &&
-            canvasChartUsesFlowTypes(block as Record<string, unknown>)) ||
-          (declared < CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION &&
-            canvasDesignUsesDocumentFields(block as Record<string, unknown>)) ||
-          (declared < CANVAS_DESIGN_ASSET_SCHEMA_VERSION &&
-            canvasDesignUsesAssets(block as Record<string, unknown>)) ||
-          (declared < CANVAS_DESIGN_RUNNING_SCHEMA_VERSION &&
-            canvasDesignRunsScript(block as Record<string, unknown>)) ||
-          (declared < CANVAS_DESIGN_FIELDS_SCHEMA_VERSION &&
-            (canvasDesignUsesDesignFields(block as Record<string, unknown>) ||
-              canvasDiagramUsesRichFields(block as Record<string, unknown>))) ||
-          (declared < CANVAS_CHART_CALLOUTS_SCHEMA_VERSION &&
-            canvasChartUsesCallouts(block as Record<string, unknown>)) ||
-          (declared < CANVAS_MOCKUP_LIBRARY_SCHEMA_VERSION &&
-            canvasMockupUsesLibrary(block as Record<string, unknown>)) ||
-          (declared < CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION &&
-            (canvasDiagramUsesStyles(block as Record<string, unknown>) ||
-              canvasPlanUsesGantt(block as Record<string, unknown>)))),
-    )
-  ) {
-    return "unsupported-schema-version";
-  }
-  return undefined;
+  const carries = canvasCarriesNoLaterFloor({
+    schemaVersion: declared,
+    presentation,
+    provenance,
+    blocks: (blocks ?? []).filter(
+      (block): block is Record<string, unknown> => typeof block === "object" && block !== null,
+    ),
+  });
+  return carries ? undefined : "unsupported-schema-version";
 }
 
 function decodeDefinitionOrReject(input: unknown): CanvasDefinition {

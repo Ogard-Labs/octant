@@ -2989,9 +2989,9 @@ const CANVAS_VERSION_GATES: readonly CanvasVersionGate[] = [
   {
     since: CANVAS_THREAD_OWNED_SCHEMA_VERSION,
     carries: (definition) =>
-      canvasProvenanceIsThreadOwned(
-        definition.provenance as { mode?: unknown; projectId?: unknown },
-      ),
+      typeof definition.provenance === "object" &&
+      definition.provenance !== null &&
+      canvasProvenanceIsThreadOwned(definition.provenance),
     requirement: `A Canvas owned by its thread requires Canvas schema version ${String(CANVAS_THREAD_OWNED_SCHEMA_VERSION)}.`,
   },
   {
@@ -3120,7 +3120,11 @@ const CANVAS_VERSION_GATES: readonly CanvasVersionGate[] = [
   },
 ];
 
-/** Whether a document carries nothing a later floor introduced than it declares. */
+/**
+ * Whether a document carries nothing a later floor introduced than it
+ * declares. The decode filter below and the domain's declared-version check
+ * both ask this one question, so a new gate is one row in the table.
+ */
 export function canvasCarriesNoLaterFloor(definition: CanvasVersionGateInput): boolean {
   return CANVAS_VERSION_GATES.every(
     (gate) => definition.schemaVersion >= gate.since || !gate.carries(definition),
