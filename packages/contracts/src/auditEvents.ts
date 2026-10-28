@@ -7,6 +7,7 @@ import {
   EventVersion,
   UtcTimestamp,
 } from "./events";
+import { HubPrincipal, PeerPrincipal } from "./hubAndSpokes";
 import { ToolActionId, ToolApprovalId, ToolCapabilityId } from "./toolActions";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -48,6 +49,8 @@ export const AuditActingPrincipal = Schema.Union(
     kind: Schema.Literal("remote-device"),
     deviceId: EventActorDeviceId,
   }).annotations(strict),
+  HubPrincipal,
+  PeerPrincipal,
 );
 export type AuditActingPrincipal = typeof AuditActingPrincipal.Type;
 
