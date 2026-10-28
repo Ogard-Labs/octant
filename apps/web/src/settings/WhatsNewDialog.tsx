@@ -1,12 +1,12 @@
 import { useId } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
-import type { BundledWhatsNewView } from "../shell/hostBridge";
+import type { BundledWhatsNew } from "../shell/hostBridge";
 
 export interface WhatsNewDialogProps {
   readonly open: boolean;
   readonly onClose: () => void;
-  readonly document: BundledWhatsNewView | undefined;
+  readonly document: BundledWhatsNew | undefined;
 }
 
 /**

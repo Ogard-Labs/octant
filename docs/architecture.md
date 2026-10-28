@@ -1630,6 +1630,13 @@ turn's `rate-limited` failure category; in Code it rides the journaled turn
 failure and parks the turn as `waiting`. Drafts, queued input, and completed
 tool results are untouched.
 
+A refused resume is the other fact that parks a Code turn as `waiting`: the
+provider's `stale-resume` failure journals as Code's own `stale` failure
+category, and the transcript's recovery — the waiting status row offering a
+new task in the Project, the composer left ready to send — keys on that
+stated category, never on the absence of a request or a limit, which a
+different parked wait could also satisfy.
+
 A stop that disclosed `resetsAt` additionally offers an explicit per-thread
 opt-in: Resume when the limit resets. A billing stop never offers it, and a
 stop that preserved no resumable provider state — the parked Chat attempt's or
@@ -1943,10 +1950,11 @@ flowchart LR
   A single narrow SQLite port has two adapters — `bun:sqlite` in production
   and `better-sqlite3` for the Node portability smoke — that pass the same
   conformance suite. Journal, migration, and projection code depend only on
-  the port. Both adapters run the store in WAL mode with `synchronous = NORMAL`:
-  streamed replies commit one transaction per token and FULL would fsync each
-  commit, while NORMAL under WAL keeps the database consistent after a crash
-  and risks only the last transactions on power loss.
+  the port. Both adapters run the store in WAL mode with `synchronous = FULL`:
+  a Chat reply's streamed deltas batch into one journal commit per short burst,
+  so the authoritative journal fsyncs a bounded number of times per second
+  instead of once per token, and a power loss loses at most the burst that was
+  still open — never a committed one.
   Settings → Data & storage exposes a read-only, server-authoritative data
   map of those locations (and per-Project facts) so a person can see what
   this host stores without opening a document. Categories the host cannot
@@ -2000,7 +2008,13 @@ flowchart LR
   and kept decoded between reads: a later read decodes only the rows appended
   since, and a thread whose slice shrank (a purge) is read afresh. The kept
   histories are shared by every reader of the journal and bounded at 100,000
-  frames across threads, least recently read dropped first.
+  frames across threads, least recently read dropped first. A Chat thread's
+  events stream holds the same rule: its frames journal on several aggregates —
+  the thread's own events, its work-list and follow-up entries, and the context
+  ledger that settles a compaction — all keyed by the thread id, so the stream
+  reads each slice through the (type, aggregate, sequence) index (migration 89)
+  instead of replaying the global journal, and a held stream that wakes on every
+  machine change decodes only its own thread's rows.
 - **Migrations.** Ordered, forward-only, checksum-verified, applied in
   transactions before the server reports ready. A changed checksum or an
   unknown newer migration fails closed; a store backup is taken before a
@@ -3719,10 +3733,16 @@ frame of its own. On that same stream, an attempt's first streamed delta
 journals `chat.attempt-updated@1` (outcome `streaming`, the first response
 reference) and every later delta journals `chat.attempt-response-appended@1`
 carrying only the reference it appended and the attempt's `updatedAt`, so
-journal bytes per reply are linear in its length. The appended frame goes only
+journal bytes per reply are linear in its length. Deltas inside a short burst
+share one journal commit, folded ahead of any full attempt update in the same
+transaction, so the store fsyncs per burst rather than per token and stays on
+`synchronous = FULL`. The appended frame goes only
 to a subscriber that asks with `appended=1`; every other subscriber still
 receives each delta as a full `attempt-updated` frame read back from the
-projection, which already holds the attempt's current state. The receipt is
+projection, which already holds the attempt's current state. An opt-in
+parameter the host does not know is ignored rather than refused, so a newer
+client on an older host still streams: a bad value on a known opt-in is a 400,
+but a future opt-in degrades to the frames it would have had without it. The receipt is
 also on the inspector snapshot as
 `latestCompaction`:
 
@@ -4126,7 +4146,10 @@ session without a recoverable cursor still fails closed; no transcript replay or
 replacement conversation repairs the missing identity. A follow-up on another model of
 the same provider instance resumes the same native session only when the driver
 reports the `modelSwitch` capability; the resume carries the thread's current
-model and the turn records it on the session. Claude resumes only a session
+model and the turn records it on the session. A provider that cannot carry the
+session on to another of its models starts a fresh session with the same
+disclosed provider-switch handoff instead of refusing the turn, so a model
+swap never wedges a thread on a refusal the person cannot act on. Claude resumes only a session
 whose identity (provider instance, Octant session, SDK session, Project root,
 authentication) this host recorded; the identity is journaled
 (`claude-resume-identity`), so a host restart keeps an existing thread
@@ -4176,7 +4199,8 @@ turn (`handoff`), and the transcript shows what was handed over and that hidden
 reasoning, tool activity and the previous session did not transfer. While the thread's selection names a provider other than the one its session
 is on (the provider of its last finished reply, or of a later switching turn
 whose handoff was journaled, which happens only once the new session is
-ready), the composer says the next message starts a new session with a
+ready), or names another model of the same provider whose driver cannot carry
+the session on to it, the composer says the next message starts a new session with a
 handoff.
 
 **Fork handoff (Code).** A fork's first session (no session recorded on the
@@ -4188,7 +4212,8 @@ every fork onto a provider instance other than the one that wrote the fork
 point, it reads the source through the same selector (purpose `fork`,
 bounded `throughOperationId`): the source's accepted prompts and completed
 replies up to and including the named turn, with the same bounds,
-attribution, taint and omission counts. The named turn must be found or the
+attribution, taint and omission counts, bounded by the fork's own model
+window when the probe reported it, as for a provider switch. The named turn must be found or the
 read refuses (`source-point-unavailable`); a whole-thread read refuses when
 the thread moved during the read, but a read through a fork point covers only
 settled turns, so the source running a later turn does not refuse it. The
@@ -4322,7 +4347,10 @@ session only when it is the same provider instance with a recorded resume
 cursor (and, for another model, the `modelSwitch` capability; in Work also the
 same folder binding). Any other provider instance starts a new session with a
 disclosed text handoff built by the same selector as Code's (purpose
-`provider-switch`, or `branch` for a branch): the thread's own active
+`provider-switch`, or `branch` for a branch), and so does another model of the
+same provider whose driver cannot carry the session on to it: a same-provider
+model swap without `modelSwitch` starts a fresh session with that handoff
+instead of refusing the turn as unrecoverable. the thread's own active
 conversation, at most 24 blocks of 4,000 characters including the summary,
 each message attributed to its provider and model, with the thread's taint and
 every omission counted (earlier messages, purged or oversized or empty bodies,

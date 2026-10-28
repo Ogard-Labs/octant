@@ -10,8 +10,8 @@ export function openBunSqlite(path: string): SqliteConnection {
     database.exec(`
       PRAGMA journal_mode = WAL;
       PRAGMA foreign_keys = ON;
-      -- Streamed replies commit one transaction per token and FULL fsyncs each one; NORMAL under WAL keeps the database consistent after a crash and only risks the last transactions on power loss.
-      PRAGMA synchronous = NORMAL;
+      -- Streamed replies batch their deltas into one journal commit per burst, so FULL fsyncs a bounded ~10 times a second instead of once per token; the authoritative journal stays durable to the last committed burst.
+      PRAGMA synchronous = FULL;
       PRAGMA busy_timeout = 5000;
     `);
   } catch (error) {

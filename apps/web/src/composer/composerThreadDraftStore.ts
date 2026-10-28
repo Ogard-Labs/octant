@@ -147,13 +147,28 @@ export function createComposerThreadDraftStore(
     for (const listener of listeners) listener();
   }
 
+  /**
+   * Re-reading the whole stored snapshot costs a parse of every draft for
+   * every thread, so a merge runs at most once per window. The first write in
+   * a window still re-reads, which is what keeps another window's concurrent
+   * draft from being clobbered; between windows the in-memory snapshot is
+   * authoritative, kept current by the storage event handler.
+   */
+  const STORAGE_REREAD_WINDOW_MS = 250;
+  let lastStorageMergeAt = 0;
+
   function persistMerged(
     mutate: (next: Map<string, ComposerThreadDraft>) => ReadonlyArray<string>,
   ): ComposerDraftPersistResult {
-    const next = new Map(loadSnapshot(storage));
-    if (unpersisted) {
-      for (const [key, draft] of snapshot) {
-        if (!next.has(key)) next.set(key, draft);
+    const now = Date.now();
+    const reread = unpersisted || now - lastStorageMergeAt >= STORAGE_REREAD_WINDOW_MS;
+    const next = reread ? new Map(loadSnapshot(storage)) : new Map(snapshot);
+    if (reread) {
+      lastStorageMergeAt = now;
+      if (unpersisted) {
+        for (const [key, draft] of snapshot) {
+          if (!next.has(key)) next.set(key, draft);
+        }
       }
     }
     const changedKeys = mutate(next);

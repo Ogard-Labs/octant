@@ -3,296 +3,71 @@ import { decodeMenuBarOpenThread, type MenuBarOpenThread } from "./menuBar";
 import { isSshTargetOperation } from "./sshTargetControls";
 import { contextBridge, ipcRenderer } from "electron";
 import type { CodeApprovalId, CodeOperationApprovalRequest } from "@octant/contracts";
-import type { OpenInApplicationId } from "@octant/contracts/shell";
 import type { CodeOperationApprovalPalette } from "./codeOperationApprovalView";
+import type { PreviewHandoffRequest } from "@octant/contracts/previews";
+import {
+  DESKTOP_IPC_CHANNELS as IPC_CHANNELS,
+  MAX_PROVIDER_CREDENTIAL_BYTES,
+  OPEN_IN_APPLICATION_IDS,
+  PROVIDER_INSTANCE_ID_PATTERN,
+  decodeCodeCheckoutOpenRequest,
+  decodeCodeExternalEditorRequest,
+} from "./ipcChannels";
+import type {
+  AppUpdateInstallOutcome,
+  AttentionNotificationRequest,
+  BoundProjectType,
+  BrowserSurfaceRequest,
+  BrowserSurfaceState,
+  BrowserSurfaceTabCommand,
+  BrowserSurfaceTabState,
+  BundledWhatsNew,
+  CanvasPrototypeOpenRequest,
+  CanvasPrototypeOpenResult,
+  CanvasPrototypeSurfacePreparation,
+  CodeCheckoutOpenRequest,
+  CodeExternalEditorRequest,
+  CodeOperationApprovalAnchor,
+  ForgetPairedComputerOutcome,
+  HostCapabilities,
+  OpenInApplicationDescriptor,
+  PairedComputer,
+  PairedComputerAnswer,
+  PairedComputerOutcome,
+  PairedComputerRequest,
+  PrivateListenerControlFailureCode,
+  PrivateListenerEnableRequest,
+  PrivateListenerPublicStatus,
+  ProjectRootPickerResult,
+  ProjectWindowTarget,
+  ProviderApiKeySummary,
+  ProviderCredentialStatus,
+  RemoteCredentialOperationReceipt,
+  RemoteDeviceInventoryEntry,
+  RemoteDeviceSourceClass,
+  RemoteDeviceState,
+  RemoteMintedPairingTicket,
+  RemotePendingPairingRequest,
+  RemotePairingTicketSourceClass,
+  ResolvedSidebarMaterial,
+  SettlePairedComputerOutcome,
+  SidebarMaterialPreference,
+  SidebarVibrancyMode,
+} from "@octant/contracts/desktop-bridge";
+import type {
+  AppUpdateArchitecture,
+  AppUpdatePlatform,
+  AppUpdateRefusal,
+  AppUpdateRelease,
+  AppUpdateState,
+  AppUpdateStatus,
+  AppVersion,
+} from "@octant/contracts/app-updates";
+import type { UtcTimestamp } from "@octant/contracts";
+
+export { IPC_CHANNELS };
 
 export const HOST_BRIDGE_KEY = "octantHost";
-
-export const IPC_CHANNELS = {
-  nativeMenu: "octant:menu:popup",
-  menuBarOpenThread: "octant:menu:open-thread",
-  menuBarTask: "octant:menu:task",
-  attentionBadge: "octant:attention:badge",
-  attentionNotify: "octant:attention:notify",
-  browserSurfaceAttach: "octant:browser-surface:attach",
-  browserSurfaceBounds: "octant:browser-surface:bounds",
-  browserSurfaceCommand: "octant:browser-surface:command",
-  browserSurfaceDetach: "octant:browser-surface:detach",
-  browserSurfaceOpenExternal: "octant:browser-surface:open-external",
-  browserSurfaceState: "octant:browser-surface:state",
-  browserSurfaceTab: "octant:browser-surface:tab",
-  canvasPrototypeSurface: "octant:canvas:prototype-surface:prepare",
-  canvasPrototypeOpen: "octant:canvas:prototype:open",
-  canvasPrototypeInput: "octant:canvas:prototype:input",
-  canvasPrototypeResize: "octant:canvas:prototype:resize",
-  canvasPrototypeClose: "octant:canvas:prototype:close",
-  canvasPrototypeDrawn: "octant:canvas:prototype:drawn",
-  canvasPrototypeEvent: "octant:canvas:prototype:event",
-  appUpdateState: "octant:app-update:state",
-  appUpdateCheck: "octant:app-update:check",
-  appUpdateDownload: "octant:app-update:download",
-  appUpdateInstall: "octant:app-update:install",
-  appUpdateAutomatic: "octant:app-update:automatic",
-  computerUseStatus: "octant:computer-use:status",
-  computerUsePermissions: "octant:computer-use:permissions",
-  computerUsePermissionSettings: "octant:computer-use:permission-settings",
-  computerUseCheckUpdates: "octant:computer-use:check-updates",
-  managedToolsStatus: "octant:managed-tools:status",
-  managedToolsCheckUpdates: "octant:managed-tools:check-updates",
-  managedToolsConfigure: "octant:managed-tools:configure",
-  appUpdateRing: "octant:app-update:ring",
-  appUpdateWhatsNew: "octant:app-update:whats-new",
-  appUpdateWhatsNewAck: "octant:app-update:whats-new-ack",
-  approvalSurfacePalette: "octant:window:approval-surface-palette",
-  clearProviderCredential: "octant:provider-credential:clear",
-  codeDeepLink: "octant:code:deep-link",
-  close: "octant:window:close",
-  projectWindowCapability: "octant:window:project-capability",
-  maximizeOrRestore: "octant:window:maximize-or-restore",
-  minimize: "octant:window:minimize",
-  openCodeExternalEditor: "octant:code:open-external-editor",
-  listOpenInApplications: "octant:code:list-open-in-applications",
-  openCodeCheckoutInApplication: "octant:code:open-checkout-in-application",
-  openInNewWindow: "octant:window:open-project",
-  openSettings: "octant:menu:open-settings",
-  previewHandoff: "octant:preview:handoff",
-  requestCodeOperationApproval: "octant:code:request-operation-approval",
-  updateCodeOperationApprovalAnchor: "octant:code:update-operation-approval-anchor",
-  cancelCodeOperationApproval: "octant:code:cancel-operation-approval",
-  startNewAgent: "octant:menu:start-new-agent",
-  providerCredentialStatus: "octant:provider-credential:status",
-  resetBounds: "octant:window:reset-bounds",
-  selectProjectRoot: "octant:project:select-root",
-  selectLocalPluginFolder: "octant:extensions:select-local-plugin-folder",
-  selectRuntimeBinary: "octant:providers:select-runtime-binary",
-  setProviderCredential: "octant:provider-credential:set",
-  listProviderApiKeys: "octant:provider-api-key:list",
-  addProviderApiKey: "octant:provider-api-key:add",
-  renameProviderApiKey: "octant:provider-api-key:rename",
-  replaceProviderApiKey: "octant:provider-api-key:replace",
-  removeProviderApiKey: "octant:provider-api-key:remove",
-  setActiveProviderApiKey: "octant:provider-api-key:set-active",
-  moveProviderApiKey: "octant:provider-api-key:move",
-  hostCapabilities: "octant:window:host-capabilities",
-  resolvedMaterial: "octant:window:resolved-material",
-  resolvedSidebarVibrancy: "octant:window:resolved-sidebar-vibrancy",
-  sidebarMaterialPreference: "octant:window:sidebar-material-preference",
-  sidebarVibrancyMode: "octant:window:sidebar-vibrancy-mode",
-  privateListenerStatus: "octant:private-listener:status",
-  privateListenerEnable: "octant:private-listener:enable",
-  privateListenerDisable: "octant:private-listener:disable",
-  privateListenerRestart: "octant:private-listener:restart",
-  remotePairingTicket: "octant:remote-device:pairing-ticket",
-  remotePairingRequests: "octant:remote-device:pairing-requests",
-  remotePairingApprove: "octant:remote-device:pairing-approve",
-  remotePairingDeny: "octant:remote-device:pairing-deny",
-  remoteDeviceInventory: "octant:remote-device:inventory",
-  remoteDeviceRename: "octant:remote-device:rename",
-  remoteDeviceRevoke: "octant:remote-device:revoke",
-  remoteDeviceRevokeAll: "octant:remote-device:revoke-all",
-  remoteDeviceReconcileExpired: "octant:remote-device:reconcile-expired",
-  sshTargetRequest: "octant:ssh-targets:request",
-  remoteHostIdentityStatus: "octant:remote-host-identity:status",
-  remoteHostIdentityRotate: "octant:remote-host-identity:rotate",
-  remoteHostIdentityRecover: "octant:remote-host-identity:recover",
-  pairedComputerPair: "octant:paired-computers:pair",
-  pairedComputerList: "octant:paired-computers:list",
-  pairedComputerForget: "octant:paired-computers:forget",
-  pairedComputerSettle: "octant:paired-computers:settle",
-  pairedComputerRequest: "octant:paired-computers:request",
-  remoteServerPageOpen: "octant:remote-server-page:open",
-  remoteServerPageSign: "octant:remote-server-page:sign",
-  remoteServerPageSigned: "octant:remote-server-page:signed",
-  remoteServerPageForgetHost: "octant:remote-server-page:forget-host",
-} as const;
-
-type ResolvedSidebarMaterial = "opaque" | "translucent";
-type SidebarMaterialPreference = "opaque" | "system";
-type SidebarVibrancyMode = "off" | "subtle" | "strong";
-export interface HostCapabilities {
-  readonly sidebarVibrancySupported: boolean;
-  readonly liveBrowserSupported: boolean;
-  readonly liveSimulatorFrameSupported: boolean;
-  readonly liveAndroidFrameSupported: boolean;
-}
-
-export type CodeOperationApprovalAnchor =
-  | {
-      readonly kind: "thread";
-      readonly projectId: string;
-      readonly threadId: string;
-      readonly bounds: {
-        readonly x: number;
-        readonly y: number;
-        readonly width: number;
-        readonly height: number;
-      };
-    }
-  | {
-      readonly kind: "draft";
-      readonly projectId: string;
-      readonly composerId: string;
-      readonly bounds: {
-        readonly x: number;
-        readonly y: number;
-        readonly width: number;
-        readonly height: number;
-      };
-    };
-
-export interface AppUpdateRelease {
-  readonly version: string;
-  readonly platform: string;
-  readonly arch: string;
-  readonly url: string;
-  readonly sha256: string;
-  readonly releasedAt: string;
-  readonly notes?: string;
-}
-
-export interface AppUpdateState {
-  readonly status: string;
-  readonly currentVersion: string;
-  readonly available?: AppUpdateRelease;
-  readonly refusal?: string;
-  readonly message?: string;
-  readonly checkedAt?: string;
-  readonly automaticChecks: boolean;
-}
-
-export type AppUpdateInstallOutcome =
-  | { readonly kind: "installing" }
-  | {
-      readonly kind: "wait";
-      readonly activeAgentCount: number;
-      readonly activityUnconfirmed: boolean;
-    }
-  | { readonly kind: "not-ready" };
-
-export type BundledWhatsNew =
-  | {
-      readonly kind: "notes";
-      readonly version: string;
-      readonly text: string;
-      readonly showAfterApply: boolean;
-    }
-  | {
-      readonly kind: "empty";
-      readonly version: string;
-      readonly showAfterApply: false;
-    };
-
-export interface BrowserSurfaceTabState {
-  readonly tabId: string;
-  readonly url: string;
-  readonly title: string;
-}
-
-export interface BrowserSurfaceState {
-  readonly contextId: string;
-  readonly url: string;
-  readonly title: string;
-  readonly loading: boolean;
-  readonly canGoBack: boolean;
-  readonly canGoForward: boolean;
-  readonly control: "idle" | "user" | "agent";
-  readonly tabs: ReadonlyArray<BrowserSurfaceTabState>;
-  readonly activeTabId: string;
-}
-
-export type BrowserSurfaceTabCommand =
-  | { readonly kind: "open" }
-  | { readonly kind: "select"; readonly tabId: string }
-  | { readonly kind: "close"; readonly tabId: string };
-
-export interface BrowserSurfaceRequest {
-  readonly contextId: string;
-  readonly threadId: string;
-  readonly bounds: {
-    readonly x: number;
-    readonly y: number;
-    readonly width: number;
-    readonly height: number;
-  };
-}
-
-export type PrivateListenerExposureClass = "lan-private" | "tailscale";
-export type PrivateListenerControlFailureCode =
-  | "local-confirmation-required"
-  | "invalid-bind"
-  | "invalid-origin"
-  | "invalid-tls"
-  | "tls-key-exposed"
-  | "occupied-port"
-  | "interface-unavailable"
-  | "bind-failed"
-  | "shutdown-failed"
-  | "unavailable";
-
-export interface PrivateListenerPublicStatus {
-  readonly enabled: boolean;
-  readonly state: "disabled" | "ready" | "failed";
-  readonly hostname: string | null;
-  readonly port: number | null;
-  readonly origin: string | null;
-  readonly exposureClass: PrivateListenerExposureClass | null;
-  readonly certificateFingerprint: string | null;
-  readonly certificateReady: boolean;
-  readonly certificateSource: "self-made" | "pasted" | null;
-  /** The self-made certificate's key pin, which a pairing code carries; null otherwise. */
-  readonly tlsPin: string | null;
-  readonly errorCode?: PrivateListenerControlFailureCode;
-}
-
-export interface PrivateListenerEnableBridgeRequest {
-  readonly hostname: string;
-  readonly port: number;
-  readonly origin: string;
-  readonly certificatePem: string;
-  readonly privateKeyPem: string;
-  readonly localConfirmation: true;
-}
-
-export type RemoteDeviceSourceClass = "loopback" | "lan-private" | "tailscale" | "unknown";
-export type RemotePairingTicketSourceClass = Exclude<RemoteDeviceSourceClass, "unknown">;
-export type RemoteDeviceState = "active" | "revoked" | "expired";
-
-export interface RemoteMintedPairingTicket {
-  readonly ticketId: string;
-  readonly ticketProof: string;
-  /** Epoch milliseconds. */
-  readonly expiresAt: number;
-  readonly sourceClass: RemotePairingTicketSourceClass;
-}
-
-export interface RemotePendingPairingRequest {
-  readonly kind: "pending";
-  readonly ticketId: string;
-  readonly hostId: string;
-  readonly deviceLabel: string;
-  readonly deviceKeyFingerprint: string;
-  readonly origin: string;
-  readonly sourceClass: RemoteDeviceSourceClass;
-  readonly comparisonCode: string;
-  readonly claimedAt: string;
-  readonly expiresAt: string;
-}
-
-export interface RemoteDeviceInventoryEntry {
-  readonly hostId: string;
-  readonly deviceId: string;
-  readonly deviceKeyFingerprint: string;
-  readonly deviceLabel: string;
-  readonly origin: string;
-  readonly protocolFloor: number;
-  readonly credentialGeneration: number;
-  readonly createdAt: string;
-  readonly expiresAt: string;
-  readonly lastSeenAt: string;
-  readonly state: RemoteDeviceState;
-  readonly revokedAt?: string;
-  readonly revokedReason?: string;
-}
 
 export interface RemotePairingApprovalResult {
   readonly decision: "approved";
@@ -301,12 +76,6 @@ export interface RemotePairingApprovalResult {
 
 export interface RemotePairingDenialResult {
   readonly decision: "denied";
-}
-
-export interface RemoteCredentialOperationReceipt {
-  readonly commandId: string;
-  readonly result: "applied" | "already-applied";
-  readonly occurredAt: string;
 }
 
 export type RemoteHostIdentityRecoveryState =
@@ -323,48 +92,6 @@ export type RemoteHostIdentityRecoveryState =
       readonly remoteIdentityUsable: false;
       readonly localDesktopUsable: true;
     };
-
-/** Another computer this app paired with from its app pairing code. */
-export interface PairedComputer {
-  readonly origin: string;
-  readonly displayName: string;
-}
-
-export type PairedComputerOutcome =
-  | {
-      readonly status: "verified";
-      readonly computer: PairedComputer;
-      readonly ticket: { readonly ticketId: string; readonly ticketProof: string };
-      readonly pin: string;
-    }
-  | { readonly status: "refused"; readonly message: string };
-
-export type SettlePairedComputerOutcome =
-  | { readonly status: "settled" }
-  | { readonly status: "refused"; readonly message: string };
-
-/** One request to a listed paired computer; main checks the origin, method, path, and headers. */
-export interface PairedComputerRequest {
-  readonly origin: string;
-  readonly method: string;
-  readonly path: string;
-  readonly headers?: Readonly<Record<string, string>>;
-  readonly body?: string | Uint8Array;
-}
-
-export type PairedComputerAnswer =
-  | {
-      readonly status: "answered";
-      readonly httpStatus: number;
-      readonly headers: ReadonlyArray<readonly [string, string]>;
-      readonly body: Uint8Array;
-    }
-  | { readonly status: "refused"; readonly message: string }
-  | { readonly status: "unreachable"; readonly message: string };
-
-export type ForgetPairedComputerOutcome =
-  | { readonly status: "forgotten"; readonly warning?: string }
-  | { readonly status: "refused"; readonly message: string };
 
 export interface RemoteHostIdentityRotationResult {
   readonly status: "rotated";
@@ -397,59 +124,11 @@ function decodeRemoteServerPageOutcome(value: unknown): RemoteServerPageBridgeOu
 }
 type AgentStartListener = (event: unknown) => void;
 type SettingsOpenListener = (event: unknown) => void;
-type BoundProjectType = "work" | "code";
-type ProviderCredentialStatus = "stored" | "missing" | "unavailable";
-const MAX_PROVIDER_CREDENTIAL_BYTES = 12 * 1_024;
-const PROVIDER_INSTANCE_ID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PROJECT_WINDOW_CAPABILITY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
-type ProjectRootPickerResult =
-  | Readonly<{ kind: "cancelled" }>
-  | Readonly<{ kind: "selected"; receiptId: string; displayName: string }>;
 /** What a receipt-issuing native picker answers: an opaque receipt, never the path. */
 type PickerReceiptResult =
   | Readonly<{ kind: "cancelled" }>
   | Readonly<{ kind: "selected"; receiptId: string; displayName: string }>;
-export interface CodeExternalEditorRequest {
-  readonly threadId: string;
-  readonly checkoutId: string;
-  readonly fileId: string;
-  readonly line: number;
-  readonly column: number;
-}
-
-export interface OpenInApplicationDescriptor {
-  readonly id: OpenInApplicationId;
-  readonly label: string;
-  readonly available: boolean;
-}
-
-export interface CodeCheckoutOpenRequest {
-  readonly threadId: string;
-  readonly applicationId: OpenInApplicationId;
-}
-
-export interface PreviewHandoffRequest {
-  readonly target: {
-    readonly targetId: string;
-    readonly projectId: string;
-    readonly hostId: string;
-    readonly kind: string;
-    readonly opaqueRef: string;
-    readonly displayName: string;
-  };
-  readonly kind: "reveal-in-finder" | "quick-look" | "open-external";
-}
-
-export type ProjectWindowTarget =
-  | Readonly<{ kind: "project"; projectId: string }>
-  | Readonly<{
-      kind: "project-thread";
-      projectId: string;
-      mode: "code" | "work";
-      threadId: string;
-    }>;
-
 export interface IpcRendererPort {
   readonly invoke: (channel: string, ...args: readonly unknown[]) => Promise<unknown>;
   readonly on: (channel: string, listener: MaterialListener) => void;
@@ -458,18 +137,6 @@ export interface IpcRendererPort {
 
 export interface ContextBridgePort {
   readonly exposeInMainWorld: (key: string, value: unknown) => void;
-}
-
-export type AttentionReason =
-  | "turn-finished"
-  | "approval-required"
-  | "question-asked"
-  | "follow-up-due";
-
-export interface AttentionNotificationBridgeRequest {
-  readonly reason: AttentionReason;
-  readonly threadTitle: string;
-  readonly detail?: string;
 }
 
 export interface OctantHostBridge {
@@ -483,7 +150,7 @@ export interface OctantHostBridge {
   readonly getManagedToolsStatus: () => Promise<unknown>;
   readonly checkManagedToolUpdates: (tool?: string) => Promise<unknown>;
   readonly setManagedToolAutomaticUpdates: (enabled: boolean) => Promise<unknown>;
-  readonly notifyAttention: (request: AttentionNotificationBridgeRequest) => Promise<void>;
+  readonly notifyAttention: (request: AttentionNotificationRequest) => Promise<void>;
   readonly setAttentionBadge: (count: number) => Promise<void>;
   /**
    * Asks the main process to close the network of the surface a running Canvas
@@ -659,10 +326,10 @@ export interface OctantHostBridge {
   ) => () => void;
   readonly getPrivateListenerStatus: () => Promise<PrivateListenerPublicStatus>;
   readonly enablePrivateListener: (
-    request: PrivateListenerEnableBridgeRequest,
+    request: PrivateListenerEnableRequest,
   ) => Promise<PrivateListenerPublicStatus>;
   readonly restartPrivateListener: (
-    request: PrivateListenerEnableBridgeRequest,
+    request: PrivateListenerEnableRequest,
   ) => Promise<PrivateListenerPublicStatus>;
   readonly disablePrivateListener: () => Promise<PrivateListenerPublicStatus>;
   readonly mintRemotePairingTicket: (
@@ -757,7 +424,7 @@ export function createHostBridge(
       ipc.on(IPC_CHANNELS.menuBarTask, receive);
       return () => ipc.removeListener(IPC_CHANNELS.menuBarTask, receive);
     },
-    notifyAttention: (request: AttentionNotificationBridgeRequest) => {
+    notifyAttention: (request: AttentionNotificationRequest) => {
       try {
         validateAttentionNotificationRequest(request);
       } catch (error) {
@@ -946,8 +613,8 @@ export function createHostBridge(
     maximizeOrRestore: () => invoke(IPC_CHANNELS.maximizeOrRestore),
     minimize: () => invoke(IPC_CHANNELS.minimize),
     openCodeExternalEditor: (request: CodeExternalEditorRequest) => {
-      validateCodeExternalEditorRequest(request);
-      return invoke(IPC_CHANNELS.openCodeExternalEditor, request);
+      // The decoded value crosses the bridge, not the raw renderer payload.
+      return invoke(IPC_CHANNELS.openCodeExternalEditor, decodeCodeExternalEditorRequest(request));
     },
     listOpenInApplications: async () => {
       const value: unknown = await ipc.invoke(IPC_CHANNELS.listOpenInApplications);
@@ -957,8 +624,10 @@ export function createHostBridge(
       return Object.freeze(value.map((entry) => Object.freeze({ ...entry })));
     },
     openCodeCheckoutInApplication: (request: CodeCheckoutOpenRequest) => {
-      validateCodeCheckoutOpenRequest(request);
-      return invoke(IPC_CHANNELS.openCodeCheckoutInApplication, request);
+      return invoke(
+        IPC_CHANNELS.openCodeCheckoutInApplication,
+        decodeCodeCheckoutOpenRequest(request),
+      );
     },
     openInNewWindow: async (target: ProjectWindowTarget) => {
       validateProjectWindowTarget(target);
@@ -1244,7 +913,7 @@ export function createHostBridge(
     },
     getPrivateListenerStatus: async () =>
       decodePrivateListenerStatus(await ipc.invoke(IPC_CHANNELS.privateListenerStatus)),
-    enablePrivateListener: async (request: PrivateListenerEnableBridgeRequest) => {
+    enablePrivateListener: async (request: PrivateListenerEnableRequest) => {
       validatePrivateListenerEnableRequest(request);
       try {
         return decodePrivateListenerStatus(
@@ -1261,7 +930,7 @@ export function createHostBridge(
         throw new Error("Octant could not enable the private listener.");
       }
     },
-    restartPrivateListener: async (request: PrivateListenerEnableBridgeRequest) => {
+    restartPrivateListener: async (request: PrivateListenerEnableRequest) => {
       validatePrivateListenerEnableRequest(request);
       try {
         return decodePrivateListenerStatus(
@@ -1759,12 +1428,6 @@ function isUtcTimestamp(value: unknown): value is string {
  * wrapper is stripped, because the wrapped text is not what a person should
  * have to read.
  */
-export interface ProviderApiKeySummary {
-  readonly id: string;
-  readonly label: string;
-  readonly active: boolean;
-}
-
 function validateProviderApiKeySecret(credential: unknown): void {
   if (
     typeof credential !== "string" ||
@@ -1850,33 +1513,6 @@ function validateProviderInstanceId(providerInstanceId: string): void {
   }
 }
 
-function validateCodeExternalEditorRequest(value: CodeExternalEditorRequest): void {
-  if (
-    !isRecord(value) ||
-    Object.keys(value).sort().join("\0") !==
-      ["threadId", "checkoutId", "fileId", "line", "column"].sort().join("\0") ||
-    ![value.threadId, value.checkoutId, value.fileId].every(
-      (id) => typeof id === "string" && PROVIDER_INSTANCE_ID_PATTERN.test(id),
-    ) ||
-    !Number.isSafeInteger(value.line) ||
-    value.line < 1 ||
-    !Number.isSafeInteger(value.column) ||
-    value.column < 1
-  ) {
-    throw new TypeError("Invalid Code external editor request.");
-  }
-}
-
-const OPEN_IN_APPLICATION_IDS: ReadonlySet<string> = new Set([
-  "vscode",
-  "cursor",
-  "zed",
-  "finder",
-  "terminal",
-  "ghostty",
-  "xcode",
-]);
-
 function isOpenInApplicationDescriptor(value: unknown): value is OpenInApplicationDescriptor {
   return (
     isRecord(value) &&
@@ -1887,19 +1523,6 @@ function isOpenInApplicationDescriptor(value: unknown): value is OpenInApplicati
     value.label.trim() !== "" &&
     typeof value.available === "boolean"
   );
-}
-
-function validateCodeCheckoutOpenRequest(value: CodeCheckoutOpenRequest): void {
-  if (
-    !isRecord(value) ||
-    Object.keys(value).sort().join("\0") !== ["threadId", "applicationId"].sort().join("\0") ||
-    typeof value.threadId !== "string" ||
-    !PROVIDER_INSTANCE_ID_PATTERN.test(value.threadId) ||
-    typeof value.applicationId !== "string" ||
-    !OPEN_IN_APPLICATION_IDS.has(value.applicationId)
-  ) {
-    throw new TypeError("Invalid Code checkout Open in request.");
-  }
 }
 
 /**
@@ -2134,22 +1757,6 @@ function validateExternalBrowserUrl(value: string): void {
   }
 }
 
-export type CanvasPrototypeSurfacePreparation =
-  | { readonly status: "ready" }
-  | { readonly status: "unavailable"; readonly reason: string };
-
-export interface CanvasPrototypeOpenRequest {
-  readonly surfaceId: string;
-  readonly src: string;
-  readonly width: number;
-  readonly height: number;
-  readonly scaleFactor: number;
-}
-
-export type CanvasPrototypeOpenResult =
-  | { readonly status: "open" }
-  | { readonly status: "refused"; readonly reason: string };
-
 function decodeCanvasPrototypeOpenResult(value: unknown): CanvasPrototypeOpenResult {
   if (isRecord(value) && value.status === "open") return { status: "open" };
   return {
@@ -2224,7 +1831,7 @@ const APP_UPDATE_STATUSES = [
   "ready",
   "refused",
   "failed",
-];
+] as const;
 
 /**
  * Validate update state by hand rather than importing the contract decoder.
@@ -2236,7 +1843,7 @@ function decodeAppUpdateState(value: unknown): AppUpdateState {
   if (
     !isRecord(value) ||
     typeof value.status !== "string" ||
-    !APP_UPDATE_STATUSES.includes(value.status) ||
+    !(APP_UPDATE_STATUSES as ReadonlyArray<string>).includes(value.status) ||
     typeof value.currentVersion !== "string" ||
     value.currentVersion.length > 64 ||
     typeof value.automaticChecks !== "boolean" ||
@@ -2248,16 +1855,18 @@ function decodeAppUpdateState(value: unknown): AppUpdateState {
     throw new TypeError("Invalid update state.");
   }
   return Object.freeze({
-    status: value.status,
-    currentVersion: value.currentVersion,
+    // The guards above already proved the literals; the brands are what the
+    // strict contract type carries and no runtime can check here.
+    status: value.status as AppUpdateStatus,
+    currentVersion: value.currentVersion as AppVersion,
     automaticChecks: value.automaticChecks,
     ring: value.ring,
     ...(value.available === undefined
       ? {}
       : { available: decodeAppUpdateRelease(value.available) }),
-    ...(value.refusal === undefined ? {} : { refusal: value.refusal }),
+    ...(value.refusal === undefined ? {} : { refusal: value.refusal as AppUpdateRefusal }),
     ...(value.message === undefined ? {} : { message: value.message }),
-    ...(value.checkedAt === undefined ? {} : { checkedAt: value.checkedAt }),
+    ...(value.checkedAt === undefined ? {} : { checkedAt: value.checkedAt as UtcTimestamp }),
   });
 }
 
@@ -2277,13 +1886,15 @@ function decodeAppUpdateRelease(value: unknown): AppUpdateRelease {
     throw new TypeError("Invalid update release.");
   }
   return Object.freeze({
-    version: value.version,
-    platform: value.platform,
-    arch: value.arch,
+    // The guards above proved the strings; the brands and platform literals
+    // are what the strict contract type carries and no runtime can check here.
+    version: value.version as AppVersion,
+    platform: value.platform as AppUpdatePlatform,
+    arch: value.arch as AppUpdateArchitecture,
     ring: value.ring,
     url: value.url,
     sha256: value.sha256,
-    releasedAt: value.releasedAt,
+    releasedAt: value.releasedAt as UtcTimestamp,
     ...(value.notes === undefined ? {} : { notes: value.notes }),
   });
 }
@@ -2441,7 +2052,7 @@ function decodeBrowserSurfaceTabState(value: unknown): BrowserSurfaceTabState {
   return Object.freeze({ tabId: value.tabId, url: value.url, title: value.title });
 }
 
-function validatePrivateListenerEnableRequest(value: PrivateListenerEnableBridgeRequest): void {
+function validatePrivateListenerEnableRequest(value: PrivateListenerEnableRequest): void {
   if (
     !isRecord(value) ||
     Object.keys(value).sort().join("\0") !==

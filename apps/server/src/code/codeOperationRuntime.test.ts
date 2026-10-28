@@ -26,6 +26,7 @@ import {
   decodeDesktopLeaseId,
   decodeProjectId,
   decodeProviderInstanceId,
+  decodeProviderModelId,
   decodeProviderSessionId,
   decodeBrowserAutomationSnapshot,
   decodeToolActionAuthority,
@@ -2472,8 +2473,27 @@ describe("CodeOperationRuntime", () => {
             expect.objectContaining({ kind: "provider-session-ready", modelId: "model-b" }),
           );
         } else {
+          // The provider cannot carry the session on to another of its models,
+          // so the turn starts a fresh session with the same disclosed
+          // handoff a provider switch takes, instead of refusing the turn.
           expect(connection.resume).not.toHaveBeenCalled();
-          expect(connection.send).toHaveBeenCalledTimes(1);
+          await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(2));
+          expect(connection.start).toHaveBeenCalledTimes(2);
+          const frames = await fixture.runtime.subscribe(
+            windowId,
+            threadId,
+            operationId(85),
+            0,
+            20,
+          );
+          expect(frames.map((frame) => frame.event)).toContainEqual(
+            expect.objectContaining({
+              kind: "context-handoff-attached",
+              reason: "provider-switch",
+              modelId: "model-b",
+              previousSessionId: sessionId,
+            }),
+          );
         }
       } finally {
         await fixture.runtime.close();
@@ -5649,6 +5669,42 @@ describe("provider switch handoff", () => {
       }
     });
 
+    it("bounds a fork's handoff by the fork's own model window", async () => {
+      const drivers = twoHarnesses();
+      const fixture = runtimeFixture({
+        resolveProviderDriver: drivers.resolveProviderDriver,
+        forkProviderSession: async () => undefined,
+        probeProvider: async () => ({
+          readiness: "ready" as const,
+          models: [
+            {
+              id: decodeProviderModelId("model-a"),
+              displayName: "Model A",
+              contextLimit: 8_000,
+              reasoning: "supported" as const,
+              inputModalities: ["text" as const],
+              options: [],
+              source: "discovered" as const,
+              verification: "verified" as const,
+            },
+          ],
+        }),
+      });
+      try {
+        await finishFirstTurn(fixture, drivers, providerInstance);
+        fixture.setOtherThread(forkOn(providerInstance, "model-a"));
+
+        await sendOnFork(fixture);
+        await vi.waitFor(() => expect(drivers.provider.send).toHaveBeenCalledTimes(2));
+        const context = vi.mocked(drivers.provider.send).mock.calls[1]![0].context ?? [];
+        // The fork's 8,000-token model caps the handoff at four blocks, not 24.
+        expect(context[0]?.text).toContain('"maxBlocks":4');
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+
     it("falls back to the text handoff when the same provider cannot take up the source's session", async () => {
       const drivers = twoHarnesses();
       const fixture = runtimeFixture({
@@ -6617,11 +6673,15 @@ function runtimeFixture(options: {
   const selectForkConversation = (input: {
     readonly source: CodeThread;
     readonly throughOperationId: string;
+    readonly targetContextLimitTokens?: number;
   }) =>
     admittedParentCodeContext({
       threadId: input.source.id,
       purpose: "fork",
       throughOperationId: input.throughOperationId,
+      ...(input.targetContextLimitTokens === undefined
+        ? {}
+        : { targetContextLimitTokens: input.targetContextLimitTokens }),
       externalContentIngested: options.externalContentIngested ?? false,
       readThread,
       readActivity: (id) =>
