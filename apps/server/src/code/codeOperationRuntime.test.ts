@@ -26,6 +26,7 @@ import {
   decodeDesktopLeaseId,
   decodeProjectId,
   decodeProviderInstanceId,
+  decodeProviderModelId,
   decodeProviderSessionId,
   decodeBrowserAutomationSnapshot,
   decodeToolActionAuthority,
@@ -5656,7 +5657,18 @@ describe("provider switch handoff", () => {
         forkProviderSession: async () => undefined,
         probeProvider: async () => ({
           readiness: "ready" as const,
-          models: [{ id: "model-a", displayName: "Model A", contextLimit: 8_000 }],
+          models: [
+            {
+              id: decodeProviderModelId("model-a"),
+              displayName: "Model A",
+              contextLimit: 8_000,
+              reasoning: "supported" as const,
+              inputModalities: ["text" as const],
+              options: [],
+              source: "discovered" as const,
+              verification: "verified" as const,
+            },
+          ],
         }),
       });
       try {
