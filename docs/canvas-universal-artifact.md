@@ -422,6 +422,23 @@ independent-outcome PRs, not a stack, unless a slice proves dependent.
 
 ## 8. Open questions
 
+### Maintainer improvement round (2026-10-28, "plan and implement 1-9")
+
+Slices 6–9 below deliver the nine ranked improvements; the same rules apply
+(each slice: specs in the same PR, evidence in the Verification table).
+
+| Slice | Delivers                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Items       |
+| ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| 6     | **Lower the friction**: one table-driven version gate (the inference cliff becomes data), Play in the share snapshot viewer (in-app, so Q-3's ruling holds — public links stay read-only until the service learns the share versions), the person-facing "Save mockup as TSX" control, worked flow/deck examples in describe, and flow/deck seed fixtures                                                                                                                                                                          | #7 #3 #8 #9 |
+| 7     | **Designed screens walk the flow**: an edge from a design screen may name an anchor in its markup (`#octant-flow:<screenId>`); in-app Play renders the design screen same-origin and follows the frame's own anchors, so a finished screen participates in click-through. The exported site keeps the Go-to list (a sandboxed frame cannot reach out without script). Plus **auto-deck**: one pure proposer (`proposeCanvasDeck`) and a host-window action that appends a deck derived from the document's own screens and numbers | #1 #4       |
+| 8     | **Annotate the board**: a flow gains `annotations` pinned to its screens (numbered callouts drawn on the board, comment-anchored through the existing node anchors) at Canvas schema 26, and mockup nodes gain per-node comment markers, so a reader sees where the threads are                                                                                                                                                                                                                                                    | #2          |
+| 9     | **Deck outputs and mockup richness**: a PDF one page per deck slide (data blocks drawn as the thread draws them), and breakpoint-paired mockup variants taught in guidance (the data already supports them)                                                                                                                                                                                                                                                                                                                        | #5 #6       |
+
+A true dual-screen speaker view stays Later (the deck player's Notes toggle
+covers the in-app case), and brand kits feeding mockup `styled` fidelity
+stays Later: it needs the Project's kit plumbed to the renderer, which is its
+own seam decision.
+
 | ID  | Question                                                         | Ruling                                                                              |
 | --- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | Q-1 | Should design frames join flows as screens in slice 1, or later? | Include design frames early — Henrik, 2026-10-28 (D-7 supersedes D-6).              |
@@ -853,3 +870,5 @@ governs over any number written earlier.
   design's Present is untouched. The `data-deck` recipe and describe guidance
   ship with it. Delivered for review as #1841. All five slices are now in
   review; rendered QA remains named-pending across the stack.
+- 2026-10-28: Maintainer asked for the nine ranked improvements; folded into
+  slices 6–9 above and implemented the same day (see Verification).

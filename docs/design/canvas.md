@@ -681,8 +681,11 @@ so no transition is left without a place to tap. Back steps the path taken,
 Restart returns to the first screen, and Esc leaves. Where the person is in
 the flow is view state alone: Play journals nothing and grants nothing, and
 it is typed link data the renderer walks (D-2 of the plan doc), so no script,
-ticketed page, or prototype host is involved. The share viewer and a public
-link draw the board read-only: Play stays in the app.
+ticketed page, or prototype host is involved. Play needs no journal runtime,
+so the authenticated share viewer offers it too: the snapshot runs on this
+host, which keeps the in-app ruling intact. A public link stays read-only:
+the public share service draws the board, not a prototype, until it learns
+the share versions this stack carries.
 
 The Markdown export writes the flow as its graph — the title, one
 line per screen, then each transition with its hotspot — and the artifact SVG

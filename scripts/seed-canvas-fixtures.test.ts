@@ -87,6 +87,8 @@ describe("seeding Canvas fixtures", () => {
       "inline",
       "sidebar",
       "sidebar",
+      "sidebar",
+      "sidebar",
     ]);
 
     const again = await seedCanvasFixtures({ dataDirectory, fixtures: ["document"] });
