@@ -24,7 +24,8 @@ the ceiling clamp, and closed reasons (see
 [Wire protocol rules](#wire-protocol-rules)). Slice 4 (confined driver
 process) is built: one supervised process per instance under the driver
 profile from the shared confinement builder, a fixed environment, the
-process's stdio as the proxy's channel, the crash limit, and `host-prohibited`
+process's stdio as the proxy's channel, the crash limit with its journaled
+hold, and `host-prohibited`
 on Linux (see [Driver process rules](#driver-process-rules)); its acceptance,
 the escape tests on macOS, runs in the `macos-15` CI job and passed there on
 2026-10-27 ([job][macos-escape-2026-10-27]). Slice 5 (admission end
@@ -218,12 +219,13 @@ confirmation.
   app the Electron executable it already ships, run as Node. The package ships
   no executable, native addon, or install script (refused at inspection;
   [decision 6](#maintainer-decisions)).
-- **Seatbelt profile**, stricter than the MCP server profile: deny default; read
-  the system roots, the runtime's install (for Electron's Node, the app bundle
-  that holds its executable), and the package root only; write a per-process
-  temporary folder only, removed at stop; **no network**; no process exec
-  beyond the runtime itself and no fork. Each grant beyond deny-default is
-  measured on macOS before it ships, as the extension profile's were.
+- **Seatbelt profile**, stricter than the MCP server profile: deny default;
+  read the system files a runtime reads to start, the runtime's install (for
+  Electron's Node, the app bundle that holds its executable), and the
+  package root only; write a per-process temporary folder only, removed at
+  stop; **no network**; no process exec beyond the runtime itself and no
+  fork. Each grant beyond deny-default is measured on macOS before it ships,
+  as the extension profile's were.
 - **Environment.** A fixed minimal set (`PATH=/usr/bin:/bin`, locale, the
   temporary folder, and for Electron only the switch that makes it run as
   Node). No inherited variables, no provider or cloud keys, no broker
@@ -246,12 +248,13 @@ the fail-closed option.
   and sets the environment itself, ignoring whatever environment the caller
   passed. No caller can widen either.
 - **The grants.** Read: the package root, the runtime's install, `/System`,
-  `/usr`, `/private/etc`, `/private/var/db`,
-  `/Library/Apple`, the data devices `/dev/null`, `/dev/zero`, `/dev/random`,
-  and `/dev/urandom`, `/` itself, and metadata of every parent folder of those.
-  These are the extension profile's measured roots less `/bin` and `/sbin`
-  (programs the driver may not exec) and less the rest of `/dev`, since the
-  person's own terminals are devices there their user may read. Write: the
+  `/usr/lib`, `/usr/share`, `/private/var/db/timezone`, the time-zone link
+  `/private/etc/localtime`, the data devices `/dev/null`, `/dev/zero`,
+  `/dev/random`, and `/dev/urandom`, `/` itself, and metadata of every parent
+  folder of those. These began as the extension profile's measured roots
+  less `/bin` and `/sbin` (programs the driver may not exec) and less the
+  rest of `/dev`, since the person's own terminals are devices there their
+  user may read, and were narrowed further as listed below. Write: the
   process's own temporary folder; the package root is denied writes
   explicitly. Exec: the runtime alone, by its path and its resolved path. No
   fork, no network, no Mach service. The builder's own denials (the Keychain,
@@ -259,12 +262,46 @@ the fail-closed option.
   every confined launch. The escape tests in
   `outsideDriverProcess.escape.test.ts` measure this on macOS in the
   `macos-15` CI job, which passed on 2026-10-27 with no grant added
-  ([job][macos-escape-2026-10-27]); a grant the runtime turns out to need is
-  added only with its observed failure.
+  ([job][macos-escape-2026-10-27]), on the first, wider profile; a grant the
+  runtime turns out to need is added only with its observed failure.
+- **Grants narrowed since that run.** The first profile kept grants it had
+  inherited from the extension profile, whose Node loads modules and
+  libraries a plain `.mjs` driver on Bun or Electron's Node does not. Each is
+  removed in its own commit, so a failure in the `macos-15` job names the
+  one to restore, and is not measured until that job passes on the change
+  that removes it. Removing a read only narrows: a runtime missing one fails
+  to start, which the instance reports as `runtime-unavailable`, and never
+  reaches more than before.
+  - The folder above Bun's executable (`~/.bun`, which holds its install
+    cache): Bun is one self-contained executable, and its home is the
+    driver's temporary folder, so it looks for no cache there.
+  - For a Homebrew Bun, the prefix's `Cellar`, `opt`, and `etc/openssl@3`:
+    Bun links only the system's libraries; a Homebrew Node is what needed
+    them. The CI job installs Bun without Homebrew, so this one is measured
+    only on a Mac whose Bun comes from Homebrew.
+  - `/Library/Apple`: it holds Apple's add-ons outside the sealed system,
+    Rosetta's translator among them, which only an Intel runtime on Apple
+    Silicon would load; the runtimes a driver runs on are native.
+  - `/private/etc`, apart from the link `/private/etc/localtime`: the host's
+    user and group lists, hosts and name-service files, and SSH and sudo
+    configuration are of no use to a driver with no network and no exec.
+  - `/private/var/db`, apart from `timezone`, where the time-zone link leads:
+    the rest is the host's own databases (the local directory's user
+    records, installer receipts, diagnostics), none of which a runtime reads
+    to start.
+  - `/usr`, apart from `lib` (the dynamic loader and system libraries) and
+    `share` (the system's ICU data and time-zone names): `bin`, `sbin`, and
+    `libexec` hold programs the driver may not exec, and `local` holds
+    whatever the person installed there, on an Intel Mac Homebrew's whole
+    prefix with its services' data.
+  - The system's public TLS files (`/private/etc/ssl`: `openssl.cnf`,
+    `cert.pem`, and `certs`), which the confinement builder grants every
+    launch so that an offline one fails at the socket rather than before
+    it. A driver never opens a socket, so its profile denies the folder
+    again after that grant, through the builder's own extra denials.
 - **The runtime's install** is taken from the runtime's own resolved path,
-  never a fixed location. For Bun it is the executable's folder and its parent
-  (and, for a Homebrew Bun, the prefix's `Cellar`, `opt`, and
-  `etc/openssl@3`). For Electron's Node it is the app bundle that holds the
+  never a fixed location. For Bun it is the executable's folder, wherever Bun
+  is installed. For Electron's Node it is the app bundle that holds the
   executable (`<name>.app` above `Contents/MacOS/<name>`), which holds
   Electron's framework, its ICU data and V8 snapshot, and its resources; the
   folder the bundle sits in (such as `/Applications`) is not readable. An
@@ -313,9 +350,40 @@ the fail-closed option.
   the driver process owner counts crashes per instance and digest with the
   supervisor's numbers: the next use may start the driver again, and a third
   crash within a minute quarantines that instance's driver at that digest.
-  Every later start is refused as `quarantined` until the instance binds
-  another digest or the host restarts. A stop the host asked for (a disable,
-  or the proxy stopping a driver that broke the protocol) is not a crash.
+  A stop the host asked for (a disable, or the proxy stopping a driver that
+  broke the protocol) is not a crash.
+- **The crash-limit hold is journaled.** On the third crash the owner refuses
+  the next start at once and the host journals the hold on the instance as
+  `provider.instance-driver-quarantined@1`, an instance snapshot whose
+  `driverQuarantine` names the reason (`crash-limit`), the digest, and the
+  time. Only the host writes it; no command, route, or remote client sets or
+  clears it. Every later start at that digest is refused as `quarantined`
+  before any folder or process exists, after a host restart too: the owner
+  reads the journaled hold, so a restart gives a crash-looping driver no
+  fresh budget. The hold is idempotent: a report for a digest already held,
+  or for one the instance no longer binds, journals nothing, and replay
+  reads back the same instance. While held, the instance reports
+  `unavailable` with the closed reason `runtime-unavailable`, no models, and
+  Octant's own words, decided from the journal before the driver is asked;
+  Settings shows the hold and what lifts it from the instance record, whether
+  or not a check has run and while the provider is off. The extension
+  projection's `outside-driver-quarantined` diagnostic is not reused: that is
+  the package's admission hold, which trust lifts, and a crash belongs to one
+  instance (see [Admission rules](#admission-rules)).
+  _Rationale: the hold used to live in memory until the host restarted, so a
+  driver that crashed on every start ran three more times on each restart.
+  Lifting it on restart was the open option; the hold now takes the
+  fail-closed one._
+- **What lifts the hold.** Only binding another digest: the person installs
+  another version (an update or a rollback) and trusts it, the instance moves
+  to it ([Rebind rules](#rebind-rules)), and the hold stays behind with the
+  digest that crashed. A move to the same digest under another version label
+  keeps it. Trusting the digest the instance already binds, a restart, and
+  turning the provider off and on lift nothing. Removing the provider and
+  adding it again from the same version makes a new provider with no crashes,
+  which is a person's explicit choice at a local window. No action retries the
+  held digest in place; one would need its own rule (who may ask, and how
+  much budget it restores) and is left to the maintainer.
 - **The channel.** The process's stdout is split into lines on bytes, so a
   character split across reads is never torn. A line still unfinished past
   the 4 MiB cap is handed to the proxy as it stands, and the proxy's own cap
@@ -538,7 +606,7 @@ the fail-closed option.
   invalidated. The next connection check or turn starts one process at the
   new digest, unverified until Verify tools runs again. The crash limit is
   kept per instance and digest, so the new digest starts with no crashes and
-  a quarantine of the old digest does not follow it; the capability ceiling
+  a journaled hold of the old digest does not follow it; the capability ceiling
   is the proxy's and applies to every process alike.
 - **The old process.** The update or rollback that changed the selection
   already stopped it, so a turn still holding the old runtime fails at once;
@@ -792,8 +860,8 @@ These rules resolve what slice 7 left to implementation.
   person-maintained `eu` and `zdr` tags) applies to an outside instance like any
   other.
 - Stored state: the package in the extension package store; the instance and
-  its digest binding, probe observation, and Verify tools records in the
-  journal; the key in the credential broker; transcripts in the host's harness
+  its digest binding, any crash-limit hold, probe observation, and Verify
+  tools records in the journal; the key in the credential broker; transcripts in the host's harness
   journal. The driver has no persistent storage. Uninstall removes the package
   files; instance records, threads, and the key stay until the person removes
   them, and the host data map lists where each lives.
@@ -815,7 +883,7 @@ put a package in front of the person. Controls marked new are this design's;
 | Puts attacker text in Settings or diagnostics                       | New, built: closed reasons only; stderr bounded and kept out of clients                                                                                             |
 | Swaps code under a trusted name (update, mirror, typosquat)         | New, built: digest-bound trust and records; held updates and rollbacks that move an instance only on trust and clear its verification. New: publisher key pin       |
 | Points the key at an internal service or attacker host              | Existing endpoint rule, built for the brokered call: HTTPS or loopback HTTP, origin-checked before the key is read; no redirect                                     |
-| Exhausts the host (floods, hangs, crash loops)                      | Existing supervisor bounds; new, built: per-message cap, host-owned deadlines, bounded brokered calls, per-instance crash limit                                     |
+| Exhausts the host (floods, hangs, crash loops)                      | Existing supervisor bounds; new, built: per-message cap, host-owned deadlines, bounded brokered calls, per-instance crash limit and journaled hold                  |
 | An agent, mention, routine, or paired device installs or trusts one | Existing and new, built: lifecycle, add-provider, and Verify tools only from a local window; structured references stay inert; install stays held until trusted     |
 | Impersonates a bundled provider                                     | New, built: one reserved family; package-name identity with an outside label; no bundled logo, account profile, or sign-in dialect                                  |
 

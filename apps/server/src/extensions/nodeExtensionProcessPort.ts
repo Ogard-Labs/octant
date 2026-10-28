@@ -314,16 +314,30 @@ async function prepareProcessLaunch(
  * runtime reading to start, less what a driver has no use for: `/bin` and
  * `/sbin` hold only programs it may not exec, and `/dev` is narrowed to the
  * data devices, because the person's own terminals are devices there that
- * their user may read.
+ * their user may read. `/Library/Apple` holds Apple's add-ons outside the
+ * sealed system, Rosetta's translator among them, which only an Intel
+ * runtime on Apple Silicon loads. `/usr` is narrowed to the loader and
+ * libraries in `lib` and the ICU and zone data in `share`: the rest holds
+ * programs it may not exec and, in `local`, whatever the person installed.
+ * `/private/var/db` is narrowed to the zone data the time-zone link leads
+ * to. Each narrowing is listed in the
+ * outside driver specification, so a runtime that fails to start without one
+ * can have that one restored.
  */
 const OUTSIDE_DRIVER_SYSTEM_READ_ROOTS = [
   "/System",
-  "/usr",
-  "/private/etc",
-  "/private/var/db",
-  "/Library/Apple",
+  "/usr/lib",
+  "/usr/share",
+  "/private/var/db/timezone",
 ] as const;
 const OUTSIDE_DRIVER_DEVICE_READS = ["/dev/null", "/dev/zero", "/dev/random", "/dev/urandom"];
+/**
+ * Of `/private/etc`, only the link naming the host's time zone, which a
+ * runtime follows to give the driver local time. The rest (the host's user
+ * and group lists, its hosts and name-service files, its SSH and sudo
+ * configuration) is nothing a driver with no network or exec has a use for.
+ */
+const OUTSIDE_DRIVER_SYSTEM_FILE_READS = ["/private/etc/localtime"];
 
 /**
  * The whole environment an outside driver gets, whatever the caller passed:
@@ -349,8 +363,12 @@ function outsideDriverEnvironment(
 }
 
 /**
- * What a driver's runtime reads to start. Bun reads its own folder and its
- * parent, plus the Homebrew prefix's shared libraries for a Homebrew Bun.
+ * What a driver's runtime reads to start. Bun reads its own folder and
+ * nothing beside it: it is one self-contained executable linking only the
+ * system's libraries, so neither the folder above it (`~/.bun`, which holds
+ * its install cache) nor, for a Homebrew Bun, the prefix's other formulae
+ * and OpenSSL config are read. Those grants were the extension profile's,
+ * whose Node loads modules from beside its folder and Homebrew libraries.
  * Electron's Node loads Electron's framework, ICU data, and V8 snapshot from
  * the app bundle that holds its executable (`<name>.app/Contents/MacOS/<name>`),
  * so that bundle is the read root, taken from the runtime's own path. An
@@ -362,8 +380,7 @@ function outsideDriverRuntimeReadRoots(
   kind: OutsideDriverProcessSandbox["runtime"],
 ): ReadonlyArray<string> {
   if (kind === "bun") {
-    const runtimeFolder = dirname(runtime);
-    return [runtimeFolder, dirname(runtimeFolder), ...homebrewRuntimeRoots(runtime)];
+    return [dirname(runtime)];
   }
   const executableFolder = dirname(runtime);
   const contents = dirname(executableFolder);
@@ -447,6 +464,7 @@ async function prepareOutsideDriverLaunch(
   const readLiterals = uniqueAbsolutePaths([
     "/",
     ...OUTSIDE_DRIVER_DEVICE_READS,
+    ...OUTSIDE_DRIVER_SYSTEM_FILE_READS,
     ...(runtime === input.command ? [] : [input.command]),
   ]);
   const metadataLiterals = uniqueAbsolutePaths(
@@ -466,6 +484,10 @@ async function prepareOutsideDriverLaunch(
     temporaryDirectory: sandbox.temporaryDirectory,
     readRoots,
     networkEgress: "none",
+    // The builder lets every launch read the system's public TLS files so
+    // that an offline one fails at the socket rather than before it. A
+    // driver never opens a socket, so it reads none of them.
+    additionalDenyReadPaths: ["/private/etc/ssl"],
     allowProcessExec: false,
     allowProcessFork: false,
     interpreterSearchPath: SAFE_PATH,

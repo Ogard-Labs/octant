@@ -9,6 +9,7 @@ import {
   type ProviderObservedState,
   type ProviderRefusalReason,
 } from "@octant/contracts";
+import { isOutsideDriverQuarantined } from "@octant/domain";
 import { thisComputerName } from "../platform";
 
 export const capabilityLabels: ReadonlyArray<
@@ -164,10 +165,12 @@ export function providerRefusalCopy(
     };
   }
   if (reason === "runtime-unavailable" && instance.driverKind === "outside-harness-endpoint") {
+    const held = outsideDriverHoldGuidance(instance);
+    if (held !== undefined) return held;
     return {
       reason: "Octant could not start this provider's driver, or the driver stopped.",
       nextStep:
-        "Check the connection again. If the driver keeps stopping, Octant holds this version until Octant restarts or you trust another version.",
+        "Check the connection again. If the driver keeps stopping, Octant holds this version until you trust another version.",
     };
   }
   if (reason === "runtime-unavailable") {
@@ -182,10 +185,32 @@ export function providerRefusalCopy(
   };
 }
 
+const OUTSIDE_DRIVER_QUARANTINE_COPY = {
+  reason:
+    "This provider's driver stopped three times within a minute, so Octant holds this version of it.",
+  nextStep:
+    "Restarting Octant does not lift the hold. Install another version of the driver package and trust it; this provider moves to it.",
+} as const;
+
+/**
+ * Why an outside provider's driver is held and what lifts it, or nothing. The
+ * hold is journaled on the provider, so it is read from the record itself and
+ * shown whether or not a check has run, and while the provider is off.
+ */
+export function outsideDriverHoldGuidance(
+  instance: ProviderInstance,
+): { readonly reason: string; readonly nextStep: string } | undefined {
+  return instance.driverKind === "outside-harness-endpoint" && isOutsideDriverQuarantined(instance)
+    ? OUTSIDE_DRIVER_QUARANTINE_COPY
+    : undefined;
+}
+
 export function providerRefusalGuidance(
   instance: ProviderInstance,
   observed: ProviderObservedState | undefined,
 ): { readonly reason: string; readonly nextStep: string } | undefined {
+  const held = outsideDriverHoldGuidance(instance);
+  if (held !== undefined) return held;
   return observed?.reason === undefined
     ? undefined
     : providerRefusalCopy(observed.reason, instance);

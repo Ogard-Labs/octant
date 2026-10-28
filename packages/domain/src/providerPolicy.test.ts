@@ -45,6 +45,8 @@ import {
   createOutsideHarnessEndpointProvider,
   effectiveProviderAuthority,
   rebindOutsideHarnessEndpointDriver,
+  isOutsideDriverQuarantined,
+  quarantineOutsideHarnessEndpointDriver,
   isImageProfileDriverKind,
   removeProvider,
   renameProvider,
@@ -2657,6 +2659,41 @@ describe("outside driver provider policy", () => {
         reboundAt,
       ),
     ).toThrow(ProviderPolicyRejected);
+  });
+
+  it("holds a crash-looping driver at the digest the provider binds, once", () => {
+    const instance = { ...create({}), enabled: true };
+    expect(isOutsideDriverQuarantined(instance)).toBe(false);
+    const held = quarantineOutsideHarnessEndpointDriver(instance, reboundAt);
+    expect(decodeProviderInstance(held)).toEqual(held);
+    expect(held).toEqual({
+      ...instance,
+      driverQuarantine: { reason: "crash-limit", digest: driver.digest, quarantinedAt: reboundAt },
+      version: 2,
+      updatedAt: reboundAt,
+    });
+    expect(isOutsideDriverQuarantined(held)).toBe(true);
+    // Already held at this digest: nothing changes, so nothing is journaled again.
+    expect(quarantineOutsideHarnessEndpointDriver(held, createdAt)).toBe(held);
+  });
+
+  it("leaves the hold behind only when the provider moves to another digest", () => {
+    const held = quarantineOutsideHarnessEndpointDriver(create({}), reboundAt);
+    const newer = { ...driver, version: "0.2.0", digest: `sha256:${"d".repeat(64)}` };
+    const moved = rebindOutsideHarnessEndpointDriver(held, newer as never, reboundAt);
+    expect(moved.driverQuarantine).toBeUndefined();
+    expect(isOutsideDriverQuarantined(moved)).toBe(false);
+    // A hold recorded for a digest the provider no longer binds holds nothing.
+    expect(
+      isOutsideDriverQuarantined({ ...moved, driverQuarantine: held.driverQuarantine } as never),
+    ).toBe(false);
+    // A new version label over the same bytes is the same driver, still held.
+    const relabelled = rebindOutsideHarnessEndpointDriver(
+      held,
+      { ...driver, version: "0.1.1" } as never,
+      reboundAt,
+    );
+    expect(isOutsideDriverQuarantined(relabelled)).toBe(true);
   });
 });
 

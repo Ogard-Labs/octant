@@ -20,6 +20,7 @@ import { serveFixtureDriver, type InMemoryDriverEnd } from "./outsideDriverFixtu
 import {
   OutsideDriverProcesses,
   resolveOutsideDriverRuntime,
+  type OutsideDriverProcessesOptions,
   type OutsideDriverProcessStart,
 } from "./outsideDriverProcess";
 import { makeOutsideHarnessEndpointProxy } from "./outsideHarnessEndpointProxy";
@@ -120,6 +121,7 @@ async function processes(
     readonly exitAtStart?: boolean;
     readonly now?: () => number;
     readonly messageBytes?: number;
+    readonly quarantine?: OutsideDriverProcessesOptions["quarantine"];
   } = {},
 ) {
   const fake = fakeSupervisor({
@@ -136,6 +138,7 @@ async function processes(
     ...(options.messageBytes === undefined
       ? {}
       : { limits: { messageBytes: options.messageBytes } }),
+    ...(options.quarantine === undefined ? {} : { quarantine: options.quarantine }),
   });
   const start = (instanceId = instanceA, reference = driver) =>
     owner.start({ instanceId, driver: reference, packageRoot, entryPoint });
@@ -315,7 +318,11 @@ describe("outside driver processes", () => {
 
   it("allows two restarts a minute and quarantines the driver at that digest on the third crash", async () => {
     let now = 0;
-    const context = await processes({ now: () => now });
+    const record = vi.fn();
+    const context = await processes({
+      now: () => now,
+      quarantine: { holds: () => false, record },
+    });
     for (let crash = 1; crash <= 3; crash += 1) {
       const closed = vi.fn();
       channelOf(await context.start()).onClosed(closed);
@@ -323,7 +330,10 @@ describe("outside driver processes", () => {
       context.processes.at(-1)?.exit();
       await vi.waitFor(() => expect(closed).toHaveBeenCalledOnce());
       await vi.waitFor(async () => expect(await readdir(context.root)).toEqual([]));
+      // The hold is journaled the moment the limit is crossed, and only then.
+      expect(record).toHaveBeenCalledTimes(crash === 3 ? 1 : 0);
     }
+    expect(record).toHaveBeenCalledWith(instanceA, driver);
 
     expect(await context.start()).toEqual({ status: "refused", reason: "quarantined" });
     expect(context.processes).toHaveLength(3);
@@ -332,6 +342,28 @@ describe("outside driver processes", () => {
       digest: `sha256:${"b".repeat(64)}`,
     } as OutsideProviderDriverReference;
     channelOf(await context.start(instanceA, updated));
+    channelOf(await context.start(instanceB));
+  });
+
+  it("refuses a driver the journal holds at that digest, as after a restart, before any folder or process exists", async () => {
+    const context = await processes({
+      quarantine: {
+        holds: (instanceId, digest) =>
+          String(instanceId) === String(instanceA) && String(digest) === String(driver.digest),
+        record: () => undefined,
+      },
+    });
+
+    expect(await context.start()).toEqual({ status: "refused", reason: "quarantined" });
+    expect(context.processes).toHaveLength(0);
+    expect(await readdir(context.root)).toEqual([]);
+    // The hold is the instance's at that digest, not the driver's everywhere.
+    channelOf(
+      await context.start(instanceA, {
+        ...driver,
+        digest: `sha256:${"b".repeat(64)}`,
+      } as OutsideProviderDriverReference),
+    );
     channelOf(await context.start(instanceB));
   });
 

@@ -555,6 +555,44 @@ describe("ProviderSettingsView", () => {
     expect(screen.queryByText(/binary path/i)).not.toBeInTheDocument();
   });
 
+  it("shows a journaled crash-loop hold on an outside driver's card, with what lifts it, even while it is off", () => {
+    const held = decodeProviderInstance({
+      ...provider(),
+      displayName: "Local chat server",
+      driverKind: "outside-harness-endpoint",
+      configuration: {
+        kind: "outside-harness-endpoint",
+        driver: {
+          extensionId: "00000000-0000-4000-8000-000000000911",
+          packageId: "00000000-0000-4000-8000-000000000912",
+          componentId: "provider-driver",
+          version: "1.2.0",
+          digest: `sha256:${"a".repeat(64)}`,
+        },
+        baseUrl: "http://127.0.0.1:8080/",
+        modelIds: ["local-model"],
+      },
+      enabled: false,
+      driverQuarantine: {
+        reason: "crash-limit",
+        digest: `sha256:${"a".repeat(64)}`,
+        quarantinedAt: "2026-07-15T10:05:00.000Z",
+      },
+    });
+    renderProviderListExpanded(fixture({ instance: held }));
+
+    expect(
+      screen.getByText(
+        "This provider's driver stopped three times within a minute, so Octant holds this version of it.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "Restarting Octant does not lift the hold. Install another version of the driver package and trust it; this provider moves to it.",
+      ),
+    ).toBeVisible();
+  });
+
   it("creates Claude with explicit subscription or write-only API-key authentication", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: claudeProvider() });

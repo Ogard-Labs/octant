@@ -515,6 +515,7 @@ const PROVIDER_INSTANCE_SNAPSHOT_EVENTS = new Set([
   "provider.instance-binary-changed@1",
   "provider.instance-configuration-changed@1",
   "provider.instance-driver-rebound@1",
+  "provider.instance-driver-quarantined@1",
   "provider.instance-enabled-changed@1",
 ]);
 const PROVIDER_INSTANCE_REMOVED_EVENT = "provider.instance-removed@1";

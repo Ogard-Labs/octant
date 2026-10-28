@@ -5905,8 +5905,8 @@ same. This holds in Chat, Work, and Code.
   server's own runtime (Bun in development, Electron's Node in the packaged
   app, whose app bundle is then the runtime's install) and takes a stricter
   profile from the shared confinement builder (no network, no exec but its
-  runtime, no fork, a read-only package, one temporary folder, and a fixed
-  environment), and on any host but macOS its component is `host-prohibited`
+  runtime, no fork, a read-only package, one temporary folder, of the system
+  only what a runtime reads to start, and a fixed environment), and on any host but macOS its component is `host-prohibited`
   ([Outside provider drivers](design/outside-provider-drivers.md#driver-process-rules)).
 - Skills are discovered only from valid `.agents/skills/` and `.claude/skills/`
   packages between the working directory and the Project or repository root
@@ -6563,7 +6563,8 @@ configured origin only), the confined process per instance that carries that
 protocol on macOS, and admission (trust at a digest, a provider added off from
 a local window, host-run Verify tools, and the process stopped whenever the
 driver stops being effective) are built, as is moving an instance to a newly
-trusted digest of its driver with its records cleared. Publisher signatures
+trusted digest of its driver with its records cleared, and a crash-limit hold
+journaled at the digest that crashed, which a restart does not lift. Publisher signatures
 are not. Only a macOS host admits one. The author kit
 (`@octant/provider-sdk/outside-driver`, `outside-driver-serve`, and
 `outside-driver-conformance`) and an example loopback driver package live in
