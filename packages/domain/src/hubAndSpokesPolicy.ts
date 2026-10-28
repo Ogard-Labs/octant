@@ -204,25 +204,33 @@ export function decideRosterReplacement(input: {
   return { status: "accepted" };
 }
 
+/** The membership changes a standby made while standing in, in the order it made them. */
+export type StandInMembershipChanges = {
+  readonly sequence: number;
+  readonly added: ReadonlyArray<RosterMember>;
+  readonly removed: ReadonlyArray<HubMemberId>;
+};
+
 /**
- * The roster the hub signs next when a standby stands down. `base` is the
- * hub-signed roster the stand-in started from, `hub` is the hub's roster now,
- * and `standby` is the standby's latest. Members the standby added join, and a
- * member removed by either side stays removed. The standby order is the hub's.
+ * The roster the hub signs next when a standby stands down. `hub` is the
+ * hub's roster now, `hubRemovedSinceBase` every member the hub removed since
+ * the stand-in began, and `standby` the changes the standby hands back.
+ * Removals are passed as change lists rather than read off snapshots, because
+ * a member added during the stand-in and removed by the other side is absent
+ * from the start roster, so no comparison of snapshots can tell that removal
+ * from a member that side never saw. A member removed by either side stays
+ * removed. The standby order is the hub's.
  */
 export function mergeStandInMembership(input: {
-  readonly base: HubRoster;
   readonly hub: HubRoster;
-  readonly standby: HubRoster;
+  readonly hubRemovedSinceBase: ReadonlyArray<HubMemberId>;
+  readonly standby: StandInMembershipChanges;
 }): HubRoster {
-  const { base, hub, standby } = input;
-  const listed = (roster: HubRoster, id: HubMemberId) =>
-    roster.members.some((member) => sameId(member.memberId, id));
-  const removed = (id: HubMemberId) =>
-    (listed(base, id) && !listed(hub, id)) || (listed(base, id) && !listed(standby, id));
-
-  const joined = standby.members.filter(
-    (member) => !listed(base, member.memberId) && !listed(hub, member.memberId),
+  const { hub, standby } = input;
+  const removals = [...input.hubRemovedSinceBase, ...standby.removed];
+  const removed = (id: HubMemberId) => includesId(removals, id);
+  const joined = standby.added.filter(
+    (member) => !hub.members.some((entry) => sameId(entry.memberId, member.memberId)),
   );
   const members = [...hub.members, ...joined].filter((member) => !removed(member.memberId));
   return {

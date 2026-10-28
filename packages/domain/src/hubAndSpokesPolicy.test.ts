@@ -335,47 +335,51 @@ describe("decideRosterReplacement", () => {
 
 describe("mergeStandInMembership", () => {
   const base = roster(5, baseMembers);
+  const ids = (merged: HubRoster) => merged.members.map((entry) => String(entry.memberId));
 
   it("takes in members the standby added", () => {
     const merged = mergeStandInMembership({
-      base,
       hub: base,
-      standby: roster(6, [...baseMembers, member(5, "spoke")]),
+      hubRemovedSinceBase: [],
+      standby: { sequence: 6, added: [member(5, "spoke")], removed: [] },
     });
-    expect(merged.members.map((entry) => String(entry.memberId))).toContain(id(5));
+    expect(ids(merged)).toContain(id(5));
     expect(merged.sequence).toBe(7);
   });
 
   it("lets a removal win over the other side keeping the member", () => {
     const standbyRemoved = mergeStandInMembership({
-      base,
       hub: base,
-      standby: roster(
-        6,
-        baseMembers.filter((entry) => entry.role !== "guest"),
-      ),
+      hubRemovedSinceBase: [],
+      standby: { sequence: 6, added: [], removed: [memberId(4)] },
     });
-    expect(standbyRemoved.members.map((entry) => String(entry.memberId))).not.toContain(id(4));
+    expect(ids(standbyRemoved)).not.toContain(id(4));
 
     const hubRemoved = mergeStandInMembership({
-      base,
       hub: roster(
         6,
         baseMembers.filter((entry) => entry.role !== "spoke"),
       ),
-      standby: roster(6, baseMembers),
+      hubRemovedSinceBase: [memberId(3)],
+      standby: { sequence: 6, added: [], removed: [] },
     });
-    expect(hubRemoved.members.map((entry) => String(entry.memberId))).not.toContain(id(3));
+    expect(ids(hubRemoved)).not.toContain(id(3));
+  });
+
+  it("keeps a member removed that joined during the stand-in and the hub then removed", () => {
+    const merged = mergeStandInMembership({
+      hub: base,
+      hubRemovedSinceBase: [memberId(5)],
+      standby: { sequence: 6, added: [member(5, "spoke")], removed: [] },
+    });
+    expect(ids(merged)).not.toContain(id(5));
   });
 
   it("keeps the hub's standby order and drops a removed standby from it", () => {
     const merged = mergeStandInMembership({
-      base,
       hub: base,
-      standby: roster(
-        6,
-        baseMembers.filter((entry) => entry.role !== "standby-hub"),
-      ),
+      hubRemovedSinceBase: [],
+      standby: { sequence: 6, added: [], removed: [memberId(2)] },
     });
     expect(merged.standbyOrder).toEqual([]);
   });
