@@ -9801,6 +9801,97 @@ function streamedReplyDriver(deltas: ReadonlyArray<string>): ProviderDriver {
   } as unknown as ProviderDriver;
 }
 
+/** Journal appends that carry at least one streamed appended-delta event. */
+function appendedCommits(append: {
+  readonly mock: { readonly calls: ReadonlyArray<ReadonlyArray<unknown>> };
+}): Array<{ events?: ReadonlyArray<{ eventName: string }> }> {
+  return append.mock.calls
+    .map(([request]) => request as { events?: ReadonlyArray<{ eventName: string }> })
+    .filter((request) =>
+      (request.events ?? []).some(
+        (event) => event.eventName === "chat.attempt-response-appended@1",
+      ),
+    );
+}
+
+describe("ChatService streamed delta batches", () => {
+  it("folds a reply's streamed deltas into the burst's journal commits, ahead of the attempt's own event", async () => {
+    const deltas = ["one ", "two ", "three ", "four ", "five ", "six."];
+    // The fixture's clock never advances, so the whole reply is one burst and
+    // every appended delta shares the terminal attempt persist's commit.
+    const { service, persistence } = openFixture({ driver: streamedReplyDriver(deltas) });
+    const append = vi.spyOn(persistence.journal, "append");
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Batched burst",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const sent = await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Hello",
+    });
+    if (sent.kind !== "turn-created") throw new Error("Expected turn-created result.");
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts[0]?.outcome === "completed",
+    );
+
+    const commits = appendedCommits(append);
+    expect(commits).toHaveLength(1);
+    expect(
+      commits[0]?.events?.filter((event) => event.eventName === "chat.attempt-response-appended@1"),
+    ).toHaveLength(deltas.length - 1);
+    // The batch journals ahead of the attempt's own event in the same commit,
+    // so the projection sees each reference appended before a whole attempt
+    // carries it.
+    const names = commits[0]?.events?.map((event) => event.eventName);
+    expect(names?.at(-1)).toBe("chat.attempt-updated@1");
+    const attempt = service.read(created.thread.id).turns[0]?.attempts[0];
+    expect(attempt?.responseRefs).toHaveLength(deltas.length);
+    expect(attempt?.outcome).toBe("completed");
+  });
+
+  it("commits a burst on its own once the batch window has passed", async () => {
+    const deltas = ["one ", "two ", "three ", "four ", "five "];
+    let ticks = 0;
+    const { service, persistence } = openFixture({
+      driver: streamedReplyDriver(deltas),
+      // Any two deltas sit further apart than the window, so each pair of
+      // appended deltas commits on its own instead of folding into the end.
+      clock: () => new Date(Date.parse("2026-10-27T12:00:00.000Z") + 1_000 * ticks++).toISOString(),
+    });
+    const append = vi.spyOn(persistence.journal, "append");
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Windowed burst",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const sent = await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Hello",
+    });
+    if (sent.kind !== "turn-created") throw new Error("Expected turn-created result.");
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts[0]?.outcome === "completed",
+    );
+
+    const commits = appendedCommits(append);
+    expect(commits.map((commit) => commit.events?.length ?? 0)).toEqual([2, 2]);
+    expect(
+      commits
+        .flatMap((commit) => commit.events ?? [])
+        .filter((event) => event.eventName === "chat.attempt-response-appended@1"),
+    ).toHaveLength(deltas.length - 1);
+    const attempt = service.read(created.thread.id).turns[0]?.attempts[0];
+    expect(attempt?.responseRefs).toHaveLength(deltas.length);
+  });
+});
+
 describe("ChatService streamed delta bodies", () => {
   it("puts the body a delta appended on its frame, and only for subscribers that asked", async () => {
     const { service } = openFixture();
