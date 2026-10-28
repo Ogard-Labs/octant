@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -22,7 +21,8 @@ import type { AppleProcessResult } from "./appleToolchainService";
 
 const TEAM = "A1B2C3D4E5";
 const CERTIFICATE = new TextEncoder().encode("fixture distribution certificate");
-const FINGERPRINT = createHash("sha1").update(CERTIFICATE).digest("hex").toUpperCase();
+// The certificate fingerprint Apple names a signing identity by (SHA-1 of CERTIFICATE).
+const FINGERPRINT = "4494EDBA13F047076952B9A2A3D99F9F054367CB";
 const PROFILE_UUID = "7b1e0f9a-3c2d-4e5f-8a9b-0c1d2e3f4a5b";
 const DELIVERY = "5d1b6c2e-8f3a-4b7c-9d0e-1f2a3b4c5d6e";
 const KEY_TEXT = "-----BEGIN PRIVATE KEY-----\nNOT-A-REAL-KEY\n-----END PRIVATE KEY-----\n";
