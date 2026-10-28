@@ -479,13 +479,16 @@ export const decodeExtensionPackageReviewLanguageServer = Schema.decodeUnknownSy
 /**
  * What a person reviews before a debug adapter can run: the binary the host
  * will start, that file's own digest, the runtimes it labels, the `launch`
- * body it sends with its placeholders, and whether it takes a debug port.
+ * body it sends with its placeholders, whether it takes a debug port, and
+ * whether it also debugs the child processes of the program it starts.
  */
 export const ExtensionPackageReviewDebugAdapter = Schema.Struct({
   runtimes: ExtensionDebugAdapterDeclaration.from.fields.runtimes,
   launchArguments: ExtensionDebugAdapterDeclaration.from.fields.launchArguments,
   importTypes: ExtensionDebugAdapterDeclaration.from.fields.importTypes,
   debugPorts: ExtensionDebugAdapterDeclaration.from.fields.debugPorts,
+  childSessions: ExtensionDebugAdapterDeclaration.from.fields.childSessions,
+  childAnnouncement: ExtensionDebugAdapterDeclaration.from.fields.childAnnouncement,
   binary: PackageRelativePath,
   binaryDigest: ExtensionContentDigest,
 }).annotations(strict);

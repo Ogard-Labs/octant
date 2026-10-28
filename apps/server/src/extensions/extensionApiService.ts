@@ -448,6 +448,12 @@ function previewDebugAdapter(
     launchArguments: declaration.launchArguments,
     importTypes: declaration.importTypes,
     debugPorts: declaration.debugPorts,
+    ...(declaration.childSessions === undefined
+      ? {}
+      : { childSessions: declaration.childSessions }),
+    ...(declaration.childAnnouncement === undefined
+      ? {}
+      : { childAnnouncement: declaration.childAnnouncement }),
     binary,
     binaryDigest: `sha256:${createHash("sha256").update(file.content).digest("hex")}`,
   });
