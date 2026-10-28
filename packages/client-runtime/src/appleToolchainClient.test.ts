@@ -1,7 +1,9 @@
 import type { AppleDiscoveryRequest } from "@octant/contracts/apple-toolchain";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-let createAppleToolchainClient: (options: Record<string, unknown>) => {
+import { createAppleToolchainClient as createClient } from "./appleToolchainClient";
+
+type LooseAppleToolchainClient = {
   discover(request: AppleDiscoveryRequest, signal?: AbortSignal): Promise<any>;
   snapshot(request: unknown): Promise<any>;
   readScreenshot(
@@ -25,13 +27,11 @@ let createAppleToolchainClient: (options: Record<string, unknown>) => {
   >;
 };
 
-beforeAll(async () => {
-  const path = "./appleToolchainClient";
-  const loaded = await import(path).catch(() => undefined);
-  expect(loaded).toBeDefined();
-  expect(loaded?.createAppleToolchainClient).toBeTypeOf("function");
-  createAppleToolchainClient = loaded!.createAppleToolchainClient;
-});
+// Static import: a dynamic import in beforeAll transformed the contracts graph inside the
+// 10s hook budget and timed out under the parallel CI run. Tests pass deliberately loose
+// fixtures, so the options are widened here.
+const createAppleToolchainClient = (options: Record<string, unknown>): LooseAppleToolchainClient =>
+  createClient(options as never);
 
 const authority = {
   hostId: "4f70656e-4f72-4269-9474-4c6f63616c31",

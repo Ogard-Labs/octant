@@ -400,6 +400,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       appleToolchainRoutes,
       resolveAndroidContext,
       resolveAppleContext,
+      prepareAppleUpload,
       resolveAppleDeviceAgentScope,
       resolveAppleDeviceThread,
     } = bindDeviceApprovals({
@@ -409,6 +410,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         codeOperationRuntime?.validateAppleDeviceLease?.(windowId, request),
       validateAppleDeviceAction: (windowId, request) =>
         codeOperationRuntime?.validateAppleDeviceAction?.(windowId, request),
+      validateAppleDistributionUpload: (windowId, request) =>
+        codeOperationRuntime?.validateAppleDistributionUpload?.(windowId, request),
       validateAndroidApproval: (windowId, request) =>
         codeOperationRuntime?.validateAndroidApproval(windowId, request),
     });
@@ -829,6 +832,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               const read = await appleDeviceService.readConsole(reference, thread);
               return read.kind === "found" ? read.bytes : undefined;
             },
+            prepareUpload: (windowId, input, signal) => prepareAppleUpload(windowId, input, signal),
           },
         },
         androidToolchain: {
@@ -1144,7 +1148,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     });
     // Settled anywhere (another surface, expiry, cancellation): the inline
     // copy goes too, so Code never lists or accepts an answer to it.
-    // Lifting a harness session out of recovery settles the turns it cut off.
+    // Recovery settles its orphaned turns before a continuation can be queued.
     onHarnessRecoveryLifted(({ threadId, mode }) => {
       if (mode === "code") codeOperationRuntime?.settleCutOffTurns?.(threadId);
     });

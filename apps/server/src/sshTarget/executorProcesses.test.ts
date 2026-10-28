@@ -94,7 +94,7 @@ afterEach(() => {
 function processes(confinement: ProcessConfinementPort = passThrough) {
   const send = (frame: SshExecutorFrame) => frames.push(decodeFrame(frame));
   const hostOpened = new ExecutorStreams({ send, opens: "odd", maxStreams: 32 });
-  const egress = new ExecutorEgress(send, hostOpened);
+  const egress = new ExecutorEgress(send, hostOpened, "linux");
   const placed = new ExecutorProcesses(
     send,
     {

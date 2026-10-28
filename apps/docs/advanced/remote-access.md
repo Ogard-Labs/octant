@@ -302,6 +302,24 @@ protects:
   again. On iPhone
   they are kept in the Keychain, readable only while the phone is unlocked.
 
+## Phone notifications
+
+**Settings › Notifications › Phone notifications** on the computer decides
+whether it notifies paired phones. It is off until you turn it on, and only a
+window on that computer can change it.
+
+- Notifications go through the push gateway named under the switch, because
+  only a sender holding the app's own push credential can reach a phone.
+  Each notification is sealed on the computer so only your phone can read it;
+  the gateway, Apple, and Google see that a phone was notified, never the
+  thread, its title, or the computer's name.
+- To use a gateway you run, enter its https address. A phone gets its delivery
+  permit from the gateway built into its app, so a computer pointed at a
+  different gateway cannot reach that phone, and its notifications fail rather
+  than go elsewhere.
+- Turning phone notifications on in the phone app, and Octant's own gateway,
+  are not available yet. Until they are, the switch sends nothing.
+
 ## Device management
 
 The host can rename or revoke devices, revoke all devices, and rotate host

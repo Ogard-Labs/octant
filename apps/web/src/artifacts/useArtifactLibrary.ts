@@ -17,6 +17,7 @@ export interface ArtifactLibraryFilters {
   readonly projectId?: ProjectId;
   readonly mode?: OctantMode;
   readonly kind?: ArtifactKind;
+  readonly tag?: string;
 }
 
 export interface ArtifactLibraryOptions {
@@ -35,7 +36,15 @@ export interface ArtifactLibrary {
   readonly refresh: () => void;
 }
 
-export const INITIAL_ARTIFACT_FILTERS: ArtifactLibraryFilters = { tab: "all", query: "" };
+/**
+ * The page opens grouped by Project, because that is how a person comes back
+ * to their work: the flat All tab remains one click away for the question the
+ * grouping cannot answer.
+ */
+export const INITIAL_ARTIFACT_FILTERS: ArtifactLibraryFilters = {
+  tab: "by-project",
+  query: "",
+};
 
 /**
  * The host's artifact library, as one view asks for it.
@@ -56,12 +65,14 @@ export function useArtifactLibrary(options: ArtifactLibraryOptions): ArtifactLib
 
   const query = useMemo((): ArtifactLibraryQuery => {
     const trimmed = filters.query.trim();
+    const tag = filters.tag?.trim();
     return {
       tab: filters.tab,
       ...(trimmed === "" ? {} : { query: trimmed }),
       ...(filters.projectId === undefined ? {} : { projectId: filters.projectId }),
       ...(filters.mode === undefined ? {} : { mode: filters.mode }),
       ...(filters.kind === undefined ? {} : { kind: filters.kind }),
+      ...(tag === undefined || tag === "" ? {} : { tag }),
     } as ArtifactLibraryQuery;
   }, [filters]);
 

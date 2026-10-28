@@ -26,6 +26,12 @@ export function nativeCodeWorkspaceApprovals(
   const requestDeviceLease = async (
     deviceRequest: Parameters<NonNullable<CodeWorkspaceApprovals["appleDeviceLease"]>>[0],
   ) => await request({ effect: { kind: "apple-device-lease", request: deviceRequest } as never });
+  const requestUpload = async (
+    uploadRequest: Parameters<NonNullable<CodeWorkspaceApprovals["appleUpload"]>>[0],
+  ) =>
+    await request({
+      effect: { kind: "apple-distribution-upload", request: uploadRequest } as never,
+    });
   const requestAndroid = async (
     androidRequest: Parameters<NonNullable<CodeWorkspaceApprovals["android"]>>[0],
   ) => await request({ effect: { kind: "android-action", request: androidRequest } as never });
@@ -44,6 +50,8 @@ export function nativeCodeWorkspaceApprovals(
     // Letting a thread use a paired phone is the desktop app's confirmation,
     // named by the device and the thread, under every posture.
     appleDeviceLease: async (request) => await requestDeviceLease(request),
+    // An upload is confirmed by the exact build it sends, under every posture.
+    appleUpload: async (request) => await requestUpload(request),
     // Android Allow input is the same native confirmation, named by the
     // emulator action it authorizes.
     android: async (request) => await requestAndroid(request),

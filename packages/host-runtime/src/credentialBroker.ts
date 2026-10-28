@@ -1,6 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingHttpHeaders, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
+import { handleAppStoreConnectKeyFileRoute } from "./appStoreConnectKeyFiles";
 import {
   CredentialPurgeFailure,
   CredentialStoreFailure,
@@ -53,6 +54,15 @@ const ROUTES = new Set([
   "/v1/desktop-provider-credentials/resolve",
   "/v1/desktop-provider-credentials/set",
   "/v1/desktop-provider-credentials/delete",
+  // No resolve: nothing on the host reads an App Store Connect key back yet,
+  // so a stolen broker token cannot either.
+  "/v1/app-store-connect-keys/has",
+  "/v1/app-store-connect-keys/set",
+  "/v1/app-store-connect-keys/delete",
+  // The key reaches an upload only as a 0600 file the broker writes into that
+  // upload's private folder and removes after; the answer never carries it.
+  "/v1/app-store-connect-keys/write-key-file",
+  "/v1/app-store-connect-keys/remove-key-file",
   "/v1/oauth/begin",
   "/v1/oauth/status",
   "/v1/oauth/refresh",
@@ -68,6 +78,7 @@ const REPLICA_STORE_CREDENTIAL_PREFIX = "/v1/replica-store-credentials/";
 const CANVAS_PUBLIC_SHARE_SECRET_PREFIX = "/v1/canvas-public-share-secrets/";
 const MCP_SERVER_CREDENTIAL_PREFIX = "/v1/mcp-server-credentials/";
 const DESKTOP_PROVIDER_CREDENTIAL_PREFIX = "/v1/desktop-provider-credentials/";
+const APP_STORE_CONNECT_KEY_PREFIX = "/v1/app-store-connect-keys/";
 type NamespacedIdField = "instanceId" | "credentialRef" | "secretId";
 const MAX_CREDENTIAL_BYTES = 12 * 1_024;
 const PURGE_FAILURE_STATUS: Readonly<Record<CredentialPurgeFailure["category"], number>> = {
@@ -130,6 +141,19 @@ export async function startCredentialBroker(
    * with the same UUID can reach one, and a desktop driver can reach no other.
    */
   desktopProviderCredentials?: CredentialStore,
+  /**
+   * The App Store Connect API key a person enters for distributing their own
+   * app, in a credential namespace of its own. It is served only on
+   * `/v1/app-store-connect-keys/*`, which can store, test for, and delete the
+   * key but never read it back.
+   */
+  appStoreConnectKeys?: CredentialStore,
+  /**
+   * The host-private directory whose `upload-<uuid>` folders the broker may
+   * write an App Store Connect key file into for one upload. Without it the
+   * key-file routes answer not found.
+   */
+  appStoreConnectKeyFileRoot?: string,
 ): Promise<CredentialBroker> {
   const token = randomBytes(32).toString("base64url");
   const runtime = createHostOAuthRuntime({
@@ -162,6 +186,8 @@ export async function startCredentialBroker(
       canvasPublicShareSecrets,
       mcpServerCredentials,
       desktopProviderCredentials,
+      appStoreConnectKeys,
+      appStoreConnectKeyFileRoot,
     ).then(
       ({ destroyIncoming, response }) => {
         const headers: Record<string, string> = {};
@@ -236,6 +262,8 @@ export async function startCredentialBroker(
         canvasPublicShareSecrets,
         mcpServerCredentials,
         desktopProviderCredentials,
+        appStoreConnectKeys,
+        appStoreConnectKeyFileRoot,
       ),
   });
 }
@@ -253,6 +281,8 @@ async function handleIncoming(
   canvasPublicShareSecrets: CredentialStore | undefined,
   mcpServerCredentials: CredentialStore | undefined,
   desktopProviderCredentials: CredentialStore | undefined,
+  appStoreConnectKeys: CredentialStore | undefined,
+  appStoreConnectKeyFileRoot: string | undefined,
 ): Promise<{ destroyIncoming: boolean; response: ResponseData }> {
   if (brokerUrl === undefined) throw new Error("unavailable");
   const headers = requestHeaders(incoming.headers);
@@ -288,6 +318,8 @@ async function handleIncoming(
         canvasPublicShareSecrets,
         mcpServerCredentials,
         desktopProviderCredentials,
+        appStoreConnectKeys,
+        appStoreConnectKeyFileRoot,
       ),
     ),
   };
@@ -306,6 +338,8 @@ async function handleBrokerRequest(
   canvasPublicShareSecrets: CredentialStore | undefined,
   mcpServerCredentials: CredentialStore | undefined,
   desktopProviderCredentials: CredentialStore | undefined,
+  appStoreConnectKeys: CredentialStore | undefined,
+  appStoreConnectKeyFileRoot: string | undefined,
 ): Promise<Response> {
   const url = new URL(request.url);
   if (!isAuthorized(peerAddress, request.headers, token)) {
@@ -376,6 +410,25 @@ async function handleBrokerRequest(
       "credentialRef",
       request,
       desktopProviderCredentials,
+    );
+  }
+
+  if (url.pathname.startsWith(APP_STORE_CONNECT_KEY_PREFIX)) {
+    if (appStoreConnectKeys === undefined) return failure("not-found", 404);
+    const operation = url.pathname.slice(APP_STORE_CONNECT_KEY_PREFIX.length);
+    if (operation === "write-key-file" || operation === "remove-key-file") {
+      return handleAppStoreConnectKeyFileRoute(
+        operation,
+        request,
+        appStoreConnectKeys,
+        appStoreConnectKeyFileRoot,
+      );
+    }
+    return handleNamespacedRoute(
+      url.pathname.slice(APP_STORE_CONNECT_KEY_PREFIX.length),
+      "credentialRef",
+      request,
+      appStoreConnectKeys,
     );
   }
 

@@ -10,6 +10,41 @@ Historical links explain rationale; their old status or placement rules do not
 override this specification. The specification describes existing behavior.
 Unfinished plugin extraction and other proposals are separate from these rules.
 
+## Continuing after a restart
+
+Status: Done (2026-10-28). Approved by Henrik on 2026-10-28.
+
+A conversation whose turn was cut off by a host restart shows a notice above
+its composer: "Octant restarted before this turn finished. Review any changes
+before continuing." Its **Resume** button explicitly submits one continuation
+in the same thread. Completed turns, deliberate stops, and a lost renderer
+connection alone do not show it. Nothing continues automatically.
+
+The server tracks turn start and settlement for every provider through the
+existing session journal; routing and advisor behavior remain provider-specific.
+Resume checks current window/thread authority, provider availability, and the
+Project or checkout before expiring dead approvals/questions. It queues a
+host-written request to inspect saved progress and continue the unfinished
+request, using the ordinary mode admission and native-session restoration.
+Neither the composer draft nor its attachment selections change.
+
+The persisted queue identity is derived from the interrupted session's recovery
+identity, so concurrent windows, repeated clicks, and a lost response cannot
+queue a second continuation. Existing unrelated queued messages must be reviewed
+and removed before this action can queue the continuation;
+Resume never unpauses its other messages. A refused recovery leaves the notice
+and an actionable reason. A continuation already queued is visible in the
+ordinary message queue, including any later admission refusal. A tool may have
+taken effect before the crash without recording its result; Resume is not an
+exact-operation replay and cannot promise to undo or deduplicate those effects.
+
+Both implementation slices are complete: server bookkeeping and durable
+continuation, then the shared conversation notice. Store replay, session-route,
+message-queue, Chat lifecycle, and conversation-card tests cover recovery,
+settlement, duplicate requests, authority refusals, and dead approvals/questions.
+Rendered checks at 1000px and 390px confirm the notice, actionable refusal,
+single-click continuation, and preservation of the composer draft.
+
 ## Navigation and Projects
 
 The window is mode-first: a persistent left sidebar with the Work and Code

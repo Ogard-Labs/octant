@@ -471,6 +471,8 @@ describe("bounded authenticated extension routes", () => {
       { kind: "rollback-package", ...target },
       { kind: "uninstall-package", extensionId, packageId },
       { kind: "set-source-trust", ...mutation, trusted: true },
+      { kind: "trust-new-publisher", ...mutation, publisherKey: `ed25519:${"b".repeat(64)}` },
+      { kind: "forget-publisher", ...mutation, publisherKey: `ed25519:${"a".repeat(64)}` },
       { kind: "set-plugin-desired", ...mutation, desired: true },
       { kind: "set-component-desired", ...mutation, componentId: "driver", desired: true },
     ]) {

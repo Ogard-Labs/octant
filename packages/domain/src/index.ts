@@ -180,6 +180,7 @@ export * from "./managedRepositoryPolicy";
 export * from "./canvasShareSnapshotPolicy";
 export * from "./canvasShareAccessLogPolicy";
 export * from "./canvasBoardPolicy";
+export * from "./canvasTagsPolicy";
 export * from "./workspacePresetPolicy";
 export * from "./appUpdatePolicy";
 export * from "./nativeHarnessRoutingPolicy";

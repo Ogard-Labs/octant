@@ -39,7 +39,7 @@ const projects: ReadonlyArray<ArtifactLibraryProjectRecord> = [
 
 function version(overrides: {
   readonly canvasId: string;
-  readonly projectId: string;
+  readonly projectId: string | null;
   readonly mode: "chat" | "work" | "code";
   readonly title: string;
 }): CanvasVersion {
@@ -86,6 +86,8 @@ function library(
   options: {
     readonly liveShares?: ReadonlySet<string>;
     readonly synced?: ReadonlyArray<unknown>;
+    readonly tags?: Readonly<Record<string, ReadonlyArray<string>>>;
+    readonly threadHoldsCanvas?: boolean;
   } = {},
 ) {
   const entries = [
@@ -113,6 +115,22 @@ function library(
       versionCount: 1,
       updatedAt: "2026-08-17T09:00:00.000Z",
     },
+    ...(options.threadHoldsCanvas === undefined
+      ? []
+      : [
+          {
+            canvasId: "10000000-0000-4000-8000-00000000000e",
+            currentVersion: version({
+              canvasId: "10000000-0000-4000-8000-00000000000e",
+              projectId: null,
+              mode: "chat",
+              title: "Trip notes",
+            }),
+            versions: [],
+            versionCount: 1,
+            updatedAt: "2026-08-16T09:00:00.000Z",
+          },
+        ]),
   ];
   return new ArtifactLibraryService({
     projection: {
@@ -121,6 +139,12 @@ function library(
     projects: () => projects,
     liveShares: () => options.liveShares ?? new Set<string>(),
     ...(options.synced === undefined ? {} : { synced: () => options.synced as never }),
+    ...(options.tags === undefined
+      ? {}
+      : { tags: (canvasId: string) => options.tags?.[canvasId] ?? [] }),
+    ...(options.threadHoldsCanvas === undefined
+      ? {}
+      : { threadHoldsCanvas: () => options.threadHoldsCanvas === true }),
     clock: () => "2026-08-18T10:00:00.000Z" as never,
   });
 }
@@ -194,5 +218,58 @@ describe("reading the host's artifact library", () => {
     expect(
       synced.list({ tab: "all", query: "budget" } as never, localWindow).synced,
     ).toBeUndefined();
+  });
+
+  it("lists a Canvas a Chat thread owns under no Project, for a window on this host only", () => {
+    const withThreadOwned = library({ threadHoldsCanvas: true });
+
+    const local = withThreadOwned.list({ tab: "all" } as never, localWindow);
+    const trip = local.entries.find((entry) => entry.title === "Trip notes");
+    expect(trip?.projectId).toBeUndefined();
+    expect(trip?.projectName).toBeUndefined();
+    // A paired device has no Project to be clamped to, so it sees nothing of
+    // a Canvas that belongs to a thread on this host.
+    expect(withThreadOwned.list({ tab: "all" } as never, pairedDevice).entries).not.toContainEqual(
+      expect.objectContaining({ title: "Trip notes" }),
+    );
+  });
+
+  it("leaves out a thread-owned Canvas whose thread no longer holds it", () => {
+    expect(
+      library({ threadHoldsCanvas: false })
+        .list({ tab: "all" } as never, localWindow)
+        .entries.map((entry) => entry.title),
+    ).not.toContain("Trip notes");
+  });
+
+  it("does not file a thread-owned Canvas under any Project filter", () => {
+    const listing = library({ threadHoldsCanvas: true }).list(
+      { tab: "all", projectId: "20000000-0000-4000-8000-000000000001" } as never,
+      localWindow,
+    );
+
+    expect(listing.entries.map((entry) => entry.title)).toEqual(["Launch plan"]);
+  });
+
+  it("carries the person's tags and answers a tag query from the host", () => {
+    const tagged = library({
+      tags: { "10000000-0000-4000-8000-00000000000a": ["Launch"] },
+    });
+
+    const listing = tagged.list({ tab: "all" } as never, localWindow);
+    expect(listing.entries[0]?.tags).toEqual(["Launch"]);
+    expect(listing.tags).toEqual([{ name: "Launch", artifactCount: 1 }]);
+    expect(listing.entries[1]?.tags).toBeUndefined();
+
+    const filtered = tagged.list({ tab: "all", tag: "Launch" } as never, localWindow);
+    expect(filtered.entries.map((entry) => entry.title)).toEqual(["Launch plan"]);
+
+    // An artifact with no tags is never a match for a tag filter, and a tag
+    // nobody carries answers with nothing rather than an empty roster.
+    expect(tagged.list({ tab: "all", tag: "Absent" } as never, localWindow).entries).toEqual([]);
+  });
+
+  it("offers no tag roster when nothing carries a tag", () => {
+    expect(library().list({ tab: "all" } as never, localWindow).tags).toBeUndefined();
   });
 });

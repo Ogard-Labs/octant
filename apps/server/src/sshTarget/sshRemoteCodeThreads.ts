@@ -350,10 +350,9 @@ const CONFINED_POSTURES: ReadonlyArray<SshConfinedPosture> = [
  * The agents a window may offer for a thread on this target, from the checks
  * a turn makes before it binds: an ACP agent that declares placement; its
  * runtime's own admission in each confined posture, the call the turn makes,
- * so a macOS target or an unproven runtime canary refuses here as it would
- * there; and whether the person set its path on the target, without which
- * the turn's placement refuses. Every other provider is left out, as the
- * turn refuses it.
+ * so an unproven runtime canary refuses here as it would there; and whether
+ * the person set its path on the target, without which the turn's placement
+ * refuses. Every other provider is left out, as the turn refuses it.
  */
 export function placeableRuntimesOn(
   options: {

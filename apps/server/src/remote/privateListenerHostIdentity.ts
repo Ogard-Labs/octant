@@ -77,6 +77,17 @@ export function privateListenerDisplayName(connection: SqliteConnection): string
   return boundedDisplayName(readHostIdentity(connection)?.display_name ?? safeHostname());
 }
 
+/**
+ * The listener's signing key when one exists, without making one: push
+ * delivery signs with the key the phones paired with, and a host that never
+ * enabled its listener has no paired phone to notify.
+ */
+export function existingPrivateListenerSigning(dataDirectory: string): HostSigningPort | undefined {
+  const directory = join(dataDirectory, HOST_IDENTITY_SUBDIR);
+  if (!existsSync(join(directory, HOST_KEY_FILE))) return undefined;
+  return loadOrCreateSigning(directory);
+}
+
 function loadOrCreateHostId(directory: string): StableHostId {
   const path = join(directory, HOST_ID_FILE);
   if (existsSync(path)) {

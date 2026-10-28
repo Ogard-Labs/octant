@@ -178,6 +178,9 @@ export function startRefusalMessage(
 }
 
 export function endedMessage(lease: DesktopLease): string {
+  if (lease.credentialMissing === true) {
+    return "The desktop could not be started: the key saved for it is no longer in this computer's credential store. Enter it again in the Project's desktop recipe.";
+  }
   if (lease.state === "refused" || lease.state === "failed") {
     return lease.endReason === undefined
       ? "The desktop could not be started."

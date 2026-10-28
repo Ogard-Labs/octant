@@ -29,6 +29,7 @@ function view(
     | "recovery-required"
     | "failed" = "running",
   steering: ReadonlyArray<unknown> = [],
+  steerable = true,
 ): NativeHarnessSessionView {
   return {
     session: {
@@ -55,10 +56,32 @@ function view(
     activatedFollowUpIds: [],
     questions: [],
     steering,
+    steerable,
   } as never;
 }
 
 describe("ThreadHarnessSteering", () => {
+  it("offers no note control while a runtime provider's session runs, since it never reads notes", async () => {
+    const client = {
+      session: vi.fn(async () => view("running", [], false)),
+      steer: vi.fn(),
+      takeSteering: vi.fn(async () => ({ taken: [] })),
+    };
+    render(<ThreadHarnessCards client={client as never} running threadId={threadId} />);
+    await waitFor(() => expect(client.session).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: "Send note" })).toBeNull();
+  });
+
+  it("offers the note control while a native harness session runs", async () => {
+    const client = {
+      session: vi.fn(async () => view("running")),
+      steer: vi.fn(),
+      takeSteering: vi.fn(async () => ({ taken: [] })),
+    };
+    render(<ThreadHarnessCards client={client as never} running threadId={threadId} />);
+    expect(await screen.findByRole("button", { name: "Send note" })).toBeInTheDocument();
+  });
+
   it.each(["idle", "failed"] as const)(
     "hands unreached notes to the next-message control after a %s turn",
     async (status) => {

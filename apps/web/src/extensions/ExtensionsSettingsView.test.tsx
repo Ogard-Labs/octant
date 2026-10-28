@@ -78,6 +78,7 @@ interface InstalledSnapshotOptions {
   readonly activation?: Activation;
   readonly componentActivation?: Activation;
   readonly componentEffectiveState?: EffectiveState;
+  readonly publisher?: Record<string, string>;
 }
 
 function installedSnapshot(options: InstalledSnapshotOptions = {}): ExtensionSnapshot {
@@ -111,6 +112,7 @@ function installedSnapshot(options: InstalledSnapshotOptions = {}): ExtensionSna
           providerFamilies: [],
         },
         activation,
+        ...(options.publisher === undefined ? {} : { publisher: options.publisher }),
         components: [
           {
             component: {
@@ -712,6 +714,46 @@ describe("ExtensionsSettingsView", () => {
       await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
       expect(screen.getByText(new RegExp(state, "i"))).toBeInTheDocument();
     }
+  });
+
+  it("shows the pinned and the new publisher key together, and sends either publisher action with the key shown", async () => {
+    const pinned = `ed25519:${"a".repeat(64)}`;
+    const selected = `ed25519:${"b".repeat(64)}`;
+    const c = client({
+      snapshot: installedSnapshot({
+        activation: baseActivation({ quarantined: true }),
+        publisher: { pinned, selected, held: "publisher-changed" },
+      }),
+    });
+    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
+
+    const keys = screen.getByLabelText("Publisher keys");
+    expect(within(keys).getByText("Pinned publisher").nextSibling?.textContent).toBe(pinned);
+    expect(within(keys).getByText("New publisher").nextSibling?.textContent).toBe(selected);
+    expect(screen.getByText(/Another publisher signed this version/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Trust new publisher" }));
+    await waitFor(() =>
+      expect(
+        c.calls.some(
+          (command) =>
+            command.kind === "trust-new-publisher" && String(command.publisherKey) === selected,
+        ),
+      ).toBe(true),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Forget publisher" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Forget publisher" }));
+    await waitFor(() =>
+      expect(
+        c.calls.some(
+          (command) =>
+            command.kind === "forget-publisher" && String(command.publisherKey) === pinned,
+        ),
+      ).toBe(true),
+    );
   });
 
   it("trusts, enables the plugin, enables the component, and uninstalls through the client", async () => {

@@ -5,15 +5,18 @@ import type {
   ArtifactLibraryTab,
 } from "@octant/contracts/artifact-library";
 import type { CanvasId, OctantMode, ProjectId } from "@octant/contracts";
-import { Plus, Search } from "lucide-react";
+import { LayoutGrid, List, Plus, Search } from "lucide-react";
 import { SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTabs, OctantTabsList, OctantTabsTab } from "../ui/base/OctantTabs";
+import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { ArtifactCard } from "./ArtifactCard";
+import { ArtifactListRow } from "./ArtifactListRow";
 import { SyncedArtifactCard } from "./SyncedArtifactCard";
 import type { ArtifactLibraryFilters } from "./useArtifactLibrary";
+import type { ArtifactLibraryView as LibraryViewMode } from "./artifactLibraryViewPreference";
 
 export interface ArtifactLibraryViewProps {
   readonly listing: ArtifactLibraryListing | undefined;
@@ -21,6 +24,9 @@ export interface ArtifactLibraryViewProps {
   readonly busy: boolean;
   readonly message?: string;
   readonly observedAt: string;
+  /** Gallery cards or compact rows; the window remembers its own choice. */
+  readonly view: LibraryViewMode;
+  readonly onViewChange: (view: LibraryViewMode) => void;
   readonly onFiltersChange: (next: ArtifactLibraryFilters) => void;
   readonly onOpen: (entry: ArtifactLibraryEntry) => void;
   readonly onExport?: (entry: ArtifactLibraryEntry) => void;
@@ -39,11 +45,16 @@ export interface ArtifactLibraryViewProps {
   readonly onSync?: (canvasId: CanvasId) => void;
   /** Restores an artifact whose deletion on another computer is all that is left. */
   readonly onRestore?: (canvasId: CanvasId) => void;
+  /** Adds one of the person's own tags; absent when this surface cannot change them. */
+  readonly onTagAdd?: (canvasId: CanvasId, tag: string) => void;
+  /** Removes one of the person's own tags; absent when this surface cannot change them. */
+  readonly onTagRemove?: (canvasId: CanvasId, tag: string) => void;
 }
 
 const TABS: ReadonlyArray<{ readonly id: ArtifactLibraryTab; readonly label: string }> = [
-  { id: "all", label: "All" },
   { id: "by-project", label: "By Project" },
+  { id: "all", label: "All" },
+  { id: "by-tag", label: "By tag" },
   { id: "shared", label: "Shared" },
 ];
 
@@ -57,15 +68,19 @@ const KINDS: ReadonlyArray<ArtifactKind> = [
 ];
 const MODES: ReadonlyArray<OctantMode> = ["chat", "work", "code"];
 
+/** A Canvas a Chat thread owns outside every Project files under this label. */
+const NO_PROJECT = "No Project";
+/** In the By tag arrangement, an artifact that carries no tag files under this. */
+const NO_TAG = "No tags";
+
 /**
  * Everything this host has made, in one place.
  *
- * The page is deliberately a gallery rather than a list: an artifact is a thing
- * you recognise by looking at it, and a person coming back to one they made
- * last month remembers its shape long before its title. Grouping by Project is
- * a tab rather than the default, because the question "what have I made" is
- * asked more often than "what is in this Project" — which the Project's own
- * page already answers.
+ * The page opens grouped by Project, because that is how a person comes back
+ * to their work; the flat All tab remains one click away. A gallery card is
+ * how an artifact is recognized, and the list row is how its facts are read —
+ * the person chooses, and the window remembers. Tags are the person's own
+ * filing on top: they group and filter without moving an artifact anywhere.
  */
 export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
   const { filters, listing } = props;
@@ -75,17 +90,22 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
     ...(props.onSync === undefined ? {} : { onSync: props.onSync }),
     ...(props.onRestore === undefined ? {} : { onRestore: props.onRestore }),
   };
+  const tagActions = {
+    ...(props.onTagAdd === undefined ? {} : { onTagAdd: props.onTagAdd }),
+    ...(props.onTagRemove === undefined ? {} : { onTagRemove: props.onTagRemove }),
+  };
   const hasActiveFilters =
     filters.query.trim() !== "" ||
     filters.kind !== undefined ||
     filters.projectId !== undefined ||
-    filters.mode !== undefined;
+    filters.mode !== undefined ||
+    filters.tag !== undefined;
   const change = (next: Partial<ArtifactLibraryFilters>) =>
     props.onFiltersChange({ ...filters, ...next });
   // Clearing a filter removes the key rather than setting it to undefined:
   // `exactOptionalPropertyTypes` treats those as different, and the query the
   // host decodes has no room for an explicitly absent field.
-  const clear = (key: "kind" | "projectId" | "mode") => {
+  const clear = (key: "kind" | "projectId" | "mode" | "tag") => {
     const { [key]: _removed, ...rest } = filters;
     props.onFiltersChange(rest);
   };
@@ -186,6 +206,44 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
           ]}
           value={filters.mode ?? ""}
         />
+
+        {(listing?.tags ?? []).length === 0 ? null : (
+          <>
+            <label className="sr-only" htmlFor="artifact-library-tag">
+              Filter by tag
+            </label>
+            <OctantSelectField
+              className="artifact-library__select select"
+              id="artifact-library-tag"
+              onValueChange={(value) => (value === "" ? clear("tag") : change({ tag: value }))}
+              options={[
+                { id: "", label: "Any tag" },
+                ...(listing?.tags ?? []).map((tag) => ({
+                  id: tag.name,
+                  label: `${tag.name} (${String(tag.artifactCount)})`,
+                })),
+              ]}
+              value={filters.tag ?? ""}
+            />
+          </>
+        )}
+
+        <OctantToggleGroup<LibraryViewMode>
+          aria-label="Artifact view"
+          className="artifact-library__view"
+          onValueChange={(value) => {
+            const next = value[0];
+            if (next === "gallery" || next === "list") props.onViewChange(next);
+          }}
+          value={[props.view]}
+        >
+          <OctantToggleGroupItem aria-label="Gallery view" value="gallery">
+            <LayoutGrid aria-hidden="true" size={14} strokeWidth={1.8} />
+          </OctantToggleGroupItem>
+          <OctantToggleGroupItem aria-label="List view" value="list">
+            <List aria-hidden="true" size={14} strokeWidth={1.8} />
+          </OctantToggleGroupItem>
+        </OctantToggleGroup>
       </div>
 
       <OctantTabs
@@ -212,26 +270,37 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
       )}
 
       {filters.tab === "by-project" ? (
-        <ArtifactsByProject
+        <GroupedArtifacts
+          entries={entries}
+          groupOf={(entry) => entry.projectName ?? NO_PROJECT}
+          observedAt={props.observedAt}
+          onOpen={props.onOpen}
+          view={props.view}
+          {...(props.onExport === undefined ? {} : { onExport: props.onExport })}
+          {...syncActions}
+          {...tagActions}
+        />
+      ) : filters.tab === "by-tag" ? (
+        <ArtifactsByTag
           entries={entries}
           observedAt={props.observedAt}
           onOpen={props.onOpen}
+          view={props.view}
           {...(props.onExport === undefined ? {} : { onExport: props.onExport })}
           {...syncActions}
+          {...tagActions}
         />
-      ) : entries.length === 0 ? null : (
-        <ul className="artifact-library__grid">
-          {entries.map((entry) => (
-            <ArtifactCard
-              entry={entry}
-              key={String(entry.canvasId)}
-              observedAt={props.observedAt}
-              onOpen={props.onOpen}
-              {...(props.onExport === undefined ? {} : { onExport: props.onExport })}
-              {...syncActions}
-            />
-          ))}
-        </ul>
+      ) : (
+        <ArtifactEntries
+          className="artifact-library__grid"
+          entries={entries}
+          observedAt={props.observedAt}
+          onOpen={props.onOpen}
+          view={props.view}
+          {...(props.onExport === undefined ? {} : { onExport: props.onExport })}
+          {...syncActions}
+          {...tagActions}
+        />
       )}
 
       {synced.length === 0 || props.onSync === undefined || props.onRestore === undefined ? null : (
@@ -293,41 +362,127 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
   );
 }
 
-function ArtifactsByProject(props: {
-  readonly entries: ReadonlyArray<ArtifactLibraryEntry>;
+interface EntryActions {
   readonly observedAt: string;
   readonly onOpen: (entry: ArtifactLibraryEntry) => void;
   readonly onExport?: (entry: ArtifactLibraryEntry) => void;
   readonly onSync?: (canvasId: CanvasId) => void;
   readonly onRestore?: (canvasId: CanvasId) => void;
-}) {
+  readonly onTagAdd?: (canvasId: CanvasId, tag: string) => void;
+  readonly onTagRemove?: (canvasId: CanvasId, tag: string) => void;
+}
+
+/** The same entries as gallery cards or as list rows, per the person's choice. */
+function ArtifactEntries(
+  props: EntryActions & {
+    readonly className: string;
+    readonly entries: ReadonlyArray<ArtifactLibraryEntry>;
+    readonly view: LibraryViewMode;
+  },
+) {
+  const { className, entries, view, ...actions } = props;
+  if (view === "list") {
+    return (
+      <ul className="artifact-library__list">
+        {entries.map((entry) => (
+          <ArtifactListRow entry={entry} key={String(entry.canvasId)} {...actions} />
+        ))}
+      </ul>
+    );
+  }
+  return (
+    <ul className={className}>
+      {entries.map((entry) => (
+        <ArtifactCard entry={entry} key={String(entry.canvasId)} {...actions} />
+      ))}
+    </ul>
+  );
+}
+
+/** One section per named group, alphabetical, each artifact once. */
+function GroupedArtifacts(
+  props: EntryActions & {
+    readonly entries: ReadonlyArray<ArtifactLibraryEntry>;
+    readonly groupOf: (entry: ArtifactLibraryEntry) => string;
+    readonly view: LibraryViewMode;
+  },
+) {
   const grouped = new Map<string, ArtifactLibraryEntry[]>();
   for (const entry of props.entries) {
-    const bucket = grouped.get(entry.projectName) ?? [];
+    const key = props.groupOf(entry);
+    const bucket = grouped.get(key) ?? [];
     bucket.push(entry);
-    grouped.set(entry.projectName, bucket);
+    grouped.set(key, bucket);
   }
+  const { entries, groupOf, view, ...actions } = props;
   return (
     <div className="artifact-library__groups">
       {[...grouped.entries()]
         .sort((left, right) => left[0].localeCompare(right[0], "en-US"))
-        .map(([projectName, entries]) => (
-          <SurfaceSection key={projectName} label={projectName}>
-            <ul className="artifact-library__grid artifact-library__grid--grouped">
-              {entries.map((entry) => (
-                <ArtifactCard
-                  entry={entry}
-                  key={String(entry.canvasId)}
-                  observedAt={props.observedAt}
-                  onOpen={props.onOpen}
-                  {...(props.onExport === undefined ? {} : { onExport: props.onExport })}
-                  {...(props.onSync === undefined ? {} : { onSync: props.onSync })}
-                  {...(props.onRestore === undefined ? {} : { onRestore: props.onRestore })}
-                />
-              ))}
-            </ul>
+        .map(([label, groupEntries]) => (
+          <SurfaceSection key={label} label={label}>
+            <ArtifactEntries
+              className="artifact-library__grid artifact-library__grid--grouped"
+              entries={groupEntries}
+              view={view}
+              {...actions}
+            />
           </SurfaceSection>
         ))}
+    </div>
+  );
+}
+
+/**
+ * One section per tag — the person's virtual folders. An artifact with several
+ * tags appears in each of them, because a folder view that hid the other
+ * filing would deny the point of tags; what carries none gathers at the end.
+ */
+function ArtifactsByTag(
+  props: EntryActions & {
+    readonly entries: ReadonlyArray<ArtifactLibraryEntry>;
+    readonly view: LibraryViewMode;
+  },
+) {
+  const { entries, view, ...actions } = props;
+  const sections = new Map<string, ArtifactLibraryEntry[]>();
+  const untagged: ArtifactLibraryEntry[] = [];
+  for (const entry of entries) {
+    const tags = entry.tags ?? [];
+    if (tags.length === 0) {
+      untagged.push(entry);
+      continue;
+    }
+    for (const tag of tags) {
+      const bucket = sections.get(tag) ?? [];
+      bucket.push(entry);
+      sections.set(tag, bucket);
+    }
+  }
+  return (
+    <div className="artifact-library__groups">
+      {[...sections.entries()]
+        .sort((left, right) => left[0].localeCompare(right[0], "en-US"))
+        .map(([label, sectionEntries]) => (
+          <SurfaceSection key={label} label={label}>
+            <ArtifactEntries
+              className="artifact-library__grid artifact-library__grid--grouped"
+              entries={sectionEntries}
+              view={view}
+              {...actions}
+            />
+          </SurfaceSection>
+        ))}
+      {untagged.length === 0 ? null : (
+        <SurfaceSection label={NO_TAG}>
+          <ArtifactEntries
+            className="artifact-library__grid artifact-library__grid--grouped"
+            entries={untagged}
+            view={view}
+            {...actions}
+          />
+        </SurfaceSection>
+      )}
     </div>
   );
 }

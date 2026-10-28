@@ -301,11 +301,13 @@ export function layoutCanvasFlow(
   });
 
   // A dragged screen keeps its journaled place; the rest stack in their rank.
+  // The columns are worked out with every screen in them, dragged or not, so
+  // nudging one screen leaves its slot behind instead of pulling its
+  // neighbours onto it.
   const manual = flow.screens.filter((screen) => screen.positioned === true);
   const manualIds = new Set(manual.map((screen) => String(screen.screenId)));
   const rankColumns = new Map<number, CanvasFlowScreenBox[]>();
   for (const box of boxes) {
-    if (manualIds.has(box.screenId)) continue;
     const rank = ranks.get(box.screenId) ?? 0;
     rankColumns.set(rank, [...(rankColumns.get(rank) ?? []), box]);
   }
@@ -321,9 +323,10 @@ export function layoutCanvasFlow(
     let y = 0;
     for (const box of column) {
       const target = boxes.find((candidate) => candidate.screenId === box.screenId);
-      if (target === undefined) continue;
-      target.x = columnX;
-      target.y = y;
+      if (target !== undefined && !manualIds.has(box.screenId)) {
+        target.x = columnX;
+        target.y = y;
+      }
       y += box.height + STACK_GAP_Y;
     }
     columnX += columnWidth;
