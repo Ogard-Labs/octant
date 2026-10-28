@@ -3075,6 +3075,61 @@ describe("Claude artifact delivery", () => {
     }
   });
 
+  it("refuses a publish approved after Claude artifacts were turned off while it waited", async () => {
+    // The person's answer can come long after the gate first read the
+    // setting and the path; both are read again before the runtime publishes.
+    let on = true;
+    const f = harness("subscription", "current-session", { artifactDelivery: () => on });
+    const acquired = await acquire(f.driver, "work");
+    const approval = Effect.runPromise(
+      Stream.runHead(
+        Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+          Stream.filter((event) => event.kind === "approval-request"),
+        ),
+      ),
+    );
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "approval-gated",
+          nativeArtifacts: true,
+        }),
+      );
+      const open = f.opens[0]!;
+      const signal = new AbortController().signal;
+      const input = { file_path: `${projectRoot}/report.html` };
+      await expect(
+        open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Artifact",
+          input,
+          toolUseId: "publish-late",
+          signal,
+        }),
+      ).resolves.toEqual({ behavior: "ask" });
+      const decision = open.canUseTool({
+        toolName: "Artifact",
+        input,
+        toolUseId: "publish-late",
+        signal,
+      });
+      await approval;
+      on = false;
+      await Effect.runPromise(
+        acquired.connection.answerApproval({ sessionId, requestId: "request-1", approved: true }),
+      );
+      await expect(decision).resolves.toEqual({
+        behavior: "deny",
+        message: "Claude artifacts are turned off in Settings.",
+      });
+    } finally {
+      await acquired.close();
+    }
+  });
+
   it("publishes only a Project file and asks first even in Full access, and never lists the account's artifacts", async () => {
     const f = harness("subscription", "current-session", { artifactDelivery: () => true });
     const acquired = await acquire(f.driver, "code");

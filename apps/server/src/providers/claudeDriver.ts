@@ -1819,12 +1819,17 @@ function makeConnection(
           });
           // The snapshot is read the moment the person approves, just before
           // the runtime reads the same file to publish it, so the thread
-          // shows what they approved sending.
+          // shows what they approved sending. The answer can come long after
+          // the gate read the setting and the path, so both are read again
+          // first: a setting turned off, or a folder swapped for a link out of
+          // the Project, while the person decided refuses the publish.
           if (
             decision.behavior === "allow" &&
             request.toolName === CLAUDE_ARTIFACT_TOOL &&
             typeof request.input.file_path === "string"
           ) {
+            const refusal = artifactCallRefusal(request.input);
+            if (refusal !== undefined) return { behavior: "deny", message: refusal };
             const snapshot = await readClaudePublishedSnapshot(request.input.file_path);
             if (snapshot !== undefined) {
               activeState.publishedSnapshots.set(request.toolUseId, snapshot);

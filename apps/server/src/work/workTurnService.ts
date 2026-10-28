@@ -1363,7 +1363,9 @@ export class WorkTurnService {
     // The live steps live only in this process until the turn settles; a window
     // that opens or reconnects mid-turn would otherwise miss the frame that
     // carried them, which no later frame replays.
-    const liveSteps = this.#liveToolSteps.get(String(turn.requestId));
+    const liveStepsHeld = this.#liveToolSteps.get(String(turn.requestId));
+    const liveSteps =
+      liveStepsHeld === undefined ? undefined : withoutPublishedSnapshots(liveStepsHeld);
     const withSteps =
       liveSteps === undefined || liveSteps.steps.length === 0
         ? turn
@@ -1734,7 +1736,7 @@ export class WorkTurnService {
           this.#liveUpdates.appendToolSteps(
             input.command.threadId,
             input.command.requestId,
-            toolSteps,
+            withoutPublishedSnapshots(toolSteps),
           );
         },
       });
@@ -2517,4 +2519,24 @@ function workTurnThreadFacts(
         workingDirectory:
           thread.workingDirectory === undefined ? undefined : String(thread.workingDirectory),
       };
+}
+
+/**
+ * A running turn's tool calls as the live feed carries them: a published
+ * page keeps its link, and its snapshot waits for the settled turn. Every
+ * step change restates the whole list, so a snapshot of up to
+ * `MAX_THREAD_PUBLISHED_SNAPSHOT_BYTES` carried live was resent to every
+ * window, and held in the feed's frames, once per later tool event of the
+ * turn (sixty later events held about 15 MB for one snapshot).
+ */
+function withoutPublishedSnapshots(toolSteps: ThreadToolSteps): ThreadToolSteps {
+  if (!toolSteps.steps.some((step) => step.published?.snapshot !== undefined)) return toolSteps;
+  return {
+    ...toolSteps,
+    steps: toolSteps.steps.map((step) => {
+      if (step.published?.snapshot === undefined) return step;
+      const { snapshot: _settled, ...page } = step.published;
+      return { ...step, published: page };
+    }),
+  };
 }

@@ -660,7 +660,8 @@ In a thread that uses Claude artifacts:
 - The thread shows a link card under the turn's steps that opens the page in
   your browser, where you are signed in to claude.ai, and beside it a
   snapshot of the file as it was when you approved publishing it. Edits made
-  later on claude.ai are not shown. A page with its own script waits for
+  later on claude.ai are not shown. In a Work thread the snapshot appears
+  when the turn finishes. A page with its own script waits for
   **Run**, as an imported HTML page in a Canvas does. Octant never downloads,
   displays, or signs in to the live page.
 - Ask for a Canvas and you still get one.

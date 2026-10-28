@@ -1644,6 +1644,15 @@ export class CodeService {
       }
       if (command.kind === "create-code-thread") {
         await this.#authorizeThread(authenticatedWindowId, command.thread);
+        // Choosing Claude artifacts turns on the runtime's telemetry, so only
+        // the change command, which a paired device cannot send with it, may
+        // make that choice; a create carrying it would skip that refusal.
+        if (command.thread.documentDelivery === "native-artifacts") {
+          throw this.#failure(
+            "unauthorized",
+            "A new Code thread starts with Canvas; choose Claude artifacts for it afterwards.",
+          );
+        }
         if (this.#persistence.readCodeThread(command.thread.id) !== undefined) {
           throw this.#failure("conflict", "Code thread already exists.");
         }

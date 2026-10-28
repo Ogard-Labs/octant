@@ -1904,7 +1904,10 @@ as a link card beside the drawn snapshot. A turn keeps at most 64 steps in arriv
 order and sets a truncated flag when it called more. Chat carries them as
 `ChatAttempt.toolSteps` on `chat.attempt-updated@1`; Work carries them as
 `WorkTurnState.toolSteps` journaled with the settled `work.turn-updated@1`,
-with a live `turn-tools` stream frame while the turn runs. They live on the
+with a live `turn-tools` stream frame while the turn runs. That frame restates
+every step at each change, so it carries a published page's link but not its
+snapshot (up to 256 KiB, resent once per later tool event); the snapshot
+arrives with the settled turn. They live on the
 attempt or turn record, so they are thread content and purging the thread
 removes them with it. Both fields are optional, so a turn saved before they existed
 still decodes, and the group draws nothing for a turn that called no tool. This
@@ -7191,7 +7194,12 @@ mechanisms are:
   that gate every publish asks, under approval-gated, auto-accepting-edits,
   and Full access alike: the approval says the file goes to claude.ai and
   leaves this computer and, when the call names a `url`, which existing page
-  it replaces. An answer is never reused for a later publish, even with
+  it replaces. The person's answer can come long after the gate first ran,
+  so an approved publish passes the gate again before the runtime is told to
+  go on: a setting turned off, or a folder swapped for a link out of the
+  Project, while they decided refuses it. Creating a Code thread that already
+  carries `native-artifacts` is refused, so the choice is made only through
+  the change command. An answer is never reused for a later publish, even with
   session approvals remembered, because the same call republishes the file
   as it is then. Full access asks because putting a Project file on an
   outside service is the person's own act, as a Canvas public link is

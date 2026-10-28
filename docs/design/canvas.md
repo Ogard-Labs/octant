@@ -195,7 +195,8 @@ through the same importer and design policy as an
 [imported HTML page](#html-import): a static design frame with no
 network, and a page with script waits for Run, whose single-use page the host
 builds from that thread's own journal under the window's read check (never
-from what the request carries). A Markdown snapshot is read as Markdown. A
+from what the request carries). A Markdown snapshot is read as Markdown. A running Work turn shows the link card at once and the
+snapshot once the turn settles. A
 file that is neither, too large, or unreadable keeps only the link card.
 Octant never fetches, frames, or signs in to claude.ai, and the card and
 snapshot stay visible when the settled toolchain folds.
