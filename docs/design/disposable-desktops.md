@@ -975,10 +975,16 @@ Rules this delivery resolved:
 - **Set from a local window; read anywhere the Project is.** Setting or
   removing a recipe chooses what this host runs, so only a local window may:
   the Project route refuses the command from a paired device, which the
-  remote route policy already denies a Project command. A paired device sees
-  the recipe with the Project, and still watches and operates its desktops
-  ([decision 3](#maintainer-decisions)). An agent has no command that
-  reaches it.
+  remote route policy already denies a Project command. A paired device may
+  read the recipe with the Project, and still watches and operates its
+  desktops ([decision 3](#maintainer-decisions)). An agent has no command
+  that reaches it.
+- **The editor is a local window's.** No paired client mounts it: the paired
+  browser (`RemoteWorkspace`) serves thread lists and threads but no Project
+  settings, and the phone shows none. A paired surface that later shows a
+  Project's settings renders the recipe read-only, with no Save or Remove
+  controls, and says changes are made on the computer running Octant,
+  because the route would refuse every change it sent.
 - **The host validates every save.** The command decodes against
   `DesktopRecipe`, so the screen, lease limits, and provider id are bounded
   and a lease cannot start longer than its maximum. The recipe must name a
@@ -2178,10 +2184,11 @@ key, a removed key, and a host with no store, with no console error, no
 horizontal overflow, and the typed key absent from the page after saving.
 
 Nothing here is owed by the maintainer beyond slice 6's E2B live smoke, which
-still gates offering E2B. Left for later: the editor shows the recipe as
-editable on a paired device, which the route refuses, and a key stored for a
-change that was not journaled stays in the store if deleting it fails too,
-since nothing names it and the store is never listed.
+still gates offering E2B. Left for later: a key stored for a change that was
+not journaled stays in the store if deleting it fails too, since nothing
+names it and the store is never listed. The key field is a local window's
+like the rest of the editor, which no paired client mounts
+([recipe storage](#built-recipe-storage)).
 
 ## Rationale
 
