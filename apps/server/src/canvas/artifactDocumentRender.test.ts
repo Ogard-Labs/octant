@@ -197,6 +197,24 @@ describe("rendering a canvas as a document", () => {
     expect(html.body).toContain("Search → Docs = 5.2K");
   });
 
+  it("writes a chart's title, subtitle, and callouts into the file and onto its picture", () => {
+    const blocks = ["line", "bar"].map((chartType) => {
+      const block = chartExampleBlocks.find((candidate) => candidate.chartType === chartType);
+      if (block === undefined) throw new Error(`${chartType} example is missing.`);
+      return block;
+    });
+    const rendered = renderArtifactMarkdown(definition(blocks));
+    if (rendered.kind !== "rendered") throw new Error("expected a rendered document");
+    expect(rendered.body).toContain("#### Up 2,304 subscribers this year, most of it before May");
+    expect(rendered.body).toContain("Email subscribers at the end of each month, 2026");
+    expect(rendered.body).toContain("- Subscribers: Jan = 7,808 — +344 on Jan 25");
+    expect(rendered.body).toContain("- Net new: Sep = 210 — +210 (highlighted)");
+    const html = renderArtifactHtml(definition(blocks));
+    if (html.kind !== "rendered") throw new Error("expected a rendered document");
+    // The callout is drawn on the picture, not only listed under it.
+    expect(html.body).toMatch(/<text[^>]*>\+344 on Jan 25<\/text>/);
+  });
+
   it("writes a treemap as an indented table of every measure", () => {
     const treemap = decodeCanvasBlock({
       blockId: "map-1",

@@ -52,6 +52,8 @@ import {
   CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION,
   CANVAS_THREAD_OWNED_SCHEMA_VERSION,
   CANVAS_DESIGN_FIELDS_SCHEMA_VERSION,
+  CANVAS_CHART_CALLOUTS_SCHEMA_VERSION,
+  canvasChartUsesCallouts,
   CANVAS_MAX_DIAGRAM_GROUP_DEPTH,
   canvasProvenanceIsThreadOwned,
   canvasDesignUsesDesignFields,
@@ -122,6 +124,7 @@ const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
   CANVAS_DESIGN_RUNNING_SCHEMA_VERSION,
   CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION,
   CANVAS_THREAD_OWNED_SCHEMA_VERSION,
+  CANVAS_DESIGN_FIELDS_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
 ];
 
@@ -529,6 +532,8 @@ function declaredSchemaRejection(input: unknown): CanvasPolicyRejectionCode | un
           (declared < CANVAS_DESIGN_FIELDS_SCHEMA_VERSION &&
             (canvasDesignUsesDesignFields(block as Record<string, unknown>) ||
               canvasDiagramUsesRichFields(block as Record<string, unknown>))) ||
+          (declared < CANVAS_CHART_CALLOUTS_SCHEMA_VERSION &&
+            canvasChartUsesCallouts(block as Record<string, unknown>)) ||
           (declared < CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION &&
             (canvasDiagramUsesStyles(block as Record<string, unknown>) ||
               canvasPlanUsesGantt(block as Record<string, unknown>)))),

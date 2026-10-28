@@ -710,7 +710,7 @@ describe("createCanvasAgentTools", () => {
     );
   });
 
-  it("lets an agent create a pie, a donut, stacked and grouped bars, a bar and line chart, a funnel, a radar, and a sankey from the examples describe returns", async () => {
+  it("lets an agent create a pie, a donut, stacked and grouped bars, a bar and line chart, a funnel, a radar, a sankey, and titled charts with callouts from the examples describe returns", async () => {
     const { create, set } = tools();
     const described = await set.execute({
       name: CANVAS_TOOL_NAME,
@@ -732,6 +732,8 @@ describe("createCanvasAgentTools", () => {
       "funnel",
       "radar",
       "sankey",
+      "line",
+      "bar",
     ]);
     expect(result.blockSchema?.properties?.chartType?.enum).toEqual(
       expect.arrayContaining([
