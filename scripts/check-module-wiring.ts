@@ -112,6 +112,10 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "packages/contracts/src/hostedRelay.ts",
     "Hosted relay frame and grant schemas, reached only through hostedRelayProtocol.ts and hostedRelayPathPolicy.ts until the relay service and host connector decode frames with them. Remove once those policies' entries are removed.",
   ],
+  [
+    "packages/domain/src/hubAndSpokesPolicy.ts",
+    "Peer authorization, delegation clamp, roster replacement, stand-in merge, held-grant reconciliation, new-member admission, and owner honoring, delivered as the contracts-and-policy slice of docs/design/hub-and-spokes.md before the hub role and joining routes that call it. Remove once the server's hub routes consult it.",
+  ],
   // ── Reached only through another island, so an island with it ──
   [
     "packages/contracts/src/auditEvents.ts",
