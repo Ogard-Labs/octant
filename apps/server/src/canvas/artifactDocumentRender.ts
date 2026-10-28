@@ -3,10 +3,13 @@ import {
   canvasTableRowCells,
   type CanvasBlock,
   type CanvasDefinition,
+  type CanvasDesignAssetResolution,
   type CanvasNumberFormat,
 } from "@octant/contracts/canvas";
 import {
   CANVAS_EXPORT_BODY_MAX_BYTES,
+  CANVAS_HTML_FILE_IMAGES_MAX_BYTES,
+  CANVAS_HTML_FILE_MAX_BYTES,
   canvasExportBodyByteLength,
   type CanvasExportImplementedFormat,
 } from "@octant/contracts/canvas-export";
@@ -39,9 +42,26 @@ import {
 } from "@octant/domain/canvas-mockup-outline";
 import { layoutCanvasDiagram } from "@octant/domain/canvas-diagram-layout";
 import { layoutCanvasPlanGantt } from "@octant/domain/canvas-plan-gantt-layout";
+import { DEFAULT_LIGHT_TOKENS } from "@octant/theme";
 import { DEFAULT_ARTIFACT_PALETTE, drawCanvasDiagramLayout, escapeXml } from "./artifactRender";
 import type { DesignFrameThemeValues } from "@octant/domain";
-import { renderCanvasDesignExportFrames } from "./canvasDesignPage";
+import { CanvasExportImages, renderCanvasDesignExportFrames } from "./canvasDesignPage";
+import {
+  drawCanvasExportChart,
+  EXPORT_INK,
+  type CanvasExportDrawing,
+  type CanvasExportLegendEntry,
+} from "./canvasExportChart";
+import {
+  drawCanvasExportBarList,
+  drawCanvasExportEr,
+  drawCanvasExportHeatmap,
+  drawCanvasExportMindmap,
+  drawCanvasExportSequence,
+  drawCanvasExportState,
+  drawCanvasExportSwimlane,
+  drawCanvasExportTreemap,
+} from "./canvasExportDiagrams";
 
 /**
  * The reading form of the same blocks a preview draws.
@@ -80,14 +100,63 @@ export interface ArtifactDocumentOptions {
 export function renderArtifactMarkdown(
   definition: Pick<CanvasDefinition, "title" | "blocks">,
 ): ArtifactDocumentRender {
-  return renderDocument(definition, "markdown", {});
+  return finish(renderDocument(definition, "markdown", {}), CANVAS_EXPORT_BODY_MAX_BYTES);
 }
 
+/**
+ * The HTML a destination receives, under the approval card's limit. Pictures
+ * make the file larger than the reading it carried before they were drawn, so
+ * a Canvas that fit then must not be refused now: when the drawn file passes
+ * the limit, each picture the reading under it already carries in full is
+ * written as that reading alone, and styled blocks as their text.
+ */
 export function renderArtifactHtml(
   definition: Pick<CanvasDefinition, "title" | "blocks">,
   options: ArtifactDocumentOptions = {},
 ): ArtifactDocumentRender {
-  return renderDocument(definition, "html", options);
+  const drawn = finish(renderDocument(definition, "html", options), CANVAS_EXPORT_BODY_MAX_BYTES);
+  if (drawn.kind === "rendered") return drawn;
+  return finish(
+    renderDocument(definition, "html", { ...options, pictures: "reading" }),
+    CANVAS_EXPORT_BODY_MAX_BYTES,
+  );
+}
+
+/**
+ * The Canvas as one HTML file a person saves or copies from their own window:
+ * the HTML form, with each design's declared images that resolved for that
+ * reader written in as `data:` images up to the file's image budget, under
+ * the file's own size cap rather than the approval card's.
+ */
+export type CanvasHtmlFileRender =
+  | (Extract<ArtifactDocumentRender, { readonly kind: "rendered" }> & {
+      /**
+       * Declared images that resolved for the reader but were drawn as
+       * placeholders because the file would pass its image budget.
+       */
+      readonly imagesLeftOut: number;
+    })
+  | { readonly kind: "too-large" };
+
+export function renderCanvasHtmlFile(
+  definition: Pick<CanvasDefinition, "title" | "blocks">,
+  options: ArtifactDocumentOptions & {
+    /** The declared images of each design, by block id, resolved for the reader. */
+    readonly designAssets: ReadonlyMap<string, ReadonlyArray<CanvasDesignAssetResolution>>;
+  },
+): CanvasHtmlFileRender {
+  const images = new CanvasExportImages(
+    options.designAssets,
+    Math.ceil(CANVAS_HTML_FILE_IMAGES_MAX_BYTES / 3) * 4,
+  );
+  const document = renderDocument(definition, "html", { ...options, images });
+  // The cap bounds the answer a window or paired device reads, where the file
+  // is a JSON string: a newline, backslash, quote, or control character the
+  // file holds as one byte takes two to six there, so the cap counts it so.
+  if (canvasExportBodyByteLength(JSON.stringify(document.body)) > CANVAS_HTML_FILE_MAX_BYTES) {
+    return { kind: "too-large" };
+  }
+  return { kind: "rendered", ...document, imagesLeftOut: images.leftOut };
 }
 
 export function renderArtifactDocument(
@@ -99,6 +168,15 @@ export function renderArtifactDocument(
     ? renderArtifactHtml(definition, options)
     : renderArtifactMarkdown(definition);
 }
+
+/**
+ * What the internal render takes: the public options, the file's image
+ * budget, and whether pictures are written as their readings alone.
+ */
+type RenderOptions = ArtifactDocumentOptions & {
+  readonly images?: CanvasExportImages;
+  readonly pictures?: "reading";
+};
 
 type Piece =
   | { readonly kind: "heading"; readonly level: number; readonly text: string }
@@ -113,6 +191,27 @@ type Piece =
       readonly kind: "table";
       readonly headers: ReadonlyArray<string>;
       readonly rows: ReadonlyArray<ReadonlyArray<string>>;
+    }
+  | {
+      /**
+       * The reading of the picture drawn just above it. Markdown, which draws
+       * no picture, writes it as ever; HTML folds it under a Data disclosure,
+       * as the screen does, so the picture reads first and nothing is lost.
+       */
+      readonly kind: "data";
+      readonly pieces: ReadonlyArray<Piece>;
+    }
+  | {
+      /**
+       * A block the HTML form draws in the Canvas's own anatomy (a callout's
+       * tone edge, a metric tile, a progress bar, a status badge). `text` is
+       * its reading, which the Markdown form writes as a paragraph.
+       */
+      readonly kind: "styled";
+      readonly text: string;
+      readonly html: string;
+      /** Consecutive metric tiles share one row, as on screen. */
+      readonly tile?: true;
     }
   | { readonly kind: "code"; readonly text: string }
   | { readonly kind: "rule" }
@@ -134,6 +233,13 @@ type Piece =
       readonly width: number;
       readonly height: number;
       readonly markup: string;
+      readonly legend?: ReadonlyArray<CanvasExportLegendEntry>;
+      /**
+       * The reading under it carries everything it shows, so a destination
+       * export near its limit writes only that reading. The node-edge diagram,
+       * drawn before any other picture, is always drawn.
+       */
+      readonly yieldsToReading?: true;
     }
   | {
       /**
@@ -154,9 +260,15 @@ type MathRun =
   | { readonly kind: "text"; readonly text: string }
   | { readonly kind: "math"; readonly source: string };
 
-function finish(title: string, body: string, writesDesignMarkup: boolean): ArtifactDocumentRender {
-  return canvasExportBodyByteLength(body) <= CANVAS_EXPORT_BODY_MAX_BYTES
-    ? { kind: "rendered", title, body, writesDesignMarkup }
+interface DocumentBody {
+  readonly title: string;
+  readonly body: string;
+  readonly writesDesignMarkup: boolean;
+}
+
+function finish(document: DocumentBody, maxBytes: number): ArtifactDocumentRender {
+  return canvasExportBodyByteLength(document.body) <= maxBytes
+    ? { kind: "rendered", ...document }
     : { kind: "too-large" };
 }
 
@@ -303,14 +415,14 @@ function comparisonMatrixPieces(
 function renderDocument(
   definition: Pick<CanvasDefinition, "title" | "blocks">,
   format: CanvasExportImplementedFormat,
-  options: ArtifactDocumentOptions,
-): ArtifactDocumentRender {
+  options: RenderOptions,
+): DocumentBody {
   const pieces: Piece[] = [];
   // A design's frames are drawn only in the HTML form and only as written by
   // acknowledgement; a design the export cannot draw reads as its titles.
   const read = (block: CanvasBlock): ReadonlyArray<Piece> =>
     block.kind === "design" && format === "html" && options.frames === "as-written"
-      ? (designFramePieces(block, options.frameTheme) ?? piecesFor(block))
+      ? (designFramePieces(block, options.frameTheme, options.images) ?? piecesFor(block))
       : piecesFor(block);
   // A dashboard reads where it sits: its title, then each placed block in
   // cell order, which is the order the screen's grid reads at one column. A
@@ -337,23 +449,29 @@ function renderDocument(
     });
   }
   const title = reading(definition.title) || "Canvas";
-  const body = format === "html" ? htmlDocument(title, pieces) : markdownDocument(title, pieces);
-  return finish(
-    title,
-    body,
-    pieces.some((piece) => piece.kind === "frame"),
-  );
+  const written = options.pictures === "reading" ? asReading(pieces) : pieces;
+  const body = format === "html" ? htmlDocument(title, written) : markdownDocument(title, written);
+  return { title, body, writesDesignMarkup: pieces.some((piece) => piece.kind === "frame") };
 }
 
 /** A design as its title and its drawn frames, when the export can draw it. */
 function designFramePieces(
   block: Extract<CanvasBlock, { readonly kind: "design" }>,
   theme: DesignFrameThemeValues | undefined,
+  images: CanvasExportImages | undefined,
 ): ReadonlyArray<Piece> | undefined {
-  const frames = renderCanvasDesignExportFrames(block, theme);
+  const frames = renderCanvasDesignExportFrames(block, theme, images);
   if (frames === undefined) return undefined;
+  // The file says so when an image that resolved was left out for size, so
+  // a placeholder in it is not mistaken for a missing image.
+  const leftOut = images?.leftOutOf(block) ?? 0;
   return [
     { kind: "heading", level: 2, text: reading(block.title) },
+    ...(leftOut === 0
+      ? []
+      : paragraph(
+          `${String(leftOut)} ${leftOut === 1 ? "image was" : "images were"} left out of this file to keep it under ${String(CANVAS_HTML_FILE_IMAGES_MAX_BYTES / (1024 * 1024))} MB of images; ${leftOut === 1 ? "its place shows" : "their places show"} a placeholder.`,
+        )),
     ...frames.map((frame) => ({ kind: "frame" as const, ...frame, title: reading(frame.title) })),
   ];
 }
@@ -364,12 +482,14 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
       return [{ kind: "heading", level: Math.min(6, block.level + 1), text: reading(block.text) }];
     case "rich-text":
       return paragraph(reading(block.text));
-    case "callout":
-      return paragraph(
-        [block.title === undefined ? "" : reading(block.title), reading(block.text)]
-          .filter((part) => part.length > 0)
-          .join(" — "),
+    case "callout": {
+      const title = block.title === undefined ? "" : reading(block.title);
+      const text = [title, reading(block.text)].filter((part) => part.length > 0).join(" — ");
+      return styled(
+        text,
+        `<aside class="callout callout--${block.tone}">${title === "" ? "" : `<strong>${escapeXml(title)}</strong>`}<p>${escapeXml(reading(block.text))}</p></aside>`,
       );
+    }
     case "link":
       return paragraph(linkText(reading(block.label), block.href));
     case "divider":
@@ -382,16 +502,24 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
       );
     case "metric": {
       const value = `${reading(block.label)}: ${scalar(block.value, block.format)}${block.unit === undefined ? "" : ` ${reading(block.unit)}`}`;
-      return paragraph(
-        block.caption === undefined ? value : `${value} — ${reading(block.caption)}`,
+      const text = block.caption === undefined ? value : `${value} — ${reading(block.caption)}`;
+      return text.length === 0
+        ? []
+        : [{ kind: "styled", text, html: metricTile(block), tile: true }];
+    }
+    case "progress": {
+      const percent = `${String(Math.round(block.value * 100))}%`;
+      const detail = block.detail === undefined ? "" : reading(block.detail);
+      return styled(
+        `${reading(block.label)}: ${percent}${detail === "" ? "" : ` — ${detail}`}`,
+        `<div class="progress"><span>${escapeXml(reading(block.label))} <span class="muted">${percent}</span></span><progress max="1" value="${String(block.value)}">${percent}</progress>${detail === "" ? "" : `<span class="muted">${escapeXml(detail)}</span>`}</div>`,
       );
     }
-    case "progress":
-      return paragraph(
-        `${reading(block.label)}: ${String(Math.round(block.value * 100))}%${block.detail === undefined ? "" : ` — ${reading(block.detail)}`}`,
-      );
     case "status":
-      return paragraph(`${reading(block.label)}: ${reading(block.value)}`);
+      return styled(
+        `${reading(block.label)}: ${reading(block.value)}`,
+        `<p class="status status--${block.tone}"><span>${escapeXml(reading(block.label))}</span> <strong>${escapeXml(reading(block.value))}</strong></p>`,
+      );
     case "key-value":
       return [
         {
@@ -413,29 +541,23 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
           }),
         },
       ];
-    case "chart":
-      if (block.chartType === "sankey") {
-        return [
-          {
-            kind: "list",
-            items: (block.links ?? []).map(
+    case "chart": {
+      // The picture the screen draws, then every reading under it, so a value
+      // a mark cannot label is still in the file.
+      const items =
+        block.chartType === "sankey"
+          ? (block.links ?? []).map(
               (link) =>
                 `${reading(link.source)} → ${reading(link.target)} = ${scalar(link.value, block.format)}`,
-            ),
-          },
-        ];
-      }
-      return [
-        {
-          kind: "list",
-          items: block.series.flatMap((series) =>
-            series.points.map(
-              (point) =>
-                `${reading(series.label)}: ${scalar(point.x, block.format)} = ${scalar(point.y, block.format)}`,
-            ),
-          ),
-        },
-      ];
+            )
+          : block.series.flatMap((series) =>
+              series.points.map(
+                (point) =>
+                  `${reading(series.label)}: ${scalar(point.x, block.format)} = ${scalar(point.y, block.format)}`,
+              ),
+            );
+      return pictured(drawCanvasExportChart(block, reading), [{ kind: "list", items }]);
+    }
     case "timeline":
       return [
         {
@@ -453,42 +575,47 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
       // a shaped node named by its role.
       const layout = layoutCanvasDiagram(block);
       const names = new Map(block.nodes.map((node) => [String(node.nodeId), reading(node.label)]));
-      const drawing: Piece = {
-        kind: "drawing",
-        label: "Diagram",
-        width: layout.width,
-        height: layout.height,
-        markup: drawCanvasDiagramLayout(layout, DEFAULT_ARTIFACT_PALETTE, {
-          x: 0,
-          y: 0,
-          scale: 1,
-          label: reading,
-        }),
-      };
-      return [
-        ...(block.nodes.length === 0 ? [] : [drawing]),
-        {
-          kind: "list",
-          items: [
-            ...layout.nodes.map((node) => {
-              const named =
-                node.shape === "plain"
-                  ? reading(node.label)
-                  : `${reading(node.label)} (${node.shape})`;
-              return node.detail === undefined ? named : `${named} — ${reading(node.detail)}`;
-            }),
-            ...block.edges.map((edge) => {
-              const from = names.get(String(edge.source)) ?? "node";
-              const to = names.get(String(edge.target)) ?? "node";
-              const label = edge.label === undefined ? "" : reading(edge.label);
-              const arrow = edge.style === "dashed" ? "⇢" : "→";
-              return label.length === 0
-                ? `${from} ${arrow} ${to}`
-                : `${from} ${arrow} ${to}: ${label}`;
-            }),
-          ],
-        },
-      ];
+      const drawing: CanvasExportDrawing | undefined =
+        block.nodes.length === 0
+          ? undefined
+          : {
+              label: "Diagram",
+              width: layout.width,
+              height: layout.height,
+              markup: drawCanvasDiagramLayout(layout, DEFAULT_ARTIFACT_PALETTE, {
+                x: 0,
+                y: 0,
+                scale: 1,
+                label: reading,
+              }),
+            };
+      return pictured(
+        drawing,
+        [
+          {
+            kind: "list",
+            items: [
+              ...layout.nodes.map((node) => {
+                const named =
+                  node.shape === "plain"
+                    ? reading(node.label)
+                    : `${reading(node.label)} (${node.shape})`;
+                return node.detail === undefined ? named : `${named} — ${reading(node.detail)}`;
+              }),
+              ...block.edges.map((edge) => {
+                const from = names.get(String(edge.source)) ?? "node";
+                const to = names.get(String(edge.target)) ?? "node";
+                const label = edge.label === undefined ? "" : reading(edge.label);
+                const arrow = edge.style === "dashed" ? "⇢" : "→";
+                return label.length === 0
+                  ? `${from} ${arrow} ${to}`
+                  : `${from} ${arrow} ${to}: ${label}`;
+              }),
+            ],
+          },
+        ],
+        "always",
+      );
     }
     case "sequence": {
       const names = new Map(
@@ -497,7 +624,7 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
           reading(participant.label),
         ]),
       );
-      return [
+      return pictured(drawCanvasExportSequence(block, reading), [
         {
           kind: "list",
           items: [
@@ -509,13 +636,13 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
             ...(block.notes ?? []).map((note) => reading(note.text)),
           ],
         },
-      ];
+      ]);
     }
     case "state": {
       const names = new Map(
         block.states.map((state) => [String(state.stateId), reading(state.label)]),
       );
-      return [
+      return pictured(drawCanvasExportState(block, reading), [
         {
           kind: "list",
           items: [
@@ -527,7 +654,7 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
             }),
           ],
         },
-      ];
+      ]);
     }
     case "code-excerpt":
     case "pseudocode":
@@ -603,13 +730,13 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
         for (const child of children.get(nodeId) ?? []) walk(child, depth + 1);
       };
       walk(rootId, 0);
-      return [
+      return pictured(drawCanvasExportTreemap(block, reading), [
         {
           kind: "table",
           headers: ["Item", ...block.measures.map((measure) => reading(measure.label))],
           rows,
         },
-      ];
+      ]);
     }
     case "heatmap": {
       // The grid as a table: a row per declared row and a column per declared
@@ -623,7 +750,7 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
             cell.value,
           ]),
         );
-        return [
+        return pictured(drawCanvasExportHeatmap(block, reading), [
           {
             kind: "table",
             headers: ["Row", ...block.columns.map((column) => reading(column.label)), "Total"],
@@ -639,9 +766,9 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
               ];
             }),
           },
-        ];
+        ]);
       }
-      return [
+      return pictured(drawCanvasExportHeatmap(block, reading), [
         {
           kind: "table",
           headers: ["Date", reading(block.valueLabel ?? "Value"), "Note"],
@@ -651,7 +778,7 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
             day.note === undefined ? "" : reading(day.note),
           ]),
         },
-      ];
+      ]);
     }
     case "design":
       // The reading form names each screen or slide. Its markup is drawn only
@@ -666,7 +793,7 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
       // block declares rather than only the top rows.
       const hasSecondary = block.rows.some((row) => row.secondaryValue !== undefined);
       const ranked = layoutCanvasBarList(block).rows;
-      return [
+      return pictured(drawCanvasExportBarList(block, reading), [
         {
           kind: "table",
           headers: [
@@ -686,7 +813,7 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
               : []),
           ]),
         },
-      ];
+      ]);
     }
     case "comparison-matrix":
       return comparisonMatrixPieces(block);
@@ -754,7 +881,7 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
       if (relationshipItems.length > 0) {
         pieces.push({ kind: "list", items: relationshipItems });
       }
-      return pieces;
+      return pictured(drawCanvasExportEr(block, reading), pieces);
     }
     case "swimlane": {
       // Numbered steps per lane, in lane order, then the connections.
@@ -787,7 +914,7 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
           }),
         });
       }
-      return pieces;
+      return pictured(drawCanvasExportSwimlane(block, reading), pieces);
     }
     case "mindmap": {
       // A nested list, indented by depth, so the branch structure survives the
@@ -814,7 +941,9 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
         for (const child of childrenOf.get(id) ?? []) walk(child, depth + 1);
       };
       if (rootId !== undefined) walk(rootId, 0);
-      return [{ kind: "tree", items }];
+      return pictured(rootId === undefined ? undefined : drawCanvasExportMindmap(block, reading), [
+        { kind: "tree", items },
+      ]);
     }
     case "dashboard":
     case "tabs":
@@ -886,6 +1015,93 @@ function mockupPieces(
 
 function paragraph(text: string): ReadonlyArray<Piece> {
   return text.length === 0 ? [] : [{ kind: "paragraph", text }];
+}
+
+/**
+ * A picture with its reading folded under it, or the reading alone when there
+ * is no picture. A picture `"always"` drawn stays even when a destination
+ * export writes the others as their readings.
+ */
+function pictured(
+  drawing: CanvasExportDrawing | undefined,
+  reading: ReadonlyArray<Piece>,
+  drawn: "always" | "within-limit" = "within-limit",
+): ReadonlyArray<Piece> {
+  if (drawing === undefined) return reading;
+  return [
+    { kind: "drawing", ...drawing, ...(drawn === "within-limit" ? { yieldsToReading: true } : {}) },
+    { kind: "data", pieces: reading },
+  ];
+}
+
+/**
+ * The document as a destination received it before pictures were drawn: each
+ * picture that yields to its reading is left out and that reading written in
+ * its place, unfolded, and a styled block is its text as a paragraph.
+ */
+function asReading(pieces: ReadonlyArray<Piece>): ReadonlyArray<Piece> {
+  return pieces.flatMap((piece): ReadonlyArray<Piece> => {
+    switch (piece.kind) {
+      case "drawing":
+        return piece.yieldsToReading === true ? [] : [piece];
+      case "data":
+        return asReading(piece.pieces);
+      case "styled":
+        return [{ kind: "paragraph", text: piece.text }];
+      default:
+        return [piece];
+    }
+  });
+}
+
+/** `html` is built here from filtered, escaped text; `text` is what Markdown writes. */
+function styled(text: string, html: string): ReadonlyArray<Piece> {
+  return text.length === 0 ? [] : [{ kind: "styled", text, html }];
+}
+
+/**
+ * A metric as the screen's tile: label, value and unit, a signed delta whose
+ * tone follows the block's own direction (the arrow and the sign stay the
+ * channel without colour), the sparkline, and the caption.
+ */
+function metricTile(block: Extract<CanvasBlock, { readonly kind: "metric" }>): string {
+  const unit =
+    block.unit === undefined ? "" : ` <span class="unit">${escapeXml(reading(block.unit))}</span>`;
+  const delta = block.delta;
+  let deltaHtml = "";
+  if (delta !== undefined) {
+    const tone =
+      delta === 0 || block.goodDirection === undefined || block.goodDirection === "neutral"
+        ? "flat"
+        : delta > 0 === (block.goodDirection === "up")
+          ? "good"
+          : "bad";
+    const arrow = delta > 0 ? "↑" : delta < 0 ? "↓" : "–";
+    const sign = delta > 0 ? "+" : "";
+    deltaHtml = `<span class="delta ${tone}">${arrow} ${escapeXml(`${sign}${formatCanvasNumber(delta, block.format)}`)}</span>`;
+  }
+  const caption =
+    block.caption === undefined
+      ? ""
+      : `<span class="muted">${escapeXml(reading(block.caption))}</span>`;
+  return `<div class="metric"><span class="muted">${escapeXml(reading(block.label))}</span><span class="value">${escapeXml(scalar(block.value, block.format))}${unit}</span>${deltaHtml}${sparkline(block.sparkline)}${caption}</div>`;
+}
+
+function sparkline(values: ReadonlyArray<number> | undefined): string {
+  if (values === undefined || values.length === 0) return "";
+  const width = 100;
+  const height = 24;
+  const low = Math.min(...values);
+  const high = Math.max(...values);
+  const span = high - low;
+  const points = values
+    .map((value, index) => {
+      const x = values.length === 1 ? width / 2 : (index / (values.length - 1)) * (width - 4) + 2;
+      const y = span === 0 ? height / 2 : height - 2 - ((value - low) / span) * (height - 4);
+      return `${String(Math.round(x * 10) / 10)},${String(Math.round(y * 10) / 10)}`;
+    })
+    .join(" ");
+  return `<svg class="sparkline" viewBox="0 0 ${String(width)} ${String(height)}" aria-hidden="true"><polyline points="${points}" fill="none" stroke="${EXPORT_INK}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 }
 
 function linkText(label: string, href: string): string {
@@ -964,6 +1180,10 @@ function markdownPiece(piece: Piece): string {
         .join("");
     case "drawing":
       return "";
+    case "data":
+      return piece.pieces.map(markdownPiece).join("\n\n");
+    case "styled":
+      return inline(piece.text);
     case "frame":
       // Markdown has no frame; the titles a design reads as are written by
       // the reading form, which the Markdown form always uses.
@@ -996,33 +1216,92 @@ function cell(value: string): string {
   return inline(value).replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\n/g, " ");
 }
 
+const color = (id: string, fallback: string): string => DEFAULT_LIGHT_TOKENS[id] ?? fallback;
+
+/**
+ * The Canvas's own anatomy on the light scheme, written into the file: a
+ * reading column, tiles, callouts, tables, and pictures. Only generic and
+ * system font families are named, so the file loads no font, and every
+ * colour is a default theme value, so it needs no Octant page to read from.
+ */
+const DOCUMENT_STYLE = [
+  ":root{color-scheme:light}",
+  "*{box-sizing:border-box}",
+  `body{margin:0;background:${color("workspace", "#ffffff")};color:${color("text-primary", "#141414")};font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}`,
+  "main{max-width:880px;margin:0 auto;padding:32px 24px 48px}",
+  "@media (max-width:600px){main{padding:20px 16px 32px}}",
+  "h1{font-size:26px;line-height:1.2;letter-spacing:-0.01em;margin:0 0 20px;overflow-wrap:anywhere}",
+  "h2{font-size:19px;margin:28px 0 8px;overflow-wrap:anywhere}",
+  "h3{font-size:16px;margin:22px 0 6px;overflow-wrap:anywhere}",
+  "h4,h5,h6{font-size:14px;margin:18px 0 6px}",
+  "p,ul,ol{margin:4px 0 14px}",
+  "figure{margin:0 0 18px}",
+  `figcaption{font-size:12px;color:${color("text-muted", "#666666")};margin:0 0 6px}`,
+  "svg{max-width:100%;height:auto}",
+  ".scroll{overflow-x:auto;margin:0 0 16px}",
+  "table{border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}",
+  `th,td{border-bottom:1px solid ${color("border", "#e0e0de")};padding:6px 10px;text-align:left;vertical-align:top}`,
+  `th{font-weight:600;color:${color("text-secondary", "#45454a")};background:${color("control", "#f0f0ef")}}`,
+  `pre{white-space:pre-wrap;overflow-wrap:anywhere;background:${color("control", "#f0f0ef")};border:1px solid ${color("border", "#e0e0de")};border-radius:6px;padding:10px 12px;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}`,
+  "a{color:inherit}",
+  `details.data{margin:-10px 0 20px;font-size:13px;color:${color("text-secondary", "#45454a")}}`,
+  `summary{cursor:pointer;color:${color("text-muted", "#666666")};font-size:12px}`,
+  `.legend{display:flex;flex-wrap:wrap;gap:4px 14px;margin:6px 0 0;padding:0;list-style:none;font-size:12px;color:${color("text-secondary", "#45454a")}}`,
+  ".legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}",
+  ".legend i.line{width:14px;height:0;border-radius:0;border-top:2px solid;vertical-align:3px}",
+  `.callout{border:1px solid ${color("border", "#e0e0de")};border-left:2px solid ${color("accent-text", "#141414")};border-radius:8px;background:${color("floating", "#fdfdfc")};padding:10px 14px;margin:0 0 16px}`,
+  `.callout--warning{border-left-color:${color("warning-text", "#141414")}}`,
+  `.callout--danger{border-left-color:${color("danger-text", "#a8102f")}}`,
+  `.callout--success{border-left-color:${color("success-text", "#0f6144")}}`,
+  ".callout strong{display:block;margin-bottom:4px}.callout p{margin:0}",
+  ".metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(max(9rem,25%),1fr));gap:8px;margin:0 0 16px}",
+  ".metric{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:12px;border:1px solid rgba(20,20,20,0.07);border-radius:6px;background:rgba(20,20,20,0.04)}",
+  ".metric .value{font-size:24px;font-weight:600;letter-spacing:-0.02em;font-variant-numeric:tabular-nums}",
+  ".metric .unit{font-size:14px;font-weight:500;letter-spacing:0}",
+  ".delta{font-size:12px;font-variant-numeric:tabular-nums}",
+  `.delta.good{color:${color("success-text", "#0f6144")}}.delta.bad{color:${color("danger-text", "#a8102f")}}`,
+  ".sparkline{display:block;width:100%;max-width:160px;height:24px}",
+  `.muted{color:${color("text-muted", "#666666")};font-size:12px}`,
+  ".progress{display:flex;flex-direction:column;gap:4px;margin:0 0 16px}",
+  `progress{width:100%;height:8px;accent-color:${color("accent", "#141414")}}`,
+  `.status{display:inline-flex;gap:6px;padding:2px 10px;border-radius:999px;background:${color("control", "#f0f0ef")};font-size:13px}`,
+  `.status--success{background:${color("success-surface", "#bfd8cc")};color:${color("success-text", "#0f6144")}}`,
+  `.status--danger{color:${color("danger-text", "#a8102f")}}`,
+  "iframe{background:#ffffff}",
+].join("");
+
 function htmlDocument(title: string, pieces: ReadonlyArray<Piece>): string {
-  const palette = DEFAULT_ARTIFACT_PALETTE;
-  const style = [
-    `body{font-family:system-ui,sans-serif;background:${palette.background};color:${palette.ink};margin:24px;line-height:1.45}`,
-    "h1{font-size:20px}h2,h3,h4,h5,h6{font-size:16px}",
-    `table{border-collapse:collapse}td,th{border:1px solid ${palette.muted};padding:4px 8px;text-align:left}`,
-    "pre{white-space:pre-wrap}",
-    "a{color:inherit}",
-  ].join("");
-  const body = pieces.map(htmlPiece).join("");
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">${framePolicy(pieces)}<title>${escapeXml(title)}</title><style>${style}</style></head><body><h1>${escapeXml(title)}</h1>${body}</body></html>\n`;
+  // Consecutive metric tiles share one responsive row, as on screen.
+  const parts: string[] = [];
+  let tiles: string[] = [];
+  for (const piece of pieces) {
+    if (piece.kind === "styled" && piece.tile === true) {
+      tiles.push(piece.html);
+      continue;
+    }
+    if (tiles.length > 0) parts.push(`<div class="metrics">${tiles.join("")}</div>`);
+    tiles = [];
+    parts.push(htmlPiece(piece));
+  }
+  if (tiles.length > 0) parts.push(`<div class="metrics">${tiles.join("")}</div>`);
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">${documentPolicy(pieces)}<meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeXml(title)}</title><style>${DOCUMENT_STYLE}</style></head><body><main><h1>${escapeXml(title)}</h1>${parts.join("")}</main></body></html>\n`;
 }
 
 /**
- * The policy a document that draws frames carries for itself. A frame's own
- * page forbids its script every request, but not leaving: a page that sets
- * its own address loaded another page, which then reached the network (seen
- * in a browser with an exported file and a local listener). `frame-src 'none'`
- * on the document refuses that navigation, and a `srcdoc` frame is not a
- * navigation, so the frames still draw. A `srcdoc` page also inherits this
- * policy, so it admits inline script only when a frame here runs any; the
- * document itself holds no script.
+ * The policy the document carries for itself, first in its head, so the file
+ * loads nothing from anywhere wherever it is opened: its styles, pictures,
+ * and images are all inside it.
+ *
+ * A frame's own page forbids its script every request, but not leaving: a
+ * page that sets its own address loaded another page, which then reached the
+ * network (seen in a browser with an exported file and a local listener).
+ * `frame-src 'none'` on the document refuses that navigation, and a `srcdoc`
+ * frame is not a navigation, so the frames still draw. A `srcdoc` page also
+ * inherits this policy, so it admits inline script only when a frame here runs
+ * any; the document itself holds no script.
  */
-function framePolicy(pieces: ReadonlyArray<Piece>): string {
-  const frames = pieces.filter((piece) => piece.kind === "frame");
-  if (frames.length === 0) return "";
-  const script = frames.some((frame) => frame.sandbox === "allow-scripts")
+function documentPolicy(pieces: ReadonlyArray<Piece>): string {
+  const script = pieces.some((piece) => piece.kind === "frame" && piece.sandbox === "allow-scripts")
     ? " script-src 'unsafe-inline';"
     : "";
   return `<meta http-equiv="Content-Security-Policy" content="default-src 'none';${script} style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'">`;
@@ -1041,9 +1320,14 @@ function htmlPiece(piece: Piece): string {
     case "tree":
       return htmlTree(piece.items);
     case "table":
-      return `<table><thead><tr>${piece.headers.map((header) => `<th>${escapeXml(header)}</th>`).join("")}</tr></thead><tbody>${piece.rows
+      // A wide table scrolls inside its own box rather than widening the page.
+      return `<div class="scroll"><table><thead><tr>${piece.headers.map((header) => `<th>${escapeXml(header)}</th>`).join("")}</tr></thead><tbody>${piece.rows
         .map((row) => `<tr>${row.map((value) => `<td>${escapeXml(value)}</td>`).join("")}</tr>`)
-        .join("")}</tbody></table>`;
+        .join("")}</tbody></table></div>`;
+    case "data":
+      return `<details class="data"><summary>Data</summary>${piece.pieces.map(htmlPiece).join("")}</details>`;
+    case "styled":
+      return piece.tile === true ? `<div class="metrics">${piece.html}</div>` : piece.html;
     case "code":
       return `<pre>${escapeXml(piece.text)}</pre>`;
     case "rule":
@@ -1054,17 +1338,33 @@ function htmlPiece(piece: Piece): string {
       if (piece.source === undefined) return `<figure><p>[redacted]</p>${caption}</figure>`;
       return `<figure>${htmlMath(piece.source, true)}${caption}<details><summary>Source</summary><pre>${escapeXml(piece.source)}</pre></details></figure>`;
     }
-    case "drawing":
-      return `<figure><svg xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${escapeXml(piece.label)}" viewBox="0 0 ${String(Math.ceil(piece.width))} ${String(Math.ceil(piece.height))}" style="max-width:100%;height:auto" width="${String(Math.ceil(piece.width))}" font-family="system-ui, sans-serif">${piece.markup}</svg></figure>`;
+    case "drawing": {
+      const legend =
+        piece.legend === undefined || piece.legend.length === 0
+          ? ""
+          : `<ul class="legend">${piece.legend
+              .map(
+                (entry) =>
+                  `<li>${
+                    entry.line === undefined
+                      ? `<i style="background:${escapeXml(entry.color)}"></i>`
+                      : `<i class="line" style="border-color:${escapeXml(entry.color)};border-top-style:${entry.line}"></i>`
+                  }${escapeXml(entry.label)}</li>`,
+              )
+              .join("")}</ul>`;
+      return `<figure><svg xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${escapeXml(piece.label)}" viewBox="0 0 ${String(Math.ceil(piece.width))} ${String(Math.ceil(piece.height))}" style="max-width:100%;height:auto" width="${String(Math.ceil(piece.width))}" font-family="system-ui, sans-serif">${piece.markup}</svg>${legend}</figure>`;
+    }
     case "math-paragraph":
       return `<p>${piece.runs
         .map((run) => (run.kind === "text" ? escapeXml(run.text) : htmlMath(run.source, false)))
         .join("")}</p>`;
     case "frame": {
       // The page is an attribute value, so its markup is escaped once more;
-      // a frame is the only thing here that can hold the author's markup.
+      // a frame is the only thing here that can hold the author's markup. It
+      // loads with the document rather than lazily: a lazy frame below the
+      // fold was blank in a printed or full-page capture of the file.
       const border = `1px solid ${DEFAULT_ARTIFACT_PALETTE.muted}`;
-      const attributes = `sandbox="${piece.sandbox}" referrerpolicy="no-referrer" loading="lazy" title="${escapeXml(piece.title)}"`;
+      const attributes = `sandbox="${piece.sandbox}" referrerpolicy="no-referrer" title="${escapeXml(piece.title)}"`;
       const srcdoc = `srcdoc="${escapeXml(piece.page)}"`;
       if (piece.width === undefined) {
         return `<figure><figcaption>${escapeXml(piece.title)}</figcaption><iframe ${attributes} style="width:100%;max-width:100%;height:${String(piece.height)}px;border:${border}" ${srcdoc}></iframe></figure>`;

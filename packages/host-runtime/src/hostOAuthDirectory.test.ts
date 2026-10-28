@@ -18,6 +18,11 @@ import {
   type FakeIdTokenFlaw,
 } from "./fakeDirectory.test-support";
 import { createHostOAuthRuntime, type HostOAuthRuntime } from "./hostOAuth";
+import {
+  controlIssuerDeadlines,
+  stalledAnswer,
+  type StalledAnswer,
+} from "./stalledIssuer.test-support";
 
 function memoryStore(): CredentialStore & { readonly values: Map<string, string> } {
   const values = new Map<string, string>();
@@ -601,7 +606,9 @@ describe("directory device-code sign-in", () => {
   function flakyDeviceRuntime(
     store: CredentialStore,
     fake: FakeDirectory,
-    failures: ReadonlyArray<"server-error" | "throttled" | "unreachable" | "slow-down"> | "always",
+    failures:
+      | ReadonlyArray<"server-error" | "throttled" | "unreachable" | "slow-down" | StalledAnswer>
+      | "always",
     clock?: { now: number },
   ) {
     const queue = failures === "always" ? [] : [...failures];
@@ -617,6 +624,9 @@ describe("directory device-code sign-in", () => {
         if (failure === "unreachable") throw new TypeError("fetch failed");
         if (failure === "throttled") return new Response("", { status: 429 });
         if (failure === "server-error") return new Response("", { status: 503 });
+        if (failure === "hangs" || failure === "stalls-mid-answer") {
+          return stalledAnswer(failure, init?.signal, 400);
+        }
       }
       return fake.fetch(input, init);
     };
@@ -656,6 +666,33 @@ describe("directory device-code sign-in", () => {
     expect(waits.slice(4).every((wait) => wait === 5_000)).toBe(true);
     expect(store.values.size).toBe(1);
   });
+
+  it.each([
+    ["never answers", "hangs"],
+    ["stops partway through its answer", "stalls-mid-answer"],
+  ] as const)(
+    "polls again after a directory poll that %s, so a stalled connection cannot hold the attempt open",
+    async (_, stall) => {
+      const deadlines = controlIssuerDeadlines();
+      try {
+        const fake = await fakeDirectory();
+        const store = memoryStore();
+        const { runtime, waits } = flakyDeviceRuntime(store, fake, [stall]);
+        const started = await beginDevice(runtime);
+
+        fake.settleDeviceCode(started.userCode, "approved");
+
+        expect(await waitForSettled(runtime, started.attemptId)).toMatchObject({
+          kind: "signed-in",
+        });
+        expect(waits.slice(0, 2)).toEqual([5_000, 10_000]);
+        expect(deadlines.bounds().every((ms) => ms === 30_000)).toBe(true);
+        expect(store.values.size).toBe(1);
+      } finally {
+        deadlines.restore();
+      }
+    },
+  );
 
   it("keeps a slow_down's longer interval through a later outage and after it, as RFC 8628 asks", async () => {
     const fake = await fakeDirectory();

@@ -61,10 +61,10 @@ import type { SshTargetStatus } from "@octant/contracts/ssh-target";
 import {
   REMOTE_CODE_THREAD_CONNECTORS_UNAVAILABLE,
   REMOTE_CODE_THREAD_POSTURES,
-  REMOTE_CODE_THREAD_PROVIDER_UNAVAILABLE,
   remoteCodeTurnReadiness,
+  remotePlacedAgentReadiness,
 } from "@octant/domain/ssh-target-recovery";
-import { harnessRunsSelection, remoteCodeThreadProviderGroups } from "./remoteCodeComposer";
+import { remoteCodeSelection, remoteCodeThreadProviderGroups } from "./remoteCodeComposer";
 import {
   useCallback,
   useContext,
@@ -206,7 +206,8 @@ export interface CodeComposerAdapterProps {
   readonly browserAvailable?: boolean;
   /**
    * The selected Project is bound to a folder on an SSH target. The composer
-   * then offers what the host runs there: Octant's own harness, Plan or Ask
+   * then offers what the host runs there: Octant's own harness and the
+   * agents the host's status lists placeable with a path set, Plan or Ask
    * for approvals, the bound folder alone, and no Browser, Computer, or
    * connector; and no Start while the host's status of the target refuses
    * the posture. The host still decides each of these itself.
@@ -264,9 +265,13 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const suggestionDescriptionId = useId();
   const remote = props.remote;
   const isRemote = remote !== undefined;
+  const remoteTarget = remote?.target;
   const providerGroups = useMemo(
-    () => (isRemote ? remoteCodeThreadProviderGroups(props.providerGroups) : props.providerGroups),
-    [props.providerGroups, isRemote],
+    () =>
+      isRemote
+        ? remoteCodeThreadProviderGroups(props.providerGroups, remoteTarget)
+        : props.providerGroups,
+    [props.providerGroups, isRemote, remoteTarget],
   );
   const [prompt, setPrompt] = useNewTaskPrompt();
   const drafts = useContext(NewTaskDraftsContext);
@@ -550,24 +555,36 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   // What the host's status of the target says before anyone presses Start,
   // and whether the chosen model is one the target runs. Neither grants
   // anything: the host admits the turn itself.
-  const remoteReadiness =
-    remote === undefined ? undefined : remoteCodeTurnReadiness(remote.target, submittedPolicy);
-  const remoteRefusal =
+  const remoteSelection =
     remote === undefined
       ? undefined
-      : remoteReadiness?.status === "unavailable"
-        ? remoteReadiness.message
-        : harnessRunsSelection(
-              providerGroups,
-              props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
-                ? undefined
-                : {
-                    providerInstanceId: props.selectedProviderInstanceId,
-                    modelId: props.selectedModelId,
-                  },
-            )
-          ? undefined
-          : REMOTE_CODE_THREAD_PROVIDER_UNAVAILABLE;
+      : remoteCodeSelection(
+          providerGroups,
+          props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
+            ? undefined
+            : {
+                providerInstanceId: props.selectedProviderInstanceId,
+                modelId: props.selectedModelId,
+              },
+        );
+  // A placed agent's turn also needs its runtime admitted in the posture,
+  // which asks runtime canaries a harness command does not.
+  const remoteReadiness =
+    remote === undefined
+      ? undefined
+      : remoteSelection?.status === "placed-agent"
+        ? remotePlacedAgentReadiness(
+            remote.target,
+            String(remoteSelection.providerInstanceId),
+            submittedPolicy,
+          )
+        : remoteCodeTurnReadiness(remote.target, submittedPolicy);
+  const remoteRefusal =
+    remoteReadiness?.status === "unavailable"
+      ? remoteReadiness.message
+      : remoteSelection?.status === "unavailable"
+        ? remoteSelection.message
+        : undefined;
   const canSubmit =
     trimmed.length > 0 &&
     !props.creating &&

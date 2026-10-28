@@ -54,7 +54,7 @@ function post(
   return request;
 }
 
-function routes() {
+function routes(recipeKey?: Parameters<typeof createDesktopPaneRouteHandler>[0]["recipeKey"]) {
   const store = new WindowAuthorityStore();
   store.register({ windowId: windowId as never, capability, now: 1 });
   const service = {
@@ -122,6 +122,7 @@ function routes() {
     service,
     localActorId,
     now: () => 2,
+    ...(recipeKey === undefined ? {} : { recipeKey }),
   });
   return { handler, service };
 }
@@ -259,6 +260,39 @@ describe("Desktop pane routes", () => {
     );
     expect(namesActor?.status).toBe(400);
     expect(service.recipeMachines).toHaveBeenCalledTimes(2);
+  });
+
+  it("says whether a Project's recipe has its key, never the key, to a window or a paired device", async () => {
+    const projectId = "60000000-0000-4000-8000-000000000006";
+    const recipeKey = vi.fn(async (_asked: string) => ({
+      key: "rejected" as const,
+      store: "available" as const,
+    }));
+    const { handler } = routes(recipeKey);
+    for (const remote of [false, true]) {
+      const answered = await handler(
+        post("/api/code/desktops", { kind: "recipe-key", projectId }, { remote }),
+      );
+      await expect(answered?.json()).resolves.toEqual({
+        status: "recipe-key",
+        key: "rejected",
+        store: "available",
+      });
+    }
+    expect(recipeKey.mock.calls.map(([asked]) => String(asked))).toEqual([projectId, projectId]);
+    const malformed = await handler(
+      post("/api/code/desktops", { kind: "recipe-key", projectId: "not-a-project" }),
+    );
+    expect(malformed?.status).toBe(400);
+
+    // A host that wires no desktop keys has none to report and no store to save one in.
+    const { handler: keyless } = routes();
+    const none = await keyless(post("/api/code/desktops", { kind: "recipe-key", projectId }));
+    await expect(none?.json()).resolves.toEqual({
+      status: "recipe-key",
+      key: "none",
+      store: "unavailable",
+    });
   });
 
   it("leaves every other path to the routes that own it", async () => {

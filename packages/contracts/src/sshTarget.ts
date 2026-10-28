@@ -379,6 +379,24 @@ export const SshTargetPostureAdmission = Schema.Struct({
 }).annotations(strict);
 export type SshTargetPostureAdmission = typeof SshTargetPostureAdmission.Type;
 
+/** The most placeable runtimes one target's status lists. */
+export const SSH_TARGET_MAX_PLACEABLE_RUNTIMES = 64;
+
+/**
+ * A provider instance whose agent a remote-bound Project's turn could place on
+ * the target: its driver passes the check a turn makes before it binds (an ACP
+ * agent that declares placement). It carries the runtime's own admission now
+ * in each confined posture and whether the person set where it is there. A
+ * window offers the agent only where both allow; the host still decides
+ * every turn itself.
+ */
+export const SshPlaceableRuntime = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  runtimePath: Schema.Literal("set", "missing"),
+  admission: Schema.Array(SshTargetPostureAdmission).pipe(Schema.maxItems(8)),
+}).annotations(strict);
+export type SshPlaceableRuntime = typeof SshPlaceableRuntime.Type;
+
 /**
  * A target and what this host would admit on it now, for Octant's own launches
  * in each confined posture. The remote user and platform appear only while the
@@ -393,6 +411,9 @@ export const SshTargetStatus = Schema.Struct({
   admission: Schema.Array(SshTargetPostureAdmission).pipe(Schema.maxItems(8)),
   runtimeBinaries: Schema.Array(SshRuntimeBinary).pipe(
     Schema.maxItems(SSH_TARGET_MAX_RUNTIME_BINARIES),
+  ),
+  placeableRuntimes: Schema.Array(SshPlaceableRuntime).pipe(
+    Schema.maxItems(SSH_TARGET_MAX_PLACEABLE_RUNTIMES),
   ),
 }).annotations(strict);
 export type SshTargetStatus = typeof SshTargetStatus.Type;

@@ -5,13 +5,16 @@ import {
   decodeDesktopProviderId,
   type DesktopPaneAnswer,
   type DesktopRecipe,
+  type DesktopRecipeKeyChange,
   type LeasableDesktopProvider,
 } from "@octant/contracts/desktop-lease";
 import type { ProjectSummary } from "@octant/contracts/projects";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { hostCredentialStore, useHostPlatform } from "../platform";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantFieldError } from "../ui/base/OctantField";
+import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField, type OctantSelectOption } from "../ui/base/OctantSelect";
 
 type CodeProjectSummary = Extract<ProjectSummary, { readonly type: "code" }>;
@@ -20,8 +23,14 @@ export interface ProjectDesktopRecipeSectionProps {
   readonly project: CodeProjectSummary;
   /** Asks the host which providers a recipe may name; absent when this window has no route to it. */
   readonly client?: Pick<DesktopPaneClient, "request">;
-  /** `null` removes the recipe. */
-  readonly onChange: (recipe: DesktopRecipe | null) => Promise<boolean>;
+  /**
+   * `null` removes the recipe. `key` enters or removes the key a cloud
+   * provider reads; the host keeps it in its credential store, never here.
+   */
+  readonly onChange: (
+    recipe: DesktopRecipe | null,
+    key?: DesktopRecipeKeyChange,
+  ) => Promise<boolean>;
   readonly disabled?: boolean;
 }
 
@@ -106,6 +115,17 @@ type ListedMachines = Extract<
 type OfferedMachines =
   | { readonly status: "loading" }
   | { readonly status: "loaded"; readonly machines: ListedMachines }
+  | { readonly status: "failed" };
+
+type RecipeKeyAnswer = Extract<DesktopPaneAnswer, { readonly status: "recipe-key" }>;
+
+type SavedKey =
+  | { readonly status: "loading" }
+  | {
+      readonly status: "loaded";
+      readonly key: RecipeKeyAnswer["key"];
+      readonly store: RecipeKeyAnswer["store"];
+    }
   | { readonly status: "failed" };
 
 const screenId = (screen: DesktopRecipe["screen"]) => `${screen.width}x${screen.height}`;
@@ -257,6 +277,13 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
   }
   const [pending, setPending] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [confirmKeyRemoval, setConfirmKeyRemoval] = useState(false);
+  // The key field is never React state: the value is read once when the
+  // person saves, sent to the host, and cleared, so it is not held for a
+  // retry or rendered back.
+  const keyInput = useRef<HTMLInputElement>(null);
+  const [keyTyped, setKeyTyped] = useState(false);
+  const hostPlatform = useHostPlatform();
   const disabled = props.disabled === true || pending;
 
   const providerOptions: ReadonlyArray<OctantSelectOption> = [
@@ -387,6 +414,70 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
         ]),
   ];
   const machineOffered = choosesMachine ? machineListed : draft.machineId === "";
+  // A cloud provider that no signed-in daemon runs leases on the person's
+  // account through a key Octant keeps in the host credential store. The key
+  // a saved recipe names carries over only while it stays on that provider
+  // and placement; anywhere else needs a key of its own.
+  const takesKey =
+    draftProvider !== undefined &&
+    draftProvider.daemon !== true &&
+    (placements.find((placement) => String(placement.placementId) === draft.placementId)
+      ?.locality ?? draftProvider.locality) === "cloud";
+  const keyCarries =
+    saved !== undefined &&
+    String(saved.providerId) === draft.providerId &&
+    String(saved.placementId ?? "") === draft.placementId;
+  const savedKeyRef = keyCarries ? String(saved.credentialRef ?? "") : "";
+  const [savedKey, setSavedKey] = useState<SavedKey>({ status: "loading" });
+  const keyQuery = takesKey
+    ? `${String(props.project.id)}|${savedKeyRef}|${String(props.project.version)}`
+    : undefined;
+  useEffect(() => {
+    const client = props.client;
+    if (keyQuery === undefined) return undefined;
+    if (client === undefined) {
+      setSavedKey({ status: "failed" });
+      return undefined;
+    }
+    const controller = new AbortController();
+    setSavedKey({ status: "loading" });
+    client
+      .request({ kind: "recipe-key", projectId: String(props.project.id) }, controller.signal)
+      .then(
+        (answer) => {
+          if (controller.signal.aborted) return;
+          setSavedKey(
+            answer.status === "recipe-key"
+              ? { status: "loaded", key: answer.key, store: answer.store }
+              : { status: "failed" },
+          );
+        },
+        () => {
+          if (!controller.signal.aborted) setSavedKey({ status: "failed" });
+        },
+      );
+    return () => controller.abort();
+  }, [props.client, props.project.id, keyQuery]);
+  const keyStoreUnavailable = savedKey.status === "loaded" && savedKey.store === "unavailable";
+  // What the key field says: a recipe moving to this provider has no key
+  // yet whatever the host holds for another one.
+  const keyState =
+    savedKey.status !== "loaded" ? savedKey.status : keyCarries ? savedKey.key : "none";
+  const providerName = draftProvider?.displayName ?? "the provider";
+  const keyMessage = keyStoreUnavailable
+    ? "This host has no credential store Octant can reach, so it can't keep a key. Desktops on this provider can't start until it does."
+    : keyState === "loading"
+      ? "Checking the key…"
+      : keyState === "failed"
+        ? "This window can't ask the host about the key."
+        : keyState === "saved"
+          ? `Key saved in ${hostCredentialStore(hostPlatform)}. Enter a new one to replace it.`
+          : keyState === "missing"
+            ? `The saved key is no longer in ${hostCredentialStore(hostPlatform)}. Enter it again.`
+            : keyState === "rejected"
+              ? `${providerName} refused this key when a desktop last started. Enter a new one.`
+              : `No key saved. Desktops can't start until you enter your ${providerName} API key.`;
+  const keyReady = !takesKey || keyCarries || keyTyped;
   const limitsRefusal =
     draft.leaseMinutes > draft.maximumLeaseMinutes
       ? "A desktop can't start with longer than its longest run."
@@ -398,15 +489,24 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
     placementOffered &&
     machineOffered &&
     limitsRefusal === undefined &&
-    !unchanged;
+    keyReady &&
+    !(unchanged && !keyTyped);
 
-  async function commit(next: DesktopRecipe | null): Promise<void> {
+  async function commit(next: DesktopRecipe | null, key?: DesktopRecipeKeyChange): Promise<void> {
     setPending(true);
     try {
-      await props.onChange(next);
+      await (key === undefined ? props.onChange(next) : props.onChange(next, key));
     } finally {
       setPending(false);
     }
+  }
+
+  /** Reads the typed key once and clears the field, whatever the host answers. */
+  function takeTypedKey(): DesktopRecipeKeyChange | undefined {
+    const typed = keyInput.current?.value.trim() ?? "";
+    if (keyInput.current !== null) keyInput.current.value = "";
+    setKeyTyped(false);
+    return takesKey && typed !== "" ? { action: "enter", key: typed } : undefined;
   }
 
   const headingId = `desktop-recipe-${props.project.id}`;
@@ -533,6 +633,30 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
               />
             </label>
           ))}
+          {takesKey ? (
+            <>
+              <label className="project-provider-policy__mode">
+                <span>API key</span>
+                <OctantInput
+                  aria-label={`${providerName} API key`}
+                  autoComplete="new-password"
+                  disabled={disabled || keyStoreUnavailable}
+                  onChange={(event) => setKeyTyped(event.currentTarget.value.trim() !== "")}
+                  placeholder={
+                    keyCarries && saved.credentialRef !== undefined
+                      ? "Enter a new key to replace it"
+                      : undefined
+                  }
+                  ref={keyInput}
+                  spellCheck={false}
+                  type="password"
+                />
+              </label>
+              <p className="project-provider-policy__hint" role="status">
+                {keyMessage}
+              </p>
+            </>
+          ) : null}
           {limitsRefusal === undefined ? null : (
             <OctantFieldError>{limitsRefusal}</OctantFieldError>
           )}
@@ -546,13 +670,24 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
         {providers.length === 0 ? null : (
           <OctantButton
             disabled={!canSave}
-            onClick={() => void commit(recipeOf(draft, saved, providers))}
+            onClick={() => void commit(recipeOf(draft, saved, providers), takeTypedKey())}
             size="sm"
             type="button"
           >
             {saved === undefined ? "Set recipe" : "Save recipe"}
           </OctantButton>
         )}
+        {takesKey && keyCarries && saved.credentialRef !== undefined ? (
+          <OctantButton
+            disabled={disabled}
+            onClick={() => setConfirmKeyRemoval(true)}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            Remove key
+          </OctantButton>
+        ) : null}
         {saved === undefined ? null : (
           <OctantButton
             disabled={disabled}
@@ -578,6 +713,22 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
         >
           This Project's threads can't start a desktop until a recipe is set again, and any desktop
           running from it now is destroyed.
+        </OctantConfirmDialog>
+      ) : null}
+      {confirmKeyRemoval && saved !== undefined ? (
+        <OctantConfirmDialog
+          confirmLabel="Remove key"
+          destructive
+          onCancel={() => setConfirmKeyRemoval(false)}
+          onConfirm={() => {
+            setConfirmKeyRemoval(false);
+            void commit(saved, { action: "remove" });
+          }}
+          title="Remove the desktop key?"
+        >
+          The recipe stays, but this Project's threads can't start a desktop until a key is entered
+          again. Any desktop running from it now is destroyed, and the key is deleted from{" "}
+          {hostCredentialStore(hostPlatform)} once that desktop is gone.
         </OctantConfirmDialog>
       ) : null}
     </section>

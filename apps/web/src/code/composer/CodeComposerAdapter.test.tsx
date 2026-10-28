@@ -1163,6 +1163,7 @@ describe("CodeComposerAdapter interactions", () => {
         { posture: "auto-accept-edits", decision: { status: "admitted" } },
       ],
       runtimeBinaries: [],
+      placeableRuntimes: [],
     } as never;
     const remoteProps = {
       ...defaultProps,
@@ -1250,6 +1251,121 @@ describe("CodeComposerAdapter interactions", () => {
 
       rerender(<CodeComposerAdapter {...remoteProps} />);
       expect(screen.getByRole("button", { name: "Create thread" })).toBeEnabled();
+    });
+
+    describe("with an ACP agent the host places on the target", () => {
+      const placed = pickerGroup(
+        "80000000-0000-4000-8000-0000000000b3",
+        "GitHub Copilot",
+        "provider",
+        "copilot-model",
+      );
+      const pathless = pickerGroup(
+        "80000000-0000-4000-8000-0000000000b4",
+        "Copilot on a spare login",
+        "provider",
+        "spare-model",
+      );
+      const everyPosture = (decision: object) =>
+        ["plan", "approval-gated", "auto-accept-edits"].map((posture) => ({ posture, decision }));
+      const withAgents = (placedAdmission = everyPosture({ status: "admitted" })) =>
+        ({
+          ...(connected as object),
+          placeableRuntimes: [
+            {
+              providerInstanceId: placed.instance.id,
+              runtimePath: "set",
+              admission: placedAdmission,
+            },
+            {
+              providerInstanceId: pathless.instance.id,
+              runtimePath: "missing",
+              admission: everyPosture({ status: "admitted" }),
+            },
+          ],
+        }) as never;
+      const agentProps = {
+        ...remoteProps,
+        providerGroups: [harness, cli, placed, pathless],
+        selectedProviderInstanceId: placed.instance.id,
+        selectedModelId: decodeProviderModelId("copilot-model"),
+        remote: { location: remoteProps.remote.location, target: withAgents() },
+      };
+      const pathCommand = `octant ssh-target runtime 55555555-5555-4555-8555-555555555555 ${String(pathless.instance.id)} <path>`;
+
+      it("offers the agent beside the harness's models and starts a thread on it", async () => {
+        const user = userEvent.setup();
+        const onCreateThread = vi.fn();
+        render(<CodeComposerAdapter {...agentProps} onCreateThread={onCreateThread} />);
+
+        await user.click(screen.getByRole("button", { name: "Provider and model" }));
+        await user.click(screen.getByRole("option", { name: "GitHub Copilot" }));
+        expect(screen.getByRole("option", { name: "copilot-model" })).toBeEnabled();
+        await user.click(screen.getByRole("option", { name: "Local Codex" }));
+        expect(screen.getByRole("option", { name: "cli-model" })).toBeDisabled();
+        await user.keyboard("{Escape}");
+
+        await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the build");
+        await user.click(screen.getByRole("button", { name: "Create thread" }));
+        await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(1));
+        expect(onCreateThread.mock.calls[0]?.[0]).toMatchObject({
+          executionPolicy: "approval-gated",
+        });
+      });
+
+      it("lists an agent with no runtime path set unavailable, with the command that sets it", async () => {
+        const user = userEvent.setup();
+        const onCreateThread = vi.fn();
+        render(
+          <CodeComposerAdapter
+            {...agentProps}
+            selectedProviderInstanceId={pathless.instance.id}
+            selectedModelId={decodeProviderModelId("spare-model")}
+            onCreateThread={onCreateThread}
+          />,
+        );
+
+        await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the build");
+        expect(screen.getByRole("button", { name: "Create thread" })).toBeDisabled();
+        expect(screen.getByRole("status")).toHaveTextContent(pathCommand);
+        await user.click(screen.getByRole("button", { name: "Provider and model" }));
+        await user.click(screen.getByRole("option", { name: "Copilot on a spare login" }));
+        expect(screen.getByRole("option", { name: "spare-model" })).toBeDisabled();
+        // The picker spells the command out above the agent's models.
+        expect(screen.getByRole("note")).toHaveTextContent(
+          `Set where this provider's runtime is on the SSH target before it runs there: ${pathCommand}.`,
+        );
+        expect(onCreateThread).not.toHaveBeenCalled();
+      });
+
+      it("offers no Start while the host refuses the agent's runtime in the posture", async () => {
+        const user = userEvent.setup();
+        render(
+          <CodeComposerAdapter
+            {...agentProps}
+            remote={{
+              location: remoteProps.remote.location,
+              target: withAgents([
+                { posture: "plan", decision: { status: "admitted" } },
+                {
+                  posture: "approval-gated",
+                  decision: {
+                    status: "refused",
+                    reason: "not-attested",
+                    posture: "approval-gated",
+                    probe: "runtime-read-ssh-directory",
+                  },
+                },
+              ]),
+            }}
+          />,
+        );
+        await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the build");
+        expect(screen.getByRole("button", { name: "Create thread" })).toBeDisabled();
+        expect(screen.getByRole("status")).toHaveTextContent(
+          "The target could not show that approval-gated work is confined (runtime-read-ssh-directory).",
+        );
+      });
     });
   });
 });

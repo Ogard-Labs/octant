@@ -871,9 +871,10 @@ ahead of everything else in it: a static design as one page per screen with
 an empty `sandbox`, and a running design as one page of every screen with
 `sandbox="allow-scripts"` and the served page's policy without `sandbox`,
 which a page cannot declare for itself. No frame has `allow-same-origin`, and
-the bridge is left out, since an exported page has no host to report to. The
-document that draws frames carries a policy of its own with `frame-src
-'none'`: a frame's page forbids its script every request but not leaving, and
+the bridge is left out, since an exported page has no host to report to. Every
+exported HTML document carries a policy of its own, first in its head, with
+`default-src 'none'`, `connect-src 'none'`, and `frame-src 'none'`, so the file
+loads nothing wherever it is opened: a frame's page forbids its script every request but not leaving, and
 a prototype that set its own address loaded another page, which reached a
 local listener; the document's policy refuses that navigation, and a `srcdoc`
 frame, which is not one, still draws. A `srcdoc` page inherits the document's
@@ -900,7 +901,8 @@ markup, so their card sets `drawsDesignFrames` for the person to acknowledge,
 and a themed design needs the window's `frameTheme` as in HTML export.
 The export approval card says when the document writes design markup
 (`writesDesignMarkup`), so approving it is the person's acknowledgement that
-markup leaves as written. A declared image draws a placeholder. A design in
+markup leaves as written. In a destination export a declared image draws a
+placeholder; the HTML file below writes in those that resolve for its reader. A design in
 the workspace theme is exported in the theme the person's window draws it
 with: an HTML export of a Canvas that holds a design carries `frameTheme`, the
 scheme and the frame's token values, because an exported file has no Octant
@@ -912,7 +914,55 @@ the host writes only the tokens a frame receives
 frame kit, which lives in `packages/domain` so the app and the export share
 one copy. An export handed no theme writes a themed design as its titles. An
 exported document frame cannot be measured, so it scrolls at a fixed height,
-and it does not carry Octant's fonts; the tokens' own fallbacks apply. A share refuses an action block, whose
+and it does not carry Octant's fonts; the tokens' own fallbacks apply.
+
+**HTML file.** The Canvas surface's More menu offers **Save as HTML file** and
+**Copy HTML**: the version on screen as one self-contained file a person can
+open offline in any browser or paste into another tool. It is the HTML export's
+document, drawn on the light scheme with Octant's own anatomy written into one
+inline stylesheet (callouts with their tone edge, metric tiles in a row, a
+progress bar, a status badge, tables that scroll in their own box), and every
+picture inline as SVG from the layout the board draws: each chart type with its
+axis, gridlines, series hues (the theme's palette roles) and legend; the
+sequence, state, entity-relationship, swimlane, mind-map, and node-edge
+diagrams; the treemap, heatmap, and bar list. The reading the Markdown form
+writes follows each picture under a **Data** disclosure, so no value is only in
+a picture. A destination's HTML export draws the same document under the
+approval card's body limit (`CANVAS_EXPORT_BODY_MAX_BYTES`, 256 KiB). Pictures
+make it larger than the reading a destination received before they were
+drawn, so a Canvas that exported then must still export: when the drawn
+document would pass the limit, each picture but the node-edge diagram (drawn
+before the others) is written as its reading alone, unfolded, and each styled
+block as its text. The stylesheet and no-load policy every HTML document now
+carries add about 3 KB that this does not take back. Math is MathML, which needs no font. Design frames are written as in
+the HTML export above, under the same sandbox and page policy; a running
+prototype runs there and reaches nothing (the frame threat model, F11). The
+file names only system and generic font families and loads nothing: the
+document's policy refuses every load, and the only address outside it is a link
+block's own `http(s)` link, which a reader follows by choice. `POST
+/api/canvas/html-file` renders it under the window authorization `get` runs
+(a paired device's Canvas read grant included) for the version the window
+names, with the window's `frameTheme`. It names no destination, so it holds no
+approval card, calls no plugin, journals nothing, and sends nothing anywhere: the
+file goes back to the window that asked, which downloads it or writes it to the
+clipboard. Text passes the same share filter as every export, so a host path,
+a credential-shaped value, and a source's opaque reference are redacted, and no
+host, Project, thread, Canvas, version, image, or source id is written. Each
+design's declared images resolve under the version's provenance, as when the
+reader draws the design, and are written in as `data:` images up to 4 MiB of
+images for the whole file (`CANVAS_HTML_FILE_IMAGES_MAX_BYTES`, charged once per
+reference); an image past that draws the labelled placeholder, the file says how
+many were left out, and so does the result (`imagesLeftOut`). The whole file is
+at most 7 MiB (`CANVAS_HTML_FILE_MAX_BYTES`) measured as the JSON string the
+answer carries it in, where a newline, quote, backslash, or control character
+takes two to six bytes, so the answer fits the 8 MiB a paired device is served;
+past that it is refused as `too-large`.
+The surface's status line says what happened, and when the file holds design
+markup, that the markup is included as written. An image block names a source,
+not bytes, and draws as its description, as on screen. The agent's
+`octant_canvas` tool has no export operation, and this adds none.
+
+A share refuses an action block, whose
 command runs only on this host. That refusal, and any block or field the share
 contract does not carry, are checked before the snapshot is journaled and
 reach the owner as an `unsafe-payload` denial: the Canvas cannot be shared, not

@@ -468,11 +468,28 @@ export function endpointTakesKey(instance: ModelEndpointInstance): boolean {
   );
 }
 
-/** The line under a row's name: who is signed in, or where it is and whether it sends a key. */
+/**
+ * Whether the host's last check of an organization sign-in endpoint was
+ * refused for want of a sign-in (it ended, or the broker no longer holds it).
+ * The host's sign-in status reads only whether the endpoint names a sign-in,
+ * so while this holds nothing may say who is signed in.
+ */
+export function lastCheckFoundSignInGone(observed: ProviderObservedState | undefined): boolean {
+  return (
+    observed?.readiness === "unauthenticated" && observed.unauthenticatedReason !== "not-authorized"
+  );
+}
+
+/**
+ * The line under a row's name: who is signed in, or where it is and whether
+ * it sends a key. `observed` is the host's last check, which an organization
+ * sign-in's status cannot overrule.
+ */
 export function endpointSubLine(
   instance: ModelEndpointInstance,
   signIn: EndpointSignIn | undefined,
   offer: { readonly accountLabel: string } | undefined,
+  observed?: ProviderObservedState,
 ): string {
   if (offer !== undefined) {
     if (signIn?.kind === "signed-in") return `Signed in as ${signIn.accountLabel}`;
@@ -483,7 +500,9 @@ export function endpointSubLine(
   const host = endpointHost(instance);
   if (instance.driverKind === "ollama") return `Ollama · ${host}`;
   if (isDirectorySignInEndpoint(instance) || instance.driverKind === "amazon-bedrock") {
-    return `${host} · Organization sign-in`;
+    return signIn?.kind === "signed-in" && !lastCheckFoundSignInGone(observed)
+      ? `Signed in as ${signIn.accountLabel}`
+      : `${host} · Organization sign-in`;
   }
   return `${host} · ${endpointTakesKey(instance) ? "API key" : "No key"}`;
 }

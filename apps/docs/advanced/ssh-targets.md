@@ -13,11 +13,13 @@ proves it confines them as your computer would.
 In this technical preview you can register targets, bind a folder on one as a
 Code Project, read its files, Git status, and diff, open terminals there,
 create managed worktrees, and start Code tasks in it from the desktop app.
-Such a task runs only on Octant's own harness (a model you reach through an
+Such a task runs on Octant's own harness (a model you reach through an
 endpoint, such as an OpenAI-compatible one), whose inference stays on your
 computer while its file tools and commands act on the target with the usual
-approvals; any other provider is refused for it, and Full access is not
-offered there. macOS targets are not admitted yet.
+approvals, or on GitHub Copilot running on the target itself
+([Where a provider runs on the target](#where-a-provider-runs-on-the-target)).
+Any other provider is refused for it, and Full access is not offered there.
+macOS targets are not admitted yet.
 
 ## What the target needs
 
@@ -83,9 +85,10 @@ Project picker opens this page.
    dot that is green while the target is connected, and choose it; or pick it
    under **On SSH targets** in the composer's Project menu.
 3. The composer shows the folder on the target where it would show a branch.
-   Choose a model under **Octant**: models of other providers are listed as
-   unavailable, because only Octant's own harness runs a task on a target
-   for now. **Access** offers **Plan** and **Ask for approvals**. Full access
+   Choose a model under **Octant**, or GitHub Copilot once its path is set on
+   the target ([below](#where-a-provider-runs-on-the-target)). Models of other
+   providers are listed as unavailable, with the reason.
+   **Access** offers **Plan** and **Ask for approvals**. Full access
    is not offered on a target, and neither is Auto-accept edits, because
    Octant keeps no checkpoint of the target's files to go back to, so you
    approve each write.
@@ -160,8 +163,16 @@ and your `~/.ssh`. Setting another path takes effect the next time the
 runtime starts. GitHub Copilot is the first provider Octant can run there:
 it signs in with the target's own `~/.copilot` (run `copilot login` on the
 target), never with a key from this computer, and the Project files it would
-otherwise load by itself are hidden from it there as on this computer. The
-composer does not offer it for a task on a target yet.
+otherwise load by itself are hidden from it there as on this computer.
+
+The composer offers GitHub Copilot for a task on a target once you set its
+path there. Until then its models are listed as unavailable, and the picker
+shows the `octant ssh-target runtime` command above with the target's and the
+provider's ids already filled in; replace `<path>` with where `copilot` is on
+the target (for example what `command -v copilot` prints there). Copilot then
+runs on the target in **Plan** or **Ask for approvals**: each file it writes
+and each command it runs on the target asks you first, and the task offers no
+send while the target has not proven it confines the agent in that posture.
 
 ## Removing a target
 

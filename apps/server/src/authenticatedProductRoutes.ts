@@ -167,6 +167,12 @@ export function classifyProductAction(request: Request): string | undefined {
     if (method === "POST" && path === "/api/canvas/design-run") {
       return "project.overview.read";
     }
+    // The HTML file is a read of the Canvas the device can already open: the
+    // route runs the same read check and sends the file to no one else. It is
+    // POST because the request carries the theme the window draws designs in.
+    if (method === "POST" && path === "/api/canvas/html-file") {
+      return "project.overview.read";
+    }
     if (
       method === "POST" &&
       (path.endsWith("/revise") || path.endsWith("/refresh") || path.endsWith("/refresh-cancel"))

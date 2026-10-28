@@ -443,6 +443,38 @@ describe("an Amazon Bedrock endpoint", () => {
     });
   });
 
+  it("names the role and account signed in under the name, unless the last check found that sign-in gone", () => {
+    const held = {
+      kind: "signed-in",
+      accountLabel: "BedrockUser in account 123456789012",
+    } as const;
+    const named = "Signed in as BedrockUser in account 123456789012";
+    expect(endpointSubLine(bedrock, held, undefined, observed())).toBe(named);
+    expect(endpointSubLine(bedrock, held, undefined, undefined)).toBe(named);
+    // A role the portal does not give is still a sign-in the person holds.
+    expect(
+      endpointSubLine(
+        bedrock,
+        held,
+        undefined,
+        observed({ readiness: "unauthenticated", unauthenticatedReason: "not-authorized" }),
+      ),
+    ).toBe(named);
+    for (const reason of ["expired", "revoked", "missing"] as const) {
+      expect(
+        endpointSubLine(
+          bedrock,
+          held,
+          undefined,
+          observed({ readiness: "unauthenticated", unauthenticatedReason: reason }),
+        ),
+      ).toBe("bedrock-runtime.us-west-2.amazonaws.com · Organization sign-in");
+    }
+    expect(endpointSubLine(bedrock, { kind: "signed-out", termsRequired: false }, undefined)).toBe(
+      "bedrock-runtime.us-west-2.amazonaws.com · Organization sign-in",
+    );
+  });
+
   it("names a role the portal does not give with no fix, and the host's sign-in service when it is down", () => {
     const noAccess = read({
       readiness: "unauthenticated",

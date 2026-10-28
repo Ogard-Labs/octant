@@ -399,10 +399,22 @@ export function changeCodeProjectDesktopRecipe(
     }
     // A cloud desktop runs on the person's own account: through a key Octant
     // holds, or through the placement a provider's daemon is signed in to.
-    // With neither the lease service refuses every acquire, so the recipe is
-    // refused here.
+    // With neither the lease service refuses every acquire, so a new recipe,
+    // or one moving to this provider or placement, is refused here. A recipe
+    // already on it may go without one: that is a person removing its key,
+    // and it starts nothing until they enter another.
     const daemonPlacement = provider.daemon === true && placement !== undefined;
-    if (locality === "cloud" && recipe.credentialRef === undefined && !daemonPlacement) {
+    const saved = project.desktopRecipe;
+    const keyRemovedInPlace =
+      saved !== undefined &&
+      String(saved.providerId) === String(recipe.providerId) &&
+      String(saved.placementId ?? "") === String(recipe.placementId ?? "");
+    if (
+      locality === "cloud" &&
+      recipe.credentialRef === undefined &&
+      !daemonPlacement &&
+      !keyRemovedInPlace
+    ) {
       reject("invalid-desktop-recipe", "A cloud desktop needs a saved key for its account");
     }
   }

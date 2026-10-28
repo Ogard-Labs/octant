@@ -890,7 +890,8 @@ launches with their own proxy on this host are built, and the ACP driver
 declares placement for a profile whose whole launch can be stated on a
 target (its fixed variables and the Project entries it denies included), at
 the runtime path the person set for it there; GitHub Copilot's profile is the
-first that can, and the composer does not offer it for a remote Project yet. SSH
+first that can, and a local window's composer offers it for a remote Project
+where the target's status lists it placeable and its path is set there. SSH
 targets, their runtime paths, their
 attestation digests, remote bindings, managed worktrees, remote terminals'
 starts and ends, and a placed runtime's egress are journaled. Its
@@ -6213,7 +6214,9 @@ same. This holds in Chat, Work, and Code.
   Bubblewrap launch, Linux only), artifact transfer, a Code send's binding
   of `octant_computer` to one of its thread's leases, the Code dock's
   Desktop tool, a Code Project's stored desktop recipe with its settings
-  editor, and E2B, the first of the two named cloud providers (E2B and Cua
+  editor (where a local window enters the key a cloud recipe's provider
+  reads, kept only in the host credential store's desktop-provider
+  namespace), and E2B, the first of the two named cloud providers (E2B and Cua
   Spaces), are built; Cua Spaces, reached through the person's local Cua daemon, is
   designed (accepted on 2026-10-27), and its local-daemon port and its driver
   for a Space on this computer or on another of the person's computers that
@@ -6259,6 +6262,19 @@ The rendered Markdown, HTML, and the artifact preview SVG read numbers through
 the shared Canvas formatter and draw marks to the shared chart specifications
 and the shared squarified treemap layout, so an exported reading matches the
 screen rather than growing a second reading.
+
+**Canvas HTML file.** Save as HTML file and Copy HTML on the Canvas surface are
+not a destination: `POST /api/canvas/html-file` renders the HTML export's
+document for the version the window names, under the same window
+authorization as reading the Canvas (a paired device's read grant included),
+and returns it to that window, which downloads it or puts it on its clipboard.
+No plugin is called, no approval card is held, and nothing is journaled, because
+nothing leaves to anyone but the reader. The file carries its own
+`default-src 'none'` policy and loads nothing; each design's declared images
+that resolve under the version's provenance are written in as `data:` images
+within a per-file image budget, and the file has its own size cap so the answer
+fits the remote gateway. The owning rule is in
+[Canvas: HTML file](design/canvas.md#design-block).
 
 The folder destination ships in-tree on that same port, so it is offered,
 approved, and journaled exactly as a plugin's contribution is. Its folder comes

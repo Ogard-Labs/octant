@@ -60,8 +60,9 @@ in `apps/server/src/code/codeAcpClientTools.ts`,
 launch also carries the profile's fixed variables and the Project entries
 it denies, GitHub Copilot's profile is placed, and the Code turn runtime
 starts a remote-bound thread's ACP agent through the placement
-([Before 6d](#before-6d)); the composer does not offer it for a remote
-Project yet, and the real-provider smoke (6d) is next. Slice 7 is
+([Before 6d](#before-6d)), which a local window's composer offers where
+the target's status lists the agent placeable and the person set its path
+there; the real-provider smoke (6d) is next. Slice 7 is
 built: a person's terminals and managed worktrees on a remote-bound Project,
 under the same admission
 ([Terminals and managed worktrees](#terminals-and-managed-worktrees)),
@@ -793,8 +794,7 @@ These rules settle what the step needs, each in the fail-closed direction:
   of the target's Projects holds a turn (prepared, running, or waiting on
   the person), checked in the same step as the removal.
 - **Not built.** Reconnecting on its own; compacting a remote thread's
-  session; the composer offering a placed ACP agent for a remote Project (it lists only
-  the harness's models there); observing a remote thread's delivery target,
+  session; observing a remote thread's delivery target,
   so nothing marks one Done from Git evidence; and listing remote threads in
   the sidebar's activity and status arrangements, which show the Project
   tree's local Projects only.
@@ -826,12 +826,16 @@ each in the fail-closed direction:
   offers remote-bound Projects under "On SSH targets". For one, the
   composer names the folder on the target and offers the bound folder only
   (no branch, worktree, or Start from origin); Plan and Ask for approvals
-  only, with nothing remembered for the Project; every provider but the
-  native harness listed unavailable with the reason; and no Browser,
-  Computer, or connector, each shown blocked if typed. It offers no Start
-  while the host's status of the target refuses the chosen posture
+  only, with nothing remembered for the Project; the native harness's
+  models, and a placed agent's where the target's status offers it
+  ([Before 6d](#before-6d)), with every other
+  provider listed unavailable with the reason; and no Browser, Computer, or
+  connector, each shown blocked if typed. It offers no Start while the
+  host's status of the target refuses the chosen posture
   (`remoteCodeTurnReadiness` in `packages/domain/src/sshTargetRecovery.ts`
-  reads the connection and the admission the host reported), and says why.
+  reads the connection and the admission the host reported), or, for a
+  placed agent, refuses that agent's runtime in it
+  (`remotePlacedAgentReadiness`), and says why.
   The thread is created through `prepare-code-project-checkout` and
   `create-code-thread` on the `remote-root` checkout; the planner refuses a
   managed worktree there.
@@ -1375,9 +1379,9 @@ Each is its own reviewable change with this section updated in place.
     target's distribution.
   - _Before it can run:_ GitHub Copilot's profile is placeable and the Code
     turn runtime composes a remote-bound Project's ACP thread
-    ([Before 6d](#before-6d)). The composer still lists only the harness's
-    models for a remote Project, so a local window cannot choose the agent
-    yet; that composer step precedes the maintainer's run.
+    ([Before 6d](#before-6d)), and a local window's composer offers the
+    agent for a remote Project once its path is set on the target
+    (`octant ssh-target runtime`). What remains is the maintainer's run.
 
 #### As built in 6b
 
@@ -1542,11 +1546,11 @@ a path short of removing the target.
 
 #### Before 6d
 
-6d needs one real profile that can be placed and a Code turn that starts it.
-Every shipped profile's local launch fixes guard variables and denies
-Project entries a placed launch could not carry after 6c, so the seam
-carries both first, as its own step. These rules settle all three, each in
-the fail-closed direction:
+6d needs one real profile that can be placed, a Code turn that starts it,
+and a composer that offers it. Every shipped profile's local launch fixes
+guard variables and denies Project entries a placed launch could not carry
+after 6c, so the seam carries both first, as its own step. These rules
+settle each, in the fail-closed direction:
 
 - **Fixed variables are the driver's constants.** `ProviderPlacedLaunch`
   gains `fixedVariables`, at most 32, and `start-process` carries them. A
@@ -1594,6 +1598,31 @@ the fail-closed direction:
   [Remote-bound Code threads](#remote-bound-code-threads): the turn binds
   the agent's client tools and a placement on one session and acquires its
   provider with that placement alone.
+- **The window offers what the turn would place.** A target's status
+  (`SshTargetStatus`, the answer a window already polls) gains
+  `placeableRuntimes`, at most 64: each enabled provider instance whose
+  driver, built as the Code turn runtime builds it, passes the turn's own
+  check (an ACP agent that declares placement), with that runtime's
+  admission now in each confined posture (the turn's
+  `admitProviderRuntime` call, so a macOS target, an undeclared posture,
+  and an unproven runtime canary refuse there as in the turn) and whether
+  the person set its path on the target (`runtimePath`, read from the same
+  runtime paths the placement reads). `placeableRuntimesOn` in
+  `apps/server/src/sshTarget/sshRemoteCodeThreads.ts` computes it beside
+  `bindPlacedAcpTurn`. The composer offers such an agent's models beside the
+  harness's only when the status lists it, its runtime is attestable in a
+  posture a remote thread offers, and its path is set; an agent listed
+  without a path is shown unavailable with the command that sets it
+  (`octant ssh-target runtime <target> <provider instance> <path>`, the
+  ids filled in), which is also the sentence the turn's placement refuses
+  with, spelled out above the agent's models in the picker. Every other
+  provider stays unavailable. Start is offered only while the runtime's
+  admission in the chosen posture is admitted, and a remote thread's own
+  view reads the same for its agent. Postures are unchanged: Plan and Ask
+  for approvals. Rejected: a separate endpoint for placeable agents, which
+  a window would have to poll beside the status it already reads, and
+  offering every ACP agent with the host deciding at Start, which would
+  offer what the turn refuses.
 - **Evidence.** For the seam: `executorProcesses.test.ts` (fixed variables
   set beside the executor's own and never over them, only existing denied
   entries covered, and a fixed variable naming an account-state variable
@@ -1623,8 +1652,20 @@ the fail-closed direction:
   (a remote turn running or waiting at a restart interrupted
   `target-disconnected`, a settled one untouched, and a second
   reconciliation adding nothing), and `sshTargetAdministrationRoutes.test.ts`
-  (removal refused `target-in-use` while a thread runs, then allowed). The
-  restart withdrawal and the compaction refusal are proved by
+  (removal refused `target-in-use` while a thread runs, then allowed). For
+  the window: `sshTargetConnectionService.test.ts` (a status lists an ACP
+  agent with its path set and one without, each admitted in every posture,
+  and no provider that declares no placement or is not an ACP agent; a
+  closed connection's agents refused `target-unreachable`; a macOS target's
+  agent refused `runtime-not-attestable` in every posture; and the turn's
+  placement refusing the pathless agent with the window's sentence),
+  `sshTargetRecovery.test.ts` (the offer and the readiness from a status),
+  and `CodeComposerAdapter.test.tsx` (the agent offered beside the harness
+  and a thread started on it, a pathless agent disabled with the command
+  spelled out, and no Start while its runtime is refused in the posture),
+  and `CodeThreadWorkspace.test.tsx` (a thread on the agent offers no send
+  while its runtime is refused in the posture or its path is missing).
+  The restart withdrawal and the compaction refusal are proved by
   `leadApprovalAttention.test.ts` (a remote lead's approval and question
   settled `expired` and journaled at start-up, an answer to either refused,
   and a second start settling nothing more), `sessionCompaction.test.ts` (a
