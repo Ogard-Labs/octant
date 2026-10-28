@@ -349,11 +349,12 @@ function outsideDriverEnvironment(
 }
 
 /**
- * What a driver's runtime reads to start. Bun reads its own folder, plus the
- * Homebrew prefix's shared libraries for a Homebrew Bun. Bun is one
- * self-contained executable, so the folder above it (`~/.bun`, which holds
- * its install cache) is not read: that grant was the extension profile's,
- * whose Node loads modules from beside its folder.
+ * What a driver's runtime reads to start. Bun reads its own folder and
+ * nothing beside it: it is one self-contained executable linking only the
+ * system's libraries, so neither the folder above it (`~/.bun`, which holds
+ * its install cache) nor, for a Homebrew Bun, the prefix's other formulae
+ * and OpenSSL config are read. Those grants were the extension profile's,
+ * whose Node loads modules from beside its folder and Homebrew libraries.
  * Electron's Node loads Electron's framework, ICU data, and V8 snapshot from
  * the app bundle that holds its executable (`<name>.app/Contents/MacOS/<name>`),
  * so that bundle is the read root, taken from the runtime's own path. An
@@ -365,7 +366,7 @@ function outsideDriverRuntimeReadRoots(
   kind: OutsideDriverProcessSandbox["runtime"],
 ): ReadonlyArray<string> {
   if (kind === "bun") {
-    return [dirname(runtime), ...homebrewRuntimeRoots(runtime)];
+    return [dirname(runtime)];
   }
   const executableFolder = dirname(runtime);
   const contents = dirname(executableFolder);

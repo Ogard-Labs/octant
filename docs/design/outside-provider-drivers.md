@@ -273,10 +273,13 @@ the fail-closed option.
   - The folder above Bun's executable (`~/.bun`, which holds its install
     cache): Bun is one self-contained executable, and its home is the
     driver's temporary folder, so it looks for no cache there.
+  - For a Homebrew Bun, the prefix's `Cellar`, `opt`, and `etc/openssl@3`:
+    Bun links only the system's libraries; a Homebrew Node is what needed
+    them. The CI job installs Bun without Homebrew, so this one is measured
+    only on a Mac whose Bun comes from Homebrew.
 - **The runtime's install** is taken from the runtime's own resolved path,
-  never a fixed location. For Bun it is the executable's folder (and, for a
-  Homebrew Bun, the prefix's `Cellar`, `opt`, and
-  `etc/openssl@3`). For Electron's Node it is the app bundle that holds the
+  never a fixed location. For Bun it is the executable's folder, wherever Bun
+  is installed. For Electron's Node it is the app bundle that holds the
   executable (`<name>.app` above `Contents/MacOS/<name>`), which holds
   Electron's framework, its ICU data and V8 snapshot, and its resources; the
   folder the bundle sits in (such as `/Applications`) is not readable. An

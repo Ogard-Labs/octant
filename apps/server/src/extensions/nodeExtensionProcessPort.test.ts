@@ -257,6 +257,49 @@ describe("node extension process port", () => {
     });
   });
 
+  it("lets a driver on a Homebrew Bun read that Bun's own folder and none of the prefix's other formulae", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-driver-homebrew-"));
+    receiptDirectories.push(root);
+    const packageRoot = join(root, "package");
+    const temporaryDirectory = join(root, "driver-tmp");
+    await mkdir(packageRoot);
+    await mkdir(temporaryDirectory, { mode: 0o700 });
+    const bun = "/opt/homebrew/Cellar/bun/1.3.0/bin/bun";
+    let profile = "";
+    const spawn = ((...input: Parameters<typeof nodeSpawn>) => {
+      const [, args, options] = input;
+      profile = String(args?.[1]);
+      return nodeSpawn(process.execPath, ["-e", ""], options);
+    }) as typeof nodeSpawn;
+    const port = createNodeExtensionProcessPort({
+      spawn,
+      shutdownTimeoutMs: 100,
+      platform: "darwin",
+      sandboxPath: process.execPath,
+    });
+    const child = await port.start({
+      ...startInput,
+      command: bun,
+      args: [join(packageRoot, "main.mjs")],
+      cwd: packageRoot,
+      readiness: "spawn",
+      sandbox: {
+        kind: "outside-driver",
+        runtime: "bun",
+        instanceId: "instance-a",
+        packageRoot,
+        temporaryDirectory,
+      },
+    });
+    await child.stop().catch(() => undefined);
+
+    // Bun links only the system's libraries, so the formulae and OpenSSL
+    // config a Homebrew Node needs are not the driver's to read.
+    expect(subpathReads(profile).filter((path) => path.startsWith("/opt/homebrew"))).toEqual([
+      "/opt/homebrew/Cellar/bun/1.3.0/bin",
+    ]);
+  });
+
   it("refuses an Electron runtime that is not inside an app bundle, since only the bundle was measured", async () => {
     let spawned = false;
     const spawn = ((...input: Parameters<typeof nodeSpawn>) => {
