@@ -34,6 +34,7 @@ interface EscapeOutcome {
   readonly readOutside: string;
   readonly readHome: string;
   readonly readHomeThroughDataVolume: string;
+  readonly readSystem: string;
   readonly readKeychains: string;
   readonly writeTemporary: string;
   readonly writePackage: string;
@@ -50,6 +51,7 @@ function escapeProbe(paths: {
   readonly outside: string;
   readonly home: string;
   readonly homeCanaryThroughDataVolume: string;
+  readonly systemFile: string;
   readonly port: number;
 }): string {
   return `
@@ -85,6 +87,7 @@ const outcome = {
   readOutside: attempt(() => readFileSync(paths.secret)),
   readHome: attempt(() => readdirSync(paths.home)),
   readHomeThroughDataVolume: attempt(() => readFileSync(paths.homeCanaryThroughDataVolume)),
+  readSystem: attempt(() => readFileSync(paths.systemFile)),
   readKeychains: attempt(() => readdirSync(join(paths.home, "Library", "Keychains"))),
   writeTemporary: attempt(() => writeFileSync(join(process.env.TMPDIR, "scratch"), "ok")),
   writePackage: attempt(() => writeFileSync(join(paths.packageRoot, "planted"), "x")),
@@ -131,6 +134,13 @@ const electron = process.platform === "darwin" ? resolveElectron() : undefined;
  * also be spelled beneath it, inside the `/System` the driver may read.
  */
 const DATA_VOLUME = "/System/Volumes/Data";
+
+/**
+ * A file on the sealed system volume that every macOS has and no runtime
+ * reads to start a driver. The driver profile grants no read under `/System`,
+ * so this stands for the whole of it.
+ */
+const SYSTEM_FILE = "/System/Library/CoreServices/SystemVersion.plist";
 
 onMacos("an outside driver's confined process", () => {
   let root = "";
@@ -181,6 +191,7 @@ onMacos("an outside driver's confined process", () => {
     // The host itself reads the canary by that spelling, so a refusal below
     // is the profile's and not a path that leads nowhere.
     expect(readFileSync(homeCanaryThroughDataVolume, "utf8")).toBe("home canary");
+    expect(existsSync(SYSTEM_FILE)).toBe(true);
     const entryPoint = join(packageRoot, "main.mjs");
     await writeFile(
       entryPoint,
@@ -190,6 +201,7 @@ onMacos("an outside driver's confined process", () => {
         outside,
         home: homedir(),
         homeCanaryThroughDataVolume,
+        systemFile: SYSTEM_FILE,
         port: address.port,
       }),
     );
@@ -222,6 +234,7 @@ onMacos("an outside driver's confined process", () => {
         readOutside: "refused",
         readHome: "refused",
         readHomeThroughDataVolume: "refused",
+        readSystem: "refused",
         readKeychains: "refused",
         writeTemporary: "allowed",
         writePackage: "refused",
@@ -244,7 +257,7 @@ onMacos("an outside driver's confined process", () => {
     expect(await readdir(temporaryRoot)).toEqual([]);
   }
 
-  it("reaches no network, no file outside its package and folder, not the home folder by either spelling or its keychains, no program, and no host variable", async () => {
+  it("reaches no network, no file outside its package and folder, nothing under /System, not the home folder by either spelling or its keychains, no program, and no host variable", async () => {
     await expectConfined({ kind: "bun", path: resolveBun() });
   });
 
