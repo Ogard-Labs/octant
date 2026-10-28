@@ -649,6 +649,55 @@ describe("startCredentialBroker", () => {
     }
   });
 
+  it("stores an App Store Connect key that no route, its own included, can read back", async () => {
+    const credentialRef = randomUUID();
+    const appStoreConnectKeys = memoryStore();
+    const broker = await startCredentialBroker(
+      memoryStore(),
+      undefined,
+      undefined,
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      appStoreConnectKeys,
+    );
+    try {
+      const call = async (path: string, body: Record<string, string>) =>
+        broker.fetchForTest(
+          brokerRequest(broker.url, broker.token, path, { body: JSON.stringify(body) }),
+        );
+      expect(
+        await (
+          await call("/v1/app-store-connect-keys/set", { credentialRef, credential: "asc-key" })
+        ).json(),
+      ).toEqual({ stored: true });
+      expect(
+        await (await call("/v1/app-store-connect-keys/has", { credentialRef })).json(),
+      ).toEqual({ present: true });
+      expect((await call("/v1/app-store-connect-keys/resolve", { credentialRef })).status).toBe(
+        404,
+      );
+      expect(
+        (await call("/v1/credentials/resolve", { providerInstanceId: credentialRef })).status,
+      ).toBe(404);
+      for (const route of [
+        "/v1/replica-store-credentials/resolve",
+        "/v1/canvas-public-share-secrets/resolve",
+        "/v1/desktop-provider-credentials/resolve",
+      ]) {
+        expect((await call(route, { credentialRef })).status).toBe(404);
+      }
+      expect(
+        await (await call("/v1/app-store-connect-keys/delete", { credentialRef })).json(),
+      ).toEqual({ deleted: true });
+      expect(await appStoreConnectKeys.has(credentialRef)).toBe(false);
+    } finally {
+      await broker.close();
+    }
+  });
+
   it("replaces and deletes a sync bucket's key pair", async () => {
     const credentialRef = randomUUID();
     const broker = await startCredentialBroker(

@@ -13,8 +13,10 @@ extends ([Architecture: device transport and evidence](../architecture.md#device
 (discovery, identity, and lease on the host), and 5 (agent operations) are
 built, slices 3 (development-signed build, install, launch, terminate, and
 console logs) and 4 (device pane and screenshots) are built and wait on their
-native smoke on a Mac with a paired device, and slices 6 to 8 wait on the
-distribution gate of decision 7.** The maintainer
+native smoke on a Mac with a paired device, slice 6 (App Store Connect key
+custody) is built and stays closed behind the distribution gate of decision 7,
+and slices 7 and 8 wait on that gate and on the open choices recorded under
+them in the delivery plan.** The maintainer
 authorized this scope as post-preview work and accepted the decisions below on
 2026-10-26. That authorizes this design and its slices; it does not by itself
 authorize spending, creating developer accounts,
@@ -94,8 +96,13 @@ TestFlight track for its mobile client is a separate operator runbook
 - `/api/apple/` is a prefix the private listener forwards to paired devices
   ([`remoteRoutePolicy.ts`](../../apps/server/src/remoteRoutePolicy.ts)).
 - The credential broker stores secrets by opaque UUID in namespaced families
-  ([`credentialBroker.ts`](../../packages/host-runtime/src/credentialBroker.ts));
-  none is for Apple signing or App Store Connect.
+  ([`credentialBroker.ts`](../../packages/host-runtime/src/credentialBroker.ts)).
+  None is for Apple signing. The App Store Connect key has its own family
+  (`/v1/app-store-connect-keys/`, Keychain service
+  `app.octant.app-store-connect-keys.v1`), entered through the local-only
+  `/api/desktop/app-store-connect-key/` routes
+  ([`appStoreConnectKeyRoutes.ts`](../../apps/server/src/apple/appStoreConnectKeyRoutes.ts)),
+  which refuse a new key while distribution is closed.
 
 ## Three layers, three authorities
 
@@ -441,7 +448,26 @@ find-identity -v -p codesigning` lists and the profiles Xcode installed in
   posture. One confirmation covers one archive, export, and upload.
 - The App Store Connect API key is a person-entered secret in its own broker
   family (`/v1/app-store-connect-keys/`), entered from the desktop renderer or
-  the host-local `octant` CLI on the same terms as provider keys. For one
+  the host-local `octant` CLI on the same terms as provider keys. A host keeps
+  one key: its issuer ID, key ID, and `.p8` private key, stored together in
+  the Keychain service `app.octant.app-store-connect-keys.v1` under one fixed
+  broker reference. The host-local routes
+  `/api/desktop/app-store-connect-key/{status,set,remove}` take the desktop
+  bridge secret and a window capability and refuse any request with an
+  `Origin` header or a non-loopback `Host`; the desktop window reaches them
+  through its main process, and `octant apple key set --issuer <id> --key-id
+<id> --stdin [--replace]` reads the private key from standard input only.
+  The host accepts a key only as a UUID issuer ID, a ten-character key ID,
+  and a PKCS #8 P-256 private key (App Store Connect's ES256 keys); it
+  refuses to overwrite a stored key without `replace`, and answers only
+  `stored`, `missing`, `removed`, or a typed refusal. Until distribution is
+  admitted (decision 7), and on any host that is not a Mac, `status` and
+  `set` are refused (`distribution-not-enabled`, `unsupported-host`) and the
+  desktop shows no key entry; `remove` always runs, so a stored key can
+  always be taken out. The family serves `has`, `set`, and `delete` only:
+  nothing reads the key back until the upload slice decides how the key
+  reaches its launch (see slices 7 and 8). Linux and Windows broker stores
+  have no such family, because distribution needs a Mac. For one
   upload the host writes it to a `0600` file in a host-private directory that
   the confinement profile denies to every launch but the upload's own, and
   removes it when the launch ends; a startup sweep removes any left behind.
@@ -708,12 +734,41 @@ accounts or hardware; its real-hardware acceptance is separate where noted.
    _Accept:_ the key is never in a response, argument, environment, or the
    journal; remote and browser entry are refused. _Verify:_ broker and route
    negative tests.
+   _State:_ built, and closed behind the gate: `APPLE_DISTRIBUTION_ADMITTED`
+   in [`appleDeviceService.ts`](../../apps/server/src/apple/appleDeviceService.ts)
+   is the one input the device policy and the key routes read, and it stays
+   `false` until the decision-7 change. Its evidence is the broker test that
+   the App Store Connect family stores, tests for, and deletes a key that no
+   route, its own included, reads back; the `App Store Connect key routes`
+   suite (a valid key stored and only `stored` answered, no overwrite
+   without `replace`, a malformed or non-P-256 key refused without echo, a
+   browser `Origin`, a wrong bridge secret or window capability, and a
+   non-loopback host refused before the key is read, key entry refused while
+   distribution is closed and on a non-Mac host while `remove` still runs);
+   the desktop forwarder and preload tests; the `AppStoreConnectKeySection`
+   component tests (hidden when the host refuses, the key sent once and
+   cleared from the form, a refusal shown); the `octant apple key` CLI tests
+   (the key only on standard input); and the local-only listener probe for
+   `/api/desktop/app-store-connect-key/set`. Still open: the Keychain helper
+   gained the service but runs only on a Mac, so a maintainer-run
+   save-status-remove on a Mac is its native check once the gate opens, and
+   the section's rows join Settings search in the same change that opens it.
 7. **Person-confirmed upload** (maintainer account, a real app, and the
    decision-7 gate). Archive, export, and upload as one confirmed local action
    with a journaled record. _Accept:_ one confirmation uploads exactly the
    named build; an agent's request runs nothing until a local person
    confirms, and no remote path reaches it. _Verify:_ server tests with
    a stubbed uploader, plus a maintainer-run upload of a test app.
+   _Waits on:_ the decision-7 change, and two choices this specification
+   leaves open. First, how the distribution signature is made: decision 2
+   covers development signing only, and its fallback (letting `xcodebuild`
+   sign with keychain access) needs its own maintainer approval, so it is
+   undecided whether export signs in a host-owned `codesign` step with an
+   App Store profile the host chooses (and by which rule) or in
+   `xcodebuild -exportArchive`, and which tool uploads. Second, which
+   process reads the key out of the broker to write the per-launch `0600`
+   file: a resolve route the server calls, or a broker route that writes
+   the file itself, so the key never crosses the server.
 8. **Person-confirmed submission and release** (maintainer account, a real app,
    and the decision-7 gate). Submit a processed build's version for App Review
    and release an approved version, each as one confirmed local action with a
@@ -723,6 +778,13 @@ accounts or hardware; its real-hardware acceptance is separate where noted.
    confirms, and no remote path reaches either. _Verify:_ server
    tests with a stubbed App Store Connect client, plus a maintainer-run
    submission and release of a test app.
+   _Waits on:_ the decision-7 change, and the choice of how App Store
+   Connect API requests are authorized: the server holding the private key
+   to sign each request's ES256 token, or the broker signing it and
+   answering only the short-lived token, as it already signs cloud requests
+   ([Architecture: cloud request signing](../architecture.md#security-and-authority)).
+   The egress these calls need (the App Store Connect API host only) is
+   also not yet recorded in the architecture.
 
 Slices 1, 2, 4, and 5 can be built before any hardware or account exists;
 slices 3, 7, and 8 cannot be accepted without the maintainer's Mac, a paired
