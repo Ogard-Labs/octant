@@ -5885,8 +5885,8 @@ same. This holds in Chat, Work, and Code.
   server's own runtime (Bun in development, Electron's Node in the packaged
   app, whose app bundle is then the runtime's install) and takes a stricter
   profile from the shared confinement builder (no network, no exec but its
-  runtime, no fork, a read-only package, one temporary folder, and a fixed
-  environment), and on any host but macOS its component is `host-prohibited`
+  runtime, no fork, a read-only package, one temporary folder, of the system
+  only what a runtime reads to start, and a fixed environment), and on any host but macOS its component is `host-prohibited`
   ([Outside provider drivers](design/outside-provider-drivers.md#driver-process-rules)).
 - Skills are discovered only from valid `.agents/skills/` and `.claude/skills/`
   packages between the working directory and the Project or repository root

@@ -219,12 +219,13 @@ confirmation.
   app the Electron executable it already ships, run as Node. The package ships
   no executable, native addon, or install script (refused at inspection;
   [decision 6](#maintainer-decisions)).
-- **Seatbelt profile**, stricter than the MCP server profile: deny default; read
-  the system roots, the runtime's install (for Electron's Node, the app bundle
-  that holds its executable), and the package root only; write a per-process
-  temporary folder only, removed at stop; **no network**; no process exec
-  beyond the runtime itself and no fork. Each grant beyond deny-default is
-  measured on macOS before it ships, as the extension profile's were.
+- **Seatbelt profile**, stricter than the MCP server profile: deny default;
+  read the system files a runtime reads to start, the runtime's install (for
+  Electron's Node, the app bundle that holds its executable), and the
+  package root only; write a per-process temporary folder only, removed at
+  stop; **no network**; no process exec beyond the runtime itself and no
+  fork. Each grant beyond deny-default is measured on macOS before it ships,
+  as the extension profile's were.
 - **Environment.** A fixed minimal set (`PATH=/usr/bin:/bin`, locale, the
   temporary folder, and for Electron only the switch that makes it run as
   Node). No inherited variables, no provider or cloud keys, no broker
@@ -247,12 +248,13 @@ the fail-closed option.
   and sets the environment itself, ignoring whatever environment the caller
   passed. No caller can widen either.
 - **The grants.** Read: the package root, the runtime's install, `/System`,
-  `/usr/lib`, `/usr/share`, `/private/var/db/timezone`, the time-zone link `/private/etc/localtime`, the
-  data devices `/dev/null`, `/dev/zero`, `/dev/random`,
-  and `/dev/urandom`, `/` itself, and metadata of every parent folder of those.
-  These are the extension profile's measured roots less `/bin` and `/sbin`
-  (programs the driver may not exec) and less the rest of `/dev`, since the
-  person's own terminals are devices there their user may read. Write: the
+  `/usr/lib`, `/usr/share`, `/private/var/db/timezone`, the time-zone link
+  `/private/etc/localtime`, the data devices `/dev/null`, `/dev/zero`,
+  `/dev/random`, and `/dev/urandom`, `/` itself, and metadata of every parent
+  folder of those. These began as the extension profile's measured roots
+  less `/bin` and `/sbin` (programs the driver may not exec) and less the
+  rest of `/dev`, since the person's own terminals are devices there their
+  user may read, and were narrowed further as listed below. Write: the
   process's own temporary folder; the package root is denied writes
   explicitly. Exec: the runtime alone, by its path and its resolved path. No
   fork, no network, no Mach service. The builder's own denials (the Keychain,
@@ -260,8 +262,8 @@ the fail-closed option.
   every confined launch. The escape tests in
   `outsideDriverProcess.escape.test.ts` measure this on macOS in the
   `macos-15` CI job, which passed on 2026-10-27 with no grant added
-  ([job][macos-escape-2026-10-27]); a grant the runtime turns out to need is
-  added only with its observed failure.
+  ([job][macos-escape-2026-10-27]), on the first, wider profile; a grant the
+  runtime turns out to need is added only with its observed failure.
 - **Grants narrowed since that run.** The first profile kept grants it had
   inherited from the extension profile, whose Node loads modules and
   libraries a plain `.mjs` driver on Bun or Electron's Node does not. Each is
