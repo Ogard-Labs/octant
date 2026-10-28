@@ -3825,6 +3825,33 @@ describe("flow screens and transitions", () => {
     expect(rejected.message).toContain("tabs brief");
   });
 
+  it("walks between two frames of one design and two variants of one mockup", () => {
+    expect(() =>
+      validateCanvasDefinition(
+        withBlocks([
+          flowMockup("form", [
+            { variantId: "empty", label: "Empty" },
+            { variantId: "filled", label: "Filled" },
+          ]),
+          flowDesign,
+          flow(
+            [
+              { screenId: "home", blockId: "site", frameId: "home" },
+              { screenId: "results", blockId: "site", frameId: "results" },
+              { screenId: "empty", blockId: "form", variantId: "empty" },
+              { screenId: "filled", blockId: "form", variantId: "filled" },
+            ],
+            [
+              { edgeId: "e1", fromScreenId: "home", toScreenId: "results" },
+              { edgeId: "e2", fromScreenId: "results", toScreenId: "empty" },
+              { edgeId: "e3", fromScreenId: "empty", toScreenId: "filled" },
+            ],
+          ),
+        ]),
+      ),
+    ).not.toThrow();
+  });
+
   it("refuses a flow in a document that declares the version before it", () => {
     const earlier = CANVAS_SCHEMA_VERSION - 1;
     const gated = flow([{ screenId: "s1", blockId: "search" }]);
