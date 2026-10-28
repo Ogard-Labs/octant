@@ -303,6 +303,7 @@ export type CanvasPolicyRejectionCode =
   | "duplicate-deck-slide"
   | "deck-slide-frame-missing"
   | "deck-slide-variant-missing"
+  | "deck-slide-design-refused"
   | "block-placed-twice";
 
 export class CanvasPolicyRejected extends Error {
@@ -1503,6 +1504,15 @@ function validateDeck(
     }
     const placed = blocks.find((candidate) => String(candidate.blockId) === String(slide.blockId));
     if (placed?.kind === "design") {
+      // A running frame is the prototype tier and keeps its own Run; a deck
+      // presents the document's finished screens, exactly as a flow's screen
+      // refuses one.
+      if (placed.runsScript === true) {
+        reject(
+          "deck-slide-design-refused",
+          `${name} shows design ${String(slide.blockId)}, which runs script; a deck slide is a static frame.`,
+        );
+      }
       if (slide.frameId === undefined) {
         reject(
           "deck-slide-frame-missing",

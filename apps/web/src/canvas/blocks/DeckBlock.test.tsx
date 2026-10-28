@@ -60,3 +60,44 @@ describe("deck", () => {
     expect(within(player).getByText("Signups")).toBeInTheDocument();
   });
 });
+
+describe("deck slide variants", () => {
+  it("names the variant each slide shows and presents that variant, not the first", async () => {
+    const user = userEvent.setup();
+    const variants = decodeCanvasBlock({
+      ...base,
+      blockId: "screen",
+      kind: "mockup",
+      device: "phone",
+      title: "Search",
+      variants: [
+        { variantId: "loaded", label: "Loaded" },
+        { variantId: "empty", label: "Empty" },
+      ],
+      nodes: [
+        { nodeId: "w", component: "window", label: "Search", variantId: "loaded" },
+        { nodeId: "w-empty", component: "window", label: "Search", variantId: "empty" },
+      ],
+    });
+    const variantDeck = decodeCanvasBlock({
+      ...base,
+      blockId: "deck",
+      kind: "deck",
+      title: "Launch deck",
+      slides: [
+        { slideId: "a", blockId: "screen", variantId: "empty" },
+        { slideId: "b", blockId: "chart" },
+      ],
+    });
+    if (variantDeck.kind !== "deck") throw new Error("expected a deck");
+    render(
+      <CanvasDocument definition={{ ...canvasFixture, blocks: [variants, chart, variantDeck] }} />,
+    );
+    // The list names the variant the slide shows, not just the block's title.
+    expect(screen.getByText("Search — Empty")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Present/ }));
+    const player = screen.getByRole("dialog", { name: "Presenting Launch deck" });
+    // The presented tree is the Empty variant's own nodes.
+    expect(within(player).getByRole("tree", { name: "Empty: Search" })).toBeInTheDocument();
+  });
+});

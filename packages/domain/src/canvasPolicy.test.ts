@@ -4182,3 +4182,43 @@ describe("deck slides", () => {
     );
   });
 });
+
+describe("deck slide design tiers", () => {
+  it("refuses a deck slide that names a running design frame", () => {
+    const chart = {
+      blockId: "chart",
+      schemaVersion: 1,
+      kind: "chart",
+      chartType: "line",
+      series: [{ seriesId: "s", label: "Signups", points: [{ x: "Q1", y: 3 }] }],
+    };
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            chart,
+            {
+              blockId: "runner",
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              kind: "design" as const,
+              title: "Runner",
+              size: "phone" as const,
+              runsScript: true,
+              frames: [{ frameId: "app", title: "App", html: "<button>Go</button>" }],
+            },
+            {
+              blockId: "deck",
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              kind: "deck" as const,
+              title: "Launch deck",
+              slides: [
+                { slideId: "a", blockId: "runner", frameId: "app" },
+                { slideId: "b", blockId: "chart" },
+              ],
+            },
+          ]),
+        ),
+      "deck-slide-design-refused",
+    );
+  });
+});

@@ -702,10 +702,13 @@ from typed screens: a mockup slot and a flow slot that names them.
 ## Deck blocks
 
 A `deck` block (Canvas schema version 25) presents the document's own blocks
-as one ordered set of 2 to 24 slides: a design's frame (named by `frameId`),
-a mockup's screen (named by `variantId` when the mockup declares variants), or
-a chart, table, metric, progress, status, or dashboard block, each with
-optional presenter notes of at most 2,000 characters. A slide references
+as one ordered set of 2 to 24 slides: a design's frame (named by `frameId`; a
+design that runs script is refused, exactly as a flow's screen refuses one —
+a deck presents finished screens, and a running frame keeps its own Run), a
+mockup's screen (named by `variantId` when the mockup declares variants),
+or a chart, table, metric, progress, status, or dashboard block, each with
+optional presenter notes of at most 2,000 characters. The slide list names
+the frame or variant each slide shows beside its block's title. A slide references
 rather than copies, so a block keeps its one definition, comments, and
 identity, and a block is placed once — a slide is never also a dashboard
 cell, a tab child, or a flow screen (`block-placed-twice`). The domain policy
@@ -714,8 +717,10 @@ names each refusal (`dangling-deck-slide`, `deck-slide-kind-refused`,
 `deck-slide-variant-missing`, and the slides budget). The reading order
 places a deck's slides inside it, so a placed block never reads twice.
 
-The deck lists its slides with their notes, and **Present** walks the set
-across blocks in the design player's anatomy: arrows and Page keys move, the
+The deck lists its slides with their notes — each naming the frame or variant
+it shows — and **Present** walks the set across blocks in the design player's
+anatomy, a mockup slide drawing the variant the deck names and a design slide
+its named frame, scaled to fit the stage as the design player scales a slide: arrows and Page keys move, the
 position reads in tabular numerals, fullscreen is offered where the browser
 has it, and the Notes toggle (off by default, remembered for the browser
 session, absent when no slide has notes) shows the current slide's notes —

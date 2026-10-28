@@ -1,17 +1,19 @@
-import type { CanvasBlock, CanvasDeckBlock, CanvasMockupBlock } from "@octant/contracts/canvas";
-
+import {
+  CANVAS_DESIGN_VIEWPORT,
+  type CanvasBlock,
+  type CanvasDeckBlock,
+} from "@octant/contracts/canvas";
 import {
   CANVAS_MOCKUP_DEVICE_NAME,
   canvasMockupCallouts,
   canvasMockupFrames,
-  type CanvasMockupFrame,
 } from "@octant/domain";
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { ChevronLeft, ChevronRight, Play } from "lucide-react";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";
 import type { DesignAssetRuntime } from "./designDocument";
-import { DesignFrameView, FullscreenButton, useFullscreen } from "./DesignBlock";
+import { DesignFrameView, FullscreenButton, useFullscreen, useSize } from "./DesignBlock";
 import { MockupFrame } from "./MockupBlock";
 import { CanvasBlockRenderer } from "./CanvasBlock";
 
@@ -22,9 +24,6 @@ import { CanvasBlockRenderer } from "./CanvasBlock";
  * player's anatomy, with the presenter's notes — and a plain design block
  * keeps its own Present unchanged.
  */
-
-/** A mockup without variants names its single frame; a validated block holds one. */
-const EMPTY_DECK_FRAME: CanvasMockupFrame = { key: "screen", label: undefined, roots: [] };
 
 export function DeckBlock(props: {
   readonly block: CanvasDeckBlock;
@@ -65,7 +64,20 @@ export function DeckBlock(props: {
           <li className="canvas-deck__slide" key={String(slide.slideId)}>
             <span className="canvas-deck__index">{String(index + 1)}</span>
             <span className="canvas-deck__label">
-              {block.kind === "design" || block.kind === "mockup" ? block.title : block.kind}
+              {block.kind === "design" && slide.frameId !== undefined
+                ? `${block.title} — ${
+                    block.frames.find((frame) => String(frame.frameId) === String(slide.frameId))
+                      ?.title ?? String(slide.frameId)
+                  }`
+                : block.kind === "mockup" && slide.variantId !== undefined
+                  ? `${block.title} — ${
+                      block.variants?.find(
+                        (variant) => String(variant.variantId) === String(slide.variantId),
+                      )?.label ?? String(slide.variantId)
+                    }`
+                  : block.kind === "design" || block.kind === "mockup"
+                    ? block.title
+                    : block.kind}
             </span>
             {slide.notes === undefined ? null : (
               <span className="canvas-deck__notes">{slide.notes}</span>
@@ -104,8 +116,14 @@ function DeckPlayer(props: {
   const [index, setIndex] = useState(0);
   const [notesShown, setNotesShown] = useState(false);
   const fullscreen = useFullscreen<HTMLDivElement>();
+  const [stageRef, stage] = useSize();
   const last = slides.length - 1;
-  const step = (by: number) => setIndex((value) => Math.min(last, Math.max(0, value + by)));
+  const step = useCallback(
+    (by: number) => {
+      setIndex((value) => Math.min(last, Math.max(0, value + by)));
+    },
+    [last],
+  );
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "ArrowRight" || event.key === "PageDown") step(1);
@@ -113,11 +131,28 @@ function DeckPlayer(props: {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  });
+  }, [step]);
   const current = slides[index];
   const slide = current?.slide;
   const block = current?.block;
   const notes = slide?.notes;
+  // A design frame is drawn at its declared viewport, scaled to fit the stage
+  // as the design player scales a slide, not at a fixed fraction of nothing.
+  const designViewport =
+    block?.kind === "design"
+      ? CANVAS_DESIGN_VIEWPORT[block.size === "document" ? "desktop" : block.size]
+      : undefined;
+  const designScale =
+    designViewport === undefined || stage === undefined
+      ? 1
+      : Math.min(1, stage.width / designViewport.width, stage.height / designViewport.height);
+  // A mockup slide shows the variant the deck names — the first frame only when
+  // the block declares none.
+  const mockupFrames = block?.kind === "mockup" ? canvasMockupFrames(block) : [];
+  const namedFrame =
+    slide?.variantId === undefined
+      ? mockupFrames[0]
+      : mockupFrames.find((frame) => frame.key === String(slide.variantId));
   return (
     <OctantDialog
       className="canvas-deck-player"
@@ -167,7 +202,7 @@ function DeckPlayer(props: {
             <FullscreenButton fullscreen={fullscreen} />
           </div>
         </header>
-        <div className="canvas-deck-player__stage">
+        <div className="canvas-deck-player__stage" ref={stageRef}>
           {block === undefined ? null : block.kind === "design" && slide?.frameId !== undefined ? (
             <DesignFrameView
               {...(props.designAssetRuntime === undefined
@@ -175,19 +210,19 @@ function DeckPlayer(props: {
                 : { assetRuntime: props.designAssetRuntime })}
               block={block}
               frameId={String(slide.frameId)}
-              scale={0.6}
+              scale={designScale}
             />
-          ) : block.kind === "mockup" ? (
+          ) : block.kind === "mockup" && namedFrame !== undefined ? (
             <div className="canvas-deck-player__mockup">
               <MockupFrame
-                block={block as CanvasMockupBlock}
-                callouts={canvasMockupCallouts(block as CanvasMockupBlock)}
+                block={block}
+                callouts={canvasMockupCallouts(block)}
                 deviceDetail={
                   block.size === undefined
                     ? CANVAS_MOCKUP_DEVICE_NAME[block.device]
                     : `${String(block.size.width)} × ${String(block.size.height)}`
                 }
-                frame={canvasMockupFrames(block as CanvasMockupBlock)[0] ?? EMPTY_DECK_FRAME}
+                frame={namedFrame}
               />
             </div>
           ) : (
