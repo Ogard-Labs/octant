@@ -3481,6 +3481,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             approvalId,
             action: "provider-tool",
             summary,
+            // Journaled with the ask so every client reads the same rule the
+            // answer is refused under, and a paired one offers no answer.
+            ...(answer.localPersonOnly === true ? { localPersonOnly: true as const } : {}),
           },
         });
         active.cursor = frame.cursor;

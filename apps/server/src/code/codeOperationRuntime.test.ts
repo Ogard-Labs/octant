@@ -1678,6 +1678,7 @@ describe("CodeOperationRuntime", () => {
         });
         expect(create).not.toHaveBeenCalled();
         if (approval === undefined) throw new Error("Expected browser approval");
+        expect(approval).not.toHaveProperty("localPersonOnly");
         if (decision === "cancelled") request.abort();
         await fixture.runtime.execute(windowId, {
           kind: "answer-provider-approval",
@@ -1831,6 +1832,8 @@ describe("CodeOperationRuntime", () => {
         });
         if (approval === undefined) throw new Error("Expected a device approval");
         expect(approval.summary).toContain("Allow Apple boot?");
+        // A Simulator effect may be answered from a paired device too.
+        expect(approval).not.toHaveProperty("localPersonOnly");
         expect(execute).not.toHaveBeenCalled();
 
         await fixture.runtime.execute(windowId, {
@@ -1951,6 +1954,9 @@ describe("CodeOperationRuntime", () => {
         // confirmation does.
         expect(approval.summary).toContain("Let this thread use Henrik's iPhone?");
         expect(approval.summary).toContain("iPhone 16 Pro");
+        // The card itself says only a window on the Mac may answer it, so a
+        // paired client can show it without answer controls.
+        expect(approval.localPersonOnly).toBe(true);
 
         // A paired device's answer, or one no window vouched for, settles nothing.
         const remote = await fixture.runtime.execute(windowId, {
@@ -1999,6 +2005,94 @@ describe("CodeOperationRuntime", () => {
       }
     },
   );
+
+  it("marks the agent's device launch as answerable only by a person at the Mac", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const provider = providerConnection(queue);
+    const deviceId = "90000000-0000-4000-8000-000000000021";
+    const authority = decodeToolActionAuthority({
+      hostId: "90000000-0000-4000-8000-000000000001",
+      mode: "code",
+      projectId: thread().projectId,
+      providerInstanceId: thread().providerInstanceId,
+      extension: { kind: "core" },
+    });
+    const request = vi.fn(async () => undefined);
+    const fixture = runtimeFixture({
+      provider: providerDriver(provider),
+      approvalValidator: false,
+      supportsAppManagedTools: true,
+      describeAppleDevice: (id) =>
+        String(id) === deviceId
+          ? {
+              name: "Henrik's iPhone",
+              model: "iPhone 16 Pro",
+              osVersion: "26.1",
+              connection: "wired",
+            }
+          : undefined,
+      appleToolchain: {
+        resolveAuthority: () => authority,
+        discover: vi.fn(),
+        execute: vi.fn(),
+        snapshot: vi.fn(),
+        requestPaneOpen: vi.fn(async () => undefined),
+        readScreenshot: vi.fn(),
+        inputGrantIsOpen: () => false,
+        devices: {
+          request,
+          check: vi.fn(async () => ({
+            kind: "refused" as const,
+            reason: "approval-required" as const,
+          })),
+          readScreenshot: vi.fn(),
+          readConsole: vi.fn(),
+        },
+      } as never,
+    });
+    fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "approval-gated" }));
+    try {
+      const operation = operationId(95);
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-request",
+            requestId: "apple-launch",
+            toolName: "octant_apple",
+            inputJson: JSON.stringify({
+              operation: "launch",
+              deviceId,
+              bundleIdentifier: "com.example.fixture",
+            }),
+          }),
+        ),
+      );
+      let approval: Extract<OperationFrame["event"], { kind: "approval-requested" }> | undefined;
+      await vi.waitFor(async () => {
+        const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 30);
+        approval = frames
+          .map((frame) => frame.event)
+          .find((event) => event.kind === "approval-requested");
+        expect(approval).toBeDefined();
+      });
+      expect(approval?.summary).toContain("Launch com.example.fixture on Henrik's iPhone?");
+      expect(approval?.localPersonOnly).toBe(true);
+      expect(request).not.toHaveBeenCalled();
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
 
   it.each([
     ["full-access", "plan"],

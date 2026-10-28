@@ -1289,6 +1289,14 @@ const ApprovalEvent = Schema.Struct({
     "provider-tool",
   ),
   summary: CodeApprovalSummaryText,
+  /**
+   * Set when only a person at a window on the host's own computer may answer:
+   * the host refuses anyone else's answer and the request keeps waiting. A
+   * paired client shows such a card without answer controls instead of
+   * offering an answer that settles nothing. Absent on every other approval,
+   * and on any journaled before the host recorded the mark.
+   */
+  localPersonOnly: Schema.optional(Schema.Literal(true)),
 }).annotations({ ...strict, ...personDecides });
 const QuestionEvent = Schema.Struct({
   kind: Schema.Literal("input-requested"),

@@ -159,6 +159,12 @@ const UNAVAILABLE_ATTACHMENT_CLIENT: CodeAttachmentClient = {
 
 export interface CodeThreadWorkspaceProps {
   readonly controller: CodeController;
+  /**
+   * Set where a paired device shows the thread. An approval the host takes
+   * only from a window on its own computer is then shown without answer
+   * controls; the host would refuse this device's answer.
+   */
+  readonly pairedDevice?: boolean;
   readonly holdAccessNotice?: CodeThreadControllers["holdAccessNotice"];
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
   /**
@@ -1824,17 +1830,25 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         >
           {props.controller.providerRequests.map((request) =>
             request.kind === "approval" ? (
-              <ProviderApprovalPrompt
-                key={String(request.approvalId)}
-                onAnswer={(decision) =>
-                  void props.controller.answerProviderRequest({
-                    kind: "approval",
-                    approvalId: request.approvalId,
-                    decision,
-                  })
-                }
-                summary={request.summary}
-              />
+              props.pairedDevice === true && request.localPersonOnly === true ? (
+                <ProviderApprovalPrompt
+                  answeredAtHost
+                  key={String(request.approvalId)}
+                  summary={request.summary}
+                />
+              ) : (
+                <ProviderApprovalPrompt
+                  key={String(request.approvalId)}
+                  onAnswer={(decision) =>
+                    void props.controller.answerProviderRequest({
+                      kind: "approval",
+                      approvalId: request.approvalId,
+                      decision,
+                    })
+                  }
+                  summary={request.summary}
+                />
+              )
             ) : (
               <ProviderQuestionCard
                 key={request.requestId}

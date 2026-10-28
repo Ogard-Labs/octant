@@ -218,7 +218,9 @@ access covers neither the device lease nor any distribution step.
   model, OS version, cable or network, and the thread), asked under every
   posture, Plan included. Only an answer from a window on the Mac settles it;
   a paired device's answer, or one no window vouched for, is refused with the
-  card still waiting. The answer mints the host's one-use `apple-device-lease`
+  card still waiting. The event carries `localPersonOnly: true`, so every
+  client reads that rule from the ask itself (see
+  [Remote clients](#remote-clients)). The answer mints the host's one-use `apple-device-lease`
   receipt for the turn's window, bound to exactly the agent's request and the
   thread's checkout, and the host counts it as a local person's confirmation
   only for a request that names the agent and carries that receipt. _Reason:_
@@ -482,8 +484,16 @@ find-identity -v -p codesigning` lists and the profiles Xcode installed in
   other device or distribution request from one, `release-device` included.
 - Starting or moving a lease, signing setup, provisioning updates, the App Store
   Connect key, upload, submission, and release are local-only, never
-  remote-approvable. So are the agent's lease and device effects: a paired
-  device sees the thread's waiting card but its answer settles nothing.
+  remote-approvable. So are the agent's lease and device effects: their
+  `approval-requested` event carries `localPersonOnly: true`, and a paired
+  client shows that card read-only, with the line "Answer this on the
+  computer running Octant." and no Approve or Deny. The host still refuses a
+  paired device's answer, whatever a client shows. _Reason:_ the card is
+  journaled once for every client, so the mark rides on the ask rather than
+  on a client's guess from its wording. The mark is optional so journals
+  written before it still replay; a request waits only on a live turn, so no
+  waiting card lacks it. The phone app lists no Code approval card at all; it
+  already sends every Code approval to the computer.
 - The private listener forwards `POST /api/apple/devices` (admitted as a
   Project read) and never `/api/apple/device-leases`,
   `/api/apple/device-actions`, or `/api/apple/device-screenshots`, which are

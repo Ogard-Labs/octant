@@ -2051,6 +2051,10 @@ Project, each with Revoke, beside Remembered websites. A Browser request from a
 CLI in a Code thread's terminal names the origin and the thread and says a
 program in the terminal asked, not the thread's agent
 ([Terminal Browser grant](docs/design/terminal-browser-grant.md#the-window)).
+A request the host marks as answerable only at its own windows shows on a
+paired device with no action row: its detail line says to answer it on the
+computer running Octant
+([Apple devices: remote clients](docs/design/apple-devices.md#remote-clients)).
 
 Ordinary usage reset/retention, Git discard, and remote administration
 confirmations use the shared `OctantConfirmDialog` over `OctantDialog`. The
