@@ -792,7 +792,8 @@ These rules settle what the step needs, each in the fail-closed direction:
   start-up, the step that already settles a subagent's parked requests
   (`NativeHarnessSessionStore`, told which threads run on a target by their
   remote-root checkout). An answer that comes later is refused
-  `already-settled`, so nothing is decided against the interrupted turn, and
+  `withdrawn` ("withdrawn before anyone answered it", never "already
+  decided"), so nothing is decided against the interrupted turn, and
   a second start finds nothing left to settle. A local thread's lead
   approval still waits for the person's resume, which settles it.
 - **A remote thread's session is not compacted.** Its runtime starts on the

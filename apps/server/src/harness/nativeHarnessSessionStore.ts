@@ -391,11 +391,14 @@ export class NativeHarnessSessionStore {
       readonly status: Exclude<NativeHarnessApprovalStatus, "pending">;
       readonly remembered?: boolean;
     },
-  ): NativeHarnessApproval | "approval-not-found" | "already-settled" {
+  ): NativeHarnessApproval | "approval-not-found" | "already-settled" | "withdrawn" {
     const record = this.#records.get(threadId);
     const index = record?.approvals.findIndex((entry) => entry.id === approvalId) ?? -1;
     if (record === undefined || index === -1) return "approval-not-found";
     const current = record.approvals[index]!;
+    // An approval that expired or was cancelled was taken away, not answered:
+    // a person who meets it later must not be told someone decided it.
+    if (current.status === "expired" || current.status === "cancelled") return "withdrawn";
     if (current.status !== "pending") return "already-settled";
     const settledAt = decodeUtcTimestamp(this.#clock());
     const settled = decodeNativeHarnessApproval({
