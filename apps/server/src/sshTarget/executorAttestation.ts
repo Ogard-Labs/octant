@@ -34,6 +34,8 @@ import {
 } from "../process/seatbeltProfile";
 import { DEFAULT_BWRAP_PATH } from "../process/linuxConfinement";
 import { LINUX_EGRESS_FORWARDER_PORT } from "../process/proxiedNetworkEgress";
+import type { EgressProxyEndpoint, OsNetworkEgress } from "../process/threadEgressPolicy";
+import { listenForLaunchToken, type LoopbackForwarder } from "./executorLoopbackForwarder";
 import { siblingSessionDirectoryName } from "./executorRuntimeDirectory";
 import { runtimeLaunchGrants } from "./executorRuntimeGrants";
 
@@ -243,11 +245,12 @@ interface CanaryLayout {
   /** A stand-in for a runtime's account state, granted read-only. */
   readonly accountState: string;
   /**
-   * Where each writing posture's probe gets a forwarder directory of its own,
+   * Where each proxied probe on Linux gets a forwarder directory of its own,
    * as a proxied command does. Nothing listens on its socket: no probe needs
    * the network. Probes run at once, and each launch writes its forwarder's
    * script into that directory, so a shared one could be rewritten while
-   * another probe's capsule reads it.
+   * another probe's capsule reads it. On macOS a proxied probe gets a
+   * loopback forwarder of its own instead, as a proxied launch does there.
    */
   readonly egressDirectory: string;
 }
@@ -423,27 +426,73 @@ async function runProbe(
 ): Promise<SshConfinementCanaryOutcome> {
   const target = probeTarget(environment, layout, probe, context.networkReachable);
   if (target === undefined) return "inconclusive";
-  // Runtimes are placed on Linux targets only, so nothing else can show a
-  // runtime's grants hold.
-  if (probe.startsWith("runtime-") && environment.platform !== "linux") return "inconclusive";
   const nonce = randomBytes(16).toString("hex");
-  let launch: ReturnType<ProcessConfinementPort["prepare"]>;
+  // The writing postures' commands and every placed runtime, Plan's
+  // included, run proxied, so their probes do too; a capsule that only
+  // Plan's command probes saw would prove nothing about them. A Plan
+  // runtime's probe on Linux runs in the nested capsule its forwarder starts.
+  const runtimeProbe = probe.startsWith("runtime-");
+  const proxied = posture !== "plan" || runtimeProbe;
+  let forwarder: LoopbackForwarder | undefined;
   try {
-    const egressSocket = join(mkdtempSync(join(layout.egressDirectory, "p-")), "s");
-    // The writing postures' commands and every placed runtime, Plan's
-    // included, run proxied, so their probes do too; a capsule that only
-    // Plan's command probes saw would prove nothing about them. A Plan
-    // runtime's probe runs in the nested capsule its forwarder starts.
-    const runtimeProbe = probe.startsWith("runtime-");
-    const networkEgress =
-      posture === "plan" && !runtimeProbe
-        ? ("none" as const)
-        : {
-            kind: "proxied" as const,
-            endpoint: { kind: "unix-socket" as const, path: egressSocket },
-          };
+    let endpoint: EgressProxyEndpoint | undefined;
+    if (proxied && environment.platform === "darwin") {
+      // A forwarder that admits a token no probe holds, so a probe that
+      // reached it would still get nowhere.
+      forwarder = await listenForLaunchToken(randomBytes(32).toString("hex"), (socket) =>
+        socket.destroy(),
+      );
+      if (forwarder === undefined) return "inconclusive";
+      endpoint = { kind: "loopback", port: forwarder.port };
+    } else if (proxied) {
+      endpoint = {
+        kind: "unix-socket",
+        path: join(mkdtempSync(join(layout.egressDirectory, "p-")), "s"),
+      };
+    }
+    const launch = prepareProbe(environment, confinement, layout, posture, probe, nonce, target, {
+      runtimeProbe,
+      networkEgress: endpoint === undefined ? "none" : { kind: "proxied", endpoint },
+    });
+    if (launch === undefined) return "inconclusive";
+    const output = await runCollectingOutput(launch.command, launch.args, {
+      cwd: layout.root,
+      env: {
+        PATH: "/usr/bin:/bin",
+        HOME: environment.homeDirectory,
+        TMPDIR: layout.temporaryDirectory,
+      },
+    });
+    const verdict = output?.trim();
+    if (verdict === `${nonce} refused`) return "refused";
+    if (verdict === `${nonce} escaped`) return "escaped";
+    return "inconclusive";
+  } catch {
+    return "inconclusive";
+  } finally {
+    forwarder?.close();
+  }
+}
+
+function prepareProbe(
+  environment: ExecutorAttestationEnvironment,
+  confinement: ProcessConfinementPort,
+  layout: CanaryLayout,
+  posture: SshConfinedPosture,
+  probe: SshConfinementCanaryProbe,
+  nonce: string,
+  target: ReadonlyArray<string>,
+  options: { readonly runtimeProbe: boolean; readonly networkEgress: OsNetworkEgress },
+): ReturnType<ProcessConfinementPort["prepare"]> | undefined {
+  const { runtimeProbe, networkEgress } = options;
+  // Seatbelt denies by default and reads by path, so on macOS a probe also
+  // reads its runtime's folder outside the home denial, as the command
+  // probes below explain.
+  const runtimeFolders =
+    environment.platform === "darwin" ? [dirname(environment.runtimeExecutable)] : [];
+  try {
     const args = [layout.probeScript, probe, nonce, ...target];
-    launch = runtimeProbe
+    return runtimeProbe
       ? confinement.prepare({
           executable: environment.runtimeExecutable,
           args,
@@ -454,7 +503,7 @@ async function runProbe(
             root: layout.root,
             home: layout.runtimeHome,
             temporaryDirectory: layout.temporaryDirectory,
-            binaryFolders: [layout.probeDirectory],
+            binaryFolders: [layout.probeDirectory, ...runtimeFolders],
             accountState: { readPaths: [layout.accountState], writePaths: [] },
             networkEgress,
           }),
@@ -477,26 +526,14 @@ async function runProbe(
             layout.root,
             layout.temporaryDirectory,
             layout.probeDirectory,
-            ...(environment.platform === "darwin" ? [dirname(environment.runtimeExecutable)] : []),
+            ...runtimeFolders,
           ],
           ...postureGrants(posture),
           networkEgress,
         });
   } catch {
-    return "inconclusive";
+    return undefined;
   }
-  const output = await runCollectingOutput(launch.command, launch.args, {
-    cwd: layout.root,
-    env: {
-      PATH: "/usr/bin:/bin",
-      HOME: environment.homeDirectory,
-      TMPDIR: layout.temporaryDirectory,
-    },
-  });
-  const verdict = output?.trim();
-  if (verdict === `${nonce} refused`) return "refused";
-  if (verdict === `${nonce} escaped`) return "escaped";
-  return "inconclusive";
 }
 
 function runCollectingOutput(
