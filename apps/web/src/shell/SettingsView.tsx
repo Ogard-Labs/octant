@@ -91,6 +91,7 @@ import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-mem
 import type { ReplicaStoreSettingsClient } from "@octant/client-runtime/replica-store-settings-client";
 import type { ReplicaSyncStatusClient } from "@octant/client-runtime/replica-sync-status-client";
 import { AutomationNotificationSettings } from "../host/AutomationNotificationSettings";
+import { PhoneNotificationSettings } from "../host/PhoneNotificationSettings";
 import { FederatedHostsLifecyclePanel } from "../host/FederatedHostsLifecyclePanel";
 import {
   type SettingsNativeCapabilities,
@@ -1224,6 +1225,10 @@ function ActiveSectionContent({
     case "notifications":
       return props.automationNotificationClient !== undefined ? (
         <div className="settings-section-stack" id="settings-notifications">
+          <PhoneNotificationSettings
+            client={props.automationNotificationClient}
+            focusedSetting={focusedSetting}
+          />
           <AutomationNotificationSettings
             client={props.automationNotificationClient}
             focused={focusedSetting === "host-automation-notifications"}
