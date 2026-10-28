@@ -96,6 +96,37 @@ describe("buildRedactedPushNotification", () => {
     }
   });
 
+  it("tells the phone an approval only the computer can answer is waiting there, as a wait and not an ask", () => {
+    const local = {
+      kind: "approval-needed",
+      hostId,
+      threadId,
+      mode: "code",
+      computerLabel: "Studio Mac",
+      threadTitle: "Fix the release build",
+      localPersonOnly: true,
+    } as const;
+    expect(buildRedactedPushNotification({ ...local, threadTitles: false })).toEqual({
+      kind: "waiting",
+      hostId,
+      threadId,
+      mode: "code",
+      title: "Waiting for you at Studio Mac",
+      body: "Only an Octant window on that computer can answer",
+    });
+    expect(buildRedactedPushNotification({ ...local, threadTitles: true }).title).toBe(
+      "Waiting for you at Studio Mac: Fix the release build",
+    );
+    // A label the scrubber refuses is replaced, not shown.
+    const scrubbed = buildRedactedPushNotification({
+      ...local,
+      computerLabel: "/Users/example/Mac",
+      threadTitles: false,
+    });
+    expect(scrubbed.title).toBe("Waiting for you at your paired computer");
+    expect(JSON.stringify(scrubbed)).not.toContain("/Users/");
+  });
+
   it("stays within the payload's byte bounds for long or multibyte titles and labels", () => {
     const payload = buildRedactedPushNotification({
       kind: "waiting",

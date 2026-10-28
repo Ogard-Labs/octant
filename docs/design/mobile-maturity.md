@@ -334,9 +334,11 @@ A notification has two layers:
   failed", "Thread completed") and "On" the computer's label, the name the
   listener's hello shows. Only for a phone that opted in does ": " and the
   thread title follow the kind. A title the scrubber flags as a secret or a
-  path is left out whole. Automation runs follow the same rule, with the
-  automation's name where a thread title would be, and show no failure
-  message.
+  path is left out whole, and a label it flags reads "your paired
+  computer". A local-only approval's text is the exception described under
+  [When the host sends](#when-the-host-sends). Automation runs follow the
+  same rule, with the automation's name where a thread title would be, and
+  show no failure message.
 
 ### When the host sends
 
@@ -345,8 +347,19 @@ A notification has two layers:
   limited per device. Automation runs keep their existing delivery service and
   receipts, moved onto the same transport and sealing.
 - An approval-needed notification is sent whether or not the approval is
-  remotely answerable; the thread screen states which. The host never sends a
-  notification to a device whose authority could not read that thread.
+  remotely answerable; the thread screen states which. A Code approval the
+  host marks `localPersonOnly` (an agent's Apple device lease or device
+  effect, which only a person at one of the host's own windows may answer)
+  is sealed as kind `waiting`, never `approval-needed`, with the title
+  "Waiting for you at" the computer's label and the body "Only an Octant
+  window on that computer can answer", so the phone offers nothing that
+  looks like an answer. The host decides from that journaled mark alone,
+  never from the approval's wording. It is still an approval for the phone's
+  approval-needed preference, its dedupe key, its high urgency, and its
+  receipt. _Reason:_ the host refuses a paired device's answer to it, so an
+  ask on the lock screen would invite an answer that settles nothing. The
+  host never sends a notification to a device whose authority could not read
+  that thread.
 - Delivery failure never changes thread, run, or approval state. A delivery
   path that refuses a destination as gone clears it.
 
