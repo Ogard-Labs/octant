@@ -1365,6 +1365,30 @@ describe("a destination export near the approval card's limit", () => {
     expect(exported.body.split("<svg")).toHaveLength(3);
   });
 
+  it("carries a mockup as its generated semantic page beside the outline reading", () => {
+    const mockup = {
+      blockId: "screen",
+      schemaVersion: 24,
+      kind: "mockup",
+      device: "phone",
+      title: "Search",
+      nodes: [
+        { nodeId: "window", component: "window", label: "Search" },
+        { nodeId: "go", parentId: "window", component: "button", label: "Go" },
+      ],
+    } as unknown as CanvasBlock;
+    const exported = renderArtifactHtml(definition([mockup]));
+    if (exported.kind !== "rendered") throw new Error("expected a rendered document");
+    expect(exported.body).toContain('class="oct-mockup-window"');
+    expect(exported.body).toContain("disabled>Go</button>");
+    expect(exported.body).not.toContain("<script");
+    // The Markdown form keeps the outline reading alone.
+    const markdown = renderArtifactMarkdown(definition([mockup]));
+    if (markdown.kind !== "rendered") throw new Error("expected a rendered document");
+    expect(markdown.body).toContain("- Window, Search");
+    expect(markdown.body).not.toContain("oct-mockup-window");
+  });
+
   it("renders a flow as a script-free site whose transitions are real anchors", () => {
     const mockup = (blockId: string) =>
       ({
