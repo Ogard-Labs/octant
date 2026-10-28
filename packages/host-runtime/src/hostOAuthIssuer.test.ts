@@ -18,6 +18,7 @@ import {
   type FakeIssuerIdTokenFlaw,
 } from "./fakeIssuer.test-support";
 import { createHostOAuthRuntime, type HostOAuthRuntime } from "./hostOAuth";
+import { controlIssuerDeadlines, stalledAnswer } from "./stalledIssuer.test-support";
 
 function memoryStore(): CredentialStore & { readonly values: Map<string, string> } {
   const values = new Map<string, string>();
@@ -152,6 +153,40 @@ describe("issuer sign-in dialect", () => {
       expect(started).toEqual({ kind: "refused", reason });
       expect(fake.authorizeRequests()).toHaveLength(0);
       expect(new Set(fake.hostsContacted())).toEqual(new Set([ISSUER_HOST]));
+    },
+  );
+
+  it.each([
+    ["never answers", "hangs"],
+    ["stops partway through its answer", "stalls-mid-answer"],
+  ] as const)(
+    "refuses to begin as unavailable when the discovery document %s, before any listener",
+    async (_, stall) => {
+      const fake = await fakeIssuer();
+      const deadlines = controlIssuerDeadlines();
+      try {
+        const runtime = createHostOAuthRuntime({
+          store: memoryStore(),
+          fetch: async (input, init) =>
+            String(input).endsWith("/.well-known/openid-configuration")
+              ? stalledAnswer(stall, init?.signal)
+              : fake.fetch(input, init),
+          timeoutMs: 5_000,
+        });
+        open.push(runtime);
+
+        const started = await runtime.begin({
+          descriptor: issuerDescriptor(),
+          actorId: randomUUID(),
+          termsAcknowledgedAt: "2026-10-26T09:00:00.000Z",
+        });
+
+        expect(started).toEqual({ kind: "refused", reason: "unavailable" });
+        expect(deadlines.bounds()).toEqual([30_000]);
+        expect(fake.authorizeRequests()).toHaveLength(0);
+      } finally {
+        deadlines.restore();
+      }
     },
   );
 

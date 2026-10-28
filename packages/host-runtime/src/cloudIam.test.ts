@@ -256,31 +256,37 @@ describe("cloud single sign-on", () => {
     expect(current.store.values.size).toBe(1);
   });
 
-  it("gives up on a portal poll that never answers and polls again, so a stalled connection cannot hold an attempt open", async () => {
-    // Each portal request carries its own deadline; the test shortens it so
-    // the stalled poll is abandoned at once instead of after the real bound.
-    const timeouts: number[] = [];
-    const timeout = AbortSignal.timeout.bind(AbortSignal);
-    const spy = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
-      timeouts.push(ms);
-      return timeout(5);
-    });
-    try {
-      const current = await scene();
-      current.cloud.failDevicePolls("hangs");
-      const started = await begin(current);
-      current.cloud.approve();
+  it.each([
+    ["never answers", "hangs"],
+    ["stops partway through its answer", "stalls-mid-answer"],
+  ] as const)(
+    "gives up on a portal poll that %s and polls again, so a stalled connection cannot hold an attempt open",
+    async (_, stall) => {
+      // Each portal request carries its own deadline; the test shortens it so
+      // the stalled poll is abandoned at once instead of after the real bound.
+      const timeouts: number[] = [];
+      const timeout = AbortSignal.timeout.bind(AbortSignal);
+      const spy = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+        timeouts.push(ms);
+        return timeout(5);
+      });
+      try {
+        const current = await scene();
+        current.cloud.failDevicePolls(stall);
+        const started = await begin(current);
+        current.cloud.approve();
 
-      const state = await settled(current, (started.body as { attemptId: string }).attemptId);
+        const state = await settled(current, (started.body as { attemptId: string }).attemptId);
 
-      expect(state).toMatchObject({ kind: "signed-in" });
-      expect(current.waits.slice(0, 2)).toEqual([1_000, 2_000]);
-      expect(timeouts.length).toBeGreaterThan(0);
-      expect(timeouts.every((ms) => ms > 0 && ms <= 60_000)).toBe(true);
-    } finally {
-      spy.mockRestore();
-    }
-  });
+        expect(state).toMatchObject({ kind: "signed-in" });
+        expect(current.waits.slice(0, 2)).toEqual([1_000, 2_000]);
+        expect(timeouts.length).toBeGreaterThan(0);
+        expect(timeouts.every((ms) => ms === 30_000)).toBe(true);
+      } finally {
+        spy.mockRestore();
+      }
+    },
+  );
 
   it("ends an attempt whose code ran out while the portal was failing as unavailable, storing nothing", async () => {
     const current = await scene();

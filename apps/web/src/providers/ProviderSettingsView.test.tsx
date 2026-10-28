@@ -2166,6 +2166,87 @@ describe("ProviderSettingsView", () => {
     );
   });
 
+  it("names the role and account on an Amazon Bedrock row the host holds a sign-in for", async () => {
+    const onProviderOAuth = vi.fn(async () => ({
+      kind: "signed-in" as const,
+      accountLabel: "BedrockUser in account 123456789012",
+    }));
+    renderProviderSettings(
+      <ModelEndpointSettingsView
+        {...fixture({ instance: bedrockProvider(), observed: observation() })}
+        onProviderOAuth={onProviderOAuth}
+      />,
+    );
+
+    const row = within(screen.getByRole("list", { name: "Model endpoints" })).getByRole("listitem");
+    expect(
+      await within(row).findByText("Signed in as BedrockUser in account 123456789012"),
+    ).toBeVisible();
+    expect(onProviderOAuth).toHaveBeenCalledTimes(1);
+    expect(onProviderOAuth).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "status", descriptorId: "amazon-bedrock-cloud-iam" }),
+    );
+  });
+
+  it("does not name who an Amazon Bedrock row is signed in as once the host's last check found the sign-in gone", async () => {
+    const onProviderOAuth = vi.fn(async () => ({
+      kind: "signed-in" as const,
+      accountLabel: "BedrockUser in account 123456789012",
+    }));
+    renderProviderSettings(
+      <ModelEndpointSettingsView
+        {...fixture({
+          instance: bedrockProvider(),
+          observed: observation({
+            readiness: "unauthenticated",
+            unauthenticatedReason: "expired",
+            credentialStatus: "missing",
+            models: [],
+          }),
+        })}
+        onProviderOAuth={onProviderOAuth}
+      />,
+    );
+
+    await waitFor(() => expect(onProviderOAuth).toHaveBeenCalled());
+    const row = within(screen.getByRole("list", { name: "Model endpoints" })).getByRole("listitem");
+    expect(within(row).getByText("Signed out")).toBeVisible();
+    expect(
+      within(row).getByText("bedrock-runtime.us-west-2.amazonaws.com · Organization sign-in"),
+    ).toBeVisible();
+    expect(within(row).queryByText(/Signed in as/)).not.toBeInTheDocument();
+  });
+
+  it("names a Foundry row's organization account once its page has read it, without asking per row", async () => {
+    const user = userEvent.setup();
+    const onProviderOAuth = vi.fn(async () => ({
+      kind: "signed-in" as const,
+      accountLabel: "person@contoso.example",
+    }));
+    renderProviderSettings(
+      <ModelEndpointSettingsView
+        {...fixture({
+          instance: directoryFoundryProvider(),
+          observed: observation({ directoryBinding: foundryBinding }),
+        })}
+        onProviderOAuth={onProviderOAuth}
+      />,
+    );
+
+    const list = screen.getByRole("list", { name: "Model endpoints" });
+    expect(within(list).getByText("contoso.openai.azure.com · Organization sign-in")).toBeVisible();
+    // Its status renews the token at the directory, so the list asks nothing.
+    expect(onProviderOAuth).not.toHaveBeenCalled();
+
+    await user.click(within(list).getByRole("link", { name: /Open details$/ }));
+    expect(await screen.findByText("person@contoso.example")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Back to Octant Harness" }));
+
+    const row = within(screen.getByRole("list", { name: "Model endpoints" })).getByRole("listitem");
+    expect(within(row).getByText("Signed in as person@contoso.example")).toBeVisible();
+    expect(onProviderOAuth).toHaveBeenCalledTimes(1);
+  });
+
   it("leaves an Amazon Bedrock endpoint's first sign-in to its Sign-in section, with no page alert", async () => {
     const props = {
       ...fixture({

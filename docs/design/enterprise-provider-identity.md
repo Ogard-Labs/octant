@@ -155,6 +155,21 @@ attempts do not accumulate in a long-running broker; a forgotten attempt
 reads `unknown`. An attempt still waiting on the issuer is kept, since its
 answer may yet store a grant that only that attempt names.
 
+Every request the broker sends to an issuer or a portal, in either route
+family, carries one deadline: discovery, device authorization, each
+device-code poll, a code exchange, a refresh, a key set, role credentials,
+and sign-out. An answer not complete 30 seconds after the request went out,
+body included, is abandoned and read as no answer at all. A device-code poll
+then waits and polls again with the outage backoff (slice 2's polling rule),
+a refresh is transient and leaves the grant as it was for the next try,
+beginning a sign-in is `unavailable`, and sign-out still deletes the local
+grant. Without a bound, one hung poll kept its attempt awaiting consent past
+its code's expiry, where neither expiry nor pruning could end it, and one
+hung refresh would hold every send waiting on that grant's single-flight
+renewal. Both route families take the bound from one place
+([`issuerRequest.ts`](../../packages/host-runtime/src/issuerRequest.ts)), so
+the rule cannot drift between them.
+
 ## Tenant, audience, and endpoint binding
 
 A `directory-oauth` instance records three facts in its configuration, none
@@ -472,9 +487,10 @@ conservative reading of decision 4 and the broker operations above:
   follows slice 2's rule: a poll the portal does not answer, or answers with
   a 429 or a 5xx, is retried with a doubling wait until the code expires, and
   a code that runs out during the outage reads `unavailable`. Every portal
-  request is abandoned after 30 seconds and read as no answer, so a stalled
-  connection cannot hold an attempt awaiting consent past its code's expiry
-  or keep Sign out waiting.
+  request carries the broker's one request deadline (see
+  [Broker operations](#broker-operations)), so a stalled connection cannot
+  hold an attempt awaiting consent past its code's expiry or keep Sign out
+  waiting.
 - **One partition.** Regions are the commercial partition's (`us-east-1`
   form); the government, isolated, sovereign, and China partitions sign under
   other hosts and keys and wait for an organization that needs one. The
@@ -590,7 +606,8 @@ conservative reading of decision 4 and the broker operations above:
   a password reset, or an administrator's session revocation become
   sign-in-again (`expired` or `revoked`) and drop the stored grant. A policy
   that needs the person present again (multi-factor or a conditional access
-  prompt) is `interaction-required`. Network failures and 5xx answers are
+  prompt) is `interaction-required`. Network failures, 5xx answers, and a
+  refresh the issuer has not answered by the broker's request deadline are
   transient and read `unavailable`; they never drop the grant.
 - **Mid-turn expiry.** A 401 on a send after a usable token makes the
   transport force one refresh and resend once inside that attempt; renewing a
@@ -918,7 +935,14 @@ five minutes past their deadline, each proved against the HTTP fake
 directory and the in-memory portal; a portal poll that never answers is
 abandoned and polled again, a directory `slow_down` keeps its longer interval
 through a later outage, and the endpoint's page does not say Signed in as when
-its last check found no grant.
+its last check found no grant. Every issuer and portal request carries the one
+request deadline: a directory, standard, or portal device-code poll that never
+answers or stops partway through its answer is abandoned and polled again, a
+refresh that does is transient and leaves the grant for the next try, and an
+issuer whose discovery document does refuses the sign-in as unavailable. An
+Amazon Bedrock row names the role and account signed in from the host's
+status, with no broker call, and not once its last check found the sign-in
+gone; a Foundry or gateway row names the account once its page has read it.
 **Needs the maintainer:** a real-account smoke with an AWS organization using
 IAM Identity Center and billed Bedrock access in one commercial region (for
 example `us-west-2`): a permission set allowing `bedrock:InvokeModel` and

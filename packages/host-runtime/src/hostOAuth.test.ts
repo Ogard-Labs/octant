@@ -11,6 +11,7 @@ import {
   exchangeAuthorizationCode,
   type HostOAuthDescriptor,
 } from "./hostOAuth";
+import { controlIssuerDeadlines, stalledAnswer } from "./stalledIssuer.test-support";
 
 const ACCESS = "access-token-must-not-leak";
 
@@ -828,6 +829,99 @@ describe("host OAuth runners", () => {
       await fake.close();
     }
   });
+
+  it.each([
+    ["never answers", "hangs"],
+    ["stops partway through its answer", "stalls-mid-answer"],
+  ] as const)(
+    "polls a device code again after a poll that %s and signs in once the issuer answers",
+    async (_, stall) => {
+      const deadlines = controlIssuerDeadlines();
+      const waits: number[] = [];
+      const fake = await startFakeAuthorizationServer({ device: { interval: 1 } });
+      let stalledPolls = 0;
+      const runtime = createHostOAuthRuntime({
+        store: memoryStore(),
+        fetch: async (input, init) => {
+          if (typeof init?.body === "string" && init.body.includes("device_code=")) {
+            stalledPolls += 1;
+            if (stalledPolls === 1) return stalledAnswer(stall, init.signal, 400);
+          }
+          return fetch(input, init);
+        },
+        sleep: async (ms) => {
+          waits.push(ms);
+        },
+      });
+      try {
+        const started = await runtime.begin({
+          descriptor: descriptor(
+            {
+              authorize: `${fake.url}/authorize`,
+              token: `${fake.url}/token`,
+              device: `${fake.url}/device`,
+            },
+            "device-code",
+          ),
+          actorId: randomUUID(),
+          termsAcknowledgedAt: "2026-10-03T18:00:00.000Z",
+        });
+        if (started.kind !== "awaiting-consent") throw new Error("expected a device attempt");
+
+        const done = await waitForState(() => runtime.status(started.attemptId), "signed-in");
+
+        expect(done.kind).toBe("signed-in");
+        // The stalled poll counts as no answer: the next waits twice the interval.
+        expect(waits.slice(0, 2)).toEqual([1_000, 2_000]);
+        expect(deadlines.bounds().length).toBeGreaterThanOrEqual(3);
+        expect(deadlines.bounds().every((ms) => ms === 30_000)).toBe(true);
+      } finally {
+        deadlines.restore();
+        await runtime.close();
+        await fake.close();
+      }
+    },
+  );
+
+  it.each([
+    ["never answers", "hangs"],
+    ["stops partway through its answer", "stalls-mid-answer"],
+  ] as const)(
+    "keeps the grant unchanged when a refresh %s and refreshes it on the next try",
+    async (_, stall) => {
+      const fake = await startFakeAuthorizationServer();
+      const store = memoryStore();
+      const signingIn = createHostOAuthRuntime({ store, timeoutMs: 2_000 });
+      const deadlines = controlIssuerDeadlines();
+      let refreshes = 0;
+      const runtime = createHostOAuthRuntime({
+        store,
+        fetch: async (input, init) => {
+          if (typeof init?.body === "string" && init.body.includes("grant_type=refresh_token")) {
+            refreshes += 1;
+            if (refreshes === 1) return stalledAnswer(stall, init.signal);
+          }
+          return fetch(input, init);
+        },
+      });
+      try {
+        const credentialRef = await signIn(signingIn, fake);
+        const before = store.values.get(credentialRef);
+
+        await expect(runtime.refresh(credentialRef)).resolves.toEqual({ kind: "transient" });
+        expect(store.values.get(credentialRef)).toBe(before);
+
+        await expect(runtime.refresh(credentialRef)).resolves.toEqual({ kind: "refreshed" });
+        expect(store.values.get(credentialRef)).toContain("rotated-access-token");
+        expect(deadlines.bounds().every((ms) => ms === 30_000)).toBe(true);
+      } finally {
+        deadlines.restore();
+        await runtime.close();
+        await signingIn.close();
+        await fake.close();
+      }
+    },
+  );
 
   it("does not return an oauth grant from the raw credential resolve path", async () => {
     const fake = await startFakeAuthorizationServer();
