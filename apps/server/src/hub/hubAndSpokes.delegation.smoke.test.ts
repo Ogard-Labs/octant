@@ -768,6 +768,39 @@ describe("a delegation whose answer never reached the delegating spoke", () => {
     expect(a.delegationState.load().sent[0]?.state).toBe("cancelled");
   });
 
+  it("sends no extra requests when the background poll runs again before the last pass finished", async () => {
+    const gate = { hold: false, release: () => {}, statusReads: 0 };
+    const slowStatus: Parameters<typeof startHubTestHost>[0]["delegatingTransport"] = (inner) => {
+      return (target) => {
+        const send = inner(target);
+        return async (url, init) => {
+          if (!url.endsWith(PEER_DELEGATION_ROUTES.status)) return send(url, init);
+          gate.statusReads += 1;
+          if (gate.hold && gate.statusReads === 1) {
+            await new Promise<void>((resolve) => (gate.release = resolve));
+          }
+          return send(url, init);
+        };
+      };
+    };
+    const { a, b } = await threeHosts({ aTransport: slowStatus });
+    const delegated = await a.delegating.delegate(startCommand(b), { windowId: "window-a" });
+    if (delegated.status !== "delegated") throw new Error(JSON.stringify(delegated));
+
+    gate.hold = true;
+    const first = a.delegating.trackOpen();
+    await vi.waitFor(() => expect(gate.statusReads).toBe(1));
+    const overlapping = a.delegating.trackOpen();
+    await Promise.resolve();
+    gate.hold = false;
+    gate.release();
+    await Promise.all([first, overlapping]);
+    expect(gate.statusReads).toBe(1);
+
+    await a.delegating.trackOpen();
+    expect(gate.statusReads).toBe(2);
+  });
+
   it("forgets a pending request the target never received once its signature could no longer be accepted", async () => {
     const flaky = flakyCreate();
     const { a, b, child } = await threeHosts({ aTransport: flaky.transport });

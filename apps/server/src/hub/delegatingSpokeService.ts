@@ -175,6 +175,7 @@ export type DelegationCancellation =
 
 export class DelegatingSpokeService {
   readonly #options: DelegatingSpokeOptions;
+  #openPass: Promise<void> | undefined;
 
   constructor(options: DelegatingSpokeOptions) {
     this.#options = options;
@@ -408,8 +409,20 @@ export class DelegatingSpokeService {
     return this.#recordResult(sent, status.result, target.member);
   }
 
-  /** Reads every delegation that has not ended; a host runs this on a timer so results arrive unasked. */
-  async trackOpen(): Promise<void> {
+  /**
+   * Reads every delegation that has not ended; a host runs this on a timer so
+   * results arrive unasked. A pass can outlast the timer's period (each signed
+   * request waits up to eight seconds on an unreachable target), so a call made
+   * during a pass joins it instead of starting a parallel one.
+   */
+  trackOpen(): Promise<void> {
+    this.#openPass ??= this.#trackOpenPass().finally(() => {
+      this.#openPass = undefined;
+    });
+    return this.#openPass;
+  }
+
+  async #trackOpenPass(): Promise<void> {
     for (const entry of this.#options.state.load().sent) {
       if (entry.resultRecorded === true) continue;
       if (entry.state === "failed" || entry.state === "cancelled") continue;
