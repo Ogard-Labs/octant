@@ -79,6 +79,7 @@ interface InstalledSnapshotOptions {
   readonly componentActivation?: Activation;
   readonly componentEffectiveState?: EffectiveState;
   readonly publisher?: Record<string, string>;
+  readonly diagnostics?: ReadonlyArray<{ readonly code: string; readonly message: string }>;
 }
 
 function installedSnapshot(options: InstalledSnapshotOptions = {}): ExtensionSnapshot {
@@ -126,7 +127,7 @@ function installedSnapshot(options: InstalledSnapshotOptions = {}): ExtensionSna
             effectiveState,
           },
         ],
-        diagnostics: [],
+        diagnostics: options.diagnostics ?? [],
       },
     ],
     collisions: [],
@@ -754,6 +755,76 @@ describe("ExtensionsSettingsView", () => {
         ),
       ).toBe(true),
     );
+  });
+
+  it("says an unsigned held version is unsigned and does not offer to trust a new publisher", async () => {
+    const pinned = `ed25519:${"a".repeat(64)}`;
+    const c = client({
+      snapshot: installedSnapshot({
+        activation: baseActivation({ quarantined: true }),
+        publisher: { pinned, held: "publisher-changed" },
+      }),
+    });
+    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
+
+    expect(screen.getByText(/This version is unsigned/)).toBeInTheDocument();
+    expect(screen.queryByText(/Another publisher signed/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Trust new publisher" })).not.toBeInTheDocument();
+  });
+
+  it("disables Trust source while the package is held for a new publisher", async () => {
+    const pinned = `ed25519:${"a".repeat(64)}`;
+    const selected = `ed25519:${"b".repeat(64)}`;
+    const c = client({
+      snapshot: installedSnapshot({
+        activation: baseActivation({ quarantined: true }),
+        publisher: { pinned, selected, held: "publisher-changed" },
+      }),
+    });
+    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
+
+    expect(screen.getByRole("button", { name: "Trust source" })).toBeDisabled();
+  });
+
+  it("keeps Revoke trust usable on a held package that is still trusted", async () => {
+    const pinned = `ed25519:${"a".repeat(64)}`;
+    const selected = `ed25519:${"b".repeat(64)}`;
+    const c = client({
+      snapshot: installedSnapshot({
+        activation: baseActivation({ trusted: true }),
+        publisher: { pinned, selected, held: "publisher-changed" },
+      }),
+    });
+    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
+
+    expect(screen.getByRole("button", { name: "Revoke trust" })).toBeEnabled();
+  });
+
+  it("shows the publisher hold sentence once even when the host also reports it as a diagnostic", async () => {
+    const pinned = `ed25519:${"a".repeat(64)}`;
+    const selected = `ed25519:${"b".repeat(64)}`;
+    const c = client({
+      snapshot: installedSnapshot({
+        activation: baseActivation({ quarantined: true }),
+        publisher: { pinned, selected, held: "publisher-changed" },
+        diagnostics: [
+          {
+            code: "outside-driver-publisher-changed",
+            message:
+              "Another publisher signed this provider driver. It stays held until you trust the new publisher or forget the old one.",
+          },
+          { code: "other", message: "Something else." },
+        ],
+      }),
+    });
+    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
+
+    expect(screen.getAllByText(/Another publisher signed/)).toHaveLength(1);
+    expect(screen.getByText("Something else.")).toBeInTheDocument();
   });
 
   it("trusts, enables the plugin, enables the component, and uninstalls through the client", async () => {
