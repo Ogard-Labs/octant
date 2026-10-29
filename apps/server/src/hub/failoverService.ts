@@ -69,6 +69,7 @@ export type StandInJoinOutcome =
       readonly status: "refused";
       readonly kind:
         | "not-standing-in"
+        | "handing-back"
         | "guest-not-during-stand-in"
         | "identity-mismatch"
         | "member-origin-not-private"
@@ -84,7 +85,11 @@ export type StandInRemovalOutcome =
   | { readonly status: "removed"; readonly sequence: number }
   | {
       readonly status: "refused";
-      readonly kind: "not-standing-in" | "not-a-member" | "cannot-remove-hub-or-standby";
+      readonly kind:
+        | "not-standing-in"
+        | "handing-back"
+        | "not-a-member"
+        | "cannot-remove-hub-or-standby";
     };
 
 export interface FailoverStatus {
@@ -212,6 +217,9 @@ export class FailoverService {
     ) {
       return { status: "refused", kind: "not-standing-in" };
     }
+    // The hand-back already sent holds the changes up to now; one made after it
+    // would be lost when the stand-in ends. The member pairs again afterwards.
+    if (standIn.handingBack === true) return { status: "refused", kind: "handing-back" };
     if (request.asGuest === true) return { status: "refused", kind: "guest-not-during-stand-in" };
     if (publicKeyFingerprint(request.identityPublicKey) !== request.member.identityKeyFingerprint) {
       return { status: "refused", kind: "identity-mismatch" };
@@ -306,6 +314,7 @@ export class FailoverService {
     if (link === undefined || link.removed === true || standIn === undefined) {
       return { status: "refused", kind: "not-standing-in" };
     }
+    if (standIn.handingBack === true) return { status: "refused", kind: "handing-back" };
     const roster = link.roster.roster;
     const entry = roster.members.find((member) => String(member.memberId) === memberId);
     if (entry === undefined) return { status: "refused", kind: "not-a-member" };
@@ -409,7 +418,11 @@ export class FailoverService {
     return seconds === undefined ? DEFAULT_FAILOVER_AFTER_MS : seconds * 1_000;
   }
 
-  /** Whether the hub answered. A newer hub-signed roster in its answer is taken like a pushed one. */
+  /**
+   * Whether the hub answered. A newer hub-signed roster in its answer is taken
+   * like a pushed one, so a spoke whose person unticked Roster still reads
+   * reachability from the answer but installs nothing from it.
+   */
   async #probeHub(link: HubLinkState): Promise<boolean> {
     const answer = await this.#askHeartbeat({
       origin: link.hubOrigin,
@@ -532,6 +545,9 @@ export class FailoverService {
     const link = this.#options.state.load().link;
     const standIn = link?.standIn;
     if (link === undefined || standIn === undefined) return;
+    // Freeze membership first, in the same step that reads the changes, so the
+    // hand-back holds every change and the end of the stand-in drops none.
+    this.#holdMembership(true);
     const handback: HubStandInHandback = {
       baseSequence: standIn.baseSequence,
       sequence: link.roster.roster.sequence,
@@ -562,16 +578,22 @@ export class FailoverService {
       headers: { [HUB_PEER_KEY_HEADER]: identity.signing.hostPublicKey },
       now: this.#options.now(),
     });
-    // Still standing in until the hub has taken the changes: try again next look.
-    if (answer.status === "unreachable") return;
+    // Still standing in until the hub has taken the changes: members can change
+    // again, and the next look sends the hand-back again.
+    if (answer.status === "unreachable") {
+      this.#holdMembership(false);
+      return;
+    }
     if (answer.response.ok) {
       try {
         const merged = decodeHubStandInHandbackResponse(await answer.response.json());
         this.#options.spoke.receiveRoster(merged.roster);
       } catch {
+        this.#holdMembership(false);
         return;
       }
     } else if (answer.response.status !== 403) {
+      this.#holdMembership(false);
       return;
     }
     // A hub that no longer names this host a standby cannot take changes back;
@@ -586,6 +608,18 @@ export class FailoverService {
       actingPrincipal: { kind: "hub", memberId: link.selfMemberId },
       memberId: link.hubMemberId,
       sequence: latest.roster.roster.sequence,
+    });
+  }
+
+  #holdMembership(on: boolean): void {
+    const state = this.#options.state.load();
+    const link = state.link;
+    const standIn = link?.standIn;
+    if (link === undefined || standIn === undefined) return;
+    const { handingBack: _was, ...rest } = standIn;
+    this.#options.state.save({
+      ...state,
+      link: { ...link, standIn: on ? { ...rest, handingBack: true } : rest },
     });
   }
 

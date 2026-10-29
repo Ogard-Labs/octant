@@ -236,6 +236,35 @@ describe("a standby-signed roster", () => {
   });
 });
 
+describe("a roster carried by the hub's heartbeat", () => {
+  it("is installed where the person ticked Roster and left alone where they did not", async () => {
+    const network = new HubTestNetwork();
+    const hub = await start(network, "Mac mini", 103);
+    const ticked = await start(network, "Laptop", 105);
+    const unticked = await start(network, "Desk", 106);
+    const newcomer = await start(network, "Phone", 107);
+    const enabled = hub.hub.enable(window);
+    if (enabled.status !== "enabled") throw new Error(enabled.status);
+    await join(hub, ticked);
+    await join(hub, unticked);
+    unticked.spoke.setGrant({ items: ["introduce", "owners"], actProjects: [] }, window);
+    const before = roster(unticked);
+    // The hub's push to each member is dropped on the way, so only the heartbeat can carry the roster.
+    network.stop(ticked.address);
+    network.stop(unticked.address);
+    await join(hub, newcomer);
+    network.start(ticked.address);
+    network.start(unticked.address);
+
+    await unticked.failover.tick();
+    await ticked.failover.tick();
+
+    expect(roster(unticked)).toEqual(before);
+    expect(names(roster(unticked))).not.toContain("Phone");
+    expect(names(roster(ticked))).toContain("Phone");
+  });
+});
+
 describe("a hub that stops and comes back", () => {
   it("lets the members switch to the standby, which adds and removes members, and takes its changes back with removal winning", async () => {
     const network = new HubTestNetwork();
@@ -349,6 +378,170 @@ describe("a hub that stops and comes back", () => {
   });
 });
 
+describe("a hand-back from a named standby", () => {
+  async function startNamed() {
+    const family = await startFamily();
+    family.standby.spoke.setGrant(standbyGrant, window);
+    const ordered = await family.hub.hub.setStandbyOrder(
+      [decodeMemberId(family.standby.hostId)],
+      window,
+    );
+    if (ordered.status !== "ordered") throw new Error(JSON.stringify(ordered));
+    return family;
+  }
+  const handbackRemoving = (ids: ReadonlyArray<string>, baseSequence: number) => ({
+    baseSequence,
+    sequence: baseSequence + 1,
+    added: [],
+    removed: ids.map((id) => decodeMemberId(id)),
+    wakeTimes: [] as [],
+  });
+
+  it("is refused whole when it removes the hub or another standby, and the roster stays as it was", async () => {
+    const { hub, standby, member } = await startNamed();
+    const before = hub.hub.status().roster;
+    if (before === undefined) throw new Error("The hub holds no roster.");
+
+    for (const target of [hub.hostId, standby.hostId]) {
+      const refused = await hub.hub.receiveHandback(
+        standby.hostId,
+        handbackRemoving([member.hostId, target], before.roster.sequence),
+      );
+      expect(refused).toEqual({ status: "refused", kind: "handback-invalid" });
+    }
+
+    expect(hub.hub.status().roster).toEqual(before);
+    expect(hub.hub.memberKey(member.hostId)).toBeDefined();
+    expect(hub.records.map((record) => record.change)).toContain("stand-in-refused");
+  });
+
+  it("still merges a hand-back that removes a plain spoke", async () => {
+    const { hub, standby, member } = await startNamed();
+    const before = hub.hub.status().roster;
+    if (before === undefined) throw new Error("The hub holds no roster.");
+
+    const merged = await hub.hub.receiveHandback(
+      standby.hostId,
+      handbackRemoving([member.hostId], before.roster.sequence),
+    );
+
+    expect(merged.status).toBe("merged");
+    expect(names(hub.hub.status().roster ?? before)).toEqual(["Mac mini", "Standby"]);
+  });
+});
+
+describe("a hand-back in flight", () => {
+  /** A standby standing in for a stopped hub, with its hand-back held until the test lets it go or lose it. */
+  async function standInWithHeldHandback() {
+    const network = new HubTestNetwork();
+    const hub = await start(network, "Mac mini", 103);
+    const held: { release: () => void; lose: boolean; seen: number } = {
+      release: () => undefined,
+      lose: false,
+      seen: 0,
+    };
+    let gate = Promise.resolve();
+    const standby = await startHubTestHost({
+      name: "Standby",
+      address: "100.101.102.104",
+      network,
+      cleanups,
+      failoverAfterMs: FAILOVER_AFTER_MS,
+      failoverTransport: (transport) => (target) => {
+        const fetchTo = transport(target);
+        return async (url, init) => {
+          if (init?.method !== "POST" || !url.endsWith("/api/hub/handback")) {
+            return fetchTo(url, init);
+          }
+          held.seen += 1;
+          await gate;
+          if (held.lose) throw new Error("The hub did not answer.");
+          return fetchTo(url, init);
+        };
+      },
+    });
+    const early = await start(network, "Desk", 106);
+    const late = await start(network, "Phone", 107);
+    const enabled = hub.hub.enable(window);
+    if (enabled.status !== "enabled") throw new Error(enabled.status);
+    await join(hub, standby);
+    standby.spoke.setGrant(standbyGrant, window);
+    const ordered = await hub.hub.setStandbyOrder([decodeMemberId(standby.hostId)], window);
+    if (ordered.status !== "ordered") throw new Error(JSON.stringify(ordered));
+    await standby.failover.tick();
+    network.stop(hub.address);
+    await pause(FAILOVER_AFTER_MS + 40);
+    await standby.failover.tick();
+    expect(standby.failover.standingIn()).toBe(true);
+
+    // Two computers pair with the standby; one finishes before the hub returns.
+    const pair = async (member: HubTestHost) => {
+      const minted = standby.failover.mintJoinCode();
+      if (minted.status !== "minted") throw new Error(minted.status);
+      const started = await member.spoke.startJoin({ code: minted.code });
+      if (started.status !== "awaiting-approval") throw new Error(JSON.stringify(started));
+      const pending = standby.administration.listPendingPairings().at(-1);
+      if (pending === undefined) throw new Error("The standby shows no pairing to approve.");
+      standby.administration.approvePairing({ ticketId: pending.ticketId });
+    };
+    await pair(early);
+    const finishedEarly = await early.spoke.finishJoin(window);
+    if (finishedEarly.status !== "joined") throw new Error(JSON.stringify(finishedEarly));
+    await pair(late);
+
+    // The hub answers again; the hand-back starts and waits on the gate.
+    gate = new Promise<void>((resolve) => {
+      held.release = resolve;
+    });
+    network.start(hub.address);
+    const stepping = standby.failover.tick();
+    await vi.waitFor(() => expect(held.seen).toBe(1));
+    return { hub, standby, early, late, held, stepping };
+  }
+
+  it("refuses a join that finishes meanwhile and hands back the one made before it", async () => {
+    const { hub, standby, early, late, held, stepping } = await standInWithHeldHandback();
+
+    const refused = await late.spoke.finishJoin(window);
+    held.release();
+    await stepping;
+
+    expect(refused.status).not.toBe("joined");
+    expect(standby.failover.standingIn()).toBe(false);
+    expect(names(hub.hub.status().roster ?? roster(standby))).toEqual([
+      "Mac mini",
+      "Standby",
+      "Desk",
+    ]);
+    expect(hub.hub.memberKey(early.hostId)).toBeDefined();
+    expect(hub.hub.memberKey(late.hostId)).toBeUndefined();
+  });
+
+  it("refuses a removal that comes meanwhile and keeps the member", async () => {
+    const { hub, standby, early, held, stepping } = await standInWithHeldHandback();
+
+    const refused = await standby.failover.removeMember(early.hostId, window);
+    held.release();
+    await stepping;
+
+    expect(refused).toEqual({ status: "refused", kind: "handing-back" });
+    expect(hub.hub.memberKey(early.hostId)).toBeDefined();
+  });
+
+  it("lets the standby change membership again when the hand-back is lost", async () => {
+    const { standby, early, held, stepping } = await standInWithHeldHandback();
+    held.lose = true;
+
+    held.release();
+    await stepping;
+
+    expect(standby.failover.standingIn()).toBe(true);
+    expect(await standby.failover.removeMember(early.hostId, window)).toMatchObject({
+      status: "removed",
+    });
+  });
+});
+
 describe("replacing the hub for good", () => {
   it("makes a named standby the hub from its own window and lets each spoke accept it from theirs", async () => {
     const { hub, standby, member } = await startFamily();
@@ -389,6 +582,74 @@ describe("replacing the hub for good", () => {
     // The new hub hears the laptop leave, though it never held the laptop's key.
     expect(await member.spoke.leave(window)).toEqual({ status: "left", hubNotified: true });
     expect(names(standby.hub.status().roster ?? promoted.roster)).toEqual(["Standby"]);
+  });
+
+  /** A promoted standby and a member whose check of the new hub waits until the test lets it through. */
+  async function promotedWithHeldAcceptance() {
+    const network = new HubTestNetwork();
+    const hub = await start(network, "Mac mini", 103);
+    const standby = await start(network, "Standby", 104);
+    const gate: { release: () => void; promise: Promise<void> } = {
+      release: () => undefined,
+      promise: Promise.resolve(),
+    };
+    let armed = false;
+    const member = await startHubTestHost({
+      name: "Laptop",
+      address: "100.101.102.105",
+      network,
+      cleanups,
+      failoverAfterMs: FAILOVER_AFTER_MS,
+      spokeTransport: (transport) => (target) => {
+        const fetchTo = transport(target);
+        return async (url, init) => {
+          if (armed && url.endsWith("/api/hub/heartbeat")) await gate.promise;
+          return fetchTo(url, init);
+        };
+      },
+    });
+    const enabled = hub.hub.enable(window);
+    if (enabled.status !== "enabled") throw new Error(enabled.status);
+    await join(hub, standby);
+    await join(hub, member);
+    standby.spoke.setGrant(standbyGrant, window);
+    await hub.hub.setStandbyOrder([decodeMemberId(standby.hostId)], window);
+    const promoted = standby.hub.promote(window);
+    if (promoted.status !== "promoted") throw new Error(JSON.stringify(promoted));
+    const hold = () => {
+      armed = true;
+      gate.promise = new Promise<void>((resolve) => {
+        gate.release = resolve;
+      });
+    };
+    return { standby, member, hold, release: () => gate.release() };
+  }
+
+  it("leaves no link when the person leaves while the new hub is being checked", async () => {
+    const { standby, member, hold, release } = await promotedWithHeldAcceptance();
+    hold();
+    const accepting = member.spoke.acceptNewHub(standby.hostId, window);
+
+    expect(await member.spoke.leave(window)).toMatchObject({ status: "left" });
+    release();
+
+    expect(await accepting).toEqual({ status: "refused", kind: "not-a-spoke" });
+    expect(member.spoke.status()).toEqual({ membership: "none" });
+    expect(member.state.load().link).toBeUndefined();
+  });
+
+  it("keeps a grant the person narrowed while the new hub is being checked", async () => {
+    const { standby, member, hold, release } = await promotedWithHeldAcceptance();
+    member.spoke.setGrant(standbyGrant, window);
+    hold();
+    const accepting = member.spoke.acceptNewHub(standby.hostId, window);
+    const narrowed: HubGrant = { items: ["roster"], actProjects: [] };
+
+    member.spoke.setGrant(narrowed, window);
+    release();
+
+    expect((await accepting).status).toBe("accepted");
+    expect(member.state.load().link?.grant).toEqual(narrowed);
   });
 
   it("refuses to promote a spoke the hub did not name, and a spoke to accept a member that is not a named standby", async () => {

@@ -225,6 +225,38 @@ export type StandInMembershipChanges = {
   readonly removed: ReadonlyArray<HubMemberId>;
 };
 
+export type StandInHandbackDecision =
+  | { readonly status: "valid" }
+  | { readonly status: "refused"; readonly kind: "handback-invalid" };
+
+/**
+ * Whether the hub may merge a standby's hand-back. The hub signs the merged
+ * roster, so every member takes it as the hub's own word: a standby must not
+ * be able to change through it what members refuse from a standby. It may
+ * remove spokes and guests, never the hub, a standby (the sender included), or
+ * a member of the standby order, and it may add only spokes the hub's roster
+ * does not already hold as the hub or a standby. One entry that breaks this
+ * refuses the whole hand-back.
+ */
+export function decideStandInHandback(input: {
+  readonly hub: HubRoster;
+  readonly senderMemberId: HubMemberId;
+  readonly standby: StandInMembershipChanges;
+}): StandInHandbackDecision {
+  const { hub, standby } = input;
+  const protectedId = (id: HubMemberId): boolean =>
+    sameId(id, input.senderMemberId) ||
+    includesId(hub.standbyOrder, id) ||
+    hub.members.some(
+      (member) =>
+        sameId(member.memberId, id) && (member.role === "hub" || member.role === "standby-hub"),
+    );
+  const invalid =
+    standby.removed.some(protectedId) ||
+    standby.added.some((member) => member.role !== "spoke" || protectedId(member.memberId));
+  return invalid ? { status: "refused", kind: "handback-invalid" } : { status: "valid" };
+}
+
 /**
  * The roster the hub signs next when a standby stands down. `hub` is the
  * hub's roster now, `hubRemovedSinceBase` every member the hub removed since
