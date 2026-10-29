@@ -161,6 +161,20 @@ describe("hub administration controls", () => {
     expect(calls).toHaveLength(2);
   });
 
+  it("sends the push switch only with its decoded body", async () => {
+    const { calls, runtime: controls } = runtime(() => Response.json({ status: "changed" }));
+
+    await sendHubAdministrationOperation(controls, "push", { enabled: true });
+    expect(calls.map((call) => call.url)).toEqual(["http://127.0.0.1:4317/api/desktop/hub/push"]);
+
+    for (const body of [{}, { enabled: "yes" }, { enabled: true, extra: 1 }, undefined]) {
+      expect(await sendHubAdministrationOperation(controls, "push", body)).toMatchObject({
+        status: 400,
+      });
+    }
+    expect(calls).toHaveLength(1);
+  });
+
   it("sends the wake switch and the hardware address only with their decoded bodies", async () => {
     const { calls, runtime: controls } = runtime(() => Response.json({ status: "changed" }));
 

@@ -12,11 +12,13 @@ import { createHash } from "node:crypto";
 import {
   REMOTE_PUSH_DELIVERY_HEADERS,
   decodeRemotePushGatewayRefusalV1,
+  type RemotePushEnvelopeV1,
   type RemotePushGatewaySettingsV1,
   type RemotePushGatewayRefusalCode,
 } from "@octant/contracts/remote-push-notifications";
 import { remotePushDeliverySigningText } from "@octant/domain/push-notification-policy";
 import type {
+  PushDeliveryDestination,
   PushDeliverySendResult,
   PushDeliveryTransport,
 } from "../automation/pushDeliveryTransport";
@@ -60,28 +62,16 @@ export function createGatewayPushDeliveryTransport(
       if (signing === undefined) {
         return { kind: "failed", retryable: false, category: "host-identity-unavailable" };
       }
-      const body = JSON.stringify({ capability: destination.token, envelope });
-      const timestamp = clock().toISOString();
-      const bodySha256 = createHash("sha256").update(body, "utf8").digest("base64url");
-      let signature: string;
-      try {
-        signature = signing.signHostPayload(
-          remotePushDeliverySigningText({ timestamp, bodySha256 }),
-        );
-      } catch {
+      const delivery = signGatewayDelivery({ signing, destination, envelope, clock });
+      if (delivery === undefined) {
         return { kind: "failed", retryable: false, category: "host-identity-unavailable" };
       }
       let response: Response;
       try {
-        response = await fetchImpl(new URL(DELIVERY_PATH, withTrailingSlash(settings.gatewayUrl)), {
+        response = await fetchImpl(gatewayDeliveryUrl(settings.gatewayUrl), {
           method: "POST",
-          headers: {
-            "content-type": "application/json",
-            [REMOTE_PUSH_DELIVERY_HEADERS.hostKey]: signing.hostPublicKey,
-            [REMOTE_PUSH_DELIVERY_HEADERS.timestamp]: timestamp,
-            [REMOTE_PUSH_DELIVERY_HEADERS.signature]: signature,
-          },
-          body,
+          headers: gatewayDeliveryHeaders(delivery),
+          body: delivery.body,
           // A gateway that answers with a redirect is refused rather than
           // followed: the signed request goes only to the address the person set.
           redirect: "manual",
@@ -90,9 +80,60 @@ export function createGatewayPushDeliveryTransport(
       } catch {
         return { kind: "failed", retryable: true, category: "gateway-unreachable" };
       }
-      return classify(response.status, await refusalCode(response));
+      return classifyGatewayAnswer(response.status, await refusalCode(response));
     },
   };
+}
+
+/**
+ * One delivery request exactly as the gateway checks it: the body and the
+ * headers that sign it. A host that cannot send to the gateway itself hands
+ * this to the hub, which forwards it unchanged.
+ */
+export interface SignedGatewayDelivery {
+  readonly body: string;
+  readonly hostKey: string;
+  readonly timestamp: string;
+  readonly signature: string;
+}
+
+/** Undefined when the host key cannot sign, which is a host without a paired phone. */
+export function signGatewayDelivery(input: {
+  readonly signing: HostSigningPort;
+  readonly destination: PushDeliveryDestination;
+  readonly envelope: RemotePushEnvelopeV1;
+  readonly clock: () => Date;
+}): SignedGatewayDelivery | undefined {
+  const body = JSON.stringify({ capability: input.destination.token, envelope: input.envelope });
+  const timestamp = input.clock().toISOString();
+  const bodySha256 = createHash("sha256").update(body, "utf8").digest("base64url");
+  try {
+    return {
+      body,
+      hostKey: input.signing.hostPublicKey,
+      timestamp,
+      signature: input.signing.signHostPayload(
+        remotePushDeliverySigningText({ timestamp, bodySha256 }),
+      ),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+/** The request headers a gateway reads a signed delivery by. */
+export function gatewayDeliveryHeaders(delivery: SignedGatewayDelivery): Record<string, string> {
+  return {
+    "content-type": "application/json",
+    [REMOTE_PUSH_DELIVERY_HEADERS.hostKey]: delivery.hostKey,
+    [REMOTE_PUSH_DELIVERY_HEADERS.timestamp]: delivery.timestamp,
+    [REMOTE_PUSH_DELIVERY_HEADERS.signature]: delivery.signature,
+  };
+}
+
+/** Where a gateway at this address takes deliveries. */
+export function gatewayDeliveryUrl(gatewayUrl: string): URL {
+  return new URL(DELIVERY_PATH, withTrailingSlash(gatewayUrl));
 }
 
 /**
@@ -101,7 +142,7 @@ export function createGatewayPushDeliveryTransport(
  * capability another gateway issued, or one bound to a key this host no longer
  * holds, fails without clearing, so changing the setting back recovers it.
  */
-function classify(
+export function classifyGatewayAnswer(
   status: number,
   code: RemotePushGatewayRefusalCode | undefined,
 ): PushDeliverySendResult {
@@ -122,7 +163,10 @@ function classify(
   return { kind: "failed", retryable: true, category: "gateway-failed" };
 }
 
-async function refusalCode(response: Response): Promise<RemotePushGatewayRefusalCode | undefined> {
+/** The refusal code a gateway answered with, when it sent one the contract knows. */
+export async function refusalCode(
+  response: Response,
+): Promise<RemotePushGatewayRefusalCode | undefined> {
   if (response.status === 202) return undefined;
   try {
     return decodeRemotePushGatewayRefusalV1(await response.json()).code;

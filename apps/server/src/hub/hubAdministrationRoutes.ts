@@ -15,6 +15,7 @@ import {
   decodeHubGrant,
   decodeHubMemberReference,
   decodeHubPromoteRequest,
+  decodeHubPushSwitchRequest,
   decodeHubStandbyOrderRequest,
   decodeHubWakeHardwareAddressRequest,
   decodeHubWakeSwitchRequest,
@@ -28,7 +29,9 @@ import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import type { FailoverService } from "./failoverService";
 import type { HubService } from "./hubService";
+import type { PushService } from "./pushService";
 import type { SpokeLinkService } from "./spokeLinkService";
+import type { SpokePushService } from "./spokePushService";
 import type { SpokeWakeService } from "./spokeWakeService";
 import type { TailscaleCertificateService } from "./tailscaleCertificate";
 import type { WakeService } from "./wakeService";
@@ -71,6 +74,8 @@ export const HUB_ADMINISTRATION_ROUTES = {
   wake: "/api/desktop/hub/wake",
   /** A spoke's own window enters or clears this computer's hardware address. */
   wakeHardwareAddress: "/api/desktop/hub/wake/hardware-address",
+  /** The hub's push switch: only a window on the hub turns it on or off. */
+  push: "/api/desktop/hub/push",
 } as const;
 
 type RouteValue = (typeof HUB_ADMINISTRATION_ROUTES)[keyof typeof HUB_ADMINISTRATION_ROUTES];
@@ -83,6 +88,8 @@ export interface HubAdministrationRouteOptions {
   readonly failover: FailoverService;
   readonly wake: WakeService;
   readonly spokeWake: SpokeWakeService;
+  readonly push: PushService;
+  readonly spokePush: SpokePushService;
   readonly certificate: TailscaleCertificateService;
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
@@ -133,6 +140,7 @@ export function createHubAdministrationRouteHandler(
         spoke: options.spoke.status(),
         failover: options.failover.status(),
         wake: { hub: options.wake.status(), spoke: options.spokeWake.status() },
+        push: { hub: options.push.status(), spoke: { handing: options.spokePush.granted() } },
       });
     }
     if (route === HUB_ADMINISTRATION_ROUTES.heldMembers) {
@@ -269,6 +277,10 @@ export function createHubAdministrationRouteHandler(
         case HUB_ADMINISTRATION_ROUTES.wake: {
           const value = decodeHubWakeSwitchRequest(parseJson(request, body.text));
           return outcome(await options.wake.setEnabled(value.enabled, WINDOW_PRINCIPAL));
+        }
+        case HUB_ADMINISTRATION_ROUTES.push: {
+          const value = decodeHubPushSwitchRequest(parseJson(request, body.text));
+          return outcome(await options.push.setEnabled(value.enabled, WINDOW_PRINCIPAL));
         }
         case HUB_ADMINISTRATION_ROUTES.wakeHardwareAddress: {
           const value = decodeHubWakeHardwareAddressRequest(parseJson(request, body.text));

@@ -479,6 +479,30 @@ describe("a guest joining a hub that has a spoke", () => {
     expect(await response?.json()).toEqual({ status: "refused", kind: "unknown-sender" });
   });
 
+  it("refuses a guest's sealed notification for the hub to forward, because a guest runs no agents", async () => {
+    const { network, hub } = await startHubAndSpoke();
+    hub.pushSetting.enabled = true;
+    hub.pushSetting.gatewayUrl = "http://127.0.0.1:9";
+    await hub.push.setEnabled(true, window);
+    const { record } = await joinGuest(hub, network);
+    const guest = record.roster.roster.members.find((member) => member.role === "guest");
+    if (guest === undefined) throw new Error("The guest is not in the roster.");
+
+    const outcome = await hub.push.forward(String(guest.memberId), {
+      body: "{}",
+      hostKey: "a2V5",
+      timestamp: new Date().toISOString(),
+      signature: "c2ln",
+    });
+
+    expect(outcome).toEqual({ status: "refused", kind: "not-a-spoke" });
+    expect(hub.records.at(-1)).toMatchObject({
+      change: "push-refused",
+      actingPrincipal: { kind: "peer", memberId: String(guest.memberId) },
+      pushReason: "not-a-spoke",
+    });
+  });
+
   it("refuses a roster signed by any key but the hub's and one older than the roster it holds", async () => {
     const { network, hub } = await startHubAndSpoke();
     const { record } = await joinGuest(hub, network);

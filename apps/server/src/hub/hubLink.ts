@@ -156,6 +156,8 @@ export async function sendHubLinkRequest(input: {
   readonly body?: string;
   readonly headers?: Readonly<Record<string, string>>;
   readonly now: number;
+  /** For a request whose answer waits on another request of the receiver's own; absent, eight seconds. */
+  readonly timeoutMs?: number;
 }): Promise<HubLinkAnswer> {
   const pinned = input.transport(input.target);
   const body = input.body ?? "";
@@ -177,7 +179,7 @@ export async function sendHubLinkRequest(input: {
         ...(input.body === undefined ? {} : { "content-type": "application/json" }),
       },
       ...(input.body === undefined ? {} : { body: input.body }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(input.timeoutMs ?? REQUEST_TIMEOUT_MS),
     });
     return { status: "answered", response };
   } catch {

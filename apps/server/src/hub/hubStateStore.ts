@@ -11,6 +11,7 @@ import {
   HardwareAddress,
   HubGrant,
   HubMemberId,
+  HubPushResult,
   HubWakeResult,
   HubWakeSpokeTimes,
   NewMemberAlert,
@@ -89,9 +90,32 @@ export const HubWakeState = Schema.Struct({
 }).annotations(strict);
 export type HubWakeState = typeof HubWakeState.Type;
 
+/**
+ * What the hub counts of the notifications it forwarded for one spoke: how many
+ * went on and how many it refused, and how the last one ended. Counts only; the
+ * hub keeps no capability, envelope, or gateway message.
+ */
+export const PushSpokeRecord = Schema.Struct({
+  memberId: HubMemberId,
+  forwarded: Schema.Int.pipe(Schema.nonNegative()),
+  refused: Schema.Int.pipe(Schema.nonNegative()),
+  lastResult: Schema.optional(
+    Schema.Struct({ at: Schema.Int, result: HubPushResult }).annotations(strict),
+  ),
+}).annotations(strict);
+export type PushSpokeRecord = typeof PushSpokeRecord.Type;
+
+/** The hub's push sender: its own switch, off until the person turns it on, and what it counted. */
+export const HubPushState = Schema.Struct({
+  enabled: Schema.Boolean,
+  spokes: Schema.Array(PushSpokeRecord),
+}).annotations(strict);
+export type HubPushState = typeof HubPushState.Type;
+
 export const HubSideState = Schema.Struct({
   enabled: Schema.Boolean,
   wake: Schema.optional(HubWakeState),
+  push: Schema.optional(HubPushState),
   roster: Schema.optional(SignedHubRoster),
   members: Schema.Array(HubMemberRecord),
   joinTickets: Schema.Array(HubJoinTicketRecord),
@@ -205,6 +229,8 @@ export const HubLinkState = Schema.Struct({
   wakeCopy: Schema.optional(Schema.Array(WakeSpokeRecord)),
   /** This spoke's side of the wake service. */
   wake: Schema.optional(SpokeWakeState),
+  /** Whether the hub's push switch was on when it last told this standby, so a stand-in forwards only then. */
+  pushCopy: Schema.optional(Schema.Struct({ enabled: Schema.Boolean }).annotations(strict)),
 }).annotations(strict);
 export type HubLinkState = typeof HubLinkState.Type;
 

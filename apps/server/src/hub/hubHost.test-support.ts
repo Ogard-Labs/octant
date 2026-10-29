@@ -45,6 +45,12 @@ import { PeerDelegationService, type PeerDelegationHost } from "./peerDelegation
 import { createPinnedHubTransport, type HubNetwork, type HubTransport } from "./pinnedHubTransport";
 import { createRosterSigningKeyStore } from "./rosterSigningKey";
 import { deviceLifecycleAt, SpokeLinkService } from "./spokeLinkService";
+import { REMOTE_PUSH_GATEWAY_DEFAULT_URL } from "@octant/contracts/remote-push-notifications";
+import type { PushDeliveryTransport } from "../automation/pushDeliveryTransport";
+import { createGatewayPushDeliveryTransport } from "../remote/gatewayPushDeliveryTransport";
+import { createHubPushDeliveryTransport } from "./hubPushTransport";
+import { PushService } from "./pushService";
+import { SpokePushService } from "./spokePushService";
 import { SpokeWakeService, type WakeRoutineView } from "./spokeWakeService";
 import { WakeService } from "./wakeService";
 
@@ -129,6 +135,14 @@ export interface HubTestHost {
   readonly wake: WakeService;
   /** This host's side of the wake service as a spoke. */
   readonly spokeWake: SpokeWakeService;
+  /** The hub side of push through the hub, and what a standing-in standby forwards with. */
+  readonly push: PushService;
+  /** This host's side of push through the hub as a spoke. */
+  readonly spokePush: SpokePushService;
+  /** This host's own Notifications setting: a test turns it on and names a gateway. */
+  readonly pushSetting: { enabled: boolean; gatewayUrl: string };
+  /** The transport this host's notifications are sent through: the hub's way where the grant ticks Push, else its own. */
+  readonly pushDelivery: PushDeliveryTransport;
   /** The magic packets this host's wake service sent, as the fake socket saw them. */
   readonly magicPackets: Uint8Array[];
   /** This host's routines as the wake service may read them: a test edits it to schedule, disable, or remove one. */
@@ -188,6 +202,10 @@ export async function startHubTestHost(input: {
   readonly wakeSocketFails?: boolean;
   /** Wraps the transport this host's wake reports go through, so a test can read the bodies sent. */
   readonly wakeTransport?: (transport: HubTransport) => HubTransport;
+  /** Wraps the transport this host hands sealed notifications to the hub through, so a test can read what is sent. */
+  readonly pushHandoffTransport?: (transport: HubTransport) => HubTransport;
+  /** How many forwards one spoke may ask of this host in a minute; absent, the service's own. */
+  readonly pushMaxPerMinute?: number;
 }): Promise<HubTestHost> {
   const directory = mkdtempSync(join(tmpdir(), "octant-hub-"));
   input.cleanups.push(() => rmSync(directory, { recursive: true, force: true }));
@@ -371,12 +389,46 @@ export async function startHubTestHost(input: {
     // Distinct, well-formed ids so a test can tell routines apart without reading the map.
     newRoutineId: () => `routine${String((routineSerial += 1)).padStart(16, "0")}`,
   });
+  // This host's own Notifications setting, which a test edits: off and the default gateway until it does.
+  const pushSetting = { enabled: false, gatewayUrl: REMOTE_PUSH_GATEWAY_DEFAULT_URL };
+  const push = new PushService({
+    state,
+    identity: () => identity,
+    transport,
+    gateway: () => pushSetting,
+    record: (change) => records.push(change),
+    now: wakeNow,
+    ...(input.pushMaxPerMinute === undefined ? {} : { maxPerMinute: input.pushMaxPerMinute }),
+  });
+  const spokePush = new SpokePushService({
+    state,
+    identity: () => identity,
+    transport: input.pushHandoffTransport?.(transport) ?? transport,
+    spoke,
+    hubUnreachable: () => failover.hubUnreachable(),
+    record: (change) => records.push(change),
+    now: wakeNow,
+  });
+  const pushDelivery = createHubPushDeliveryTransport({
+    direct: createGatewayPushDeliveryTransport({
+      settings: () => pushSetting,
+      signing: () => identity.signing,
+    }),
+    settings: () => pushSetting,
+    signing: () => identity.signing,
+    handoff: () => ({
+      granted: () => spokePush.granted(),
+      hand: (delivery) => spokePush.hand(delivery),
+    }),
+  });
   const hubLinkRoutes = createHubLinkRouteHandler({
     hub,
     spoke,
     failover,
     wake,
     spokeWake,
+    push,
+    spokePush,
     ...(input.wakeClock === undefined ? {} : { now: input.wakeClock }),
   });
   const hubOwnerRoutes = createHubOwnerRouteHandler({
@@ -487,6 +539,10 @@ export async function startHubTestHost(input: {
     failover,
     wake,
     spokeWake,
+    push,
+    spokePush,
+    pushSetting,
+    pushDelivery,
     magicPackets,
     routines,
     schedulerPokes,

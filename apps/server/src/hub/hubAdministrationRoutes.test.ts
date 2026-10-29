@@ -47,6 +47,8 @@ async function setup(
     failover: host.failover,
     wake: host.wake,
     spokeWake: host.spokeWake,
+    push: host.push,
+    spokePush: host.spokePush,
     certificate: new TailscaleCertificateService({
       setting: createTailscaleCertificateSetting(host.directory),
       daemon: unreachableTailscaleDaemon,
@@ -180,6 +182,45 @@ describe("hub administration over the loopback channel", () => {
       ["hub-role-enabled", "local-window"],
       ["wake-switch-changed", "local-window"],
       ["wake-switch-changed", "local-window"],
+    ]);
+  });
+
+  it("turns the push sender on and off only for a window, only on a hub, and journals it with its principal", async () => {
+    const { host, handle } = await setup();
+
+    const beforeTheHub = await handle(post(HUB_ADMINISTRATION_ROUTES.push, { enabled: true }));
+    expect(beforeTheHub?.status).toBe(409);
+    expect(await beforeTheHub?.json()).toEqual({ status: "refused", kind: "hub-role-off" });
+
+    await handle(post(HUB_ADMINISTRATION_ROUTES.enable));
+    const unauthenticated = await handle(
+      post(
+        HUB_ADMINISTRATION_ROUTES.push,
+        { enabled: true },
+        { "x-octant-window-capability": "B".repeat(43) },
+      ),
+    );
+    expect(unauthenticated?.status).toBe(401);
+    expect(host.push.status().enabled).toBe(false);
+    const malformed = await handle(post(HUB_ADMINISTRATION_ROUTES.push, { enabled: true, x: 1 }));
+    expect(malformed?.status).toBe(400);
+
+    const on = await handle(post(HUB_ADMINISTRATION_ROUTES.push, { enabled: true }));
+    expect(await on?.json()).toEqual({ status: "changed", enabled: true });
+    expect(host.push.status().enabled).toBe(true);
+    const status = await handle(
+      new Request(`http://127.0.0.1${HUB_ADMINISTRATION_ROUTES.status}`, {
+        headers: { "x-octant-desktop-secret": secret, "x-octant-window-capability": capability },
+      }),
+    );
+    expect(await status?.json()).toMatchObject({
+      push: { hub: { enabled: true, spokes: [] }, spoke: { handing: false } },
+    });
+    await handle(post(HUB_ADMINISTRATION_ROUTES.push, { enabled: false }));
+    expect(host.records.map((record) => [record.change, record.actingPrincipal.kind])).toEqual([
+      ["hub-role-enabled", "local-window"],
+      ["push-switch-changed", "local-window"],
+      ["push-switch-changed", "local-window"],
     ]);
   });
 
