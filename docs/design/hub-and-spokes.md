@@ -44,8 +44,8 @@ switch, spokes reporting opaque routine times, the Wake-on-LAN packet and signed
 nudge, standbys holding the times), read narrowly as the last item of slice 8
 records; it has run only between hosts on loopback with a fake socket, and a real
 Wake-on-LAN wake of a sleeping Mac has not been tried. Delegation is
-built for Work Projects, read narrowly as the last item of the delivery plan's
-slice 6 records. Failover is built (a named standby, member switching, stand-in,
+built for Work Projects, including an agent's own helper request that names a
+member, read narrowly as the last item of the delivery plan's slice 6 records. Failover is built (a named standby, member switching, stand-in,
 step-down with merge-back, and promotion), read narrowly as the last item of
 slice 7 records; it has run only between hosts on loopback, with the hub
 stopped by blocking its address, never on a real network or after a real
@@ -977,9 +977,23 @@ maintainer's hardware, or names the maintainer gate.
      the default model the Work settings name.
    - Artifact references are empty: a Work turn reports the paths it changed, not
      content digests.
-   - An agent's helper request carries no target member yet. The delegating service
-     is started, read, and cancelled through loopback administration routes on A.
-     Wiring a target member into the agent tool surface is a seam change of its own.
+   - An agent's helper request carries an optional target member (a roster member
+     id), on the `octant_agents` tool and the native harness `delegate` tool alike.
+     It reaches the same delegating service the loopback routes use, so the parent
+     check, the peer-grant clamp, `peer:A` on B, approvals on B, the framed and
+     tainting result, and the cancel on a stopped turn are one set of rules. The
+     request takes a task only: a model, `after`, or the parent's conversation is
+     refused. The posture is always Work's approval-gated, clamped by the parent
+     and the grant, never chosen by the agent. Only a Work thread in a Work Project
+     may name a member; a Chat or Code parent, a Project that is not a Work Project,
+     Work turned off, no hub membership, an unknown member, a paused parent, and a
+     member that refuses (no grant for this host, or a grant that does not cover the
+     request) each answer as a refusal value, and the target's own words are not
+     repeated to the model. Capabilities report `remoteDelegation` honestly. The
+     agent receives the request id; reading the result and cancelling a single
+     request stay on the loopback routes (a stopped parent turn still cancels them),
+     and a driver whose tool surface is not one of these two has no way to name a
+     member.
 
 7. **Failover.** Standby order, roster and wake-time copies, stand-in and
    step-down. Acceptance: members switch after the set time and return when

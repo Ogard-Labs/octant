@@ -59,6 +59,24 @@ export interface AgentRunDelegationInput {
   readonly reasoning?: string;
   readonly includeParentContext?: boolean;
   readonly after?: ReadonlyArray<string>;
+  /** A roster member that runs the child on its own host instead of this one. */
+  readonly targetMemberId?: string;
+}
+
+/**
+ * Starts a child on another member of the person's hub. The host behind it
+ * applies its own rules to the parent thread and the member's peer grant; this
+ * seam only carries the request and its answer.
+ */
+export interface RemoteDelegationPort {
+  readonly start: (input: {
+    readonly parentThreadId: string;
+    readonly windowId: string;
+    readonly mode: OctantMode;
+    readonly projectId: string | undefined;
+    readonly targetMemberId: string;
+    readonly task: string;
+  }) => Promise<AgentRunDelegationResult>;
 }
 
 export interface AgentRunDelegationRouting {
@@ -82,9 +100,23 @@ export interface AgentRunDelegationOptions {
   readonly routing?: AgentRunDelegationRouting;
   readonly isTainted?: () => boolean;
   readonly isPaused?: () => boolean;
+  readonly projectId?: string | undefined;
+  /** Absent when this host cannot reach other members; a target member is then refused. */
+  readonly remote?: RemoteDelegationPort;
 }
 
 export type AgentRunDelegationResult =
+  /**
+   * A child another member runs. Its result is recorded on this host as outside
+   * content, so no `runId` exists here to wait on.
+   */
+  | {
+      readonly status: "delegated-remote";
+      readonly requestId: string;
+      readonly targetMemberId: string;
+      readonly state: "accepted" | "pending-acceptance";
+      readonly authority?: { readonly mode: string; readonly posture: string };
+    }
   | {
       readonly status: "accepted";
       readonly runId: string;
@@ -131,6 +163,11 @@ export function agentRunDelegationCapabilities(options: AgentRunDelegationOption
     },
     dependencies: true,
     parentContext: options.admission.parentContext !== undefined,
+    // Reported by what this thread can do, so a Chat or Code thread never offers it.
+    remoteDelegation:
+      options.remote !== undefined && options.mode === "work"
+        ? ("target-member" as const)
+        : ("unavailable" as const),
     targets: options.listTargets(),
   } as const;
 }
@@ -154,6 +191,37 @@ export async function startAgentRunDelegation(
       reason: "session-paused",
       message: "This run is paused, so no new helper starts until it is resumed.",
     };
+  if (input.targetMemberId !== undefined) {
+    // The child runs on its own host's default model with its own context, so
+    // choices that only mean something on this host are refused, not dropped.
+    if (
+      input.providerInstanceId !== undefined ||
+      input.modelId !== undefined ||
+      input.reasoning !== undefined ||
+      input.after !== undefined ||
+      input.includeParentContext === true
+    )
+      return {
+        status: "refused",
+        reason: "remote-delegation-options-unsupported",
+        message:
+          "A helper on another member takes only a task: it cannot name a model, wait on siblings, or receive this thread's conversation.",
+      };
+    if (options.remote === undefined)
+      return {
+        status: "refused",
+        reason: "remote-delegation-unavailable",
+        message: "This host cannot start helpers on other members.",
+      };
+    return options.remote.start({
+      parentThreadId: options.parentThreadId,
+      windowId: options.windowId,
+      mode: options.mode,
+      projectId: options.projectId,
+      targetMemberId: input.targetMemberId,
+      task: input.task,
+    });
+  }
   const role = input.role ?? allowedAgentRunRolesForMode(options.mode)[0];
   let controlRequest: AgentRunControlRequest;
   try {

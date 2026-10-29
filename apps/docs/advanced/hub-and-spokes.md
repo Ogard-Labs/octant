@@ -351,9 +351,16 @@ result back. Nothing is delegated until a thread asks for it.
 
 In this release only Work Projects take delegated work; a Code Project refuses
 it. Work runs on the default model that computer's Work settings name. A plan-only
-request or one that names a provider profile is refused. An agent's helper
-request does not carry a target computer yet: you start, read, and cancel a
-delegation through the local administration channel on the asking computer.
+request or one that names a provider profile is refused.
+
+An agent in a Work thread can ask for a helper on another computer by naming that
+member. It sends a task and nothing else: no model, no earlier helpers to wait on,
+and none of the thread's conversation. The work asks before each edit, and never
+runs above the thread's own access or the other computer's grant. If the thread
+has no hub, the member is unknown, the other computer has not granted it, or the
+thread is paused, the agent is told the request was refused. Reading the result
+and cancelling one request still go through the local administration channel on
+the asking computer.
 
 ## If the hub goes down
 

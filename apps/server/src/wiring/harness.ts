@@ -85,6 +85,7 @@ export type HarnessDependencies = Pick<ServerStart, "persistence"> &
     | "agentRunOrchestration"
     | "contributeChildTools"
     | "externalContentIngestionStore"
+    | "remoteDelegation"
     | "sideTasks"
     | "threadFollowUpSuggestions"
     | "turnMetrics"
@@ -129,6 +130,7 @@ export function wireHarness(deps: HarnessDependencies) {
     nativeHarnessLeadFallback,
     nativeHarnessQuestions,
     nativeHarnessRouter,
+    remoteDelegation,
     nativeHarnessRoutingStore,
     nativeHarnessSessions,
     nativeHarnessTranscripts,
@@ -521,6 +523,7 @@ export function wireHarness(deps: HarnessDependencies) {
           isTainted: () =>
             readThreadExternalContentTaint(persistence.connection, scope.parentThreadId)
               .externalContentIngested,
+          remote: remoteDelegation,
           router: nativeHarnessRouter,
           sessions: nativeHarnessSessions,
           uuid: randomUUID,

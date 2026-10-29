@@ -14,6 +14,7 @@ import {
   collectAgentRunResult,
   startAgentRunDelegation,
   type AgentsToolTarget,
+  type RemoteDelegationPort,
 } from "../agentRun/agentRunDelegation";
 import type { AgentRunControlParentFacts } from "../agentRun/agentRunControlService";
 import type { AgentRunOrchestrationService } from "../agentRun/agentRunOrchestrationService";
@@ -41,6 +42,7 @@ export interface NativeHarnessDelegatePortOptions {
   readonly uuid: () => string;
   readonly listTargets?: () => ReadonlyArray<AgentsToolTarget>;
   readonly isTainted?: () => boolean;
+  readonly remote?: RemoteDelegationPort;
   /** Injectable so tests drive `wait` without real time passing. */
   readonly now?: () => number;
   readonly sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
