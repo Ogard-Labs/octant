@@ -99,6 +99,7 @@ interface OwnerScope {
   readonly roster: Parameters<typeof authorizeOwnerRequest>[0]["roster"];
   readonly owners: ReadonlyArray<HostOwnerRecord>;
   readonly grant: HubGrant | undefined;
+  readonly inactiveDeviceMemberIds: ReadonlyArray<string>;
 }
 
 type Refusal = { readonly status: number; readonly kind: string };
@@ -114,11 +115,23 @@ export function createHubOwnerRouteHandler(
     const hubScope: OwnerScope | undefined =
       hub === undefined
         ? undefined
-        : { host: "hub", roster: hub.roster, owners: hub.owners, grant: undefined };
+        : {
+            host: "hub",
+            roster: hub.roster,
+            owners: hub.owners,
+            grant: undefined,
+            inactiveDeviceMemberIds: hub.inactiveDeviceMemberIds,
+          };
     const spokeScope: OwnerScope | undefined =
       spoke === undefined
         ? undefined
-        : { host: "spoke", roster: spoke.roster, owners: spoke.owners, grant: spoke.grant };
+        : {
+            host: "spoke",
+            roster: spoke.roster,
+            owners: spoke.owners,
+            grant: spoke.grant,
+            inactiveDeviceMemberIds: spoke.inactiveDeviceMemberIds,
+          };
     if (HUB_ONLY.has(route)) {
       return hubScope ?? { status: 403, kind: "hub-role-off" };
     }
@@ -169,6 +182,9 @@ export function createHubOwnerRouteHandler(
       (member) => String(member.memberId) === senderId,
     );
     if (senderMember === undefined || presentedKey === null) return refused(401, "unknown-sender");
+    // Revoking a member's paired device on this host ends its owner powers here,
+    // even while its owner entry and roster entry remain.
+    if (scope.inactiveDeviceMemberIds.includes(senderId)) return refused(403, "device-revoked");
 
     // The unlock is checked here, before anything else is decided, because it
     // consumes the challenge whatever happens next.

@@ -37,6 +37,15 @@ import { createPinnedHubTransport, type HubNetwork } from "./pinnedHubTransport"
 import { createRosterSigningKeyStore } from "./rosterSigningKey";
 import { SpokeLinkService } from "./spokeLinkService";
 
+function deviceIsActive(
+  administration: Pick<LocalDeviceAdministrationPort, "listDevices">,
+  deviceId: string,
+): boolean {
+  return administration
+    .listDevices()
+    .some((device) => device.deviceId === deviceId && device.state === "active");
+}
+
 const tailscaleFacts: RequestTransportFacts = {
   listenerTrust: "remote",
   sourceClass: "tailscale",
@@ -200,6 +209,7 @@ export async function startHubTestHost(input: {
           administration.revokeDevice({ deviceId });
         },
         deviceKeyFingerprint: (deviceId) => current.pairedDeviceKeyFingerprint(deviceId),
+        deviceActive: (deviceId) => deviceIsActive(administration, deviceId),
       };
     },
     transport,
@@ -220,6 +230,7 @@ export async function startHubTestHost(input: {
         revokeDevice: (deviceId) => {
           administration.revokeDevice({ deviceId });
         },
+        deviceActive: (deviceId) => deviceIsActive(administration, deviceId),
       };
     },
     record: (change) => records.push(change),

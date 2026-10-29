@@ -714,6 +714,37 @@ describe("owner devices administering a hub", () => {
     expect(stale.json).toEqual({ status: "refused", kind: "not-an-owner" });
   });
 
+  it("ends an owner phone's powers on the hub once its paired device is revoked there", async () => {
+    const { network, hub, phone, authenticator } = await startOwnerWorld();
+    const device = hub.state
+      .load()
+      .hub?.members.find((member) => String(member.memberId) === phone.hostId);
+    if (device === undefined) throw new Error("The hub holds no device for the phone.");
+    const ticketsBefore = hub.state.load().hub?.joinTickets.length;
+
+    hub.administration.revokeDevice({ deviceId: device.deviceId });
+
+    const challenge = await ownerCall({
+      device: phone,
+      network,
+      target: hub,
+      route: HUB_OWNER_ROUTES.challenge,
+      body: { method: "POST", path: HUB_OWNER_ROUTES.joinCode, bodyHash: "a".repeat(64) },
+    });
+    const minted = await ownerCall({
+      device: phone,
+      network,
+      target: hub,
+      route: HUB_OWNER_ROUTES.joinCode,
+      body: { owner: false },
+      unlock: { authenticator, shape: "raw" },
+    });
+
+    expect(challenge).toMatchObject({ status: 403, json: { kind: "device-revoked" } });
+    expect(minted).toMatchObject({ status: 403, json: { kind: "device-revoked" } });
+    expect(hub.state.load().hub?.joinTickets.length).toBe(ticketsBefore);
+  });
+
   it("ignores an unlock key presented with a code that is not an owner code", async () => {
     const { hub, spoke } = await startOwnerWorld();
     const before = hub.hub.listOwners();

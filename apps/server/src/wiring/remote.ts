@@ -31,7 +31,10 @@ import {
 } from "../remote/remoteGateway";
 import type { PrivateListener } from "../privateListener";
 import { resolvePrincipalRouteContext } from "../principalRouteContext";
-import { createLocalDeviceAdministrationRouteHandler } from "../remote/localDeviceAdministrationRoutes";
+import {
+  createLocalDeviceAdministrationRouteHandler,
+  type LocalDeviceAdministrationPort,
+} from "../remote/localDeviceAdministrationRoutes";
 import { createHostControlRouteHandler } from "../hostControlRoutes";
 import { desktopCredentialStore } from "../hostDataMap";
 import { ThreadRetentionService } from "../threadRetentionService";
@@ -117,6 +120,16 @@ export type RemoteDependencies = Pick<
   Pick<FoundationsWiring, "providerRuntimeRegistry"> &
   Pick<SshTargetsWiring, "sshTargetConnections" | "sshTargetStore"> &
   Pick<CodeRuntimeWiring, "codeOperationRuntime">;
+
+/** A paired device is active until revoked or expired; one this host no longer lists is not. */
+function deviceIsActive(
+  administration: Pick<LocalDeviceAdministrationPort, "listDevices">,
+  deviceId: string,
+): boolean {
+  return administration
+    .listDevices()
+    .some((device) => device.deviceId === deviceId && device.state === "active");
+}
 
 export function wireRemote(deps: RemoteDependencies) {
   const {
@@ -346,6 +359,7 @@ export function wireRemote(deps: RemoteDependencies) {
           administration.revokeDevice({ deviceId });
         },
         deviceKeyFingerprint: (deviceId) => gateway.pairedDeviceKeyFingerprint(deviceId),
+        deviceActive: (deviceId) => deviceIsActive(administration, deviceId),
       };
     },
     transport: hubTransport,
@@ -366,6 +380,7 @@ export function wireRemote(deps: RemoteDependencies) {
         revokeDevice: (deviceId) => {
           administration.revokeDevice({ deviceId });
         },
+        deviceActive: (deviceId) => deviceIsActive(administration, deviceId),
       };
     },
     record: recordHubMembership,

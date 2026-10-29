@@ -76,6 +76,8 @@ export interface SpokeDevicePort {
     readonly sourceClass: "lan-private" | "tailscale";
   }) => { readonly deviceId: string };
   readonly revokeDevice: (deviceId: string) => void;
+  /** False for a device that is revoked, expired, or not held here. */
+  readonly deviceActive: (deviceId: string) => boolean;
 }
 
 export type GuestAdmission =
@@ -213,6 +215,8 @@ export type SpokeOwnerContext = {
   readonly owners: ReadonlyArray<HostOwnerRecord>;
   readonly grant: HubGrant;
   readonly hubMemberId: HubMemberId;
+  /** Members whose paired device on this host is revoked or unknown: they hold no owner powers here. */
+  readonly inactiveDeviceMemberIds: ReadonlyArray<string>;
 };
 
 export type MemberConfirmation =
@@ -346,6 +350,10 @@ export class SpokeLinkService {
       owners: link.owners ?? [],
       grant: link.grant,
       hubMemberId: link.hubMemberId,
+      // Only a guest holds a paired device on a spoke; a failed lookup counts as inactive.
+      inactiveDeviceMemberIds: (link.guestDevices ?? [])
+        .filter((entry) => this.#options.devices()?.deviceActive(entry.deviceId) !== true)
+        .map((entry) => String(entry.memberId)),
     };
   }
 

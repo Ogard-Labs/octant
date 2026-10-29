@@ -63,6 +63,8 @@ export interface HubPairingPort {
   readonly revokeDevice: (deviceId: string) => void;
   /** The key fingerprint of a device this hub paired, so a guest's identity key can be tied to it. */
   readonly deviceKeyFingerprint: (deviceId: string) => string | undefined;
+  /** False for a device that is revoked, expired, or not held here. */
+  readonly deviceActive: (deviceId: string) => boolean;
 }
 
 export interface HubServiceOptions {
@@ -277,11 +279,21 @@ export class HubService {
     | {
         readonly roster: SignedHubRoster["roster"];
         readonly owners: ReadonlyArray<HostOwnerRecord>;
+        /** Members whose paired device on this hub is revoked or unknown: they hold no owner powers here. */
+        readonly inactiveDeviceMemberIds: ReadonlyArray<string>;
       }
     | undefined {
     const hub = this.#options.state.load().hub;
     if (hub?.roster === undefined) return undefined;
-    return { roster: hub.roster.roster, owners: hub.owners ?? [] };
+    const pairing = this.#options.pairing();
+    return {
+      roster: hub.roster.roster,
+      owners: hub.owners ?? [],
+      // A failed lookup counts as inactive, so owner powers fail closed.
+      inactiveDeviceMemberIds: hub.members
+        .filter((member) => pairing?.deviceActive(member.deviceId) !== true)
+        .map((member) => String(member.memberId)),
+    };
   }
 
   listOwners(): ReadonlyArray<OwnerListEntry> {
