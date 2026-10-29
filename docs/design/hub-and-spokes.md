@@ -630,6 +630,15 @@ child. B answers for the turn the request started: a follow-up a person runs on
 that thread is neither the result A receives nor something A can interrupt. A
 guest never receives delegated work.
 
+A keeps the request on file before it sends it. If B's answer is lost (a
+timeout, a reset connection, a reply that cannot be read), B may already run the
+child, so the request stays pending under its id: A reports it as pending, a
+later read finds B's child by that id, and cancel reaches B the same way. A
+refusal B itself wrote removes the request. A pending request B has no record of
+is dropped once its signature could no longer be accepted. Erasing the parent
+thread stops its remote children and erases what A kept of them, a result
+included; a read for them then answers as unknown.
+
 **Credentials.** No credential crosses with a delegation. The work on B uses
 B's own provider sign-ins and B's own Git and SSH identities, including any an
 owner copied there ([Shared sign-ins](#shared-sign-ins)).

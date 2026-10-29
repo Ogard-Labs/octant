@@ -718,6 +718,11 @@ export function wireRemote(deps: RemoteDependencies) {
       // A running debug session ends before the purge takes its records and
       // its checkout, so nothing it writes as it ends outlives the purge.
       if (mode === "code") await debugService.endThread(decodeCodeThreadId(String(threadId)));
+      // Remote children the thread started are stopped while this host still
+      // knows where they run, then what it kept of them (a result included)
+      // goes with the thread.
+      await delegatingSpoke.cancelParent(String(threadId)).catch(() => undefined);
+      delegatingSpoke.forgetParent(String(threadId));
       const released = await threadMessageQueue.purgeThread(
         decodeThreadMessageQueueScope({ mode, threadId }),
       );

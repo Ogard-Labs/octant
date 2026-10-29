@@ -40,6 +40,17 @@ export const ReceivedDelegation = Schema.Struct({
 }).annotations(strict);
 export type ReceivedDelegation = typeof ReceivedDelegation.Type;
 
+/**
+ * What a sent delegation is: the child's state as the target reported it, or
+ * `awaiting-acceptance` while the target's answer to the request is lost. In
+ * that case the target may already run the child, so the request stays on file.
+ */
+export const SentDelegationState = Schema.Union(
+  DelegationChildState,
+  Schema.Literal("awaiting-acceptance"),
+);
+export type SentDelegationState = typeof SentDelegationState.Type;
+
 /** A delegation this spoke sent for one of its own threads. */
 export const SentDelegation = Schema.Struct({
   requestId: DelegationRequestId,
@@ -51,7 +62,7 @@ export const SentDelegation = Schema.Struct({
   }).annotations(strict),
   authority: DelegatedAuthority,
   /** The child's state as the target last reported it. */
-  state: DelegationChildState,
+  state: SentDelegationState,
   /** Set once the result was recorded on the parent thread; a result is recorded once. */
   resultRecorded: Schema.optional(Schema.Literal(true)),
   /**

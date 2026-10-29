@@ -28,7 +28,8 @@ import { HUB_LINK_HEADER, HUB_PEER_KEY_HEADER, signHubLinkRequest } from "./hubL
 import { HubTestNetwork, startHubTestHost, type HubTestHost } from "./hubHost.test-support";
 import { PEER_DELEGATION_ROUTES } from "./peerDelegationRoutes";
 import type { ChildReading, PeerDelegationHost } from "./peerDelegationService";
-import { createPinnedHubTransport } from "./pinnedHubTransport";
+import { createDelegationStateStore } from "./delegationStateStore";
+import { createPinnedHubTransport, type HubTransport } from "./pinnedHubTransport";
 
 const cleanups: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
@@ -132,6 +133,7 @@ async function threeHosts(
     readonly child?: ReturnType<typeof fakeChildHost>;
     readonly parent?: ReturnType<typeof parentRules>;
     readonly bProductDispatch?: Parameters<typeof startHubTestHost>[0]["productDispatch"];
+    readonly aTransport?: Parameters<typeof startHubTestHost>[0]["delegatingTransport"];
   } = {},
 ) {
   const network = new HubTestNetwork();
@@ -149,6 +151,7 @@ async function threeHosts(
     network,
     cleanups,
     parent: parent.port,
+    ...(options.aTransport === undefined ? {} : { delegatingTransport: options.aTransport }),
   });
   const b = await startHubTestHost({
     name: "Desktop B",
@@ -439,6 +442,136 @@ describe("a spoke delegating work to another spoke", () => {
     expect(first?.status).toBe(201);
     expect(again?.status).toBe(201);
     expect(child.started).toHaveLength(1);
+  });
+});
+
+/**
+ * A's link to B misbehaving on the create call alone: `lose-answer` lets B
+ * start the child and then drops B's reply (the 8-second timeout case);
+ * `drop-request` never reaches B.
+ */
+function flakyCreate() {
+  const fault = { mode: "none" as "none" | "lose-answer" | "drop-request" };
+  const transport = (inner: HubTransport): HubTransport => {
+    return (target) => {
+      const send = inner(target);
+      return async (url, init) => {
+        const creating = url.endsWith(PEER_DELEGATION_ROUTES.create);
+        if (creating && fault.mode === "drop-request") throw new Error("connection reset");
+        const response = await send(url, init);
+        if (creating && fault.mode === "lose-answer") throw new Error("timed out");
+        return response;
+      };
+    };
+  };
+  return { fault, transport };
+}
+
+describe("a delegation whose answer never reached the delegating spoke", () => {
+  it("keeps the request pending when the acceptance is lost, and a later read finds the one child on the target", async () => {
+    const flaky = flakyCreate();
+    const { a, b, child } = await threeHosts({ aTransport: flaky.transport });
+    flaky.fault.mode = "lose-answer";
+
+    const delegated = await a.delegating.delegate(startCommand(b), { windowId: "window-a" });
+
+    if (delegated.status !== "pending-acceptance") throw new Error(JSON.stringify(delegated));
+    expect(child.started).toHaveLength(1);
+    expect(a.delegationState.load().sent).toEqual([
+      expect.objectContaining({
+        requestId: delegated.requestId,
+        targetMemberId: b.hostId,
+        parent: { mode: "work", threadId: PARENT_THREAD },
+        state: "awaiting-acceptance",
+      }),
+    ]);
+
+    flaky.fault.mode = "none";
+    const reconciled = await a.delegating.refresh(String(delegated.requestId));
+
+    expect(reconciled).toMatchObject({ status: "in-progress", state: "running" });
+    expect(a.delegationState.load().sent[0]?.state).toBe("running");
+    expect(child.started).toHaveLength(1);
+    expect(a.delegationRecords.map((entry) => entry.change)).toEqual(["sent"]);
+  });
+
+  it("does not leave a request pending when the target refuses it", async () => {
+    const { a, b, child } = await threeHosts({ child: fakeChildHost({ modes: ["code"] }) });
+
+    const delegated = await a.delegating.delegate(startCommand(b), { windowId: "window-a" });
+
+    expect(delegated.status).toBe("refused-by-target");
+    expect(child.started).toHaveLength(0);
+    expect(a.delegationState.load().sent).toEqual([]);
+  });
+
+  it("asks the target to interrupt a child whose acceptance was lost", async () => {
+    const flaky = flakyCreate();
+    const { a, b, child } = await threeHosts({ aTransport: flaky.transport });
+    flaky.fault.mode = "lose-answer";
+    const delegated = await a.delegating.delegate(startCommand(b), { windowId: "window-a" });
+    if (delegated.status !== "pending-acceptance") throw new Error(JSON.stringify(delegated));
+    flaky.fault.mode = "none";
+
+    const cancelled = await a.delegating.cancel(String(delegated.requestId));
+
+    expect(cancelled).toEqual({ status: "cancelled", requestId: delegated.requestId });
+    expect(child.interrupted).toHaveLength(1);
+    expect(a.delegationState.load().sent[0]?.state).toBe("cancelled");
+  });
+
+  it("forgets a pending request the target never received once its signature could no longer be accepted", async () => {
+    const flaky = flakyCreate();
+    const { a, b, child } = await threeHosts({ aTransport: flaky.transport });
+    flaky.fault.mode = "drop-request";
+    const delegated = await a.delegating.delegate(startCommand(b), { windowId: "window-a" });
+    if (delegated.status !== "pending-acceptance") throw new Error(JSON.stringify(delegated));
+    flaky.fault.mode = "none";
+
+    expect(await a.delegating.refresh(String(delegated.requestId))).toMatchObject({
+      status: "in-progress",
+      state: "awaiting-acceptance",
+    });
+    // Five minutes pass: the saved request is that much older.
+    const saved = a.delegationState.load();
+    a.delegationState.save({
+      ...saved,
+      sent: saved.sent.map((entry) => ({
+        ...entry,
+        sentAt: decodeTimestamp(new Date(Date.parse(entry.sentAt) - 5 * 60_000).toISOString()),
+      })),
+    });
+    expect(await a.delegating.refresh(String(delegated.requestId))).toEqual({
+      status: "unknown-request",
+    });
+    expect(a.delegationState.load().sent).toEqual([]);
+    expect(child.started).toHaveLength(0);
+  });
+});
+
+describe("erasing a parent thread", () => {
+  it("removes the delegations it started, result included, from this spoke and from its saved state", async () => {
+    const { a, b, child } = await threeHosts();
+    const mine = await a.delegating.delegate(startCommand(b), { windowId: "window-a" });
+    const other = await a.delegating.delegate(
+      startCommand(b, { parent: { mode: "work", threadId: OTHER_THREAD } }),
+      { windowId: "window-a" },
+    );
+    if (mine.status !== "delegated" || other.status !== "delegated") throw new Error("not sent");
+    child.finish("Private findings.");
+    await a.delegating.trackOpen();
+    expect(a.delegationState.load().sent.some((entry) => entry.result !== undefined)).toBe(true);
+
+    a.delegating.forgetParent(PARENT_THREAD);
+
+    expect(await a.delegating.refresh(String(mine.requestId))).toEqual({
+      status: "unknown-request",
+    });
+    const reloaded = createDelegationStateStore(a.directory).load();
+    expect(reloaded.sent.map((entry) => String(entry.requestId))).toEqual([
+      String(other.requestId),
+    ]);
+    expect(JSON.stringify(reloaded)).not.toContain("Private findings.");
   });
 });
 

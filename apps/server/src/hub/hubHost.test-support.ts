@@ -41,7 +41,7 @@ import { createHubStateStore, type HubStatePort } from "./hubStateStore";
 import { HubService, type HubHostIdentity } from "./hubService";
 import { createPeerDelegationRouteHandler } from "./peerDelegationRoutes";
 import { PeerDelegationService, type PeerDelegationHost } from "./peerDelegationService";
-import { createPinnedHubTransport, type HubNetwork } from "./pinnedHubTransport";
+import { createPinnedHubTransport, type HubNetwork, type HubTransport } from "./pinnedHubTransport";
 import { createRosterSigningKeyStore } from "./rosterSigningKey";
 import { SpokeLinkService } from "./spokeLinkService";
 
@@ -140,6 +140,8 @@ export async function startHubTestHost(input: {
   readonly delegationHost?: PeerDelegationHost;
   /** This host's own rules for a parent thread; absent, it has no parent thread to delegate for. */
   readonly parent?: DelegatingParentPort;
+  /** Wraps the transport this host's delegating side sends through, so a test can lose an answer. */
+  readonly delegatingTransport?: (transport: HubTransport) => HubTransport;
   /** The authenticated product surface; the tests that prove a member reaches none of it pass a spy. */
   readonly productDispatch?: RemoteProductDispatch;
 }): Promise<HubTestHost> {
@@ -294,7 +296,7 @@ export async function startHubTestHost(input: {
     state: delegationState,
     identity: () => identity,
     target: (memberId) => spoke.memberTarget(memberId),
-    transport,
+    transport: input.delegatingTransport?.(transport) ?? transport,
     parent: input.parent ?? NO_PARENT,
     record: (change) => delegationRecords.push(change),
     now: Date.now,

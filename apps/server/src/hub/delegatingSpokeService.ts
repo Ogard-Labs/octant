@@ -32,7 +32,7 @@ import { delegationPostureWithin } from "@octant/domain";
 import { Schema } from "effect";
 import { frameExternalContentForModel } from "../context/externalContentFraming";
 import type { DelegationStatePort, SentDelegation } from "./delegationStateStore";
-import { HUB_PEER_KEY_HEADER, sendHubLinkRequest } from "./hubLink";
+import { FRESHNESS_WINDOW_MS, HUB_PEER_KEY_HEADER, sendHubLinkRequest } from "./hubLink";
 import { listenerPinFromDigest } from "./hubCrypto";
 import type { HubHostIdentity } from "./hubService";
 import type { HubTransport } from "./pinnedHubTransport";
@@ -44,6 +44,12 @@ const decodeWorkThreadId = Schema.decodeUnknownSync(WorkThreadIdSchema);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 /** The roster roles that run agents and so receive delegated work. */
 const DELEGATION_TARGET_ROLES: ReadonlyArray<RosterMember["role"]> = ["spoke", "standby-hub"];
+/**
+ * How long a request whose answer was lost may still be on its way to the
+ * target: its signature is accepted for the freshness window on either side of
+ * the time it was signed. Past this, a target that does not know it never will.
+ */
+const UNCONFIRMED_REQUEST_MS = 2 * FRESHNESS_WINDOW_MS;
 
 /** This host's own rules for a parent thread, judged where the thread lives. */
 export interface DelegatingParentPort {
@@ -98,6 +104,11 @@ export type DelegateOutcome =
       readonly requestId: DelegationRequestId;
       readonly authority: DelegatedAuthority;
     }
+  /**
+   * The target's answer was lost, so it may already run the child. The request
+   * stays on file under this id; a later read or cancel settles it.
+   */
+  | { readonly status: "pending-acceptance"; readonly requestId: DelegationRequestId }
   | {
       readonly status: "refused";
       readonly kind:
@@ -197,33 +208,11 @@ export class DelegatingSpokeService {
       projectId: command.projectId,
       task: command.task,
       authority: command.authority,
-      delegatedFrom:
-        command.parent.mode === "code"
-          ? {
-              kind: "code",
-              memberId: target.self,
-              threadId: decodeCodeThreadId(command.parent.threadId),
-            }
-          : {
-              kind: "work",
-              memberId: target.self,
-              threadId: decodeWorkThreadId(command.parent.threadId),
-            },
+      delegatedFrom: delegatedFromParent(command.parent, target.self),
     };
-    const answer = await this.#send(target, origin, PEER_DELEGATION_ROUTES.create, request);
-    if (answer.status === "unreachable") return { status: "refused", kind: "target-unreachable" };
-    if (!answer.response.ok) {
-      return { status: "refused-by-target", ...(await refusalOf(answer.response)) };
-    }
-    let accepted;
-    try {
-      accepted = decodeDelegationAccepted(await answer.response.json());
-    } catch {
-      return { status: "refused", kind: "target-answer-invalid" };
-    }
-    if (String(accepted.requestId) !== String(requestId)) {
-      return { status: "refused", kind: "target-answer-invalid" };
-    }
+    // The target may start the child and then fail to tell this host (a lost
+    // answer, the 8-second timeout). The request is on file before it leaves,
+    // so such a child can always be read and cancelled by its id.
     const current = this.#options.state.load();
     this.#options.state.save({
       ...current,
@@ -234,12 +223,31 @@ export class DelegatingSpokeService {
           targetMemberId: command.targetMemberId,
           projectId: command.projectId,
           parent: command.parent,
-          authority: accepted.authority,
-          state: "running",
+          authority: command.authority,
+          state: "awaiting-acceptance",
           sentAt: decodeTimestamp(new Date(this.#options.now()).toISOString()),
         },
       ],
     });
+    const pending: DelegateOutcome = { status: "pending-acceptance", requestId };
+    const answer = await this.#send(target, origin, PEER_DELEGATION_ROUTES.create, request);
+    if (answer.status === "unreachable") return pending;
+    if (!answer.response.ok) {
+      const refusal = await refusalOf(answer.response);
+      // A body that is not the target's own refusal (a proxy's error page) does
+      // not say the target declined.
+      if (refusal.reason === "unreadable") return pending;
+      this.#remove(requestId);
+      return { status: "refused-by-target", ...refusal };
+    }
+    let accepted;
+    try {
+      accepted = decodeDelegationAccepted(await answer.response.json());
+    } catch {
+      return pending;
+    }
+    if (String(accepted.requestId) !== String(requestId)) return pending;
+    this.#update(requestId, { state: "running", authority: accepted.authority });
     this.#options.record({
       change: "sent",
       actingPrincipal: { kind: "local-window" },
@@ -249,6 +257,13 @@ export class DelegatingSpokeService {
       delegatedFrom: request.delegatedFrom,
     });
     return { status: "delegated", requestId, authority: accepted.authority };
+  }
+
+  /** Erasing a parent thread erases what it delegated, a kept result included. */
+  forgetParent(threadId: string): void {
+    const current = this.#options.state.load();
+    const kept = current.sent.filter((entry) => entry.parent.threadId !== threadId);
+    if (kept.length !== current.sent.length) this.#options.state.save({ ...current, sent: kept });
   }
 
   /** Reads the remote child's state from its spoke and, once it completed, records its result here. */
@@ -280,7 +295,17 @@ export class DelegatingSpokeService {
     });
     if (answer.status === "unreachable") return { status: "target-unreachable" };
     if (!answer.response.ok) {
-      return { status: "refused-by-target", ...(await refusalOf(answer.response)) };
+      const refusal = await refusalOf(answer.response);
+      if (sent.state === "awaiting-acceptance" && refusal.reason === "unknown-request") {
+        // The target has no such request. It may still arrive until its
+        // signature goes stale; after that it never will, and nothing runs.
+        if (this.#options.now() - Date.parse(sent.sentAt) <= UNCONFIRMED_REQUEST_MS) {
+          return { status: "in-progress", requestId: sent.requestId, state: sent.state };
+        }
+        this.#remove(sent.requestId);
+        return { status: "unknown-request" };
+      }
+      return { status: "refused-by-target", ...refusal };
     }
     let status;
     try {
@@ -290,6 +315,18 @@ export class DelegatingSpokeService {
     }
     if (String(status.requestId) !== String(sent.requestId)) {
       return { status: "target-unreachable" };
+    }
+    if (sent.state === "awaiting-acceptance") {
+      // The target does run the child: the lost answer was an acceptance.
+      this.#update(sent.requestId, { state: status.state });
+      this.#options.record({
+        change: "sent",
+        actingPrincipal: { kind: "local-window" },
+        requestId: sent.requestId,
+        memberId: sent.targetMemberId,
+        projectId: sent.projectId,
+        delegatedFrom: delegatedFromParent(sent.parent, target.self),
+      });
     }
     if (status.state !== "completed" || status.result === undefined) {
       this.#update(sent.requestId, { state: status.state });
@@ -391,6 +428,14 @@ export class DelegatingSpokeService {
     return this.#options.state.load().sent.find((entry) => String(entry.requestId) === requestId);
   }
 
+  #remove(requestId: DelegationRequestId): void {
+    const current = this.#options.state.load();
+    this.#options.state.save({
+      ...current,
+      sent: current.sent.filter((entry) => String(entry.requestId) !== String(requestId)),
+    });
+  }
+
   #update(requestId: DelegationRequestId, change: Partial<SentDelegation>): void {
     const current = this.#options.state.load();
     this.#options.state.save({
@@ -421,6 +466,16 @@ export class DelegatingSpokeService {
       now: this.#options.now(),
     });
   }
+}
+
+/** The thread reference a request carries so the target knows which thread asked. */
+function delegatedFromParent(
+  parent: SentDelegation["parent"],
+  self: RosterMember["memberId"],
+): DelegationRequest["delegatedFrom"] {
+  return parent.mode === "code"
+    ? { kind: "code", memberId: self, threadId: decodeCodeThreadId(parent.threadId) }
+    : { kind: "work", memberId: self, threadId: decodeWorkThreadId(parent.threadId) };
 }
 
 function peerSourceLabel(memberId: string): string {

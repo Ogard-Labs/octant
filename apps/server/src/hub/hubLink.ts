@@ -19,7 +19,7 @@ export const HUB_LINK_HEADER = "x-octant-hub-link";
 export const HUB_PEER_KEY_HEADER = "x-octant-hub-peer-key";
 
 /** How far a request's time may be from the receiver's clock. */
-const FRESHNESS_WINDOW_MS = 120_000;
+export const FRESHNESS_WINDOW_MS = 120_000;
 const MAX_REMEMBERED_NONCES = 4_096;
 const REQUEST_TIMEOUT_MS = 8_000;
 
