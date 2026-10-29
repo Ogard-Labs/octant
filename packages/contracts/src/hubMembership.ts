@@ -2,7 +2,7 @@ import { Schema } from "effect";
 import { AuditActingPrincipal } from "./auditEvents";
 import { HubGrantItem, HubMemberId, RosterMember, SignedHubRoster } from "./hubAndSpokes";
 import { HubPushReason } from "./hubPush";
-import { HubWakeSpokeTimes } from "./hubWake";
+import { HUB_WAKE_MAX_SPOKES, HubWakeSpokeTimes } from "./hubWake";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const digest = Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/));
@@ -47,6 +47,7 @@ export const HubMembershipChange = Schema.Literal(
   "wake-switch-changed",
   "wake-times-reported",
   "wake-times-merged",
+  "wake-times-dropped",
   "wake-nudge-sent",
   "wake-nudge-refused",
   "wake-unreachable",
@@ -275,7 +276,7 @@ export const HubStandInHandback = Schema.Struct({
   sequence: Schema.Int.pipe(Schema.positive()),
   added: Schema.Array(StandInAddedMember).pipe(Schema.maxItems(64)),
   removed: Schema.Array(HubMemberId).pipe(Schema.maxItems(256)),
-  wakeTimes: Schema.Array(HubHandbackWakeTimes).pipe(Schema.maxItems(256)),
+  wakeTimes: Schema.Array(HubHandbackWakeTimes).pipe(Schema.maxItems(HUB_WAKE_MAX_SPOKES)),
 }).annotations(strict);
 export type HubStandInHandback = typeof HubStandInHandback.Type;
 export const decodeHubStandInHandback = Schema.decodeUnknownSync(HubStandInHandback);

@@ -2,6 +2,8 @@ import { CANVAS_DESIGN_PAGE_PATH } from "@octant/contracts/canvas";
 import {
   CHAT_ATTACHMENT_MEDIA_TYPES,
   CODE_ATTACHMENT_MEDIA_TYPES,
+  HUB_WAKE_MAX_SPOKES,
+  HUB_WAKE_MAX_TIMES_PER_SPOKE,
   MAX_CODE_ATTACHMENT_BYTES,
   MAX_WORK_ATTACHMENT_BYTES,
   OWNER_IDENTITY_KEY_HEADER,
@@ -109,6 +111,18 @@ export const REMOTE_PROTOCOL_ROUTE_IDS = {
   pairingStatus: "remote-protocol-pairing-status",
   negotiate: "remote-protocol-negotiate",
 } as const;
+
+/**
+ * The most a wake copy carries, from the schema's bounds: every spoke at the
+ * per-spoke maximum of times. One encoded time is 117 bytes (a 64-character id and
+ * a timestamp) and one spoke's own fields come to about 130; the budget rounds both
+ * up. Four full spokes already overran the 64 KiB these routes started with, and the
+ * gateway answered 413 to a body the hub could not shrink.
+ */
+export const HUB_WAKE_COPY_MAX_BODY_BYTES =
+  HUB_WAKE_MAX_SPOKES * (HUB_WAKE_MAX_TIMES_PER_SPOKE * 128 + 256) + 4_096;
+/** A hand-back adds up to 64 members the standby made (a few KiB each) and the ids it removed. */
+export const HUB_HANDBACK_MAX_BODY_BYTES = HUB_WAKE_COPY_MAX_BODY_BYTES + 1_048_576;
 
 export const REMOTE_HUB_LINK_ROUTE_IDS = {
   join: "hub-link-join",
@@ -301,7 +315,7 @@ const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
     allowQuery: false,
     allowedRequestHeaders: ["content-type", HUB_LINK_HEADER, HUB_PEER_KEY_HEADER],
     allowedContentTypes: ["application/json"],
-    maxBodyBytes: 65_536,
+    maxBodyBytes: HUB_HANDBACK_MAX_BODY_BYTES,
     maxResponseBytes: 65_536,
   },
   // The wake service: a spoke's routine times (opaque ids and times only), the
@@ -336,7 +350,7 @@ const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
     allowQuery: false,
     allowedRequestHeaders: ["content-type", HUB_LINK_HEADER],
     allowedContentTypes: ["application/json"],
-    maxBodyBytes: 65_536,
+    maxBodyBytes: HUB_WAKE_COPY_MAX_BODY_BYTES,
     maxResponseBytes: 4_096,
   },
   // Push through the hub: a spoke's sealed delivery request for the hub to forward
