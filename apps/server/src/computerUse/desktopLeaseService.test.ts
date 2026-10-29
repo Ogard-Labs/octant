@@ -612,7 +612,7 @@ describe("desktop lease service", () => {
     });
     const last = connection
       .prepare(
-        "SELECT payload_json FROM event_journal WHERE aggregate_id = ? ORDER BY aggregate_version DESC LIMIT 1",
+        "SELECT payload_json FROM event_journal WHERE aggregate_id = ? AND event_name = 'desktop.lease-transitioned@1' ORDER BY aggregate_version DESC LIMIT 1",
       )
       .get(String(leaseId)) as { payload_json: string };
     expect(JSON.parse(last.payload_json)).toMatchObject({
@@ -2473,6 +2473,79 @@ describe("desktop lease service spend cap for billed desktops", () => {
     await expect(
       service.acquire({ owner: code(threadB), actor: agentOf(threadB) }),
     ).resolves.toMatchObject({ status: "acquired" });
+  });
+
+  describe("a failed acquire's unverified leftover desktop across a host restart", () => {
+    function leakyHost() {
+      const leaky = createFakeDesktopProvider({
+        id: "leaky.example",
+        locality: "cloud",
+        billed: true,
+        behaviour: { omitProviderExpiry: true, lingerAfterRelease: true },
+      });
+      const other = createFakeDesktopProvider({
+        id: "other.example",
+        locality: "cloud",
+        billed: true,
+      });
+      const harness = host({ providers: [leaky, other], spendCap: 600 });
+      harness.state.recipes.set(threadB, recipeFor("other.example", cloudCredential, HOURLY_COST));
+      return { ...harness, leaky };
+    }
+
+    it("still counts the whole estimate after the host restarts", async () => {
+      const { service, restart, leaky } = leakyHost();
+      await service.acquire({ owner: code(threadA), actor: agentOf(threadA) });
+      expect(runningDesktops(leaky.backend)).toBe(1);
+
+      // Nothing in memory survives; only the journal does.
+      const restarted = restart();
+      expect(restarted.spend({ actor: person })).toMatchObject({
+        summary: { spentUsdCents: ESTIMATE },
+      });
+      await expect(
+        restarted.acquire({ owner: code(threadB), actor: agentOf(threadB) }),
+      ).resolves.toEqual({ status: "refused", reason: "spend-cap-reached" });
+
+      // Starting the restarted host retries the destroy; the provider still
+      // keeps the desktop, so it stays counted.
+      await restarted.start();
+      expect(restarted.spend({ actor: person })).toMatchObject({
+        summary: { spentUsdCents: ESTIMATE },
+      });
+    });
+
+    it("stops counting it after a verified destroy, also across a restart", async () => {
+      const { service, restart, leaky, state } = leakyHost();
+      await service.acquire({ owner: code(threadA), actor: agentOf(threadA) });
+
+      leaky.backend.behaviour.lingerAfterRelease = false;
+      state.now += 60 * MINUTE;
+      await restart().start();
+      expect(runningDesktops(leaky.backend)).toBe(0);
+
+      expect(restart().spend({ actor: person })).toMatchObject({ summary: { spentUsdCents: 0 } });
+      await expect(
+        restart().acquire({ owner: code(threadB), actor: agentOf(threadB) }),
+      ).resolves.toMatchObject({ status: "acquired" });
+    });
+
+    it("rebuilds the same spend however many times the journal is replayed", async () => {
+      const { service, restart, connection, leaky, state } = leakyHost();
+      await service.acquire({ owner: code(threadA), actor: agentOf(threadA) });
+      const counted = restart().spend({ actor: person });
+      expect(restart().spend({ actor: person })).toEqual(counted);
+
+      leaky.backend.behaviour.lingerAfterRelease = false;
+      state.now += 60 * MINUTE;
+      await service.sweep();
+      const cleared = restart().spend({ actor: person });
+      expect(cleared).toMatchObject({ summary: { spentUsdCents: 0 } });
+      expect(restart().spend({ actor: person })).toEqual(cleared);
+      // Verified gone is journaled once, not again by a later start.
+      await restart().start();
+      expect(spendEvents(connection, "desktop.leftover-cleared@1")).toHaveLength(1);
+    });
   });
 
   it("refuses a billed recipe with no hourly cost before any provider call", async () => {

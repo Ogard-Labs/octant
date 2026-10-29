@@ -8,12 +8,14 @@ import {
   DesktopSpendCapChanged,
   decodeDesktopSpendCapChanged,
   DesktopLeaseExtended,
+  DesktopLeaseLeftoverCleared,
   DesktopLeaseOperated,
   DesktopLeaseRequested,
   DesktopLeaseTransitioned,
   decodeDesktopArtifactSent,
   decodeDesktopLease,
   decodeDesktopLeaseExtended,
+  decodeDesktopLeaseLeftoverCleared,
   decodeDesktopLeaseOperated,
   decodeDesktopLeaseRequested,
   decodeDesktopLeaseTransitioned,
@@ -33,6 +35,7 @@ export function registerDesktopLeaseEvents(registry: EventRegistry): EventRegist
     .register(DESKTOP_LEASE_EVENT_NAMES.extended, 1, DesktopLeaseExtended)
     .register(DESKTOP_LEASE_EVENT_NAMES.artifactSent, 1, DesktopArtifactSent)
     .register(DESKTOP_LEASE_EVENT_NAMES.operated, 1, DesktopLeaseOperated)
+    .register(DESKTOP_LEASE_EVENT_NAMES.leftoverCleared, 1, DesktopLeaseLeftoverCleared)
     .register(DESKTOP_SPEND_EVENT_NAMES.capChanged, 1, DesktopSpendCapChanged)
     .register(DESKTOP_SPEND_EVENT_NAMES.billedLeaseRefused, 1, DesktopBilledLeaseRefused);
 }
@@ -129,8 +132,16 @@ export class DesktopLeaseProjection implements Projection {
         ...(transitioned.endReason === undefined ? {} : { endReason: transitioned.endReason }),
         ...(transitioned.credentialRejected === undefined ? {} : { credentialRejected: true }),
         ...(transitioned.credentialMissing === undefined ? {} : { credentialMissing: true }),
+        ...(transitioned.leftoverUnverified === undefined ? {} : { leftoverUnverified: true }),
         updatedAt: event.occurredAt,
       }));
+      return;
+    }
+    if (event.eventName === DESKTOP_LEASE_EVENT_NAMES.leftoverCleared) {
+      // Verified gone: the lease's own end time stays, so its spend still counts
+      // from request to end.
+      const cleared = decodeDesktopLeaseLeftoverCleared(event.payload);
+      this.#update(cleared.leaseId, version, ({ leftoverUnverified: _, ...lease }) => lease);
       return;
     }
     if (event.eventName === DESKTOP_LEASE_EVENT_NAMES.extended) {

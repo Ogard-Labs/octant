@@ -1484,7 +1484,17 @@ The spend-cap rules:
   by. A lease that may still hold a desktop counts its whole estimate, and so
   does a refused or failed one whose leftover desktop the host has not yet
   verified gone, from before the first destroy until a destroy is verified,
-  so another billed provider cannot take room it may still be spending. A
+  so another billed provider cannot take room it may still be spending. That
+  state is journaled, so a restart keeps it: a failed acquire's transition
+  to `refused` or `failed` carries `leftoverUnverified` (the lease record
+  already holds its provider, placement and estimate), and the lease counts
+  from then on. `desktop.leftover-cleared@1` is written only once a destroy
+  is verified, and the projection rebuilds the flag from both, the same on
+  every replay. Starting the host retries the destroy of each marked lease
+  through the sweep's orphan path, by lease id; a lease whose provider is not
+  loaded on this host stays marked and counted, and shows the flag, until
+  its provider returns or a person removes the desktop. No time limit ends
+  the counting on its own. A
   lease released, or refused or failed with nothing left, counts its time
   from request to end at the hourly cost, rounded up and never above its
   estimate.
@@ -2129,7 +2139,9 @@ cost is refused before any provider call; a billed placement with a
 declared stop is kept without a provider expiry and estimated over that stop;
 a person's billed Start without the estimate they saw is declined; and a
 failed acquire whose leftover desktop keeps running holds its whole estimate,
-refusing another billed provider, until a destroy is verified.
+refusing another billed provider, until a destroy is verified, including
+across a host restart, where the journal alone rebuilds it and the same figure
+comes back from every replay.
 `desktopLeasePolicy.test.ts` covers the decision, the estimate, what a lease
 counts, the month, who may change the cap, and the expiry exception;
 `projectPolicy.test.ts` the hourly-cost rule; `desktopPaneRoutes.test.ts` the

@@ -330,6 +330,11 @@ export const DesktopLease = Schema.Struct({
   credentialRejected: Schema.optional(Schema.Literal(true)),
   /** The host's credential store no longer held the recipe's key when this lease asked for a desktop. */
   credentialMissing: Schema.optional(Schema.Literal(true)),
+  /**
+   * A refused or failed acquire may have left a desktop the host has not yet
+   * verified gone. It stays set, across restarts, until a destroy is verified.
+   */
+  leftoverUnverified: Schema.optional(Schema.Literal(true)),
   updatedAt: UtcTimestamp,
 }).annotations(strict);
 export type DesktopLease = typeof DesktopLease.Type;
@@ -341,6 +346,7 @@ export const DESKTOP_LEASE_EVENT_NAMES = {
   extended: "desktop.lease-extended@1",
   artifactSent: "desktop.artifact-sent@1",
   operated: "desktop.operated@1",
+  leftoverCleared: "desktop.leftover-cleared@1",
 } as const;
 
 /**
@@ -393,8 +399,22 @@ export const DesktopLeaseTransitioned = Schema.Struct({
   credentialRejected: Schema.optional(Schema.Literal(true)),
   /** On a refused acquisition: the credential store held no key for the lease's reference. */
   credentialMissing: Schema.optional(Schema.Literal(true)),
+  /**
+   * On a refused or failed acquisition: the provider may have kept a desktop
+   * under this lease that no destroy has yet verified gone. Journaled with the
+   * transition, before the first destroy, so a crash cannot lose it.
+   */
+  leftoverUnverified: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type DesktopLeaseTransitioned = typeof DesktopLeaseTransitioned.Type;
+
+/** A destroy verified the lease's leftover desktop gone. */
+export const DesktopLeaseLeftoverCleared = Schema.Struct({
+  leaseId: DesktopLeaseId,
+  owner: DesktopLeaseOwner,
+  providerId: DesktopProviderId,
+}).annotations(strict);
+export type DesktopLeaseLeftoverCleared = typeof DesktopLeaseLeftoverCleared.Type;
 
 /** Written only after the driver confirmed the provider-side expiry moved. */
 export const DesktopLeaseExtended = Schema.Struct({
@@ -766,6 +786,9 @@ export const decodeDesktopLeaseDaemon = Schema.decodeUnknownSync(DesktopLeaseDae
 export const decodeDesktopLease = Schema.decodeUnknownSync(DesktopLease);
 export const decodeDesktopLeaseRequested = Schema.decodeUnknownSync(DesktopLeaseRequested);
 export const decodeDesktopLeaseTransitioned = Schema.decodeUnknownSync(DesktopLeaseTransitioned);
+export const decodeDesktopLeaseLeftoverCleared = Schema.decodeUnknownSync(
+  DesktopLeaseLeftoverCleared,
+);
 export const decodeDesktopLeaseExtended = Schema.decodeUnknownSync(DesktopLeaseExtended);
 export const decodeDesktopArtifactSent = Schema.decodeUnknownSync(DesktopArtifactSent);
 export const decodeDesktopInputEvent = Schema.decodeUnknownSync(DesktopInputEvent);

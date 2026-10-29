@@ -32,6 +32,7 @@ import {
   type DesktopLeaseOwner,
   type DesktopLeaseRefusal,
   type DesktopLeaseRefusalReason,
+  type DesktopLeaseLeftoverCleared,
   type DesktopLeaseRequested,
   type DesktopLeaseState,
   type DesktopLeaseTransitioned,
@@ -740,8 +741,6 @@ export function createDesktopLeaseService(
   const viewIdleMs = options.viewIdleMs ?? DEFAULT_VIEW_IDLE_MS;
   const live = new Map<string, LiveLease>();
   const orphans = new Map<string, Orphan>();
-  /** Leases with a leftover desktop a destroy has not yet verified gone. */
-  const unverifiedDesktops = new Set<string>();
   const serial = new Map<string, Promise<unknown>>();
   /** Leases with a transfer between its read and its delivery. */
   const transferring = new Set<string>();
@@ -809,7 +808,12 @@ export function createDesktopLeaseService(
     extra: Partial<
       Pick<
         DesktopLeaseTransitioned,
-        "endReason" | "requestedBy" | "detail" | "credentialRejected" | "credentialMissing"
+        | "endReason"
+        | "requestedBy"
+        | "detail"
+        | "credentialRejected"
+        | "credentialMissing"
+        | "leftoverUnverified"
       >
     > = {},
   ): DesktopLease {
@@ -829,6 +833,7 @@ export function createDesktopLeaseService(
       ...(extra.detail === undefined ? {} : { detail: extra.detail.slice(0, 512) }),
       ...(extra.credentialRejected === undefined ? {} : { credentialRejected: true }),
       ...(extra.credentialMissing === undefined ? {} : { credentialMissing: true }),
+      ...(extra.leftoverUnverified === undefined ? {} : { leftoverUnverified: true }),
     };
     append(record, leaseId, DESKTOP_LEASE_EVENT_NAMES.transitioned, payload, actor);
     return read(leaseId).lease;
@@ -993,10 +998,6 @@ export function createDesktopLeaseService(
   }
 
   async function destroyOrphan(key: string, orphan: Orphan): Promise<boolean> {
-    // Counted against the month's cap from before the first attempt until a
-    // destroy is verified, so no other billed lease takes room this desktop
-    // may still be spending.
-    unverifiedDesktops.add(String(orphan.leaseId));
     const destroyed = await destroy(
       orphan.teardown,
       orphan.leaseId,
@@ -1005,7 +1006,23 @@ export function createDesktopLeaseService(
     );
     if (destroyed.kind === "gone") {
       orphans.delete(key);
-      unverifiedDesktops.delete(String(orphan.leaseId));
+      // The lease counted its whole estimate against the month's cap from its
+      // failed transition, which journaled the leftover, until this.
+      const record = projection.get(orphan.leaseId);
+      if (record?.lease.leftoverUnverified === true) {
+        const cleared: DesktopLeaseLeftoverCleared = {
+          leaseId: orphan.leaseId,
+          owner: record.lease.owner,
+          providerId: record.lease.providerId,
+        };
+        append(
+          record,
+          orphan.leaseId,
+          DESKTOP_LEASE_EVENT_NAMES.leftoverCleared,
+          cleared,
+          options.systemActor,
+        );
+      }
       return true;
     }
     orphan.backoff = extendCacheBackoff(orphan.backoff, options.now());
@@ -1071,6 +1088,27 @@ export function createDesktopLeaseService(
         }
       }
     }
+    // A refused or failed acquire the last run left unverified: the journal
+    // still marks it, so look for its desktop again by lease id. A provider
+    // that is not loaded here leaves it marked, and counted against the cap.
+    for (const record of projection.list()) {
+      if (record.lease.leftoverUnverified !== true) continue;
+      const leaseId = record.lease.leaseId;
+      if ([...orphans.values()].some((orphan) => String(orphan.leaseId) === String(leaseId))) {
+        continue;
+      }
+      const loaded = registered(String(record.lease.providerId));
+      if (loaded === undefined) continue;
+      await inOrder(leaseId, () =>
+        destroyOrphan(`stray:${String(leaseId)}`, {
+          teardown: teardownPortOf(loaded.provider),
+          leaseId,
+          ...(record.lease.credentialRef === undefined
+            ? {}
+            : { credentialRef: record.lease.credentialRef }),
+        }),
+      );
+    }
     for (const record of unreleased) {
       const leaseId = record.lease.leaseId;
       const providerId = String(record.lease.providerId);
@@ -1128,7 +1166,7 @@ export function createDesktopLeaseService(
         requestedAt: Date.parse(lease.requestedAt),
         updatedAt: Date.parse(lease.updatedAt),
         ...(lease.spend === undefined ? {} : { spend: lease.spend }),
-        unverifiedDesktop: unverifiedDesktops.has(String(lease.leaseId)),
+        unverifiedDesktop: lease.leftoverUnverified === true,
       })),
     });
     return {
@@ -1428,6 +1466,7 @@ export function createDesktopLeaseService(
             ...(keyMissing ? { credentialMissing: true as const } : {}),
             ...(pending === undefined ? {} : { endReason: pending.reason }),
             ...(pending?.requestedBy === undefined ? {} : { requestedBy: pending.requestedBy }),
+            leftoverUnverified: true,
           },
         );
         await reapStray(teardownPortOf(provider), leaseId, recipe.credentialRef);
@@ -1454,6 +1493,7 @@ export function createDesktopLeaseService(
         live.delete(String(leaseId));
         const lease = transition(leaseId, "failed", caller.actor, {
           detail: "The provider set no expiry of its own for a billed desktop.",
+          leftoverUnverified: true,
         });
         await destroyOrphan(`stray:${String(leaseId)}`, {
           teardown: teardownPortOf(provider),
