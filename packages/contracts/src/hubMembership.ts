@@ -247,6 +247,17 @@ export const StandInAddedMember = Schema.Struct({
 export type StandInAddedMember = typeof StandInAddedMember.Type;
 
 /**
+ * One spoke's times as a standby gathered them. `reportedAt` is when the spoke
+ * reported to the standby; the hub keeps whichever report is newer, and counts
+ * one without a time as older.
+ */
+export const HubHandbackWakeTimes = Schema.Struct({
+  ...HubWakeSpokeTimes.fields,
+  reportedAt: Schema.optional(Schema.Int),
+}).annotations(strict);
+export type HubHandbackWakeTimes = typeof HubHandbackWakeTimes.Type;
+
+/**
  * What a standby hands back to the hub when it steps down. `wakeTimes` are the
  * routine times spokes reported to it while it stood in; the hub takes them
  * for the spokes it still lists.
@@ -256,7 +267,7 @@ export const HubStandInHandback = Schema.Struct({
   sequence: Schema.Int.pipe(Schema.positive()),
   added: Schema.Array(StandInAddedMember).pipe(Schema.maxItems(64)),
   removed: Schema.Array(HubMemberId).pipe(Schema.maxItems(256)),
-  wakeTimes: Schema.Array(HubWakeSpokeTimes).pipe(Schema.maxItems(256)),
+  wakeTimes: Schema.Array(HubHandbackWakeTimes).pipe(Schema.maxItems(256)),
 }).annotations(strict);
 export type HubStandInHandback = typeof HubStandInHandback.Type;
 export const decodeHubStandInHandback = Schema.decodeUnknownSync(HubStandInHandback);

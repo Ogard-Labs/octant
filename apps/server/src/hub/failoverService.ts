@@ -562,11 +562,14 @@ export class FailoverService {
       removed: standIn.removed,
       // What spokes reported to this standby while it stood in; the hub keeps the
       // spokes it still lists and ignores the rest.
-      wakeTimes: (standIn.wakeReports ?? []).map(({ memberId, times, hardwareAddress }) => ({
-        memberId,
-        times,
-        ...(hardwareAddress === undefined ? {} : { hardwareAddress }),
-      })),
+      wakeTimes: (standIn.wakeReports ?? []).map(
+        ({ memberId, times, hardwareAddress, reportedAt }) => ({
+          memberId,
+          times,
+          ...(hardwareAddress === undefined ? {} : { hardwareAddress }),
+          reportedAt,
+        }),
+      ),
     };
     const identity = this.#options.identity();
     const answer = await sendHubLinkRequest({

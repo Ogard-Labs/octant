@@ -12,6 +12,7 @@ import {
   HubMemberId,
   decodeHubWakeNudgeAnswer,
   type AuditActingPrincipal,
+  type HubHandbackWakeTimes,
   type HubMembershipChangedPayload,
   type HubWakeCopy,
   type HubWakeNudge,
@@ -274,11 +275,13 @@ export class WakeService {
   /**
    * The times a standby gathered while it stood in, taken back by the hub after
    * the membership merge. Only spokes the hub still lists are kept, and a
-   * standby's report replaces what the hub held for that spoke.
+   * standby's report replaces what the hub held for that spoke only when it is
+   * newer: a spoke may have reported straight to the hub since. A report with no
+   * time counts as older than any the hub holds.
    */
   mergeHandback(
     senderMemberId: string,
-    handed: ReadonlyArray<HubWakeSpokeTimes>,
+    handed: ReadonlyArray<HubHandbackWakeTimes>,
   ): { readonly merged: number } {
     const state = this.#options.state.load();
     const hub = state.hub;
@@ -287,13 +290,18 @@ export class WakeService {
     }
     const roster = hub.roster.roster;
     const now = this.#options.now();
-    const accepted = handed.filter((spoke) =>
-      roster.members.some(
-        (member) => String(member.memberId) === String(spoke.memberId) && isSpokeLike(member),
-      ),
+    const previous = hub.wake.spokes;
+    const newerThanHeld = (spoke: HubHandbackWakeTimes) => {
+      const held = previous.find((record) => String(record.memberId) === String(spoke.memberId));
+      return held === undefined || (spoke.reportedAt ?? Number.NEGATIVE_INFINITY) > held.reportedAt;
+    };
+    const accepted = handed.filter(
+      (spoke) =>
+        roster.members.some(
+          (member) => String(member.memberId) === String(spoke.memberId) && isSpokeLike(member),
+        ) && newerThanHeld(spoke),
     );
     if (accepted.length === 0) return { merged: 0 };
-    const previous = hub.wake.spokes;
     const replaced = new Set(accepted.map((spoke) => String(spoke.memberId)));
     const next: WakeSpokeRecord[] = [
       ...previous.filter((spoke) => !replaced.has(String(spoke.memberId))),
@@ -301,9 +309,10 @@ export class WakeService {
         const lastResult = previous.find(
           (held) => String(held.memberId) === String(spoke.memberId),
         )?.lastResult;
+        const { reportedAt, ...carried } = spoke;
         return {
-          ...spoke,
-          reportedAt: now,
+          ...carried,
+          reportedAt: reportedAt ?? now,
           ...(lastResult === undefined ? {} : { lastResult }),
         };
       }),
