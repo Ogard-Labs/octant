@@ -15,6 +15,7 @@ import {
 import {
   EMPTY_CANVAS_COMMENT_STATE,
   admitCanvasCommentCommand,
+  admitCanvasDeckProposal,
   admitCanvasDiagramLayoutRevision,
   admitCanvasPlanTaskRevision,
   applyCanvasCommentEvent,
@@ -578,6 +579,120 @@ describe("Canvas diagram layout revision policy", () => {
   });
 });
 
+describe("Canvas flow screen drag policy", () => {
+  function flowVersion(): CanvasVersion {
+    return decodeCanvasVersion({
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      canvasId: ids.canvas,
+      versionId: ids.version,
+      sequence: 1,
+      definition: {
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        title: "Search flow",
+        provenance,
+        sourceManifest: [],
+        blocks: [
+          {
+            blockId: "search" as never,
+            schemaVersion: CANVAS_SCHEMA_VERSION,
+            kind: "mockup" as const,
+            device: "phone" as const,
+            title: "Search",
+            nodes: [
+              { nodeId: "window" as never, component: "window" as const, label: "Search" },
+              {
+                nodeId: "go" as never,
+                parentId: "window" as never,
+                component: "button" as const,
+                label: "Go",
+              },
+            ],
+          },
+          {
+            blockId: "app-flow" as never,
+            schemaVersion: CANVAS_SCHEMA_VERSION,
+            kind: "flow" as const,
+            title: "Search flow",
+            screens: [{ screenId: "s1" as never, blockId: "search" as never }],
+            edges: [],
+          },
+        ],
+      },
+      createdBy: actor,
+      createdAt: now,
+    });
+  }
+
+  it("applies a screen's position and marks the board manual", () => {
+    const result = admitCanvasDiagramLayoutRevision(
+      {
+        kind: "canvas-diagram-layout-revise",
+        canvasId: ids.canvas,
+        versionId: ids.nextVersion,
+        blockId: "app-flow" as never,
+        positions: [{ nodeId: "s1" as never, x: 120, y: 80 }],
+        actor,
+        expectedSequence: 1,
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        issuedAt: now,
+      },
+      flowVersion(),
+      ids.nextVersion,
+      "2026-08-01T21:00:01.000Z" as never,
+    );
+    expect(result.kind).toBe("accepted");
+    if (result.kind !== "accepted") throw new Error("expected accepted");
+    expect(result.next.sequence).toBe(2);
+    const flow = result.next.definition.blocks[1];
+    if (flow?.kind !== "flow") throw new Error("expected a flow");
+    expect(flow.layout).toBe("manual");
+    const screen = flow.screens[0];
+    expect(screen?.x).toBe(120);
+    expect(screen?.y).toBe(80);
+    expect(screen?.positioned).toBe(true);
+  });
+
+  it("rejects a drag that names a screen the flow does not hold", () => {
+    const result = admitCanvasDiagramLayoutRevision(
+      {
+        kind: "canvas-diagram-layout-revise",
+        canvasId: ids.canvas,
+        versionId: ids.nextVersion,
+        blockId: "app-flow" as never,
+        positions: [{ nodeId: "missing" as never, x: 10, y: 10 }],
+        actor,
+        expectedSequence: 1,
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        issuedAt: now,
+      },
+      flowVersion(),
+      ids.nextVersion,
+      "2026-08-01T21:00:01.000Z" as never,
+    );
+    expect(result).toMatchObject({ kind: "rejected", code: "unknown-node" });
+  });
+
+  it("rejects a drag aimed at a block that is not a board", () => {
+    const result = admitCanvasDiagramLayoutRevision(
+      {
+        kind: "canvas-diagram-layout-revise",
+        canvasId: ids.canvas,
+        versionId: ids.nextVersion,
+        blockId: "search" as never,
+        positions: [{ nodeId: "s1" as never, x: 10, y: 10 }],
+        actor,
+        expectedSequence: 1,
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        issuedAt: now,
+      },
+      flowVersion(),
+      ids.nextVersion,
+      "2026-08-01T21:00:01.000Z" as never,
+    );
+    expect(result).toMatchObject({ kind: "rejected", code: "not-a-diagram" });
+  });
+});
+
 describe("Canvas comment replay", () => {
   const empty = EMPTY_CANVAS_COMMENT_STATE;
 
@@ -751,3 +866,89 @@ describe("Canvas plan task revision policy", () => {
     expect(admit({ taskId: "ghost" })).toMatchObject({ code: "unknown-task" });
   });
 });
+
+describe("Canvas deck proposal policy", () => {
+  it("derives the deck from the document's own blocks and journals a version", () => {
+    const result = admitCanvasDeckProposal(
+      {
+        kind: "canvas-deck-propose",
+        canvasId: ids.canvas,
+        versionId: ids.nextVersion,
+        actor,
+        expectedSequence: 1,
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        issuedAt: now,
+      },
+      deckVersion(),
+      ids.nextVersion,
+      "2026-08-01T21:00:01.000Z" as never,
+    );
+    expect(result.kind).toBe("accepted");
+    if (result.kind !== "accepted") throw new Error("expected accepted");
+    expect(result.next.sequence).toBe(2);
+    const deck = result.next.definition.blocks.at(-1);
+    expect(deck?.kind).toBe("deck");
+    if (deck?.kind !== "deck") throw new Error("expected a deck");
+    // The document's screen and its number are the slides, in order.
+    expect(deck.slides.map((slide) => String(slide.blockId))).toEqual(["screen", "signups"]);
+  });
+
+  it("refuses a document with too little to present", () => {
+    const thin = deckVersion();
+    // Drop the mockup so only the chart remains: one slide is not a deck.
+    const definition = thin.definition;
+    const oneBlock = {
+      ...definition,
+      blocks: definition.blocks.filter((block) => block.kind === "chart"),
+    };
+    const result = admitCanvasDeckProposal(
+      {
+        kind: "canvas-deck-propose",
+        canvasId: ids.canvas,
+        versionId: ids.nextVersion,
+        actor,
+        expectedSequence: 1,
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        issuedAt: now,
+      },
+      { ...thin, definition: oneBlock },
+      ids.nextVersion,
+      "2026-08-01T21:00:01.000Z" as never,
+    );
+    expect(result).toMatchObject({ kind: "rejected", code: "nothing-to-present" });
+  });
+});
+
+function deckVersion(): CanvasVersion {
+  return decodeCanvasVersion({
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    canvasId: ids.canvas,
+    versionId: ids.version,
+    sequence: 1,
+    definition: {
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      title: "Launch review",
+      provenance,
+      sourceManifest: [],
+      blocks: [
+        {
+          blockId: "screen" as never,
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          kind: "mockup" as const,
+          device: "phone" as const,
+          title: "Screen",
+          nodes: [{ nodeId: "window" as never, component: "window" as const, label: "Screen" }],
+        },
+        {
+          blockId: "signups" as never,
+          schemaVersion: 1,
+          kind: "metric" as const,
+          label: "Weekly signups",
+          value: 1284,
+        },
+      ],
+    },
+    createdBy: actor,
+    createdAt: now,
+  });
+}

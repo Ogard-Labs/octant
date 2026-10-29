@@ -2,6 +2,8 @@ import {
   CANVAS_MAX_DIAGRAM_NODES,
   CanvasDiagramBlock,
   CanvasDiagramNode,
+  CanvasFlowBlock,
+  CanvasFlowScreen,
   CanvasVersion,
   decodeCanvasVersion,
   type CanvasBlock,
@@ -26,12 +28,15 @@ import {
   decodeCanvasComment,
   decodeCanvasCommentCommand,
   decodeCanvasCommentReply,
+  decodeCanvasDeckProposeCommand,
   decodeCanvasDiagramLayoutReviseCommand,
   decodeCanvasPlanTaskReviseCommand,
+  type CanvasDeckProposeCommand,
 } from "@octant/contracts/canvas-board";
-import { decodeCanvasVersionId } from "@octant/contracts/canvas";
+import { proposeCanvasDeck } from "./canvasDeckProposal";
+import { CANVAS_SCHEMA_VERSION, decodeCanvasVersionId } from "@octant/contracts/canvas";
 import type { UtcTimestamp } from "@octant/contracts/events";
-import { validateCanvasDefinition } from "./canvasPolicy";
+import { CanvasPolicyRejected, validateCanvasDefinition } from "./canvasPolicy";
 
 export type CanvasBoardRejectionCode =
   | "malformed-request"
@@ -48,7 +53,8 @@ export type CanvasBoardRejectionCode =
   | "unknown-node"
   | "missing-position"
   | "not-a-plan"
-  | "unknown-task";
+  | "unknown-task"
+  | "nothing-to-present";
 
 export interface CanvasBoardRejected {
   readonly kind: "rejected";
@@ -350,6 +356,10 @@ function isDiagramBlock(block: CanvasBlock): block is CanvasDiagramBlock {
   return block.kind === "diagram";
 }
 
+function isFlowBlock(block: CanvasBlock): block is CanvasFlowBlock {
+  return block.kind === "flow";
+}
+
 function applyNodePositions(
   block: CanvasDiagramBlock,
   positions: ReadonlyArray<CanvasDiagramNodePosition>,
@@ -372,6 +382,28 @@ function applyNodePositions(
   };
 }
 
+function applyScreenPositions(
+  block: CanvasFlowBlock,
+  positions: ReadonlyArray<CanvasDiagramNodePosition>,
+): CanvasFlowBlock {
+  const positionMap = new Map(positions.map((position) => [String(position.nodeId), position]));
+  const updatedScreens: CanvasFlowScreen[] = block.screens.map((screen) => {
+    const position = positionMap.get(String(screen.screenId));
+    if (position === undefined) return screen;
+    return {
+      ...screen,
+      x: position.x,
+      y: position.y,
+      positioned: true,
+    };
+  });
+  return {
+    ...block,
+    layout: "manual",
+    screens: updatedScreens,
+  };
+}
+
 function replaceBlock(
   blocks: ReadonlyArray<CanvasBlock>,
   blockId: string,
@@ -381,13 +413,15 @@ function replaceBlock(
 }
 
 /**
- * Apply an immutable diagram layout revision to a Canvas version.
+ * Apply an immutable board layout revision to a Canvas version. The target is
+ * a board — a diagram's nodes or a flow's screens — and the positions apply
+ * as journaled manual placement.
  *
- * The command carries only the requested node positions. The policy verifies
- * that the actor is a user or agent, the target block is a diagram, every
- * positioned node exists, and the resulting definition still passes the Canvas
- * budget and cross-reference policy. The next version keeps the same version
- * identity rules as any other version append.
+ * The command carries only the requested node or screen positions. The policy
+ * verifies that the actor is a user or agent, the target block is a board,
+ * every positioned node or screen exists, and the resulting definition still
+ * passes the Canvas budget and cross-reference policy. The next version keeps
+ * the same version identity rules as any other version append.
  */
 export function admitCanvasDiagramLayoutRevision(
   input: unknown,
@@ -433,11 +467,15 @@ export function admitCanvasDiagramLayoutRevision(
   const block = current.definition.blocks.find(
     (candidate) => String(candidate.blockId) === String(command.blockId),
   );
-  if (block === undefined || !isDiagramBlock(block)) {
-    return reject("not-a-diagram", "Canvas layout revision target is not a diagram block.");
+  if (block === undefined || (!isDiagramBlock(block) && !isFlowBlock(block))) {
+    return reject("not-a-diagram", "Canvas layout revision target is not a board block.");
   }
 
-  const nodeIds = new Set(block.nodes.map((node) => String(node.nodeId)));
+  const nodeIds = new Set(
+    isDiagramBlock(block)
+      ? block.nodes.map((node) => String(node.nodeId))
+      : block.screens.map((screen) => String(screen.screenId)),
+  );
   if (command.positions.length > CANVAS_MAX_DIAGRAM_NODES) {
     return reject(
       "oversized-payload",
@@ -450,7 +488,9 @@ export function admitCanvasDiagramLayoutRevision(
     }
   }
 
-  const revisedBlock = applyNodePositions(block, command.positions);
+  const revisedBlock = isDiagramBlock(block)
+    ? applyNodePositions(block, command.positions)
+    : applyScreenPositions(block, command.positions);
   const revisedDefinition = {
     ...current.definition,
     blocks: replaceBlock(current.definition.blocks, String(command.blockId), revisedBlock),
@@ -565,6 +605,90 @@ export function admitCanvasPlanTaskRevision(
     decodeCanvasVersion(next);
   } catch {
     return reject("malformed-request", "Canvas plan task revision produced an invalid version.");
+  }
+  return { kind: "accepted", next };
+}
+
+/**
+ * Record a person's one-click deck proposal as a new immutable version: the
+ * pure proposer derives the deck from the document's own screens and
+ * readings, the deck's block id is made unique among the document's blocks,
+ * and the whole definition revalidates, so the proposal journals only what
+ * the person could have authored by hand.
+ */
+export function admitCanvasDeckProposal(
+  input: unknown,
+  current: CanvasVersion,
+  nextVersionId: unknown,
+  now: UtcTimestamp,
+): CanvasDiagramLayoutRevisionAdmitResult {
+  let command: CanvasDeckProposeCommand;
+  try {
+    command = decodeCanvasDeckProposeCommand(input);
+  } catch {
+    return reject("malformed-request", "Canvas deck proposal is malformed.");
+  }
+  if (!isUserOrAgent(command.actor)) {
+    return reject("unauthorized", "Canvas deck proposal must be authored by a user or agent.");
+  }
+  if (command.expectedSequence !== current.sequence) {
+    return reject("stale-version", "Canvas deck proposal targets a stale Canvas sequence.");
+  }
+  let decodedNextVersionId: ReturnType<typeof decodeCanvasVersionId>;
+  try {
+    decodedNextVersionId = decodeCanvasVersionId(nextVersionId);
+  } catch {
+    return reject("malformed-request", "Canvas deck proposal version id is invalid.");
+  }
+  if (
+    String(command.canvasId) !== String(current.canvasId) ||
+    String(command.versionId) !== String(decodedNextVersionId) ||
+    String(decodedNextVersionId) === String(current.versionId)
+  ) {
+    return reject("malformed-request", "Canvas deck proposal targets the wrong version.");
+  }
+  const deck = proposeCanvasDeck(current.definition);
+  if (deck === undefined) {
+    return reject(
+      "nothing-to-present",
+      "This Canvas has too little to present: a deck needs at least two screens or readings that nothing else already places.",
+    );
+  }
+  // The proposer already chose a block id the document has not taken and
+  // kept to the deck's budgets; the whole definition revalidates, so the
+  // proposal journals only what the person could have written by hand.
+  const { omitted: _omitted, ...proposed } = deck;
+  let validatedDefinition: typeof current.definition;
+  try {
+    // A deck exists from its own schema version on, so a document written
+    // before it is declared at the current version once it holds one.
+    validatedDefinition = validateCanvasDefinition({
+      ...current.definition,
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      blocks: [...current.definition.blocks, { schemaVersion: CANVAS_SCHEMA_VERSION, ...proposed }],
+    });
+  } catch (error) {
+    if (error instanceof CanvasPolicyRejected && error.code === "payload-budget-exceeded") {
+      return reject("oversized-payload", error.message);
+    }
+    return reject(
+      "malformed-request",
+      error instanceof Error ? error.message : "Canvas deck proposal failed validation.",
+    );
+  }
+  const next: CanvasVersion = {
+    schemaVersion: current.schemaVersion,
+    canvasId: current.canvasId,
+    versionId: decodedNextVersionId,
+    sequence: current.sequence + 1,
+    definition: validatedDefinition,
+    createdBy: command.actor,
+    createdAt: now,
+  };
+  try {
+    decodeCanvasVersion(next);
+  } catch {
+    return reject("malformed-request", "Canvas deck proposal produced an invalid version.");
   }
   return { kind: "accepted", next };
 }

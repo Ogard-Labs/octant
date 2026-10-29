@@ -82,6 +82,7 @@ import {
   type PrivacyTarget,
 } from "../host/HostSettingsSection";
 import { RememberedToolApprovalsPanel } from "../extensions/RememberedToolApprovalsPanel";
+import { BrowserHubSection } from "../host/BrowserHubSection";
 import { RemoteAccessSettingsSection } from "../host/RemoteAccessSettingsSection";
 import { SshTargetsSettingsPage } from "../host/SshTargetsSettingsSection";
 import { PublicLinkSettings } from "../settings/PublicLinkSettings";
@@ -91,6 +92,7 @@ import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-mem
 import type { ReplicaStoreSettingsClient } from "@octant/client-runtime/replica-store-settings-client";
 import type { ReplicaSyncStatusClient } from "@octant/client-runtime/replica-sync-status-client";
 import { AutomationNotificationSettings } from "../host/AutomationNotificationSettings";
+import { PhoneNotificationSettings } from "../host/PhoneNotificationSettings";
 import { FederatedHostsLifecyclePanel } from "../host/FederatedHostsLifecyclePanel";
 import {
   type SettingsNativeCapabilities,
@@ -111,6 +113,7 @@ import { ImageGenerationSettingsView } from "../settings/ImageGenerationSettings
 import { ModelEndpointSettingsView } from "../settings/ModelEndpointSettingsView";
 import { ComputerUseSettingsView } from "../settings/ComputerUseSettingsView";
 import { ManagedToolsSettingsView } from "../settings/ManagedToolsSettingsView";
+import { AppStoreConnectKeySection } from "../settings/AppStoreConnectKeySection";
 import { UserProfileSettingsView } from "../profile/UserProfileSettingsView";
 import {
   ScopeIndicator,
@@ -1010,12 +1013,19 @@ function ActiveSectionContent({
           {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
         />
       );
-    case "device-tools":
+    case "device-tools": {
+      const appStoreConnectKeyRequest = props.hostBridge?.appStoreConnectKeyRequest;
       return (
-        <ManagedToolsSettingsView
-          {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
-        />
+        <>
+          <ManagedToolsSettingsView
+            {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
+          />
+          {appStoreConnectKeyRequest === undefined ? null : (
+            <AppStoreConnectKeySection bridge={{ appStoreConnectKeyRequest }} />
+          )}
+        </>
       );
+    }
     case "providers":
       // The catalog of every provider Octant can set up sits under the ones
       // this host has, so finding and configuring a provider is one page. A
@@ -1167,6 +1177,7 @@ function ActiveSectionContent({
             Octant desktop app or with the <code>octant pair</code> and <code>octant auth</code>{" "}
             commands.
           </p>
+          <BrowserHubSection hubAdministration={hubAdministrationOf(props.hostBridge)} />
         </section>
       );
     }
@@ -1226,6 +1237,10 @@ function ActiveSectionContent({
     case "notifications":
       return props.automationNotificationClient !== undefined ? (
         <div className="settings-section-stack" id="settings-notifications">
+          <PhoneNotificationSettings
+            client={props.automationNotificationClient}
+            focusedSetting={focusedSetting}
+          />
           <AutomationNotificationSettings
             client={props.automationNotificationClient}
             focused={focusedSetting === "host-automation-notifications"}
@@ -1592,6 +1607,8 @@ function providerSettingsViewProps(
     onChangePiConfiguration: controller.changePiConfiguration,
     onChangeOhMyPiConfiguration: controller.changeOhMyPiConfiguration,
     onChangeOllamaConfiguration: controller.changeOllamaConfiguration,
+    onChangeOutsideHarnessEndpointConfiguration:
+      controller.changeOutsideHarnessEndpointConfiguration,
     onChangeOpenAiCompatibleConfiguration: controller.changeOpenAiCompatibleConfiguration,
     onChangeOpenAiImageConfiguration: controller.changeOpenAiImageConfiguration,
     onChangeGeminiImageConfiguration: controller.changeGeminiImageConfiguration,

@@ -79,7 +79,7 @@ export function OwnerAlertsPanel(props: OwnerAlertsPanelProps) {
     setBusy(true);
     setNotice(undefined);
     try {
-      const result = await runOwnerAlertAction(spoke, row.alert, action);
+      const result = await runOwnerAlertAction(spoke, row, action);
       setNotice(ownerActionNotice(result, ACTION_DONE[action]));
     } catch {
       setNotice({ tone: "problem", message: "Nothing changed. Try again." });
@@ -147,16 +147,20 @@ export function OwnerAlertsPanel(props: OwnerAlertsPanelProps) {
         </Text>
       ) : null}
       {reading?.rows.map((row) => (
-        <View key={String(row.alert.alertId)} style={styles.box} testID="mobile-owner-alert">
+        <View
+          key={`${row.spoke.memberId}:${String(row.member.memberId)}`}
+          style={styles.box}
+          testID="mobile-owner-alert"
+        >
           <Text style={styles.boxTitle}>
-            {row.alert.name} joined {row.spoke.name}
+            {row.member.name} joined {row.spoke.name}
           </Text>
           <Text style={styles.mono} selectable>
-            {row.alert.identityKeyFingerprint}
+            {row.member.identityKeyFingerprint}
           </Text>
           <View style={styles.actions}>
             {(["remove", "confirm", "dismiss"] as const)
-              .filter((action) => action !== "confirm" || row.held)
+              .filter((action) => (action === "confirm" ? row.held : row.alert !== undefined))
               .map((action) => (
                 <Pressable
                   accessibilityRole="button"

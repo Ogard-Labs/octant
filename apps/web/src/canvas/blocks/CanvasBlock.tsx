@@ -15,6 +15,7 @@ import { DesignBlock } from "./DesignBlock";
 import { MockupBlock } from "./MockupBlock";
 import { StructuredBlocks } from "./StructuredBlocks";
 import type { TableRowComments } from "./TableBlock";
+import type { MockupNodeComments } from "./MockupBlock";
 import { TextBlocks } from "./TextBlocks";
 import { TreemapBlock } from "./TreemapBlock";
 import { HeatmapBlock } from "./HeatmapBlock";
@@ -33,6 +34,7 @@ export function CanvasBlockRenderer({
   designAssetRuntime,
   designRunRuntime,
   rowComments,
+  nodeComments,
 }: {
   readonly block: CanvasBlock;
   /** Lets a diagram journal a drag; absent on surfaces that cannot. */
@@ -50,6 +52,8 @@ export function CanvasBlockRenderer({
   readonly designRunRuntime?: DesignRunRuntime;
   /** Comment markers on a table's rows that carry an id; absent where comments are not journaled. */
   readonly rowComments?: TableRowComments;
+  /** Comment markers on a mockup's nodes; absent where comments are not journaled. */
+  readonly nodeComments?: MockupNodeComments;
 }) {
   switch (block.kind) {
     case "heading":
@@ -86,7 +90,9 @@ export function CanvasBlockRenderer({
     case "mindmap":
       return <MindmapDiagram block={block} />;
     case "mockup":
-      return <MockupBlock block={block} />;
+      return (
+        <MockupBlock block={block} {...(nodeComments === undefined ? {} : { nodeComments })} />
+      );
     case "treemap":
       return (
         <TreemapBlock block={block} {...(actionRuntime === undefined ? {} : { actionRuntime })} />

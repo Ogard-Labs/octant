@@ -49,6 +49,7 @@ import {
   claudeChangeKeepsRuntime,
   changeGeminiImageConfiguration,
   changeOllamaConfiguration,
+  changeOutsideHarnessEndpointConfiguration,
   changePiConfiguration,
   changeOpenAiCompatibleConfiguration,
   changeOpenAiImageConfiguration,
@@ -441,6 +442,33 @@ export class ProviderService implements ProviderServiceApi {
       if (rebound) moved.push(candidate.id);
     }
     return moved;
+  }
+
+  /**
+   * Clears what every outside instance added from a package learned under its
+   * previous publisher, when the person re-trusts a new one: the catalogue is
+   * invalidated with its Verify tools record removed, and the observation is
+   * cleared. The package is held, so nothing restarts until the person trusts
+   * it; the move to its new digest then clears them again, as for any digest.
+   */
+  async forgetOutsideDriverVerification(extensionId: string): Promise<void> {
+    for (const candidate of this.#persistence.readProviderInstances()) {
+      if (candidate.driverKind !== "outside-harness-endpoint") continue;
+      if (String(candidate.configuration.driver.extensionId) !== extensionId) continue;
+      await this.#withInstanceOperation(candidate.id, async () => {
+        this.#assertReady();
+        await this.#runtime.invalidateRuntime(candidate.id).catch((error: unknown) => {
+          if (!(error instanceof ProviderRuntimeInvalidationRejected)) throw error;
+        });
+        this.#invalidateCatalog(
+          candidate.id,
+          { kind: "driver" },
+          "provider driver's publisher changed",
+          decodeTimestamp(this.#clock()),
+        );
+        this.#runtime.clearObservedState(candidate.id);
+      });
+    }
   }
 
   /**
@@ -1287,6 +1315,22 @@ export class ProviderService implements ProviderServiceApi {
               throw this.#unsupported("This provider does not use Ollama configuration.");
             }
             instance = changeOllamaConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-outside-harness-endpoint-configuration") {
+            if (current.driverKind !== "outside-harness-endpoint") {
+              throw this.#unsupported("This provider is not from an outside driver.");
+            }
+            // The driver it binds is not part of this change, and nothing here
+            // asks whether that driver is admitted: reconfiguring starts, trusts,
+            // and enables nothing, and a driver that is not admitted still
+            // starts no process.
+            instance = changeOutsideHarnessEndpointConfiguration(
               current,
               command.configuration,
               updatedAt,
@@ -2421,6 +2465,12 @@ function credentialBinding(instance: ProviderInstance): string | undefined {
         String(cloudIam.accountId),
         String(cloudIam.roleName),
       ].join("\n");
+    }
+    case "outside-harness-endpoint": {
+      // The key is sent to one address, and a provider that stops sending one
+      // has no use for what the host holds.
+      const { baseUrl, key } = instance.configuration;
+      return [baseUrl, key === undefined ? "no-key" : "key"].join("\n");
     }
     case "bfl-image":
     case "ideogram-image":

@@ -49,14 +49,20 @@ export interface NativeHarnessSessionRouteDependencies {
     readonly threadId: string;
   }) => Promise<ReadonlyArray<string>>;
   /**
-   * Told once a resume has cleared a recovery, after the session settled the
-   * turn the restart cut off, so a surface that keeps its own record of that
-   * turn can settle it too.
+   * Settles the mode's orphaned turns before a continuation is queued, while
+   * recovery still prevents dispatch. A hold-only resume settles them afterward.
    */
-  readonly onRecoveryLifted?: (input: {
+  readonly settleInterruptedTurns?: (input: {
     readonly threadId: string;
     readonly mode: NativeHarnessSessionView["session"]["mode"];
   }) => void;
+  readonly continueRecovery?: (input: {
+    readonly threadId: string;
+    readonly windowId: string;
+    readonly mode: NativeHarnessSessionView["session"]["mode"];
+  }) => Promise<
+    { readonly kind: "queued" } | { readonly kind: "refused"; readonly message: string }
+  >;
   /** Stops what would start new work on its own while the session is paused. */
   readonly onPaused?: (input: { readonly threadId: string }) => void;
   readonly decideApproval?: (input: {
@@ -69,6 +75,7 @@ export interface NativeHarnessSessionRouteDependencies {
     | "decided"
     | "approval-not-found"
     | "already-settled"
+    | "withdrawn"
     | "host-not-offered"
     | "lost-in-restart";
   readonly steer?: (input: {
@@ -119,6 +126,7 @@ export function createNativeHarnessSessionRouteHandler(
   dependencies: NativeHarnessSessionRouteDependencies,
 ) {
   const now = dependencies.now ?? Date.now;
+  const commanding = new Set<string>();
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
     if (!url.pathname.startsWith(PREFIX)) return undefined;
@@ -167,62 +175,90 @@ export function createNativeHarnessSessionRouteHandler(
     }
 
     if (action === "commands") {
-      let command;
+      if (commanding.has(threadId)) return json(refusedCommand("stale-version"), 409, origin);
+      commanding.add(threadId);
       try {
-        command = decodeNativeHarnessSessionCommand(body);
-      } catch {
-        return failure("Native harness session command is invalid.", 400, origin);
-      }
-      if (view === undefined || String(view.session.id) !== String(command.sessionId)) {
-        return json(refusedCommand("session-not-found"), 404, origin);
-      }
-      if (command.expectedVersion !== view.session.version) {
-        return json(refusedCommand("stale-version"), 409, origin);
-      }
-      if (command.kind === "pause-native-harness-session") {
-        if (view.session.status !== "running" && view.session.status !== "idle") {
-          return json(refusedCommand("not-running"), 409, origin);
+        const view = dependencies.store.read(threadId);
+        let command;
+        try {
+          command = decodeNativeHarnessSessionCommand(body);
+        } catch {
+          return failure("Native harness session command is invalid.", 400, origin);
         }
-        // A pause drains: the turn running now and the helpers it started
-        // finish, and nothing new is admitted until a person resumes.
-        dependencies.store.pause(
-          threadId,
-          "paused-by-user",
-          dependencies.store.turnInFlight(threadId)
-            ? "Paused by the user. The current turn will finish; nothing new starts."
-            : "Paused by the user.",
-        );
-        dependencies.onPaused?.({ threadId });
-      } else if (command.kind === "resume-native-harness-session") {
-        const liftsRecovery = view.session.status === "recovery-required";
-        if (liftsRecovery) {
-          const blockers = (await dependencies.recoveryBlockers?.({ threadId })) ?? [];
-          if (blockers.length > 0) {
-            return json(
-              refusedCommand(
-                "not-ready",
-                `Not ready to resume: ${blockers.join(" ")}`.slice(0, 512),
-              ),
-              409,
-              origin,
-            );
+        if (view === undefined || String(view.session.id) !== String(command.sessionId)) {
+          return json(refusedCommand("session-not-found"), 404, origin);
+        }
+        if (command.expectedVersion !== view.session.version) {
+          return json(refusedCommand("stale-version"), 409, origin);
+        }
+        if (command.kind === "pause-native-harness-session") {
+          if (view.session.status !== "running" && view.session.status !== "idle") {
+            return json(refusedCommand("not-running"), 409, origin);
           }
+          // A pause drains: the turn running now and the helpers it started
+          // finish, and nothing new is admitted until a person resumes.
+          dependencies.store.pause(
+            threadId,
+            "paused-by-user",
+            dependencies.store.turnInFlight(threadId)
+              ? "Paused by the user. The current turn will finish; nothing new starts."
+              : "Paused by the user.",
+          );
+          dependencies.onPaused?.({ threadId });
+        } else if (command.kind === "resume-native-harness-session") {
+          const liftsRecovery = view.session.status === "recovery-required";
+          if (command.continueInterrupted === true && !liftsRecovery) {
+            return json(refusedCommand("not-paused"), 409, origin);
+          }
+          if (liftsRecovery) {
+            const blockers = (await dependencies.recoveryBlockers?.({ threadId })) ?? [];
+            if (blockers.length > 0) {
+              return json(
+                refusedCommand(
+                  "not-ready",
+                  `Not ready to resume: ${blockers.join(" ")}`.slice(0, 512),
+                ),
+                409,
+                origin,
+              );
+            }
+          }
+          if (command.continueInterrupted === true) {
+            dependencies.settleInterruptedTurns?.({ threadId, mode: view.session.mode });
+            const continuation = await dependencies.continueRecovery?.({
+              threadId,
+              windowId,
+              mode: view.session.mode,
+            });
+            if (continuation?.kind !== "queued") {
+              return json(
+                refusedCommand(
+                  "not-ready",
+                  continuation?.message ?? "Restart continuation is unavailable on this host.",
+                ),
+                409,
+                origin,
+              );
+            }
+          }
+          if (!dependencies.store.resume(threadId)) {
+            return json(refusedCommand("not-paused"), 409, origin);
+          }
+          if (liftsRecovery && command.continueInterrupted !== true) {
+            dependencies.settleInterruptedTurns?.({ threadId, mode: view.session.mode });
+          }
+        } else {
+          dependencies.interruptTurn?.({ threadId, windowId });
         }
-        if (!dependencies.store.resume(threadId)) {
-          return json(refusedCommand("not-paused"), 409, origin);
-        }
-        if (liftsRecovery) {
-          dependencies.onRecoveryLifted?.({ threadId, mode: view.session.mode });
-        }
-      } else {
-        dependencies.interruptTurn?.({ threadId, windowId });
+        const updated = dependencies.store.read(threadId);
+        const result: NativeHarnessSessionCommandResult = {
+          kind: "native-harness-session",
+          session: (updated ?? view).session,
+        };
+        return json(result, 200, origin);
+      } finally {
+        commanding.delete(threadId);
       }
-      const updated = dependencies.store.read(threadId);
-      const result: NativeHarnessSessionCommandResult = {
-        kind: "native-harness-session",
-        session: (updated ?? view).session,
-      };
-      return json(result, 200, origin);
     }
 
     if (action === "approvals") {
@@ -253,6 +289,7 @@ export function createNativeHarnessSessionRouteHandler(
               approvalId: decision.approvalId,
               reason:
                 outcome === "already-settled" ||
+                outcome === "withdrawn" ||
                 outcome === "host-not-offered" ||
                 outcome === "lost-in-restart"
                   ? outcome
@@ -260,11 +297,13 @@ export function createNativeHarnessSessionRouteHandler(
               message:
                 outcome === "already-settled"
                   ? "That approval was already decided."
-                  : outcome === "host-not-offered"
-                    ? "This command can reach only hosts its approval lists. Nothing was decided."
-                    : outcome === "lost-in-restart"
-                      ? "Octant restarted while this was waiting, so the call did not run. Resume the session; the agent asks again if it still needs it."
-                      : "No pending approval has that id on this thread.",
+                  : outcome === "withdrawn"
+                    ? "That approval was withdrawn before anyone answered it, so nothing was decided."
+                    : outcome === "host-not-offered"
+                      ? "This command can reach only hosts its approval lists. Nothing was decided."
+                      : outcome === "lost-in-restart"
+                        ? "Octant restarted while this was waiting, so the call did not run. Resume the session; the agent asks again if it still needs it."
+                        : "No pending approval has that id on this thread.",
             };
       return json(result, result.kind === "approval-decided" ? 200 : 409, origin);
     }

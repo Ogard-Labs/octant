@@ -125,8 +125,11 @@ type SavedKey =
       readonly status: "loaded";
       readonly key: RecipeKeyAnswer["key"];
       readonly store: RecipeKeyAnswer["store"];
+      readonly releasing: boolean;
     }
   | { readonly status: "failed" };
+
+const KEY_RELEASE_POLL_MS = 5_000;
 
 const screenId = (screen: DesktopRecipe["screen"]) => `${screen.width}x${screen.height}`;
 
@@ -429,6 +432,10 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
     String(saved.placementId ?? "") === draft.placementId;
   const savedKeyRef = keyCarries ? String(saved.credentialRef ?? "") : "";
   const [savedKey, setSavedKey] = useState<SavedKey>({ status: "loading" });
+  // Teardown and the key sweep change nothing the query below depends on, so
+  // while a retired key is waiting the answer is asked for again.
+  const [keyAsked, setKeyAsked] = useState(0);
+  const waitingOnRelease = savedKey.status === "loaded" && savedKey.releasing;
   const keyQuery = takesKey
     ? `${String(props.project.id)}|${savedKeyRef}|${String(props.project.version)}`
     : undefined;
@@ -440,7 +447,8 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
       return undefined;
     }
     const controller = new AbortController();
-    setSavedKey({ status: "loading" });
+    // A repeat ask keeps the last answer on screen rather than flickering.
+    setSavedKey((current) => (keyAsked > 0 ? current : { status: "loading" }));
     client
       .request({ kind: "recipe-key", projectId: String(props.project.id) }, controller.signal)
       .then(
@@ -448,7 +456,12 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
           if (controller.signal.aborted) return;
           setSavedKey(
             answer.status === "recipe-key"
-              ? { status: "loaded", key: answer.key, store: answer.store }
+              ? {
+                  status: "loaded",
+                  key: answer.key,
+                  store: answer.store,
+                  releasing: answer.releasing === true,
+                }
               : { status: "failed" },
           );
         },
@@ -457,7 +470,12 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
         },
       );
     return () => controller.abort();
-  }, [props.client, props.project.id, keyQuery]);
+  }, [props.client, props.project.id, keyQuery, keyAsked]);
+  useEffect(() => {
+    if (!waitingOnRelease) return undefined;
+    const timer = setInterval(() => setKeyAsked((count) => count + 1), KEY_RELEASE_POLL_MS);
+    return () => clearInterval(timer);
+  }, [waitingOnRelease]);
   const keyStoreUnavailable = savedKey.status === "loaded" && savedKey.store === "unavailable";
   // What the key field says: a recipe moving to this provider has no key
   // yet whatever the host holds for another one.
@@ -477,6 +495,7 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
             : keyState === "rejected"
               ? `${providerName} refused this key when a desktop last started. Enter a new one.`
               : `No key saved. Desktops can't start until you enter your ${providerName} API key.`;
+  const keyReleasing = savedKey.status === "loaded" && savedKey.releasing;
   const keyReady = !takesKey || keyCarries || keyTyped;
   const limitsRefusal =
     draft.leaseMinutes > draft.maximumLeaseMinutes
@@ -655,6 +674,12 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
               <p className="project-provider-policy__hint" role="status">
                 {keyMessage}
               </p>
+              {keyReleasing ? (
+                <p className="project-provider-policy__hint" role="status">
+                  A previous key stays in {hostCredentialStore(hostPlatform)} until the desktops
+                  made with it are gone, then Octant deletes it.
+                </p>
+              ) : null}
             </>
           ) : null}
           {limitsRefusal === undefined ? null : (

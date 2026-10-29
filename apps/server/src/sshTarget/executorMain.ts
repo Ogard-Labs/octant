@@ -97,7 +97,7 @@ await serveSshExecutor({
       opens: "odd",
       maxStreams: MAX_DIALED_CONNECTIONS + SSH_EXECUTOR_MAX_PLACED_PROCESSES,
     });
-    const egress = new ExecutorEgress(send, hostOpened);
+    const egress = new ExecutorEgress(send, hostOpened, process.platform);
     const processes = new ExecutorProcesses(
       send,
       {

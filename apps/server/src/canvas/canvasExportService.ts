@@ -563,6 +563,16 @@ export class CanvasExportService {
     if (byteLength > CANVAS_EXPORT_PICTURES_MAX_BYTES) {
       return refused("too-large", "The rendered pictures are too large to export.");
     }
+    // A PDF is one page per design frame, or one per deck slide followed by
+    // the design frames the deck does not place.
+    const pages =
+      format !== "pdf"
+        ? undefined
+        : subject.kind === "frames"
+          ? subject.frames.length
+          : subject.kind === "slides"
+            ? subject.slides.length + (subject.frames?.length ?? 0)
+            : undefined;
     return {
       kind: "pictures",
       format,
@@ -571,8 +581,14 @@ export class CanvasExportService {
       payloadDigest: decodeCanvasExportPayloadDigest(digestOfFiles(files)),
       card: {
         files: files.map((file) => ({ name: file.name, byteLength: file.bytes.length })),
-        ...(format === "pdf" && subject.kind === "frames" ? { pages: subject.frames.length } : {}),
+        ...(pages === undefined ? {} : { pages }),
         ...(subject.kind === "frames" ? { drawsDesignFrames: true as const } : {}),
+        ...(subject.kind === "slides" &&
+        subject.slides.some((slide) =>
+          slide.definition.blocks.some((block) => block.kind === "design"),
+        )
+          ? { drawsDesignFrames: true as const }
+          : {}),
       },
     };
   }
@@ -654,6 +670,84 @@ function pictureSubject(
   document: CanvasExportDocument,
   frameTheme: CanvasExportFrameTheme | undefined,
 ): CanvasExportPictureRequest["subject"] | CanvasExportRefusal {
+  // A Canvas that holds a deck presents it: the deck's slides are the
+  // subject, one sheet each, so a picture export is one deck page per slide.
+  const deck = document.blocks.find(
+    (block): block is Extract<CanvasBlock, { kind: "deck" }> => block.kind === "deck",
+  );
+  if (deck !== undefined && document.definition !== undefined) {
+    const byId = new Map(
+      document.blocks.map((block) => [String(block.blockId), block as CanvasBlock]),
+    );
+    const slides: Array<{ definition: CanvasDefinition }> = [];
+    for (const slide of deck.slides) {
+      const placed = byId.get(String(slide.blockId));
+      if (placed === undefined) continue;
+      let block = placed;
+      if (placed.kind === "design" && slide.frameId !== undefined) {
+        // A design slide shows the one frame the deck names, so the block the
+        // slide's page draws carries that frame alone.
+        block = {
+          ...placed,
+          frames: placed.frames.filter((frame) => String(frame.frameId) === String(slide.frameId)),
+        };
+      }
+      if (placed.kind === "mockup" && slide.variantId !== undefined) {
+        // A mockup slide shows the one variant the deck names; the block's
+        // other variants stay on the screen, not on this slide.
+        const variant = placed.variants?.find(
+          (candidate) => String(candidate.variantId) === String(slide.variantId),
+        );
+        if (variant !== undefined) {
+          block = { ...placed, variants: [variant] };
+        }
+      }
+      slides.push({
+        definition: {
+          ...document.definition,
+          title: placed.kind === "design" || placed.kind === "mockup" ? placed.title : deck.title,
+          blocks: [block],
+        },
+      });
+    }
+    if (slides.length > 0) {
+      // A design the deck does not place keeps its own sheets after the
+      // deck's slides, so presenting one Canvas drops no screens it holds
+      // beside it.
+      const named = new Set(deck.slides.map((slide) => String(slide.blockId)));
+      const loose: CanvasExportPictureFrame[] = [];
+      for (const block of document.blocks) {
+        if (
+          block.kind !== "design" ||
+          block.size === "document" ||
+          named.has(String(block.blockId))
+        ) {
+          continue;
+        }
+        const pages = renderCanvasDesignExportFrames(block, frameTheme);
+        if (pages === undefined) {
+          return refused(
+            "malformed",
+            "A design in the workspace theme needs the theme the window draws it with.",
+          );
+        }
+        for (const page of pages) {
+          if (page.width === undefined) continue;
+          loose.push({
+            page: page.page,
+            sandbox: page.sandbox,
+            width: page.width,
+            height: page.height,
+          });
+        }
+      }
+      return {
+        kind: "slides",
+        slides,
+        ...(loose.length === 0 ? {} : { frames: loose }),
+      };
+    }
+  }
   const frames: CanvasExportPictureFrame[] = [];
   for (const block of document.blocks) {
     if (block.kind !== "design" || block.size === "document") continue;

@@ -96,6 +96,160 @@ export function makeDesktopProviderCredentialBrokerClient(
   return makeBrokerCredentialClient(options, "/v1/desktop-provider-credentials/", "credentialRef");
 }
 
+/**
+ * The App Store Connect API key, through the broker's own routes for it. The
+ * broker serves no resolve there, so this client can store, test for, and
+ * delete the key and never read it.
+ */
+export function makeAppStoreConnectKeyBrokerClient(
+  options: CredentialBrokerClientOptions,
+): Pick<ProviderCredentialStore, "has" | "set" | "delete"> {
+  const client = makeBrokerCredentialClient(
+    options,
+    "/v1/app-store-connect-keys/",
+    "credentialRef",
+  );
+  return Object.freeze({ has: client.has, set: client.set, delete: client.delete });
+}
+
+/** What writing the App Store Connect key file for one upload found. */
+export type AppStoreConnectKeyFileWrite =
+  | {
+      readonly kind: "written";
+      /** The `0600` file the broker wrote, inside the upload's private folder. */
+      readonly file: string;
+      readonly issuerId: string;
+      readonly keyId: string;
+    }
+  | { readonly kind: "missing" }
+  /** The key is kept in 1Password and `op` was missing, signed out, or declined. */
+  | { readonly kind: "key-source-unavailable" }
+  | { readonly kind: "unavailable" };
+
+/**
+ * The broker's key-file routes for one upload: it writes the stored key into
+ * the upload's private folder and removes it again. The answer names the file
+ * and the key's public IDs; this client never sees the key's bytes.
+ */
+export interface AppStoreConnectKeyFiles {
+  readonly write: (directory: string) => Promise<AppStoreConnectKeyFileWrite>;
+  readonly remove: (directory: string) => Promise<void>;
+}
+
+export function makeAppStoreConnectKeyFileBrokerClient(
+  options: CredentialBrokerClientOptions,
+  credentialRef: string,
+): AppStoreConnectKeyFiles {
+  const fetch = options.fetch ?? globalThis.fetch;
+  const post = async (operation: "write-key-file" | "remove-key-file", body: unknown) =>
+    await fetch(new URL(`/v1/app-store-connect-keys/${operation}`, options.url).toString(), {
+      method: "POST",
+      redirect: "error",
+      headers: {
+        "content-type": "application/json",
+        "x-octant-credential-broker-token": options.token,
+      },
+      body: JSON.stringify(body),
+    });
+  return Object.freeze({
+    write: async (directory: string): Promise<AppStoreConnectKeyFileWrite> => {
+      let response: Response;
+      try {
+        response = await post("write-key-file", { credentialRef, directory });
+      } catch {
+        return { kind: "unavailable" };
+      }
+      if (response.status === 404) return { kind: "missing" };
+      if (response.status === 424) return { kind: "key-source-unavailable" };
+      if (!response.ok) return { kind: "unavailable" };
+      try {
+        const value = (await response.json()) as unknown;
+        if (
+          hasExactKeys(value, ["file", "issuerId", "keyId"]) &&
+          typeof value.file === "string" &&
+          typeof value.issuerId === "string" &&
+          typeof value.keyId === "string"
+        ) {
+          return {
+            kind: "written",
+            file: value.file,
+            issuerId: value.issuerId,
+            keyId: value.keyId,
+          };
+        }
+      } catch {
+        // An answer that does not decode wrote nothing the upload can use.
+      }
+      return { kind: "unavailable" };
+    },
+    remove: async (directory: string): Promise<void> => {
+      try {
+        await post("remove-key-file", { directory });
+      } catch {
+        // The host removes the whole upload folder after the launch anyway.
+      }
+    },
+  });
+}
+
+/** What asking the broker for one App Store Connect API token found. */
+export type AppStoreConnectTokenSigning =
+  | { readonly kind: "signed"; readonly token: string }
+  | { readonly kind: "missing" }
+  /** The key is kept in 1Password and `op` was missing, signed out, or declined. */
+  | { readonly kind: "key-source-unavailable" }
+  | { readonly kind: "unavailable" };
+
+/**
+ * The broker's App Store Connect signer. The server names the credential
+ * reference and nothing else; the broker reads the key from its source,
+ * signs one short-lived token, and answers only the token, which the server
+ * sends in one request's `Authorization` header and never keeps.
+ */
+export interface AppStoreConnectTokens {
+  readonly sign: () => Promise<AppStoreConnectTokenSigning>;
+}
+
+export function makeAppStoreConnectTokenBrokerClient(
+  options: CredentialBrokerClientOptions,
+  credentialRef: string,
+): AppStoreConnectTokens {
+  const fetch = options.fetch ?? globalThis.fetch;
+  return Object.freeze({
+    sign: async (): Promise<AppStoreConnectTokenSigning> => {
+      let response: Response;
+      try {
+        response = await fetch(
+          new URL("/v1/app-store-connect-keys/sign-token", options.url).toString(),
+          {
+            method: "POST",
+            redirect: "error",
+            headers: {
+              "content-type": "application/json",
+              "x-octant-credential-broker-token": options.token,
+            },
+            body: JSON.stringify({ credentialRef }),
+          },
+        );
+      } catch {
+        return { kind: "unavailable" };
+      }
+      if (response.status === 404) return { kind: "missing" };
+      if (response.status === 424) return { kind: "key-source-unavailable" };
+      if (!response.ok) return { kind: "unavailable" };
+      try {
+        const value = (await response.json()) as unknown;
+        if (hasExactKeys(value, ["token"]) && typeof value.token === "string") {
+          return { kind: "signed", token: value.token };
+        }
+      } catch {
+        // An answer that does not decode signed nothing usable.
+      }
+      return { kind: "unavailable" };
+    },
+  });
+}
+
 function makeBrokerCredentialClient(
   options: CredentialBrokerClientOptions,
   routePrefix:
@@ -104,7 +258,8 @@ function makeBrokerCredentialClient(
     | "/v1/replica-store-credentials/"
     | "/v1/canvas-public-share-secrets/"
     | "/v1/mcp-server-credentials/"
-    | "/v1/desktop-provider-credentials/",
+    | "/v1/desktop-provider-credentials/"
+    | "/v1/app-store-connect-keys/",
   field: "providerInstanceId" | "instanceId" | "credentialRef" | "secretId",
 ): ProviderCredentialStore {
   const fetch = options.fetch ?? globalThis.fetch;

@@ -14,10 +14,8 @@ import type {
   WorkTurnUpdated,
 } from "@octant/contracts";
 import { REMOTE_PUSH_RATE_LIMIT } from "@octant/domain/push-notification-policy";
-import {
-  createRecordingPushDeliveryTransport,
-  type PushDeliverySendResult,
-} from "../automation/pushDeliveryTransport";
+import type { PushDeliverySendResult } from "../automation/pushDeliveryTransport";
+import { createRecordingPushDeliveryTransport } from "../automation/pushDeliveryTransport.test-support";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";

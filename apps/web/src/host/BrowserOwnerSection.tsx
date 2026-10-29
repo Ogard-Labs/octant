@@ -59,7 +59,7 @@ export function BrowserOwnerSection(props: BrowserOwnerSectionProps) {
     if (spoke === undefined) return;
     setBusy(true);
     setNotice(undefined);
-    setNotice(ownerActionNotice(await runOwnerAlertAction(spoke, row.alert, action), DONE[action]));
+    setNotice(ownerActionNotice(await runOwnerAlertAction(spoke, row, action), DONE[action]));
     setBusy(false);
     await load();
   };
@@ -76,26 +76,26 @@ export function BrowserOwnerSection(props: BrowserOwnerSectionProps) {
       ) : (
         <ul aria-label="New member alerts" className="setgroup">
           {reading.rows.map((row) => (
-            <li className="setrow" key={String(row.alert.alertId)}>
+            <li className="setrow" key={`${row.spoke.memberId}:${String(row.member.memberId)}`}>
               <span className="setrow-label">
-                {row.alert.name} joined {row.spoke.name}
+                {row.member.name} joined {row.spoke.name}
               </span>
               <SettingsFactList
                 facts={[
                   {
                     label: "Device key",
                     value: (
-                      <code className="oct-meta--mono">{row.alert.identityKeyFingerprint}</code>
+                      <code className="oct-meta--mono">{row.member.identityKeyFingerprint}</code>
                     ),
                   },
                 ]}
               />
               <div className="setrow-control">
                 {(["remove", "confirm", "dismiss"] as const)
-                  .filter((action) => action !== "confirm" || row.held)
+                  .filter((action) => (action === "confirm" ? row.held : row.alert !== undefined))
                   .map((action) => (
                     <OctantButton
-                      aria-label={`${action === "remove" ? "Remove" : action === "confirm" ? "Confirm" : "Dismiss"} ${row.alert.name}`}
+                      aria-label={`${action === "remove" ? "Remove" : action === "confirm" ? "Confirm" : "Dismiss"} ${row.member.name}`}
                       disabled={busy}
                       key={action}
                       onClick={() => void act(row, action)}

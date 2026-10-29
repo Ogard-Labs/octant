@@ -223,6 +223,10 @@ export const MAX_CODE_DEBUG_MESSAGE_LENGTH = 2_048;
 export const MAX_CODE_DEBUG_BREAKPOINT_FILES = 64;
 export const MAX_CODE_DEBUG_BREAKPOINTS_PER_FILE = 256;
 export const MAX_CODE_DEBUG_APPROVED_CONFIGURATIONS = 256;
+/** A session debugs at most this many of its program's children at once. */
+export const MAX_CODE_DEBUG_CHILDREN_AT_ONCE = 8;
+/** And at most this many over its life; later announcements run undebugged. */
+export const MAX_CODE_DEBUG_CHILDREN_PER_SESSION = 32;
 const MAX_LINE = 2_147_483_647;
 /** DAP references and identifiers are non-negative 32-bit integers. */
 const MAX_REFERENCE = 2_147_483_647;
@@ -238,6 +242,17 @@ export type CodeDebugApprovalScope = typeof CodeDebugApprovalScope.Type;
 /** Names one debug session, and its egress launch, across the journal. */
 export const CodeDebugSessionId = Schema.UUID.pipe(Schema.brand("CodeDebugSessionId"));
 export type CodeDebugSessionId = typeof CodeDebugSessionId.Type;
+
+/**
+ * Names one child process a session debugs: its place in the order the
+ * session attached its children, from 1. Canonical:
+ * docs/design/language-services.md § Child processes.
+ */
+export const CodeDebugChildId = Schema.Int.pipe(
+  Schema.between(1, MAX_CODE_DEBUG_CHILDREN_PER_SESSION),
+  Schema.brand("CodeDebugChildId"),
+);
+export type CodeDebugChildId = typeof CodeDebugChildId.Type;
 
 /**
  * Why a session ended. `stopped` is the person's Stop; `program-exited` the
@@ -331,6 +346,10 @@ export const CodeDebugSessionEnded = Schema.Struct({
   threadId: CodeThreadId,
   configurationDigest: CodeDebugConfigurationDigest,
   endReason: CodeDebugSessionEndReason,
+  /** How many child processes the session attached over its life, as a count only. */
+  childSessions: Schema.optional(
+    Schema.Int.pipe(Schema.between(0, MAX_CODE_DEBUG_CHILDREN_PER_SESSION)),
+  ),
 }).annotations(strict);
 export type CodeDebugSessionEnded = typeof CodeDebugSessionEnded.Type;
 
@@ -532,6 +551,12 @@ export type CodeDebugSessionRequest = typeof CodeDebugSessionRequest.Type;
 export const CodeDebugSessionCall = Schema.Struct({
   ...threadScope,
   sessionId: CodeDebugSessionId,
+  /**
+   * The session's child the request is for; absent for the program the
+   * session started. Breakpoints reach the program and every child whichever
+   * is named, and `stop` on a child ends that child only.
+   */
+  child: Schema.optional(CodeDebugChildId),
   request: CodeDebugSessionRequest,
 }).annotations(strict);
 export type CodeDebugSessionCall = typeof CodeDebugSessionCall.Type;
@@ -560,6 +585,14 @@ export const CodeDebugSessionState = Schema.Union(
   }).annotations(strict),
 );
 export type CodeDebugSessionState = typeof CodeDebugSessionState.Type;
+
+/** A child process the session debugs now, as the panel lists it under the session. */
+export const CodeDebugChildSummary = Schema.Struct({
+  child: CodeDebugChildId,
+  name: boundedText(MAX_CODE_DEBUG_NAME_LENGTH),
+  status: Schema.Literal("starting", "running", "stopped"),
+}).annotations(strict);
+export type CodeDebugChildSummary = typeof CodeDebugChildSummary.Type;
 
 export const CodeDebugOutputEntry = Schema.Struct({
   sequence: Schema.Int.pipe(Schema.positive()),
@@ -624,6 +657,16 @@ export const CodeDebugSessionResult = Schema.Union(
     output: Schema.Array(CodeDebugOutputEntry).pipe(Schema.maxItems(MAX_CODE_DEBUG_OUTPUT_ENTRIES)),
     /** Output past `afterOutput` the ring no longer holds, or more than one answer carries. */
     outputDropped: Schema.Boolean,
+    /**
+     * The children the session debugs now, whichever the request named;
+     * present when the adapter declares children. `state`, `revision`, and
+     * `exceptionFilters` are those of the child the request named.
+     */
+    children: Schema.optional(
+      Schema.Array(CodeDebugChildSummary).pipe(Schema.maxItems(MAX_CODE_DEBUG_CHILDREN_AT_ONCE)),
+    ),
+    /** Children the adapter announced past either bound, which ran undebugged. */
+    undebuggedChildren: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   }).annotations(strict),
   Schema.Struct({
     status: Schema.Literal("breakpoints"),
@@ -701,6 +744,7 @@ export const decodeCodeDebugConfigurationDigest = Schema.decodeUnknownSync(
   CodeDebugConfigurationDigest,
 );
 export const decodeCodeDebugSessionId = Schema.decodeUnknownSync(CodeDebugSessionId);
+export const decodeCodeDebugChildId = Schema.decodeUnknownSync(CodeDebugChildId);
 export const decodeCodeDebugConfigurationsRequest = Schema.decodeUnknownSync(
   CodeDebugConfigurationsRequest,
 );

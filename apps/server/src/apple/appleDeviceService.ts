@@ -33,6 +33,8 @@ import {
   type AppleDeviceThreadHoldings,
 } from "@octant/domain";
 import type { AppleDeviceLeases, EndedAppleDeviceLease } from "./appleDeviceLeases";
+import type { AppleDistributionUpload } from "./appleDistributionUpload";
+import type { AppleStoreVersions } from "./appleStoreVersions";
 import {
   MAX_DEVICE_IDENTITIES,
   readStoredFile,
@@ -61,6 +63,16 @@ import {
   withoutDeviceIdentifiers,
   type DevicectlDevice,
 } from "./devicectl";
+
+/**
+ * Whether the Current Release Boundary admits distribution (decision 7 of
+ * docs/design/apple-devices.md). The maintainer admitted it on 2026-10-28, so
+ * App Store Connect key entry is open on a Mac and upload, submission, and
+ * release are decided by the distribution rows of the device policy; each
+ * still needs a local person's confirmation. Turning this off again refuses
+ * every one of them as `distribution-not-enabled`.
+ */
+export const APPLE_DISTRIBUTION_ADMITTED = true;
 
 const DEVICECTL_TIMEOUT_MS = 30_000;
 /** The largest `--json-output` document the host reads back. */
@@ -162,6 +174,17 @@ export interface AppleDeviceServiceOptions {
   readonly platform?: NodeJS.Platform;
   /** Override for tests; production waits `LAUNCH_SETTLE_MS`. */
   readonly launchSettleMs?: number;
+  /**
+   * The person-confirmed upload to App Store Connect. Absent, an upload the
+   * policy allowed is still refused as not offered on this host.
+   */
+  readonly distribution?: Pick<AppleDistributionUpload, "upload">;
+  /**
+   * The person-confirmed submission for App Review and release of one
+   * version. Absent, a step the policy allowed is still refused as not
+   * offered on this host.
+   */
+  readonly storeVersions?: Pick<AppleStoreVersions, "carryOut">;
 }
 
 /**
@@ -379,7 +402,16 @@ export class AppleDeviceService {
     // Releasing needs no fresh look at the device: a person may let go of a
     // phone that is already unplugged.
     if (request.kind === "release-device") return undefined;
-    if ((await this.#refresh(signal)) !== "unreadable") return undefined;
+    // Distribution targets no device: once the toolchain has answered, a
+    // device listing that failed does not stand in its way.
+    if (
+      (await this.#refresh(signal)) !== "unreadable" ||
+      request.kind === "upload" ||
+      request.kind === "submit-for-review" ||
+      request.kind === "release-version"
+    ) {
+      return undefined;
+    }
     return decodeAppleDeviceResponse({
       kind: "apple-device-failure",
       failure: { category: "unavailable", message: "Paired devices could not be listed." },
@@ -418,8 +450,7 @@ export class AppleDeviceService {
       tooling: this.#layer.tooling,
       devices: this.#layer.devices,
       leases: this.#options.leases.list(),
-      // Decision 7 keeps distribution closed until its own release-boundary change.
-      distributionEnabled: false,
+      distributionEnabled: APPLE_DISTRIBUTION_ADMITTED,
     };
     return {
       decision: evaluateAppleDeviceRequest(request, context, host, this.#holdingsFor(request)),
@@ -582,6 +613,37 @@ export class AppleDeviceService {
           notes: [],
           artifacts: [],
         });
+      case "upload": {
+        const distribution = this.#options.distribution;
+        if (distribution === undefined) return refused("operation-unavailable");
+        if (this.#actionIds.has(String(request.actionId))) {
+          return decodeAppleDeviceResponse({
+            kind: "apple-device-failure",
+            failure: {
+              category: "invalid",
+              message: "This upload's action id was already used; issue a new one.",
+            },
+          });
+        }
+        this.#actionIds.add(String(request.actionId));
+        return await distribution.upload(request, context, signal);
+      }
+      case "submit-for-review":
+      case "release-version": {
+        const storeVersions = this.#options.storeVersions;
+        if (storeVersions === undefined) return refused("operation-unavailable");
+        if (this.#actionIds.has(String(request.actionId))) {
+          return decodeAppleDeviceResponse({
+            kind: "apple-device-failure",
+            failure: {
+              category: "invalid",
+              message: "This step's action id was already used; issue a new one.",
+            },
+          });
+        }
+        this.#actionIds.add(String(request.actionId));
+        return await storeVersions.carryOut(request, signal);
+      }
       default:
         // Uninstall arrives in a later slice; until then the host does not
         // offer what the policy would allow.

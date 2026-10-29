@@ -120,6 +120,22 @@ export async function openAppPairingCode(
 ): Promise<OpenedAppPairingCode | Refused | Failed> {
   const reading = readAppPairingCode(options.code);
   if (reading.status === "refused") return reading;
+  return openPairingTicket({ ...options, ...reading });
+}
+
+/**
+ * Opens a ticket at an origin under a stated trust. A client that holds pins
+ * passes the code's pinned trust; a browser, which cannot check a pin, passes
+ * the origin that served its page and the platform's own certificate check.
+ */
+export async function openPairingTicket(
+  options: Omit<OpenAppPairingCodeOptions, "code"> & {
+    readonly origin: string;
+    readonly ticket: RemotePairingTicket;
+    readonly listenerTrust: ListenerTrust;
+  },
+): Promise<OpenedAppPairingCode | Refused | Failed> {
+  const reading = options;
   const transport = options.transport({
     origin: reading.origin,
     trust: { current: reading.listenerTrust },

@@ -30,6 +30,7 @@ import type {
   ThreadMessageQueueInspection,
 } from "./threadMessageQueuePort";
 import { ThreadMessageQueueService } from "./threadMessageQueueService";
+import { queueRestartContinuation } from "../harness/restartContinuation";
 
 const now = "2026-10-03T18:00:00.000Z";
 const actor = decodeEventActor({ kind: "system", actorId: randomUUID() });
@@ -134,6 +135,58 @@ function command(
   });
 }
 describe("durable ordinary thread queue", () => {
+  const recovery = {
+    windowId,
+    threadId: String(scope.threadId),
+    mode: "chat" as const,
+    recoveryIdentity: "lost-turn-1",
+  };
+
+  it("keeps a restart continuation durable and deduplicates a lost response across queue reconstruction", async () => {
+    const before = fixture();
+    expect(await queueRestartContinuation(before.service, recovery)).toEqual({ kind: "queued" });
+    const queued = await snapshot(before.service);
+    expect(queued.items).toHaveLength(1);
+    expect(queued.items[0]?.payload?.prompt).toContain("Do not blindly repeat operations");
+    const path = before.database;
+    before.close();
+    const after = fixture(port(), path);
+    await after.service.recover();
+    expect(await queueRestartContinuation(after.service, recovery)).toEqual({ kind: "queued" });
+    expect((await snapshot(after.service)).items).toHaveLength(1);
+    await after.service.tick(scope);
+    expect(after.p.admit).toHaveBeenCalledTimes(1);
+    await queueRestartContinuation(after.service, recovery);
+    await after.service.tick(scope);
+    expect(after.p.admit).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not unpause unrelated queued work when resuming an interrupted turn", async () => {
+    const f = fixture();
+    await f.service.execute(windowId, enqueue());
+    const state = await snapshot(f.service);
+    await f.service.execute(windowId, command("pause", state.version));
+    expect(await queueRestartContinuation(f.service, recovery)).toMatchObject({
+      kind: "refused",
+      message: expect.stringContaining("Review and remove them from the queue"),
+    });
+    expect((await snapshot(f.service)).paused).toBe(true);
+    expect((await snapshot(f.service)).items).toHaveLength(1);
+    await f.service.tick(scope);
+    expect(f.p.admit).not.toHaveBeenCalled();
+  });
+
+  it("keeps a continuation in the ordinary queue when its later mode admission is refused", async () => {
+    const f = fixture();
+    f.p.admit.mockResolvedValue({ status: "refused", reason: "authority-revoked" });
+    await queueRestartContinuation(f.service, recovery);
+    await f.service.tick(scope);
+    expect(await snapshot(f.service)).toMatchObject({
+      holdReason: "authority-revoked",
+      items: [{ status: "queued" }],
+    });
+  });
+
   it("keeps private bodies out of the journal and holds pending work after reopening", async () => {
     const f = fixture();
     const c = enqueue();

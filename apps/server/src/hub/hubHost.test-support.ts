@@ -43,7 +43,7 @@ import { createPeerDelegationRouteHandler } from "./peerDelegationRoutes";
 import { PeerDelegationService, type PeerDelegationHost } from "./peerDelegationService";
 import { createPinnedHubTransport, type HubNetwork, type HubTransport } from "./pinnedHubTransport";
 import { createRosterSigningKeyStore } from "./rosterSigningKey";
-import { SpokeLinkService } from "./spokeLinkService";
+import { deviceLifecycleAt, SpokeLinkService } from "./spokeLinkService";
 
 function deviceIsActive(
   administration: Pick<LocalDeviceAdministrationPort, "listDevices">,
@@ -144,6 +144,8 @@ export async function startHubTestHost(input: {
   readonly delegatingTransport?: (transport: HubTransport) => HubTransport;
   /** The authenticated product surface; the tests that prove a member reaches none of it pass a spy. */
   readonly productDispatch?: RemoteProductDispatch;
+  /** The clock the spoke role reads, so a test can let a device's inactivity window pass. */
+  readonly now?: () => number;
 }): Promise<HubTestHost> {
   const directory = mkdtempSync(join(tmpdir(), "octant-hub-"));
   input.cleanups.push(() => rmSync(directory, { recursive: true, force: true }));
@@ -260,6 +262,8 @@ export async function startHubTestHost(input: {
       const current = gateway;
       return {
         admitIntroducedDevice: (input) => current.admitIntroducedDevice(input),
+        deviceLifecycle: (deviceId, now) =>
+          deviceLifecycleAt(administration.listDevices(), deviceId, now),
         revokeDevice: (deviceId) => {
           administration.revokeDevice({ deviceId });
         },
@@ -268,7 +272,7 @@ export async function startHubTestHost(input: {
     },
     record: (change) => records.push(change),
     serverBuildVersion: "0.1.0",
-    now: Date.now,
+    now: input.now ?? Date.now,
   });
   // Moves this host's clock for the owner routes only, so a challenge can
   // outlive its minute without the test waiting for it.

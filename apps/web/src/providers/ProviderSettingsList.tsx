@@ -53,6 +53,7 @@ import {
   SubscriptionEndpointSignIn,
 } from "./ProviderSettingsConfiguration";
 import { acpAuthenticationFact } from "./configuration/AcpConfigurationForms";
+import { OutsideDriverConfigurationForm } from "./configuration/OutsideDriverConfigurationForm";
 import { credentialStatusLabel, useCredentialStatus } from "./ProviderSettingsCredentials";
 import { ProviderApiKeyEditor, acceptsApiKeyPool } from "./ProviderApiKeyEditor";
 import {
@@ -93,6 +94,7 @@ export type ProviderSettingsListProps = Pick<
   | "onChangePiConfiguration"
   | "onChangeOhMyPiConfiguration"
   | "onChangeOllamaConfiguration"
+  | "onChangeOutsideHarnessEndpointConfiguration"
   | "onChangeOpenAiCompatibleConfiguration"
   | "onChangeAnthropicCompatibleConfiguration"
   | "onChangeAzureFoundryConfiguration"
@@ -293,6 +295,12 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         onChangePiConfiguration={props.onChangePiConfiguration}
         onChangeOhMyPiConfiguration={props.onChangeOhMyPiConfiguration}
         onChangeOllamaConfiguration={props.onChangeOllamaConfiguration}
+        {...(props.onChangeOutsideHarnessEndpointConfiguration === undefined
+          ? {}
+          : {
+              onChangeOutsideHarnessEndpointConfiguration:
+                props.onChangeOutsideHarnessEndpointConfiguration,
+            })}
         onChangeOpenAiCompatibleConfiguration={props.onChangeOpenAiCompatibleConfiguration}
         onChangeAnthropicCompatibleConfiguration={props.onChangeAnthropicCompatibleConfiguration}
         onChangeAzureFoundryConfiguration={props.onChangeAzureFoundryConfiguration}
@@ -618,6 +626,7 @@ interface ProviderRowProps {
   readonly onChangePiConfiguration: ProviderSettingsViewProps["onChangePiConfiguration"];
   readonly onChangeOhMyPiConfiguration: ProviderSettingsViewProps["onChangeOhMyPiConfiguration"];
   readonly onChangeOllamaConfiguration: ProviderSettingsViewProps["onChangeOllamaConfiguration"];
+  readonly onChangeOutsideHarnessEndpointConfiguration?: ProviderSettingsViewProps["onChangeOutsideHarnessEndpointConfiguration"];
   readonly onChangeOpenAiCompatibleConfiguration: ProviderSettingsViewProps["onChangeOpenAiCompatibleConfiguration"];
   readonly onChangeAnthropicCompatibleConfiguration: ProviderSettingsViewProps["onChangeAnthropicCompatibleConfiguration"];
   readonly onChangeAzureFoundryConfiguration: ProviderSettingsViewProps["onChangeAzureFoundryConfiguration"];
@@ -1316,6 +1325,15 @@ function ProviderRow(props: ProviderRowProps) {
                   {...(props.onOpenExternalUrl === undefined
                     ? {}
                     : { onOpenExternalUrl: props.onOpenExternalUrl })}
+                />
+              ) : outsideInstance !== undefined &&
+                props.onChangeOutsideHarnessEndpointConfiguration !== undefined ? (
+                <OutsideDriverConfigurationForm
+                  credentialManagementAvailable={props.credentialManagementAvailable}
+                  disabled={disabled}
+                  instance={outsideInstance}
+                  key={`outside:${props.instance.version}`}
+                  onChange={props.onChangeOutsideHarnessEndpointConfiguration}
                 />
               ) : null}
             </section>
