@@ -422,6 +422,7 @@ export class DelegatingSpokeService {
     if (answer.status === "unreachable") return;
     if (!answer.response.ok) {
       const refusal = await refusalOf(answer.response);
+      if (!isDefiniteAnswer(refusal)) return;
       if (
         refusal.reason === "unknown-request" &&
         now - Date.parse(owed.sentAt) > UNCONFIRMED_REQUEST_MS
@@ -476,6 +477,10 @@ export class DelegatingSpokeService {
     }
     if (!answer.response.ok) {
       const refusal = await refusalOf(answer.response);
+      if (!isDefiniteAnswer(refusal)) {
+        this.#update(sent.requestId, { cancelRequested: true });
+        return { status: "target-unreachable" };
+      }
       // The target may not have finished starting a request this host sent, so
       // "unknown" is not yet an answer: the poll asks again.
       if (sent.state === "awaiting-acceptance" && refusal.reason === "unknown-request") {
@@ -654,6 +659,19 @@ export function memberOrigin(member: RosterMember): string | undefined {
   if (host === undefined) return undefined;
   const bracketed = host.includes(":") ? `[${host}]` : host;
   return `https://${bracketed}${member.listenerPort === undefined ? "" : `:${member.listenerPort}`}`;
+}
+
+/**
+ * A refusal with no readable reason, or a status that says "try again" (a
+ * gateway that is closed answers 503 with no body), is the target not
+ * answering: the cancel stays owed instead of being treated as decided.
+ */
+function isDefiniteAnswer(refusal: {
+  readonly httpStatus: number;
+  readonly reason: string;
+}): boolean {
+  if (refusal.reason === "unreadable") return false;
+  return refusal.httpStatus !== 408 && refusal.httpStatus !== 429 && refusal.httpStatus < 500;
 }
 
 async function refusalOf(

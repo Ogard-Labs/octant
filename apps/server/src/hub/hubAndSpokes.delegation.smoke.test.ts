@@ -919,6 +919,65 @@ describe("erasing a parent thread whose remote child could not be reached", () =
   });
 });
 
+describe("a target that answers a cancellation with an unreadable refusal", () => {
+  function closedGatewayCancel() {
+    const fault = { closed: false };
+    const transport = (inner: HubTransport): HubTransport => {
+      return (target) => {
+        const send = inner(target);
+        return async (url, init) => {
+          if (fault.closed && url.endsWith(PEER_DELEGATION_ROUTES.cancel)) {
+            return new Response(null, { status: 503 });
+          }
+          return send(url, init);
+        };
+      };
+    };
+    return { fault, transport };
+  }
+
+  it("keeps the cancel owed and cancels the child on the next poll", async () => {
+    const closing = closedGatewayCancel();
+    const { a, b, child } = await threeHosts({ aTransport: closing.transport });
+    const delegated = await a.delegating.delegate(startCommand(b), { windowId: "window-a" });
+    if (delegated.status !== "delegated") throw new Error(JSON.stringify(delegated));
+    closing.fault.closed = true;
+
+    expect(await a.delegating.cancel(String(delegated.requestId))).toEqual({
+      status: "target-unreachable",
+    });
+    expect(a.delegationState.load().sent[0]?.cancelRequested).toBe(true);
+    expect(child.interrupted).toHaveLength(0);
+
+    closing.fault.closed = false;
+    await a.delegating.trackOpen();
+
+    expect(child.interrupted).toHaveLength(1);
+  });
+
+  it("keeps a cancellation owed for an erased parent until the target answers it", async () => {
+    const closing = closedGatewayCancel();
+    const { a, b, child } = await threeHosts({ aTransport: closing.transport });
+    const delegated = await a.delegating.delegate(startCommand(b), { windowId: "window-a" });
+    if (delegated.status !== "delegated") throw new Error(JSON.stringify(delegated));
+    closing.fault.closed = true;
+    await a.delegating.cancelParent(PARENT_THREAD);
+    a.delegating.forgetParent(PARENT_THREAD);
+    expect(a.delegationState.load().owedCancels).toHaveLength(1);
+
+    await a.delegating.trackOpen();
+
+    expect(a.delegationState.load().owedCancels).toHaveLength(1);
+    expect(child.interrupted).toHaveLength(0);
+
+    closing.fault.closed = false;
+    await a.delegating.trackOpen();
+
+    expect(child.interrupted).toHaveLength(1);
+    expect(a.delegationState.load().owedCancels ?? []).toEqual([]);
+  });
+});
+
 describe("what the delegating spoke checks before it asks anyone", () => {
   it.each([
     [
