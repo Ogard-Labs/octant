@@ -10,7 +10,15 @@
  * reaches these routes, because only this process holds the bridge secret.
  */
 
-import { decodeHubGrant, decodeHubLeaveRequest } from "@octant/contracts";
+import {
+  decodeConfirmNewMembersRequest,
+  decodeHubGrant,
+  decodeHubLeaveRequest,
+  decodeOwnerAdditionRequest,
+  decodeOwnerAlertRequest,
+  decodeOwnerMemberRequest,
+  decodeOwnerRemovalRequest,
+} from "@octant/contracts";
 import { Schema } from "effect";
 
 type BodyDecoder = (value: unknown) => unknown;
@@ -56,6 +64,36 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
   "join-finish": { method: "POST", path: "/api/desktop/hub/join/finish" },
   grant: { method: "POST", path: "/api/desktop/hub/grant", decodeBody: decodeHubGrant },
   leave: { method: "POST", path: "/api/desktop/hub/leave" },
+  "owners-add": {
+    method: "POST",
+    path: "/api/desktop/hub/owners/add",
+    decodeBody: decodeOwnerAdditionRequest,
+  },
+  "owners-remove": {
+    method: "POST",
+    path: "/api/desktop/hub/owners/remove",
+    decodeBody: decodeOwnerRemovalRequest,
+  },
+  "confirm-new-members": {
+    method: "POST",
+    path: "/api/desktop/hub/confirm-new-members",
+    decodeBody: decodeConfirmNewMembersRequest,
+  },
+  "confirm-member": {
+    method: "POST",
+    path: "/api/desktop/hub/members/confirm",
+    decodeBody: decodeOwnerMemberRequest,
+  },
+  "alert-dismiss": {
+    method: "POST",
+    path: "/api/desktop/hub/alerts/dismiss",
+    decodeBody: decodeOwnerAlertRequest,
+  },
+  "alert-remove": {
+    method: "POST",
+    path: "/api/desktop/hub/alerts/remove",
+    decodeBody: decodeOwnerAlertRequest,
+  },
   "certificate-status": { method: "GET", path: "/api/desktop/hub/certificate" },
   certificate: {
     method: "POST",

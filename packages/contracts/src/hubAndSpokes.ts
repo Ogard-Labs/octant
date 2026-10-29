@@ -43,6 +43,17 @@ export const PeerPrincipal = Schema.Struct({
 }).annotations(strict);
 export type PeerPrincipal = typeof PeerPrincipal.Type;
 
+/**
+ * An owner device acting on a host with a window's powers after a fresh
+ * unlock. It names the owner for the journal only; a request resolves to it
+ * after the host checked its owner list and the unlock, never from the request.
+ */
+export const OwnerUnlockPrincipal = Schema.Struct({
+  kind: Schema.Literal("owner-unlock"),
+  memberId: HubMemberId,
+}).annotations(strict);
+export type OwnerUnlockPrincipal = typeof OwnerUnlockPrincipal.Type;
+
 export const HubAndSpokesPrincipal = Schema.Union(HubPrincipal, PeerPrincipal);
 export type HubAndSpokesPrincipal = typeof HubAndSpokesPrincipal.Type;
 
@@ -150,6 +161,12 @@ export const RosterMember = Schema.Struct({
   /** The port the member's listener serves on; absent means the HTTPS default. */
   listenerPort: Schema.optional(Schema.Int.pipe(Schema.between(1, 65_535))),
   owner: Schema.Boolean,
+  /**
+   * The unlock public key the hub recorded when this member joined with an
+   * owner code. It authorizes nothing: a host lists an owner only after its own
+   * person confirms the name and both fingerprints.
+   */
+  ownerUnlockPublicKey: Schema.optional(base64Url(512)),
 }).annotations(strict);
 export type RosterMember = typeof RosterMember.Type;
 
@@ -189,20 +206,36 @@ export const HostOwnerEntry = Schema.Struct({
 }).annotations(strict);
 export type HostOwnerEntry = typeof HostOwnerEntry.Type;
 
-/**
- * An owner device's confirmation of one new member on one spoke, signed with
- * the owner's unlock key. The spoke checks the signature and the owner against
- * its own owner list; the hub cannot produce one.
- */
-export const NewMemberConfirmation = Schema.Struct({
+const newMemberConfirmationFields = {
   spokeId: HubMemberId,
   memberId: HubMemberId,
   identityKeyFingerprint: digest,
   confirmedBy: HubMemberId,
   unlockKeyFingerprint: digest,
   confirmedAt: UtcTimestamp,
-  signature: base64Url(512),
-}).annotations(strict);
+};
+
+/**
+ * An owner device's confirmation of one new member on one spoke, signed with
+ * the owner's unlock key. The spoke checks the signature and the owner against
+ * its own owner list; the hub cannot produce one. A raw key signs the
+ * confirmation text; a passkey carries a WebAuthn assertion whose challenge is
+ * the SHA-256 of that text, as for an unlock.
+ */
+export const NewMemberConfirmation = Schema.Union(
+  // The assertion comes first: a decoder that ignores extra fields would
+  // otherwise match the raw shape and drop the assertion.
+  Schema.Struct({
+    ...newMemberConfirmationFields,
+    authenticatorData: base64Url(1_024),
+    clientDataJson: base64Url(2_048),
+    signature: base64Url(512),
+  }).annotations(strict),
+  Schema.Struct({
+    ...newMemberConfirmationFields,
+    signature: base64Url(512),
+  }).annotations(strict),
+);
 export type NewMemberConfirmation = typeof NewMemberConfirmation.Type;
 
 export const DelegatingThreadReference = Schema.Union(

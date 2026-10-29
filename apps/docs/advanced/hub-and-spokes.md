@@ -199,6 +199,90 @@ the same fingerprint, so nothing they hold changes. If Tailscale hands over a
 certificate that does not check out, Octant does not install it and the
 listener keeps serving the original.
 
+## Owner devices
+
+An owner device is one of your own devices that can do from afar what you could
+do at a computer's window, for example remove a member or change who else is an
+owner. It can do this only right after you prove you are there.
+
+**Each computer keeps its own owner list.** The hub's roster shows which
+members are owners and carries each owner's unlock key. But the roster never
+makes anyone an owner on a computer. A computer lists only the owners you
+confirmed on it.
+
+**How a device becomes an owner**
+
+- On the hub: make the join code with **The device that joins is an owner of
+  this hub** ticked, or run `octant hub join-code --owner`. The device that joins
+  with that code is the hub's first owner. A phone shows a switch, **This is an
+  owner code**, before it joins. Turn it on for an owner code.
+- On a spoke: when the spoke joins with **Owners** ticked, open **Settings →
+  Remote access** on that spoke. Under **Owner devices** it lists the hub's owner
+  devices by name, device key fingerprint, and unlock key fingerprint. You paste
+  nothing. Check that the name and both fingerprints match what the device shows,
+  and choose **Add**. The hub cannot add an owner to a spoke.
+- Later: add or remove owners in that computer's own window the same way.
+- If the roster later lists a different unlock key for an owner you already
+  added, the spoke keeps the key you confirmed and shows a warning. To accept the
+  new key, remove that owner and add it again.
+
+**The unlock.** Every change an owner device makes asks you to unlock first, with
+Face ID, a fingerprint, your passcode, or a passkey. One unlock covers one
+action, for at most 60 seconds. A second action asks again. An unlock that was
+used, that ran out, or that was for a different action is refused, and the
+screen says so in plain words. If you cancel the unlock, nothing changes.
+
+**Phone.** The phone makes an unlock key when it joins with an owner code. Its
+private half is kept only in the phone's secure storage and opens only after you
+unlock. This is a narrower protection than a hardware key: the key is not bound
+to the phone's secure chip, and it is in memory while one action runs. Confirming
+a member asks you once. The phone drops the key when the action ends.
+
+**Browser.** A browser on your tailnet that joined as an owner uses a passkey as
+its unlock key, one passkey for each computer address it uses. A browser without
+a built-in authenticator cannot be an owner. The desktop app never offers a
+passkey, because its window already has the computer's authority.
+
+To join from a browser, open the hub's web app at its tailnet name, then go to
+**Settings → Remote access → Hub**. Paste the hub's join code, compare the short
+code with the one the hub shows, and approve there. For an owner code, tick **This
+is an owner code**: the browser makes a passkey for that address first and sends
+only its public key. If the browser cannot make a passkey, the box stays off and
+it can join only as a plain guest. If you cancel the passkey, nothing is sent to
+the hub. **Leave the hub** forgets the hub on this browser; remove the browser on
+the hub too.
+
+A browser can reach only the address that served its page, so it cannot read a
+spoke's alerts from the hub's page, and it does not yet reach the other computers
+on the hub. Owner alerts show in a browser only on a computer's own address, and
+none of that has been tried yet.
+
+An agent, a routine, the hub, a standby hub, and another computer can never
+unlock. Joining a spoke to a hub still happens on that spoke.
+
+### Confirm new members and alerts
+
+Under **Settings → Remote access → New members**, a spoke has **Confirm new
+members**. It is off by default. With it on, a member the hub adds later can only
+read status on that spoke until you confirm it, in that spoke's window or on an
+owner device. **Confirm** shows only for a member the spoke is holding this way.
+
+Every spoke also keeps an alert for each member a newer roster adds, whether or
+not Confirm new members is on. The hub cannot hide or write one. An alert shows
+the member's name and key fingerprint. In a window you can choose **Dismiss**,
+**Remove** (this spoke drops what it gave that member and refuses it), or
+**Confirm** for a member held until confirmed. An owner phone shows the same
+alerts under **Owner alerts**, with **Remove**, **Confirm**, and **Dismiss**, each
+asking for the unlock first. If you did not add the member, choose **Remove**,
+then check the hub: a member nobody added may mean the hub is not safe.
+
+Confirming a member signs a note with the unlock key. A passkey can sign it too.
+A passkey asks twice: once for the note, once for the action. A phone asks once.
+
+**Not checked on real hardware.** The owner features are built and tested with
+software keys. A phone with Face ID or a fingerprint, a real passkey (none has been
+run, in a browser or anywhere else), and Android have not been tried. Expect rough edges the first time you use them.
+
 ## The hub grant
 
 The grant is a closed list. You can change every item, at any time, on the
@@ -217,8 +301,9 @@ spoke. Only the spoke can change it.
 | Act       | Act here as a paired device would, in Projects you name.                                  |
 
 Ticking an item records your choice. In this release the hub can use only
-Roster and Status. The other items, including Introduce and Owners, do nothing
-yet, because the features behind them are not available yet.
+Roster and Status. Owners works for your own owner devices (see
+[Owner devices](#owner-devices)). The other items, including Introduce, do
+nothing yet, because the features behind them are not available yet.
 
 Whatever you tick, the computer keeps its files, sign-ins, sandbox, and every
 approval.
@@ -241,15 +326,20 @@ with `octant hub status`.
 
 ## If something goes wrong
 
-| Situation               | What you do                                                                                                                                                  |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Add a new laptop        | Make a join code on the hub. Join from the laptop. Compare the short code and approve on the hub.                                                            |
-| Lose a laptop           | On the hub, remove it. Other spokes drop what they held for it at the next roster.                                                                           |
-| Lose every owner device | Sit at any computer, or reach the hub over SSH on the private network. Run `octant hub join-code --owner`. The device that joins with that code is an owner. |
+| Situation                               | What you do                                                                                                                                                                     |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Add a new laptop                        | Make a join code on the hub. Join from the laptop. Compare the short code and approve on the hub.                                                                               |
+| Lose a laptop                           | On the hub, remove it. Other spokes drop what they held for it at the next roster.                                                                                              |
+| Lose the phone                          | In a window on the hub or a spoke, or on another owner device, remove the phone: as a member on the hub, and as an owner on each computer. Join a new phone with an owner code. |
+| Lose every owner device                 | Sit at any computer, or reach the hub over SSH on the private network. Run `octant hub join-code --owner`. The device that joins with that code is an owner.                    |
+| An alert shows a member you did not add | Choose **Remove** in the alert, in a window or on an owner device, then check the hub.                                                                                          |
 
-These are not available yet: using owner devices to administer a hub, a standby
-hub that takes over when the hub is down, and alerts about members you did not
-add. If the hub is down or lost, each computer keeps working on its own. Join the
+A thief who has the phone but not your face, finger, or passcode has only the
+powers of an ordinary member until you remove it.
+
+These are not available yet: a standby hub that takes over when the hub is
+down, sign-in copy between computers, and posture changes from an owner device.
+If the hub is down or lost, each computer keeps working on its own. Join the
 computers to a new hub from each one.
 
 ## Next steps

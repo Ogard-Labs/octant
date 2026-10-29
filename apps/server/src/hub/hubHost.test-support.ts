@@ -29,11 +29,22 @@ import type { PrivateListenerHostStatus } from "../remote/privateListenerLifecyc
 import { createRemoteGateway, type RemoteGateway } from "../remote/remoteGateway";
 import { createSelfMadeListenerCertificateStore } from "../remote/selfMadeListenerCertificate";
 import { createHubLinkRouteHandler } from "./hubLinkRoutes";
+import { createHubOwnerRouteHandler } from "./hubOwnerRoutes";
+import { OwnerUnlockService } from "./ownerUnlock";
 import { createHubStateStore, type HubStatePort } from "./hubStateStore";
 import { HubService, type HubHostIdentity } from "./hubService";
 import { createPinnedHubTransport, type HubNetwork } from "./pinnedHubTransport";
 import { createRosterSigningKeyStore } from "./rosterSigningKey";
 import { deviceLifecycleAt, SpokeLinkService } from "./spokeLinkService";
+
+function deviceIsActive(
+  administration: Pick<LocalDeviceAdministrationPort, "listDevices">,
+  deviceId: string,
+): boolean {
+  return administration
+    .listDevices()
+    .some((device) => device.deviceId === deviceId && device.state === "active");
+}
 
 const tailscaleFacts: RequestTransportFacts = {
   listenerTrust: "remote",
@@ -90,6 +101,8 @@ export interface HubTestHost {
   readonly signHostPayload: (payload: string) => string;
   readonly hostPublicKey: string;
   readonly privateKey: KeyObject;
+  /** Moves the clock the owner routes read; the rest of the host keeps real time. */
+  readonly clock: { offset: number };
 }
 
 export async function startHubTestHost(input: {
@@ -198,6 +211,7 @@ export async function startHubTestHost(input: {
           administration.revokeDevice({ deviceId });
         },
         deviceKeyFingerprint: (deviceId) => current.pairedDeviceKeyFingerprint(deviceId),
+        deviceActive: (deviceId) => deviceIsActive(administration, deviceId),
       };
     },
     transport,
@@ -220,13 +234,26 @@ export async function startHubTestHost(input: {
         revokeDevice: (deviceId) => {
           administration.revokeDevice({ deviceId });
         },
+        deviceActive: (deviceId) => deviceIsActive(administration, deviceId),
       };
     },
     record: (change) => records.push(change),
     serverBuildVersion: "0.1.0",
     now: input.now ?? Date.now,
   });
-  const hubLink = createHubLinkRouteHandler({ hub, spoke });
+  // Moves this host's clock for the owner routes only, so a challenge can
+  // outlive its minute without the test waiting for it.
+  const clock = { offset: 0 };
+  const ownerNow = () => Date.now() + clock.offset;
+  const hubLinkRoutes = createHubLinkRouteHandler({ hub, spoke });
+  const hubOwnerRoutes = createHubOwnerRouteHandler({
+    hub,
+    spoke,
+    unlock: new OwnerUnlockService({ now: ownerNow, hostMemberId: () => hub.hubMemberId() }),
+    now: ownerNow,
+  });
+  const hubLink = async (request: Request) =>
+    (await hubLinkRoutes(request)) ?? hubOwnerRoutes(request);
 
   let gatewayFetch:
     | ((request: Request, facts?: RequestTransportFacts) => Promise<Response>)
@@ -308,5 +335,6 @@ export async function startHubTestHost(input: {
     signHostPayload,
     hostPublicKey: publicDer.toString("base64url"),
     privateKey: keys.privateKey,
+    clock,
   };
 }

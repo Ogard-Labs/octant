@@ -48,6 +48,7 @@ function actorFor(principal: AuditActingPrincipal, localActorId: string): EventA
       return { kind: "remote-device", actorId, deviceId: principal.deviceId };
     case "hub":
     case "peer":
+    case "owner-unlock":
       return { kind: "system", actorId };
   }
 }

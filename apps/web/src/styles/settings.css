@@ -720,7 +720,9 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="custom-image-sources"],
 .setrow[data-setting-id="app-store-connect-issuer"],
 .setrow[data-setting-id="app-store-connect-key-id"],
-.setrow[data-setting-id="app-store-connect-private-key"] {
+.setrow[data-setting-id="app-store-connect-private-key"],
+.setrow[data-setting-id="browser-hub-code"],
+.setrow[data-setting-id="browser-hub-claim"] {
   grid-template-columns: minmax(0, 1fr);
 }
 
@@ -737,7 +739,9 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="synthesis"] > .setrow-control,
 .setrow[data-setting-id="app-store-connect-issuer"] > .setrow-control,
 .setrow[data-setting-id="app-store-connect-key-id"] > .setrow-control,
-.setrow[data-setting-id="app-store-connect-private-key"] > .setrow-control {
+.setrow[data-setting-id="app-store-connect-private-key"] > .setrow-control,
+.setrow[data-setting-id="browser-hub-code"] > .setrow-control,
+.setrow[data-setting-id="browser-hub-claim"] > .setrow-control {
   grid-column: 1;
   grid-row: auto;
   justify-self: stretch;

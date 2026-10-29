@@ -13,6 +13,8 @@ import {
   type HubJoinRequest,
   type HubJoinResponse,
   type HubMembershipChangedPayload,
+  type OwnerCandidate,
+  type OwnerListEntry,
   type RosterMember,
   type SignedHubRoster,
 } from "@octant/contracts";
@@ -23,7 +25,16 @@ import type { PrivateListenerHostStatus } from "../remote/privateListenerLifecyc
 import type { HostSigningPort } from "../remote/remoteProtocolService";
 import { listenerPinFromDigest, publicKeyFingerprint } from "./hubCrypto";
 import { sendHubLinkRequest } from "./hubLink";
-import type { HubSideState, HubStatePort } from "./hubStateStore";
+import type { HostOwnerRecord, HubSideState, HubStatePort } from "./hubStateStore";
+import {
+  addOwnerRecords,
+  isUnlockPublicKey,
+  ownerListView,
+  readRosterOwners,
+  withoutOwner,
+  type OwnerCandidateView,
+  type OwnerChange,
+} from "./ownerRecords";
 import type { HubTransport } from "./pinnedHubTransport";
 import { originIsPrivate, readPrivateListener } from "./privateListenerReading";
 import type { RosterSigningKeyStore } from "./rosterSigningKey";
@@ -52,6 +63,8 @@ export interface HubPairingPort {
   readonly revokeDevice: (deviceId: string) => void;
   /** The key fingerprint of a device this hub paired, so a guest's identity key can be tied to it. */
   readonly deviceKeyFingerprint: (deviceId: string) => string | undefined;
+  /** False for a device that is revoked, expired, or not held here. */
+  readonly deviceActive: (deviceId: string) => boolean;
 }
 
 export interface HubServiceOptions {
@@ -105,6 +118,7 @@ export type JoinOutcome =
         | "not-a-join-code"
         | "not-approved"
         | "already-member"
+        | "unlock-key-invalid"
         | "listener-not-running"
         | "listener-not-private"
         | "listener-has-no-pin";
@@ -187,7 +201,13 @@ export class HubService {
     });
     this.#options.state.save({
       ...current,
-      hub: { enabled: true, roster, members: hub?.members ?? [], joinTickets: [] },
+      hub: {
+        enabled: true,
+        roster,
+        members: hub?.members ?? [],
+        joinTickets: [],
+        ...(hub?.owners === undefined ? {} : { owners: hub.owners }),
+      },
     });
     this.#options.record({
       change: "hub-role-enabled",
@@ -210,8 +230,15 @@ export class HubService {
     return { status: "disabled" };
   }
 
-  /** A join code for the person to type or scan on the device that is joining. */
-  mintJoinCode(input: { readonly owner: boolean }): JoinCodeOutcome {
+  /**
+   * A join code for the person to type or scan on the device that is joining.
+   * The loopback channel's call is the window's own act and is not journaled
+   * here; an owner device's call passes its principal and is.
+   */
+  mintJoinCode(
+    input: { readonly owner: boolean },
+    principal?: AuditActingPrincipal,
+  ): JoinCodeOutcome {
     const current = this.#options.state.load();
     const hub = current.hub;
     if (hub?.enabled !== true) return { status: "refused", kind: "hub-role-off" };
@@ -236,12 +263,99 @@ export class HubService {
         joinTickets: [...hub.joinTickets, { ticketId: ticket.ticketId, owner: input.owner }],
       },
     });
+    if (principal !== undefined) {
+      this.#options.record({ change: "join-code-minted", actingPrincipal: principal });
+    }
     return {
       status: "minted",
       code: built.code,
       expiresAt: ticket.expiresAt,
       owner: input.owner,
     };
+  }
+
+  /** What the owner routes check a request against: the roster this hub signed and its own owner list. */
+  ownerContext():
+    | {
+        readonly roster: SignedHubRoster["roster"];
+        readonly owners: ReadonlyArray<HostOwnerRecord>;
+        /** Members whose paired device on this hub is revoked or unknown: they hold no owner powers here. */
+        readonly inactiveDeviceMemberIds: ReadonlyArray<string>;
+      }
+    | undefined {
+    const hub = this.#options.state.load().hub;
+    if (hub?.roster === undefined) return undefined;
+    const pairing = this.#options.pairing();
+    return {
+      roster: hub.roster.roster,
+      owners: hub.owners ?? [],
+      // A failed lookup counts as inactive, so owner powers fail closed.
+      inactiveDeviceMemberIds: hub.members
+        .filter((member) => pairing?.deviceActive(member.deviceId) !== true)
+        .map((member) => String(member.memberId)),
+    };
+  }
+
+  listOwners(): ReadonlyArray<OwnerListEntry> {
+    return ownerListView(this.#options.state.load().hub?.owners ?? []);
+  }
+
+  /** Roster members that list an unlock key but are not owners here, for the person to confirm. */
+  ownerCandidates(): ReadonlyArray<OwnerCandidateView> {
+    const hub = this.#options.state.load().hub;
+    if (hub?.roster === undefined) return [];
+    return readRosterOwners({
+      roster: hub.roster.roster,
+      selfMemberId: this.hubMemberId(),
+      owners: hub.owners ?? [],
+    }).candidates;
+  }
+
+  /**
+   * Adds devices to this hub's owner list. Only a window on this host, or an
+   * owner already on the list with a fresh unlock, reaches this; the caller
+   * has checked which.
+   */
+  addOwners(
+    candidates: ReadonlyArray<OwnerCandidate>,
+    principal: AuditActingPrincipal,
+  ): OwnerChange {
+    const current = this.#options.state.load();
+    const hub = current.hub;
+    if (hub?.roster === undefined) return { status: "refused", kind: "hub-role-off" };
+    const added = addOwnerRecords({
+      roster: hub.roster.roster,
+      selfMemberId: this.hubMemberId(),
+      owners: hub.owners ?? [],
+      candidates,
+    });
+    if (added.status === "refused") return added;
+    this.#options.state.save({ ...current, hub: { ...hub, owners: added.owners } });
+    for (const candidate of candidates) {
+      this.#options.record({
+        change: "owner-added",
+        actingPrincipal: principal,
+        memberId: candidate.memberId,
+      });
+    }
+    return { status: "changed", owners: ownerListView(added.owners) };
+  }
+
+  removeOwner(memberId: string, principal: AuditActingPrincipal): OwnerChange {
+    const current = this.#options.state.load();
+    const hub = current.hub;
+    if (hub === undefined) return { status: "refused", kind: "hub-role-off" };
+    const owners = hub.owners ?? [];
+    const target = owners.find((owner) => String(owner.memberId) === memberId);
+    if (target === undefined) return { status: "refused", kind: "not-an-owner", memberId };
+    const remaining = withoutOwner(owners, memberId);
+    this.#options.state.save({ ...current, hub: { ...hub, owners: remaining } });
+    this.#options.record({
+      change: "owner-removed",
+      actingPrincipal: principal,
+      memberId: target.memberId,
+    });
+    return { status: "changed", owners: ownerListView(remaining) };
   }
 
   /**
@@ -296,6 +410,15 @@ export class HubService {
     // The roster states what the hub checked, not what the member claimed: a
     // guest has no listener, no names, no addresses, and no owner mark.
     const { listenerPort: _claimedPort, ...claimed } = request.member;
+    // Only an owner code adds the joiner to this hub's owner list, with the
+    // unlock key it presented; the roster's owner mark alone never does. The
+    // roster entry then carries that key, signed by the hub, so a spoke's
+    // person can confirm it by fingerprint instead of pasting it.
+    const presented = ticket.owner ? request.ownerUnlockPublicKey : undefined;
+    if (presented !== undefined && !isUnlockPublicKey(presented)) {
+      return { status: "refused", kind: "unlock-key-invalid" };
+    }
+    const listedKey = presented === undefined ? {} : { ownerUnlockPublicKey: presented };
     const member: RosterMember = asGuest
       ? {
           ...claimed,
@@ -304,13 +427,28 @@ export class HubService {
           privateNames: [],
           addresses: [],
           owner: false,
+          ...listedKey,
         }
       : {
           ...claimed,
           role: "spoke",
           ...listenerPortOf(request.listenerOrigin),
           owner: ticket.owner,
+          ...listedKey,
         };
+    const owners: ReadonlyArray<HostOwnerRecord> =
+      presented === undefined
+        ? (hub.owners ?? [])
+        : [
+            ...(hub.owners ?? []),
+            {
+              memberId: member.memberId,
+              name: member.name,
+              identityKeyFingerprint: member.identityKeyFingerprint,
+              unlockKeyFingerprint: publicKeyFingerprint(presented),
+              unlockPublicKey: presented,
+            },
+          ];
     const signed = this.#sign({
       ...roster,
       sequence: roster.sequence + 1,
@@ -320,6 +458,7 @@ export class HubService {
       ...current,
       hub: {
         ...hub,
+        ...(owners.length === 0 ? {} : { owners }),
         roster: signed,
         members: [
           ...hub.members,
@@ -341,6 +480,13 @@ export class HubService {
       memberId: member.memberId,
       sequence: signed.roster.sequence,
     });
+    if (presented !== undefined) {
+      this.#options.record({
+        change: "owner-added",
+        actingPrincipal: { kind: "remote-device", deviceId: decodeDeviceId(deviceId) },
+        memberId: member.memberId,
+      });
+    }
     void this.#publish(signed, hub, [String(member.memberId)]);
     const identity = this.#options.identity();
     return {
@@ -420,6 +566,8 @@ export class HubService {
         ...hub,
         roster: signed,
         members: hub.members.filter((member) => String(member.memberId) !== memberId),
+        // A removed member loses its owner powers here with the roster entry.
+        ...(hub.owners === undefined ? {} : { owners: withoutOwner(hub.owners, memberId) }),
       },
     });
     this.#options.record({

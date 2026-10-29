@@ -1153,10 +1153,23 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "hub join spoke code comparison grant leave roster introduce owners",
         },
         {
+          id: settingId("hub-confirm-new-members"),
+          label: "Confirm new members",
+          scope: "host",
+          keywords:
+            "hub confirm new members alert owner devices status-only fingerprint remove dismiss",
+        },
+        {
           id: settingId("paired-computers-code"),
           label: "Pair with another computer",
           scope: "host",
           keywords: "pair pairing another computer code",
+        },
+        {
+          id: settingId("browser-hub-code"),
+          label: "Join the hub as a guest",
+          scope: "host",
+          keywords: "hub join guest browser code owner passkey comparison leave",
         },
       ],
     },

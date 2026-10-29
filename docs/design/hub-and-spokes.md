@@ -15,16 +15,33 @@ network calls
 release scope
 ([Current Release Boundary](../architecture.md#current-release-boundary)).
 
-**Status: approved design 2026-10-28; the hub role, joining, and phone guests
-are built.** A host can act as hub, make a join code, approve and remove
-members, and keep the roster; another computer can join, change its hub grant,
-and leave. This works from Settings in a desktop window and from `octant hub`,
-and the hub can run as a boot service. A phone can join as a guest and reach
-each spoke that accepted it, and Settings and `octant hub certificate` turn on
-the Tailscale certificate request, which the listener serves to browsers beside
-the pinned one. A browser guest screen is not built. The phone flow has not been run on a real device. The hub
-uses only the Roster and Status grant items so far. Owners, failover, the wake
-service, push, provisioning, and delegation are not built. The maintainer
+**Status: approved design 2026-10-28; the hub role, joining, phone guests, and
+owner devices are built.** A host can act as hub, make a join code, approve and
+remove members, and keep the roster; another computer can join, change its hub
+grant, and leave. This works from Settings in a desktop window and from
+`octant hub`, and the hub can run as a boot service. A phone can join as a
+guest and reach each spoke that accepted it, and Settings and
+`octant hub certificate` turn on the Tailscale certificate request, which the
+listener serves to browsers beside the pinned one. Each host keeps its own owner
+list; an owner device acts on a host after a fresh unlock; Confirm new members
+and new-member alerts work; a window lists, confirms, and removes owners (the
+roster carries each owner's unlock key, so nothing is pasted) and settles
+alerts; a phone that joined with an owner code makes an unlock key and removes,
+confirms, or dismisses alerts, and a passkey owner can confirm too. A remote
+browser can join the hub that serves its page as a guest, with a plain or owner
+code (Settings → Remote access → Hub); with an owner code it makes a passkey for
+that origin first and keeps its identity, and it fails closed to a plain guest
+when it cannot make one. A browser reaches only the origin that served its page,
+under its own certificate check, because it cannot check a pin. So it cannot yet
+reach other members, and a spoke's alerts show in a browser only on that spoke's
+own origin, with the browser's join and passkey held there; reaching spokes from
+the hub's page (decision H15's links, and a browser identity a spoke can accept)
+is not built. The browser flow is tested with a faked authenticator and has not
+been run against a real hub. Nothing here has been run on a real phone, a real
+passkey, or Android. Sign-in copy, posture routes, a Mac Touch ID unlock key,
+failover, the wake service, push, provisioning, and delegation are not built.
+The hub uses only the Roster and Status grant items, and the Owners item for
+owner devices. The maintainer
 asked for this design and authorized it as post-preview, design-first work on
 2026-10-28, and set its shape the same day: a running instance enabled as hub,
 members paired by QR or manual code over a private network such as Tailscale,
@@ -398,13 +415,13 @@ from their phone or laptop what they could do sitting at any of them. An
   code with `octant hub join-code --owner` in a shell on it; the member that
   joins with that code is the hub's first owner. On a spoke: when the spoke
   joins with Owners ticked, the person confirms the listed owner devices in
-  the spoke's own window or `octant hub join` prompt, by name and key
-  fingerprint.
+  the spoke's own window or `octant hub join` prompt, by name, identity-key
+  fingerprint, and unlock-key fingerprint.
 - **Adding later owners.** A host adds an owner to its list only when a
   window on that host confirms it, or when a device already on that host's
-  list approves it with a fresh unlock that signs the new device's identity
-  key and unlock key. Removing an owner works the same way. Each change is
-  journaled on the host.
+  list approves it with a fresh unlock that names the new device's
+  identity-key and unlock-key fingerprints. Removing an owner works the same
+  way. Each change is journaled on the host.
 - **Which hosts honor owners.** Each spoke chooses at join, as the hub grant
   item **Owners** ("let my owner devices act as if they were here"). It is
   ticked by default, because every member is the person's own device, and
@@ -416,14 +433,63 @@ from their phone or laptop what they could do sitting at any of them. An
   Touch ID, or the device passcode on a phone (a Secure Enclave key, or an
   Android Keystore key that needs user authentication); Touch ID or the login
   password on a Mac; a passkey with user verification in a browser. The
-  private key never leaves that hardware. The public key reaches each
-  host only through one of the two ways above that add an owner to its list;
-  a device cannot register its own unlock key.
+  private key never leaves that hardware. The public key reaches the hub when
+  the device joins with an owner code, and the hub's signed roster carries it
+  on that member's entry. A host copies it into its own list only after its
+  person, or an owner already on that list with a fresh unlock, confirms the
+  device by name and both fingerprints (the two ways above that add an
+  owner); a device cannot register its own unlock key on a spoke.
 - **Using it.** An owner request that needs window authority carries the
   unlock key's signature over a fresh host challenge and the request's command
   id. The host accepts it for that one request, or, for administration screens
   only, for a short window ([decision H17](#decisions)). Without a fresh
   unlock, an owner device is an ordinary member.
+- **One unlock, one action, 60 seconds.** The host's challenge names the
+  owner, the method, the path, and the hash of the request body, ends 60
+  seconds after the host issued it, and is forgotten once any request answers
+  it, whether or not that request succeeds. This build asks for a new unlock
+  for every change; the five-minute reuse for administration screens in
+  [decision H17](#decisions) is not built. Rationale: a signature that names
+  its action cannot be replayed for another, and a client that never keeps an
+  unlock open has nothing to leak.
+- **Alerts live on spokes.** Each spoke compares a newer roster with the one it
+  held and keeps an alert for every member added, whatever Confirm new members
+  says. An owner device reads them from the spoke it concerns; the hub holds no
+  alert and cannot clear or write one. Rationale: the party that might be
+  compromised cannot be the one that reports.
+- **Confirming a new member is signed by the unlock key.** The owner's unlock
+  key signs a note naming the spoke, the member, its identity-key fingerprint,
+  the owner, and the unlock key's fingerprint, and the spoke checks it against
+  the key on its own owner list. A raw key signs the note itself. A passkey
+  answers the note as a WebAuthn assertion whose challenge is the SHA-256 of
+  the note, under the same rule as an unlock (the person present and
+  verified), so a passkey owner can confirm too. A passkey signs one challenge
+  per prompt, so a passkey owner is asked twice: once for the note, once for
+  the action that carries it. A phone's raw key opens once for the whole
+  action, so the person authenticates once and the key is dropped from memory
+  afterwards.
+- **Held members are readable.** A window, and an owner device (a read that
+  asks for no unlock), can list the members a host holds status-only under
+  Confirm new members. Confirm shows only for those.
+- **The roster carries unlock keys but adds no owner.** When a member joins
+  with an owner code, the hub records its unlock public key and the signed
+  roster carries it as an optional field on that member's entry. A spoke never
+  adds an owner because the roster says so: its window, or an owner already on
+  its list with a fresh unlock, confirms each listed owner by name,
+  identity-key fingerprint, and unlock-key fingerprint, and only then does the
+  spoke copy that entry into its own owner list. Nothing is pasted by hand.
+  If a later roster lists a different unlock key for an owner already on the
+  list, the spoke keeps the key it confirmed and shows the mismatch. Rationale:
+  a key that arrived through the hub could be one the hub chose, so the
+  person's confirmation is what makes it an owner's.
+- **The phone's unlock key is a biometric-gated secure-store key.** The phone
+  makes a P-256 key, keeps its private half only in the platform's secure
+  storage with user authentication required on every read, and asks for the
+  system prompt before reading it. It is not a Secure Enclave or Keystore key:
+  it is not bound to hardware, and it is in memory while it signs. Rationale:
+  the app has no native module for a hardware key yet; the narrower key still
+  keeps a thief without the person's face, finger, or passcode out of the owner
+  powers.
 - **What it allows,** on a host that honors owners: listener, pairing, and
   device administration (approving joins, revoking devices); setting provider
   keys and adding MCP servers with secrets; remembering Full access or an
@@ -439,7 +505,10 @@ from their phone or laptop what they could do sitting at any of them. An
 - **Browsers.** A passkey belongs to one web origin, so a browser owner
   registers one passkey per host origin it uses (with decision H15's direct
   option, one per spoke). A browser without a platform authenticator cannot
-  be an owner.
+  be an owner. A browser cannot check a certificate pin, so it reaches a host
+  only at the origin that served its page, under the browser's own certificate
+  check ([decision H14](#decisions)); it joins with only the ticket of a join
+  code, never the code's address or pin.
 - **Losing a device.** Remove on the hub, an unmark from another owner device,
   or a revoke on any host ends its owner powers there; Remove ends them
   everywhere at the next roster. A thief holding the device without the
@@ -504,7 +573,9 @@ another, so the person signs in once:
 **Discovery.** Every member holds the latest roster the hub signed. The
 roster holds, for each member, its name, role, identity key fingerprint,
 listener pin, private-network host names (for example a Tailscale name) and
-addresses, and owner mark, plus the standby order and a sequence number. A
+addresses, and owner mark (with the unlock public key of a member that joined
+with an owner code; it adds no owner), plus the standby order and a sequence
+number. A
 member checks the hub's signature and keeps the roster with the highest
 sequence number it has seen. Live data travels beside the roster, unsigned
 and advisory: each member's online or asleep state from the hub, and what

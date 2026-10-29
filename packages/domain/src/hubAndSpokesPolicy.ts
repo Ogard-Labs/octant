@@ -429,8 +429,125 @@ export function hubRosterSigningPayload(roster: HubRoster): string {
       // keeps the bytes it was signed over.
       ...(member.listenerPort === undefined ? {} : { listenerPort: member.listenerPort }),
       owner: member.owner,
+      // Written only when present, so the key is covered by the hub's signature
+      // and a roster without one keeps the bytes it was signed over.
+      ...(member.ownerUnlockPublicKey === undefined
+        ? {}
+        : { ownerUnlockPublicKey: member.ownerUnlockPublicKey }),
     })),
     standbyOrder: roster.standbyOrder,
     failoverAfterSeconds: roster.failoverAfterSeconds,
   })}`;
+}
+
+/**
+ * How long a host's challenge stays good. A person's Face ID, Touch ID or
+ * passkey check takes seconds, and the request that follows is one local
+ * round trip; a minute covers a slow prompt while a challenge copied off the
+ * wire is useless almost at once. Under the two minutes the member link allows.
+ */
+export const OWNER_UNLOCK_LIFETIME_MS = 60_000;
+
+/**
+ * The exact text an owner's unlock key answers for one action. The host
+ * issued the challenge for this owner, this method, this path, and this body
+ * hash, so a signature for one action opens no other. A WebAuthn assertion
+ * carries the SHA-256 of this text as its challenge.
+ */
+export function ownerUnlockSigningPayload(input: {
+  readonly challengeId: string;
+  readonly nonce: string;
+  readonly hostMemberId: string;
+  readonly ownerMemberId: string;
+  readonly method: string;
+  readonly path: string;
+  readonly bodyHash: string;
+  readonly expiresAt: number;
+}): string {
+  return [
+    "octant-owner-unlock-v1",
+    input.challengeId,
+    input.nonce,
+    input.hostMemberId,
+    input.ownerMemberId,
+    input.method.toUpperCase(),
+    input.path,
+    input.bodyHash,
+    String(input.expiresAt),
+  ].join("\n");
+}
+
+/** The text an owner's unlock key signs to confirm one new member on one spoke. */
+export function newMemberConfirmationSigningPayload(
+  confirmation: Omit<NewMemberConfirmation, "signature">,
+): string {
+  return [
+    "octant-new-member-confirmation-v1",
+    confirmation.spokeId,
+    confirmation.memberId,
+    confirmation.identityKeyFingerprint,
+    confirmation.confirmedBy,
+    confirmation.unlockKeyFingerprint,
+    confirmation.confirmedAt,
+  ].join("\n");
+}
+
+/** A grant that lets the member read status and nothing else: what a new member holds until confirmed. */
+export function holdsOnlyStatusGrant(grant: PeerGrant): boolean {
+  return grant.delegation === undefined && grant.answerApprovals !== true;
+}
+
+export type OwnerRequestAuthorization =
+  | { readonly status: "allowed"; readonly entry: HostOwnerEntry }
+  | {
+      readonly status: "refused";
+      readonly kind:
+        | "hub-principal"
+        | "owners-not-honored"
+        | "not-an-owner"
+        | "identity-mismatch"
+        | "not-in-roster"
+        | "unlock-required";
+    };
+
+/**
+ * Whether a request from a member may use a window's powers on this host.
+ * Checked in this order so the first failing reason is the one reported: the
+ * hub and a standby never carry owner powers; a spoke honors owners only while
+ * its hub grant ticks Owners (the hub honors them always); the sender must be
+ * on this host's own owner list with the identity key it presents and still be
+ * in the held roster; and the request must carry a fresh unlock the caller
+ * already verified. The roster's owner mark is never read.
+ */
+export function authorizeOwnerRequest(input: {
+  readonly host: "hub" | "spoke";
+  readonly grant: HubGrant | undefined;
+  readonly owners: ReadonlyArray<HostOwnerEntry>;
+  readonly roster: HubRoster;
+  readonly memberId: HubMemberId;
+  readonly identityKeyFingerprint: string;
+  /** `not-needed` is for asking the host for a challenge or reading an alert, which change nothing. */
+  readonly unlock: "fresh" | "absent" | "not-needed";
+}): OwnerRequestAuthorization {
+  const listed = input.roster.members.find((member) => sameId(member.memberId, input.memberId));
+  if (listed?.role === "hub" || listed?.role === "standby-hub") {
+    return { status: "refused", kind: "hub-principal" };
+  }
+  if (input.host === "spoke" && input.grant?.items.includes("owners") !== true) {
+    return { status: "refused", kind: "owners-not-honored" };
+  }
+  const honored = honorOwner({
+    owners: input.owners,
+    roster: input.roster,
+    memberId: input.memberId,
+    identityKeyFingerprint: input.identityKeyFingerprint,
+  });
+  if (honored.status === "not-owner") {
+    return {
+      status: "refused",
+      kind: honored.kind === "not-on-owner-list" ? "not-an-owner" : honored.kind,
+    };
+  }
+  if (input.unlock === "absent") return { status: "refused", kind: "unlock-required" };
+  return { status: "allowed", entry: honored.entry };
 }

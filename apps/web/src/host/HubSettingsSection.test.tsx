@@ -331,3 +331,407 @@ describe("HubSettingsSection", () => {
     expect(await screen.findByText(sentence)).toBeVisible();
   });
 });
+
+const ALERT = "99999999-9999-4999-8999-999999999999";
+
+const PHONE_CANDIDATE = {
+  memberId: "m-2",
+  name: "Henrik's iPhone",
+  identityKeyFingerprint: "2".repeat(64),
+  unlockKeyFingerprint: "4".repeat(64),
+};
+
+const STUDIO_HELD = {
+  memberId: "m-3",
+  name: "Studio",
+  role: "spoke",
+  identityKeyFingerprint: "3".repeat(64),
+};
+
+function linkedStatus(
+  overrides: {
+    readonly items?: ReadonlyArray<string>;
+    readonly owners?: ReadonlyArray<Record<string, unknown>>;
+    readonly ownerCandidates?: ReadonlyArray<Record<string, unknown>>;
+    readonly ownerKeyMismatches?: ReadonlyArray<Record<string, unknown>>;
+    readonly confirmNewMembers?: boolean;
+    readonly heldMembers?: ReadonlyArray<Record<string, unknown>>;
+    readonly alerts?: ReadonlyArray<Record<string, unknown>>;
+  } = {},
+) {
+  return statusBody({
+    spoke: {
+      membership: "member",
+      hub: { memberId: "m-1", name: "Mac mini" },
+      grant: { items: overrides.items ?? ["roster", "owners"], actProjects: [] },
+      acceptedMemberIds: [],
+      roster: {
+        roster: {
+          members: [
+            {
+              memberId: "m-1",
+              name: "Mac mini",
+              role: "hub",
+              owner: false,
+              identityKeyFingerprint: "1".repeat(64),
+            },
+            {
+              memberId: "m-2",
+              name: "Henrik's iPhone",
+              role: "guest",
+              owner: true,
+              identityKeyFingerprint: "2".repeat(64),
+            },
+            {
+              memberId: "m-3",
+              name: "Studio",
+              role: "spoke",
+              owner: false,
+              identityKeyFingerprint: "3".repeat(64),
+            },
+          ],
+        },
+      },
+      owners: overrides.owners ?? [],
+      ownerCandidates: overrides.ownerCandidates ?? [],
+      ownerKeyMismatches: overrides.ownerKeyMismatches ?? [],
+      confirmNewMembers: overrides.confirmNewMembers ?? false,
+      heldMembers: overrides.heldMembers ?? [],
+      alerts: overrides.alerts ?? [],
+    },
+  });
+}
+
+describe("HubSettingsSection owner devices", () => {
+  it("lists the owners this computer keeps by name and fingerprints, never keys", async () => {
+    renderHub({
+      status: {
+        status: 200,
+        body: linkedStatus({
+          owners: [
+            {
+              memberId: "m-2",
+              name: "Henrik's iPhone",
+              identityKeyFingerprint: "2".repeat(64),
+              unlockKeyFingerprint: "4".repeat(64),
+            },
+          ],
+        }),
+      },
+    });
+
+    const owners = await screen.findByRole("list", { name: "Owner devices" });
+    expect(within(owners).getByText("Henrik's iPhone")).toBeVisible();
+    expect(owners).toHaveTextContent("2".repeat(64));
+    expect(owners).toHaveTextContent("4".repeat(64));
+  });
+
+  it("adds an owner device the roster lists a key for only after the person confirms its name and both fingerprints, with no key to paste", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderHub({
+      status: { status: 200, body: linkedStatus({ ownerCandidates: [PHONE_CANDIDATE] }) },
+      "owners-add": { status: 200, body: { status: "changed", owners: [] } },
+    });
+
+    const add = await screen.findByRole("button", { name: "Add Henrik's iPhone as an owner" });
+    expect(screen.queryByLabelText("Unlock key from the device")).toBeNull();
+    await user.click(add);
+    const dialog = await screen.findByRole("dialog", {
+      name: "Add Henrik's iPhone as an owner of this computer?",
+    });
+    expect(dialog).toHaveTextContent("Henrik's iPhone");
+    expect(dialog).toHaveTextContent("2".repeat(64));
+    expect(dialog).toHaveTextContent("4".repeat(64));
+    expect(calls.some((call) => call.operation === "owners-add")).toBe(false);
+    await user.click(within(dialog).getByRole("button", { name: "Add Henrik's iPhone" }));
+
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "owners-add")?.body).toEqual({
+        owners: [
+          {
+            memberId: "m-2",
+            identityKeyFingerprint: "2".repeat(64),
+            unlockKeyFingerprint: "4".repeat(64),
+          },
+        ],
+      }),
+    );
+  });
+
+  it("lists a roster member that carries no unlock key nowhere an owner could be added", async () => {
+    renderHub({ status: { status: 200, body: linkedStatus() } });
+
+    await screen.findByRole("switch", { name: "Confirm new members" });
+
+    expect(screen.queryByRole("button", { name: /as an owner/ })).toBeNull();
+    expect(screen.queryByRole("list", { name: "Devices that could be owners" })).toBeNull();
+  });
+
+  it("says plainly that an owner's unlock key changed in the roster and that the key confirmed here is kept", async () => {
+    renderHub({
+      status: {
+        status: 200,
+        body: linkedStatus({
+          owners: [
+            {
+              memberId: "m-2",
+              name: "Henrik's iPhone",
+              identityKeyFingerprint: "2".repeat(64),
+              unlockKeyFingerprint: "4".repeat(64),
+            },
+          ],
+          ownerKeyMismatches: [
+            {
+              memberId: "m-2",
+              name: "Henrik's iPhone",
+              heldUnlockKeyFingerprint: "4".repeat(64),
+              rosterUnlockKeyFingerprint: "6".repeat(64),
+            },
+          ],
+        }),
+      },
+    });
+
+    const warning = await screen.findByRole("list", { name: "Owners whose unlock key changed" });
+
+    expect(warning).toHaveTextContent("Henrik's iPhone's unlock key changed");
+    expect(warning).toHaveTextContent("6".repeat(64));
+    expect(warning).toHaveTextContent("keeps the key you confirmed");
+  });
+
+  it("says the roster lists a different device key when the host refuses a fingerprint mismatch", async () => {
+    const user = userEvent.setup();
+    renderHub({
+      status: { status: 200, body: linkedStatus({ ownerCandidates: [PHONE_CANDIDATE] }) },
+      "owners-add": { status: 409, body: { status: "refused", kind: "identity-mismatch" } },
+    });
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add Henrik's iPhone as an owner" }),
+    );
+    await user.click(await screen.findByRole("button", { name: "Add Henrik's iPhone" }));
+
+    expect(await screen.findByText(/roster lists a different device key/i)).toBeVisible();
+  });
+
+  it("asks before removing an owner and removes only after the person confirms", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderHub({
+      status: {
+        status: 200,
+        body: linkedStatus({
+          owners: [
+            {
+              memberId: "m-2",
+              name: "Henrik's iPhone",
+              identityKeyFingerprint: "2".repeat(64),
+              unlockKeyFingerprint: "4".repeat(64),
+            },
+          ],
+        }),
+      },
+      "owners-remove": { status: 200, body: { status: "changed", owners: [] } },
+    });
+
+    await user.click(
+      await screen.findByRole("button", { name: "Remove Henrik's iPhone as an owner" }),
+    );
+    expect(calls.some((call) => call.operation === "owners-remove")).toBe(false);
+    await user.click(await screen.findByRole("button", { name: "Remove Henrik's iPhone" }));
+
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "owners-remove")?.body).toEqual({
+        memberId: "m-2",
+      }),
+    );
+  });
+
+  it("offers no owner list when the hub grant leaves Owners off", async () => {
+    renderHub({
+      status: {
+        status: 200,
+        body: linkedStatus({ items: ["roster"], ownerCandidates: [PHONE_CANDIDATE] }),
+      },
+    });
+
+    expect(await screen.findByText(/Owners item is off in the hub grant/i)).toBeVisible();
+    expect(screen.queryByRole("list", { name: "Devices that could be owners" })).toBeNull();
+  });
+
+  it("lists the hub's own owners on the hub and offers the members its roster lists a key for", async () => {
+    renderHub({
+      status: {
+        status: 200,
+        body: {
+          hub: {
+            enabled: true,
+            roster: {
+              roster: {
+                members: [
+                  {
+                    memberId: "m-1",
+                    name: "Mac mini",
+                    role: "hub",
+                    owner: false,
+                    identityKeyFingerprint: "1".repeat(64),
+                  },
+                  {
+                    memberId: "m-3",
+                    name: "Studio",
+                    role: "spoke",
+                    owner: false,
+                    identityKeyFingerprint: "3".repeat(64),
+                  },
+                ],
+              },
+            },
+            owners: [
+              {
+                memberId: "m-9",
+                name: "Phone",
+                identityKeyFingerprint: "9".repeat(64),
+                unlockKeyFingerprint: "8".repeat(64),
+              },
+            ],
+            ownerCandidates: [
+              {
+                memberId: "m-3",
+                name: "Studio",
+                identityKeyFingerprint: "3".repeat(64),
+                unlockKeyFingerprint: "7".repeat(64),
+              },
+            ],
+          },
+          spoke: { membership: "none" },
+        },
+      },
+    });
+
+    const owners = await screen.findByRole("list", { name: "Owner devices" });
+    expect(within(owners).getByText("Phone")).toBeVisible();
+    const candidates = screen.getByRole("list", { name: "Devices that could be owners" });
+    expect(within(candidates).getByText("Studio")).toBeVisible();
+    expect(within(candidates).queryByText("Mac mini")).toBeNull();
+  });
+});
+
+describe("HubSettingsSection new members", () => {
+  it("turns Confirm new members on from the window and reports it", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderHub({
+      status: { status: 200, body: linkedStatus() },
+      "confirm-new-members": { status: 200, body: { status: "changed", enabled: true } },
+    });
+
+    const toggle = await screen.findByRole("switch", { name: "Confirm new members" });
+    expect(toggle).not.toBeChecked();
+    await user.click(toggle);
+
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "confirm-new-members")?.body).toEqual({
+        enabled: true,
+      }),
+    );
+    expect(await screen.findByText("Confirm new members is on.")).toBeVisible();
+  });
+
+  it("confirms a member this computer holds status-only", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderHub({
+      status: {
+        status: 200,
+        body: linkedStatus({ confirmNewMembers: true, heldMembers: [STUDIO_HELD] }),
+      },
+      "confirm-member": { status: 200, body: { status: "confirmed", memberId: "m-3" } },
+    });
+
+    const waiting = await screen.findByRole("list", { name: "Members waiting for confirmation" });
+    await user.click(within(waiting).getByRole("button", { name: "Confirm Studio" }));
+
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "confirm-member")?.body).toEqual({
+        memberId: "m-3",
+      }),
+    );
+    expect(await screen.findByText("Confirmed Studio.")).toBeVisible();
+  });
+
+  it("shows an alert with Dismiss and Remove, and Confirm only for a member held status-only", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderHub({
+      status: {
+        status: 200,
+        body: linkedStatus({
+          heldMembers: [STUDIO_HELD],
+          alerts: [
+            {
+              alertId: ALERT,
+              memberId: "m-3",
+              name: "Studio",
+              role: "spoke",
+              identityKeyFingerprint: "3".repeat(64),
+            },
+            {
+              alertId: "99999999-9999-4999-8999-999999999998",
+              memberId: "m-4",
+              name: "Old iPad",
+              role: "guest",
+              identityKeyFingerprint: "5".repeat(64),
+            },
+          ],
+        }),
+      },
+      "alert-dismiss": { status: 200, body: { status: "dismissed", alertId: ALERT } },
+      "alert-remove": { status: 200, body: { status: "removed", alertId: ALERT } },
+    });
+
+    const alerts = await screen.findByRole("list", { name: "New member alerts" });
+    expect(
+      within(alerts).getByRole("button", { name: "Confirm Studio from the alert" }),
+    ).toBeVisible();
+    expect(
+      within(alerts).queryByRole("button", { name: "Confirm Old iPad from the alert" }),
+    ).toBeNull();
+    await user.click(
+      within(alerts).getByRole("button", { name: "Dismiss the alert about Studio" }),
+    );
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "alert-dismiss")?.body).toEqual({
+        alertId: ALERT,
+      }),
+    );
+    await user.click(
+      within(alerts).getByRole("button", { name: "Remove Studio from this computer" }),
+    );
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "alert-remove")?.body).toEqual({
+        alertId: ALERT,
+      }),
+    );
+  });
+
+  it("says plainly when the host no longer has the alert", async () => {
+    const user = userEvent.setup();
+    renderHub({
+      status: {
+        status: 200,
+        body: linkedStatus({
+          alerts: [
+            {
+              alertId: ALERT,
+              memberId: "m-3",
+              name: "Studio",
+              role: "spoke",
+              identityKeyFingerprint: "3".repeat(64),
+            },
+          ],
+        }),
+      },
+      "alert-dismiss": { status: 409, body: { status: "refused", kind: "no-such-alert" } },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Dismiss the alert about Studio" }));
+
+    expect(await screen.findByText("That alert is already gone.")).toBeVisible();
+  });
+});

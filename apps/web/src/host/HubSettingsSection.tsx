@@ -19,6 +19,15 @@ import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantField, OctantFieldLabel } from "../ui/base/OctantField";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
+import {
+  NewMemberChecks,
+  OwnerDevices,
+  type HeldMemberRow,
+  type NewMemberAlertRow,
+  type OwnerCandidateRow,
+  type OwnerKeyMismatchRow,
+  type OwnerRow,
+} from "./HubOwnerPanels";
 import { PairingCodeQr } from "./PairingCodeQr";
 
 /**
@@ -110,6 +119,19 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
     "The certificate Tailscale sent did not check out (bad key, expired, wrong name, or unreadable), so nothing was installed.",
   "could-not-apply":
     "The remote listener could not restart with that certificate, so it was dropped and the listener is using its own again.",
+  "not-in-roster": "That device is not on the roster this computer holds.",
+  "cannot-own-the-hub": "The hub cannot be an owner.",
+  "cannot-own-itself": "A computer cannot list itself as an owner.",
+  "unlock-key-invalid": "That is not a valid unlock key, so nothing was added.",
+  "no-unlock-key-listed":
+    "The roster lists no unlock key for that device. Join the hub again with an owner code.",
+  "unlock-key-mismatch":
+    "The roster lists a different unlock key for that device, so nothing was added.",
+  "already-owner": "That device is already an owner here.",
+  "not-an-owner": "That device is not an owner here.",
+  "not-awaiting-confirmation": "That member is not waiting for confirmation.",
+  "confirmation-invalid": "That confirmation did not check out, so the member stays as it was.",
+  "no-such-alert": "That alert is already gone.",
   "could-not-remove":
     "The remote listener could not restart without the Tailscale certificate, so it is still on. Try turning it off again.",
 };
@@ -124,6 +146,7 @@ interface Member {
   readonly name: string;
   readonly role: string;
   readonly owner: boolean;
+  readonly identityKeyFingerprint: string;
 }
 
 interface Grant {
@@ -134,12 +157,22 @@ interface Grant {
 interface HubStatus {
   readonly enabled: boolean;
   readonly members: ReadonlyArray<Member>;
+  /** The hub's own owner list, and the roster members that list an unlock key but are not on it. */
+  readonly owners: ReadonlyArray<OwnerRow>;
+  readonly ownerCandidates: ReadonlyArray<OwnerCandidateRow>;
   readonly link?: {
     readonly membership: "member" | "removed";
     readonly hubName: string;
     readonly grant: Grant;
     /** The hub's roster as this computer holds it, each with whether this computer accepted it. */
     readonly roster: ReadonlyArray<Member & { readonly accepted: boolean }>;
+    /** This computer's own owner list, the roster entries to confirm or that changed, Confirm new members, the members it holds for it, and its alerts. */
+    readonly owners: ReadonlyArray<OwnerRow>;
+    readonly ownerCandidates: ReadonlyArray<OwnerCandidateRow>;
+    readonly ownerKeyMismatches: ReadonlyArray<OwnerKeyMismatchRow>;
+    readonly confirmNewMembers: boolean;
+    readonly heldMembers: ReadonlyArray<HeldMemberRow>;
+    readonly alerts: ReadonlyArray<NewMemberAlertRow>;
   };
 }
 
@@ -282,13 +315,19 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
     body: unknown,
     expected: string,
     failure: string,
+    refusals: Readonly<Record<string, string>> = {},
   ): Promise<Reply | undefined> => {
     setMessage(undefined);
     setBusy(true);
     try {
       const reply = await request(operation, body);
       if (reply.status === 200 && field(reply.body, "status") === expected) return reply;
-      setMessage(refusalText(reply, failure));
+      const kind = field(reply.body, "kind");
+      setMessage(
+        typeof kind === "string" && refusals[kind] !== undefined
+          ? refusals[kind]
+          : refusalText(reply, failure),
+      );
     } catch (error) {
       setMessage(failureMessage(error, failure));
     } finally {
@@ -378,6 +417,79 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
     if (reply !== undefined) {
       setJoin({ phase: "idle" });
       setMessage("The hub grant is saved.");
+    }
+    await refresh();
+  };
+
+  const addOwner = async (candidate: OwnerCandidateRow) => {
+    const reply = await act(
+      "owners-add",
+      {
+        owners: [
+          {
+            memberId: candidate.memberId,
+            identityKeyFingerprint: candidate.identityKeyFingerprint,
+            unlockKeyFingerprint: candidate.unlockKeyFingerprint,
+          },
+        ],
+      },
+      "changed",
+      "Octant could not add that owner.",
+      {
+        "identity-mismatch":
+          "The roster lists a different device key for that member, so nothing was added.",
+      },
+    );
+    if (reply !== undefined) setMessage(`Added ${candidate.name} as an owner.`);
+    await refresh();
+  };
+
+  const removeOwner = async (owner: OwnerRow) => {
+    const reply = await act(
+      "owners-remove",
+      { memberId: owner.memberId },
+      "changed",
+      "Octant could not remove that owner.",
+    );
+    if (reply !== undefined) setMessage(`Removed ${owner.name} as an owner.`);
+    await refresh();
+  };
+
+  const setConfirmNewMembers = async (enabled: boolean) => {
+    const reply = await act(
+      "confirm-new-members",
+      { enabled },
+      "changed",
+      "Octant could not change Confirm new members.",
+    );
+    if (reply !== undefined) setMessage(`Confirm new members is ${enabled ? "on" : "off"}.`);
+    await refresh();
+  };
+
+  const confirmMember = async (memberId: string, name: string) => {
+    const reply = await act(
+      "confirm-member",
+      { memberId },
+      "confirmed",
+      "Octant could not confirm that member.",
+    );
+    if (reply !== undefined) setMessage(`Confirmed ${name}.`);
+    await refresh();
+  };
+
+  const settleAlert = async (alert: NewMemberAlertRow, how: "dismiss" | "remove") => {
+    const reply = await act(
+      how === "dismiss" ? "alert-dismiss" : "alert-remove",
+      { alertId: alert.alertId },
+      how === "dismiss" ? "dismissed" : "removed",
+      "Octant could not settle that alert.",
+    );
+    if (reply !== undefined) {
+      setMessage(
+        how === "dismiss"
+          ? `Dismissed the alert about ${alert.name}.`
+          : `Removed ${alert.name} from this computer. Check the hub too.`,
+      );
     }
     await refresh();
   };
@@ -548,7 +660,9 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
         {message === undefined ? null : (
           <SettingsState
             kind={
-              /^(Approved|Denied|Removed|Left|The hub grant is saved)/.test(message)
+              /^(Approved|Denied|Removed|Left|Added|Confirm|Dismissed|The hub grant is saved)/.test(
+                message,
+              )
                 ? "success"
                 : "error"
             }
@@ -694,6 +808,64 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
             </OctantConfirmDialog>
           )}
         </SettingsSection>
+      )}
+
+      {!hubOn || status === undefined ? null : (
+        <SettingsSection title="Owner devices">
+          <p className="settings-section-line">
+            An owner device can act on this hub with a window's powers after a fresh unlock. A
+            device that joins with an owner code is listed here. Remove one from this window, and
+            add it back later if you wish.
+          </p>
+          <OwnerDevices
+            busy={busy}
+            candidates={status.ownerCandidates}
+            mismatches={[]}
+            onAdd={addOwner}
+            onRemove={removeOwner}
+            owners={status.owners}
+          />
+        </SettingsSection>
+      )}
+
+      {linked === undefined || hubOn ? null : (
+        <>
+          <SettingsSection title="Owner devices">
+            {linked.grant.items.includes("owners") ? (
+              <>
+                <p className="settings-section-line">
+                  The hub lists the unlock key of a device that joined with an owner code. An owner
+                  here is confirmed by you, in this window, by name and fingerprint: the hub cannot
+                  add one.
+                </p>
+                <OwnerDevices
+                  busy={busy}
+                  candidates={linked.ownerCandidates}
+                  mismatches={linked.ownerKeyMismatches}
+                  onAdd={addOwner}
+                  onRemove={removeOwner}
+                  owners={linked.owners}
+                />
+              </>
+            ) : (
+              <SettingsState kind="empty">
+                The Owners item is off in the hub grant, so owner devices cannot act here.
+              </SettingsState>
+            )}
+          </SettingsSection>
+          <SettingsSection title="New members">
+            <NewMemberChecks
+              alerts={linked.alerts}
+              awaiting={linked.heldMembers}
+              busy={busy}
+              confirmNewMembers={linked.confirmNewMembers}
+              onConfirm={(memberId, name) => void confirmMember(memberId, name)}
+              onDismiss={(alert) => void settleAlert(alert, "dismiss")}
+              onRemove={(alert) => void settleAlert(alert, "remove")}
+              onSetConfirmNewMembers={(enabled) => void setConfirmNewMembers(enabled)}
+            />
+          </SettingsSection>
+        </>
       )}
 
       {hubOn ? null : (
@@ -899,9 +1071,92 @@ function readStatus(body: unknown): HubStatus | undefined {
     const roster = readMembers(field(field(field(spoke, "roster"), "roster"), "members")).map(
       (member) => ({ ...member, accepted: accepted.has(member.memberId) }),
     );
-    return { enabled, members, link: { membership, hubName, grant, roster } };
+    return {
+      enabled,
+      members,
+      owners: readOwners(field(hub, "owners")),
+      ownerCandidates: readOwnerCandidates(field(hub, "ownerCandidates")),
+      link: {
+        membership,
+        hubName,
+        grant,
+        roster,
+        owners: readOwners(field(spoke, "owners")),
+        ownerCandidates: readOwnerCandidates(field(spoke, "ownerCandidates")),
+        ownerKeyMismatches: readKeyMismatches(field(spoke, "ownerKeyMismatches")),
+        confirmNewMembers: field(spoke, "confirmNewMembers") === true,
+        heldMembers: readHeldMembers(field(spoke, "heldMembers")),
+        alerts: readAlerts(field(spoke, "alerts")),
+      },
+    };
   }
-  return { enabled, members };
+  return {
+    enabled,
+    members,
+    owners: readOwners(field(hub, "owners")),
+    ownerCandidates: readOwnerCandidates(field(hub, "ownerCandidates")),
+  };
+}
+
+function readOwnerCandidates(rows: unknown): OwnerCandidateRow[] {
+  const candidates: OwnerCandidateRow[] = [];
+  for (const entry of Array.isArray(rows) ? rows : []) {
+    const memberId = field(entry, "memberId");
+    const name = field(entry, "name");
+    const identity = field(entry, "identityKeyFingerprint");
+    const unlock = field(entry, "unlockKeyFingerprint");
+    if (
+      typeof memberId === "string" &&
+      typeof name === "string" &&
+      typeof identity === "string" &&
+      typeof unlock === "string"
+    ) {
+      candidates.push({
+        memberId,
+        name,
+        identityKeyFingerprint: identity,
+        unlockKeyFingerprint: unlock,
+      });
+    }
+  }
+  return candidates;
+}
+
+function readKeyMismatches(rows: unknown): OwnerKeyMismatchRow[] {
+  const mismatches: OwnerKeyMismatchRow[] = [];
+  for (const entry of Array.isArray(rows) ? rows : []) {
+    const memberId = field(entry, "memberId");
+    const name = field(entry, "name");
+    const held = field(entry, "heldUnlockKeyFingerprint");
+    const listed = field(entry, "rosterUnlockKeyFingerprint");
+    if (
+      typeof memberId === "string" &&
+      typeof name === "string" &&
+      typeof held === "string" &&
+      typeof listed === "string"
+    ) {
+      mismatches.push({
+        memberId,
+        name,
+        heldUnlockKeyFingerprint: held,
+        rosterUnlockKeyFingerprint: listed,
+      });
+    }
+  }
+  return mismatches;
+}
+
+function readHeldMembers(rows: unknown): HeldMemberRow[] {
+  const held: HeldMemberRow[] = [];
+  for (const entry of Array.isArray(rows) ? rows : []) {
+    const memberId = field(entry, "memberId");
+    const name = field(entry, "name");
+    const identity = field(entry, "identityKeyFingerprint");
+    if (typeof memberId === "string" && typeof name === "string" && typeof identity === "string") {
+      held.push({ memberId, name, identityKeyFingerprint: identity });
+    }
+  }
+  return held;
 }
 
 function readMembers(rows: unknown): Member[] {
@@ -910,11 +1165,64 @@ function readMembers(rows: unknown): Member[] {
     const memberId = field(entry, "memberId");
     const name = field(entry, "name");
     const role = field(entry, "role");
+    const identityKeyFingerprint = field(entry, "identityKeyFingerprint");
     if (typeof memberId === "string" && typeof name === "string" && typeof role === "string") {
-      members.push({ memberId, name, role, owner: field(entry, "owner") === true });
+      members.push({
+        memberId,
+        name,
+        role,
+        owner: field(entry, "owner") === true,
+        identityKeyFingerprint:
+          typeof identityKeyFingerprint === "string" ? identityKeyFingerprint : "",
+      });
     }
   }
   return members;
+}
+
+function readOwners(rows: unknown): OwnerRow[] {
+  const owners: OwnerRow[] = [];
+  for (const entry of Array.isArray(rows) ? rows : []) {
+    const memberId = field(entry, "memberId");
+    const name = field(entry, "name");
+    const identity = field(entry, "identityKeyFingerprint");
+    const unlock = field(entry, "unlockKeyFingerprint");
+    if (
+      typeof memberId === "string" &&
+      typeof name === "string" &&
+      typeof identity === "string" &&
+      typeof unlock === "string"
+    ) {
+      owners.push({
+        memberId,
+        name,
+        identityKeyFingerprint: identity,
+        unlockKeyFingerprint: unlock,
+      });
+    }
+  }
+  return owners;
+}
+
+function readAlerts(rows: unknown): NewMemberAlertRow[] {
+  const alerts: NewMemberAlertRow[] = [];
+  for (const entry of Array.isArray(rows) ? rows : []) {
+    const alertId = field(entry, "alertId");
+    const memberId = field(entry, "memberId");
+    const name = field(entry, "name");
+    const role = field(entry, "role");
+    const identity = field(entry, "identityKeyFingerprint");
+    if (
+      typeof alertId === "string" &&
+      typeof memberId === "string" &&
+      typeof name === "string" &&
+      typeof role === "string" &&
+      typeof identity === "string"
+    ) {
+      alerts.push({ alertId, memberId, name, role, identityKeyFingerprint: identity });
+    }
+  }
+  return alerts;
 }
 
 function readCertificate(body: unknown): CertificateStatus | undefined {

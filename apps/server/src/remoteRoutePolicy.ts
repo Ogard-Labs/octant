@@ -4,6 +4,8 @@ import {
   CODE_ATTACHMENT_MEDIA_TYPES,
   MAX_CODE_ATTACHMENT_BYTES,
   MAX_WORK_ATTACHMENT_BYTES,
+  OWNER_IDENTITY_KEY_HEADER,
+  OWNER_UNLOCK_HEADER,
   REMOTE_SERVER_PROXY_RELAYED,
   REMOTE_SERVER_PROXY_RELAYED_HEADER,
   WORK_ATTACHMENT_MEDIA_TYPES,
@@ -115,6 +117,7 @@ export const REMOTE_HUB_LINK_ROUTE_IDS = {
   status: "hub-link-status",
   guestRoster: "hub-link-guest-roster",
   guest: "hub-link-guest",
+  owner: "hub-link-owner",
 } as const;
 
 const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
@@ -284,6 +287,24 @@ const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
     allowedContentTypes: ["application/json"],
     maxBodyBytes: 4_096,
     maxResponseBytes: 4_096,
+  },
+  // An owner device's administration of a host, signed like the routes above
+  // and checked against the host's own owner list and a fresh unlock.
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.owner,
+    match: { kind: "prefix", path: "/api/hub/owner" },
+    surface: "pre-auth",
+    methods: ["GET", "POST"],
+    allowQuery: false,
+    allowedRequestHeaders: [
+      "content-type",
+      HUB_LINK_HEADER,
+      OWNER_UNLOCK_HEADER,
+      OWNER_IDENTITY_KEY_HEADER,
+    ],
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: 16_384,
+    maxResponseBytes: 32_768,
   },
 ];
 

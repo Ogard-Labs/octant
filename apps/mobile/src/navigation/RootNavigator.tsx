@@ -9,6 +9,8 @@ import { backMobileHomeView, type MobileHomeView } from "../inbox/homeView";
 import { ThreadScreen } from "../inbox/ThreadScreen";
 import { hostHealthTone } from "../hosts/hostHealthTone";
 import { GuestHubPanel, GuestHubRefusals } from "../hosts/GuestHubPanel";
+import { createExpoPhoneUnlockKey } from "../hosts/expoOwnerUnlockPorts";
+import { OwnerAlertsPanel } from "../hosts/OwnerAlertsPanel";
 import type { GuestSpokeRefusal } from "../hosts/hubGuestFlow";
 import { PairingPanel } from "../hosts/PairingPanel";
 import { RemoveHostPanel } from "../hosts/RemoveHostPanel";
@@ -90,6 +92,7 @@ function HostsBody(props: {
     [notificationPermission, refreshHosts, removeMobileHostInTurn],
   );
   const authenticator = useMemo(() => createExpoBiometricAuthenticator(), []);
+  const unlockKey = useMemo(() => createExpoPhoneUnlockKey(), []);
   const deviceIntegrity = useMemo(() => createUnavailableDeviceIntegrityPort(), []);
   const healthTint = {
     neutral: colors.textSecondary,
@@ -227,6 +230,7 @@ function HostsBody(props: {
                   deviceKeyStore={deviceKeyStore}
                   guestHubStore={guestHubStore}
                   removeHost={removeMobileHostInTurn}
+                  {...(unlockKey === undefined ? {} : { unlockKey })}
                   onJoined={() => {
                     void refreshHosts();
                   }}
@@ -258,6 +262,13 @@ function HostsBody(props: {
               </Text>
             ) : null}
             <GuestHubRefusals refused={notAccepted} />
+            {unlockKey === undefined ? null : (
+              <OwnerAlertsPanel
+                deviceKeyStore={deviceKeyStore}
+                guestHubStore={guestHubStore}
+                unlockKey={unlockKey}
+              />
+            )}
             {hosts.length === 0 ? (
               <Text style={styles.sectionBody}>{MOBILE_COPY.hostsEmpty}</Text>
             ) : (

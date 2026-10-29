@@ -9,9 +9,10 @@
   // satisfy Bun's `fetch` type (it adds `preconnect`). The client runtime
   // typechecks those sources under its own program; the driver has its own
   // program below, and the pairing-code smoke, the two-host forwarder test, and
-  // the guest smoke run under vitest.
+  // the guest smoke and the owners smoke (which admits a guest) run under vitest.
   "exclude": [
     "src/hub/hubAndSpokes.guest.smoke.test.ts",
+    "src/hub/hubAndSpokes.owners.smoke.test.ts",
     "src/remote/remoteExitEvidenceADriver.ts",
     "src/remote/remotePairingCode.smoke.test.ts",
     "src/remote/remoteServerForwarder.twoHost.test.ts"

@@ -27,6 +27,14 @@ export const HubMembershipChange = Schema.Literal(
   "roster-accepted",
   "guest-admitted",
   "guest-dropped",
+  "owner-added",
+  "owner-removed",
+  "new-member-alerted",
+  "new-member-confirmed",
+  "new-member-removed",
+  "alert-dismissed",
+  "confirm-new-members-changed",
+  "join-code-minted",
 );
 export type HubMembershipChange = typeof HubMembershipChange.Type;
 
@@ -55,7 +63,9 @@ export const decodeHubMembershipChangedPayload = Schema.decodeUnknownSync(
 export const HubJoinRequest = Schema.Struct({
   ticketId: Schema.UUID,
   ticketProof: bounded(256),
-  member: RosterMember.pipe(Schema.omit("role", "owner")).annotations(strict),
+  member: RosterMember.pipe(Schema.omit("role", "owner", "ownerUnlockPublicKey")).annotations(
+    strict,
+  ),
   identityPublicKey: base64Url(512),
   /** Absent for a guest, which runs no listener. */
   listenerOrigin: Schema.optional(bounded(300)),
@@ -65,6 +75,11 @@ export const HubJoinRequest = Schema.Struct({
    * grant to choose.
    */
   asGuest: Schema.optional(Schema.Literal(true)),
+  /**
+   * The joining member's unlock public key. The hub adds it to its owner list
+   * only when the join code was an owner code; any other code ignores it.
+   */
+  ownerUnlockPublicKey: Schema.optional(base64Url(512)),
 }).annotations(strict);
 export type HubJoinRequest = typeof HubJoinRequest.Type;
 export const decodeHubJoinRequest = Schema.decodeUnknownSync(HubJoinRequest);

@@ -252,6 +252,12 @@ export type HubAdministrationOperation =
   | "join-finish"
   | "grant"
   | "leave"
+  | "owners-add"
+  | "owners-remove"
+  | "confirm-new-members"
+  | "confirm-member"
+  | "alert-dismiss"
+  | "alert-remove"
   | "certificate-status"
   | "certificate";
 

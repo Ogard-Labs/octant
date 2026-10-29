@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { decodeWindowId } from "@octant/contracts";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { signHubLinkRequest, HUB_LINK_HEADER } from "./hubLink";
@@ -26,11 +26,14 @@ const windowId = decodeWindowId("33333333-3333-4333-8333-333333333333");
 const capability = "A".repeat(43);
 const secret = "desktop-secret";
 
-async function setup(listenerStatus?: Parameters<typeof startHubTestHost>[0]["listenerStatus"]) {
+async function setup(
+  listenerStatus?: Parameters<typeof startHubTestHost>[0]["listenerStatus"],
+  network = new HubTestNetwork(),
+) {
   const host = await startHubTestHost({
     name: "Mac mini",
     address: "100.101.102.103",
-    network: new HubTestNetwork(),
+    network,
     cleanups,
     ...(listenerStatus === undefined ? {} : { listenerStatus }),
   });
@@ -285,5 +288,113 @@ describe("who may administer the hub role", () => {
           headers: { [HUB_LINK_HEADER]: header },
         }),
     );
+  });
+
+  it("lets a window decide a host's owners and refuses a window-less request for any owner route", async () => {
+    const { host, handle } = await setup();
+    host.hub.enable({ kind: "local-window" });
+    const candidate = {
+      memberId: "44444444-4444-4444-8444-444444444444",
+      identityKeyFingerprint: "a".repeat(64),
+      unlockKeyFingerprint: "b".repeat(64),
+    };
+
+    const unknown = await handle(
+      post(HUB_ADMINISTRATION_ROUTES.ownersAdd, { owners: [candidate] }),
+    );
+    const removed = await handle(
+      post(HUB_ADMINISTRATION_ROUTES.ownersRemove, { memberId: candidate.memberId }),
+    );
+    const unauthenticated = await handle(
+      post(
+        HUB_ADMINISTRATION_ROUTES.ownersAdd,
+        { owners: [candidate] },
+        { "x-octant-window-capability": "B".repeat(43) },
+      ),
+    );
+
+    expect(unknown?.status).toBe(409);
+    expect(await unknown?.json()).toMatchObject({ status: "refused", kind: "not-in-roster" });
+    expect(removed?.status).toBe(409);
+    expect(await removed?.json()).toMatchObject({ status: "refused", kind: "not-an-owner" });
+    expect(unauthenticated?.status).toBe(401);
+    expect(host.hub.listOwners()).toEqual([]);
+  });
+
+  it("sends a window's owner changes to the spoke list once a former hub has joined another hub", async () => {
+    const network = new HubTestNetwork();
+    const { host, handle } = await setup(undefined, network);
+    const otherHub = await startHubTestHost({
+      name: "Laptop",
+      address: "100.101.102.104",
+      network,
+      cleanups,
+    });
+    host.hub.enable({ kind: "local-window" });
+    host.hub.disable({ kind: "local-window" });
+    otherHub.hub.enable({ kind: "local-window" });
+    const minted = otherHub.hub.mintJoinCode({ owner: false });
+    if (minted.status !== "minted") throw new Error(minted.status);
+    expect((await host.spoke.startJoin({ code: minted.code })).status).toBe("awaiting-approval");
+    const [pending] = otherHub.administration.listPendingPairings();
+    if (pending === undefined) throw new Error("The hub shows no pairing to approve.");
+    otherHub.administration.approvePairing({ ticketId: pending.ticketId });
+    expect((await host.spoke.finishJoin({ kind: "local-window" })).status).toBe("joined");
+    const hubRemove = vi.spyOn(host.hub, "removeOwner");
+    const spokeRemove = vi.spyOn(host.spoke, "removeOwner");
+
+    const removed = await handle(
+      post(HUB_ADMINISTRATION_ROUTES.ownersRemove, {
+        memberId: "44444444-4444-4444-8444-444444444444",
+      }),
+    );
+
+    expect(removed?.status).toBe(409);
+    expect(spokeRemove).toHaveBeenCalledTimes(1);
+    expect(hubRemove).not.toHaveBeenCalled();
+  });
+
+  it("refuses to confirm a member or dismiss an alert on a host that is not a spoke", async () => {
+    const { handle } = await setup();
+
+    const confirmed = await handle(
+      post(HUB_ADMINISTRATION_ROUTES.confirmMember, {
+        memberId: "44444444-4444-4444-8444-444444444444",
+      }),
+    );
+    const dismissed = await handle(
+      post(HUB_ADMINISTRATION_ROUTES.alertDismiss, {
+        alertId: "55555555-5555-4555-8555-555555555555",
+      }),
+    );
+    const setting = await handle(
+      post(HUB_ADMINISTRATION_ROUTES.confirmNewMembers, { enabled: true }),
+    );
+
+    for (const response of [confirmed, dismissed, setting]) {
+      expect(response?.status).toBe(409);
+      expect(await response?.json()).toMatchObject({ status: "refused", kind: "not-a-spoke" });
+    }
+  });
+
+  it("lists no held members on a host that is not a spoke, and only reads them with a window", async () => {
+    const { handle } = await setup();
+    const read = (headers: Record<string, string>) =>
+      new Request(`http://127.0.0.1${HUB_ADMINISTRATION_ROUTES.heldMembers}`, { headers });
+    const window = {
+      "x-octant-desktop-secret": secret,
+      "x-octant-window-capability": capability,
+    };
+
+    const held = await handle(read(window));
+    const unauthenticated = await handle(
+      read({ ...window, "x-octant-window-capability": "B".repeat(43) }),
+    );
+    const posted = await handle(post(HUB_ADMINISTRATION_ROUTES.heldMembers));
+
+    expect(held?.status).toBe(200);
+    expect(await held?.json()).toEqual({ members: [] });
+    expect(unauthenticated?.status).toBe(401);
+    expect(posted?.status).toBe(400);
   });
 });

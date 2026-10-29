@@ -7,7 +7,13 @@
 
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { HubGrant, HubMemberId, PeerGrant, SignedHubRoster } from "@octant/contracts";
+import {
+  HubGrant,
+  HubMemberId,
+  NewMemberAlert,
+  PeerGrant,
+  SignedHubRoster,
+} from "@octant/contracts";
 import { Schema } from "effect";
 
 const SUBDIR = "hub";
@@ -36,11 +42,28 @@ export const HubJoinTicketRecord = Schema.Struct({
 }).annotations(strict);
 export type HubJoinTicketRecord = typeof HubJoinTicketRecord.Type;
 
+/**
+ * One entry of a host's own owner list with what the host needs to check the
+ * device: its name as the roster showed it when it was added, and the unlock
+ * public key. The identity key is not kept; the device presents it with each
+ * request and the host compares its fingerprint.
+ */
+export const HostOwnerRecord = Schema.Struct({
+  memberId: HubMemberId,
+  name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  identityKeyFingerprint: digest,
+  unlockKeyFingerprint: digest,
+  unlockPublicKey: key,
+}).annotations(strict);
+export type HostOwnerRecord = typeof HostOwnerRecord.Type;
+
 export const HubSideState = Schema.Struct({
   enabled: Schema.Boolean,
   roster: Schema.optional(SignedHubRoster),
   members: Schema.Array(HubMemberRecord),
   joinTickets: Schema.Array(HubJoinTicketRecord),
+  /** The hub's own owner list. A roster's owner mark never adds to it. */
+  owners: Schema.optional(Schema.Array(HostOwnerRecord)),
 }).annotations(strict);
 export type HubSideState = typeof HubSideState.Type;
 
@@ -67,6 +90,14 @@ export const HubLinkState = Schema.Struct({
   guestDevices: Schema.optional(Schema.Array(GuestDeviceRecord)),
   /** Set once a newer roster no longer lists this spoke: the hub principal is revoked. */
   removed: Schema.optional(Schema.Literal(true)),
+  /** This spoke's own owner list; it is dropped with the rest of the link when the spoke leaves. */
+  owners: Schema.optional(Schema.Array(HostOwnerRecord)),
+  /** Hold a new member status-only until a window or an owner's signed unlock confirms it. Off by default. */
+  confirmNewMembers: Schema.optional(Schema.Literal(true)),
+  /** New members a roster added, which this spoke's windows and owner devices can read and dismiss. */
+  alerts: Schema.optional(Schema.Array(NewMemberAlert)),
+  /** Members a person removed from an alert here: a later roster still lists them, and this spoke does not accept them again. */
+  rejectedMemberIds: Schema.optional(Schema.Array(HubMemberId)),
   /** Set while Leave waits on the hub, so no guest is admitted after the devices to revoke were read. */
   leaving: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
