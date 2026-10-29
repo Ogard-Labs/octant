@@ -360,7 +360,7 @@ export class ProviderService implements ProviderServiceApi {
       const catalogByInstance = new Map(
         (persistedCatalogs ?? []).map((catalog) => [String(catalog.instanceId), catalog]),
       );
-      const observedStates = this.#runtime
+      const runtimeObservedStates = this.#runtime
         .observedStates()
         .filter(({ instanceId }) => configuredIds.has(instanceId))
         .map((state) => {
@@ -382,12 +382,35 @@ export class ProviderService implements ProviderServiceApi {
               catalogByInstance.get(String(state.instanceId))?.manualModelOrder ?? [],
             ),
           });
-        })
-        .sort(
-          (left, right) =>
-            (providerIndex.get(String(left.instanceId)) ?? Number.MAX_SAFE_INTEGER) -
-            (providerIndex.get(String(right.instanceId)) ?? Number.MAX_SAFE_INTEGER),
+        });
+      // A withheld driver's instance can be Off, and an Off instance has no
+      // observation; report why it is withheld so the card says so before
+      // anyone turns it on.
+      const observedIds = new Set(
+        runtimeObservedStates.map(({ instanceId }) => String(instanceId)),
+      );
+      const withheldObservedStates = orderedInstances
+        .filter(
+          (instance) =>
+            !observedIds.has(String(instance.id)) &&
+            bundledProviderDriverWithheldReason(instance.driverKind) !== undefined &&
+            !this.#isInstanceDriverAvailable(instance),
+        )
+        .map((instance) =>
+          withRuntimeIntegration(
+            instance.driverKind,
+            driverNotAdmittedObservation(
+              instance.id,
+              decodeTimestamp(this.#clock()),
+              instance.driverKind,
+            ),
+          ),
         );
+      const observedStates = [...runtimeObservedStates, ...withheldObservedStates].sort(
+        (left, right) =>
+          (providerIndex.get(String(left.instanceId)) ?? Number.MAX_SAFE_INTEGER) -
+          (providerIndex.get(String(right.instanceId)) ?? Number.MAX_SAFE_INTEGER),
+      );
       const outsideDrivers = this.#outsideDriverListings();
       return decodeProviderRegistrySnapshot({
         instances: orderedInstances,
@@ -1346,6 +1369,11 @@ export class ProviderService implements ProviderServiceApi {
             await this.#runtime.invalidateRuntime(current.id);
             eventName = "provider.instance-configuration-changed@1";
           } else {
+            const withheldReason =
+              command.kind === "set-provider-enabled" && command.enabled
+                ? bundledProviderDriverWithheldReason(current.driverKind)
+                : undefined;
+            if (withheldReason !== undefined) throw this.#unsupported(withheldReason);
             if (
               command.kind === "set-provider-enabled" &&
               command.enabled &&

@@ -52,11 +52,12 @@ describe("provider Settings presentation", () => {
         ].map((capability) => [capability, "unavailable"]),
       ),
       reason: "driver-not-admitted",
+      message: "fx is not offered yet: the current fx release cannot load certificates.",
       observedAt: "2026-07-15T10:00:00.000Z",
     });
     const guidance = providerRefusalGuidance(instance, blocked);
-    expect(guidance?.reason).toMatch(/fx is not offered yet.*certificates/);
-    expect(guidance?.nextStep).toMatch(/provider and its threads are kept/);
+    expect(guidance?.reason).toBe(blocked.message);
+    expect(guidance?.nextStep).toMatch(/use another provider for new turns/);
   });
 
   it("names every image profile driver kind, not only chat and code runtimes", () => {

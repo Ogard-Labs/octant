@@ -153,12 +153,12 @@ export function providerRefusalCopy(
       nextStep: `Sign in to ${label} with its provider-owned login, then check the connection again.`,
     };
   }
-  if (reason === "driver-not-admitted" && instance.driverKind === "fx") {
+  if (reason === "driver-not-admitted" && instance.driverKind !== "outside-harness-endpoint") {
+    // A bundled driver is never missing a package; the host withholds it and
+    // sends the reason in the observed message.
     return {
-      reason:
-        "fx is not offered yet: the current fx release cannot load certificates inside Octant's sandbox, so it cannot reach the Vercel AI Gateway.",
-      nextStep:
-        "Your fx provider and its threads are kept. Octant offers fx again once a stock fx release can load certificates in the sandbox; until then, use another provider for new turns.",
+      reason: `${label} is not offered yet.`,
+      nextStep: `Octant offers ${label} again in a later release; until then, use another provider for new turns.`,
     };
   }
   if (reason === "driver-not-admitted") {
@@ -222,9 +222,25 @@ export function providerRefusalGuidance(
 ): { readonly reason: string; readonly nextStep: string } | undefined {
   const held = outsideDriverHoldGuidance(instance);
   if (held !== undefined) return held;
-  return observed?.reason === undefined
-    ? undefined
-    : providerRefusalCopy(observed.reason, instance);
+  if (observed?.reason === undefined) return undefined;
+  const copy = providerRefusalCopy(observed.reason, instance);
+  const withheld = providerWithheldReason(instance, observed);
+  return withheld === undefined ? copy : { ...copy, reason: withheld };
+}
+
+/**
+ * The host's reason a bundled driver is withheld, or undefined. The host sends
+ * it for an Off instance too, so the card can say why before anyone turns it
+ * on; the renderer keeps no copy of it.
+ */
+export function providerWithheldReason(
+  instance: ProviderInstance,
+  observed: ProviderObservedState | undefined,
+): string | undefined {
+  return observed?.reason === "driver-not-admitted" &&
+    instance.driverKind !== "outside-harness-endpoint"
+    ? observed.message
+    : undefined;
 }
 
 export function titleCase(value: string): string {
