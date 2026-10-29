@@ -105,16 +105,40 @@ describe("a spoke accepting the guests a verified roster lists", () => {
     expect(result.dropped).toEqual([id("3")]);
   });
 
-  it("grants a listed spoke nothing: only guests are accepted here", () => {
+  it("accepts another spoke as a full member that may delegate, and never the hub or itself", () => {
     const result = introduceGuests({
       spokeId,
-      roster: rosterOf(member("1", "hub"), member("5", "spoke")),
+      roster: rosterOf(member("1", "hub"), member("2", "spoke"), member("5", "spoke")),
       grants: [],
       introduce: true,
       confirmNewMembers: false,
     });
 
-    expect(result.grants).toEqual([]);
+    expect(result.admitted.map((admitted) => String(admitted.memberId))).toEqual([String(id("5"))]);
+    expect(result.grants).toEqual([
+      {
+        memberId: id("5"),
+        readStatus: true,
+        delegation: {
+          projects: "all",
+          modes: ["work", "code"],
+          posture: "approval-gated",
+          providerProfiles: { allowDefault: true, profileIds: [] },
+        },
+      },
+    ]);
+  });
+
+  it("holds a new spoke at status only while Confirm new members is on", () => {
+    const result = introduceGuests({
+      spokeId,
+      roster: rosterOf(member("1", "hub"), member("5", "spoke")),
+      grants: [],
+      introduce: true,
+      confirmNewMembers: true,
+    });
+
+    expect(result.grants).toEqual([{ memberId: id("5"), readStatus: true }]);
   });
 });
 

@@ -20,6 +20,7 @@ import {
   clampDelegation,
   decideRosterReplacement,
   defaultHubGrant,
+  delegationPostureWithin,
   honorOwner,
   hubRosterSigningPayload,
   mergeStandInMembership,
@@ -217,6 +218,16 @@ describe("clampDelegation", () => {
         project: { ...projectAuthority, projectId: otherProject as DelegationRequest["projectId"] },
       }),
     ).toEqual({ status: "refused", kind: "project-mismatch" });
+  });
+});
+
+describe("delegationPostureWithin", () => {
+  it("lets a child run at or below the posture its parent runs at, never above", () => {
+    expect(delegationPostureWithin("plan", "approval-gated")).toBe(true);
+    expect(delegationPostureWithin("approval-gated", "approval-gated")).toBe(true);
+    expect(delegationPostureWithin("approval-gated", "plan")).toBe(false);
+    expect(delegationPostureWithin("full-access", "approval-gated")).toBe(false);
+    expect(delegationPostureWithin("full-access", "full-access")).toBe(true);
   });
 });
 

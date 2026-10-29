@@ -27,6 +27,18 @@ const narrowerPosture = (
   b: PeerDelegationPosture,
 ): PeerDelegationPosture => (postureRank[a] <= postureRank[b] ? a : b);
 
+/**
+ * Whether a child may run at `requested` under a parent running at `ceiling`.
+ * A remote child is equal or narrower than the thread that asked for it, as a
+ * local child run is.
+ */
+export function delegationPostureWithin(
+  requested: PeerDelegationPosture,
+  ceiling: PeerDelegationPosture,
+): boolean {
+  return postureRank[requested] <= postureRank[ceiling];
+}
+
 type BrandedId = HubMemberId | ProjectId | AgentProfileId;
 
 const sameId = (a: BrandedId, b: BrandedId): boolean => String(a) === String(b);

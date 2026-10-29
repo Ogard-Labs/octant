@@ -3,9 +3,20 @@ import { admitNewMember } from "./hubAndSpokesPolicy";
 
 const sameId = (a: HubMemberId, b: HubMemberId): boolean => String(a) === String(b);
 
-/** Members of the roster that run no agents and no listener: the phones and browsers. */
-export function listedGuests(roster: HubRoster): ReadonlyArray<RosterMember> {
-  return roster.members.filter((member) => member.role === "guest");
+/**
+ * The roster members a spoke introduces: the phones and browsers, and the
+ * other spokes (a standby is a spoke too). The hub is not one of them: it holds
+ * the hub grant, which the spoke's person chose, and sends no delegated work.
+ */
+export function introducibleMembers(
+  roster: HubRoster,
+  spokeId: HubMemberId,
+): ReadonlyArray<RosterMember> {
+  return roster.members.filter(
+    (member) =>
+      (member.role === "guest" || member.role === "spoke" || member.role === "standby-hub") &&
+      !sameId(member.memberId, spokeId),
+  );
 }
 
 export type GuestIntroduction = {
@@ -15,11 +26,11 @@ export type GuestIntroduction = {
 };
 
 /**
- * The grants a spoke holds for guests after it saw a verified roster. A spoke
- * that ticked Introduce admits every listed guest it holds no grant for as a
- * new member (a full member unless Confirm new members is on); a spoke that
- * did not admits none. A guest the roster no longer lists loses its grant,
- * whether or not Introduce is ticked.
+ * The grants a spoke holds for other members after it saw a verified roster. A
+ * spoke that ticked Introduce admits every listed guest and spoke it holds no
+ * grant for as a new member (a full member unless Confirm new members is on); a
+ * spoke that did not admits none. A member the roster no longer lists loses its
+ * grant, whether or not Introduce is ticked.
  */
 export function introduceGuests(input: {
   readonly spokeId: HubMemberId;
@@ -33,7 +44,7 @@ export function introduceGuests(input: {
   const kept = input.grants.filter(listed);
   const dropped = input.grants.filter((grant) => !listed(grant)).map((grant) => grant.memberId);
   if (!input.introduce) return { grants: kept, admitted: [], dropped };
-  const fresh = listedGuests(input.roster).filter(
+  const fresh = introducibleMembers(input.roster, input.spokeId).filter(
     (guest) => !kept.some((grant) => sameId(grant.memberId, guest.memberId)),
   );
   const added = fresh.map(
