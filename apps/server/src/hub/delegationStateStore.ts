@@ -12,6 +12,7 @@ import {
   DelegatingThreadReference,
   DelegationChildState,
   DelegationRequestId,
+  DelegationResult,
   HubMemberId,
   PeerDelegationMode,
   ProjectId,
@@ -51,6 +52,11 @@ export const SentDelegation = Schema.Struct({
   state: DelegationChildState,
   /** Set once the result was recorded on the parent thread; a result is recorded once. */
   resultRecorded: Schema.optional(Schema.Literal(true)),
+  /**
+   * What the target returned, kept so a read after the background poll recorded
+   * it still hands the parent thread the text; the journal holds only the mark.
+   */
+  result: Schema.optional(DelegationResult),
   sentAt: UtcTimestamp,
 }).annotations(strict);
 export type SentDelegation = typeof SentDelegation.Type;

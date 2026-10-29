@@ -313,11 +313,29 @@ describe("a spoke delegating work to another spoke", () => {
     expect(a.delegationRecords.map((entry) => entry.change)).toEqual(["sent", "result-recorded"]);
 
     // A result is recorded once.
-    expect(await a.delegating.refresh(String(delegated.requestId))).toEqual({
+    expect(await a.delegating.refresh(String(delegated.requestId))).toMatchObject({
       status: "already-recorded",
       requestId: delegated.requestId,
+      framedText: completed.framedText,
     });
     expect(parent.ingested).toHaveLength(1);
+  });
+
+  it("still returns the framed result to a later read after the background poll recorded it", async () => {
+    const { a, b, child, parent } = await threeHosts();
+    const delegated = await a.delegating.delegate(startCommand(b), { windowId: "window-a" });
+    if (delegated.status !== "delegated") throw new Error(JSON.stringify(delegated));
+    child.finish("The notes raise three open questions.");
+
+    await a.delegating.trackOpen();
+    const later = await a.delegating.refresh(String(delegated.requestId));
+
+    if (later.status !== "already-recorded") throw new Error(JSON.stringify(later));
+    expect(later.result?.finalMessage).toBe("The notes raise three open questions.");
+    expect(later.framedText).toContain('origin="tool-result"');
+    expect(later.framedText).toContain("The notes raise three open questions.");
+    expect(parent.ingested).toHaveLength(1);
+    expect(a.delegationRecords.map((entry) => entry.change)).toEqual(["sent", "result-recorded"]);
   });
 
   it("records a hostile result as data: framed, marked, and followed by nothing", async () => {

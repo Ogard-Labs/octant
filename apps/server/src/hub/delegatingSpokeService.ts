@@ -139,7 +139,13 @@ export type DelegationProgress =
       readonly state: "failed" | "cancelled";
     }
   | ({ readonly status: "completed" } & RecordedDelegationResult)
-  | { readonly status: "already-recorded"; readonly requestId: DelegationRequestId };
+  | {
+      readonly status: "already-recorded";
+      readonly requestId: DelegationRequestId;
+      /** Kept with the delegation, so every later read hands the result on again. */
+      readonly result?: DelegationResult;
+      readonly framedText?: string;
+    };
 
 export type DelegationCancellation =
   | { readonly status: "unknown-request" }
@@ -250,7 +256,16 @@ export class DelegatingSpokeService {
     const sent = this.#find(requestId);
     if (sent === undefined) return { status: "unknown-request" };
     if (sent.resultRecorded === true) {
-      return { status: "already-recorded", requestId: sent.requestId };
+      return {
+        status: "already-recorded",
+        requestId: sent.requestId,
+        ...(sent.result === undefined
+          ? {}
+          : {
+              result: sent.result,
+              framedText: frameResult(sent.result, String(sent.targetMemberId)).text,
+            }),
+      };
     }
     if (sent.state === "failed" || sent.state === "cancelled") {
       return { status: "ended", requestId: sent.requestId, state: sent.state };
@@ -345,7 +360,7 @@ export class DelegatingSpokeService {
     // The result is data from another computer. It is framed as data and the
     // parent thread is marked as having read outside content before any of it
     // is handed on; if the mark cannot be written, nothing is handed on.
-    const sourceLabel = `peer-delegation:${String(target.memberId)}`;
+    const sourceLabel = peerSourceLabel(String(target.memberId));
     const ingested = this.#options.parent.ingest({
       threadId: sent.parent.threadId,
       sourceLabel,
@@ -353,13 +368,10 @@ export class DelegatingSpokeService {
       correlationId: (this.#options.uuid ?? randomUUID)(),
     });
     if (ingested === "refused") return { status: "target-unreachable" };
-    const framed = frameExternalContentForModel({
-      origin: "tool-result",
-      sourceLabel,
-      section: "subagent-results",
-      body: delegationResultBody(result),
-    });
-    this.#update(sent.requestId, { state: "completed", resultRecorded: true });
+    const framed = frameResult(result, String(target.memberId));
+    // The background poll reaches here with nobody to hand the text to, so the
+    // result is kept with the delegation before it counts as recorded.
+    this.#update(sent.requestId, { state: "completed", resultRecorded: true, result });
     this.#options.record({
       change: "result-recorded",
       actingPrincipal: { kind: "local-window" },
@@ -409,6 +421,20 @@ export class DelegatingSpokeService {
       now: this.#options.now(),
     });
   }
+}
+
+function peerSourceLabel(memberId: string): string {
+  return `peer-delegation:${memberId}`;
+}
+
+/** A result as the parent thread receives it: data from another computer, inside a frame. */
+function frameResult(result: DelegationResult, memberId: string) {
+  return frameExternalContentForModel({
+    origin: "tool-result",
+    sourceLabel: peerSourceLabel(memberId),
+    section: "subagent-results",
+    body: delegationResultBody(result),
+  });
 }
 
 /** The text of a result as the parent thread sees it, headed by where it came from. */
