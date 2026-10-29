@@ -129,6 +129,8 @@ export interface HubTestHost {
   readonly wake: WakeService;
   /** This host's side of the wake service as a spoke. */
   readonly spokeWake: SpokeWakeService;
+  /** Starts a new wake service over the same state, as a restart of the server does; `spokeWake` is then the new one. */
+  readonly restartSpokeWake: () => SpokeWakeService;
   /** The magic packets this host's wake service sent, as the fake socket saw them. */
   readonly magicPackets: Uint8Array[];
   /** This host's routines as the wake service may read them: a test edits it to schedule, disable, or remove one. */
@@ -357,23 +359,25 @@ export async function startHubTestHost(input: {
   const routines: WakeRoutineView[] = [];
   const schedulerPokes = { count: 0 };
   let routineSerial = 0;
-  const spokeWake = new SpokeWakeService({
-    state,
-    identity: () => identity,
-    transport: input.wakeTransport?.(transport) ?? transport,
-    spoke,
-    routines: () => routines,
-    scheduler: {
-      poke: () => {
-        schedulerPokes.count += 1;
+  const makeSpokeWake = () =>
+    new SpokeWakeService({
+      state,
+      identity: () => identity,
+      transport: input.wakeTransport?.(transport) ?? transport,
+      spoke,
+      routines: () => routines,
+      scheduler: {
+        poke: () => {
+          schedulerPokes.count += 1;
+        },
       },
-    },
-    hubUnreachable: () => failover.hubUnreachable(),
-    record: (change) => records.push(change),
-    now: wakeNow,
-    // Distinct, well-formed ids so a test can tell routines apart without reading the map.
-    newRoutineId: () => `routine${String((routineSerial += 1)).padStart(16, "0")}`,
-  });
+      hubUnreachable: () => failover.hubUnreachable(),
+      record: (change) => records.push(change),
+      now: wakeNow,
+      // Distinct, well-formed ids so a test can tell routines apart without reading the map.
+      newRoutineId: () => `routine${String((routineSerial += 1)).padStart(16, "0")}`,
+    });
+  let spokeWake = makeSpokeWake();
   const hubLinkRoutes = createHubLinkRouteHandler({
     hub,
     spoke,
@@ -489,7 +493,13 @@ export async function startHubTestHost(input: {
     spoke,
     failover,
     wake,
-    spokeWake,
+    get spokeWake() {
+      return spokeWake;
+    },
+    restartSpokeWake: () => {
+      spokeWake = makeSpokeWake();
+      return spokeWake;
+    },
     magicPackets,
     routines,
     schedulerPokes,

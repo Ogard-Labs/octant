@@ -145,6 +145,7 @@ export class SpokeWakeService {
         wake: {
           routines: link.wake?.routines ?? [],
           ...(address === undefined ? {} : { hardwareAddress: address }),
+          ...(link.wake?.shared === true ? { shared: true as const } : {}),
         },
       },
     });
@@ -189,12 +190,14 @@ export class SpokeWakeService {
     // A standing-in standby is awake and runs its own scheduler: no one wakes it.
     if (link.standIn !== undefined) return { status: "refused", kind: "stand-in" };
     const granted = this.#wakeGranted();
-    if (!granted && this.#lastSent === undefined) {
+    // What this spoke shared stays on the hub until a withdrawal is confirmed, also across a restart.
+    if (!granted && link.wake?.shared !== true) {
       return { status: "refused", kind: "wake-not-granted" };
     }
     const report: HubWakeReport = granted ? this.#build(link) : { times: [] };
     const target = coordinator(link);
     if (target === undefined) return { status: "unreachable" };
+    if (granted) this.#markShared(true);
     const body = JSON.stringify(report);
     const signature = `${target.memberId}|${body}`;
     if (signature === this.#lastSent) return { status: "unchanged" };
@@ -217,6 +220,7 @@ export class SpokeWakeService {
       return { status: "declined", kind: await declinedKind(answer.response) };
     }
     this.#lastSent = granted ? signature : undefined;
+    if (!granted) this.#markShared(false);
     const generation = await answeredGeneration(answer.response);
     if (generation !== undefined) this.#hubGeneration = generation;
     this.#lastCount = report.times.length;
@@ -272,6 +276,25 @@ export class SpokeWakeService {
     return { status: "accepted" };
   }
 
+  #markShared(shared: boolean): void {
+    const state = this.#options.state.load();
+    const link = state.link;
+    if (link === undefined || (link.wake?.shared === true) === shared) return;
+    this.#options.state.save({
+      ...state,
+      link: {
+        ...link,
+        wake: {
+          routines: link.wake?.routines ?? [],
+          ...(link.wake?.hardwareAddress === undefined
+            ? {}
+            : { hardwareAddress: link.wake.hardwareAddress }),
+          ...(shared ? { shared: true as const } : {}),
+        },
+      },
+    });
+  }
+
   #wakeGranted(): boolean {
     return this.#options.spoke.hubMayUse("wake").status === "allowed";
   }
@@ -320,6 +343,7 @@ export class SpokeWakeService {
               ...(state.link.wake?.hardwareAddress === undefined
                 ? {}
                 : { hardwareAddress: state.link.wake.hardwareAddress }),
+              ...(state.link.wake?.shared === true ? { shared: true as const } : {}),
             },
           },
         });

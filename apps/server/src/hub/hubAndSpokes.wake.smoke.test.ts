@@ -356,6 +356,66 @@ describe("what a spoke tells the hub", () => {
     expect(hub.wake.status().spokes).toHaveLength(1);
   });
 
+  it("is sent again on the spoke's next tick after the hub role was turned off and on", async () => {
+    const { clock, hub, laptop } = await startPair();
+    laptop.spoke.setGrant(wakeGrant, window);
+    laptop.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 30 * MINUTE),
+    });
+    await laptop.spokeWake.tick();
+    await laptop.failover.tick();
+    expect(hub.wake.status().spokes).toHaveLength(1);
+
+    expect(hub.hub.disable(window).status).toBe("disabled");
+    expect(hub.hub.enable(window).status).toBe("enabled");
+    await hub.wake.setEnabled(true, window);
+    expect(hub.wake.status().spokes).toEqual([]);
+
+    await laptop.failover.tick();
+    await laptop.spokeWake.tick();
+    expect(hub.wake.status().spokes).toHaveLength(1);
+  });
+
+  it("withdraws its times and hardware address on the first tick after a restart when Wake was unticked before it", async () => {
+    const { clock, hub, laptop } = await startPair();
+    laptop.spoke.setGrant(wakeGrant, window);
+    laptop.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 30 * MINUTE),
+    });
+    expect(laptop.spokeWake.setHardwareAddress("AA-BB-CC-00-11-22").status).toBe("changed");
+    await laptop.spokeWake.tick();
+    expect(hub.state.load().hub?.wake?.spokes[0]?.hardwareAddress).toBeDefined();
+
+    laptop.spoke.setGrant({ items: ["roster", "introduce", "owners"], actProjects: [] }, window);
+    const restarted = laptop.restartSpokeWake();
+    await restarted.tick();
+
+    expect(hub.state.load().hub?.wake?.spokes).toEqual([]);
+    // Once the hub confirmed, there is nothing left to withdraw.
+    expect(await restarted.report()).toEqual({ status: "refused", kind: "wake-not-granted" });
+  });
+
+  it("drops the times and hardware address a hub held for a spoke that left", async () => {
+    const { clock, hub, laptop } = await startPair();
+    laptop.spoke.setGrant(wakeGrant, window);
+    laptop.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 30 * MINUTE),
+    });
+    laptop.spokeWake.setHardwareAddress("AA-BB-CC-00-11-22");
+    await laptop.spokeWake.tick();
+    expect(hub.state.load().hub?.wake?.spokes).toHaveLength(1);
+
+    const removed = await hub.hub.removeMember({ memberId: laptop.hostId }, window);
+    expect(removed.status).toBe("removed");
+    expect(hub.state.load().hub?.wake?.spokes).toEqual([]);
+  });
+
   it("is filed under the member whose key signed it, and the body cannot name another", async () => {
     const { clock, hub, laptop } = await startPair();
     const times = [

@@ -156,6 +156,11 @@ export type StandInState = typeof StandInState.Type;
  */
 export const SpokeWakeState = Schema.Struct({
   hardwareAddress: Schema.optional(HardwareAddress),
+  /**
+   * Set once this spoke has sent the hub its wake state, and cleared only when the
+   * hub confirms a withdrawal. A restart before the withdrawal still withdraws.
+   */
+  shared: Schema.optional(Schema.Literal(true)),
   routines: Schema.Array(
     Schema.Struct({
       automationId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
