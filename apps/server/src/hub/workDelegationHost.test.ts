@@ -112,6 +112,7 @@ const input: Parameters<PeerDelegationHost["startThread"]>[0] = {
   projectId: PROJECT,
   task: "Summarize the notes.\nThen list the open questions.",
   authority,
+  admissionCurrent: () => true,
 };
 
 describe("the Work thread a delegation becomes on the receiving spoke", () => {
@@ -141,7 +142,44 @@ describe("the Work thread a delegation becomes on the receiving spoke", () => {
       prompt: input.task,
       authority: { confinementPosture: "project-root-confined", workingDirectory: "." },
     });
-    expect(firstTurns[0]?.options).toEqual({ holdAskFirst: true });
+    expect(firstTurns[0]?.options).toEqual({
+      holdAskFirst: true,
+      admissionCurrent: expect.any(Function),
+    });
+  });
+
+  it("creates no thread when the sender's grant has already ended", async () => {
+    const { host, executed, firstTurns } = services();
+
+    const started = await host.startThread({ ...input, admissionCurrent: () => false });
+
+    expect(started).toEqual({ status: "refused", kind: "delegation-not-granted" });
+    expect(executed).toHaveLength(0);
+    expect(firstTurns).toHaveLength(0);
+  });
+
+  it("hands the first turn a live check, and refuses when the grant ended before the provider ran", async () => {
+    let current = true;
+    let providerRuns = 0;
+    const { host } = services({
+      turns: {
+        startFirstTurn: async (_scope, _command, options) => {
+          // The grant ends while the turn is being prepared; the turn service
+          // rechecks before it reaches the provider.
+          current = false;
+          if (options?.admissionCurrent?.() === false) throw new Error("no longer current");
+          providerRuns += 1;
+          return { kind: "accepted" };
+        },
+        turns: async () => [],
+        cancelFirstTurn: async () => ({ kind: "turn-cancelled" }),
+      },
+    });
+
+    const started = await host.startThread({ ...input, admissionCurrent: () => current });
+
+    expect(started).toEqual({ status: "refused", kind: "delegation-not-granted" });
+    expect(providerRuns).toBe(0);
   });
 
   it("offers a Work Project only Work, and a Code Project no mode, so the clamp refuses Code", () => {

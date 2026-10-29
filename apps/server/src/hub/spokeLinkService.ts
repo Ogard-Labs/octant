@@ -923,6 +923,25 @@ export class SpokeLinkService {
   }
 
   /**
+   * The member and the grant this host holds for it right now, for a request
+   * already authenticated that must still be allowed when its work starts.
+   * Undefined once the host left the hub, the roster dropped the member, or
+   * its peer grant was removed.
+   */
+  currentPeer(memberId: HubMemberId): AuthorizedPeer | undefined {
+    const link = this.#options.state.load().link;
+    if (link === undefined || link.removed === true) return undefined;
+    const authorized = authorizePeer({
+      roster: link.roster.roster,
+      grants: link.peerGrants,
+      memberId,
+    });
+    return authorized.status === "authorized"
+      ? { member: authorized.member, grant: authorized.grant }
+      : undefined;
+  }
+
+  /**
    * The roster entry and the listener pin this host reaches a full member at.
    * Only a spoke, a standby, or the hub with a listener is dialled; a guest has
    * no listener, and a member the held roster does not list is not reachable.

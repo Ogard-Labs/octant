@@ -286,6 +286,7 @@ export async function startHubTestHost(input: {
   const peerDelegationRoutes = createPeerDelegationRouteHandler({
     delegation: new PeerDelegationService({
       authenticate: (request) => spoke.authenticatePeer(request),
+      currentPeer: (memberId) => spoke.currentPeer(memberId),
       host: input.delegationHost ?? NO_DELEGATION_HOST,
       state: delegationState,
       record: (change) => delegationRecords.push(change),

@@ -463,6 +463,7 @@ export function wireRemote(deps: RemoteDependencies) {
   const peerDelegationRoutes = createPeerDelegationRouteHandler({
     delegation: new PeerDelegationService({
       authenticate: (input) => spokeLinkService.authenticatePeer(input),
+      currentPeer: (memberId) => spokeLinkService.currentPeer(memberId),
       host: createWorkDelegationHost({
         readProject: (projectId) => persistence.readProject(projectId),
         isWorkEnabled: () =>

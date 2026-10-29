@@ -60,7 +60,10 @@ export interface WorkDelegationServices {
     readonly startFirstTurn: (
       scope: WindowId,
       command: unknown,
-      options?: { readonly holdAskFirst?: boolean },
+      options?: {
+        readonly holdAskFirst?: boolean;
+        readonly admissionCurrent?: () => boolean;
+      },
     ) => Promise<{ readonly kind: string }>;
     readonly turns: (
       scope: WindowId,
@@ -120,6 +123,8 @@ export function createWorkDelegationHost(services: WorkDelegationServices): Peer
       ) {
         return { status: "refused", kind: "provider-unavailable" };
       }
+      // The sender's grant may have ended while this start waited on settings.
+      if (!input.admissionCurrent()) return { status: "refused", kind: "delegation-not-granted" };
       const threadId = uuid();
       try {
         const created = await services.threads.execute(services.scope, {
@@ -157,13 +162,18 @@ export function createWorkDelegationHost(services: WorkDelegationServices): Peer
           },
           // Nobody asked for this turn at this host, so it asks before every
           // edit whatever the host's Work default is.
-          { holdAskFirst: true },
+          // The turn service rechecks this after it prepares and before the
+          // provider runs, so a grant ended meanwhile starts no work.
+          { holdAskFirst: true, admissionCurrent: input.admissionCurrent },
         );
         return started.kind === "accepted"
           ? { status: "started", threadId, turnId }
           : { status: "refused", kind: "start-failed" };
       } catch {
-        return { status: "refused", kind: "start-failed" };
+        return {
+          status: "refused",
+          kind: input.admissionCurrent() ? "start-failed" : "delegation-not-granted",
+        };
       }
     },
 

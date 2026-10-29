@@ -1247,6 +1247,45 @@ describe("what the receiving spoke refuses", () => {
     expect(child.started).toHaveLength(0);
   });
 
+  it("starts no provider work when the peer grant is removed while the start is preparing", async () => {
+    const child = fakeChildHost();
+    const startThread = child.host.startThread;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let providerRuns = 0;
+    const slow: PeerDelegationHost = {
+      ...child.host,
+      startThread: async (input) => {
+        await gate;
+        if (!input.admissionCurrent()) return { status: "refused", kind: "delegation-not-granted" };
+        providerRuns += 1;
+        return startThread(input);
+      },
+    };
+    const { a, b } = await threeHosts({ child: { ...child, host: slow } });
+
+    const pending = b.hubLink(signedDelegation({ signer: a, recipient: b, body: requestBody(a) }));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const state = b.state.load();
+    if (state.link === undefined) throw new Error("B is not a spoke.");
+    b.state.save({
+      ...state,
+      link: {
+        ...state.link,
+        peerGrants: state.link.peerGrants.filter((grant) => String(grant.memberId) !== a.hostId),
+      },
+    });
+    release();
+
+    const response = await pending;
+    expect(response?.status).toBe(403);
+    expect(await response?.json()).toEqual({ status: "refused", kind: "delegation-not-granted" });
+    expect(providerRuns).toBe(0);
+    expect(child.started).toHaveLength(0);
+  });
+
   it("refuses a Project outside the grant and one this spoke has not opened", async () => {
     const { a, b, child } = await threeHosts();
     setGrantHeldBy(b, a, (grant) =>

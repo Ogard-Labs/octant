@@ -24,7 +24,11 @@ import {
   type PeerPrincipal,
   type ProjectId,
 } from "@octant/contracts";
-import { clampDelegation, type DelegationProjectAuthority } from "@octant/domain";
+import {
+  clampDelegation,
+  type AuthorizedPeer,
+  type DelegationProjectAuthority,
+} from "@octant/domain";
 import { Schema } from "effect";
 import {
   MAX_OPEN_DELEGATIONS,
@@ -58,6 +62,12 @@ export interface PeerDelegationHost {
     readonly projectId: ProjectId;
     readonly task: string;
     readonly authority: DelegatedAuthority;
+    /**
+     * Reads the sender's grant afresh: false once the sender left the roster or
+     * its grant no longer allows this request. The host checks it before it
+     * creates anything and again before any provider work runs.
+     */
+    readonly admissionCurrent: () => boolean;
   }) => Promise<StartedThread>;
   /** Reads the delegated turn, not whatever turn the thread has run since. */
   readonly readThread: (threadId: string, turnId: string) => Promise<ChildReading | undefined>;
@@ -78,6 +88,7 @@ export type StartedThread =
   | {
       readonly status: "refused";
       readonly kind:
+        | "delegation-not-granted"
         | "project-unavailable"
         | "mode-unavailable"
         | "posture-unavailable"
@@ -134,6 +145,8 @@ export interface PeerDelegationServiceOptions {
     readonly path: string;
     readonly body: string;
   }) => PeerRequestOutcome;
+  /** The peer as this host holds it right now; undefined once it is out of the roster or has no grant. */
+  readonly currentPeer: (memberId: HubMemberId) => AuthorizedPeer | undefined;
   readonly host: PeerDelegationHost;
   readonly state: DelegationStatePort;
   readonly record: (change: HubDelegationRecordedPayload) => void;
@@ -249,12 +262,27 @@ export class PeerDelegationService {
     authority: DelegatedAuthority,
   ): Promise<DelegationReceipt> {
     if (!(await this.#makeRoom())) return refusal("too-many-open-delegations");
+    // The grant and the Project are read again each time: the person here may
+    // remove or narrow the sender while this start is preparing.
+    const admissionCurrent = (): boolean => {
+      const peer = this.#options.currentPeer(principal.memberId);
+      const project = this.#options.host.projectAuthority(request.projectId);
+      if (peer === undefined || project === undefined) return false;
+      const clamp = clampDelegation({ peer, request, project });
+      return (
+        clamp.status === "clamped" &&
+        clamp.authority.posture === authority.posture &&
+        clamp.authority.mode === authority.mode
+      );
+    };
+    if (!admissionCurrent()) return refusal("delegation-not-granted");
     const started = await this.#options.host.startThread({
       requestId: request.requestId,
       senderName,
       projectId: request.projectId,
       task: request.task,
       authority,
+      admissionCurrent,
     });
     if (started.status === "refused") return refusal(started.kind);
     const received: ReceivedDelegation = {
