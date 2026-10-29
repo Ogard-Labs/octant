@@ -112,7 +112,11 @@ describe("hub administration controls", () => {
     const { calls, runtime: controls } = runtime(() => Response.json({ status: "changed" }));
     const added = {
       owners: [
-        { memberId: MEMBER_ID, identityKeyFingerprint: "a".repeat(64), unlockPublicKey: "MFkw" },
+        {
+          memberId: MEMBER_ID,
+          identityKeyFingerprint: "a".repeat(64),
+          unlockKeyFingerprint: "b".repeat(64),
+        },
       ],
     };
     const sent: ReadonlyArray<readonly [string, unknown, string]> = [
@@ -134,12 +138,17 @@ describe("hub administration controls", () => {
 
   it("refuses an owner request that fails its schema, sending nothing", async () => {
     const { calls, runtime: controls } = runtime(() => Response.json({}));
-    const owner = { memberId: MEMBER_ID, identityKeyFingerprint: "a".repeat(64) };
+    const owner = {
+      memberId: MEMBER_ID,
+      identityKeyFingerprint: "a".repeat(64),
+      unlockKeyFingerprint: "b".repeat(64),
+    };
     const refused: ReadonlyArray<readonly [string, unknown]> = [
       ["owners-add", { owners: [] }],
-      ["owners-add", { owners: [{ ...owner, unlockPublicKey: "not base64url!" }] }],
-      ["owners-add", { owners: [{ ...owner, unlockPublicKey: "MFkw", role: "hub" }] }],
-      ["owners-add", { owners: [{ ...owner, unlockPublicKey: "MFkw" }], extra: true }],
+      ["owners-add", { owners: [{ ...owner, unlockKeyFingerprint: "not a digest" }] }],
+      ["owners-add", { owners: [{ ...owner, unlockPublicKey: "MFkw" }] }],
+      ["owners-add", { owners: [{ ...owner, role: "hub" }] }],
+      ["owners-add", { owners: [owner], extra: true }],
       ["owners-add", undefined],
       ["owners-remove", { memberId: "not-a-uuid" }],
       ["owners-remove", { memberId: MEMBER_ID, force: true }],
