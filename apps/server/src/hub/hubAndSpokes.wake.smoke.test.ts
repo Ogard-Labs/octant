@@ -1,0 +1,1290 @@
+// Hosts in one process, each the real remote gateway behind a real TLS listener
+// serving a certificate it made itself. A hub turns on the wake service, a spoke
+// whose person ticked Wake tells it when its routines are next due, and a clock
+// the test moves brings an occurrence into the lead time. The Wake-on-LAN socket
+// is a fake that records what it was given; everything else is the real path.
+
+import { Schema } from "effect";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  HardwareAddress,
+  HubMemberId,
+  UtcTimestamp,
+  WakeRoutineId,
+  type HubGrant,
+} from "@octant/contracts";
+import { HUB_LINK_HEADER, HUB_PEER_KEY_HEADER, signHubLinkRequest } from "./hubLink";
+import { HubTestNetwork, startHubTestHost, type HubTestHost } from "./hubHost.test-support";
+import { HUB_LINK_ROUTES } from "./hubLinkRoutes";
+import type { HubTransport } from "./pinnedHubTransport";
+
+const cleanups: Array<() => Promise<void> | void> = [];
+afterEach(async () => {
+  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+});
+
+const window = { kind: "local-window" } as const;
+const decodeMemberId = Schema.decodeUnknownSync(HubMemberId);
+const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
+const decodeHardwareAddress = Schema.decodeUnknownSync(HardwareAddress);
+const MINUTE = 60_000;
+const FAILOVER_AFTER_MS = 60;
+const wakeGrant: HubGrant = { items: ["roster", "introduce", "owners", "wake"], actProjects: [] };
+const wakeAndStandbyGrant: HubGrant = {
+  items: ["roster", "introduce", "owners", "wake", "standby"],
+  actProjects: [],
+};
+const standbyGrant: HubGrant = {
+  items: ["roster", "introduce", "owners", "standby"],
+  actProjects: [],
+};
+
+const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** One clock for every host in a test, so the signatures on a nudge agree with the checks. */
+function makeClock() {
+  const state = { offset: 0 };
+  return { state, now: () => Date.now() + state.offset };
+}
+
+type Clock = ReturnType<typeof makeClock>;
+
+function start(
+  network: HubTestNetwork,
+  clock: Clock,
+  name: string,
+  last: number,
+  extra: Partial<Parameters<typeof startHubTestHost>[0]> = {},
+) {
+  return startHubTestHost({
+    name,
+    address: `100.101.102.${last}`,
+    network,
+    cleanups,
+    wakeClock: clock.now,
+    wakeLeadMs: 2 * MINUTE,
+    failoverAfterMs: FAILOVER_AFTER_MS,
+    ...extra,
+  });
+}
+
+/** The way a person joins: a code from the hub, a comparison on both screens, approval on the hub. */
+async function join(hub: HubTestHost, member: HubTestHost) {
+  const minted = hub.hub.mintJoinCode({ owner: false });
+  if (minted.status !== "minted") throw new Error(minted.status);
+  const started = await member.spoke.startJoin({ code: minted.code });
+  if (started.status !== "awaiting-approval") throw new Error(JSON.stringify(started));
+  const pending = hub.administration.listPendingPairings().at(-1);
+  if (pending === undefined) throw new Error("The hub shows no pairing to approve.");
+  hub.administration.approvePairing({ ticketId: pending.ticketId });
+  const finished = await member.spoke.finishJoin(window);
+  if (finished.status !== "joined") throw new Error(JSON.stringify(finished));
+}
+
+async function startPair(extra: Partial<Parameters<typeof startHubTestHost>[0]> = {}) {
+  const network = new HubTestNetwork();
+  const clock = makeClock();
+  const hub = await start(network, clock, "Mac mini", 103);
+  const laptop = await start(network, clock, "Laptop", 104, extra);
+  const enabled = hub.hub.enable(window);
+  if (enabled.status !== "enabled") throw new Error(enabled.status);
+  await join(hub, laptop);
+  const switched = await hub.wake.setEnabled(true, window);
+  expect(switched).toEqual({ status: "changed", enabled: true });
+  return { network, clock, hub, laptop };
+}
+
+const iso = (ms: number) => decodeTimestamp(new Date(ms).toISOString());
+
+const nudges = (host: HubTestHost) =>
+  host.requests.filter((entry) => entry === `POST ${HUB_LINK_ROUTES.wakeNudge}`).length;
+
+/** A request to `recipient`'s listener signed with `signer`'s identity key, as the signer's own server would. */
+function signedRequest(input: {
+  readonly signer: HubTestHost;
+  readonly recipient: HubTestHost;
+  readonly clock: Clock;
+  readonly method: "POST" | "PUT";
+  readonly path: string;
+  readonly body: unknown;
+  readonly senderId?: string;
+  readonly presentKey?: boolean;
+}) {
+  const body = JSON.stringify(input.body);
+  return input.recipient.hubLink(
+    new Request(`${input.recipient.origin}${input.path}`, {
+      method: input.method,
+      headers: {
+        host: `${input.recipient.address}:8443`,
+        "content-type": "application/json",
+        ...(input.presentKey === false
+          ? {}
+          : { [HUB_PEER_KEY_HEADER]: input.signer.hostPublicKey }),
+        [HUB_LINK_HEADER]: signHubLinkRequest({
+          signHostPayload: input.signer.signHostPayload,
+          senderMemberId: input.senderId ?? input.signer.hostId,
+          recipientMemberId: input.recipient.hostId,
+          method: input.method,
+          path: input.path,
+          body,
+          now: input.clock.now(),
+        }),
+      },
+      body,
+    }),
+  );
+}
+
+describe("waking a spoke before its routine is due", () => {
+  it("nudges the spoke inside the lead time, once, and the spoke only wakes its own scheduler", async () => {
+    const { clock, hub, laptop } = await startPair();
+    laptop.spoke.setGrant(wakeGrant, window);
+    laptop.routines.push({
+      id: "automation-nightly",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 10 * MINUTE),
+    });
+
+    expect(await laptop.spokeWake.report()).toEqual({ status: "sent", count: 1 });
+    expect(hub.wake.status()).toMatchObject({
+      enabled: true,
+      spokes: [{ memberId: laptop.hostId, upcoming: 1 }],
+    });
+
+    // Outside the lead time nothing is sent.
+    await hub.wake.tick();
+    expect(nudges(laptop)).toBe(0);
+    expect(laptop.schedulerPokes.count).toBe(0);
+
+    // Inside it the hub nudges once; a second look does not nudge again.
+    clock.state.offset = 9 * MINUTE;
+    await hub.wake.tick();
+    await hub.wake.tick();
+    expect(nudges(laptop)).toBe(1);
+    expect(laptop.schedulerPokes.count).toBe(1);
+    expect(hub.magicPackets).toEqual([]);
+    expect(hub.wake.status().spokes[0]?.lastResult).toMatchObject({ result: "nudged" });
+
+    // The spoke's routine is as it was: the nudge started nothing and changed nothing.
+    expect(laptop.routines).toEqual([
+      { id: "automation-nightly", enabled: true, nextDueAt: expect.any(String) },
+    ]);
+    expect(
+      hub.records.map((record) => [record.change, record.actingPrincipal.kind]).slice(-3),
+    ).toEqual([
+      ["wake-switch-changed", "local-window"],
+      ["wake-times-reported", "peer"],
+      ["wake-nudge-sent", "hub"],
+    ]);
+  });
+
+  it("sends a magic packet only when the person entered the hardware address on the spoke", async () => {
+    const { clock, hub, laptop } = await startPair();
+    laptop.spoke.setGrant(wakeGrant, window);
+    laptop.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 10 * MINUTE),
+    });
+    await laptop.spokeWake.report();
+    clock.state.offset = 9 * MINUTE;
+    await hub.wake.tick();
+    // No address was entered: a nudge went out and no packet did.
+    expect(nudges(laptop)).toBe(1);
+    expect(hub.magicPackets).toEqual([]);
+
+    // The person enters one; the next report carries it and the next occurrence is woken with a packet.
+    clock.state.offset = 0;
+    expect(laptop.spokeWake.setHardwareAddress("AA-BB-CC-00-11-22")).toEqual({
+      status: "changed",
+      hardwareAddress: "aa:bb:cc:00:11:22",
+    });
+    laptop.routines.push({
+      id: "automation-b",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 40 * MINUTE),
+    });
+    await vi.waitFor(async () => {
+      await laptop.spokeWake.report();
+      expect(hub.state.load().hub?.wake?.spokes[0]?.hardwareAddress).toBe("aa:bb:cc:00:11:22");
+    });
+    clock.state.offset = 39 * MINUTE;
+    await hub.wake.tick();
+
+    expect(hub.magicPackets).toHaveLength(1);
+    const packet = hub.magicPackets[0];
+    expect(packet).toHaveLength(102);
+    expect([...(packet?.slice(0, 6) ?? [])]).toEqual([255, 255, 255, 255, 255, 255]);
+    for (let repeat = 0; repeat < 16; repeat += 1) {
+      expect([...(packet?.slice(6 + repeat * 6, 12 + repeat * 6) ?? [])]).toEqual([
+        0xaa, 0xbb, 0xcc, 0x00, 0x11, 0x22,
+      ]);
+    }
+  });
+
+  it("records an occurrence as unreachable when neither the packet nor the nudge reaches the spoke", async () => {
+    const { network, clock, hub, laptop } = await startPair();
+    laptop.spoke.setGrant(wakeGrant, window);
+    laptop.spokeWake.setHardwareAddress("aa:bb:cc:00:11:22");
+    laptop.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 10 * MINUTE),
+    });
+    await vi.waitFor(async () => {
+      await laptop.spokeWake.report();
+      expect(hub.state.load().hub?.wake?.spokes).toHaveLength(1);
+    });
+    network.stop(laptop.address);
+
+    // Inside the lead time the hub tries, and keeps trying until the occurrence.
+    clock.state.offset = 9 * MINUTE;
+    await hub.wake.tick();
+    expect(hub.magicPackets).toHaveLength(1);
+    expect(hub.wake.status().spokes[0]?.lastResult).toBeUndefined();
+    await hub.wake.tick();
+    expect(hub.magicPackets).toHaveLength(1);
+
+    // At the occurrence it gives up and says so; the spoke's own missed-run policy takes over.
+    clock.state.offset = 10 * MINUTE + 1_000;
+    await hub.wake.tick();
+    expect(hub.wake.status().spokes[0]?.lastResult).toMatchObject({ result: "unreachable" });
+    expect(hub.records.at(-1)).toMatchObject({
+      change: "wake-unreachable",
+      actingPrincipal: { kind: "hub" },
+      memberId: laptop.hostId,
+    });
+    expect(laptop.schedulerPokes.count).toBe(0);
+  });
+});
+
+describe("what a spoke tells the hub", () => {
+  it("is only opaque ids and times, never the routine's own id or anything about it", async () => {
+    const bodies: string[] = [];
+    const spy =
+      (transport: HubTransport): HubTransport =>
+      (target) => {
+        const fetcher = transport(target);
+        return (url, init) => {
+          if (String(url).endsWith(HUB_LINK_ROUTES.wakeTimes)) bodies.push(String(init?.body));
+          return fetcher(url, init);
+        };
+      };
+    const { clock, hub, laptop } = await startPair({ wakeTransport: spy });
+    laptop.spoke.setGrant(wakeGrant, window);
+    laptop.routines.push(
+      { id: "automation-secret-name", enabled: true, nextDueAt: iso(clock.now() + 30 * MINUTE) },
+      { id: "automation-paused", enabled: false, nextDueAt: iso(clock.now() + 20 * MINUTE) },
+      { id: "automation-exhausted", enabled: true, nextDueAt: null },
+    );
+
+    await laptop.spokeWake.report();
+
+    expect(bodies).toHaveLength(1);
+    const [body] = bodies;
+    const parsed = JSON.parse(body ?? "") as { times: Array<Record<string, string>> };
+    expect(Object.keys(parsed).sort()).toEqual(["sequence", "times"]);
+    expect(parsed.times).toHaveLength(1);
+    expect(Object.keys(parsed.times[0] ?? {}).sort()).toEqual(["nextAt", "routineId"]);
+    for (const content of ["automation", "secret", "paused", "exhausted", "prompt", "project"]) {
+      expect(body).not.toContain(content);
+    }
+    // The hub holds the same and nothing else.
+    expect(JSON.stringify(hub.state.load().hub?.wake)).not.toContain("automation");
+  });
+
+  it("is sent again when the next occurrence changes, and a removed or disabled routine is withdrawn", async () => {
+    const { clock, hub, laptop } = await startPair();
+    laptop.spoke.setGrant(wakeGrant, window);
+    const routine = {
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 30 * MINUTE),
+    };
+    laptop.routines.push(routine);
+    expect(await laptop.spokeWake.report()).toEqual({ status: "sent", count: 1 });
+    expect(await laptop.spokeWake.report()).toEqual({ status: "unchanged" });
+    const first = hub.state.load().hub?.wake?.spokes[0]?.times[0];
+
+    laptop.routines[0] = { ...routine, nextDueAt: iso(clock.now() + 60 * MINUTE) };
+    expect(await laptop.spokeWake.report()).toEqual({ status: "sent", count: 1 });
+    const second = hub.state.load().hub?.wake?.spokes[0]?.times[0];
+    // The same routine keeps its id; only the time moved.
+    expect(second?.routineId).toBe(first?.routineId);
+    expect(second?.nextAt).not.toBe(first?.nextAt);
+
+    laptop.routines[0] = { ...routine, enabled: false };
+    expect(await laptop.spokeWake.report()).toEqual({ status: "sent", count: 0 });
+    expect(hub.wake.status().spokes).toEqual([]);
+  });
+
+  it("is sent only while the spoke's person has Wake ticked, and withdrawn when they untick it", async () => {
+    const { clock, hub, laptop } = await startPair();
+    laptop.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 30 * MINUTE),
+    });
+
+    expect(await laptop.spokeWake.report()).toEqual({
+      status: "refused",
+      kind: "wake-not-granted",
+    });
+    expect(hub.wake.status().spokes).toEqual([]);
+    expect(laptop.spokeWake.status().sharing).toBe(false);
+
+    laptop.spoke.setGrant(wakeGrant, window);
+    expect(await laptop.spokeWake.report()).toEqual({ status: "sent", count: 1 });
+    expect(hub.wake.status().spokes).toHaveLength(1);
+
+    laptop.spoke.setGrant({ items: ["roster", "introduce", "owners"], actProjects: [] }, window);
+    expect(await laptop.spokeWake.report()).toEqual({ status: "sent", count: 0 });
+    expect(hub.wake.status().spokes).toEqual([]);
+  });
+
+  it("is sent again on the spoke's next tick after the hub's wake service was turned off and on", async () => {
+    const { clock, hub, laptop } = await startPair();
+    laptop.spoke.setGrant(wakeGrant, window);
+    laptop.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 30 * MINUTE),
+    });
+    await laptop.spokeWake.tick();
+    expect(hub.wake.status().spokes).toHaveLength(1);
+
+    await hub.wake.setEnabled(false, window);
+    await hub.wake.setEnabled(true, window);
+    expect(hub.wake.status().spokes).toEqual([]);
+
+    // The routine did not change; the hub's answer to the spoke's look is what says the hub forgot.
+    await laptop.failover.tick();
+    await laptop.spokeWake.tick();
+    expect(hub.wake.status().spokes).toHaveLength(1);
+  });
+
+  it("is sent again on the spoke's next tick after the hub role was turned off and on", async () => {
+    const { clock, hub, laptop } = await startPair();
+    laptop.spoke.setGrant(wakeGrant, window);
+    laptop.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 30 * MINUTE),
+    });
+    await laptop.spokeWake.tick();
+    await laptop.failover.tick();
+    expect(hub.wake.status().spokes).toHaveLength(1);
+
+    expect(hub.hub.disable(window).status).toBe("disabled");
+    expect(hub.hub.enable(window).status).toBe("enabled");
+    await hub.wake.setEnabled(true, window);
+    expect(hub.wake.status().spokes).toEqual([]);
+
+    await laptop.failover.tick();
+    await laptop.spokeWake.tick();
+    expect(hub.wake.status().spokes).toHaveLength(1);
+  });
+
+  it("withdraws its times and hardware address on the first tick after a restart when Wake was unticked before it", async () => {
+    const { clock, hub, laptop } = await startPair();
+    laptop.spoke.setGrant(wakeGrant, window);
+    laptop.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 30 * MINUTE),
+    });
+    expect(laptop.spokeWake.setHardwareAddress("AA-BB-CC-00-11-22").status).toBe("changed");
+    await laptop.spokeWake.tick();
+    expect(hub.state.load().hub?.wake?.spokes[0]?.hardwareAddress).toBeDefined();
+
+    laptop.spoke.setGrant({ items: ["roster", "introduce", "owners"], actProjects: [] }, window);
+    const restarted = laptop.restartSpokeWake();
+    await restarted.tick();
+
+    expect(hub.state.load().hub?.wake?.spokes).toEqual([]);
+    // Once the hub confirmed, there is nothing left to withdraw.
+    expect(await restarted.report()).toEqual({ status: "refused", kind: "wake-not-granted" });
+  });
+
+  it("sends one follow-up report with the latest state when the address changes while a report is in flight", async () => {
+    const bodies: string[] = [];
+    let inFlight = 0;
+    let mostInFlight = 0;
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const spy =
+      (transport: HubTransport): HubTransport =>
+      (target) => {
+        const fetcher = transport(target);
+        return async (url, init) => {
+          if (!String(url).endsWith(HUB_LINK_ROUTES.wakeTimes)) return fetcher(url, init);
+          bodies.push(String(init?.body));
+          inFlight += 1;
+          mostInFlight = Math.max(mostInFlight, inFlight);
+          try {
+            if (bodies.length === 1) await held;
+            return await fetcher(url, init);
+          } finally {
+            inFlight -= 1;
+          }
+        };
+      };
+    const { clock, hub, laptop } = await startPair({ wakeTransport: spy });
+    laptop.spoke.setGrant(wakeGrant, window);
+    laptop.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 30 * MINUTE),
+    });
+
+    const ticking = laptop.spokeWake.tick();
+    await vi.waitFor(() => expect(bodies).toHaveLength(1));
+    expect(laptop.spokeWake.setHardwareAddress("AA-BB-CC-00-11-22").status).toBe("changed");
+    await pause(20);
+    expect(bodies).toHaveLength(1);
+    release();
+    await ticking;
+
+    expect(bodies).toHaveLength(2);
+    expect(mostInFlight).toBe(1);
+    expect(JSON.parse(bodies[0] ?? "")).not.toHaveProperty("hardwareAddress");
+    expect(JSON.parse(bodies[1] ?? "")).toHaveProperty("hardwareAddress", "aa:bb:cc:00:11:22");
+    expect(hub.state.load().hub?.wake?.spokes[0]?.hardwareAddress).toBe("aa:bb:cc:00:11:22");
+  });
+
+  it("does not restore times or address when an older report arrives after a withdrawal", async () => {
+    const { clock, hub, laptop } = await startPair();
+    const older = {
+      sequence: 10,
+      times: [{ routineId: decodeNudgeId("r".repeat(22)), nextAt: iso(clock.now() + 5 * MINUTE) }],
+      hardwareAddress: decodeHardwareAddress("aa:bb:cc:00:11:22"),
+    };
+
+    expect(await hub.wake.receiveReport(laptop.hostId, { sequence: 9, times: [] })).toMatchObject({
+      status: "recorded",
+    });
+    expect(await hub.wake.receiveReport(laptop.hostId, { ...older, sequence: 11 })).toMatchObject({
+      status: "recorded",
+    });
+    expect(await hub.wake.receiveReport(laptop.hostId, { sequence: 12, times: [] })).toMatchObject({
+      status: "recorded",
+    });
+    expect(await hub.wake.receiveReport(laptop.hostId, older)).toEqual({ status: "stale-report" });
+    expect(hub.state.load().hub?.wake?.spokes).toEqual([]);
+
+    expect(await hub.wake.receiveReport(laptop.hostId, { ...older, sequence: 13 })).toMatchObject({
+      status: "recorded",
+    });
+    expect(hub.state.load().hub?.wake?.spokes[0]?.hardwareAddress).toBe("aa:bb:cc:00:11:22");
+    expect(await hub.wake.receiveReport(laptop.hostId, { ...older, sequence: 13 })).toEqual({
+      status: "stale-report",
+    });
+  });
+
+  it("drops the times and hardware address a hub held for a spoke that left", async () => {
+    const { clock, hub, laptop } = await startPair();
+    laptop.spoke.setGrant(wakeGrant, window);
+    laptop.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 30 * MINUTE),
+    });
+    laptop.spokeWake.setHardwareAddress("AA-BB-CC-00-11-22");
+    await laptop.spokeWake.tick();
+    expect(hub.state.load().hub?.wake?.spokes).toHaveLength(1);
+
+    const removed = await hub.hub.removeMember({ memberId: laptop.hostId }, window);
+    expect(removed.status).toBe("removed");
+    expect(hub.state.load().hub?.wake?.spokes).toEqual([]);
+  });
+
+  it("is filed under the member whose key signed it, and the body cannot name another", async () => {
+    const { clock, hub, laptop } = await startPair();
+    const times = [
+      { routineId: decodeNudgeId("r".repeat(22)), nextAt: iso(clock.now() + 5 * MINUTE) },
+    ];
+
+    const named = await signedRequest({
+      signer: laptop,
+      recipient: hub,
+      clock,
+      method: "POST",
+      path: HUB_LINK_ROUTES.wakeTimes,
+      body: { sequence: 1, times, memberId: hub.hostId },
+    });
+    expect(named?.status).toBe(400);
+
+    const filed = await signedRequest({
+      signer: laptop,
+      recipient: hub,
+      clock,
+      method: "POST",
+      path: HUB_LINK_ROUTES.wakeTimes,
+      body: { sequence: 1, times },
+    });
+    expect(filed?.status).toBe(200);
+    expect(hub.state.load().hub?.wake?.spokes.map((spoke) => String(spoke.memberId))).toEqual([
+      laptop.hostId,
+    ]);
+
+    // The hub's own id is not a spoke, and a stranger's signature proves nothing.
+    expect(await hub.wake.receiveReport(hub.hostId, { sequence: 1, times })).toEqual({
+      status: "refused",
+      kind: "not-a-spoke",
+    });
+    const stranger = await signedRequest({
+      signer: laptop,
+      recipient: hub,
+      clock,
+      method: "POST",
+      path: HUB_LINK_ROUTES.wakeTimes,
+      body: { times },
+      senderId: "99999999-9999-4999-8999-999999999999",
+    });
+    expect(stranger?.status).toBe(401);
+  });
+
+  it("is refused while the hub's wake service is off, and by a host that is not a hub", async () => {
+    const { clock, hub, laptop } = await startPair();
+    const times = [
+      { routineId: decodeNudgeId("r".repeat(22)), nextAt: iso(clock.now() + 5 * MINUTE) },
+    ];
+    await hub.wake.setEnabled(false, window);
+
+    const off = await signedRequest({
+      signer: laptop,
+      recipient: hub,
+      clock,
+      method: "POST",
+      path: HUB_LINK_ROUTES.wakeTimes,
+      body: { sequence: 1, times },
+    });
+    expect(off?.status).toBe(403);
+    expect(await off?.json()).toEqual({ status: "refused", kind: "wake-service-off" });
+
+    const notAHub = await signedRequest({
+      signer: hub,
+      recipient: laptop,
+      clock,
+      method: "POST",
+      path: HUB_LINK_ROUTES.wakeTimes,
+      body: { sequence: 1, times },
+    });
+    expect(notAHub?.status).toBe(403);
+    expect(await notAHub?.json()).toEqual({ status: "refused", kind: "hub-role-off" });
+  });
+});
+
+describe("a spoke deciding what a nudge is worth", () => {
+  const hubSender = (hub: HubTestHost) => ({
+    kind: "hub" as const,
+    memberId: decodeMemberId(hub.hostId),
+  });
+
+  async function readyPair() {
+    const pair = await startPair();
+    pair.laptop.spoke.setGrant(wakeGrant, window);
+    pair.laptop.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(pair.clock.now() + 5 * MINUTE),
+    });
+    await pair.laptop.spokeWake.report();
+    const [reported] = pair.hub.state.load().hub?.wake?.spokes[0]?.times ?? [];
+    if (reported === undefined) throw new Error("Nothing was reported.");
+    return { ...pair, reported };
+  }
+
+  it("does nothing and starts nothing for an id it does not have", async () => {
+    const { hub, laptop, reported } = await readyPair();
+
+    const result = await laptop.spokeWake.receiveNudge(hubSender(hub), {
+      routineId: decodeNudgeId("x".repeat(22)),
+      occurrenceAt: reported.nextAt,
+    });
+
+    expect(result).toEqual({ status: "ignored", kind: "unknown-routine" });
+    expect(laptop.schedulerPokes.count).toBe(0);
+    expect(laptop.records.at(-1)).toMatchObject({
+      change: "wake-nudge-refused",
+      actingPrincipal: { kind: "hub" },
+      wakeReason: "unknown-routine",
+    });
+  });
+
+  it("does nothing for an id whose routine was disabled or removed since it was reported", async () => {
+    const { hub, laptop, reported } = await readyPair();
+    laptop.routines.length = 0;
+
+    const result = await laptop.spokeWake.receiveNudge(hubSender(hub), {
+      routineId: reported.routineId,
+      occurrenceAt: reported.nextAt,
+    });
+
+    expect(result).toEqual({ status: "ignored", kind: "unknown-routine" });
+    expect(laptop.schedulerPokes.count).toBe(0);
+  });
+
+  it("does nothing for a time that is not its own next occurrence", async () => {
+    const { hub, laptop, reported } = await readyPair();
+
+    const result = await laptop.spokeWake.receiveNudge(hubSender(hub), {
+      routineId: reported.routineId,
+      occurrenceAt: iso(Date.parse(reported.nextAt) + 30 * MINUTE),
+    });
+
+    expect(result).toEqual({ status: "ignored", kind: "time-mismatch" });
+    expect(laptop.schedulerPokes.count).toBe(0);
+  });
+
+  it("does nothing for an occurrence that is still far off", async () => {
+    const pair = await startPair();
+    const { clock, hub, laptop } = pair;
+    laptop.spoke.setGrant(wakeGrant, window);
+    laptop.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 3 * 60 * MINUTE),
+    });
+    await laptop.spokeWake.report();
+    const [reported] = hub.state.load().hub?.wake?.spokes[0]?.times ?? [];
+    if (reported === undefined) throw new Error("Nothing was reported.");
+
+    const result = await laptop.spokeWake.receiveNudge(hubSender(hub), {
+      routineId: reported.routineId,
+      occurrenceAt: reported.nextAt,
+    });
+
+    expect(result).toEqual({ status: "ignored", kind: "too-early" });
+    expect(laptop.schedulerPokes.count).toBe(0);
+  });
+
+  it("wakes its scheduler for a nudge that checks out, and a nudge is never a command to run", async () => {
+    const { hub, laptop, reported } = await readyPair();
+    const before = structuredClone(laptop.routines);
+
+    const result = await laptop.spokeWake.receiveNudge(hubSender(hub), {
+      routineId: reported.routineId,
+      occurrenceAt: reported.nextAt,
+    });
+
+    expect(result).toEqual({ status: "accepted" });
+    // The only thing the spoke can do with a nudge is poke the scheduler it already runs.
+    expect(laptop.schedulerPokes.count).toBe(1);
+    expect(laptop.routines).toEqual(before);
+  });
+
+  it("refuses a nudge, whoever sends it, once the person unticks Wake", async () => {
+    const { clock, hub, laptop } = await readyPair();
+    laptop.spoke.setGrant({ items: ["roster", "introduce", "owners"], actProjects: [] }, window);
+
+    clock.state.offset = 4 * MINUTE;
+    await hub.wake.tick();
+
+    expect(laptop.schedulerPokes.count).toBe(0);
+    expect(hub.wake.status().spokes[0]?.lastResult).toMatchObject({ result: "refused" });
+    expect(laptop.records.at(-1)).toMatchObject({
+      change: "wake-nudge-refused",
+      wakeReason: "wake-not-granted",
+    });
+    expect(hub.records.at(-1)).toMatchObject({
+      change: "wake-nudge-refused",
+      actingPrincipal: { kind: "hub" },
+      wakeReason: "wake-not-granted",
+    });
+  });
+
+  it("refuses a nudge from a member that is neither the hub nor a named standby", async () => {
+    const { network, clock, hub, laptop, reported } = await readyPair();
+    const desk = await start(network, clock, "Desk", 105);
+    await join(hub, desk);
+    const body = { routineId: reported.routineId, occurrenceAt: reported.nextAt };
+
+    const fromPeer = await signedRequest({
+      signer: desk,
+      recipient: laptop,
+      clock,
+      method: "POST",
+      path: HUB_LINK_ROUTES.wakeNudge,
+      body,
+    });
+    const claimingToBeTheHub = await signedRequest({
+      signer: desk,
+      recipient: laptop,
+      clock,
+      method: "POST",
+      path: HUB_LINK_ROUTES.wakeNudge,
+      body,
+      senderId: hub.hostId,
+    });
+
+    expect(fromPeer?.status).toBe(403);
+    expect(await fromPeer?.json()).toEqual({ status: "refused", kind: "not-a-named-standby" });
+    expect(claimingToBeTheHub?.status).toBe(401);
+    expect(laptop.schedulerPokes.count).toBe(0);
+  });
+});
+
+const decodeNudgeId = Schema.decodeUnknownSync(WakeRoutineId);
+
+describe("the wake service in a failover", () => {
+  async function startFamily(
+    standbyExtra: Partial<Parameters<typeof startHubTestHost>[0]> = {},
+    hubExtra: Partial<Parameters<typeof startHubTestHost>[0]> = {},
+  ) {
+    const network = new HubTestNetwork();
+    const clock = makeClock();
+    const hub = await start(network, clock, "Mac mini", 103, hubExtra);
+    const standby = await start(network, clock, "Standby", 104, standbyExtra);
+    const member = await start(network, clock, "Laptop", 105);
+    const enabled = hub.hub.enable(window);
+    if (enabled.status !== "enabled") throw new Error(enabled.status);
+    await join(hub, standby);
+    await join(hub, member);
+    await hub.wake.setEnabled(true, window);
+    return { network, clock, hub, standby, member };
+  }
+
+  it("hands the hub's wake times to a standby, which wakes a spoke that ticked Wake and Standby, and hands back what spokes told it", async () => {
+    const { network, clock, hub, standby, member } = await startFamily();
+    standby.spoke.setGrant(standbyGrant, window);
+    member.spoke.setGrant(wakeAndStandbyGrant, window);
+    const ordered = await hub.hub.setStandbyOrder([decodeMemberId(standby.hostId)], window);
+    if (ordered.status !== "ordered") throw new Error(JSON.stringify(ordered));
+    member.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 10 * MINUTE),
+    });
+    expect(await member.spokeWake.report()).toEqual({ status: "sent", count: 1 });
+    // The hub hands the standby a copy of what it holds.
+    await vi.waitFor(() => expect(standby.state.load().link?.wakeCopy).toHaveLength(1));
+    const copied = standby.state.load().link?.wakeCopy?.[0];
+    expect(String(copied?.memberId)).toBe(member.hostId);
+    expect(copied?.times).toEqual(hub.state.load().hub?.wake?.spokes[0]?.times);
+    expect(JSON.stringify(copied)).not.toContain("automation");
+    await standby.failover.tick();
+    await member.failover.tick();
+
+    // The hub stops; the standby stands in and the member follows it.
+    network.stop(hub.address);
+    await pause(FAILOVER_AFTER_MS + 40);
+    await standby.failover.tick();
+    expect(standby.failover.standingIn()).toBe(true);
+    await vi.waitFor(() =>
+      expect(member.spoke.status()).toMatchObject({ rosterSignedBy: "standby" }),
+    );
+
+    // A routine the member adds now is reported to the standby, which keeps it apart from the copy.
+    member.routines.push({
+      id: "automation-b",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 30 * MINUTE),
+    });
+    expect(await member.spokeWake.report()).toEqual({ status: "sent", count: 2 });
+    expect(standby.state.load().link?.standIn?.wakeReports?.[0]?.times).toHaveLength(2);
+
+    // Inside the lead time the standby nudges the member, which believes it: the standby is
+    // named, the member ticked Standby, and the member cannot reach the hub.
+    clock.state.offset = 9 * MINUTE;
+    await standby.wake.tick();
+    expect(member.schedulerPokes.count).toBe(1);
+    expect(standby.records.at(-1)).toMatchObject({
+      change: "wake-nudge-sent",
+      actingPrincipal: { kind: "hub" },
+      memberId: member.hostId,
+    });
+
+    // The hub returns; the standby steps down and hands back the times spokes told it.
+    clock.state.offset = 0;
+    network.start(hub.address);
+    await standby.failover.tick();
+    expect(standby.failover.standingIn()).toBe(false);
+    const held = hub.state.load().hub?.wake?.spokes ?? [];
+    expect(held.map((spoke) => String(spoke.memberId))).toEqual([member.hostId]);
+    expect(held[0]?.times).toHaveLength(2);
+    expect(hub.records.map((record) => record.change)).toEqual(
+      expect.arrayContaining(["stand-in-merged", "wake-times-merged"]),
+    );
+  });
+
+  it("still hands membership back, without wake times, when the gateway refuses the hand-back as too large", async () => {
+    const attempts: Array<number> = [];
+    const { network, clock, hub, standby, member } = await startFamily({
+      failoverTransport: (transport) => (target) => {
+        const fetchTo = transport(target);
+        return async (url, init) => {
+          if (init?.method !== "POST" || !url.endsWith("/api/hub/handback")) {
+            return fetchTo(url, init);
+          }
+          const sent: { wakeTimes: ReadonlyArray<unknown> } = JSON.parse(String(init.body));
+          attempts.push(sent.wakeTimes.length);
+          return sent.wakeTimes.length === 0
+            ? fetchTo(url, init)
+            : new Response("{}", { status: 413 });
+        };
+      },
+    });
+    standby.spoke.setGrant(standbyGrant, window);
+    member.spoke.setGrant(wakeAndStandbyGrant, window);
+    const ordered = await hub.hub.setStandbyOrder([decodeMemberId(standby.hostId)], window);
+    if (ordered.status !== "ordered") throw new Error(JSON.stringify(ordered));
+    member.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 10 * MINUTE),
+    });
+    expect(await member.spokeWake.report()).toEqual({ status: "sent", count: 1 });
+    await vi.waitFor(() => expect(standby.state.load().link?.wakeCopy).toHaveLength(1));
+    await standby.failover.tick();
+    await member.failover.tick();
+    network.stop(hub.address);
+    await pause(FAILOVER_AFTER_MS + 40);
+    await standby.failover.tick();
+    expect(standby.failover.standingIn()).toBe(true);
+    await vi.waitFor(() =>
+      expect(member.spoke.status()).toMatchObject({ rosterSignedBy: "standby" }),
+    );
+    // A spoke reports to the standing-in standby, so the hand-back carries a time.
+    member.routines.push({
+      id: "automation-b",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 30 * MINUTE),
+    });
+    expect(await member.spokeWake.report()).toEqual({ status: "sent", count: 2 });
+    expect(standby.state.load().link?.standIn?.wakeReports).toHaveLength(1);
+
+    network.start(hub.address);
+    await standby.failover.tick();
+
+    expect(attempts).toEqual([1, 0]);
+    expect(standby.failover.standingIn()).toBe(false);
+    expect(standby.records.map((record) => record.change)).toContain("wake-times-dropped");
+    expect(hub.records.map((record) => record.change)).toContain("stand-in-merged");
+  });
+
+  it("asks a spoke to report again while the standby hands back, and the hub then holds the times it kept", async () => {
+    let release: () => void = () => undefined;
+    let gate = Promise.resolve();
+    let handbacks = 0;
+    const { network, clock, hub, standby, member } = await startFamily({
+      failoverTransport: (transport) => (target) => {
+        const fetchTo = transport(target);
+        return async (url, init) => {
+          if (init?.method !== "POST" || !url.endsWith("/api/hub/handback")) {
+            return fetchTo(url, init);
+          }
+          handbacks += 1;
+          await gate;
+          return fetchTo(url, init);
+        };
+      },
+    });
+    standby.spoke.setGrant(standbyGrant, window);
+    member.spoke.setGrant(wakeAndStandbyGrant, window);
+    const ordered = await hub.hub.setStandbyOrder([decodeMemberId(standby.hostId)], window);
+    if (ordered.status !== "ordered") throw new Error(JSON.stringify(ordered));
+    member.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 10 * MINUTE),
+    });
+    expect(await member.spokeWake.report()).toEqual({ status: "sent", count: 1 });
+    await vi.waitFor(() => expect(standby.state.load().link?.wakeCopy).toHaveLength(1));
+    await standby.failover.tick();
+    await member.failover.tick();
+    network.stop(hub.address);
+    await pause(FAILOVER_AFTER_MS + 40);
+    await standby.failover.tick();
+    expect(standby.failover.standingIn()).toBe(true);
+    await vi.waitFor(() =>
+      expect(member.spoke.status()).toMatchObject({ rosterSignedBy: "standby" }),
+    );
+
+    // The hub answers again and the hand-back starts, then waits on the gate.
+    gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    network.start(hub.address);
+    const stepping = standby.failover.tick();
+    await vi.waitFor(() => expect(handbacks).toBe(1));
+
+    member.routines.push({
+      id: "automation-b",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 30 * MINUTE),
+    });
+    expect(await member.spokeWake.report()).toEqual({
+      status: "declined",
+      kind: "handing-back",
+    });
+    expect(standby.state.load().link?.standIn?.wakeReports ?? []).toEqual([]);
+
+    release();
+    await stepping;
+    expect(standby.failover.standingIn()).toBe(false);
+
+    // The spoke still has the times to send, so it reports them to the hub it follows next.
+    await member.failover.tick();
+    await vi.waitFor(async () =>
+      expect(await member.spokeWake.report()).toEqual({ status: "sent", count: 2 }),
+    );
+    expect(hub.state.load().hub?.wake?.spokes[0]?.times).toHaveLength(2);
+  });
+
+  it("keeps the times a spoke reports straight to the hub while the hand-back's roster is still being sent", async () => {
+    let release: () => void = () => undefined;
+    let gate = Promise.resolve();
+    let armed = false;
+    let held = 0;
+    const { network, clock, hub, standby, member } = await startFamily(
+      {},
+      {
+        hubTransport: (transport) => (target) => {
+          const fetchTo = transport(target);
+          return async (url, init) => {
+            if (armed && init?.method === "PUT" && url.includes("100.101.102.104")) {
+              held += 1;
+              await gate;
+            }
+            return fetchTo(url, init);
+          };
+        },
+      },
+    );
+    standby.spoke.setGrant(standbyGrant, window);
+    member.spoke.setGrant(wakeAndStandbyGrant, window);
+    const ordered = await hub.hub.setStandbyOrder([decodeMemberId(standby.hostId)], window);
+    if (ordered.status !== "ordered") throw new Error(JSON.stringify(ordered));
+    member.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 10 * MINUTE),
+    });
+    expect(await member.spokeWake.report()).toEqual({ status: "sent", count: 1 });
+    await vi.waitFor(() => expect(standby.state.load().link?.wakeCopy).toHaveLength(1));
+    await standby.failover.tick();
+    await member.failover.tick();
+    network.stop(hub.address);
+    await pause(FAILOVER_AFTER_MS + 40);
+    await standby.failover.tick();
+    expect(standby.failover.standingIn()).toBe(true);
+    await vi.waitFor(() =>
+      expect(member.spoke.status()).toMatchObject({ rosterSignedBy: "standby" }),
+    );
+    member.routines.push({
+      id: "automation-b",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 30 * MINUTE),
+    });
+    expect(await member.spokeWake.report()).toEqual({ status: "sent", count: 2 });
+
+    // The hub returns and takes the hand-back; its roster reaches the spoke while the standby's copy is still held.
+    gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    armed = true;
+    network.start(hub.address);
+    const stepping = standby.failover.tick();
+    await vi.waitFor(() => expect(held).toBe(1));
+    await vi.waitFor(() => expect(member.spoke.status()).toMatchObject({ rosterSignedBy: "hub" }));
+
+    member.routines.push({
+      id: "automation-c",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 50 * MINUTE),
+    });
+    await vi.waitFor(async () =>
+      expect(await member.spokeWake.report()).toEqual({ status: "sent", count: 3 }),
+    );
+    release();
+    await stepping;
+
+    expect(hub.state.load().hub?.wake?.spokes[0]?.times).toHaveLength(3);
+  });
+
+  /** The hub stops, the standby stands in, and the member follows it. */
+  async function standIn(family: Awaited<ReturnType<typeof startFamily>>) {
+    const { network, hub, standby, member } = family;
+    await standby.failover.tick();
+    await member.failover.tick();
+    network.stop(hub.address);
+    await pause(FAILOVER_AFTER_MS + 40);
+    await standby.failover.tick();
+    expect(standby.failover.standingIn()).toBe(true);
+    await vi.waitFor(() =>
+      expect(member.spoke.status()).toMatchObject({ rosterSignedBy: "standby" }),
+    );
+  }
+
+  it("takes no report and sends no packet or nudge while standing in for a hub whose wake service is off", async () => {
+    const family = await startFamily();
+    const { clock, hub, standby, member } = family;
+    standby.spoke.setGrant(standbyGrant, window);
+    member.spoke.setGrant(wakeAndStandbyGrant, window);
+    const ordered = await hub.hub.setStandbyOrder([decodeMemberId(standby.hostId)], window);
+    if (ordered.status !== "ordered") throw new Error(JSON.stringify(ordered));
+    await hub.wake.setEnabled(false, window);
+    await standIn(family);
+
+    member.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 10 * MINUTE),
+    });
+    expect(member.spokeWake.setHardwareAddress("AA-BB-CC-00-11-22").status).toBe("changed");
+    expect(await member.spokeWake.report()).toEqual({
+      status: "declined",
+      kind: "wake-service-off",
+    });
+    expect(standby.state.load().link?.standIn?.wakeReports ?? []).toEqual([]);
+
+    clock.state.offset = 9 * MINUTE;
+    await standby.wake.tick();
+    expect(nudges(member)).toBe(0);
+    expect(standby.magicPackets).toEqual([]);
+  });
+
+  it("counts a wake copy that does not say the hub's switch is on as off when standing in", async () => {
+    const family = await startFamily();
+    const { clock, hub, standby, member } = family;
+    standby.spoke.setGrant(standbyGrant, window);
+    member.spoke.setGrant(wakeAndStandbyGrant, window);
+    const ordered = await hub.hub.setStandbyOrder([decodeMemberId(standby.hostId)], window);
+    if (ordered.status !== "ordered") throw new Error(JSON.stringify(ordered));
+    member.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 10 * MINUTE),
+    });
+    expect(await member.spokeWake.report()).toEqual({ status: "sent", count: 1 });
+    await vi.waitFor(() => expect(standby.state.load().link?.wakeCopy).toHaveLength(1));
+    // A copy from a hub that predates the switch carries the times and nothing about it.
+    const older = await signedRequest({
+      signer: hub,
+      recipient: standby,
+      clock,
+      method: "PUT",
+      path: HUB_LINK_ROUTES.wakeCopy,
+      body: {
+        spokes: (hub.state.load().hub?.wake?.spokes ?? []).map((spoke) => ({
+          memberId: spoke.memberId,
+          times: spoke.times,
+        })),
+      },
+    });
+    expect(older?.status).toBe(200);
+    await standIn(family);
+
+    clock.state.offset = 9 * MINUTE;
+    await standby.wake.tick();
+    expect(nudges(member)).toBe(0);
+  });
+
+  it("keeps the newer wake copy when an older one arrives late", async () => {
+    const { clock, hub, standby, member } = await startFamily();
+    standby.spoke.setGrant(standbyGrant, window);
+    member.spoke.setGrant(wakeAndStandbyGrant, window);
+    const ordered = await hub.hub.setStandbyOrder([decodeMemberId(standby.hostId)], window);
+    if (ordered.status !== "ordered") throw new Error(JSON.stringify(ordered));
+    member.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 10 * MINUTE),
+    });
+    expect(await member.spokeWake.report()).toEqual({ status: "sent", count: 1 });
+    await vi.waitFor(() => expect(standby.state.load().link?.wakeCopy).toHaveLength(1));
+    const revision = hub.state.load().hub?.wake?.copyRevision ?? 0;
+    expect(revision).toBeGreaterThan(0);
+    const send = (older: number) =>
+      signedRequest({
+        signer: hub,
+        recipient: standby,
+        clock,
+        method: "PUT",
+        path: HUB_LINK_ROUTES.wakeCopy,
+        body: { enabled: true, revision: older, spokes: [] },
+      });
+
+    const delayed = await send(revision - 1);
+    const repeated = await send(revision);
+
+    expect(delayed?.status).toBe(409);
+    expect(await delayed?.json()).toEqual({ status: "refused", kind: "stale-copy" });
+    expect(repeated?.status).toBe(409);
+    expect(standby.state.load().link?.wakeCopy).toHaveLength(1);
+    const newer = await send(revision + 1);
+    expect(newer?.status).toBe(200);
+    expect(standby.state.load().link?.wakeCopy).toEqual([]);
+  });
+
+  it("numbers the next wake copy above the last one after the hub role is turned off and on", async () => {
+    const { clock, hub, standby, member } = await startFamily();
+    standby.spoke.setGrant(standbyGrant, window);
+    member.spoke.setGrant(wakeAndStandbyGrant, window);
+    const ordered = await hub.hub.setStandbyOrder([decodeMemberId(standby.hostId)], window);
+    if (ordered.status !== "ordered") throw new Error(JSON.stringify(ordered));
+    const routine = {
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 10 * MINUTE),
+    };
+    member.routines.push(routine);
+    expect(await member.spokeWake.report()).toEqual({ status: "sent", count: 1 });
+    await vi.waitFor(() => expect(standby.state.load().link?.wakeCopy).toHaveLength(1));
+    const before = hub.state.load().hub?.wake?.copyRevision ?? 0;
+
+    expect(hub.hub.disable(window).status).toBe("disabled");
+    expect(hub.hub.enable(window).status).toBe("enabled");
+    await hub.wake.setEnabled(true, window);
+    routine.nextDueAt = iso(clock.now() + 20 * MINUTE);
+    expect(await member.spokeWake.report()).toEqual({ status: "sent", count: 1 });
+
+    await vi.waitFor(() =>
+      expect(standby.state.load().link?.wakeCopy?.[0]?.times[0]?.nextAt).toBe(routine.nextDueAt),
+    );
+    expect(hub.state.load().hub?.wake?.copyRevision ?? 0).toBeGreaterThan(before);
+  });
+
+  it("refuses a standby's nudge from a spoke that did not tick Standby, and while the hub is reachable", async () => {
+    const { clock, hub, standby, member } = await startFamily();
+    standby.spoke.setGrant(standbyGrant, window);
+    member.spoke.setGrant(wakeGrant, window);
+    await hub.hub.setStandbyOrder([decodeMemberId(standby.hostId)], window);
+    member.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 5 * MINUTE),
+    });
+    await member.spokeWake.report();
+    const [reported] = hub.state.load().hub?.wake?.spokes[0]?.times ?? [];
+    if (reported === undefined) throw new Error("Nothing was reported.");
+    const body = { routineId: reported.routineId, occurrenceAt: reported.nextAt };
+    const nudge = () =>
+      signedRequest({
+        signer: standby,
+        recipient: member,
+        clock,
+        method: "POST",
+        path: HUB_LINK_ROUTES.wakeNudge,
+        body,
+      });
+
+    const withoutStandby = await nudge();
+    expect(withoutStandby?.status).toBe(403);
+    expect(await withoutStandby?.json()).toEqual({
+      status: "refused",
+      kind: "standby-not-granted",
+    });
+
+    member.spoke.setGrant(wakeAndStandbyGrant, window);
+    const hubReachable = await nudge();
+    expect(hubReachable?.status).toBe(403);
+    expect(await hubReachable?.json()).toEqual({ status: "refused", kind: "hub-reachable" });
+    expect(member.schedulerPokes.count).toBe(0);
+  });
+
+  it("refuses a wake copy from anyone but the hub, and from a hub to a spoke that did not tick Standby", async () => {
+    const { clock, hub, standby, member } = await startFamily();
+    const body = { spokes: [] };
+
+    const fromMember = await signedRequest({
+      signer: member,
+      recipient: standby,
+      clock,
+      method: "PUT",
+      path: HUB_LINK_ROUTES.wakeCopy,
+      body,
+    });
+    const withoutStandby = await signedRequest({
+      signer: hub,
+      recipient: standby,
+      clock,
+      method: "PUT",
+      path: HUB_LINK_ROUTES.wakeCopy,
+      body,
+    });
+
+    expect(fromMember?.status).toBe(401);
+    expect(withoutStandby?.status).toBe(403);
+    expect(await withoutStandby?.json()).toEqual({ status: "refused", kind: "item-not-granted" });
+    expect(standby.state.load().link?.wakeCopy).toBeUndefined();
+  });
+});
+
+describe("the wake service's own switch", () => {
+  it("is off until the hub's window turns it on, works only on a hub, and forgets every time when turned off", async () => {
+    const network = new HubTestNetwork();
+    const clock = makeClock();
+    const hub = await start(network, clock, "Mac mini", 103);
+    const laptop = await start(network, clock, "Laptop", 104);
+
+    expect(await hub.wake.setEnabled(true, window)).toEqual({
+      status: "refused",
+      kind: "hub-role-off",
+    });
+    hub.hub.enable(window);
+    await join(hub, laptop);
+    expect(hub.wake.status().enabled).toBe(false);
+    laptop.spoke.setGrant(wakeGrant, window);
+    laptop.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 30 * MINUTE),
+    });
+    // Off: the hub takes no report.
+    expect(await laptop.spokeWake.report()).toEqual({
+      status: "declined",
+      kind: "wake-service-off",
+    });
+
+    await hub.wake.setEnabled(true, window);
+    expect(await laptop.spokeWake.report()).toEqual({ status: "sent", count: 1 });
+    expect(hub.wake.status().spokes).toHaveLength(1);
+
+    await hub.wake.setEnabled(false, window);
+    expect(hub.wake.status()).toEqual({ enabled: false, spokes: [] });
+    expect(hub.records.filter((record) => record.change === "wake-switch-changed")).toHaveLength(2);
+  });
+});
+
+describe("a spoke that withdrew its wake state while a hand-back answer was lost", () => {
+  it("holds no times or address for the spoke when the standby retries the same hand-back", async () => {
+    const { clock, hub, laptop } = await startPair();
+    const report = {
+      memberId: decodeMemberId(laptop.hostId),
+      times: [
+        {
+          routineId: decodeNudgeId("routine-aaaaaaaaaaaaaaaaaaaaaa"),
+          nextAt: iso(clock.now() + 10 * MINUTE),
+        },
+      ],
+      hardwareAddress: decodeHardwareAddress("aa:bb:cc:00:11:22"),
+      reportedAt: clock.now(),
+    };
+    const handed = [report];
+    // The hub takes the hand-back, but its answer never reaches the standby.
+    expect(hub.wake.mergeHandback(laptop.hostId, handed)).toEqual({ merged: 1 });
+
+    clock.state.offset += MINUTE;
+    // The spoke's person unticks Wake, so it sends an empty report.
+    expect(await hub.wake.receiveReport(laptop.hostId, { sequence: 1, times: [] })).toMatchObject({
+      status: "recorded",
+      count: 0,
+    });
+    expect(hub.state.load().hub?.wake?.spokes).toEqual([]);
+
+    // The standby retries the same hand-back.
+    expect(hub.wake.mergeHandback(laptop.hostId, handed)).toEqual({ merged: 0 });
+    expect(hub.state.load().hub?.wake?.spokes).toEqual([]);
+    expect(hub.wake.status().spokes).toEqual([]);
+
+    // A later real report replaces the withdrawal.
+    clock.state.offset += MINUTE;
+    expect(hub.wake.mergeHandback(laptop.hostId, [{ ...report, reportedAt: clock.now() }])).toEqual(
+      { merged: 1 },
+    );
+  });
+});

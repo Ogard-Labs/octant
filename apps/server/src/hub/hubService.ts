@@ -227,6 +227,7 @@ export class HubService {
     return {
       standingIn: false,
       roster: hub.roster,
+      wakeGeneration: hub.wake?.generation ?? 0,
       ...(reading.status === "refused"
         ? {}
         : {
@@ -294,6 +295,22 @@ export class HubService {
         roster,
         members: hub?.members ?? [],
         joinTickets: [],
+        // The switch and held times start over, but the copy number must not: a standby
+        // that held a higher number would refuse every copy as stale until it caught up.
+        // The generation moves too, so a spoke that reported under the old one sees the
+        // hub dropped its times and sends them again; it never goes backwards.
+        ...(hub?.wake === undefined
+          ? {}
+          : {
+              wake: {
+                enabled: false,
+                spokes: [],
+                generation: Math.max((hub.wake.generation ?? 0) + 1, this.#options.now()),
+                ...(hub.wake.copyRevision === undefined
+                  ? {}
+                  : { copyRevision: hub.wake.copyRevision }),
+              },
+            }),
         ...(hub?.owners === undefined ? {} : { owners: hub.owners }),
       },
     });
@@ -706,6 +723,12 @@ export class HubService {
   async receiveHandback(
     senderMemberId: string,
     handback: HubStandInHandback,
+    /**
+     * Runs once the merged roster is saved and before it is published. A spoke
+     * that gets the roster can report to the hub at once, so whatever the hub
+     * takes from the hand-back must be in place by then.
+     */
+    beforePublish: () => void = () => undefined,
   ): Promise<HandbackOutcome> {
     const current = this.#options.state.load();
     const hub = current.hub;
@@ -817,6 +840,7 @@ export class HubService {
       memberId: sender.memberId,
       sequence: signed.roster.sequence,
     });
+    beforePublish();
     // Members that were removed are told by the roster that no longer lists them.
     await this.#publish(signed, nextHub, [...roster.members, ...added.map((e) => e.member)], []);
     return { status: "merged", roster: signed };
@@ -925,6 +949,22 @@ export class HubService {
         ...hub,
         roster: signed,
         members: hub.members.filter((member) => String(member.memberId) !== memberId),
+        // What the hub held to wake the member goes with it, hardware address included.
+        ...(hub.wake === undefined
+          ? {}
+          : {
+              wake: {
+                ...hub.wake,
+                spokes: hub.wake.spokes.filter((spoke) => String(spoke.memberId) !== memberId),
+                ...(hub.wake.withdrawals === undefined
+                  ? {}
+                  : {
+                      withdrawals: hub.wake.withdrawals.filter(
+                        (withdrawal) => String(withdrawal.memberId) !== memberId,
+                      ),
+                    }),
+              },
+            }),
         // A removed member loses its owner powers here with the roster entry.
         ...(hub.owners === undefined ? {} : { owners: withoutOwner(hub.owners, memberId) }),
         removals: [

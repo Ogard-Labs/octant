@@ -161,6 +161,35 @@ describe("hub administration controls", () => {
     expect(calls).toHaveLength(2);
   });
 
+  it("sends the wake switch and the hardware address only with their decoded bodies", async () => {
+    const { calls, runtime: controls } = runtime(() => Response.json({ status: "changed" }));
+
+    await sendHubAdministrationOperation(controls, "wake", { enabled: true });
+    await sendHubAdministrationOperation(controls, "wake-hardware-address", {
+      address: "aa:bb:cc:00:11:22",
+    });
+    await sendHubAdministrationOperation(controls, "wake-hardware-address", { address: null });
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://127.0.0.1:4317/api/desktop/hub/wake",
+      "http://127.0.0.1:4317/api/desktop/hub/wake/hardware-address",
+      "http://127.0.0.1:4317/api/desktop/hub/wake/hardware-address",
+    ]);
+
+    for (const [operation, body] of [
+      ["wake", {}],
+      ["wake", { enabled: "yes" }],
+      ["wake", { enabled: true, extra: 1 }],
+      ["wake", undefined],
+      ["wake-hardware-address", {}],
+      ["wake-hardware-address", { address: 7 }],
+    ] as const) {
+      expect(await sendHubAdministrationOperation(controls, operation, body)).toMatchObject({
+        status: 400,
+      });
+    }
+    expect(calls).toHaveLength(3);
+  });
+
   it("refuses an owner request that fails its schema, sending nothing", async () => {
     const { calls, runtime: controls } = runtime(() => Response.json({}));
     const owner = {

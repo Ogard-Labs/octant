@@ -261,7 +261,9 @@ export type HubAdministrationOperation =
   | "certificate-status"
   | "certificate"
   | "standby-order"
-  | "promote";
+  | "promote"
+  | "wake"
+  | "wake-hardware-address";
 
 /**
  * The loopback hub administration, which only a local window reaches. Absent

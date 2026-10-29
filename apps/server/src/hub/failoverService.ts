@@ -47,6 +47,8 @@ export interface FailoverOptions {
   readonly spoke: SpokeLinkService;
   readonly record: (change: HubMembershipChangedPayload) => void;
   readonly now: () => number;
+  /** Told the wake generation the hub's heartbeat carried, so the spoke can resend times the hub cleared. */
+  readonly noteHubWakeGeneration?: (generation: number) => void;
   /** Replaces the failover time the hub's roster carries; tests cannot wait minutes. */
   readonly failoverAfterMs?: () => number | undefined;
 }
@@ -432,7 +434,8 @@ export class FailoverService {
     });
     if (answer === undefined) return false;
     if (answer.heartbeat !== undefined && !answer.heartbeat.standingIn) {
-      const { roster } = answer.heartbeat;
+      const { roster, wakeGeneration } = answer.heartbeat;
+      if (wakeGeneration !== undefined) this.#options.noteHubWakeGeneration?.(wakeGeneration);
       if (roster.signedBy.kind === "hub" && roster.roster.sequence > link.roster.roster.sequence) {
         this.#options.spoke.receiveRoster(roster);
       }
@@ -557,22 +560,48 @@ export class FailoverService {
         listenerOrigin,
       })),
       removed: standIn.removed,
-      // Slice 8 fills this: no wake times exist to hand back yet.
-      wakeTimes: [],
+      // What spokes reported to this standby while it stood in; the hub keeps the
+      // spokes it still lists and ignores the rest.
+      wakeTimes: (standIn.wakeReports ?? []).map(
+        ({ memberId, times, hardwareAddress, reportedAt }) => ({
+          memberId,
+          times,
+          ...(hardwareAddress === undefined ? {} : { hardwareAddress }),
+          reportedAt,
+        }),
+      ),
     };
     const identity = this.#options.identity();
-    const answer = await sendHubLinkRequest({
-      transport: this.#options.transport,
-      target: { origin: link.hubOrigin, pin: listenerPinFromDigest(link.hubListenerPin) },
-      signHostPayload: identity.signing.signHostPayload,
-      senderMemberId: String(link.selfMemberId),
-      recipientMemberId: String(link.hubMemberId),
-      method: "POST",
-      path: "/api/hub/handback",
-      body: JSON.stringify(handback),
-      headers: { [HUB_PEER_KEY_HEADER]: identity.signing.hostPublicKey },
-      now: this.#options.now(),
-    });
+    const send = (body: HubStandInHandback) =>
+      sendHubLinkRequest({
+        transport: this.#options.transport,
+        target: { origin: link.hubOrigin, pin: listenerPinFromDigest(link.hubListenerPin) },
+        signHostPayload: identity.signing.signHostPayload,
+        senderMemberId: String(link.selfMemberId),
+        recipientMemberId: String(link.hubMemberId),
+        method: "POST",
+        path: "/api/hub/handback",
+        body: JSON.stringify(body),
+        headers: { [HUB_PEER_KEY_HEADER]: identity.signing.hostPublicKey },
+        now: this.#options.now(),
+      });
+    let answer = await send(handback);
+    // A gateway that finds the body too large will find it too large every time, and the
+    // membership changes ride in the same body. The wake times are rebuilt from the
+    // spokes' own reports, so they are the part to give up.
+    if (
+      answer.status === "answered" &&
+      answer.response.status === 413 &&
+      handback.wakeTimes.length > 0
+    ) {
+      this.#options.record({
+        change: "wake-times-dropped",
+        actingPrincipal: { kind: "hub", memberId: link.selfMemberId },
+        memberId: link.hubMemberId,
+        wakeCount: handback.wakeTimes.reduce((total, spoke) => total + spoke.times.length, 0),
+      });
+      answer = await send({ ...handback, wakeTimes: [] });
+    }
     // Still standing in until the hub has taken the changes: members can change
     // again, and the next look sends the hand-back again.
     if (answer.status === "unreachable") {

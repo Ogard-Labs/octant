@@ -39,7 +39,11 @@ the hub's page (decision H15's links, and a browser identity a spoke can accept)
 is not built. The browser flow is tested with a faked authenticator and has not
 been run against a real hub. Nothing here has been run on a real phone, a real
 passkey, or Android. Sign-in copy, posture routes, a Mac Touch ID unlock key,
-the wake service, push, and provisioning are not built. Delegation is
+push, and provisioning are not built. The wake service is built (the hub's own
+switch, spokes reporting opaque routine times, the Wake-on-LAN packet and signed
+nudge, standbys holding the times), read narrowly as the last item of slice 8
+records; it has run only between hosts on loopback with a fake socket, and a real
+Wake-on-LAN wake of a sleeping Mac has not been tried. Delegation is
 built for Work Projects, read narrowly as the last item of the delivery plan's
 slice 6 records. Failover is built (a named standby, member switching, stand-in,
 step-down with merge-back, and promotion), read narrowly as the last item of
@@ -47,7 +51,8 @@ slice 7 records; it has run only between hosts on loopback, with the hub
 stopped by blocking its address, never on a real network or after a real
 reboot.
 The hub uses only the Roster and Status grant items, the Owners item for
-owner devices, and the Standby item for naming a standby. The maintainer
+owner devices, the Standby item for naming a standby, and the Wake item for the
+wake service. The maintainer
 asked for this design and authorized it as post-preview, design-first work on
 2026-10-28, and set its shape the same day: a running instance enabled as hub,
 members paired by QR or manual code over a private network such as Tailscale,
@@ -767,6 +772,16 @@ may run a self-hosted wake service for spokes whose hub grant includes Wake:
   and the spoke handles it on return under its missed-run policy. The hub
   stores each spoke's hardware address only if the person entered it on the
   spoke.
+- **The switch is the hub's own, and a stand-in obeys it.** The hub hands each
+  standby its wake switch with the copy of the times. A standby that is
+  standing in takes reports and wakes spokes only while the copy says the
+  switch is on; a copy that does not say so (missing, or from an older hub)
+  counts as off, and the standby refuses a report with `wake-service-off`.
+- **Times the hub cleared are sent again.** Turning the switch off or on
+  clears the hub's times and moves a wake generation. Turning the hub role off
+  and on does the same, and the generation never goes backwards. The hub's report answer
+  and heartbeat carry it, and a spoke that sees it change forgets what it last
+  sent and reports in full on its next look, without any routine changing.
 - **Hub-held schedules.** A routine the person wants to run "on whichever
   spoke is awake" is not in this design; a routine always belongs to one
   spoke's Project.
@@ -976,10 +991,11 @@ maintainer's hardware, or names the maintainer gate.
      (default five minutes) and a test may override it. Only a standby that stands
      in tells members, by signing the next roster with its own key and sending it;
      a member that missed that asks the standbys in order.
-   - **The standby holds the roster only.** What a standby needs to take over is
-     the latest hub-signed roster, which names every member's address, pin, and key
-     fingerprint, so the hub copies nothing else to it. Wake times do not exist
-     (slice 8); the hand-back carries a `wakeTimes` field that is always empty.
+   - **The standby holds the roster, and the wake times once the wake service
+     is on.** What a standby needs to take over is the latest hub-signed roster,
+     which names every member's address, pin, and key fingerprint. The wake times
+     travel apart from the roster, as slice 8 records; the hand-back's `wakeTimes`
+     field carries what spokes reported to the standby while it stood in.
    - **A stand-in adds spokes only, never owners or guests.** A join through a
      stand-in code makes a spoke with no owner mark; guest joins and the owner
      code wait for the hub. A standing-in standby cannot remove the hub or a
@@ -1012,6 +1028,85 @@ maintainer's hardware, or names the maintainer gate.
    routine's prompt or Project; a nudge for an unknown routine does nothing.
    Verification: server tests; a real Wake-on-LAN wake of a sleeping Mac is a
    maintainer gate (hardware).
+
+   Built, with these narrower readings:
+   - **A report replaces what the hub held.** A spoke sends every enabled
+     routine's next occurrence in one list, under a random id it made for each
+     routine and keeps only in its own hub-link state (dropped when it leaves).
+     A routine that is removed or disabled drops out of the list, which withdraws
+     it, and loses its id. The body carries no member id: the hub files it under
+     the member whose key signed it, and refuses a guest or the hub itself.
+   - **Reports are numbered and sent one at a time.** Every way into a report
+     (the timer, a new hardware address, a grant change, a new hub wake
+     generation) goes through one path on the spoke: a change asked for while a
+     report is in flight is sent once when it completes, never in parallel. Each
+     report carries a sequence the spoke keeps in its hub-link state, above its
+     last and never below the clock in milliseconds, so it survives a restart. The
+     hub (or a standing-in standby) applies a report only when its sequence is
+     above the last it applied for that spoke, counting a withdrawal's, and
+     answers `stale-report` otherwise; the spoke counts that as done. Without
+     this a withdrawal that outran an older report was undone by it, and later
+     looks never withdrew again. Hand-backs still use `reportedAt` and the
+     withdrawal record.
+   - **Wake is its own switch on the hub, window only.** `octant hub wake on|off`
+     and Settings › Hub reach the loopback administration route; a remote client
+     never does. Turning it off forgets every held time and tells the standbys to
+     do the same. While it is off the hub refuses reports.
+   - **A spoke reports only while its grant ticks Wake.** Unticking withdraws the
+     list and the hardware address. The spoke keeps, in its hub state, that it
+     has shared wake state not yet withdrawn, and clears that only after the hub
+     confirms, so a restart before its next look still withdraws. The hub also
+     drops a spoke's held times and address when that spoke leaves or is removed.
+     The hub cannot know a spoke's grant, so the spoke is the only check:
+     it also refuses a nudge once Wake is unticked, so stale hub-held times cost
+     nothing.
+   - **The hardware address is the spoke's, entered in its own window or never.**
+     It travels inside the report, only while Wake is ticked, and is stored with
+     that spoke's times, copied to standbys with them, and forgotten with them.
+     The packet is six `0xFF` bytes then the address sixteen times, broadcast on
+     the LAN (`255.255.255.255:9`) through a port tests replace.
+   - **A packet alone is not a wake.** Wake-on-LAN cannot be confirmed, so the
+     hub sends the packet once per occurrence, then repeats the signed nudge on
+     each look (every 15 seconds) from the lead time (default two minutes) until
+     the spoke answers or the occurrence arrives. If no nudge was answered by
+     then the occurrence is recorded unreachable, even when a packet went out.
+   - **The spoke believes a nudge only if** the id maps to an enabled routine it
+     has, the time is within a minute of that routine's own next occurrence, the
+     occurrence is within ten minutes, and its grant ticks Wake. Believing it
+     pokes the host's scheduler, which claims only what its own clock says is
+     due; nothing in the nudge path can start a run. Anything else is answered as
+     ignored, with the reason, and journaled.
+   - **A standby's nudge needs more.** The spoke must also have ticked Standby,
+     and must itself be unable to reach the hub for the failover time, the test
+     it applies to a standby's roster. The hub's own nudge needs neither.
+   - **Standbys hold a copy.** The hub hands every named standby the times it
+     holds (also on a timer, and when the switch changes). Only a spoke that
+     ticked Standby takes one. While a standby stands in, spokes that follow its
+     roster report to it, it wakes from the copy overlaid with those reports, and
+     on step-down it hands the reports back with the membership changes. The hub
+     takes them only for spokes it still lists, only while its wake service is
+     on, and a report replaces what it held for that spoke.
+   - **Copies are numbered, and the routes are sized for the largest.** The hub
+     sends copies without waiting for each other, so each carries a revision the
+     hub keeps rising; a standby keeps a copy only if its revision is newer than
+     the one it holds, and answers an older or equal one `stale-copy` (409). The
+     copy and hand-back routes accept a body of every allowed spoke at the
+     allowed number of times (about 8 MiB, plus 1 MiB for the membership changes
+     in a hand-back). If a gateway still answers a hand-back 413, the standby
+     journals `wake-times-dropped` and hands back the membership without wake
+     times; spokes report them again.
+   - **Results.** The last result per spoke (nudged, ignored, refused,
+     unreachable) is kept on the hub for Settings and `octant hub status`; a
+     standing-in standby journals its results and does not keep them.
+   - **The journal** records reports, merges, nudges sent, refused, and
+     unreachable occurrences, each with its principal, a count, and a reason
+     word. Routine ids, names, and times are not journaled.
+   - **The hub's own routines are not reported.** It is awake, runs its own
+     scheduler, and has no hub to tell.
+   - **The window bridge.** The desktop's allow-list of hub operations gained
+     `wake` and `wake-hardware-address`, each decoded against its contract before
+     it is forwarded.
+
 9. **Push through the hub.** Spokes hand sealed envelopes to the hub, which
    forwards per H7. Depends on the push gateway slices in Mobile maturity.
    Verification: transport tests against a local gateway; a device delivery

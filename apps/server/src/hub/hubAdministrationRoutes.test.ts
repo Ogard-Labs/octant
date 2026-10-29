@@ -45,6 +45,8 @@ async function setup(
     hub: host.hub,
     spoke: host.spoke,
     failover: host.failover,
+    wake: host.wake,
+    spokeWake: host.spokeWake,
     certificate: new TailscaleCertificateService({
       setting: createTailscaleCertificateSetting(host.directory),
       daemon: unreachableTailscaleDaemon,
@@ -142,6 +144,60 @@ describe("hub administration over the loopback channel", () => {
       ["hub-role-enabled", "local-window"],
       ["hub-role-disabled", "local-window"],
     ]);
+  });
+
+  it("turns the wake service on and off only for a window, only on a hub, and journals it with its principal", async () => {
+    const { host, handle } = await setup();
+
+    const beforeTheHub = await handle(post(HUB_ADMINISTRATION_ROUTES.wake, { enabled: true }));
+    expect(beforeTheHub?.status).toBe(409);
+    expect(await beforeTheHub?.json()).toEqual({ status: "refused", kind: "hub-role-off" });
+
+    await handle(post(HUB_ADMINISTRATION_ROUTES.enable));
+    const unauthenticated = await handle(
+      post(
+        HUB_ADMINISTRATION_ROUTES.wake,
+        { enabled: true },
+        { "x-octant-window-capability": "B".repeat(43) },
+      ),
+    );
+    expect(unauthenticated?.status).toBe(401);
+    expect(host.wake.status().enabled).toBe(false);
+
+    const on = await handle(post(HUB_ADMINISTRATION_ROUTES.wake, { enabled: true }));
+    expect(await on?.json()).toEqual({ status: "changed", enabled: true });
+    expect(host.wake.status().enabled).toBe(true);
+    const status = await handle(
+      new Request(`http://127.0.0.1${HUB_ADMINISTRATION_ROUTES.status}`, {
+        headers: { "x-octant-desktop-secret": secret, "x-octant-window-capability": capability },
+      }),
+    );
+    expect(await status?.json()).toMatchObject({
+      wake: { hub: { enabled: true, spokes: [] }, spoke: { sharing: false, reported: 0 } },
+    });
+    await handle(post(HUB_ADMINISTRATION_ROUTES.wake, { enabled: false }));
+    expect(host.records.map((record) => [record.change, record.actingPrincipal.kind])).toEqual([
+      ["hub-role-enabled", "local-window"],
+      ["wake-switch-changed", "local-window"],
+      ["wake-switch-changed", "local-window"],
+    ]);
+  });
+
+  it("enters a hardware address only on a spoke and only when it is one", async () => {
+    const { handle } = await setup();
+
+    const notJoined = await handle(
+      post(HUB_ADMINISTRATION_ROUTES.wakeHardwareAddress, { address: "aa:bb:cc:00:11:22" }),
+    );
+    expect(notJoined?.status).toBe(409);
+    expect(await notJoined?.json()).toEqual({ status: "refused", kind: "not-a-spoke" });
+    const malformed = await handle(
+      post(HUB_ADMINISTRATION_ROUTES.wakeHardwareAddress, {
+        address: "aa:bb:cc:00:11:22",
+        extra: 1,
+      }),
+    );
+    expect(malformed?.status).toBe(400);
   });
 
   it("refuses to turn the hub role on while the listener has a public address", async () => {

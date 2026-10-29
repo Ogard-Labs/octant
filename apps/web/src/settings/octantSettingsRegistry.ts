@@ -1147,6 +1147,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "tailscale certificate https ts.net browser web app trusted certificate transparency hub",
         },
         {
+          id: settingId("hub-wake-service"),
+          label: "Wake service",
+          scope: "host",
+          keywords:
+            "hub wake service routines wake on lan magic packet nudge spokes sleeping computers hardware address",
+        },
+        {
           id: settingId("hub-join"),
           label: "Join a hub",
           scope: "host",

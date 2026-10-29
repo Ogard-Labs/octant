@@ -646,6 +646,7 @@ function printUsage(): void {
       "  octant hub accept-hub <member-id-or-name>",
       "  octant hub stand-in join-code",
       "  octant hub stand-in remove <member-id-or-name>",
+      "  octant hub wake on|off",
       "  octant ssh-target [list]",
       "  octant ssh-target add <destination> --executor <path-of-octant-on-target> [--fingerprint <SHA256:...>]",
       "  octant ssh-target repin <target-id> [--fingerprint <SHA256:...>]",

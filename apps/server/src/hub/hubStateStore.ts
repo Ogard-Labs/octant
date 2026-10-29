@@ -8,12 +8,16 @@
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  HardwareAddress,
   HubGrant,
   HubMemberId,
+  HubWakeResult,
+  HubWakeSpokeTimes,
   NewMemberAlert,
   PeerGrant,
   RosterMember,
   SignedHubRoster,
+  WakeRoutineId,
 } from "@octant/contracts";
 import { Schema } from "effect";
 
@@ -63,8 +67,48 @@ export const HostOwnerRecord = Schema.Struct({
 }).annotations(strict);
 export type HostOwnerRecord = typeof HostOwnerRecord.Type;
 
+/**
+ * What a hub or a standing-in standby holds of one spoke's routines: opaque
+ * ids and times, the address the person entered on the spoke, and the last
+ * result of waking it. Rebuilt from the spoke's reports, so losing it costs
+ * only the wakes until the spoke reports again.
+ */
+export const WakeSpokeRecord = Schema.Struct({
+  ...HubWakeSpokeTimes.fields,
+  reportedAt: Schema.Int,
+  lastResult: Schema.optional(
+    Schema.Struct({ at: Schema.Int, result: HubWakeResult }).annotations(strict),
+  ),
+}).annotations(strict);
+export type WakeSpokeRecord = typeof WakeSpokeRecord.Type;
+
+/**
+ * When a spoke last withdrew its wake state. It carries no times and no address and
+ * never wakes anything; it only stops an older hand-back from bringing them back.
+ */
+export const WakeWithdrawal = Schema.Struct({
+  memberId: HubMemberId,
+  withdrawnAt: Schema.Int,
+  /** The sequence of the withdrawing report, so an older report arriving later is ignored. */
+  sequence: Schema.optional(Schema.Int.pipe(Schema.positive())),
+}).annotations(strict);
+export type WakeWithdrawal = typeof WakeWithdrawal.Type;
+
+/** The hub's wake service: its own switch, off until the person turns it on, and the times it holds. */
+export const HubWakeState = Schema.Struct({
+  enabled: Schema.Boolean,
+  spokes: Schema.Array(WakeSpokeRecord),
+  withdrawals: Schema.optional(Schema.Array(WakeWithdrawal)),
+  /** Counts the times the switch changed; spokes learn it from the heartbeat and resend when it moves. */
+  generation: Schema.optional(Schema.Int),
+  /** The revision of the last copy handed to the standbys; it only rises, so a late older copy can be told apart. */
+  copyRevision: Schema.optional(Schema.Int),
+}).annotations(strict);
+export type HubWakeState = typeof HubWakeState.Type;
+
 export const HubSideState = Schema.Struct({
   enabled: Schema.Boolean,
+  wake: Schema.optional(HubWakeState),
   roster: Schema.optional(SignedHubRoster),
   members: Schema.Array(HubMemberRecord),
   joinTickets: Schema.Array(HubJoinTicketRecord),
@@ -107,6 +151,8 @@ export const StandInState = Schema.Struct({
   added: Schema.Array(StandInAddedRecord),
   removed: Schema.Array(HubMemberId),
   joinTickets: Schema.Array(Schema.UUID),
+  /** Routine times spokes reported to this standby while it stood in; handed back with the changes above. */
+  wakeReports: Schema.optional(Schema.Array(WakeSpokeRecord)),
   /**
    * Set while a hand-back to the returned hub is in flight. Membership is
    * frozen then, so every change made is in the hand-back and none can be lost
@@ -115,6 +161,29 @@ export const StandInState = Schema.Struct({
   handingBack: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type StandInState = typeof StandInState.Type;
+
+/**
+ * What a spoke keeps for the wake service: the hardware address its person
+ * entered (sent to the hub only when present) and the random id it made for
+ * each routine it reports. The ids map back to routines only here.
+ */
+export const SpokeWakeState = Schema.Struct({
+  hardwareAddress: Schema.optional(HardwareAddress),
+  /**
+   * Set once this spoke has sent the hub its wake state, and cleared only when the
+   * hub confirms a withdrawal. A restart before the withdrawal still withdraws.
+   */
+  shared: Schema.optional(Schema.Literal(true)),
+  /** The sequence of the last report this spoke started; the next is above it, and above the clock. */
+  reportSequence: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  routines: Schema.Array(
+    Schema.Struct({
+      automationId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+      routineId: WakeRoutineId,
+    }).annotations(strict),
+  ),
+}).annotations(strict);
+export type SpokeWakeState = typeof SpokeWakeState.Type;
 
 export const GuestDeviceRecord = Schema.Struct({
   memberId: HubMemberId,
@@ -156,6 +225,14 @@ export const HubLinkState = Schema.Struct({
   hubSignedRoster: Schema.optional(SignedHubRoster),
   /** Present while this host, a named standby, stands in for a hub it cannot reach. */
   standIn: Schema.optional(StandInState),
+  /** The wake times the hub handed this standby, so it can wake spokes while it stands in. */
+  wakeCopy: Schema.optional(Schema.Array(WakeSpokeRecord)),
+  /** The hub's wake switch as the last copy said it; a standby stands in to wake spokes only while it is on. */
+  wakeCopyEnabled: Schema.optional(Schema.Boolean),
+  /** The revision of the copy held; an older or equal copy arriving later is refused. */
+  wakeCopyRevision: Schema.optional(Schema.Int),
+  /** This spoke's side of the wake service. */
+  wake: Schema.optional(SpokeWakeState),
 }).annotations(strict);
 export type HubLinkState = typeof HubLinkState.Type;
 

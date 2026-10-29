@@ -28,6 +28,8 @@ export type HubCliCommand =
   | { readonly action: "promote"; readonly confirm: boolean }
   /** On a spoke: accept the named standby that was promoted to hub. */
   | { readonly action: "accept-hub"; readonly member: string }
+  /** On the hub: turns the wake service on or off. It is off until a person turns it on. */
+  | { readonly action: "wake"; readonly enabled: boolean }
   | { readonly action: "stand-in"; readonly step: "join-code" }
   | { readonly action: "stand-in"; readonly step: "remove"; readonly member: string }
   | {
@@ -48,6 +50,7 @@ const HUB_SIDE_ACTIONS: ReadonlySet<HubCliCommand["action"]> = new Set([
   "promote",
   "accept-hub",
   "stand-in",
+  "wake",
 ]);
 
 const JOIN_APPROVAL_WINDOW_MS = 5 * 60_000;
@@ -109,6 +112,11 @@ export function resolveHubCliCommand(
       const [member] = rest;
       if (member === undefined || rest.length !== 1 || !only()) return undefined;
       return { action, member };
+    }
+    case "wake": {
+      const [setting] = rest;
+      if (rest.length !== 1 || !only() || (setting !== "on" && setting !== "off")) return undefined;
+      return { action, enabled: setting === "on" };
     }
     case "stand-in": {
       const [step, member] = rest;
@@ -229,6 +237,8 @@ export async function runHubCliCommand(input: Input): Promise<number> {
       return await runPromote(input, command.confirm);
     case "accept-hub":
       return await runAcceptHub(input, command.member);
+    case "wake":
+      return await runWake(input, command.enabled);
     case "stand-in":
       return command.step === "join-code"
         ? await runStandInJoinCode(input)
@@ -290,6 +300,33 @@ async function runCertificate(
   return 0;
 }
 
+async function runWake(input: Input, enabled: boolean): Promise<number> {
+  const response = await post(input, "/api/desktop/hub/wake", { enabled });
+  if (!isOk(response, "changed")) {
+    return refusal(input, response, "Octant refused to change the wake service.");
+  }
+  input.stdout.write(
+    enabled
+      ? "The wake service is on. A spoke takes part only if its person ticked Wake in its hub grant.\n"
+      : "The wake service is off, and the hub forgot every time it held.\n",
+  );
+  return 0;
+}
+
+function writeWakeService(input: Input, status: HubStatusOutput): void {
+  const wake = status.wake?.hub;
+  if (wake === undefined) return;
+  input.stdout.write(`Wake service ${wake.enabled ? "on" : "off"}\n`);
+  for (const spoke of wake.spokes) {
+    const name = status.members.find((member) => member.memberId === spoke.memberId)?.name;
+    const last =
+      spoke.lastResult === undefined
+        ? ""
+        : `, last ${spoke.lastResult.result} ${new Date(spoke.lastResult.at).toISOString()}`;
+    input.stdout.write(`  ${name ?? spoke.memberId}  ${spoke.upcoming} wake(s) ahead${last}\n`);
+  }
+}
+
 async function runStatus(input: Input): Promise<number> {
   const status = await readStatus(input, "Octant refused to read the hub status.");
   if (status === undefined) return 1;
@@ -300,6 +337,7 @@ async function runStatus(input: Input): Promise<number> {
     );
   }
   if (status.hubEnabled && status.standbyOrder.length > 0) writeStandbyOrder(input, status);
+  if (status.hubEnabled) writeWakeService(input, status);
   if (status.link === undefined) {
     input.stdout.write("This computer has not joined a hub.\n");
     return 0;
@@ -319,6 +357,14 @@ async function runStatus(input: Input): Promise<number> {
     );
   }
   writeGrant(input, status.link.grant);
+  const sharing = status.wake?.spoke;
+  if (sharing !== undefined) {
+    input.stdout.write(
+      sharing.sharing
+        ? `Wake: this computer tells the hub when its routines are due (${sharing.reported} now).${sharing.hardwareAddress === undefined ? "" : " It also shares the hardware address you entered."}\n`
+        : "Wake: this computer shares no routine times (Wake is not ticked in its hub grant).\n",
+    );
+  }
   return 0;
 }
 
@@ -790,6 +836,8 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
   "cannot-remove-hub-or-standby":
     "A standby that stands in cannot remove the hub or a standby; the hub's window changes those.",
   "roster-not-newer": "That hub's roster is not newer than the one this computer holds.",
+  "wake-service-off": "The wake service is off. Turn it on with `octant hub wake on`.",
+  "invalid-address": "That is not a hardware address (six hex pairs, such as aa:bb:cc:00:11:22).",
 };
 
 /** The server's refusal as a sentence plus its own word for it, so nothing is hidden. */
@@ -832,6 +880,21 @@ interface HubStatusOutput {
   readonly heldMembers: ReadonlyArray<HubMemberOutput>;
   /** The standby hubs the latest roster this computer holds names, in order. */
   readonly standbyOrder: ReadonlyArray<string>;
+  readonly wake?: {
+    readonly hub: {
+      readonly enabled: boolean;
+      readonly spokes: ReadonlyArray<{
+        readonly memberId: string;
+        readonly upcoming: number;
+        readonly lastResult?: { readonly at: number; readonly result: string };
+      }>;
+    };
+    readonly spoke: {
+      readonly sharing: boolean;
+      readonly reported: number;
+      readonly hardwareAddress?: string;
+    };
+  };
   readonly link?: {
     readonly membership: "member" | "removed";
     readonly hubName: string;
@@ -869,6 +932,7 @@ async function readStatus(input: Input, fallback: string): Promise<HubStatusOutp
     : field(field(spoke, "roster"), "roster");
   const heldMembers = rosterMembersOf(heldRoster);
   const standbyOrder = stringList(field(heldRoster, "standbyOrder"));
+  const wake = wakeOf(field(response.body, "wake"));
   if (
     (membership === "member" || membership === "removed") &&
     typeof hubName === "string" &&
@@ -883,6 +947,7 @@ async function readStatus(input: Input, fallback: string): Promise<HubStatusOutp
       members,
       heldMembers,
       standbyOrder,
+      ...(wake === undefined ? {} : { wake }),
       link: {
         membership,
         hubName,
@@ -896,7 +961,54 @@ async function readStatus(input: Input, fallback: string): Promise<HubStatusOutp
       },
     };
   }
-  return { hubEnabled: enabled, members, heldMembers, standbyOrder };
+  return {
+    hubEnabled: enabled,
+    members,
+    heldMembers,
+    standbyOrder,
+    ...(wake === undefined ? {} : { wake }),
+  };
+}
+
+function wakeOf(value: unknown): HubStatusOutput["wake"] {
+  const hub = field(value, "hub");
+  const spoke = field(value, "spoke");
+  const enabled = field(hub, "enabled");
+  const rawSpokes = field(hub, "spokes");
+  const sharing = field(spoke, "sharing");
+  const reported = field(spoke, "reported");
+  if (
+    typeof enabled !== "boolean" ||
+    !Array.isArray(rawSpokes) ||
+    typeof sharing !== "boolean" ||
+    typeof reported !== "number"
+  ) {
+    return undefined;
+  }
+  const spokes: Array<NonNullable<HubStatusOutput["wake"]>["hub"]["spokes"][number]> = [];
+  for (const entry of rawSpokes) {
+    const memberId = field(entry, "memberId");
+    const upcoming = field(entry, "upcoming");
+    const at = field(field(entry, "lastResult"), "at");
+    const result = field(field(entry, "lastResult"), "result");
+    if (typeof memberId !== "string" || typeof upcoming !== "number") continue;
+    spokes.push({
+      memberId,
+      upcoming,
+      ...(typeof at === "number" && typeof result === "string"
+        ? { lastResult: { at, result } }
+        : {}),
+    });
+  }
+  const hardwareAddress = field(spoke, "hardwareAddress");
+  return {
+    hub: { enabled, spokes },
+    spoke: {
+      sharing,
+      reported,
+      ...(typeof hardwareAddress === "string" ? { hardwareAddress } : {}),
+    },
+  };
 }
 
 function rosterMembersOf(roster: unknown): ReadonlyArray<HubMemberOutput> {

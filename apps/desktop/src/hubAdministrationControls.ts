@@ -16,6 +16,8 @@ import {
   decodeHubLeaveRequest,
   decodeHubPromoteRequest,
   decodeHubStandbyOrderRequest,
+  decodeHubWakeHardwareAddressRequest,
+  decodeHubWakeSwitchRequest,
   decodeOwnerAdditionRequest,
   decodeOwnerAlertRequest,
   decodeOwnerMemberRequest,
@@ -112,6 +114,16 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     method: "POST",
     path: "/api/desktop/hub/promote",
     decodeBody: decodeHubPromoteRequest,
+  },
+  wake: {
+    method: "POST",
+    path: "/api/desktop/hub/wake",
+    decodeBody: decodeHubWakeSwitchRequest,
+  },
+  "wake-hardware-address": {
+    method: "POST",
+    path: "/api/desktop/hub/wake/hardware-address",
+    decodeBody: decodeHubWakeHardwareAddressRequest,
   },
 } as const satisfies Readonly<Record<string, HubAdministrationRoute>>;
 

@@ -595,6 +595,102 @@ describe("octant hub status, grant, leave and remove", () => {
   });
 });
 
+describe("octant hub wake", () => {
+  const SPOKE_ID = "44444444-4444-4444-8444-444444444444";
+  const status = (wake: Record<string, unknown>) => ({
+    hub: {
+      enabled: true,
+      roster: {
+        roster: {
+          standbyOrder: [],
+          members: [{ memberId: SPOKE_ID, name: "Laptop", role: "spoke", owner: false }],
+        },
+      },
+    },
+    spoke: { membership: "none" },
+    wake,
+  });
+
+  it("reads wake on and off and nothing else", () => {
+    expect(resolveHubCliCommand(["wake", "on"], {})).toEqual({ action: "wake", enabled: true });
+    expect(resolveHubCliCommand(["wake", "off"], {})).toEqual({ action: "wake", enabled: false });
+    expect(resolveHubCliCommand(["wake"], {})).toBeUndefined();
+    expect(resolveHubCliCommand(["wake", "maybe"], {})).toBeUndefined();
+    expect(resolveHubCliCommand(["wake", "on", "extra"], {})).toBeUndefined();
+    expect(resolveHubCliCommand(["wake", "on"], { force: true })).toBeUndefined();
+  });
+
+  it("turns the wake service on and off through the window-only route", async () => {
+    const on = await fixture(() => ok({ status: "changed", enabled: true }));
+    expect(await on.run({ action: "wake", enabled: true })).toBe(0);
+    expect(on.sent[0]).toMatchObject({ path: "/api/desktop/hub/wake", body: { enabled: true } });
+    expect(on.text()).toContain("Wake");
+
+    const off = await fixture(() => ok({ status: "changed", enabled: false }));
+    expect(await off.run({ action: "wake", enabled: false })).toBe(0);
+    expect(off.sent[0]).toMatchObject({ body: { enabled: false } });
+
+    const refused = await fixture(() => ({
+      status: 409,
+      body: { status: "refused", kind: "hub-role-off" },
+    }));
+    expect(await refused.run({ action: "wake", enabled: true })).toBe(1);
+    expect(refused.errors()).toContain("hub-role-off");
+  });
+
+  it("shows the switch, each spoke's upcoming wakes and the last result in the hub status", async () => {
+    const host = await fixture(() =>
+      ok(
+        status({
+          hub: {
+            enabled: true,
+            spokes: [
+              {
+                memberId: SPOKE_ID,
+                upcoming: 2,
+                lastResult: { at: 0, result: "unreachable" },
+              },
+            ],
+          },
+          spoke: { sharing: false, reported: 0 },
+        }),
+      ),
+    );
+
+    expect(await host.run({ action: "status" })).toBe(0);
+
+    expect(host.text()).toContain("Wake service on");
+    expect(host.text()).toContain(
+      "Laptop  2 wake(s) ahead, last unreachable 1970-01-01T00:00:00.000Z",
+    );
+  });
+
+  it("shows on a spoke whether it shares routine times, without ever printing a routine", async () => {
+    const host = await fixture(() =>
+      ok({
+        hub: { enabled: false },
+        spoke: {
+          membership: "member",
+          hub: { memberId: MEMBER, name: "Mac mini" },
+          grant: DEFAULT_GRANT,
+          roster: { roster: { standbyOrder: [], members: [] } },
+          rosterSignedBy: "hub",
+        },
+        wake: {
+          hub: { enabled: false, spokes: [] },
+          spoke: { sharing: true, reported: 3, hardwareAddress: "aa:bb:cc:00:11:22" },
+        },
+      }),
+    );
+
+    expect(await host.run({ action: "status" })).toBe(0);
+
+    expect(host.text()).toContain("tells the hub when its routines are due (3 now)");
+    expect(host.text()).toContain("shares the hardware address you entered");
+    expect(host.text()).not.toContain("aa:bb:cc:00:11:22");
+  });
+});
+
 describe("octant hub failover commands", () => {
   const STANDBY = "33333333-3333-4333-8333-333333333333";
   const roster = (extra: Record<string, unknown> = {}) => ({
