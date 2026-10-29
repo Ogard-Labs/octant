@@ -709,7 +709,13 @@ Files the removed feature wrote stay in place and nothing reads them:
 `distribution-keys/` under the data directory's `apple-runtime/` folder. Every
 Apple launch is still denied `signing/`, `devicectl/`, `device-captures/`, and
 `distribution-keys/`, because they may hold device listings, entitlements, or
-a key file; a person can delete them.
+a key file; a person can delete them. The macOS Keychain item
+`app.octant.app-store-connect-keys.v1`, where a person may have saved an App
+Store Connect key, is likewise left in place: nothing reads or writes it, the
+host data map no longer lists it, and the Keychain helper still enumerates it
+so a full data purge removes it. The broker has no
+`/v1/app-store-connect-keys/*` routes and `octant apple key` is gone; a key
+saved in 1Password was only ever a reference and is untouched.
 
 On an approval-gated thread, **Allow input** is the confirmation that opens
 that destination; clicks, typing, Home, and Lock never raise it
@@ -8568,21 +8574,6 @@ mechanisms are:
   signs nothing without the secret key. Removing the endpoint, or changing its
   region, portal, account, or role, ends the portal session and deletes the
   grant before the change is journaled.
-- **App Store Connect request signing.** The credential broker signs App
-  Store Connect API tokens itself
-  ([`appStoreConnectKeySource.ts`](../packages/host-runtime/src/appStoreConnectKeySource.ts)):
-  an ES256 JSON Web Token with the key ID in its header and the issuer ID, the
-  `appstoreconnect-v1` audience, and an expiry fifteen minutes after issue in
-  its claims, signed with the platform's crypto. The server's sign request
-  names the App Store Connect credential reference and nothing else, so a
-  caller cannot choose the claims, lifetime, or key; the answer is that one
-  token, which the server sends in one step's requests and never keeps. The
-  key comes from the broker's own App Store Connect family or, when the
-  person saved a 1Password secret reference in its place, from the person's
-  `op read` at the moment the broker signs a token or writes an upload's key
-  file, held for that one operation. `op` missing, signed out, or declined
-  refuses the step as `key-source-unavailable`, with no retry. The reference
-  stays in the broker's store and is never journaled.
 - **Artifact replica membership.** Each replica entry carries a detached
   Ed25519 signature from the device signing key the writing host holds for its
   replica instance, in a credential namespace of its own that provider

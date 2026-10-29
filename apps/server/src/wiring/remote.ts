@@ -20,8 +20,6 @@ import { createProvisionHostPorts } from "../hub/provisionHostPorts";
 import { ProvisionService } from "../hub/provisionService";
 import { SpokeProvisionService } from "../hub/spokeProvisionService";
 import { createProviderCredentialRouteHandler } from "../providers/providerCredentialRoutes";
-import { makeAppStoreConnectKeyBrokerClient } from "../providers/credentialBrokerClient";
-import { createAppStoreConnectKeyRouteHandler } from "../apple/appStoreConnectKeyRoutes";
 import { ProviderServiceError } from "../providers/providerService";
 import { providerKeyJournal, reconcileProviderKeyChanges } from "../providers/providerKeyJournal";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -758,19 +756,6 @@ export function wireRemote(deps: RemoteDependencies) {
       }
     },
   });
-  const appStoreConnectKeyRoutes = createAppStoreConnectKeyRouteHandler({
-    desktopBridgeSecret: options.desktopBridgeSecret,
-    windowAuthorityStore,
-    macos: process.platform === "darwin",
-    distributionEnabled: true,
-    keys:
-      options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
-        ? undefined
-        : makeAppStoreConnectKeyBrokerClient({
-            url: options.credentialBrokerUrl,
-            token: options.credentialBrokerToken,
-          }),
-  });
   const privateListenerSetting = createPrivateListenerSetting(providerDataDirectory);
   const privateListenerAdministrationRoutes = createPrivateListenerAdministrationRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
@@ -1031,7 +1016,6 @@ export function wireRemote(deps: RemoteDependencies) {
     }),
   });
   return {
-    appStoreConnectKeyRoutes,
     composeHostDiagnostics,
     delegationAdministrationRoutes,
     externalContentRoutes,

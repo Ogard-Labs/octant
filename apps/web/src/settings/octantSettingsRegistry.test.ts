@@ -240,25 +240,6 @@ describe("octantSettingsRegistry", () => {
     expect(results[0]?.sectionId).toBe("voice");
   });
 
-  it("finds the App Store Connect key on Device tools only in a desktop window", () => {
-    const desktop = searchSettings(
-      listAvailableSections(octantSettingsRegistry, capabilities),
-      capabilities,
-      "app store connect",
-    );
-    expect(desktop[0]).toMatchObject({
-      sectionId: "device-tools",
-      settingId: "app-store-connect-key-state",
-    });
-    const browserCapabilities = { ...capabilities, nativeBoundsAvailable: false };
-    const browser = searchSettings(
-      listAvailableSections(octantSettingsRegistry, browserCapabilities),
-      browserCapabilities,
-      "app store connect",
-    );
-    expect(browser.filter((result) => result.kind === "setting")).toEqual([]);
-  });
-
   it("lands a link to the model endpoints on the add-endpoint row of Octant Harness", () => {
     const resolved = resolveDeepLink(octantSettingsRegistry, capabilities, {
       section: "harness",
