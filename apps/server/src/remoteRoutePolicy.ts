@@ -80,20 +80,6 @@ const LOCAL_ONLY_PREFIXES = [
   // Reviewing what a thread read and clearing its outside-content mark is a
   // person's act at this machine.
   "/api/thread-external-content",
-  // Starting, moving, or releasing a physical device's lease is a person's
-  // act at the Mac the device is paired with, and remote clients observe a
-  // device only: building, installing, launching, stopping, and reading an
-  // app's console, and taking a screenshot start at the Mac too. A device
-  // screenshot shows the person's own phone, so its pixels stay with windows
-  // on that Mac.
-  "/api/apple/device-leases",
-  "/api/apple/device-actions",
-  "/api/apple/device-screenshots",
-  // An upload to App Store Connect, and the read of what it would send, are a
-  // local person's acts; no remote principal starts or confirms one.
-  "/api/apple/distribution",
-  "/api/apple/distribution-preparations",
-  "/api/apple/distribution-versions",
 ] as const;
 
 /**

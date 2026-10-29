@@ -23,9 +23,6 @@ import {
   decodeProviderSessionId,
   type CodeCheckoutIdentity,
   type AppleActionRequest,
-  type AppleDeviceId,
-  type AppleDeviceRecord,
-  type AppleDeviceRequest,
   type AndroidEmulatorRequest,
   type CodeOperationCommand,
   type CodeOperationFailure,
@@ -300,9 +297,6 @@ export interface CodeOperationRuntimeOptions {
    * The paired device a lease confirmation names, as the host last saw it.
    * Absent on a host with no device layer, where no lease is ever confirmed.
    */
-  readonly describeAppleDevice?: (
-    deviceId: AppleDeviceId,
-  ) => Pick<AppleDeviceRecord, "name" | "model" | "osVersion" | "connection"> | undefined;
   readonly windowAccess: {
     readonly canAccessProject: CodeOperationAuthorityPort["canAccessProject"];
     /**
@@ -719,18 +713,6 @@ export interface CodeOperationRuntime {
   validateAppleApproval(windowId: WindowId, request: AppleActionRequest): Promise<boolean>;
   validateAndroidApproval(windowId: WindowId, request: AndroidEmulatorRequest): Promise<boolean>;
   /** Whether a person at this window confirmed exactly this device lease. */
-  validateAppleDeviceLease?(windowId: WindowId, request: AppleDeviceRequest): Promise<boolean>;
-  validateAppleDistributionUpload?(
-    windowId: WindowId,
-    request: AppleDeviceRequest,
-  ): Promise<boolean>;
-  /** Whether a person at this window confirmed exactly this submission or release. */
-  validateAppleDistributionVersion?(
-    windowId: WindowId,
-    request: AppleDeviceRequest,
-  ): Promise<boolean>;
-  /** Whether this window holds the one-use approval of exactly this device effect. */
-  validateAppleDeviceAction?(windowId: WindowId, request: AppleDeviceRequest): Promise<boolean>;
   revokeApprovals(windowId: WindowId): void;
   /**
    * Shows a native-harness question on the thread's running turn so it is
@@ -1169,34 +1151,6 @@ export function createCodeOperationRuntime(
         );
         thread = resolved?.thread;
         checkout = resolved?.checkout;
-      } else if (request.effect.kind === "apple-device-lease") {
-        const lease = await resolveAppleDeviceLeaseScope(options, windowId, request.effect.request);
-        if (lease === undefined) return undefined;
-        directContext = await approvalContext(options, undefined, lease.thread, lease.checkout);
-        directThreadTitle = lease.thread.title;
-        directPrompt = appleDeviceLeasePrompt(lease);
-      } else if (request.effect.kind === "apple-device-action") {
-        const action = await resolveAppleDeviceActionScope(
-          options,
-          windowId,
-          request.effect.request,
-        );
-        if (action === undefined) return undefined;
-        directContext = await approvalContext(options, undefined, action.thread, action.checkout);
-        directThreadTitle = action.thread.title;
-        directPrompt = appleDeviceActionPrompt(action, request.effect.request);
-      } else if (request.effect.kind === "apple-distribution-upload") {
-        const upload = await resolveAppleUploadScope(options, windowId, request.effect.request);
-        if (upload === undefined) return undefined;
-        directContext = await approvalContext(options, undefined, upload.thread, upload.checkout);
-        directThreadTitle = upload.thread.title;
-        directPrompt = appleUploadPrompt(upload, request.effect.request);
-      } else if (request.effect.kind === "apple-distribution-version") {
-        const step = await resolveAppleUploadScope(options, windowId, request.effect.request);
-        if (step === undefined) return undefined;
-        directContext = await approvalContext(options, undefined, step.thread, step.checkout);
-        directThreadTitle = step.thread.title;
-        directPrompt = appleStoreVersionPrompt(step, request.effect.request);
       } else if (request.effect.kind === "create-thread-full-access") {
         thread = request.effect.thread;
         checkout = options.persistence.readCodeCheckout(thread.checkoutId);
@@ -1337,58 +1291,6 @@ export function createCodeOperationRuntime(
       return await approvalValidator.validate({
         windowId,
         effect: { kind: "apple-action", request },
-        contextDigest: approvalContextDigest(context),
-        approvalId: request.approval.approvalId,
-      });
-    },
-    validateAppleDeviceLease: async (windowId, request) => {
-      if (approvalValidator === undefined || request.approval.kind !== "approved") return false;
-      const lease = await resolveAppleDeviceLeaseScope(options, windowId, request);
-      if (lease === undefined) return false;
-      const context = await approvalContext(options, undefined, lease.thread, lease.checkout);
-      if (context === undefined) return false;
-      return await approvalValidator.validate({
-        windowId,
-        effect: { kind: "apple-device-lease", request },
-        contextDigest: approvalContextDigest(context),
-        approvalId: request.approval.approvalId,
-      });
-    },
-    validateAppleDistributionUpload: async (windowId, request) => {
-      if (approvalValidator === undefined || request.approval.kind !== "approved") return false;
-      const upload = await resolveAppleUploadScope(options, windowId, request);
-      if (upload === undefined) return false;
-      const context = await approvalContext(options, undefined, upload.thread, upload.checkout);
-      if (context === undefined) return false;
-      return await approvalValidator.validate({
-        windowId,
-        effect: { kind: "apple-distribution-upload", request },
-        contextDigest: approvalContextDigest(context),
-        approvalId: request.approval.approvalId,
-      });
-    },
-    validateAppleDistributionVersion: async (windowId, request) => {
-      if (approvalValidator === undefined || request.approval.kind !== "approved") return false;
-      const step = await resolveAppleUploadScope(options, windowId, request);
-      if (step === undefined) return false;
-      const context = await approvalContext(options, undefined, step.thread, step.checkout);
-      if (context === undefined) return false;
-      return await approvalValidator.validate({
-        windowId,
-        effect: { kind: "apple-distribution-version", request },
-        contextDigest: approvalContextDigest(context),
-        approvalId: request.approval.approvalId,
-      });
-    },
-    validateAppleDeviceAction: async (windowId, request) => {
-      if (approvalValidator === undefined || request.approval.kind !== "approved") return false;
-      const resolved = await resolveDeviceApprovalScope(options, windowId, request);
-      if (resolved === undefined) return false;
-      const context = await approvalContext(options, undefined, resolved.thread, resolved.checkout);
-      if (context === undefined) return false;
-      return await approvalValidator.validate({
-        windowId,
-        effect: { kind: "apple-device-action", request },
         contextDigest: approvalContextDigest(context),
         approvalId: request.approval.approvalId,
       });
@@ -1869,246 +1771,6 @@ async function resolveAndroidApprovalScope(
   return resolveDeviceApprovalScope(options, windowId, request);
 }
 
-interface AppleDeviceLeaseScope {
-  readonly thread: CodeThread;
-  readonly checkout: CodeCheckoutIdentity;
-  readonly device: NonNullable<
-    ReturnType<NonNullable<CodeOperationRuntimeOptions["describeAppleDevice"]>>
-  >;
-  /** The thread a move takes the device from, which the person must be shown. */
-  readonly from?: CodeThread;
-}
-
-/**
- * The thread, checkout, and device a lease confirmation names. Unlike an
- * effect's approval it does not depend on the thread's posture: a lease asks
- * a person under every posture, Full access and Plan included.
- */
-async function resolveAppleDeviceLeaseScope(
-  options: CodeOperationRuntimeOptions,
-  windowId: WindowId,
-  request: AppleDeviceRequest,
-): Promise<AppleDeviceLeaseScope | undefined> {
-  const thread = options.persistence.readCodeThread(request.threadId);
-  const checkout = options.persistence.readCodeCheckout(request.checkoutId);
-  const device =
-    request.deviceId === undefined ? undefined : options.describeAppleDevice?.(request.deviceId);
-  const from =
-    request.fromThreadId === undefined
-      ? undefined
-      : options.persistence.readCodeThread(request.fromThreadId);
-  if (
-    request.kind !== "use-device" ||
-    device === undefined ||
-    thread === undefined ||
-    checkout === undefined ||
-    thread.checkoutId !== checkout.id ||
-    thread.repositoryId !== checkout.repositoryId ||
-    thread.projectId !== request.authority.projectId ||
-    thread.providerInstanceId !== request.authority.providerInstanceId ||
-    thread.lifecycle !== "active" ||
-    checkout.availability !== "available" ||
-    request.authority.mode !== "code" ||
-    request.authority.extension.kind !== "core" ||
-    (request.fromThreadId !== undefined && from === undefined) ||
-    !(await options.windowAccess.canAccessProject(windowId, thread.projectId))
-  ) {
-    return undefined;
-  }
-  return { thread, checkout, device, ...(from === undefined ? {} : { from }) };
-}
-
-/** Names the device and the thread, and for a move the thread that loses it. */
-function appleDeviceLeasePrompt(lease: AppleDeviceLeaseScope): {
-  readonly message: string;
-  readonly detail: string;
-} {
-  const { device, from, thread } = lease;
-  return {
-    message: `Let this thread use ${device.name}?`,
-    detail: boundApprovalDetail(
-      [
-        `Device: ${device.name} · ${device.model} · iOS ${device.osVersion} · ${device.connection === "wired" ? "connected by cable" : "on the network"}`,
-        `Thread: ${thread.title}`,
-        ...(from === undefined ? [] : [`Moves the device from: ${from.title}`]),
-        "Until the lease ends, this thread can install and run its own app on the device, take screenshots, and read that app's console output.",
-      ].join("\n"),
-    ),
-  };
-}
-
-/**
- * The thread, checkout, and device a device effect's approval names. Like a
- * Simulator effect's, it is asked only while the thread's posture decides
- * effects by approval: Plan refuses them and Full access runs them unasked.
- */
-async function resolveAppleDeviceActionScope(
-  options: CodeOperationRuntimeOptions,
-  windowId: WindowId,
-  request: AppleDeviceRequest,
-  /** The posture that decides; a live turn may run narrower than the stored thread. */
-  effectiveThread?: (thread: CodeThread) => CodeThread,
-): Promise<Omit<AppleDeviceLeaseScope, "from"> | undefined> {
-  const resolved = await resolveDeviceApprovalScope(options, windowId, request, effectiveThread);
-  const device =
-    request.deviceId === undefined ? undefined : options.describeAppleDevice?.(request.deviceId);
-  if (resolved === undefined || device === undefined) return undefined;
-  return { ...resolved, device };
-}
-
-/** Names the device, the thread, and exactly what this one approval runs. */
-function appleDeviceActionPrompt(
-  scope: Omit<AppleDeviceLeaseScope, "from">,
-  request: AppleDeviceRequest,
-): { readonly message: string; readonly detail: string } {
-  const { device, thread } = scope;
-  const app = request.bundleIdentifier ?? "this thread's app";
-  const message =
-    request.kind === "build"
-      ? `Build this thread's app for ${device.name}?`
-      : request.kind === "run"
-        ? `Build and run this thread's app on ${device.name}?`
-        : request.kind === "install"
-          ? `Install this thread's app on ${device.name}?`
-          : request.kind === "launch"
-            ? `Launch ${app} on ${device.name}?`
-            : `Stop ${app} on ${device.name}?`;
-  return {
-    message,
-    detail: boundApprovalDetail(
-      [
-        `Action: ${request.kind}`,
-        `Device: ${device.name} · ${device.model} · iOS ${device.osVersion} · ${device.connection === "wired" ? "connected by cable" : "on the network"}`,
-        `Thread: ${thread.title}`,
-        ...(request.projectPath === undefined ? [] : [`Project: ${request.projectPath}`]),
-        ...(request.scheme === undefined ? [] : [`Scheme: ${request.scheme}`]),
-        ...(request.teamId === undefined
-          ? []
-          : [
-              `Team: ${request.teamId}`,
-              "Signs for development with your own identity for this team from the login keychain. Octant changes no certificate or provisioning profile.",
-            ]),
-        ...(request.artifact === undefined ? [] : [`Signed app: ${request.artifact}`]),
-        ...(request.bundleIdentifier === undefined ? [] : [`App: ${request.bundleIdentifier}`]),
-      ].join("\n"),
-    ),
-  };
-}
-
-/**
- * The thread and checkout a distribution step's confirmation names: an
- * upload, a submission for App Review, or a release. Like a lease, it does
- * not depend on the thread's posture: each asks a person under every posture,
- * Full access included, and the device policy refuses it in Plan.
- */
-async function resolveAppleUploadScope(
-  options: CodeOperationRuntimeOptions,
-  windowId: WindowId,
-  request: AppleDeviceRequest,
-): Promise<{ readonly thread: CodeThread; readonly checkout: CodeCheckoutIdentity } | undefined> {
-  const thread = options.persistence.readCodeThread(request.threadId);
-  const checkout = options.persistence.readCodeCheckout(request.checkoutId);
-  const complete =
-    (request.kind === "upload" && request.upload !== undefined) ||
-    ((request.kind === "submit-for-review" || request.kind === "release-version") &&
-      request.storeVersion !== undefined);
-  if (
-    !complete ||
-    thread === undefined ||
-    checkout === undefined ||
-    thread.checkoutId !== checkout.id ||
-    thread.repositoryId !== checkout.repositoryId ||
-    thread.projectId !== request.authority.projectId ||
-    thread.providerInstanceId !== request.authority.providerInstanceId ||
-    thread.lifecycle !== "active" ||
-    checkout.availability !== "available" ||
-    request.authority.mode !== "code" ||
-    request.authority.extension.kind !== "core" ||
-    !(await options.windowAccess.canAccessProject(windowId, thread.projectId))
-  ) {
-    return undefined;
-  }
-  return { thread, checkout };
-}
-
-/**
- * Names exactly what one upload sends: the app, its version and build, the
- * team and the signing identity, the project, and the checkout revision the
- * approval is bound to.
- */
-function appleUploadPrompt(
-  scope: { readonly thread: CodeThread; readonly checkout: CodeCheckoutIdentity },
-  request: AppleDeviceRequest,
-): { readonly message: string; readonly detail: string } {
-  const upload = request.upload;
-  const head = scope.checkout.head;
-  const revision =
-    head.kind === "branch"
-      ? `${head.name} at ${head.oid.slice(0, 12)}`
-      : head.kind === "detached"
-        ? head.oid.slice(0, 12)
-        : "no commit yet";
-  return {
-    message:
-      upload === undefined
-        ? "Upload this thread's app to App Store Connect?"
-        : `Upload ${upload.bundleIdentifier} ${upload.version} (${upload.buildNumber}) to App Store Connect?`,
-    detail: boundApprovalDetail(
-      [
-        ...(upload === undefined
-          ? []
-          : [
-              `App: ${upload.bundleIdentifier}`,
-              `Version: ${upload.version} (build ${upload.buildNumber})`,
-              `Team: ${upload.signing.teamId}`,
-              `Signing identity: ${upload.signing.identity}`,
-              `Provisioning profile: ${upload.profileId}`,
-            ]),
-        ...(request.projectPath === undefined ? [] : [`Project: ${request.projectPath}`]),
-        ...(request.scheme === undefined ? [] : [`Scheme: ${request.scheme}`]),
-        `Revision: ${revision}`,
-        `Thread: ${scope.thread.title}`,
-        "Octant archives this revision, signs it for the App Store with this identity and profile, and uploads that one build with your App Store Connect key. It does not submit the version for review or release it.",
-      ].join("\n"),
-    ),
-  };
-}
-
-/**
- * Names exactly the version one submission or release acts on: the app, the
- * version and its build, and the platform. A release says that it publishes
- * the version to the App Store.
- */
-function appleStoreVersionPrompt(
-  scope: { readonly thread: CodeThread },
-  request: AppleDeviceRequest,
-): { readonly message: string; readonly detail: string } {
-  const version = request.storeVersion;
-  const release = request.kind === "release-version";
-  const named =
-    version === undefined
-      ? "this thread's app"
-      : `${version.bundleIdentifier} ${version.version} (${version.buildNumber})`;
-  return {
-    message: release ? `Release ${named} on the App Store?` : `Submit ${named} for App Review?`,
-    detail: boundApprovalDetail(
-      [
-        ...(version === undefined
-          ? []
-          : [
-              `App: ${version.bundleIdentifier}`,
-              `Version: ${version.version} (build ${version.buildNumber})`,
-              "Platform: iOS",
-            ]),
-        `Thread: ${scope.thread.title}`,
-        release
-          ? "Octant releases this one approved version now, publishing it to the App Store with your App Store Connect key. It changes nothing else."
-          : "Octant submits this one version for App Review with what App Store Connect already holds for it, using your App Store Connect key. It does not change metadata, screenshots, pricing, availability, or export-compliance answers, and it does not release the version.",
-      ].join("\n"),
-    ),
-  };
-}
-
 async function resolveDeviceApprovalScope(
   options: CodeOperationRuntimeOptions,
   windowId: WindowId,
@@ -2202,15 +1864,6 @@ function approvalPrompt(
         ? [`Scheme: ${effect.request.scheme}`]
         : []),
     ].join("\n");
-  } else if (
-    effect.kind === "apple-device-lease" ||
-    effect.kind === "apple-device-action" ||
-    effect.kind === "apple-distribution-upload" ||
-    effect.kind === "apple-distribution-version"
-  ) {
-    // prepareApproval words a device request from the device it names, which
-    // this function is not given; reaching here is a wiring fault.
-    throw new TypeError("A device request is prompted with the device it names.");
   } else if (effect.kind === "android-action") {
     const input =
       isAndroidEmulatorInputKind(effect.request.kind) ||
@@ -2416,10 +2069,6 @@ interface ActiveTurn {
     string,
     {
       readonly origin?: string;
-      /** Settled only by a person at a window on this Mac, never by a paired device. */
-      readonly localPersonOnly?: true;
-      /** Still answerable in a Plan turn: it allows nothing Plan refuses. */
-      readonly answerableInPlan?: true;
       readonly finish: (outcome: "approved" | "denied" | "cancelled" | "expired") => void;
     }
   >;
@@ -3521,20 +3170,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const { context, prompt } = asked;
     const summary = boundProviderSummary(`${prompt.message}\n${prompt.detail}`);
     if (summary === undefined) return { status: "unavailable" };
-    // A physical device's lease and effects are a person's at the Mac to
-    // allow: a paired device observes only (decision 4 of
-    // docs/design/apple-devices.md), so its answer settles nothing here.
-    const localPersonOnly =
-      effect.kind === "apple-device-lease" ||
-      effect.kind === "apple-device-action" ||
-      effect.kind === "apple-distribution-upload" ||
-      effect.kind === "apple-distribution-version";
-    const outcome = await this.#askToolApproval(active, summary, undefined, signal, {
-      localPersonOnly,
-      // A lease is asked under every posture: it opens the device to the
-      // thread but changes nothing on it, so Plan still lets it be answered.
-      answerableInPlan: effect.kind === "apple-device-lease",
-    });
+    const outcome = await this.#askToolApproval(active, summary, undefined, signal);
     if (outcome !== "approved") return { status: outcome };
     try {
       const receipt = store.issue({
@@ -3571,55 +3207,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // The turn's posture, not the stored one: a Full-access thread running an
     // approval-gated turn asks here too, and its stored policy alone refused it.
     const turnPosture = (thread: CodeThread) => this.threadWithActiveTurnPosture(thread);
-    if (effect.kind === "apple-device-lease") {
-      const lease = await resolveAppleDeviceLeaseScope(
-        this.#options,
-        active.windowId,
-        effect.request,
-      );
-      if (lease === undefined) return undefined;
-      const context = await approvalContext(this.#options, undefined, lease.thread, lease.checkout);
-      return context === undefined ? undefined : { context, prompt: appleDeviceLeasePrompt(lease) };
-    }
-    if (effect.kind === "apple-distribution-upload") {
-      const upload = await resolveAppleUploadScope(this.#options, active.windowId, effect.request);
-      if (upload === undefined) return undefined;
-      const context = await approvalContext(
-        this.#options,
-        undefined,
-        upload.thread,
-        upload.checkout,
-      );
-      return context === undefined
-        ? undefined
-        : { context, prompt: appleUploadPrompt(upload, effect.request) };
-    }
-    if (effect.kind === "apple-distribution-version") {
-      const step = await resolveAppleUploadScope(this.#options, active.windowId, effect.request);
-      if (step === undefined) return undefined;
-      const context = await approvalContext(this.#options, undefined, step.thread, step.checkout);
-      return context === undefined
-        ? undefined
-        : { context, prompt: appleStoreVersionPrompt(step, effect.request) };
-    }
-    if (effect.kind === "apple-device-action") {
-      const action = await resolveAppleDeviceActionScope(
-        this.#options,
-        active.windowId,
-        effect.request,
-        turnPosture,
-      );
-      if (action === undefined) return undefined;
-      const context = await approvalContext(
-        this.#options,
-        undefined,
-        action.thread,
-        action.checkout,
-      );
-      return context === undefined
-        ? undefined
-        : { context, prompt: appleDeviceActionPrompt(action, effect.request) };
-    }
     const scope = await resolveDeviceApprovalScope(
       this.#options,
       active.windowId,
@@ -3638,7 +3225,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     summary: string,
     origin: string | undefined,
     signal?: AbortSignal,
-    answer: { readonly localPersonOnly?: boolean; readonly answerableInPlan?: boolean } = {},
   ): Promise<"approved" | "denied" | "cancelled" | "expired"> {
     if (signal?.aborted || active.abort.signal.aborted || active.toolApprovals.size >= 4)
       return Promise.resolve("cancelled");
@@ -3660,8 +3246,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       const timer = setTimeout(() => finish("expired"), 10 * 60_000);
       active.toolApprovals.set(String(approvalId), {
         ...(origin === undefined ? {} : { origin }),
-        ...(answer.localPersonOnly === true ? { localPersonOnly: true } : {}),
-        ...(answer.answerableInPlan === true ? { answerableInPlan: true } : {}),
         finish,
       });
       signal?.addEventListener("abort", abort, { once: true });
@@ -3676,9 +3260,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             approvalId,
             action: "provider-tool",
             summary,
-            // Journaled with the ask so every client reads the same rule the
-            // answer is refused under, and a paired one offers no answer.
-            ...(answer.localPersonOnly === true ? { localPersonOnly: true as const } : {}),
           },
         });
         active.cursor = frame.cursor;
@@ -3701,18 +3282,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const toolApproval = active?.toolApprovals.get(input.approvalId);
     if (active !== undefined && toolApproval !== undefined) {
       if (
-        (turnPosture === "plan" && toolApproval.answerableInPlan !== true) ||
+        turnPosture === "plan" ||
         active.thread.permissionPersistence !== input.thread.permissionPersistence
       )
         return turnState("failed");
-      // The card stays up for the person at the Mac; a paired device's
-      // answer, or one whose window nobody vouched for, settles nothing.
-      if (toolApproval.localPersonOnly === true && input.answeredBy !== "local-window") {
-        return turnState(active.state, {
-          category: "failed",
-          message: "Only a person at the Mac this thread runs on can answer this request.",
-        });
-      }
       toolApproval.finish(input.decision === "approved" ? "approved" : "denied");
       if (input.decision === "approved") return answeredTurnState(active.state);
       return this.#countDeniedApproval(active);
