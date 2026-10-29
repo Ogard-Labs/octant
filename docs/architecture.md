@@ -898,7 +898,12 @@ could bind a Project to an SSH target still replays: its thirteen event names
 a thread left on a `remote-root` checkout keeps its history but refuses every
 operation, because its Project is no longer in the catalog and no window opens
 it. A restart interrupts such a thread's turn that was still running and
-withdraws the approvals and questions it left pending.
+withdraws the approvals and questions it left pending. A migration drops the
+five `ssh_*` projection tables, which nothing fills any more. The
+`<data>/ssh-targets/` folder of host-key pin files is left in place and
+listed in the host data map as an unused leftover; Octant never deletes it. An
+export written before the removal still assembles: its `ssh-targets` page is
+read and dropped.
 
 An authorized repository test remains cancellable while the host rediscovers its
 command definition. Cancellation during discovery prevents process launch; runtime

@@ -49,10 +49,10 @@ const CACHE_DIRECTORIES: ReadonlyArray<{ readonly name: string; readonly relativ
   // The desktop app installs the computer-use driver here, and the host keeps
   // its runtime receipts under it, so a person inspecting the store sees it.
   { name: "Computer use driver", relative: "computer-use" },
-  // Each SSH target's pinned host key, in the owner-only known-hosts file the
-  // SSH client reads. The registration is in the journal; this is the copy
-  // the client needs, written from the journal before each connection.
-  { name: "SSH target host-key pins", relative: "ssh-targets" },
+  // A leftover of the removed SSH targets: the owner-only known-hosts files
+  // they pinned. Nothing reads or writes them now, and Octant leaves them in
+  // place; the person may delete the folder.
+  { name: "Leftover SSH target host-key pins (unused)", relative: "ssh-targets" },
 ];
 
 // Octant assigns each extra provider account a folder under the person's
@@ -227,13 +227,7 @@ function composeOutbound(kind: HostDataMapHostKind): ReadonlyArray<HostDataMapOu
           leavesMachine: false,
           purpose: "This headless host does not check for desktop app updates.",
         };
-  const sshTargets: HostDataMapOutboundCategory = {
-    kind: "known",
-    category: "ssh-target-connections",
-    leavesMachine: true,
-    purpose: "Octant connects to the SSH targets you register, through your own SSH client.",
-  };
-  return [provider, updates, marketplace, sshTargets];
+  return [provider, updates, marketplace];
 }
 
 function namedLocations(
