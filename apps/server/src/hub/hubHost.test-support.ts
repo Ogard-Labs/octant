@@ -18,7 +18,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { vi } from "vitest";
 import { decodeStableHostId } from "@octant/contracts/remote-access";
-import type { HubDelegationRecordedPayload, HubMembershipChangedPayload } from "@octant/contracts";
+import type {
+  AppReleaseRing,
+  HubDelegationRecordedPayload,
+  HubMembershipChangedPayload,
+} from "@octant/contracts";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
@@ -49,10 +53,23 @@ import { REMOTE_PUSH_GATEWAY_DEFAULT_URL } from "@octant/contracts/remote-push-n
 import type { PushDeliveryTransport } from "../automation/pushDeliveryTransport";
 import { createGatewayPushDeliveryTransport } from "../remote/gatewayPushDeliveryTransport";
 import { createHubPushDeliveryTransport } from "./hubPushTransport";
+import { ProvisionService } from "./provisionService";
 import { PushService } from "./pushService";
+import { SpokeProvisionService, type ProvisionHostPorts } from "./spokeProvisionService";
 import { SpokePushService } from "./spokePushService";
 import { SpokeWakeService, type WakeRoutineView } from "./spokeWakeService";
 import { WakeService } from "./wakeService";
+
+/** What a test host's services did for applied offers. */
+export interface ProvisionedByOffer {
+  channel: AppReleaseRing | undefined;
+  readonly plugins: Array<{ entryId: string; trusted: boolean; enabled: boolean }>;
+  readonly profiles: Array<{ displayName: string }>;
+  readonly endpoints: Array<{ displayName: string; enabled: boolean }>;
+  readonly routines: Array<{ displayName: string; projectId: string; authoredBy: "local-window" }>;
+  /** Makes every apply on this host fail, as a service that refused would. */
+  fail: boolean;
+}
 
 function deviceIsActive(
   administration: Pick<LocalDeviceAdministrationPort, "listDevices">,
@@ -143,6 +160,12 @@ export interface HubTestHost {
   readonly pushSetting: { enabled: boolean; gatewayUrl: string };
   /** The transport this host's notifications are sent through: the hub's way where the grant ticks Push, else its own. */
   readonly pushDelivery: PushDeliveryTransport;
+  /** The hub side of provisioning: offers, delivery, and the mirror it serves. */
+  readonly provision: ProvisionService;
+  /** This host's side of provisioning as a spoke: proposals, apply, dismiss, auto-apply. */
+  readonly spokeProvision: SpokeProvisionService;
+  /** What this host's services did with applied offers, and a switch to make them fail. */
+  readonly provisioned: ProvisionedByOffer;
   /** The magic packets this host's wake service sent, as the fake socket saw them. */
   readonly magicPackets: Uint8Array[];
   /** This host's routines as the wake service may read them: a test edits it to schedule, disable, or remove one. */
@@ -208,6 +231,12 @@ export async function startHubTestHost(input: {
   readonly pushHandoffTransport?: (transport: HubTransport) => HubTransport;
   /** How many forwards one spoke may ask of this host in a minute; absent, the service's own. */
   readonly pushMaxPerMinute?: number;
+  /** The release keys this host trusts for a mirrored update feed; absent, it cannot check one. */
+  readonly updateFeedVerifier?: ProvisionHostPorts["verifyUpdateSignature"];
+  /** How long a proposal this host holds stays open; absent, the service's own. */
+  readonly proposalLifetimeMs?: number;
+  /** How many proposals this host holds; absent, the service's own. */
+  readonly maxProposals?: number;
 }): Promise<HubTestHost> {
   const directory = mkdtempSync(join(tmpdir(), "octant-hub-"));
   input.cleanups.push(() => rmSync(directory, { recursive: true, force: true }));
@@ -424,6 +453,86 @@ export async function startHubTestHost(input: {
       hand: (delivery) => spokePush.hand(delivery),
     }),
   });
+  // This host's own services for each kind of offer, as fakes a test reads: what the spoke
+  // would install, add, or author is recorded here, and a test can make any of them fail.
+  const provisioned: ProvisionedByOffer = {
+    channel: undefined,
+    plugins: [],
+    profiles: [],
+    endpoints: [],
+    routines: [],
+    fail: false,
+  };
+  const provision = new ProvisionService({
+    state,
+    identity: () => identity,
+    transport,
+    record: (change) => records.push(change),
+    now: wakeNow,
+  });
+  const spokeProvision = new SpokeProvisionService({
+    state,
+    identity: () => identity,
+    transport,
+    spoke,
+    ports: {
+      updateChannel: {
+        current: () => provisioned.channel,
+        set: async (channel) => {
+          if (provisioned.fail) return { status: "failed", kind: "apply-failed" };
+          provisioned.channel = channel;
+          return { status: "applied" };
+        },
+      },
+      plugin: {
+        install: async (offer) => {
+          if (provisioned.fail) return { status: "failed", kind: "apply-failed" };
+          // Installed only: untrusted and disabled, whatever the offer said.
+          provisioned.plugins.push({
+            entryId: String(offer.entryId),
+            trusted: false,
+            enabled: false,
+          });
+          return { status: "applied" };
+        },
+      },
+      agentProfile: {
+        add: async (offer) => {
+          if (provisioned.fail) return { status: "failed", kind: "apply-failed" };
+          provisioned.profiles.push({ displayName: offer.displayName });
+          return { status: "applied" };
+        },
+      },
+      modelEndpoint: {
+        add: async (offer) => {
+          if (provisioned.fail) return { status: "failed", kind: "apply-failed" };
+          provisioned.endpoints.push({ displayName: offer.displayName, enabled: false });
+          return { status: "applied" };
+        },
+      },
+      routine: {
+        author: async (offer, projectId) => {
+          if (provisioned.fail) return { status: "failed", kind: "apply-failed" };
+          provisioned.routines.push({
+            displayName: offer.displayName,
+            projectId,
+            // The spoke's own window authors it, never the hub that offered it.
+            authoredBy: "local-window",
+          });
+          return { status: "applied" };
+        },
+      },
+      ...(input.updateFeedVerifier === undefined
+        ? {}
+        : { verifyUpdateSignature: input.updateFeedVerifier }),
+    },
+    record: (change) => records.push(change),
+    now: wakeNow,
+    ...(input.proposalLifetimeMs === undefined
+      ? {}
+      : { proposalLifetimeMs: input.proposalLifetimeMs }),
+    ...(input.maxProposals === undefined ? {} : { maxProposals: input.maxProposals }),
+  });
   const hubLinkRoutes = createHubLinkRouteHandler({
     hub,
     spoke,
@@ -432,6 +541,8 @@ export async function startHubTestHost(input: {
     spokeWake,
     push,
     spokePush,
+    provision,
+    spokeProvision,
     ...(input.wakeClock === undefined ? {} : { now: input.wakeClock }),
   });
   const hubOwnerRoutes = createHubOwnerRouteHandler({
@@ -546,6 +657,9 @@ export async function startHubTestHost(input: {
     spokePush,
     pushSetting,
     pushDelivery,
+    provision,
+    spokeProvision,
+    provisioned,
     magicPackets,
     routines,
     schedulerPokes,
