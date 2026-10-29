@@ -678,9 +678,29 @@ alternatives considered and the reason for the choice follow it.
    reach of the signing launch and gives no delivery identifier, and the
    separate Transporter app, which Xcode does not install. The key reaches
    the upload as a file the broker writes and removes (above), so the server
-   never reads the key's bytes; this follows the same principle as the open
-   choice of who signs App Store Connect API requests, which only slice 8
-   needs.
+   never reads the key's bytes; decision 9 applies the same principle to
+   App Store Connect API requests.
+9. **App Store Connect API request signing and the key's source.** _Accepted
+   2026-10-28._ The broker signs each App Store Connect API request's ES256
+   token itself, as it signs cloud requests
+   ([Architecture: cloud request signing](../architecture.md#security-and-authority)),
+   and answers only the token, which App Store Connect accepts for at most
+   twenty minutes. The server never holds the private key. The key comes
+   from one of two sources the person chooses at key entry: the broker's own
+   App Store Connect family (the default, above), or a 1Password secret
+   reference (`op://<vault>/<item>/<field>`) saved in that family in the
+   key's place. For a reference, the broker reads the key with the person's
+   own `op` CLI only at the moment it signs a token or writes an upload's key
+   file, so 1Password asks the person to approve, and it keeps the key for
+   that one operation. The reference is never journaled. When `op` is
+   missing or signed out, or the person declines, the operation is refused
+   (`key-source-unavailable`) and not retried. Rejected: the server holding
+   the key to sign, which would put a key that can manage the person's apps
+   in server memory, where one leak through a log or crash report exposes
+   it, while a leaked token expires within minutes. Also rejected: requiring
+   1Password, since not every developer uses it. Not yet measured: whether
+   1Password's desktop-app integration accepts the broker process as the
+   `op` caller.
 
 ## Delivery plan
 
@@ -826,6 +846,7 @@ accounts or hardware; its real-hardware acceptance is separate where noted.
    open: the Keychain helper gained the service but runs only on a Mac, so a
    maintainer-run save-status-remove from a desktop window on a Mac is its
    native check.
+   Not built: a 1Password reference as the key's source (decision 9).
 7. **Person-confirmed upload** (maintainer account, a real app, and the
    decision-7 gate). Archive, export, and upload as one confirmed local action
    with a journaled record. _Accept:_ one confirmation uploads exactly the
@@ -887,13 +908,9 @@ accounts or hardware; its real-hardware acceptance is separate where noted.
    confirms, and no remote path reaches either. _Verify:_ server
    tests with a stubbed App Store Connect client, plus a maintainer-run
    submission and release of a test app.
-   _Waits on:_ the choice of how App Store
-   Connect API requests are authorized: the server holding the private key
-   to sign each request's ES256 token, or the broker signing it and
-   answering only the short-lived token, as it already signs cloud requests
-   ([Architecture: cloud request signing](../architecture.md#security-and-authority)).
-   The egress these calls need (the App Store Connect API host only) is
-   also not yet recorded in the architecture.
+   Requests are authorized by a broker-signed token (decision 9). _Waits
+   on:_ recording the egress these calls need (the App Store Connect API
+   host only) in the architecture.
 
 Slices 1, 2, 4, and 5 can be built before any hardware or account exists;
 slices 3, 7, and 8 cannot be accepted without the maintainer's Mac, a paired
