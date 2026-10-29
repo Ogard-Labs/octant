@@ -14,7 +14,9 @@
  * turns a cancel into an aborted signal, and writes every failure as the
  * structure the host reads. The driver holds no credential and makes no
  * network call: `host.http` asks the host to make one, and the host adds the
- * key and refuses any address but the one the person configured.
+ * key and refuses any address but the one the person configured. A call made
+ * from `send` names that send, so the host can close it when it cancels the
+ * send; this module then settles the call here as `interrupted` too.
  */
 import { createInterface } from "node:readline";
 
@@ -77,17 +79,25 @@ export function serveOutsideDriver(driver, io = standardIo()) {
   let configuration;
   const write = (message) => io.write(JSON.stringify(message));
 
-  const host = {
+  // A send's host tags each brokered call with the send's id and, when the
+  // send's signal aborts, settles the calls still open as interrupted: the
+  // host has closed them, so nothing more arrives for them.
+  const hostFor = (send) => ({
     get configuration() {
       return configuration;
     },
     http: (request) => {
+      if (send?.signal.aborted) return Promise.reject(new OutsideDriverFailure("interrupted"));
       const httpId = nextHttpId;
       nextHttpId += 1;
       return new Promise((resolve, reject) => {
         const body = bodyStream();
-        brokered.set(httpId, {
-          head: (result) => resolve(brokeredResponse(result, body)),
+        let headed = false;
+        const waiter = {
+          head: (result) => {
+            headed = true;
+            resolve(brokeredResponse(result, body));
+          },
           refuse: (error) => {
             brokered.delete(httpId);
             reject(new OutsideDriverFailure(error?.data?.category ?? "unavailable"));
@@ -97,11 +107,25 @@ export function serveOutsideDriver(driver, io = standardIo()) {
             brokered.delete(httpId);
             body.end(params);
           },
+          interrupt: () => {
+            // A call that already ended keeps its body, which the driver may not have read yet.
+            if (!brokered.delete(httpId)) return;
+            if (headed) body.interrupt();
+            else reject(new OutsideDriverFailure("interrupted"));
+          },
+        };
+        brokered.set(httpId, waiter);
+        send?.open.add(waiter);
+        write({
+          jsonrpc: "2.0",
+          id: httpId,
+          method: "http/request",
+          params: send === undefined ? request : { ...request, requestId: send.id },
         });
-        write({ jsonrpc: "2.0", id: httpId, method: "http/request", params: request });
       });
     },
-  };
+  });
+  const host = hostFor(undefined);
 
   const call = async (id, method, params) => {
     switch (method) {
@@ -120,6 +144,11 @@ export function serveOutsideDriver(driver, io = standardIo()) {
       case "session/send": {
         const controller = new AbortController();
         cancels.set(id, controller);
+        const open = new Set();
+        controller.signal.addEventListener("abort", () => {
+          for (const waiter of open) waiter.interrupt();
+          open.clear();
+        });
         try {
           return await driver.send(params, {
             signal: controller.signal,
@@ -129,7 +158,7 @@ export function serveOutsideDriver(driver, io = standardIo()) {
               if (controller.signal.aborted) return;
               write({ jsonrpc: "2.0", method: "session/event", params: { requestId: id, event } });
             },
-            host,
+            host: hostFor({ id, signal: controller.signal, open }),
           });
         } catch (error) {
           if (controller.signal.aborted) throw new OutsideDriverFailure("interrupted");
@@ -227,6 +256,11 @@ function bodyStream() {
     },
     end: (params) => {
       ended = params;
+      notify();
+    },
+    interrupt: () => {
+      chunks.length = 0;
+      ended = { outcome: "failed", category: "interrupted" };
       notify();
     },
     async *read() {

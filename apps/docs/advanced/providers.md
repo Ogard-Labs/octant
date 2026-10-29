@@ -167,7 +167,7 @@ it instead of imitating it.
   the thread's history again, fitted to the model's context window. Changing
   the model is therefore fine.
 - **Most** for ACP agents: they reopen a session only when the agent offers to,
-  and they ask questions on every agent except Mistral Vibe and fx.
+  and they ask questions on every agent except Mistral Vibe.
 - **Token usage** is not measured for ACP agents. A spend ceiling leaves their
   turns out and says so, and a thread's context meter, in Code, Work, or
   Chat, says the runtime reports no usage rather than waiting for a figure
@@ -335,10 +335,14 @@ shell are intentionally ignored; add a persistent alias declaration or use
 Local CLI and SDK providers include Codex CLI, Claude Agent SDK,
 OpenCode CLI, Kilo ACP, Pi RPC, Oh My Pi, Devin ACP, Mistral Vibe ACP,
 Ollama, Kimi Code ACP, Grok Build ACP, Goose ACP, GLM Agent, Gemini CLI ACP,
-GitHub Copilot ACP, Cline ACP, Qwen Code ACP, and fx ACP.
-fx is the one ACP provider Octant runs in a managed home rather than against a
-native profile, because its ACP entrypoint exposes no profile-path variable;
-it authenticates with a Vercel AI Gateway API key instead of a CLI login.
+GitHub Copilot ACP, Cline ACP, and Qwen Code ACP.
+
+Octant does not offer fx for now. The current fx release cannot load
+certificates inside Octant's sandbox, so it cannot reach the Vercel AI Gateway.
+Octant does not find fx, add it, or start it. If you already added an fx
+provider, Settings keeps it and its threads and says why it is unavailable; it
+cannot start new turns. Octant will offer fx again once a fx release fixes
+this.
 
 Codex commentary and subsequent answer messages retain paragraph boundaries
 in new responses, including when the provider sends a completed message

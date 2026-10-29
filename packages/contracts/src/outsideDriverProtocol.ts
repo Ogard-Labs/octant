@@ -281,8 +281,13 @@ const HttpHeaderValue = Schema.String.pipe(
  * credential goes (`auth`), never the credential: the host leases this
  * instance's key, sets the header, and sends the request only to the
  * instance's configured origin.
+ *
+ * `requestId` names the `session/send` the call serves, so the host can close
+ * the call when it cancels that send. A probe's call serves no send and omits
+ * it; a send the host never issued stops the driver.
  */
 export const OutsideDriverHttpRequestParams = Schema.Struct({
+  requestId: Schema.optional(OutsideDriverMessageId),
   url: Schema.String.pipe(Schema.maxLength(8_192)),
   method: Schema.Literal("GET", "POST"),
   headers: Schema.optional(

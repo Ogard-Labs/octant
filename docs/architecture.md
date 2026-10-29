@@ -2825,7 +2825,16 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   and Plan before any process starts, runs its `ask` mode below Full access
   and `code` only on Full access, authenticates only with a broker-held AI
   Gateway API key, and cannot read or write the Project root's `AGENTS.md`,
-  `.mcp.json`, `.fx.json`, `.agents`, or `.claude/skills`. Image profiles are
+  `.mcp.json`, `.fx.json`, `.agents`, or `.claude/skills`. fx is currently
+  withheld (maintainer decision, 2026-10-29): measured 2026-10-28 on fx 0.0.15,
+  the deny-default Seatbelt profile denies System Keychain reads, and fx's HTTP
+  pool aborts certificate loading instead of falling back to
+  `/etc/ssl/cert.pem`, so it cannot reach the AI Gateway and its model catalog
+  drops to one model. Octant will not grant fx Keychain reads. Withheld means
+  the driver is not admitted on the activation ladder: discovery offers nothing,
+  no fx instance is created, no fx process starts, and a stored fx instance and
+  its threads are kept but report `driver-not-admitted` with that reason in
+  Settings. The gate lifts when a stock fx release has the fallback. Image profiles are
   recorded in [decisions/0055-image-generation-provider-profiles.md](decisions/0055-image-generation-provider-profiles.md).
   Generation itself is a journaled job with adapters for the dedicated image
   kinds `openai-image`, `gemini-native-image`, `bfl-image` (Black Forest Labs),
@@ -7645,7 +7654,8 @@ find-identity` and `codesign`, through a port with no network; `codesign`
     out and says so. They report no file changes or diffs, ask no user
     questions on Mistral Vibe and fx, resume only when the agent offers load or
     resume, and offer Octant's tools only on macOS when the agent serves HTTP
-    MCP. fx is also refused in Chat and Plan.
+    MCP. fx is also refused in Chat and Plan, and is withheld entirely for now
+    (see above), so the matrix rows for it apply once it is offered again.
   - **Ollama** carries the Octant Harness agent loop over the local service on
     literal loopback, like the harness endpoints: no provider approvals,
     questions, or file changes, Octant's tools per verified model (a model
