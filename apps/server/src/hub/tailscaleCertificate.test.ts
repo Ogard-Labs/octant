@@ -51,14 +51,17 @@ function setup(input: {
       },
   );
   let held = false;
+  let removalFails = false;
   const install = vi.fn<TailscaleCertificateSink["install"]>(async () => {
     const outcome = input.installs ?? "installed";
     if (outcome !== "installed") return { status: "refused", kind: outcome };
     held = true;
     return { status: "installed" };
   });
-  const remove = vi.fn(async () => {
+  const remove = vi.fn<TailscaleCertificateSink["remove"]>(async () => {
+    if (removalFails) return { status: "refused", kind: "could-not-apply" };
     held = false;
+    return { status: "removed" };
   });
   const service = new TailscaleCertificateService({
     setting: createTailscaleCertificateSetting(directory),
@@ -76,6 +79,10 @@ function setup(input: {
     forgetHeld: () => {
       held = false;
     },
+    failRemoval: (fails: boolean) => {
+      removalFails = fails;
+    },
+    holds: () => held,
     directory,
     advance: (ms: number) => {
       now += ms;
@@ -242,6 +249,23 @@ describe("the Tailscale certificate for the web app", () => {
     expect(await renewal).toEqual({ status: "refused", kind: "turned-off" });
     expect(remove).toHaveBeenCalledTimes(2);
     expect(service.status().enabled).toBe(false);
+  });
+
+  it("says the certificate could not be removed and stays on when the listener will not restart without it, and a later attempt removes it", async () => {
+    const { service, failRemoval, holds } = setup({});
+    service.enable({ acknowledgedCertificateTransparency: true });
+    await service.renewIfDue();
+    failRemoval(true);
+
+    expect(await service.disable()).toEqual({ status: "refused", kind: "could-not-remove" });
+
+    expect(service.status().enabled).toBe(true);
+    expect(holds()).toBe(true);
+
+    failRemoval(false);
+    expect(await service.disable()).toEqual({ status: "disabled" });
+    expect(service.status().enabled).toBe(false);
+    expect(holds()).toBe(false);
   });
 
   it("turns off again by taking the tailnet certificate away and leaving the pinned one", async () => {
