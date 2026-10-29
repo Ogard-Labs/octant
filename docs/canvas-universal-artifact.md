@@ -409,7 +409,7 @@ links across the exported pages. Supersedes D-6.
 | 1     | `flow` block: schema 23, policies, pure layout, board drawing (mockup frames and design frames as live nodes), comment anchors, reading order, MD/HTML/SVG export parity, share v12, preview warnings, journaled drags | FR-1, FR-3, NFR-1, NFR-2, NFR-3, NFR-5 | In review (#1830); rendered QA pending |
 | 2     | Click-through Play over the flow; flow HTML export as one linked, script-free page set (D-9: one self-contained site)                                                                                                  | FR-2, FR-7 (flow part), NFR-4, NFR-6   | In review (#1832); rendered QA pending |
 | 3     | Mockup catalog: new components and reusable definitions — schema 24, share v13 (image fills cut)                                                                                                                       | FR-4, FR-6, NFR-5                      | In review (#1839); rendered QA pending |
-| 4     | Per-variant mockup HTML and TSX export; describe guidance and recipes for everything above                                                                                                                             | FR-7 (rest), FR-9                      | Planned                                |
+| 4     | Per-variant mockup HTML export (TSX moved to the export-menu slice)                                                                                                                                                    | FR-7 (mockup HTML)                     | In review (#1840); rendered QA pending |
 | 5     | `deck` block: schema 25, share v14, player integration, deck recipes                                                                                                                                                   | FR-8, FR-9                             | Planned                                |
 
 Each slice rides its own `feature/*` branch and PR to `main`, updates the
@@ -839,3 +839,9 @@ governs over any number written earlier.
   placeholder boxes until a later slice builds that. The generator, outline readings, hotspot list,
   renderer faces, and describe guidance grew with the catalog. Delivered for
   review as #1839.
+- 2026-10-28: Slice 4 implemented: the HTML handoff. The HTML export embeds
+  each mockup variant's generated semantic page (`canvasMockupHtml`, shared
+  with the flow site) with its stylesheet ahead of the outline reading,
+  generated from the redacted block. The TSX form moved to the slice that
+  first offers it to a person (the export menu), so no module ships without
+  a caller. Delivered for review as #1840.
