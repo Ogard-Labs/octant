@@ -27,9 +27,17 @@ list; an owner device acts on a host after a fresh unlock; Confirm new members
 and new-member alerts work; a window lists, confirms, and removes owners (the
 roster carries each owner's unlock key, so nothing is pasted) and settles
 alerts; a phone that joined with an owner code makes an unlock key and removes,
-confirms, or dismisses alerts, and a passkey owner can confirm too. The browser passkey and its alerts screen are
-written and tested with a faked authenticator, but no browser screen joins a hub
-yet, so nothing mounts them. Nothing here has been run on a real phone, a real
+confirms, or dismisses alerts, and a passkey owner can confirm too. A remote
+browser can join the hub that serves its page as a guest, with a plain or owner
+code (Settings → Remote access → Hub); with an owner code it makes a passkey for
+that origin first and keeps its identity, and it fails closed to a plain guest
+when it cannot make one. A browser reaches only the origin that served its page,
+under its own certificate check, because it cannot check a pin. So it cannot yet
+reach other members, and a spoke's alerts show in a browser only on that spoke's
+own origin, with the browser's join and passkey held there; reaching spokes from
+the hub's page (decision H15's links, and a browser identity a spoke can accept)
+is not built. The browser flow is tested with a faked authenticator and has not
+been run against a real hub. Nothing here has been run on a real phone, a real
 passkey, or Android. Sign-in copy, posture routes, a Mac Touch ID unlock key,
 failover, the wake service, push, provisioning, and delegation are not built.
 The hub uses only the Roster and Status grant items, and the Owners item for
@@ -497,7 +505,10 @@ from their phone or laptop what they could do sitting at any of them. An
 - **Browsers.** A passkey belongs to one web origin, so a browser owner
   registers one passkey per host origin it uses (with decision H15's direct
   option, one per spoke). A browser without a platform authenticator cannot
-  be an owner.
+  be an owner. A browser cannot check a certificate pin, so it reaches a host
+  only at the origin that served its page, under the browser's own certificate
+  check ([decision H14](#decisions)); it joins with only the ticket of a join
+  code, never the code's address or pin.
 - **Losing a device.** Remove on the hub, an unmark from another owner device,
   or a revoke on any host ends its owner powers there; Remove ends them
   everywhere at the next roster. A thief holding the device without the

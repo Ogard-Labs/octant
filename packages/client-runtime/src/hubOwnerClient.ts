@@ -91,8 +91,12 @@ export type OwnerUnlockSigner =
 export interface OwnerTarget {
   readonly memberId: string;
   readonly origin: string;
-  /** The host listener's certificate pin, `sha256-` and base64url. */
-  readonly pin: string;
+  /**
+   * The host listener's certificate pin, `sha256-` and base64url. A browser
+   * cannot check a pin and names none: it reaches only the origin that served
+   * its page, under the platform's own certificate check.
+   */
+  readonly pin?: string;
 }
 
 export type OwnerActionResult =
@@ -167,7 +171,10 @@ export function createOwnerClient(options: OwnerClientOptions): OwnerClient {
   }): Promise<Answer | undefined> => {
     const transport = options.transport({
       origin: target.origin,
-      trust: { current: { kind: "pinned", pin: target.pin } },
+      trust: {
+        current:
+          target.pin === undefined ? { kind: "platform" } : { kind: "pinned", pin: target.pin },
+      },
     });
     if (transport.status === "unavailable") return undefined;
     try {

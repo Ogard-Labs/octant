@@ -82,6 +82,7 @@ import {
   type PrivacyTarget,
 } from "../host/HostSettingsSection";
 import { RememberedToolApprovalsPanel } from "../extensions/RememberedToolApprovalsPanel";
+import { BrowserHubSection } from "../host/BrowserHubSection";
 import { RemoteAccessSettingsSection } from "../host/RemoteAccessSettingsSection";
 import { SshTargetsSettingsPage } from "../host/SshTargetsSettingsSection";
 import { PublicLinkSettings } from "../settings/PublicLinkSettings";
@@ -1176,6 +1177,7 @@ function ActiveSectionContent({
             Octant desktop app or with the <code>octant pair</code> and <code>octant auth</code>{" "}
             commands.
           </p>
+          <BrowserHubSection hubAdministration={hubAdministrationOf(props.hostBridge)} />
         </section>
       );
     }

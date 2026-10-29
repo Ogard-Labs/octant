@@ -298,6 +298,8 @@ describe("octantSettingsRegistry", () => {
  * they are not things a person looks up.
  */
 const UNLISTED_SETTING_ROWS = new Set([
+  "browser-hub-claim",
+  "browser-hub-joined",
   "first-run-task-mode",
   "first-run-task-project",
   "managed-tools-empty",

@@ -1165,6 +1165,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords: "pair pairing another computer code",
         },
+        {
+          id: settingId("browser-hub-code"),
+          label: "Join the hub as a guest",
+          scope: "host",
+          keywords: "hub join guest browser code owner passkey comparison leave",
+        },
       ],
     },
     {

@@ -5,8 +5,8 @@
 // roster gives. Nothing here goes through the hub except the join and the
 // roster read: a spoke's traffic never does (the hub never sees it).
 //
-// No screen is built on this yet. A platform supplies a pinned transport and a
-// device key store, exactly as pairing does.
+// A platform supplies a pinned transport and a device key store, exactly as
+// pairing does; a browser supplies the origin that served its page instead.
 
 import {
   NO_LISTENER_PIN,
@@ -23,7 +23,12 @@ import {
   hubRosterSigningPayload,
   type RosterReplacement,
 } from "@octant/domain";
-import { openAppPairingCode, type PinnedListenerTransportPort } from "./appPairingCode";
+import {
+  openAppPairingCode,
+  openPairingTicket,
+  type OpenedAppPairingCode,
+  type PinnedListenerTransportPort,
+} from "./appPairingCode";
 import {
   HUB_LINK_HEADER,
   base64UrlDecode,
@@ -37,6 +42,7 @@ import type {
   RemoteDeviceKeyPair,
   RemoteDeviceKeyStore,
   RemotePairingApproval,
+  RemotePairingTicket,
 } from "./remotePairingClient";
 
 const HUB_GUEST_ROUTES = {
@@ -176,15 +182,47 @@ export interface JoinHubAsGuestOptions {
  * key it paired with, which is what the roster vouches for to every spoke.
  */
 export async function joinHubAsGuest(options: JoinHubAsGuestOptions): Promise<GuestJoinStart> {
-  const now = options.now ?? Date.now;
   const opened = await openAppPairingCode({
     code: options.code,
     transport: options.transport,
     webBuildVersion: options.webBuildVersion,
     deviceKeyStore: options.deviceKeyStore,
-    now,
+    ...(options.now === undefined ? {} : { now: options.now }),
   });
   if (opened.status !== "opened") return opened;
+  return continueGuestJoin(opened, options);
+}
+
+/**
+ * Joins a hub as a guest from a browser. A browser cannot check a listener's
+ * certificate pin, so it reaches the hub only at the origin that served the page,
+ * under the browser's own certificate check (the hub's Tailscale certificate).
+ * Only the code's ticket is used; the origin and pin it names are not.
+ */
+export async function joinHubAsGuestAtOrigin(
+  options: Omit<JoinHubAsGuestOptions, "code"> & {
+    readonly origin: string;
+    readonly ticket: RemotePairingTicket;
+  },
+): Promise<GuestJoinStart> {
+  const opened = await openPairingTicket({
+    origin: options.origin,
+    ticket: options.ticket,
+    listenerTrust: { kind: "platform" },
+    transport: options.transport,
+    webBuildVersion: options.webBuildVersion,
+    deviceKeyStore: options.deviceKeyStore,
+    ...(options.now === undefined ? {} : { now: options.now }),
+  });
+  if (opened.status !== "opened") return opened;
+  return continueGuestJoin(opened, options);
+}
+
+async function continueGuestJoin(
+  opened: OpenedAppPairingCode,
+  options: Omit<JoinHubAsGuestOptions, "code">,
+): Promise<GuestJoinStart> {
+  const now = options.now ?? Date.now;
   const hello = opened.hostHello;
   if (hello.hostPublicKey === undefined) {
     return { status: "refused", message: "That Octant host cannot be a hub." };
