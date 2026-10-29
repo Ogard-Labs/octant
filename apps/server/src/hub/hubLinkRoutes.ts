@@ -20,6 +20,7 @@ import {
   decodeSignedHubRoster,
   encodeSignedHubRoster,
 } from "@octant/contracts";
+import { HUB_HANDBACK_MAX_BODY_BYTES, HUB_WAKE_COPY_MAX_BODY_BYTES } from "../remoteRoutePolicy";
 import type { FailoverService } from "./failoverService";
 import { HUB_LINK_HEADER, HUB_PEER_KEY_HEADER, HubLinkVerifier } from "./hubLink";
 import type { HubService } from "./hubService";
@@ -136,7 +137,14 @@ export function createHubLinkRouteHandler(
           ? "GET"
           : "POST";
     if (request.method !== expectedMethod || url.search !== "") return refused(405, "invalid");
-    const body = await readBody(request);
+    const body = await readBody(
+      request,
+      route === HUB_LINK_ROUTES.handback
+        ? HUB_HANDBACK_MAX_BODY_BYTES
+        : route === HUB_LINK_ROUTES.wakeCopy
+          ? HUB_WAKE_COPY_MAX_BODY_BYTES
+          : MAX_BODY_BYTES,
+    );
     if (body === undefined) return refused(413, "invalid");
     const header = request.headers.get(HUB_LINK_HEADER);
     const presentedKey = request.headers.get(HUB_PEER_KEY_HEADER);
@@ -253,9 +261,8 @@ export function createHubLinkRouteHandler(
         return refused(400, "invalid");
       }
       const held = options.wake.receiveCopy(copy);
-      return held.status === "recorded"
-        ? Response.json(held, { headers: NO_STORE })
-        : refused(403, held.kind);
+      if (held.status === "recorded") return Response.json(held, { headers: NO_STORE });
+      return refused(held.kind === "stale-copy" ? 409 : 403, held.kind);
     }
 
     if (route === HUB_LINK_ROUTES.pushGrant) {
@@ -551,16 +558,19 @@ export function createHubLinkRouteHandler(
 }
 
 /** The request body as text, or undefined when it is over the member-link limit or cannot be read. */
-export async function readBody(request: Request): Promise<string | undefined> {
+export async function readBody(
+  request: Request,
+  limit: number = MAX_BODY_BYTES,
+): Promise<string | undefined> {
   const declared = Number(request.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return undefined;
+  if (Number.isFinite(declared) && declared > limit) return undefined;
   let text: string;
   try {
     text = await request.text();
   } catch {
     return undefined;
   }
-  return Buffer.byteLength(text, "utf8") > MAX_BODY_BYTES ? undefined : text;
+  return Buffer.byteLength(text, "utf8") > limit ? undefined : text;
 }
 
 export function refused(status: number, kind: string): Response {

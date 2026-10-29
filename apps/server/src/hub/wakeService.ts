@@ -28,7 +28,7 @@ import { Schema } from "effect";
 import { listenerPinFromDigest } from "./hubCrypto";
 import { HUB_PEER_KEY_HEADER, sendHubLinkRequest } from "./hubLink";
 import type { HubHostIdentity } from "./hubService";
-import type { HubStatePort, WakeSpokeRecord } from "./hubStateStore";
+import type { HubStatePort, HubWakeState, WakeSpokeRecord } from "./hubStateStore";
 import { memberOrigin } from "./memberOrigin";
 import type { HubTransport } from "./pinnedHubTransport";
 import type { WakeOnLanPort } from "./wakeOnLan";
@@ -70,7 +70,10 @@ export type WakeReportOutcome =
 
 export type WakeCopyOutcome =
   | { readonly status: "recorded"; readonly count: number }
-  | { readonly status: "refused"; readonly kind: "not-a-spoke" | "hub-revoked" };
+  | {
+      readonly status: "refused";
+      readonly kind: "not-a-spoke" | "hub-revoked" | "stale-copy";
+    };
 
 export interface WakeStatus {
   readonly enabled: boolean;
@@ -137,6 +140,7 @@ export class WakeService {
       hub: {
         ...hub,
         wake: {
+          ...hub.wake,
           enabled,
           spokes: enabled ? (hub.wake?.spokes ?? []) : [],
           generation: (hub.wake?.generation ?? 0) + 1,
@@ -256,11 +260,24 @@ export class WakeService {
     const link = state.link;
     if (link === undefined) return { status: "refused", kind: "not-a-spoke" };
     if (link.removed === true) return { status: "refused", kind: "hub-revoked" };
+    // Copies go out without waiting for each other, so one can arrive after a newer one.
+    if (
+      copy.revision !== undefined &&
+      link.wakeCopyRevision !== undefined &&
+      copy.revision <= link.wakeCopyRevision
+    ) {
+      return { status: "refused", kind: "stale-copy" };
+    }
     const now = this.#options.now();
     const held = copy.spokes.map((spoke) => ({ ...spoke, reportedAt: now }));
     this.#options.state.save({
       ...state,
-      link: { ...link, wakeCopy: held, wakeCopyEnabled: copy.enabled === true },
+      link: {
+        ...link,
+        wakeCopy: held,
+        wakeCopyEnabled: copy.enabled === true,
+        ...(copy.revision === undefined ? {} : { wakeCopyRevision: copy.revision }),
+      },
     });
     const count = copy.spokes.reduce((total, spoke) => total + spoke.times.length, 0);
     this.#options.record({
@@ -546,9 +563,22 @@ export class WakeService {
     const hub = state.hub;
     if (hub?.enabled !== true || hub.roster === undefined) return;
     const roster = hub.roster.roster;
-    const copy: HubWakeCopy = {
+    // The revision is taken and saved before anything is awaited, so copies are numbered in
+    // the order they were made however late each one arrives.
+    // It is also never below the wall clock in milliseconds, so it keeps rising even when the
+    // saved number was lost (state restored from a backup, or a hub rebuilt from scratch).
+    const revision = Math.max((hub.wake?.copyRevision ?? 0) + 1, this.#options.now());
+    const wake: HubWakeState = {
       enabled: hub.wake?.enabled === true,
-      spokes: hub.wake?.enabled === true ? hub.wake.spokes.map(times) : [],
+      spokes: hub.wake?.spokes ?? [],
+      ...(hub.wake?.generation === undefined ? {} : { generation: hub.wake.generation }),
+      copyRevision: revision,
+    };
+    this.#options.state.save({ ...state, hub: { ...hub, wake } });
+    const copy: HubWakeCopy = {
+      enabled: wake.enabled,
+      revision,
+      spokes: wake.enabled ? wake.spokes.map(times) : [],
     };
     const body = JSON.stringify(copy);
     const identity = this.#options.identity();

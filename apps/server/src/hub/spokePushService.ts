@@ -22,13 +22,8 @@ import type { HubHostIdentity } from "./hubService";
 import type { HubLinkState, HubStatePort } from "./hubStateStore";
 import { memberOrigin } from "./memberOrigin";
 import type { HubTransport } from "./pinnedHubTransport";
+import { handoffTimeoutMs } from "./pushService";
 import type { SpokeLinkService } from "./spokeLinkService";
-
-/**
- * The hub waits on the spoke (to confirm the grant) and on the gateway before it
- * answers, so the hand-off waits longer than an ordinary member-link request.
- */
-const HANDOFF_TIMEOUT_MS = 25_000;
 
 export interface SpokePushOptions {
   readonly state: HubStatePort;
@@ -39,6 +34,8 @@ export interface SpokePushOptions {
   readonly hubUnreachable: () => Promise<boolean>;
   readonly record: (change: HubMembershipChangedPayload) => void;
   readonly now: () => number;
+  /** The timeout of an ordinary hub-link request, from which the hand-off timeout follows. */
+  readonly linkTimeoutMs?: number;
 }
 
 export type PushHandoffResult =
@@ -114,7 +111,8 @@ export class SpokePushService {
       // A hub that never held this key (a promoted standby) checks it against the roster.
       headers: { [HUB_PEER_KEY_HEADER]: identity.signing.hostPublicKey },
       now: this.#options.now(),
-      timeoutMs: HANDOFF_TIMEOUT_MS,
+      // The hub waits on this spoke (to confirm the grant) and then on the gateway before it answers.
+      timeoutMs: handoffTimeoutMs(this.#options.linkTimeoutMs),
     });
     if (answer.status === "unreachable") return { status: "unreachable" };
     if (!answer.response.ok) {

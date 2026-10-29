@@ -95,6 +95,8 @@ export const HubWakeState = Schema.Struct({
   spokes: Schema.Array(WakeSpokeRecord),
   /** Counts the times the switch changed; spokes learn it from the heartbeat and resend when it moves. */
   generation: Schema.optional(Schema.Int),
+  /** The revision of the last copy handed to the standbys; it only rises, so a late older copy can be told apart. */
+  copyRevision: Schema.optional(Schema.Int),
 }).annotations(strict);
 export type HubWakeState = typeof HubWakeState.Type;
 
@@ -289,6 +291,8 @@ export const HubLinkState = Schema.Struct({
   wakeCopy: Schema.optional(Schema.Array(WakeSpokeRecord)),
   /** The hub's wake switch as the last copy said it; a standby stands in to wake spokes only while it is on. */
   wakeCopyEnabled: Schema.optional(Schema.Boolean),
+  /** The revision of the copy held; an older or equal copy arriving later is refused. */
+  wakeCopyRevision: Schema.optional(Schema.Int),
   /** This spoke's side of the wake service. */
   wake: Schema.optional(SpokeWakeState),
   /** Whether the hub's push switch was on when it last told this standby, so a stand-in forwards only then. */
