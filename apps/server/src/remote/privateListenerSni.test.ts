@@ -4,8 +4,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { connect } from "node:tls";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { connect as connectTcp, type Socket } from "node:net";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { createPinnedHubTransport, type HubNetwork } from "../hub/pinnedHubTransport";
 import { nodeServe } from "../nodeServe";
 import {
   PrivateListenerError,
@@ -69,6 +71,30 @@ function handshake(port: number, sni: string | undefined, host: string): Promise
   });
 }
 
+/**
+ * A hub transport that reaches the listener on loopback while the origin names
+ * the tailnet machine, as a peer host does: the name resolves to a tailnet
+ * address, and the connection lands on the test listener.
+ */
+function pinnedFetchByTailnetName(port: number, pin: string) {
+  const network: HubNetwork = {
+    resolve: async () => ["100.101.102.103"],
+    dial: (_address, dialPort) =>
+      new Promise<Socket>((resolve, reject) => {
+        const socket = connectTcp({ host: "127.0.0.1", port: dialPort });
+        socket.once("error", reject);
+        socket.once("connect", () => {
+          Object.defineProperty(socket, "remoteAddress", { value: "100.101.102.103" });
+          resolve(socket);
+        });
+      }),
+  };
+  return createPinnedHubTransport(network)({
+    origin: `https://${TAILNET_NAME}:${port}`,
+    pin,
+  });
+}
+
 function suite(
   label: string,
   start: (own: PrivateListenerTls, tailnet: PrivateListenerNamedTls) => Promise<number>,
@@ -97,6 +123,21 @@ function suite(
 
       expect(result.pin).toBe(own.pin);
       expect(result.status).toBe(204);
+    });
+
+    it("serves a pinned client that reaches this machine by its tailnet name the pinned certificate", async () => {
+      const response = await pinnedFetchByTailnetName(
+        port,
+        own.pin,
+      )(`https://${TAILNET_NAME}:${port}/`);
+
+      expect(response.status).toBe(204);
+    });
+
+    it("still refuses a pinned client whose pin is not the pinned certificate's", async () => {
+      await expect(
+        pinnedFetchByTailnetName(port, tailnet.pin)(`https://${TAILNET_NAME}:${port}/`),
+      ).rejects.toMatchObject({ reason: "pin-mismatch" });
     });
 
     it("serves the pinned certificate to a client that asks for any other name", async () => {

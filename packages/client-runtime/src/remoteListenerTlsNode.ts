@@ -227,8 +227,13 @@ function secureListenerSocket(input: {
     const tlsSocket = connectTls({
       socket: input.socket,
       host: input.hostname,
-      // Node refuses an IP address as a server name, so SNI goes only with a name.
-      ...(isIP(input.hostname) === 0 ? { servername: input.hostname } : {}),
+      // Platform trust checks the certificate against the name, so SNI goes
+      // with a name. A pinned origin asks for the listener's own certificate,
+      // which a listener that also holds one for its tailnet name serves only
+      // to a client sending no name. Node refuses an IP address as a server name.
+      ...(input.trust.current.kind === "platform" && isIP(input.hostname) === 0
+        ? { servername: input.hostname }
+        : {}),
       // TLS 1.2 renegotiation would present a second certificate after the
       // one judged below; TLS 1.3 has no renegotiation, and the listener
       // speaks it.

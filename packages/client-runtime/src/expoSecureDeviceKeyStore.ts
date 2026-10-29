@@ -127,6 +127,25 @@ export function createExpoSecureDeviceKeyStore(
       return importKeyPair(record);
     },
 
+    async copyKey(keyId, copyOptions) {
+      const records = await readCatalog();
+      const source = records.find((entry) => entry.keyId === keyId);
+      if (source === undefined) return undefined;
+      // The stored secret is copied as it is; the restored CryptoKey is
+      // non-extractable and cannot be exported again.
+      const copyId = randomUUID();
+      records.push({
+        keyId: copyId,
+        origin: copyOptions.origin,
+        hostId: copyOptions.hostId,
+        createdAt: new Date().toISOString(),
+        privateKeyPkcs8Base64: source.privateKeyPkcs8Base64,
+        publicKeySpkiBase64: source.publicKeySpkiBase64,
+      });
+      await writeCatalog(records);
+      return copyId;
+    },
+
     async updateMetadata(keyId, metadata) {
       const records = await readCatalog();
       const index = records.findIndex((entry) => entry.keyId === keyId);

@@ -52,6 +52,16 @@ export interface RemoteDeviceKeyStore {
     },
   ) => Promise<string>;
   readonly get: (keyId: string) => Promise<RemoteDeviceKeyPair | undefined>;
+  /**
+   * Records the same device key for another origin and host, as a new key id
+   * with no registration yet. The key is copied inside the store: a key read
+   * back with `get` may be non-extractable, so it cannot be handed to `set`.
+   * Resolves undefined when `keyId` no longer exists.
+   */
+  readonly copyKey: (
+    keyId: string,
+    options: { readonly origin: string; readonly hostId: StableHostId },
+  ) => Promise<string | undefined>;
   /** Persist non-secret registration facts next to the origin-scoped key. */
   readonly updateMetadata: (
     keyId: string,
@@ -553,6 +563,19 @@ export function createInMemoryDeviceKeyStore(): RemoteDeviceKeyStore {
     async get(keyId) {
       return records.get(keyId)?.keyPair;
     },
+    async copyKey(keyId, options) {
+      const source = records.get(keyId);
+      if (source === undefined) return undefined;
+      const copyId = crypto.randomUUID();
+      records.set(copyId, {
+        keyId: copyId,
+        origin: options.origin,
+        hostId: options.hostId,
+        createdAt: new Date().toISOString(),
+        keyPair: source.keyPair,
+      });
+      return copyId;
+    },
     async updateMetadata(keyId, metadata) {
       const record = records.get(keyId);
       if (record === undefined) {
@@ -645,6 +668,33 @@ export function createIndexedDbDeviceKeyStore(): RemoteDeviceKeyStore {
           resolve(record?.keyPair);
         };
         request.onerror = () => reject(new Error("Failed to read remote device key."));
+      });
+    },
+    async copyKey(keyId, options) {
+      const db = await openDb();
+      const copyId = crypto.randomUUID();
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction(STORE_NAME, "readwrite");
+        const store = transaction.objectStore(STORE_NAME);
+        const request = store.get(keyId);
+        request.onsuccess = () => {
+          const source = request.result as StoredDeviceKeyRecord | undefined;
+          if (source === undefined) {
+            resolve(undefined);
+            return;
+          }
+          const put = store.put({
+            keyId: copyId,
+            origin: options.origin,
+            hostId: options.hostId,
+            createdAt: new Date().toISOString(),
+            keyPair: source.keyPair,
+          } satisfies StoredDeviceKeyRecord);
+          put.onsuccess = () => resolve(copyId);
+        };
+        request.onerror = () => reject(new Error("Failed to read remote device key."));
+        transaction.onabort = () => reject(new Error("Failed to store remote device key."));
+        transaction.onerror = () => reject(new Error("Failed to store remote device key."));
       });
     },
     async updateMetadata(keyId, metadata) {
