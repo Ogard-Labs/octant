@@ -156,7 +156,10 @@ describe("the standby order", () => {
   it("refuses the hub, a guest, an unknown member, and a repeated member", async () => {
     const { hub, standby } = await startFamily();
     const kind = async (ids: ReadonlyArray<string>) => {
-      const result = await hub.hub.setStandbyOrder(ids.map(decodeMemberId), window);
+      const result = await hub.hub.setStandbyOrder(
+        ids.map((id) => decodeMemberId(id)),
+        window,
+      );
       return result.status === "refused" ? result.kind : result.status;
     };
 

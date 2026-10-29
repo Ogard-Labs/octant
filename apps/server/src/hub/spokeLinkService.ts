@@ -217,6 +217,8 @@ export type SpokeLinkStatus =
       readonly alerts: ReadonlyArray<NewMemberAlert>;
       /** `standby` means the held roster is one a standby signed while the hub was unreachable. */
       readonly rosterSignedBy: "hub" | "standby";
+      /** The latest hub-signed roster this computer holds names it a standby, so its own window may promote it. */
+      readonly namedStandby: boolean;
       /** Set while this host, a named standby, stands in for a hub it cannot reach. */
       readonly standIn?: {
         readonly startedAt: number;
@@ -377,6 +379,13 @@ export class SpokeLinkService {
       heldMembers: this.heldMembers(),
       alerts: link.alerts ?? [],
       rosterSignedBy: link.roster.signedBy.kind,
+      namedStandby:
+        link.removed !== true &&
+        (hubSignedAnchor(link)?.roster.members.some(
+          (member) =>
+            member.role === "standby-hub" && String(member.memberId) === String(link.selfMemberId),
+        ) ??
+          false),
       ...(link.standIn === undefined
         ? {}
         : {

@@ -53,7 +53,7 @@ describe("octant hub command parsing", () => {
 
   it("rejects unknown commands, stray flags, and items outside the closed list", () => {
     expect(resolveHubCliCommand([], {})).toBeUndefined();
-    expect(resolveHubCliCommand(["promote"], {})).toBeUndefined();
+    expect(resolveHubCliCommand(["frobnicate"], {})).toBeUndefined();
     expect(resolveHubCliCommand(["status"], { owner: true })).toBeUndefined();
     expect(resolveHubCliCommand(["join"], {})).toBeUndefined();
     expect(resolveHubCliCommand(["join-code"], { owner: "yes" })).toBeUndefined();
@@ -592,6 +592,175 @@ describe("octant hub status, grant, leave and remove", () => {
     expect(await host.run({ action: "status" })).toBe(1);
 
     expect(host.errors()).toContain("Hub administration is unauthorized.");
+  });
+});
+
+describe("octant hub failover commands", () => {
+  const STANDBY = "33333333-3333-4333-8333-333333333333";
+  const roster = (extra: Record<string, unknown> = {}) => ({
+    roster: {
+      standbyOrder: [STANDBY],
+      members: [
+        { memberId: MEMBER, name: "Mac mini", role: "hub", owner: false },
+        { memberId: STANDBY, name: "Laptop", role: "standby-hub", owner: false },
+      ],
+    },
+    ...extra,
+  });
+  const hubStatus = { hub: { enabled: true, roster: roster() }, spoke: { membership: "none" } };
+
+  it("reads the failover commands and their flags", () => {
+    expect(resolveHubCliCommand(["standby"], {})).toEqual({
+      action: "standby",
+      members: [],
+      clear: false,
+    });
+    expect(resolveHubCliCommand(["standby", "Laptop", "Desk"], {})).toEqual({
+      action: "standby",
+      members: ["Laptop", "Desk"],
+      clear: false,
+    });
+    expect(resolveHubCliCommand(["standby"], { clear: true })).toEqual({
+      action: "standby",
+      members: [],
+      clear: true,
+    });
+    expect(resolveHubCliCommand(["standby", "Laptop"], { clear: true })).toBeUndefined();
+    expect(resolveHubCliCommand(["promote"], {})).toEqual({ action: "promote", confirm: false });
+    expect(resolveHubCliCommand(["promote"], { confirm: true })).toEqual({
+      action: "promote",
+      confirm: true,
+    });
+    expect(resolveHubCliCommand(["promote", "Laptop"], {})).toBeUndefined();
+    expect(resolveHubCliCommand(["accept-hub", "Laptop"], {})).toEqual({
+      action: "accept-hub",
+      member: "Laptop",
+    });
+    expect(resolveHubCliCommand(["accept-hub"], {})).toBeUndefined();
+    expect(resolveHubCliCommand(["stand-in", "join-code"], {})).toEqual({
+      action: "stand-in",
+      step: "join-code",
+    });
+    expect(resolveHubCliCommand(["stand-in", "remove", "Desk"], {})).toEqual({
+      action: "stand-in",
+      step: "remove",
+      member: "Desk",
+    });
+    expect(resolveHubCliCommand(["stand-in"], {})).toBeUndefined();
+    expect(resolveHubCliCommand(["stand-in", "remove"], {})).toBeUndefined();
+  });
+
+  it("lists the standby order in the hub status and when asked", async () => {
+    const host = await fixture(() => ok(hubStatus));
+
+    expect(await host.run({ action: "status" })).toBe(0);
+    expect(host.text()).toContain("Standby order:");
+    expect(host.text()).toContain(`1. Laptop  ${STANDBY}`);
+
+    const listed = await fixture(() => ok(hubStatus));
+    expect(await listed.run({ action: "standby", members: [], clear: false })).toBe(0);
+    expect(listed.text()).toContain(`1. Laptop  ${STANDBY}`);
+    expect(listed.sent).toHaveLength(1);
+  });
+
+  it("sets the standby order by name, and shows why the hub refused it", async () => {
+    const setting = await fixture((request) =>
+      request.method === "GET" ? ok(hubStatus) : ok({ status: "ordered", roster: {} }),
+    );
+    expect(await setting.run({ action: "standby", members: ["laptop"], clear: false })).toBe(0);
+    expect(setting.sent[1]).toMatchObject({
+      path: "/api/desktop/hub/standby-order",
+      body: { memberIds: [STANDBY] },
+    });
+
+    const refused = await fixture((request) =>
+      request.method === "GET"
+        ? ok(hubStatus)
+        : { status: 409, body: { status: "refused", kind: "standby-not-granted" } },
+    );
+    expect(await refused.run({ action: "standby", members: ["laptop"], clear: false })).toBe(1);
+    expect(refused.errors()).toContain("has not ticked Standby");
+
+    const cleared = await fixture((request) =>
+      request.method === "GET" ? ok(hubStatus) : ok({ status: "ordered", roster: {} }),
+    );
+    expect(await cleared.run({ action: "standby", members: [], clear: true })).toBe(0);
+    expect(cleared.sent[1]?.body).toEqual({ memberIds: [] });
+  });
+
+  it("promotes only after a typed confirmation or --confirm", async () => {
+    const unconfirmed = await fixture(() => ok({ status: "promoted" }));
+    expect(await unconfirmed.run({ action: "promote", confirm: false })).toBe(1);
+    expect(unconfirmed.sent).toHaveLength(0);
+    expect(unconfirmed.errors()).toContain("--confirm");
+
+    const declined = await fixture(() => ok({ status: "promoted" }), { ask: async () => "no" });
+    expect(await declined.run({ action: "promote", confirm: false })).toBe(1);
+    expect(declined.sent).toHaveLength(0);
+
+    const typed = await fixture(() => ok({ status: "promoted" }), { ask: async () => "promote" });
+    expect(await typed.run({ action: "promote", confirm: false })).toBe(0);
+    expect(typed.sent[0]).toMatchObject({
+      path: "/api/desktop/hub/promote",
+      body: { confirmed: true },
+    });
+
+    const flagged = await fixture(() => ok({ status: "promoted" }));
+    expect(await flagged.run({ action: "promote", confirm: true })).toBe(0);
+  });
+
+  it("shows a standby standing in and a member following one", async () => {
+    const spoke = (extra: Record<string, unknown>) => ({
+      hub: { enabled: false },
+      spoke: {
+        membership: "member",
+        hub: { memberId: MEMBER, name: "Mac mini" },
+        grant: DEFAULT_GRANT,
+        roster: roster(),
+        rosterSignedBy: "standby",
+        ...extra,
+      },
+    });
+    const standing = await fixture(() =>
+      ok(spoke({ standIn: { startedAt: 0, baseSequence: 4, added: 1, removed: 2 } })),
+    );
+    expect(await standing.run({ action: "status" })).toBe(0);
+    expect(standing.text()).toContain("standing in for the hub since 1970-01-01T00:00:00.000Z");
+    expect(standing.text()).toContain("added 1, removed 2");
+
+    const following = await fixture(() => ok(spoke({})));
+    expect(await following.run({ action: "status" })).toBe(0);
+    expect(following.text()).toContain("follows the standby that is standing in");
+  });
+
+  it("accepts a promoted hub by name and removes a member while standing in", async () => {
+    const spokeStatus = {
+      hub: { enabled: false },
+      spoke: {
+        membership: "member",
+        hub: { memberId: MEMBER, name: "Mac mini" },
+        grant: DEFAULT_GRANT,
+        roster: roster(),
+        rosterSignedBy: "hub",
+      },
+    };
+    const accepting = await fixture((request) =>
+      request.method === "GET" ? ok(spokeStatus) : ok({ status: "accepted", sequence: 9 }),
+    );
+    expect(await accepting.run({ action: "accept-hub", member: "laptop" })).toBe(0);
+    expect(accepting.sent[1]).toMatchObject({
+      path: "/api/desktop/hub/accept-new-hub",
+      body: { hubMemberId: STANDBY },
+    });
+
+    const removing = await fixture((request) =>
+      request.method === "GET" ? ok(spokeStatus) : ok({ status: "removed", sequence: 9 }),
+    );
+    expect(await removing.run({ action: "stand-in", step: "remove", member: "Mac mini" })).toBe(0);
+    expect(removing.sent[1]).toMatchObject({
+      path: "/api/desktop/hub/stand-in/members/remove",
+      body: { memberId: MEMBER },
+    });
   });
 });
 

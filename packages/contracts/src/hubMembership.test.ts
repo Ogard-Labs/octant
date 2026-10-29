@@ -3,6 +3,9 @@ import {
   decodeHubJoinRequest,
   decodeHubLeaveRequest,
   decodeHubMembershipChangedPayload,
+  decodeHubPromoteRequest,
+  decodeHubStandbyOrderRequest,
+  decodeHubStandInHandback,
 } from "./hubMembership";
 
 const id = "11111111-1111-4111-8111-111111111111";
@@ -55,5 +58,30 @@ describe("hub membership wire contracts", () => {
       }),
     ).toThrow();
     expect(() => decodeHubMembershipChangedPayload({ change: "member-removed" })).toThrow();
+  });
+
+  it("decodes the failover requests and refuses a repeated standby, an unconfirmed promotion, and wake times that do not exist yet", () => {
+    expect(decodeHubStandbyOrderRequest({ memberIds: [id] }).memberIds).toEqual([id]);
+    expect(decodeHubStandbyOrderRequest({ memberIds: [] }).memberIds).toEqual([]);
+    expect(() => decodeHubStandbyOrderRequest({ memberIds: [id, id] })).toThrow();
+    expect(() => decodeHubStandbyOrderRequest({ memberIds: [id], extra: true })).toThrow();
+
+    expect(decodeHubPromoteRequest({ confirmed: true })).toEqual({ confirmed: true });
+    expect(() => decodeHubPromoteRequest({ confirmed: false })).toThrow();
+    expect(() => decodeHubPromoteRequest({})).toThrow();
+
+    const handback = { baseSequence: 3, sequence: 5, added: [], removed: [id], wakeTimes: [] };
+    expect(decodeHubStandInHandback(handback).removed).toEqual([id]);
+    expect(() => decodeHubStandInHandback({ ...handback, wakeTimes: [{}] })).toThrow();
+    expect(() => decodeHubStandInHandback({ ...handback, sequence: 0 })).toThrow();
+
+    expect(
+      decodeHubMembershipChangedPayload({
+        change: "standby-order-changed",
+        actingPrincipal: { kind: "local-window" },
+        memberIds: [id],
+        sequence: 4,
+      }).memberIds,
+    ).toEqual([id]);
   });
 });
