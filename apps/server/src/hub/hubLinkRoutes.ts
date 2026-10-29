@@ -416,9 +416,9 @@ export function createHubLinkRouteHandler(
       }
       // The report is filed under the member whose key signed it; the body names no one.
       const recorded = await options.wake.receiveReport(verified.senderMemberId, report);
-      return recorded.status === "recorded"
-        ? Response.json(recorded, { headers: NO_STORE })
-        : refused(403, recorded.kind);
+      return recorded.status === "refused"
+        ? refused(403, recorded.kind)
+        : Response.json(recorded, { headers: NO_STORE });
     }
 
     if (route === HUB_LINK_ROUTES.heartbeat) {

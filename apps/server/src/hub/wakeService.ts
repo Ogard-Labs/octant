@@ -65,6 +65,8 @@ export type WakeReportOutcome =
       /** The hub's wake generation when it filed the report; absent from a standing-in standby. */
       readonly generation?: number;
     }
+  /** A report no newer than the last one applied for that spoke; the spoke is done with it. */
+  | { readonly status: "stale-report" }
   | {
       readonly status: "refused";
       readonly kind: "wake-service-off" | "not-a-spoke" | "not-coordinating" | "handing-back";
@@ -194,6 +196,14 @@ export class WakeService {
           String(spoke.memberId) !== senderMemberId &&
           roster.members.some((member) => String(member.memberId) === String(spoke.memberId)),
       );
+      // The tombstone's sequence counts: a withdrawal must not be undone by an older report.
+      const lastSequence = Math.max(
+        previous?.sequence ?? 0,
+        ...(hub.wake.withdrawals ?? [])
+          .filter((withdrawal) => String(withdrawal.memberId) === senderMemberId)
+          .map((withdrawal) => withdrawal.sequence ?? 0),
+      );
+      if (report.sequence <= lastSequence) return { status: "stale-report" };
       const withdrawing = report.times.length === 0 && report.hardwareAddress === undefined;
       // A withdrawal is remembered so a standby's older hand-back, retried after its answer
       // was lost, cannot bring the times and address back; a real report replaces it.
@@ -201,7 +211,7 @@ export class WakeService {
         ...liveWithdrawals(hub.wake, roster, now).filter(
           (withdrawal) => String(withdrawal.memberId) !== senderMemberId,
         ),
-        ...(withdrawing ? [{ memberId, withdrawnAt: now }] : []),
+        ...(withdrawing ? [{ memberId, withdrawnAt: now, sequence: report.sequence }] : []),
       ];
       const next: WakeSpokeRecord[] = withdrawing
         ? held
@@ -213,6 +223,7 @@ export class WakeService {
               ...(report.hardwareAddress === undefined
                 ? {}
                 : { hardwareAddress: report.hardwareAddress }),
+              sequence: report.sequence,
               reportedAt: now,
               ...(previous?.lastResult === undefined ? {} : { lastResult: previous.lastResult }),
             },
@@ -249,6 +260,10 @@ export class WakeService {
     if (link.standIn.handingBack === true) return { status: "refused", kind: "handing-back" };
     // The hub's wake switch is its own: a standby that never heard it was on takes no report.
     if (link.wakeCopyEnabled !== true) return { status: "refused", kind: "wake-service-off" };
+    const lastSequence =
+      (link.standIn.wakeReports ?? []).find((spoke) => String(spoke.memberId) === senderMemberId)
+        ?.sequence ?? 0;
+    if (report.sequence <= lastSequence) return { status: "stale-report" };
     // An empty report stays on file while standing in: it is what overrides the copy.
     const reports = [
       ...(link.standIn.wakeReports ?? []).filter(
@@ -260,6 +275,7 @@ export class WakeService {
         ...(report.hardwareAddress === undefined
           ? {}
           : { hardwareAddress: report.hardwareAddress }),
+        sequence: report.sequence,
         reportedAt: now,
       },
     ];

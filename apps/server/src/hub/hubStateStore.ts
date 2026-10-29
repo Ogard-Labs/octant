@@ -96,6 +96,8 @@ export type WakeSpokeRecord = typeof WakeSpokeRecord.Type;
 export const WakeWithdrawal = Schema.Struct({
   memberId: HubMemberId,
   withdrawnAt: Schema.Int,
+  /** The sequence of the withdrawing report, so an older report arriving later is ignored. */
+  sequence: Schema.optional(Schema.Int.pipe(Schema.positive())),
 }).annotations(strict);
 export type WakeWithdrawal = typeof WakeWithdrawal.Type;
 
@@ -254,6 +256,8 @@ export const SpokeWakeState = Schema.Struct({
    * hub confirms a withdrawal. A restart before the withdrawal still withdraws.
    */
   shared: Schema.optional(Schema.Literal(true)),
+  /** The sequence of the last report this spoke started; the next is above it, and above the clock. */
+  reportSequence: Schema.optional(Schema.Int.pipe(Schema.positive())),
   routines: Schema.Array(
     Schema.Struct({
       automationId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
