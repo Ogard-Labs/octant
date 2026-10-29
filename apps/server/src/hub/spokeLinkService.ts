@@ -18,6 +18,7 @@ import {
   type HubJoinRequest,
   type HubMemberId,
   type HubPrincipal,
+  type PeerPrincipal,
   type HubSpokeStatus,
   type NewMemberAlert,
   type NewMemberConfirmation,
@@ -29,6 +30,7 @@ import {
 import {
   admitNewMember,
   authorizeHubRequest,
+  authorizePeer,
   decideRosterReplacement,
   defaultHubGrant,
   evaluateDeviceRegistration,
@@ -38,6 +40,7 @@ import {
   introduceGuests,
   newMemberConfirmationSigningPayload,
   reconcileHeldGrants,
+  type AuthorizedPeer,
   type NewMemberAdmission,
   type RosterReplacement,
 } from "@octant/domain";
@@ -283,6 +286,38 @@ export type HubRequestOutcome =
         | "unknown-sender"
         | "signature-invalid"
         | "replayed";
+    };
+
+export type PeerRequestOutcome =
+  | {
+      readonly status: "peer";
+      readonly principal: PeerPrincipal;
+      readonly peer: AuthorizedPeer;
+      /** This host's own member id, which a result it returns names as its source. */
+      readonly selfMemberId: HubMemberId;
+    }
+  | {
+      readonly status: "refused";
+      readonly kind:
+        | "not-a-spoke"
+        | "hub-revoked"
+        | "missing"
+        | "malformed"
+        | "stale"
+        | "unknown-sender"
+        | "key-mismatch"
+        | "signature-invalid"
+        | "replayed"
+        | "not-in-roster"
+        | "hub-cannot-delegate"
+        | "no-peer-grant";
+    };
+
+export type MemberTarget =
+  | { readonly status: "member"; readonly self: HubMemberId; readonly member: RosterMember }
+  | {
+      readonly status: "refused";
+      readonly kind: "not-a-spoke" | "hub-revoked" | "not-in-roster";
     };
 
 export type RosterReceipt =
@@ -851,6 +886,99 @@ export class SpokeLinkService {
     });
     if (verified.status === "refused") return { status: "refused", kind: verified.kind };
     return { status: "hub", principal: { kind: "hub", memberId: link.hubMemberId } };
+  }
+
+  /**
+   * Resolves a request that claims to come from another member of the hub.
+   * Checked in this order, so the first failing reason is the one reported:
+   * this host is a member of a hub; the sender is in the verified roster the
+   * host holds; the key it presents is the one the roster fingerprints; the
+   * request is signed with that key, fresh, and not seen before; the sender is
+   * not the hub, a standby, or a guest, which never send delegated work; and
+   * this host gave the sender a peer grant. The roster says who the hub
+   * vouches for; only the peer grant says what the sender may do here.
+   */
+  authenticatePeer(input: {
+    readonly header: string | null;
+    readonly publicKey: string | null;
+    readonly method: string;
+    readonly path: string;
+    readonly body: string;
+  }): PeerRequestOutcome {
+    const link = this.#options.state.load().link;
+    if (link === undefined) return { status: "refused", kind: "not-a-spoke" };
+    if (link.removed === true) return { status: "refused", kind: "hub-revoked" };
+    if (input.header === null) return { status: "refused", kind: "missing" };
+    const claimed = input.header.split(".")[1];
+    if (claimed === undefined) return { status: "refused", kind: "malformed" };
+    const roster = link.roster.roster;
+    const member = roster.members.find((entry) => String(entry.memberId) === claimed);
+    if (member === undefined || claimed === String(link.selfMemberId)) {
+      return { status: "refused", kind: "not-in-roster" };
+    }
+    if (input.publicKey === null) return { status: "refused", kind: "unknown-sender" };
+    if (publicKeyFingerprint(input.publicKey) !== member.identityKeyFingerprint) {
+      return { status: "refused", kind: "key-mismatch" };
+    }
+    const verified = this.#verifier.verify({
+      header: input.header,
+      method: input.method,
+      path: input.path,
+      body: input.body,
+      recipientMemberId: String(link.selfMemberId),
+      publicKeyFor: (sender) => (sender === claimed ? (input.publicKey ?? undefined) : undefined),
+    });
+    if (verified.status === "refused") return { status: "refused", kind: verified.kind };
+    if (member.role === "hub" || member.role === "standby-hub") {
+      return { status: "refused", kind: "hub-cannot-delegate" };
+    }
+    const authorized = authorizePeer({
+      roster,
+      grants: link.peerGrants,
+      memberId: member.memberId,
+    });
+    if (authorized.status === "refused") {
+      return { status: "refused", kind: "no-peer-grant" };
+    }
+    return {
+      status: "peer",
+      principal: { kind: "peer", memberId: member.memberId },
+      peer: { member: authorized.member, grant: authorized.grant },
+      selfMemberId: link.selfMemberId,
+    };
+  }
+
+  /**
+   * The member and the grant this host holds for it right now, for a request
+   * already authenticated that must still be allowed when its work starts.
+   * Undefined once the host left the hub, the roster dropped the member, or
+   * its peer grant was removed.
+   */
+  currentPeer(memberId: HubMemberId): AuthorizedPeer | undefined {
+    const link = this.#options.state.load().link;
+    if (link === undefined || link.removed === true) return undefined;
+    const authorized = authorizePeer({
+      roster: link.roster.roster,
+      grants: link.peerGrants,
+      memberId,
+    });
+    return authorized.status === "authorized"
+      ? { member: authorized.member, grant: authorized.grant }
+      : undefined;
+  }
+
+  /**
+   * The roster entry and the listener pin this host reaches a full member at.
+   * Only a spoke, a standby, or the hub with a listener is dialled; a guest has
+   * no listener, and a member the held roster does not list is not reachable.
+   */
+  memberTarget(memberId: string): MemberTarget {
+    const link = this.#options.state.load().link;
+    if (link === undefined) return { status: "refused", kind: "not-a-spoke" };
+    if (link.removed === true) return { status: "refused", kind: "hub-revoked" };
+    const member = link.roster.roster.members.find((entry) => String(entry.memberId) === memberId);
+    if (member === undefined) return { status: "refused", kind: "not-in-roster" };
+    return { status: "member", self: link.selfMemberId, member };
   }
 
   /** Whether the hub's grant lets it use an item. */

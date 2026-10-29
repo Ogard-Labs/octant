@@ -1,0 +1,178 @@
+// What a host remembers about delegations: the ones it received from a peer
+// (which thread each became here) and the ones it sent (where each child runs
+// and whether its result is recorded). The journal records every change with
+// its principal; this file is what a restart reads. It sits beside the hub
+// state in the Octant data folder where only the person's account reads it, and
+// a file that cannot be read back exactly is treated as no state.
+
+import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  DelegatedAuthority,
+  DelegatingThreadReference,
+  DelegationChildState,
+  DelegationRequestId,
+  DelegationResult,
+  HubMemberId,
+  PeerDelegationMode,
+  ProjectId,
+  UtcTimestamp,
+} from "@octant/contracts";
+import { Schema } from "effect";
+
+const SUBDIR = "hub";
+const FILE = "delegations.json";
+const strict = { parseOptions: { onExcessProperty: "error" as const } };
+/** The newest settled entries a host keeps of each kind; a person's own devices delegate rarely. */
+export const MAX_REMEMBERED_SETTLED = 1_024;
+/**
+ * The most delegations a host holds open at once (sent and still active, or
+ * received and not yet settled). An open one is never forgotten to make room:
+ * forgetting a running child would strand it, so past this a new one is refused.
+ */
+export const MAX_OPEN_DELEGATIONS = 4_096;
+
+/** A delegation this spoke accepted from a peer, and the thread it became here. */
+export const ReceivedDelegation = Schema.Struct({
+  requestId: DelegationRequestId,
+  senderMemberId: HubMemberId,
+  projectId: ProjectId,
+  delegatedFrom: DelegatingThreadReference,
+  threadId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+  /** The turn that carries the task; a follow-up a person runs on the thread is a different turn. */
+  turnId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+  authority: DelegatedAuthority,
+  receivedAt: UtcTimestamp,
+}).annotations(strict);
+export type ReceivedDelegation = typeof ReceivedDelegation.Type;
+
+/**
+ * What a sent delegation is: the child's state as the target reported it, or
+ * `awaiting-acceptance` while the target's answer to the request is lost. In
+ * that case the target may already run the child, so the request stays on file.
+ */
+export const SentDelegationState = Schema.Union(
+  DelegationChildState,
+  Schema.Literal("awaiting-acceptance"),
+);
+export type SentDelegationState = typeof SentDelegationState.Type;
+
+/** A delegation this spoke sent for one of its own threads. */
+export const SentDelegation = Schema.Struct({
+  requestId: DelegationRequestId,
+  targetMemberId: HubMemberId,
+  projectId: ProjectId,
+  parent: Schema.Struct({
+    mode: PeerDelegationMode,
+    threadId: Schema.UUID,
+  }).annotations(strict),
+  authority: DelegatedAuthority,
+  /** The child's state as the target last reported it. */
+  state: SentDelegationState,
+  /**
+   * The task text, kept only while the request is `awaiting-acceptance` so a
+   * retried start can resend it under the same id. It is this host's own
+   * content, erased with the parent thread, and dropped once the target answers.
+   */
+  task: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(32_768))),
+  /** Set once the result was recorded on the parent thread; a result is recorded once. */
+  resultRecorded: Schema.optional(Schema.Literal(true)),
+  /**
+   * Set when a cancel got no definite answer (the target was unreachable, or did
+   * not yet know a request still awaiting acceptance); the background poll
+   * sends it again until the child ends.
+   */
+  cancelRequested: Schema.optional(Schema.Literal(true)),
+  /**
+   * What the target returned, kept so a read after the background poll recorded
+   * it still hands the parent thread the text; the journal holds only the mark.
+   */
+  result: Schema.optional(DelegationResult),
+  sentAt: UtcTimestamp,
+}).annotations(strict);
+export type SentDelegation = typeof SentDelegation.Type;
+
+/**
+ * A cancellation still owed to a target after the parent thread was erased, when
+ * the target gave no definite answer to the cancel. It names the request and the
+ * target and nothing else: no task, no result, no parent thread. It is dropped
+ * once the target answers, or a day after it was left.
+ */
+export const OwedCancel = Schema.Struct({
+  requestId: DelegationRequestId,
+  targetMemberId: HubMemberId,
+  /** When the request was sent, to tell a target that never got it from one still starting it. */
+  sentAt: UtcTimestamp,
+  owedSince: UtcTimestamp,
+}).annotations(strict);
+export type OwedCancel = typeof OwedCancel.Type;
+
+export const DelegationState = Schema.Struct({
+  received: Schema.Array(ReceivedDelegation),
+  sent: Schema.Array(SentDelegation),
+  owedCancels: Schema.optional(Schema.Array(OwedCancel)),
+}).annotations(strict);
+export type DelegationState = typeof DelegationState.Type;
+
+export const EMPTY_DELEGATION_STATE: DelegationState = { received: [], sent: [] };
+
+const decodeState = Schema.decodeUnknownSync(DelegationState);
+
+/** A sent delegation nothing more will happen to: its result is recorded, or it ended. */
+export function isSettledSent(entry: SentDelegation): boolean {
+  return entry.resultRecorded === true || entry.state === "failed" || entry.state === "cancelled";
+}
+
+/** Sent delegations still active plus cancellations still owed: what the hard limit counts. */
+export function openSentCount(state: DelegationState): number {
+  return (
+    state.sent.filter((entry) => !isSettledSent(entry)).length + (state.owedCancels ?? []).length
+  );
+}
+
+/** Drops the oldest settled entries beyond the cap; an entry that is not settled is never dropped. */
+function dropOldestSettled(
+  entries: ReadonlyArray<SentDelegation>,
+  settled: (entry: SentDelegation) => boolean,
+): ReadonlyArray<SentDelegation> {
+  let excess = entries.filter(settled).length - MAX_REMEMBERED_SETTLED;
+  if (excess <= 0) return entries;
+  return entries.filter((entry) => !(settled(entry) && excess-- > 0));
+}
+
+export interface DelegationStatePort {
+  readonly load: () => DelegationState;
+  readonly save: (state: DelegationState) => void;
+}
+
+export function createDelegationStateStore(dataDirectory: string): DelegationStatePort {
+  const directory = join(dataDirectory, SUBDIR);
+  const path = join(directory, FILE);
+  return {
+    load: () => {
+      try {
+        return decodeState(JSON.parse(readFileSync(path, "utf8")));
+      } catch {
+        return EMPTY_DELEGATION_STATE;
+      }
+    },
+    save: (state) => {
+      mkdirSync(directory, { recursive: true, mode: 0o700 });
+      chmodSync(directory, 0o700);
+      const staging = `${path}.${process.pid}.tmp`;
+      const kept: DelegationState = {
+        // A received entry carries no state of its own (the thread it became
+        // does), so the peer service prunes those; the store never drops one.
+        received: state.received,
+        sent: dropOldestSettled(state.sent, isSettledSent),
+        // An owed cancel is a promise to stop a child; it expires by age, not by count.
+        ...(state.owedCancels === undefined ? {} : { owedCancels: state.owedCancels }),
+      };
+      writeFileSync(staging, JSON.stringify(Schema.encodeSync(DelegationState)(kept)), {
+        mode: 0o600,
+      });
+      chmodSync(staging, 0o600);
+      renameSync(staging, path);
+    },
+  };
+}

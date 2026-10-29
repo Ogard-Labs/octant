@@ -18,7 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { vi } from "vitest";
 import { decodeStableHostId } from "@octant/contracts/remote-access";
-import type { HubMembershipChangedPayload } from "@octant/contracts";
+import type { HubDelegationRecordedPayload, HubMembershipChangedPayload } from "@octant/contracts";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
@@ -26,14 +26,22 @@ import { openSqlite } from "../persistence/sqlitePort";
 import type { RequestTransportFacts, Serve } from "../server";
 import type { LocalDeviceAdministrationPort } from "../remote/localDeviceAdministrationRoutes";
 import type { PrivateListenerHostStatus } from "../remote/privateListenerLifecycleController";
-import { createRemoteGateway, type RemoteGateway } from "../remote/remoteGateway";
+import {
+  createRemoteGateway,
+  type RemoteGateway,
+  type RemoteProductDispatch,
+} from "../remote/remoteGateway";
 import { createSelfMadeListenerCertificateStore } from "../remote/selfMadeListenerCertificate";
+import { DelegatingSpokeService, type DelegatingParentPort } from "./delegatingSpokeService";
+import { createDelegationStateStore, type DelegationStatePort } from "./delegationStateStore";
 import { createHubLinkRouteHandler } from "./hubLinkRoutes";
 import { createHubOwnerRouteHandler } from "./hubOwnerRoutes";
 import { OwnerUnlockService } from "./ownerUnlock";
 import { createHubStateStore, type HubStatePort } from "./hubStateStore";
 import { HubService, type HubHostIdentity } from "./hubService";
-import { createPinnedHubTransport, type HubNetwork } from "./pinnedHubTransport";
+import { createPeerDelegationRouteHandler } from "./peerDelegationRoutes";
+import { PeerDelegationService, type PeerDelegationHost } from "./peerDelegationService";
+import { createPinnedHubTransport, type HubNetwork, type HubTransport } from "./pinnedHubTransport";
 import { createRosterSigningKeyStore } from "./rosterSigningKey";
 import { deviceLifecycleAt, SpokeLinkService } from "./spokeLinkService";
 
@@ -50,6 +58,18 @@ const tailscaleFacts: RequestTransportFacts = {
   listenerTrust: "remote",
   sourceClass: "tailscale",
   sourceKey: "opaque-tailscale-source-key",
+};
+
+const NO_DELEGATION_HOST: PeerDelegationHost = {
+  projectAuthority: () => undefined,
+  startThread: async () => ({ status: "refused", kind: "project-unavailable" }),
+  readThread: async () => undefined,
+  interrupt: async () => "unavailable",
+};
+
+const NO_PARENT: DelegatingParentPort = {
+  check: () => ({ status: "refused", kind: "parent-unavailable" }),
+  ingest: () => "refused",
 };
 
 /** Maps each host's private address to the loopback port its listener really serves on. */
@@ -93,6 +113,11 @@ export interface HubTestHost {
   readonly spoke: SpokeLinkService;
   readonly state: HubStatePort;
   readonly records: HubMembershipChangedPayload[];
+  /** This host's delegations, sent and received, as the delegation routes keep them. */
+  readonly delegationState: DelegationStatePort;
+  readonly delegationRecords: HubDelegationRecordedPayload[];
+  /** The delegating side of this host: what its agents' remote child runs go through. */
+  readonly delegating: DelegatingSpokeService;
   readonly listener: PrivateListenerHostStatus;
   /** Every request this host's listener answered, as `METHOD path`. */
   readonly requests: string[];
@@ -111,6 +136,14 @@ export async function startHubTestHost(input: {
   readonly network: HubTestNetwork;
   readonly cleanups: Array<() => Promise<void> | void>;
   readonly listenerStatus?: Partial<PrivateListenerHostStatus>;
+  /** What a delegation to this host becomes; absent, this host has no Project open for delegated work. */
+  readonly delegationHost?: PeerDelegationHost;
+  /** This host's own rules for a parent thread; absent, it has no parent thread to delegate for. */
+  readonly parent?: DelegatingParentPort;
+  /** Wraps the transport this host's delegating side sends through, so a test can lose an answer. */
+  readonly delegatingTransport?: (transport: HubTransport) => HubTransport;
+  /** The authenticated product surface; the tests that prove a member reaches none of it pass a spy. */
+  readonly productDispatch?: RemoteProductDispatch;
   /** The clock the spoke role reads, so a test can let a device's inactivity window pass. */
   readonly now?: () => number;
 }): Promise<HubTestHost> {
@@ -252,8 +285,31 @@ export async function startHubTestHost(input: {
     unlock: new OwnerUnlockService({ now: ownerNow, hostMemberId: () => hub.hubMemberId() }),
     now: ownerNow,
   });
+  const delegationState = createDelegationStateStore(directory);
+  const delegationRecords: HubDelegationRecordedPayload[] = [];
+  const peerDelegationRoutes = createPeerDelegationRouteHandler({
+    delegation: new PeerDelegationService({
+      authenticate: (request) => spoke.authenticatePeer(request),
+      currentPeer: (memberId) => spoke.currentPeer(memberId),
+      host: input.delegationHost ?? NO_DELEGATION_HOST,
+      state: delegationState,
+      record: (change) => delegationRecords.push(change),
+      now: Date.now,
+    }),
+  });
+  const delegating = new DelegatingSpokeService({
+    state: delegationState,
+    identity: () => identity,
+    target: (memberId) => spoke.memberTarget(memberId),
+    transport: input.delegatingTransport?.(transport) ?? transport,
+    parent: input.parent ?? NO_PARENT,
+    record: (change) => delegationRecords.push(change),
+    now: Date.now,
+  });
   const hubLink = async (request: Request) =>
-    (await hubLinkRoutes(request)) ?? hubOwnerRoutes(request);
+    (await hubLinkRoutes(request)) ??
+    (await peerDelegationRoutes(request)) ??
+    hubOwnerRoutes(request);
 
   let gatewayFetch:
     | ((request: Request, facts?: RequestTransportFacts) => Promise<Response>)
@@ -271,6 +327,7 @@ export async function startHubTestHost(input: {
     signing: identity.signing,
     webAssets: () => Promise.resolve(new Response("web", { status: 200 })),
     hubLink,
+    ...(input.productDispatch === undefined ? {} : { productDispatch: input.productDispatch }),
     serve,
     clock: isoNow,
     config: { listener: { hostname: input.address, port: 8443, origin, tls: certificate.tls } },
@@ -329,6 +386,9 @@ export async function startHubTestHost(input: {
     spoke,
     state,
     records,
+    delegationState,
+    delegationRecords,
+    delegating,
     listener,
     requests,
     hubLink,

@@ -11,6 +11,7 @@ import { HubTestNetwork, startHubTestHost, type HubTestHost } from "./hubHost.te
 import { createPinnedHubTransport } from "./pinnedHubTransport";
 import { REMOTE_HUB_LINK_ROUTE_IDS, createRemoteRoutePolicy } from "../remoteRoutePolicy";
 import { HUB_LINK_ROUTES } from "./hubLinkRoutes";
+import { PEER_DELEGATION_ROUTES } from "./peerDelegationRoutes";
 
 const cleanups: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
@@ -335,6 +336,9 @@ describe("the hub-link routes the private listener serves", () => {
       [REMOTE_HUB_LINK_ROUTE_IDS.status, "GET", HUB_LINK_ROUTES.status],
       [REMOTE_HUB_LINK_ROUTE_IDS.guestRoster, "GET", HUB_LINK_ROUTES.guestRoster],
       [REMOTE_HUB_LINK_ROUTE_IDS.guest, "POST", HUB_LINK_ROUTES.guest],
+      [REMOTE_HUB_LINK_ROUTE_IDS.delegate, "POST", PEER_DELEGATION_ROUTES.create],
+      [REMOTE_HUB_LINK_ROUTE_IDS.delegationStatus, "POST", PEER_DELEGATION_ROUTES.status],
+      [REMOTE_HUB_LINK_ROUTE_IDS.delegationCancel, "POST", PEER_DELEGATION_ROUTES.cancel],
     ] as const) {
       const decision = policy.inspect(
         new Request(`https://100.101.102.103:8443${path}`, {
@@ -360,6 +364,14 @@ describe("the hub-link routes the private listener serves", () => {
       }),
     );
     expect(wrongMethod.kind).toBe("reject");
+    const delegationWithQuery = policy.inspect(
+      new Request(`https://100.101.102.103:8443${PEER_DELEGATION_ROUTES.create}?x=1`, {
+        method: "POST",
+        headers: { host: LISTENER_HOST, "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    expect(delegationWithQuery.kind).toBe("reject");
   });
 
   it("refuses the whole administration prefix to anything that arrives over the listener", () => {

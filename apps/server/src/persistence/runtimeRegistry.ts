@@ -136,7 +136,9 @@ import {
   ProjectTerminalEnded,
   ProjectTerminalStarted,
   ProductFeedbackDiscarded,
+  HUB_DELEGATION_RECORDED,
   HUB_MEMBERSHIP_CHANGED,
+  HubDelegationRecordedPayload,
   HubMembershipChangedPayload,
   REMOTE_PUSH_DELIVERY_EVENT_NAMES,
   REMOTE_PUSH_REGISTRATION_EVENT_NAMES,
@@ -568,6 +570,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(TERMINAL_BROWSER_GRANT_EVENT_NAMES.issued, 1, TerminalBrowserGrantIssued)
     .register(TERMINAL_BROWSER_GRANT_EVENT_NAMES.revoked, 1, TerminalBrowserGrantRevoked)
     .register(HUB_MEMBERSHIP_CHANGED, 1, HubMembershipChangedPayload)
+    .register(HUB_DELEGATION_RECORDED, 1, HubDelegationRecordedPayload)
     .register(REMOTE_SERVER_GRANT_OPENED, 1, RemoteServerGrantOpenedPayload)
     .register(REMOTE_SERVER_GRANT_CLOSED, 1, RemoteServerGrantClosedPayload)
     .register(THREAD_CHECKPOINT_MARKED, 1, ThreadCheckpointMarked)

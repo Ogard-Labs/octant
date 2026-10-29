@@ -837,6 +837,7 @@ export function startOctantServer(
       threadMessageQueue,
       threadMessageQueueRoutes,
       observeWorkThreadRuntime,
+      onWorkTurnCancelled,
       workThreadService,
       workThreadServiceWithWorkflows,
       workTurnService,
@@ -1174,6 +1175,7 @@ export function startOctantServer(
       composeHostDiagnostics,
       externalContentRoutes,
       hostControlRoutes,
+      delegationAdministrationRoutes,
       hubAdministrationRoutes,
       localDeviceAdministrationRoutes,
       privateListenerAdministrationRoutes,
@@ -1200,6 +1202,8 @@ export function startOctantServer(
       debugConfigurationApprovals,
       debugService,
       languageServerApprovals,
+      nativeHarnessSessions,
+      onWorkTurnCancelled,
       options,
       persistence,
       providerDataDirectory,
@@ -1219,6 +1223,9 @@ export function startOctantServer(
       windowAuthorityStore,
       workAttachments,
       workThreadProjection,
+      workThreadServiceWithWorkflows,
+      workTurnService,
+      agentRunAdmission,
     });
 
     let remoteListenerError: PrivateListenerFailureCode | undefined;
@@ -1291,6 +1298,7 @@ export function startOctantServer(
               return (
                 (await privateListenerAdministrationRoutes(request)) ??
                 (await hubAdministrationRoutes(request)) ??
+                (await delegationAdministrationRoutes(request)) ??
                 (await sshTargetAdministrationRoutes(request)) ??
                 (await providerCredentialRoutes(request)) ??
                 (await appStoreConnectKeyRoutes(request)) ??

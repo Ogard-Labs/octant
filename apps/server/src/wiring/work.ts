@@ -308,8 +308,17 @@ export function wireWork(deps: WorkDependencies) {
       issueContext: githubIssueContextService,
       linearIssueContext: linearIssueContextService,
     });
+    // Hosts composed after Work (delegation to another spoke) learn that a
+    // person stopped a thread's turn through this, not through the service.
+    const turnCancelledListeners = new Set<(threadId: WorkThreadId) => void>();
+    const onWorkTurnCancelled = (listener: (threadId: WorkThreadId) => void): void => {
+      turnCancelledListeners.add(listener);
+    };
     const workTurnService = new WorkTurnService({
       liveTurns,
+      onTurnCancelled: (threadId) => {
+        for (const listener of turnCancelledListeners) listener(threadId);
+      },
       runningAccess: runningWorkTurns,
       outsideContentMarks: runtimeOutsideContentMarks,
       usageStore: workTurnUsageStore,
@@ -1155,6 +1164,7 @@ export function wireWork(deps: WorkDependencies) {
       workArtifactProjection,
       workThreadService,
       observeWorkThreadRuntime,
+      onWorkTurnCancelled,
       workThreadServiceWithWorkflows,
       workTurnService,
       workflowService,

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import {
+  AgentRunParentThreadId,
   decodeChatThreadId,
   decodeCodeThreadId,
   decodeImageGenerationScopeId,
@@ -9,6 +10,7 @@ import {
   decodeWorkThreadId,
   LOCAL_HOST_ID,
 } from "@octant/contracts";
+import { Schema } from "effect";
 import { decodeBrowserThreadId } from "@octant/contracts/browser-automation";
 import { managedWorktreeRoot } from "../code/managedWorktreeService";
 import { purgeThreadArtifacts, removeMirrorFiles } from "../persistence/threadArtifactPurge";
@@ -25,7 +27,9 @@ import {
   threadStandingFromMessageQueue,
 } from "../externalContentRoutes";
 import { ExternalContentClearStore } from "../context/externalContentClearStore";
-import { defaultShellSettings } from "@octant/domain";
+import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
+import { defaultShellSettings, enabledModes } from "@octant/domain";
 import {
   createRemoteGateway,
   type RemoteGateway,
@@ -42,6 +46,13 @@ import { createHostControlRouteHandler } from "../hostControlRoutes";
 import { desktopCredentialStore } from "../hostDataMap";
 import { ThreadRetentionService } from "../threadRetentionService";
 import { createLiveHostExportService } from "../hostExportService";
+import { createDelegationAdministrationRouteHandler } from "../hub/delegationAdministrationRoutes";
+import { createDelegationJournal } from "../hub/delegationJournal";
+import { createDelegationStateStore } from "../hub/delegationStateStore";
+import { DelegatingSpokeService } from "../hub/delegatingSpokeService";
+import { PeerDelegationService } from "../hub/peerDelegationService";
+import { createPeerDelegationRouteHandler } from "../hub/peerDelegationRoutes";
+import { createWorkDelegationHost } from "../hub/workDelegationHost";
 import { createHubAdministrationRouteHandler } from "../hub/hubAdministrationRoutes";
 import { createHubLinkRouteHandler } from "../hub/hubLinkRoutes";
 import { createHubOwnerRouteHandler } from "../hub/hubOwnerRoutes";
@@ -75,7 +86,9 @@ import { boundHostRuntimeDiagnostics, type HostRuntimeDiagnostics } from "@octan
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
-import type { AgentRunsWiring } from "./agentRuns";
+import { type AgentRunsWiring, authorizeAgentRunParentThread } from "./agentRuns";
+import type { HarnessStateWiring } from "./harnessState";
+import { checkDelegationParent } from "../hub/delegationParentCheck";
 import type { IntegrationsWiring } from "./integrations";
 import type { ComputerUseWiring } from "./computerUse";
 import type { CodeWiring } from "./code";
@@ -95,7 +108,8 @@ export type RemoteDependencies = Pick<
   "options" | "persistence" | "serve" | "startedAt" | "version"
 > &
   Pick<AuthorityWiring, "browserCaptureStore" | "windowAuthorityStore"> &
-  Pick<AgentRunsWiring, "externalContentIngestionStore"> &
+  Pick<AgentRunsWiring, "agentRunAdmission" | "externalContentIngestionStore"> &
+  Pick<HarnessStateWiring, "nativeHarnessSessions"> &
   Pick<IntegrationsWiring, "agentMessageService" | "toolEgressRules"> &
   Pick<ComputerUseWiring, "webAssets"> &
   Pick<CodeWiring, "codeAttachments" | "codeProjectAccess" | "workAttachments"> &
@@ -115,7 +129,14 @@ export type RemoteDependencies = Pick<
     | "languageServerApprovals"
     | "remoteServerGrants"
   > &
-  Pick<WorkWiring, "threadExportService" | "threadMessageQueue"> &
+  Pick<
+    WorkWiring,
+    | "threadExportService"
+    | "threadMessageQueue"
+    | "onWorkTurnCancelled"
+    | "workThreadServiceWithWorkflows"
+    | "workTurnService"
+  > &
   Pick<CanvasWiring, "canvasRoutes" | "canvasPublicShareService"> &
   Pick<AutomationWiring, "pushNotificationTokenStore"> &
   Pick<RoutesWiring, "authenticatedProductDispatch"> &
@@ -123,6 +144,8 @@ export type RemoteDependencies = Pick<
   Pick<FoundationsWiring, "providerRuntimeRegistry"> &
   Pick<SshTargetsWiring, "sshTargetConnections" | "sshTargetStore"> &
   Pick<CodeRuntimeWiring, "codeOperationRuntime">;
+
+const decodeAgentRunParentThreadId = Schema.decodeUnknownSync(AgentRunParentThreadId);
 
 /** A paired device is active until revoked or expired; one this host no longer lists is not. */
 function deviceIsActive(
@@ -137,8 +160,10 @@ function deviceIsActive(
 export function wireRemote(deps: RemoteDependencies) {
   const {
     agentMessageService,
+    agentRunAdmission,
     authenticatedProductDispatch,
     browserCaptureStore,
+    nativeHarnessSessions,
     canvasPublicShareService,
     canvasRoutes,
     chatAttachmentStore,
@@ -146,10 +171,12 @@ export function wireRemote(deps: RemoteDependencies) {
     codeProjectAccess,
     credentialBroker,
     credentialResolver,
+    externalContentIngestionStore,
     generatedImageStore,
     debugConfigurationApprovals,
     debugService,
     languageServerApprovals,
+    onWorkTurnCancelled,
     options,
     persistence,
     providerDataDirectory,
@@ -167,6 +194,8 @@ export function wireRemote(deps: RemoteDependencies) {
     windowAuthorityStore,
     workAttachments,
     workThreadProjection,
+    workThreadServiceWithWorkflows,
+    workTurnService,
   } = deps;
 
   // The proxy route's grant requests run under the paired device's own scope,
@@ -306,7 +335,10 @@ export function wireRemote(deps: RemoteDependencies) {
         productDispatch: services.productDispatch ?? authenticatedProductDispatch,
         hubLink:
           services.hubLink ??
-          (async (request) => (await hubLinkRoutes(request)) ?? hubOwnerRoutes(request)),
+          (async (request) =>
+            (await hubLinkRoutes(request)) ??
+            (await peerDelegationRoutes(request)) ??
+            hubOwnerRoutes(request)),
         remoteServerGrants: services.remoteServerGrants ?? remoteServerGrantGatewayPort,
         serve: options.remoteServe ?? serve,
         config,
@@ -421,6 +453,106 @@ export function wireRemote(deps: RemoteDependencies) {
     maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   });
   const hubLinkRoutes = createHubLinkRouteHandler({ hub: hubService, spoke: spokeLinkService });
+  // Delegation between spokes: the receiving side starts an ordinary Work
+  // thread under this host's own scope, and the sending side checks this host's
+  // rules for the parent thread before it asks another member.
+  const delegationState = createDelegationStateStore(providerDataDirectory);
+  const recordDelegation = createDelegationJournal({
+    journal: persistence.journal,
+    connection: persistence.connection,
+    hostId: () => String(resolveHubIdentity().hostId),
+    localActorId: OCTANT_LOCAL_ACTOR_ID,
+    uuid: randomUUID,
+    clock: () => new Date().toISOString(),
+  });
+  const peerDelegationRoutes = createPeerDelegationRouteHandler({
+    delegation: new PeerDelegationService({
+      authenticate: (input) => spokeLinkService.authenticatePeer(input),
+      currentPeer: (memberId) => spokeLinkService.currentPeer(memberId),
+      host: createWorkDelegationHost({
+        readProject: (projectId) => persistence.readProject(projectId),
+        isWorkEnabled: () =>
+          enabledModes(
+            persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+          ).includes("work"),
+        threads: {
+          execute: async (scope, command) =>
+            workThreadServiceWithWorkflows.execute(scope, command as never),
+          bootstrap: async (scope) => workThreadServiceWithWorkflows.bootstrap(scope),
+        },
+        turns: {
+          startFirstTurn: async (scope, command, startOptions) =>
+            workTurnService.startFirstTurn(scope, command, startOptions),
+          turns: async (scope, threadId) => workTurnService.turns(scope, threadId),
+          cancelFirstTurn: async (scope, command) =>
+            workTurnService.cancelFirstTurn(scope, command),
+        },
+        scope: ROUTINE_HOST_SCOPE_ID,
+      }),
+      state: delegationState,
+      record: recordDelegation,
+      now: Date.now,
+    }),
+  });
+  const delegatingSpoke = new DelegatingSpokeService({
+    state: delegationState,
+    identity: resolveHubIdentity,
+    target: (memberId) => spokeLinkService.memberTarget(memberId),
+    transport: hubTransport,
+    parent: {
+      check: (input) =>
+        checkDelegationParent(
+          {
+            creationPosture: () => agentRunAdmission.settings.current().creationPosture,
+            authorizeCreation: ({ threadId, windowId }) =>
+              agentRunAdmission.authorizeCreation({
+                parentThreadId: decodeAgentRunParentThreadId(threadId),
+                windowId,
+              }),
+            externalContentIngested: (threadId) =>
+              readThreadExternalContentTaint(persistence.connection, threadId)
+                .externalContentIngested,
+            sessionStatus: (threadId) => nativeHarnessSessions.read(threadId)?.session.status,
+          },
+          input,
+        ),
+      ingest: ({ threadId, sourceLabel, contentReference, correlationId }) => {
+        const recorded = externalContentIngestionStore.record({
+          threadId,
+          provenance: { origin: "tool-result", sourceLabel },
+          contentReference,
+          correlationId,
+          authorized: true,
+        });
+        return recorded.kind === "recorded" || recorded.kind === "already-recorded"
+          ? recorded.kind
+          : "refused";
+      },
+    },
+    record: recordDelegation,
+    now: Date.now,
+  });
+  // A result arrives without anyone asking for it: the host reads each open
+  // delegation now and then. With none sent, a pass reads nothing.
+  setInterval(() => void delegatingSpoke.trackOpen().catch(() => undefined), 5_000).unref();
+  // A person stopping the parent thread's turn asks each target to stop the
+  // children that thread started there. Only Work parents have remote children:
+  // a Code request is refused by the target.
+  onWorkTurnCancelled((threadId) => {
+    void delegatingSpoke.cancelParent(String(threadId)).catch(() => undefined);
+  });
+  const delegationAdministrationRoutes = createDelegationAdministrationRouteHandler({
+    desktopBridgeSecret: options.desktopBridgeSecret,
+    windowAuthorityStore,
+    delegation: delegatingSpoke,
+    authorizeParent: ({ threadId, windowId }) =>
+      authorizeAgentRunParentThread({
+        persistence,
+        workThreadProjection,
+        parentThreadId: decodeAgentRunParentThreadId(threadId),
+        windowId,
+      }),
+  });
   const hubOwnerRoutes = createHubOwnerRouteHandler({
     hub: hubService,
     spoke: spokeLinkService,
@@ -607,6 +739,11 @@ export function wireRemote(deps: RemoteDependencies) {
       // A running debug session ends before the purge takes its records and
       // its checkout, so nothing it writes as it ends outlives the purge.
       if (mode === "code") await debugService.endThread(decodeCodeThreadId(String(threadId)));
+      // Remote children the thread started are stopped while this host still
+      // knows where they run, then what it kept of them (a result included)
+      // goes with the thread.
+      await delegatingSpoke.cancelParent(String(threadId)).catch(() => undefined);
+      delegatingSpoke.forgetParent(String(threadId));
       const released = await threadMessageQueue.purgeThread(
         decodeThreadMessageQueueScope({ mode, threadId }),
       );
@@ -745,6 +882,7 @@ export function wireRemote(deps: RemoteDependencies) {
   return {
     appStoreConnectKeyRoutes,
     composeHostDiagnostics,
+    delegationAdministrationRoutes,
     externalContentRoutes,
     hostControlRoutes,
     hubAdministrationRoutes,
