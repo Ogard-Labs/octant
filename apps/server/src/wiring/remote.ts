@@ -26,7 +26,7 @@ import {
 import { ExternalContentClearStore } from "../context/externalContentClearStore";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
-import { defaultShellSettings } from "@octant/domain";
+import { defaultShellSettings, enabledModes } from "@octant/domain";
 import {
   createRemoteGateway,
   type RemoteGateway,
@@ -463,6 +463,10 @@ export function wireRemote(deps: RemoteDependencies) {
       authenticate: (input) => spokeLinkService.authenticatePeer(input),
       host: createWorkDelegationHost({
         readProject: (projectId) => persistence.readProject(projectId),
+        isWorkEnabled: () =>
+          enabledModes(persistence.readShellSettings()?.settings ?? defaultShellSettings()).includes(
+            "work",
+          ),
         threads: {
           execute: async (scope, command) =>
             workThreadServiceWithWorkflows.execute(scope, command as never),

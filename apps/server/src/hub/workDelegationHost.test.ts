@@ -74,6 +74,7 @@ function services(overrides: Partial<WorkDelegationServices> = {}) {
   ];
   const base: WorkDelegationServices = {
     readProject: () => project("work"),
+    isWorkEnabled: () => true,
     threads: {
       execute: async (_scope, command) => {
         executed.push(command);
@@ -188,6 +189,45 @@ describe("the Work thread a delegation becomes on the receiving spoke", () => {
     });
     expect(executed).toEqual([]);
     expect(noDefault.executed).toEqual([]);
+  });
+
+  it("refuses a delegation and starts nothing while Work is turned off on this host", async () => {
+    let workOn = false;
+    const { host, executed, firstTurns } = services({ isWorkEnabled: () => workOn });
+
+    expect(host.projectAuthority(PROJECT)).toBeUndefined();
+    expect(await host.startThread(input)).toEqual({ status: "refused", kind: "mode-unavailable" });
+    expect(executed).toEqual([]);
+    expect(firstTurns).toEqual([]);
+
+    workOn = true;
+    expect(host.projectAuthority(PROJECT)).toMatchObject({ modes: ["work"] });
+    expect(await host.startThread(input)).toMatchObject({ status: "started" });
+  });
+
+  it("starts no turn when Work is turned off after the thread was created", async () => {
+    let workOn = true;
+    const created: unknown[] = [];
+    const { host, firstTurns } = services({
+      isWorkEnabled: () => workOn,
+      threads: {
+        execute: async (_scope, command) => {
+          created.push(command);
+          workOn = false;
+          return { kind: "thread-created", thread: { id: THREAD } };
+        },
+        bootstrap: async () => ({
+          settings: {
+            defaultProviderInstanceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            defaultModelId: "model-a",
+          },
+        }),
+      },
+    });
+
+    expect(await host.startThread(input)).toEqual({ status: "refused", kind: "mode-unavailable" });
+    expect(created).toHaveLength(1);
+    expect(firstTurns).toEqual([]);
   });
 
   it("reports the child's state and final message as its turn has them, and interrupts only a turn still going", async () => {

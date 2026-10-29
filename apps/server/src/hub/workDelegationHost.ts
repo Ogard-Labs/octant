@@ -43,6 +43,8 @@ export type DelegationTurnFacts = Pick<
 
 export interface WorkDelegationServices {
   readonly readProject: (projectId: ProjectId) => DelegationProjectFacts | undefined;
+  /** Whether Work is turned on in this host's settings right now; read live, never cached. */
+  readonly isWorkEnabled: () => boolean;
   readonly threads: {
     readonly execute: (scope: WindowId, command: unknown) => Promise<unknown>;
     readonly bootstrap: (scope: WindowId) => Promise<{
@@ -82,6 +84,8 @@ export function createWorkDelegationHost(services: WorkDelegationServices): Peer
       if (project === undefined || project.lifecycle !== "active" || project.type === "chat") {
         return undefined;
       }
+      // Turning Work off keeps its Projects but hides them from peers.
+      if (project.type === "work" && !services.isWorkEnabled()) return undefined;
       // Work never reaches Full access, and Code is not delegable on this host.
       return {
         projectId,
@@ -95,7 +99,9 @@ export function createWorkDelegationHost(services: WorkDelegationServices): Peer
       if (project?.type !== "work" || project.lifecycle !== "active") {
         return { status: "refused", kind: "project-unavailable" };
       }
-      if (input.authority.mode !== "work") return { status: "refused", kind: "mode-unavailable" };
+      if (input.authority.mode !== "work" || !services.isWorkEnabled()) {
+        return { status: "refused", kind: "mode-unavailable" };
+      }
       // Work asks first; it has no read-only posture to run a plan-only request at.
       if (input.authority.posture !== "approval-gated") {
         return { status: "refused", kind: "posture-unavailable" };
@@ -128,6 +134,8 @@ export function createWorkDelegationHost(services: WorkDelegationServices): Peer
           workingDirectory: ".",
         });
         if (!wasCreated(created)) return { status: "refused", kind: "start-failed" };
+        // Work may have been turned off while the thread was being created.
+        if (!services.isWorkEnabled()) return { status: "refused", kind: "mode-unavailable" };
         const turnId = uuid();
         const started = await services.turns.startFirstTurn(
           services.scope,
