@@ -1160,6 +1160,20 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "hub confirm new members alert owner devices status-only fingerprint remove dismiss",
         },
         {
+          id: settingId("hub-wake-service"),
+          label: "Wake service",
+          scope: "host",
+          keywords:
+            "hub wake service wake spoke computer routine due sleeping opaque id off by default",
+        },
+        {
+          id: settingId("hub-push-sender"),
+          label: "Push sender",
+          scope: "host",
+          keywords:
+            "hub push sender phone notifications spokes sealed gateway forward standby off by default",
+        },
+        {
           id: settingId("paired-computers-code"),
           label: "Pair with another computer",
           scope: "host",
