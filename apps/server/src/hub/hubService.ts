@@ -24,6 +24,7 @@ import type { StableHostId } from "@octant/contracts/remote-access";
 import {
   buildPairingCode,
   hubRosterSigningPayload,
+  decideStandInHandback,
   mergeStandInMembership,
   orderStandbys,
 } from "@octant/domain";
@@ -157,7 +158,7 @@ export type HandbackOutcome =
   | { readonly status: "merged"; readonly roster: SignedHubRoster }
   | {
       readonly status: "refused";
-      readonly kind: "hub-role-off" | "not-a-named-standby" | "invalid-member";
+      readonly kind: "hub-role-off" | "not-a-named-standby" | "invalid-member" | "handback-invalid";
     };
 
 export type PromoteOutcome =
@@ -718,6 +719,26 @@ export class HubService {
       !roster.standbyOrder.some((id) => String(id) === senderMemberId)
     ) {
       return { status: "refused", kind: "not-a-named-standby" };
+    }
+    // The hub signs the merge, so a standby that names the hub or a standby in
+    // its removals, or adds anything but a spoke, is refused whole.
+    const decision = decideStandInHandback({
+      hub: roster,
+      senderMemberId: sender.memberId,
+      standby: {
+        sequence: handback.sequence,
+        added: handback.added.map((entry) => entry.member),
+        removed: handback.removed,
+      },
+    });
+    if (decision.status === "refused") {
+      this.#options.record({
+        change: "stand-in-refused",
+        actingPrincipal: { kind: "hub", memberId: sender.memberId },
+        memberId: sender.memberId,
+        sequence: roster.sequence,
+      });
+      return decision;
     }
     // The roster states what the hub checked: a standby's claim of an owner
     // mark, an unlock key, or a port the origin does not carry is not kept.

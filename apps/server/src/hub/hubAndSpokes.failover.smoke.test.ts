@@ -378,6 +378,58 @@ describe("a hub that stops and comes back", () => {
   });
 });
 
+describe("a hand-back from a named standby", () => {
+  async function startNamed() {
+    const family = await startFamily();
+    family.standby.spoke.setGrant(standbyGrant, window);
+    const ordered = await family.hub.hub.setStandbyOrder(
+      [decodeMemberId(family.standby.hostId)],
+      window,
+    );
+    if (ordered.status !== "ordered") throw new Error(JSON.stringify(ordered));
+    return family;
+  }
+  const handbackRemoving = (ids: ReadonlyArray<string>, baseSequence: number) => ({
+    baseSequence,
+    sequence: baseSequence + 1,
+    added: [],
+    removed: ids.map((id) => decodeMemberId(id)),
+    wakeTimes: [] as [],
+  });
+
+  it("is refused whole when it removes the hub or another standby, and the roster stays as it was", async () => {
+    const { hub, standby, member } = await startNamed();
+    const before = hub.hub.status().roster;
+    if (before === undefined) throw new Error("The hub holds no roster.");
+
+    for (const target of [hub.hostId, standby.hostId]) {
+      const refused = await hub.hub.receiveHandback(
+        standby.hostId,
+        handbackRemoving([member.hostId, target], before.roster.sequence),
+      );
+      expect(refused).toEqual({ status: "refused", kind: "handback-invalid" });
+    }
+
+    expect(hub.hub.status().roster).toEqual(before);
+    expect(hub.hub.memberKey(member.hostId)).toBeDefined();
+    expect(hub.records.map((record) => record.change)).toContain("stand-in-refused");
+  });
+
+  it("still merges a hand-back that removes a plain spoke", async () => {
+    const { hub, standby, member } = await startNamed();
+    const before = hub.hub.status().roster;
+    if (before === undefined) throw new Error("The hub holds no roster.");
+
+    const merged = await hub.hub.receiveHandback(
+      standby.hostId,
+      handbackRemoving([member.hostId], before.roster.sequence),
+    );
+
+    expect(merged.status).toBe("merged");
+    expect(names(hub.hub.status().roster ?? before)).toEqual(["Mac mini", "Standby"]);
+  });
+});
+
 describe("a hand-back in flight", () => {
   /** A standby standing in for a stopped hub, with its hand-back held until the test lets it go or lose it. */
   async function standInWithHeldHandback() {

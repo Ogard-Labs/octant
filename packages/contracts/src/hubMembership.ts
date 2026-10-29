@@ -39,6 +39,7 @@ export const HubMembershipChange = Schema.Literal(
   "stand-in-started",
   "stand-in-ended",
   "stand-in-merged",
+  "stand-in-refused",
   "hub-promoted",
   "new-hub-accepted",
 );

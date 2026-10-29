@@ -20,6 +20,7 @@ import {
   clampDelegation,
   decideRosterReplacement,
   decideStandIn,
+  decideStandInHandback,
   defaultHubGrant,
   delegationPostureWithin,
   honorOwner,
@@ -30,6 +31,7 @@ import {
   OWNER_UNLOCK_LIFETIME_MS,
   ownerUnlockSigningPayload,
   reconcileHeldGrants,
+  type StandInMembershipChanges,
 } from "./hubAndSpokesPolicy";
 
 const id = (n: number) =>
@@ -402,6 +404,62 @@ describe("mergeStandInMembership", () => {
       standby: { sequence: 6, added: [], removed: [memberId(2)] },
     });
     expect(merged.standbyOrder).toEqual([]);
+  });
+});
+
+describe("decideStandInHandback", () => {
+  const base = roster(5, baseMembers);
+  const decide = (changes: Partial<StandInMembershipChanges>, sender = 2) =>
+    decideStandInHandback({
+      hub: base,
+      senderMemberId: memberId(sender),
+      standby: { sequence: 6, added: [], removed: [], ...changes },
+    });
+
+  it("accepts a hand-back that adds spokes and removes a spoke or a guest", () => {
+    expect(decide({ added: [member(5, "spoke")], removed: [memberId(3), memberId(4)] })).toEqual({
+      status: "valid",
+    });
+  });
+
+  it("refuses a hand-back that removes the hub", () => {
+    expect(decide({ removed: [memberId(1)] })).toEqual({
+      status: "refused",
+      kind: "handback-invalid",
+    });
+  });
+
+  it("refuses a hand-back that removes another standby or the sender itself", () => {
+    const withTwo = decideStandInHandback({
+      hub: roster(
+        5,
+        [...baseMembers.slice(0, 3), member(5, "standby-hub"), member(4, "guest")],
+        [2, 5],
+      ),
+      senderMemberId: memberId(2),
+      standby: { sequence: 6, added: [], removed: [memberId(5)] },
+    });
+    expect(withTwo).toEqual({ status: "refused", kind: "handback-invalid" });
+    expect(decide({ removed: [memberId(2)] })).toEqual({
+      status: "refused",
+      kind: "handback-invalid",
+    });
+  });
+
+  it("refuses a hand-back that adds a hub, a standby, or a guest", () => {
+    for (const role of ["hub", "standby-hub", "guest"] as const) {
+      expect(decide({ added: [member(5, role)] })).toEqual({
+        status: "refused",
+        kind: "handback-invalid",
+      });
+    }
+  });
+
+  it("refuses a hand-back that re-adds a member the roster holds under another role", () => {
+    expect(decide({ added: [member(1, "spoke")] })).toEqual({
+      status: "refused",
+      kind: "handback-invalid",
+    });
   });
 });
 
