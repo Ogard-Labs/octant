@@ -1112,24 +1112,11 @@ interface CreateOutsideHarnessEndpointProviderInput {
 export function createOutsideHarnessEndpointProvider(
   input: CreateOutsideHarnessEndpointProviderInput,
 ): OutsideHarnessEndpointProviderInstance {
-  const { configuration } = input;
-  const baseUrl = normalizeOpenAiCompatibleBaseUrl(configuration.baseUrl);
-  if (configuration.key === undefined && !isLoopbackHostname(new URL(baseUrl).hostname)) {
-    reject("invalid-authentication", "Unauthenticated providers must use a loopback endpoint.");
-  }
   return {
     id: input.id,
     displayName: normalizeName(input.displayName, input.existingInstances),
     driverKind: "outside-harness-endpoint",
-    configuration: {
-      kind: "outside-harness-endpoint",
-      driver: configuration.driver,
-      baseUrl,
-      ...(configuration.key === undefined ? {} : { key: configuration.key }),
-      modelIds: normalizeManualModelIds(
-        configuration.modelIds,
-      ) as OutsideHarnessEndpointProviderConfiguration["modelIds"],
-    },
+    configuration: normalizeOutsideHarnessEndpointConfiguration(input.configuration),
     enabled: false,
     environmentPolicy: "inherit-host",
     version: nextVersion(input.expectedVersion),
@@ -1138,11 +1125,68 @@ export function createOutsideHarnessEndpointProvider(
   };
 }
 
+function normalizeOutsideHarnessEndpointConfiguration(
+  configuration: OutsideHarnessEndpointProviderConfiguration,
+): OutsideHarnessEndpointProviderConfiguration {
+  const baseUrl = normalizeOpenAiCompatibleBaseUrl(configuration.baseUrl);
+  if (configuration.key === undefined && !isLoopbackHostname(new URL(baseUrl).hostname)) {
+    reject("invalid-authentication", "Unauthenticated providers must use a loopback endpoint.");
+  }
+  return {
+    kind: "outside-harness-endpoint",
+    driver: configuration.driver,
+    baseUrl,
+    ...(configuration.key === undefined ? {} : { key: configuration.key }),
+    modelIds: normalizeManualModelIds(
+      configuration.modelIds,
+    ) as OutsideHarnessEndpointProviderConfiguration["modelIds"],
+  };
+}
+
 /**
- * Moves a provider to the digest its person trusted for the same driver. It is
- * the one change an outside provider takes after it is added, and the host
- * makes it only once the person has trusted the new selection; the address,
- * key placement, listed models, and switch stay as the person set them. A
+ * Changes the address, key placement, or listed models of an outside provider.
+ * The driver reference is never part of the change: the exact package, version,
+ * and digest the provider binds stay as they are, so a change here cannot admit
+ * another driver (that is a new provider, or a rebind after the person trusts
+ * a new digest). The provider's switch, its crash-limit hold, and its threads
+ * stay as they are. The same address and key rules as adding apply.
+ */
+export function changeOutsideHarnessEndpointConfiguration(
+  provider: OutsideHarnessEndpointProviderInstance,
+  configuration: OutsideHarnessEndpointProviderConfiguration,
+  updatedAt: UtcTimestamp,
+  activeSessionCount = 0,
+): OutsideHarnessEndpointProviderInstance {
+  const bound = provider.configuration.driver;
+  const named = configuration.driver;
+  if (
+    String(bound.extensionId) !== String(named.extensionId) ||
+    String(bound.packageId) !== String(named.packageId) ||
+    String(bound.componentId) !== String(named.componentId) ||
+    String(bound.version) !== String(named.version) ||
+    String(bound.digest) !== String(named.digest)
+  ) {
+    reject(
+      "invalid-configuration",
+      "A provider keeps the driver it was added with; add a new provider to use another.",
+    );
+  }
+  if (activeSessionCount > 0) {
+    reject("active-sessions", "Stop active sessions before changing this provider endpoint.");
+  }
+  return {
+    ...provider,
+    configuration: normalizeOutsideHarnessEndpointConfiguration(configuration),
+    version: nextVersion(provider.version),
+    updatedAt,
+  };
+}
+
+/**
+ * Moves a provider to the digest its person trusted for the same driver. The
+ * host makes it only once the person has trusted the new selection; the
+ * address, key placement, listed models, and switch stay as the person set
+ * them. A
  * reference to another package or component is refused: that is a different
  * driver, which takes a new provider.
  */

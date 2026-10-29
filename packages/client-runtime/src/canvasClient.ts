@@ -152,6 +152,8 @@ export interface CanvasClient {
    * destination. A host without the route omits it.
    */
   htmlFile?(request: CanvasHtmlFileRequest): Promise<CanvasHtmlFileResult>;
+  /** A person's one click: the host derives and journals a deck from the Canvas. */
+  proposeDeck?(body: unknown): Promise<CanvasDiagramLayoutReviseResult>;
   /**
    * The folder a Canvas exports to, and the host identity and browse mode a
    * person chooses one with. A host without the route offers no folder
@@ -346,6 +348,18 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
       return request(
         options.fetch,
         new URL("/api/canvas/plan-revise", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        decodeHostAnswer(CanvasDiagramLayoutReviseResult),
+      );
+    },
+    proposeDeck(body) {
+      return request(
+        options.fetch,
+        new URL("/api/canvas/deck-propose", options.baseUrl).toString(),
         {
           method: "POST",
           headers: { ...headers, "content-type": "application/json" },

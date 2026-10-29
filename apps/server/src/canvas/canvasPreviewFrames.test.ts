@@ -1,9 +1,11 @@
+import type { Page } from "playwright-core";
 import { describe, expect, it } from "vitest";
 import {
   boundedFrameReading,
   boundedScriptErrors,
   designFrameReadings,
   readFramesWithinBudget,
+  readPreviewDesignFrames,
 } from "./canvasPreviewFrames";
 import { canvasPreviewDesignWarnings } from "./canvasPreviewWarnings";
 
@@ -200,5 +202,59 @@ describe("a design the look could not finish reading", () => {
 
   it("is measured when every frame answered", () => {
     expect(designFrameReadings([{ overflow: [], contrast: [] }]).measured).toBe(true);
+  });
+});
+
+describe("a design drawn as flow screens", () => {
+  it("is measured through the frames the flow board drew, as one design", async () => {
+    // A page stands in for the preview browser: a standalone design section,
+    // and one design whose two frames are drawn only as screens of a flow.
+    const frame = (frameId: string) => ({
+      contentFrame: () =>
+        Promise.resolve({
+          evaluate: () =>
+            Promise.resolve({ overflow: [{ frameId, overflowPx: 30 }], contrast: [] }),
+        }),
+    });
+    const host = (blockId: string, frameIds: ReadonlyArray<string>) => ({
+      getAttribute: () => Promise.resolve(blockId),
+      locator: () => ({ elementHandles: () => Promise.resolve(frameIds.map(frame)) }),
+    });
+    const selectors: string[] = [];
+    const page = {
+      getAttribute: () => Promise.resolve(null),
+      locator: (selector: string) => {
+        selectors.push(selector);
+        return {
+          all: () =>
+            Promise.resolve([
+              host("site", ["home"]),
+              host("app", ["sign-in"]),
+              host("app", ["done"]),
+            ]),
+        };
+      },
+    };
+    const readings = await readPreviewDesignFrames(page as unknown as Page);
+    expect(selectors[0]).toContain(".canvas-flow-board__design-frame[data-canvas-design]");
+    expect(readings).toEqual([
+      {
+        blockId: "site",
+        measured: true,
+        scriptErrors: [],
+        overflow: [{ frameId: "home", overflowPx: 30 }],
+        contrast: [],
+      },
+      {
+        blockId: "app",
+        measured: true,
+        scriptErrors: [],
+        overflow: [
+          { frameId: "sign-in", overflowPx: 30 },
+          { frameId: "done", overflowPx: 30 },
+        ],
+        contrast: [],
+      },
+    ]);
   });
 });

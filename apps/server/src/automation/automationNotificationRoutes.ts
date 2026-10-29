@@ -1,3 +1,4 @@
+import { decodeSetRemotePushGatewaySettingsV1 } from "@octant/contracts/remote-push-notifications";
 import {
   decodeUpdateAutomationNotificationPreferences,
   type AutomationNotificationDeliveryQueryResponse,
@@ -12,6 +13,9 @@ import {
   type AutomationNotificationPreferencesStore,
 } from "./automationNotificationPreferencesStore";
 import type { AutomationNotificationDeliveryService } from "./automationNotificationDeliveryService";
+import type { PushGatewaySettingPort } from "../remote/pushGatewaySetting";
+
+const PUSH_GATEWAY_PATH = "/api/push-notifications/gateway";
 
 const METHODS = "GET, PUT, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
@@ -20,6 +24,8 @@ export interface AutomationNotificationRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly preferences: Pick<AutomationNotificationPreferencesStore, "current" | "update">;
   readonly delivery: Pick<AutomationNotificationDeliveryService, "status" | "queryDeliveries">;
+  /** The Notifications setting that turns phone push on and names its gateway. */
+  readonly pushGateway?: PushGatewaySettingPort;
   readonly now?: () => number;
 }
 
@@ -85,7 +91,8 @@ export function createAutomationNotificationRouteHandler(
     if (
       url.pathname !== "/api/automation-notifications" &&
       url.pathname !== "/api/automation-notifications/status" &&
-      url.pathname !== "/api/automation-notifications/deliveries"
+      url.pathname !== "/api/automation-notifications/deliveries" &&
+      url.pathname !== PUSH_GATEWAY_PATH
     ) {
       return undefined;
     }
@@ -99,6 +106,10 @@ export function createAutomationNotificationRouteHandler(
 
     const auth = authorizeRequest(request, dependencies, now);
     if (auth instanceof Response) return auth;
+
+    if (url.pathname === PUSH_GATEWAY_PATH) {
+      return pushGatewayResponse(request, auth.kind, dependencies.pushGateway, origin);
+    }
 
     if (url.pathname === "/api/automation-notifications/status" && request.method === "GET") {
       const status: AutomationNotificationDeliveryStatus = dependencies.delivery.status();
@@ -166,4 +177,46 @@ export function createAutomationNotificationRouteHandler(
 
     return failure("Automation notification method is not allowed.", 405, origin);
   };
+}
+
+/**
+ * Turning phone push on, or pointing it at another gateway, decides where
+ * this computer sends requests, so it is the person's choice at a window on
+ * this computer and never a paired device's. Reading it is safe for both: it
+ * holds an address and a switch, no secret.
+ */
+async function pushGatewayResponse(
+  request: Request,
+  principal: "local-window" | "remote-device",
+  setting: PushGatewaySettingPort | undefined,
+  origin: string | null,
+): Promise<Response> {
+  if (setting === undefined) {
+    return failure("Phone notifications are unavailable on this host.", 404, origin);
+  }
+  if (request.method === "GET") return json({ settings: setting.current() }, 200, origin);
+  if (request.method !== "PUT") {
+    return failure("Phone notification method is not allowed.", 405, origin);
+  }
+  if (principal !== "local-window") {
+    return failure(
+      "Phone notifications can be changed only from a window on this computer.",
+      403,
+      origin,
+    );
+  }
+  let command: ReturnType<typeof decodeSetRemotePushGatewaySettingsV1>;
+  try {
+    command = decodeSetRemotePushGatewaySettingsV1(await request.json());
+  } catch {
+    return failure("Phone notification settings body is invalid.", 400, origin);
+  }
+  const change = setting.change(command);
+  if (change.kind === "stale-version") {
+    return failure("Phone notification settings changed elsewhere.", 409, origin);
+  }
+  if (change.kind === "unavailable") {
+    return failure("Phone notification settings could not be saved.", 503, origin);
+  }
+  return json({ settings: change.settings }, 200, origin);
 }

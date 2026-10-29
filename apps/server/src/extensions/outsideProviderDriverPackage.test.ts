@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
-import { chmod, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { generateKeyPairSync, randomUUID } from "node:crypto";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -24,6 +24,8 @@ import { buildCatalogs } from "./extensionChatResolver";
 import { ExtensionLifecycleService, NOOP_EXTENSION_SUPERVISOR } from "./extensionLifecycleService";
 import { ExtensionPackageStore } from "./extensionPackageStore";
 import { LocalPluginFolderRegistry } from "./localPluginFolderRegistry";
+import { readOutsideProviderDriverPackage } from "./outsideProviderDriverPackage";
+import { signOutsideDriverPackage } from "@octant/provider-sdk/outside-driver-sign";
 
 const now = "2026-10-26T12:00:00.000Z";
 const directories: Array<string> = [];
@@ -361,6 +363,117 @@ describe("outside provider driver inspection from a local folder", () => {
     expect(result.preview.review.components.map((component) => component.kind)).toEqual([
       "provider-driver",
     ]);
+  });
+});
+
+/** A throwaway Ed25519 key made for one test; it is never written to disk. */
+function throwawayKey(): string {
+  return generateKeyPairSync("ed25519")
+    .privateKey.export({ format: "pem", type: "pkcs8" })
+    .toString();
+}
+
+describe("outside provider driver publisher signatures", () => {
+  it("verifies a signed folder and shows the key that signed it in the review", async () => {
+    const context = await setup();
+    const root = await writeDriverFolder();
+    const signed = await signOutsideDriverPackage({ root, privateKeyPem: throwawayKey() });
+
+    const result = await context.inspect(root);
+
+    expect(result.kind).toBe("package-inspected");
+    if (result.kind !== "package-inspected") return;
+    expect(result.preview.review.provenance.publisherKey).toBe(signed.fingerprint);
+  });
+
+  it("keeps an unsigned folder as developer input with no publisher key", async () => {
+    const context = await setup();
+    const result = await context.inspect(await writeDriverFolder());
+    if (result.kind !== "package-inspected") throw new Error("expected an inspected driver");
+    expect(result.preview.review.provenance.publisherKey).toBeUndefined();
+  });
+
+  it.each([
+    ["a file changed after signing", { "dist/driver.mjs": "export default { changed: true };\n" }],
+    ["a file added after signing", { "dist/extra.mjs": "export const extra = 1;\n" }],
+  ] as const)("refuses a signed folder with %s as signature-invalid", async (_label, files) => {
+    const context = await setup();
+    const root = await writeDriverFolder();
+    await signOutsideDriverPackage({ root, privateKeyPem: throwawayKey() });
+    for (const [path, content] of Object.entries(files)) {
+      await mkdir(dirname(join(root, path)), { recursive: true });
+      await writeFile(join(root, path), content);
+    }
+
+    const result = await context.inspect(root);
+
+    expect(refusalMessage(result)).toBe(
+      "This provider driver's signature does not match its files, name, or version, or does not verify.",
+    );
+    expect(context.lifecycle.snapshot().packages).toEqual([]);
+  });
+
+  it("refuses a signature that names another version, or that another key made", async () => {
+    const context = await setup();
+    const root = await writeDriverFolder();
+    await signOutsideDriverPackage({ root, privateKeyPem: throwawayKey() });
+    const path = join(root, "octant-signature.json");
+    const signature = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+
+    await writeFile(path, JSON.stringify({ ...signature, version: "0.2.0" }));
+    expect(refusalMessage(await context.inspect(root))).toMatch(/signature does not match/);
+
+    const other = await writeDriverFolder();
+    await signOutsideDriverPackage({ root: other, privateKeyPem: throwawayKey() });
+    const otherSignature = JSON.parse(
+      await readFile(join(other, "octant-signature.json"), "utf8"),
+    ) as Record<string, unknown>;
+    // The other key's public half beside this key's signature does not verify.
+    await writeFile(path, JSON.stringify({ ...signature, publicKey: otherSignature.publicKey }));
+    expect(refusalMessage(await context.inspect(root))).toMatch(/signature does not match/);
+  });
+
+  it("refuses a driver document that states its own publisher key", async () => {
+    const context = await setup();
+    const result = await context.inspect(
+      await writeDriverFolder({
+        document: driverDocument({
+          provenance: { publisher: "Example Author", publisherKey: `ed25519:${"a".repeat(64)}` },
+        }),
+      }),
+    );
+    expect(refusalMessage(result)).toBe(
+      "This provider driver states its own identity, source, digest or review; Octant sets those itself.",
+    );
+  });
+
+  it("refuses a marketplace package with no signature as signature-missing, and a signed one until its source exists", async () => {
+    const registry = new LocalPluginFolderRegistry({ platform: "darwin" });
+    const read = async (root: string) => {
+      const input = (await registry.register(root)).packageInput;
+      if (!("layout" in input) || input.layout !== "outside-provider-driver") {
+        throw new Error("expected a driver folder");
+      }
+      // The same files, as a marketplace would hand them over.
+      return readOutsideProviderDriverPackage({
+        ...input,
+        source: { kind: "plugin-package", sourceRef: "npm:loopback-chat" as never },
+      });
+    };
+
+    expect(await read(await writeDriverFolder())).toEqual({
+      status: "refused",
+      reason: "signature-missing",
+    });
+
+    const tampered = await writeDriverFolder();
+    await signOutsideDriverPackage({ root: tampered, privateKeyPem: throwawayKey() });
+    await writeFile(join(tampered, "dist/driver.mjs"), "export default { changed: true };\n");
+    expect(await read(tampered)).toEqual({ status: "refused", reason: "signature-invalid" });
+
+    const signed = await writeDriverFolder();
+    await signOutsideDriverPackage({ root: signed, privateKeyPem: throwawayKey() });
+    expect(await read(signed)).toEqual({ status: "refused", reason: "source-unsupported" });
   });
 });
 

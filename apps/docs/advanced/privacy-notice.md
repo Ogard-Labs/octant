@@ -202,6 +202,15 @@ does not delete a gist afterward; take it down on GitHub. A folder export
 makes no network call. See
 [Export a Canvas or artifact](/guide/export#export-to-a-github-gist).
 
+App Store Connect is reached only for your own app and only when you act.
+Once you save an App Store Connect key on a Mac, uploading a build, checking a
+version, submitting it for App Review, or releasing it sends requests to
+Apple's App Store Connect (`api.appstoreconnect.apple.com` for checks,
+submissions, and releases), each after you confirm the exact build or
+version. The key stays in the Keychain or in 1Password; requests carry a
+short-lived token the host signs for them. See
+[Apple workbench](/advanced/apple-workbench#app-store-connect-key).
+
 A Claude artifact goes to your claude.ai account. Only once you turn on
 **Enable Claude artifacts** for a Claude account and choose artifacts for a
 thread does Claude Code publish a page from that thread's folder to

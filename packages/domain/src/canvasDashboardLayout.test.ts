@@ -37,6 +37,46 @@ describe("dashboard reading order", () => {
   });
 });
 
+describe("flow reading order", () => {
+  it("reads a flow's screens inside it and skips placed blocks at their own positions", () => {
+    const intro = { blockId: "intro", kind: "rich-text" };
+    const outro = { blockId: "outro", kind: "rich-text" };
+    const search = { blockId: "search", kind: "mockup" };
+    const site = { blockId: "site", kind: "design" };
+    const flow = {
+      blockId: "app-flow",
+      kind: "flow",
+      title: "Search flow",
+      screens: [
+        { screenId: "s1", blockId: "search" },
+        { screenId: "s2", blockId: "site" },
+      ],
+      edges: [],
+    };
+    const items = canvasReadingOrder([intro, flow, search, site, outro]);
+    expect(items.map((item) => item.kind)).toEqual(["block", "flow", "block"]);
+    const placed = items[1];
+    if (placed?.kind !== "flow") throw new Error("expected a flow");
+    expect(placed.screens.map((block) => block.kind)).toEqual(["mockup", "design"]);
+  });
+
+  it("keeps a screen in place when the flow names a kind a board does not draw", () => {
+    const note = { blockId: "note", kind: "rich-text" };
+    const flow = {
+      blockId: "app-flow",
+      kind: "flow",
+      title: "Search flow",
+      screens: [{ screenId: "s1", blockId: "note" }],
+      edges: [],
+    };
+    const items = canvasReadingOrder([flow, note]);
+    expect(items.map((item) => item.kind)).toEqual(["flow", "block"]);
+    const placed = items[0];
+    if (placed?.kind !== "flow") throw new Error("expected a flow");
+    expect(placed.screens).toHaveLength(0);
+  });
+});
+
 describe("tabs and columns reading order", () => {
   it("reads a dashboard inside a tab pane with its cells, and neither again at its own position", () => {
     const tabs = {

@@ -56,7 +56,7 @@ describe("ProviderRoutes", () => {
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
-  it("refuses a paired device adding an outside driver provider or verifying tools before the service runs", async () => {
+  it("refuses a paired device adding or reconfiguring an outside driver provider or verifying tools before the service runs", async () => {
     const execute = vi.fn(() => ({ kind: "provider-created", instance: provider() }));
     const route = routeFixture({ execute });
     const pairedDeviceId = "80000000-0000-4000-8000-000000000030";
@@ -81,6 +81,12 @@ describe("ProviderRoutes", () => {
       },
       { kind: "verify-model-tools", instanceId, modelId: "local-model" },
     ];
+    const { displayName: _displayName, ...create } = commands[0] as Record<string, unknown>;
+    commands.push({
+      ...create,
+      kind: "change-outside-harness-endpoint-configuration",
+      expectedVersion: 1,
+    } as never);
     for (const body of commands) {
       const remote = new Request("http://127.0.0.1/api/providers/commands", {
         method: "POST",

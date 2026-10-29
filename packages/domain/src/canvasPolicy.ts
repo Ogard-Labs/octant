@@ -1,4 +1,7 @@
+import type { CanvasFlowScreen } from "@octant/contracts/canvas";
 import {
+  canvasCarriesNoLaterFloor,
+  CanvasSchemaVersion,
   CANVAS_MAX_BLOCKS,
   CANVAS_MAX_BAR_LIST_ROWS,
   CANVAS_MAX_DIAGRAM_EDGES,
@@ -27,6 +30,12 @@ import {
   CANVAS_MOCKUP_LEGACY_MAX_DEPTH,
   CANVAS_MOCKUP_LEGACY_MAX_NODES,
   CANVAS_MAX_MOCKUP_NODES,
+  CANVAS_MAX_MOCKUP_DEFINITIONS,
+  CANVAS_MAX_MOCKUP_DEFINITION_NODES,
+  CANVAS_MAX_DECK_SLIDES,
+  CANVAS_DECK_SLIDE_KINDS,
+  CANVAS_MAX_FLOW_ANNOTATIONS,
+  CANVAS_MAX_FLOW_ANNOTATION_LENGTH,
   CANVAS_MAX_MOCKUP_TEXT_LENGTH,
   CANVAS_MAX_PAYLOAD_BYTES,
   CANVAS_MAX_SERIES,
@@ -35,39 +44,15 @@ import {
   CANVAS_MAX_TEXT_BYTES,
   CANVAS_MAX_TREEMAP_DEPTH,
   CANVAS_MAX_TREEMAP_LEAVES,
-  CANVAS_BAR_LIST_SCHEMA_VERSION,
-  CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION,
-  CANVAS_METRIC_TREND_SCHEMA_VERSION,
-  CANVAS_HEATMAP_SCHEMA_VERSION,
-  CANVAS_MOCKUP_SCHEMA_VERSION,
-  CANVAS_PRESENTATION_SCHEMA_VERSION,
-  CANVAS_SCHEMA_VERSION,
-  CANVAS_TREEMAP_SCHEMA_VERSION,
-  CANVAS_DESIGN_SCHEMA_VERSION,
-  CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION,
-  CANVAS_MATH_SCHEMA_VERSION,
-  CANVAS_TABLE_ROW_ID_SCHEMA_VERSION,
-  CANVAS_FLOW_CHARTS_SCHEMA_VERSION,
-  CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION,
   CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION,
-  CANVAS_THREAD_OWNED_SCHEMA_VERSION,
-  CANVAS_DESIGN_FIELDS_SCHEMA_VERSION,
-  CANVAS_CHART_CALLOUTS_SCHEMA_VERSION,
-  canvasChartUsesCallouts,
+  CANVAS_MAX_FLOW_EDGES,
+  CANVAS_MAX_FLOW_SCREENS,
+  CANVAS_FLOW_HOTSPOT_COMPONENTS,
   CANVAS_MAX_DIAGRAM_GROUP_DEPTH,
-  canvasProvenanceIsThreadOwned,
-  canvasDesignUsesDesignFields,
-  canvasDiagramUsesRichFields,
-  canvasDiagramUsesStyles,
-  canvasPlanUsesGantt,
   isCanvasDiagramNodeRole,
   canvasLayoutGroupChildIds,
   isCanvasLayoutGroup,
-  CANVAS_DASHBOARD_SCHEMA_VERSION,
   CANVAS_MAX_DASHBOARD_CELLS,
-  CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION,
-  CANVAS_DESIGN_ASSET_SCHEMA_VERSION,
-  CANVAS_DESIGN_RUNNING_SCHEMA_VERSION,
   CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH,
   CANVAS_MAX_FUNNEL_STAGES,
   CANVAS_MAX_RADAR_AXES,
@@ -75,19 +60,12 @@ import {
   CANVAS_MAX_SANKEY_NODES,
   CANVAS_MIN_RADAR_AXES,
   CanvasBlock,
-  canvasChartUsesFlowTypes,
   CanvasDefinition,
-  canvasDesignUsesAssets,
-  canvasDesignRunsScript,
-  canvasDesignUsesDocumentFields,
-  canvasMockupUsesCatalog,
   type CanvasMockupComponent,
   type CanvasMockupNode,
   CanvasVersion,
-  canvasMetricUsesTrendFields,
   canvasTableRowCells,
   canvasTableRowId,
-  canvasTableUsesRowIds,
   decodeCanvasDefinition,
   decodeCanvasVersion,
   type CanvasSourceId,
@@ -95,7 +73,11 @@ import {
 import { canvasDesignMarkupRefusal, canvasDesignStylesheetRefusal } from "./canvasDesignPolicy";
 import { designBrandTokenRefusal } from "./canvasDesignFrameKit";
 import { canvasMathSourceRefusal } from "./canvasMathPolicy";
-import { canvasDashboardColumns, isCanvasDashboardCellKind } from "./canvasDashboardLayout";
+import {
+  canvasDashboardColumns,
+  isCanvasDashboardCellKind,
+  isCanvasDeckSlideKind,
+} from "./canvasDashboardLayout";
 import { canonicalizeWorkRelativePath, WorkConfinementRejected } from "./workConfinementPolicy";
 
 const encoder = new TextEncoder();
@@ -103,50 +85,9 @@ const encoder = new TextEncoder();
 // Versions this runtime decodes: every historical version plus the current
 // one. A document declaring anything else is refused as a future version,
 // before its blocks are read, so a newer contract never reaches a renderer.
-const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
-  1,
-  2,
-  3,
-  CANVAS_PRESENTATION_SCHEMA_VERSION,
-  CANVAS_TREEMAP_SCHEMA_VERSION,
-  CANVAS_HEATMAP_SCHEMA_VERSION,
-  CANVAS_BAR_LIST_SCHEMA_VERSION,
-  CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION,
-  CANVAS_DESIGN_SCHEMA_VERSION,
-  CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION,
-  CANVAS_MATH_SCHEMA_VERSION,
-  CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION,
-  CANVAS_TABLE_ROW_ID_SCHEMA_VERSION,
-  CANVAS_FLOW_CHARTS_SCHEMA_VERSION,
-  CANVAS_DASHBOARD_SCHEMA_VERSION,
-  CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION,
-  CANVAS_DESIGN_ASSET_SCHEMA_VERSION,
-  CANVAS_DESIGN_RUNNING_SCHEMA_VERSION,
-  CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION,
-  CANVAS_THREAD_OWNED_SCHEMA_VERSION,
-  CANVAS_DESIGN_FIELDS_SCHEMA_VERSION,
-  CANVAS_SCHEMA_VERSION,
-];
-
-// A block kind that a document may only carry from the version that
-// introduced it. A document declaring an older version but carrying the kind
-// fails closed as a declared future version rather than a corrupt document.
-const VERSION_GATED_BLOCK_KINDS: ReadonlyArray<{ readonly kind: string; readonly since: number }> =
-  [
-    { kind: "mockup", since: CANVAS_MOCKUP_SCHEMA_VERSION },
-    { kind: "treemap", since: CANVAS_TREEMAP_SCHEMA_VERSION },
-    { kind: "heatmap", since: CANVAS_HEATMAP_SCHEMA_VERSION },
-    { kind: "bar-list", since: CANVAS_BAR_LIST_SCHEMA_VERSION },
-    { kind: "er", since: CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION },
-    { kind: "swimlane", since: CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION },
-    { kind: "mindmap", since: CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION },
-    { kind: "design", since: CANVAS_DESIGN_SCHEMA_VERSION },
-    { kind: "comparison-matrix", since: CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION },
-    { kind: "math", since: CANVAS_MATH_SCHEMA_VERSION },
-    { kind: "dashboard", since: CANVAS_DASHBOARD_SCHEMA_VERSION },
-    { kind: "tabs", since: CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION },
-    { kind: "columns", since: CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION },
-  ];
+// Every version the contract decodes, from its own literal list, so a bump
+// cannot leave the policy refusing a version the decoder admits.
+const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = CanvasSchemaVersion.literals;
 
 export type CanvasPolicyRejectionCode =
   | "invalid-schema"
@@ -265,6 +206,33 @@ export type CanvasPolicyRejectionCode =
   | "diagram-group-nesting-cycle"
   | "diagram-group-depth-exceeded"
   | "design-brand-refused"
+  | "flow-screens-budget-exceeded"
+  | "flow-edges-budget-exceeded"
+  | "duplicate-flow-screen"
+  | "dangling-flow-screen"
+  | "flow-screen-kind-refused"
+  | "flow-screen-variant-missing"
+  | "flow-screen-frame-missing"
+  | "flow-screen-design-refused"
+  | "duplicate-flow-edge"
+  | "dangling-flow-edge"
+  | "flow-edge-self"
+  | "flow-hotspot-refused"
+  | "flow-annotations-budget-exceeded"
+  | "dangling-flow-annotation"
+  | "duplicate-flow-annotation"
+  | "mockup-definitions-budget-exceeded"
+  | "duplicate-mockup-definition"
+  | "dangling-mockup-definition"
+  | "mockup-definition-nested"
+  | "mockup-definition-shape"
+  | "deck-slides-budget-exceeded"
+  | "dangling-deck-slide"
+  | "deck-slide-kind-refused"
+  | "duplicate-deck-slide"
+  | "deck-slide-frame-missing"
+  | "deck-slide-variant-missing"
+  | "deck-slide-design-refused"
   | "block-placed-twice";
 
 export class CanvasPolicyRejected extends Error {
@@ -465,15 +433,12 @@ function calculateBudgetUsage(
 
 /**
  * A document a newer runtime declared with a version this runtime has never
- * seen — either a future schema version or a version-gated field (a mockup
- * block from version 3, a thread presentation from version 4, a treemap from
- * version 5, a heatmap from version 6, a design block from version 9, a design
- * document or theme from version 16, design assets from version 17, a
- * design that runs script from version 18, frame notes, brand tokens, and the
- * richer diagram fields from version 21) inside a
- * document that declares an older version — must fail closed as an
+ * seen — either a future schema version or a version-gated kind or field
+ * inside a document that declares an older version — must fail closed as an
  * unsupported schema version, before any content is read, rather than
- * collapsing into a generic "corrupt" decode failure. Works on both a
+ * collapsing into a generic "corrupt" decode failure. The gated kinds and
+ * fields are the contract's one version-gate table, read loosely so a
+ * document that did not decode is asked the same question. Works on both a
  * definition (`blocks` at the top level) and a version envelope (blocks under
  * `definition`).
  */
@@ -490,58 +455,21 @@ function declaredSchemaRejection(input: unknown): CanvasPolicyRejectionCode | un
   if (typeof declared !== "number") return undefined;
   if (!SUPPORTED_CANVAS_SCHEMA_VERSIONS.includes(declared)) return "unsupported-schema-version";
   const presentation = envelope.presentation ?? envelope.definition?.presentation;
-  if (declared < CANVAS_PRESENTATION_SCHEMA_VERSION && presentation !== undefined) {
-    return "unsupported-schema-version";
-  }
   const provenance = envelope.provenance ?? envelope.definition?.provenance;
-  if (
-    declared < CANVAS_THREAD_OWNED_SCHEMA_VERSION &&
-    typeof provenance === "object" &&
-    provenance !== null &&
-    canvasProvenanceIsThreadOwned(provenance)
-  ) {
-    return "unsupported-schema-version";
-  }
   const blocks = Array.isArray(envelope.blocks)
     ? envelope.blocks
     : Array.isArray(envelope.definition?.blocks)
       ? envelope.definition?.blocks
       : undefined;
-  if (
-    blocks?.some(
-      (block) =>
-        typeof block === "object" &&
-        block !== null &&
-        (VERSION_GATED_BLOCK_KINDS.some(
-          (gated) => gated.kind === (block as { kind?: unknown }).kind && declared < gated.since,
-        ) ||
-          (declared < CANVAS_METRIC_TREND_SCHEMA_VERSION &&
-            canvasMetricUsesTrendFields(block as Record<string, unknown>)) ||
-          (declared < CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION &&
-            canvasMockupUsesCatalog(block as Record<string, unknown>)) ||
-          (declared < CANVAS_TABLE_ROW_ID_SCHEMA_VERSION &&
-            canvasTableUsesRowIds(block as Record<string, unknown>)) ||
-          (declared < CANVAS_FLOW_CHARTS_SCHEMA_VERSION &&
-            canvasChartUsesFlowTypes(block as Record<string, unknown>)) ||
-          (declared < CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION &&
-            canvasDesignUsesDocumentFields(block as Record<string, unknown>)) ||
-          (declared < CANVAS_DESIGN_ASSET_SCHEMA_VERSION &&
-            canvasDesignUsesAssets(block as Record<string, unknown>)) ||
-          (declared < CANVAS_DESIGN_RUNNING_SCHEMA_VERSION &&
-            canvasDesignRunsScript(block as Record<string, unknown>)) ||
-          (declared < CANVAS_DESIGN_FIELDS_SCHEMA_VERSION &&
-            (canvasDesignUsesDesignFields(block as Record<string, unknown>) ||
-              canvasDiagramUsesRichFields(block as Record<string, unknown>))) ||
-          (declared < CANVAS_CHART_CALLOUTS_SCHEMA_VERSION &&
-            canvasChartUsesCallouts(block as Record<string, unknown>)) ||
-          (declared < CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION &&
-            (canvasDiagramUsesStyles(block as Record<string, unknown>) ||
-              canvasPlanUsesGantt(block as Record<string, unknown>)))),
-    )
-  ) {
-    return "unsupported-schema-version";
-  }
-  return undefined;
+  const carries = canvasCarriesNoLaterFloor({
+    schemaVersion: declared,
+    presentation,
+    provenance,
+    blocks: (blocks ?? []).filter(
+      (block): block is Record<string, unknown> => typeof block === "object" && block !== null,
+    ),
+  });
+  return carries ? undefined : "unsupported-schema-version";
 }
 
 function decodeDefinitionOrReject(input: unknown): CanvasDefinition {
@@ -596,6 +524,7 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
       lanes?: unknown;
       steps?: unknown;
       connections?: unknown;
+      screens?: unknown;
       title?: unknown;
       columns?: unknown;
       cells?: unknown;
@@ -827,6 +756,14 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
       block.cells.length > CANVAS_MAX_DASHBOARD_CELLS
     ) {
       return "dashboard-cells-budget-exceeded";
+    }
+    if (block.kind === "flow") {
+      if (Array.isArray(block.screens) && block.screens.length > CANVAS_MAX_FLOW_SCREENS) {
+        return "flow-screens-budget-exceeded";
+      }
+      if (Array.isArray(block.edges) && block.edges.length > CANVAS_MAX_FLOW_EDGES) {
+        return "flow-edges-budget-exceeded";
+      }
     }
   }
   if (imageCount > CANVAS_MAX_IMAGES) return "image-budget-exceeded";
@@ -1098,6 +1035,8 @@ function validateCrossReferences(definition: CanvasDefinition): void {
     if (block.kind === "mindmap") validateMindmap(block);
     if (block.kind === "mockup") validateMockup(block, definition.schemaVersion);
     if (block.kind === "design") validateDesign(block, definition.provenance.mode);
+    if (block.kind === "flow") validateFlow(block, definition.blocks);
+    if (block.kind === "deck") validateDeck(block, definition.blocks);
     if (block.kind === "treemap") validateTreemap(block);
     if (block.kind === "heatmap") validateHeatmap(block);
     if (block.kind === "bar-list") validateBarList(block);
@@ -1221,11 +1160,18 @@ function validatePlacedOnce(definition: CanvasDefinition): void {
         ? block.cells.map((cell) => cell.blockId)
         : block.kind === "tabs" || block.kind === "columns"
           ? canvasLayoutGroupChildIds(block)
-          : [];
+          : block.kind === "flow"
+            ? block.screens.map((screen) => screen.blockId)
+            : block.kind === "deck"
+              ? block.slides.map((slide) => slide.blockId)
+              : [];
     for (const childId of childIds) {
       const id = String(childId);
       const first = placedBy.get(id);
-      if (first !== undefined) {
+      // One placer naming a block again is a second frame or variant of the
+      // same screen (a flow from Home to About of one design); placed once
+      // means one placer, so only a second placer is refused.
+      if (first !== undefined && first !== block) {
         reject(
           "block-placed-twice",
           `Canvas block ${id} is placed by both ${first.kind} ${first.blockId} and ${block.kind} ${block.blockId}; a block is placed once.`,
@@ -1391,6 +1337,324 @@ function validateDesign(
     const refusal = canvasDesignMarkupRefusal(frame.html, assetIds, runsScript);
     if (refusal !== undefined) {
       reject("design-markup-refused", `Canvas design ${block.blockId} frame ${id} ${refusal}`);
+    }
+  }
+}
+
+const FLOW_HOTSPOT_COMPONENTS: ReadonlySet<string> = new Set(CANVAS_FLOW_HOTSPOT_COMPONENTS);
+
+/**
+ * A flow places screens the document already holds, so every screen must name
+ * a block of a kind it can draw — a mockup, at a variant it declares when it
+ * declares any, or one frame of a design that runs no script — and every edge
+ * must land on two screens the flow holds. A hotspot names the control a
+ * person taps, so it must be a node of the from-screen's mockup from the
+ * interactive list: a design screen has no hotspots, and an inert part of a
+ * mockup is not a link.
+ */
+/**
+ * A deck presents the document's own blocks, in the order the author chose.
+ * Every slide names a block the document holds, of a kind a deck can show;
+ * a design slide names its frame, a mockup slide its variant when there are
+ * variants. A block is placed once, exactly as a dashboard or flow places
+ * its own, so a slide keeps one definition and one comment home.
+ */
+function validateDeck(
+  block: Extract<CanvasBlock, { readonly kind: "deck" }>,
+  blocks: ReadonlyArray<CanvasBlock>,
+): void {
+  const name = `Canvas deck ${block.blockId}`;
+  if (block.slides.length > CANVAS_MAX_DECK_SLIDES) {
+    reject(
+      "deck-slides-budget-exceeded",
+      `${name} holds more than ${String(CANVAS_MAX_DECK_SLIDES)} slides.`,
+    );
+  }
+  const kinds = new Map(blocks.map((candidate) => [String(candidate.blockId), candidate.kind]));
+  const slideIds = new Set<string>();
+  const shown = new Set<string>();
+  for (const slide of block.slides) {
+    const slideId = String(slide.slideId);
+    if (slideIds.has(slideId)) {
+      reject("duplicate-deck-slide", `${name} has two slides with the id ${slideId}.`);
+    }
+    slideIds.add(slideId);
+    // Several frames of one design, or variants of one mockup, are several
+    // slides; the same view twice is one slide written twice.
+    const view = JSON.stringify([
+      String(slide.blockId),
+      slide.frameId === undefined ? null : String(slide.frameId),
+      slide.variantId === undefined ? null : String(slide.variantId),
+    ]);
+    if (shown.has(view)) {
+      reject(
+        "duplicate-deck-slide",
+        `${name} shows block ${String(slide.blockId)} at the same frame or variant twice.`,
+      );
+    }
+    shown.add(view);
+    const kind = kinds.get(String(slide.blockId));
+    if (kind === undefined) {
+      reject(
+        "dangling-deck-slide",
+        `${name} shows block ${String(slide.blockId)}, which the Canvas does not hold.`,
+      );
+    }
+    if (kind !== undefined && !isCanvasDeckSlideKind(kind)) {
+      reject(
+        "deck-slide-kind-refused",
+        `${name} cannot show a ${kind} block; a slide is a ${CANVAS_DECK_SLIDE_KINDS.join(", ")} block.`,
+      );
+    }
+    const placed = blocks.find((candidate) => String(candidate.blockId) === String(slide.blockId));
+    if (placed?.kind === "design") {
+      // A running frame is the prototype tier and keeps its own Run; a deck
+      // presents the document's finished screens, exactly as a flow's screen
+      // refuses one.
+      if (placed.runsScript === true) {
+        reject(
+          "deck-slide-design-refused",
+          `${name} shows design ${String(slide.blockId)}, which runs script; a deck slide is a static frame.`,
+        );
+      }
+      if (slide.frameId === undefined) {
+        reject(
+          "deck-slide-frame-missing",
+          `${name} shows design ${String(slide.blockId)} without naming one of its frames.`,
+        );
+      }
+      if (
+        slide.frameId !== undefined &&
+        !placed.frames.some((frame) => String(frame.frameId) === String(slide.frameId))
+      ) {
+        reject(
+          "deck-slide-frame-missing",
+          `${name} shows frame ${String(slide.frameId)}, which design ${String(slide.blockId)} does not hold.`,
+        );
+      }
+    }
+    if (placed?.kind === "mockup") {
+      if (placed.variants !== undefined && slide.variantId === undefined) {
+        reject(
+          "deck-slide-variant-missing",
+          `${name} shows mockup ${String(slide.blockId)} without naming one of its variants.`,
+        );
+      }
+      if (
+        slide.variantId !== undefined &&
+        !placed.variants?.some((variant) => String(variant.variantId) === String(slide.variantId))
+      ) {
+        reject(
+          "deck-slide-variant-missing",
+          `${name} shows variant ${String(slide.variantId)}, which mockup ${String(slide.blockId)} does not declare.`,
+        );
+      }
+    }
+  }
+}
+
+/**
+ * Whether a design frame's markup holds an anchor with this id that links to
+ * the screen: `<a id="go" href="#octant-flow:results">`. Attributes are read
+ * whole, in either quote style, so `data-id="go"` or the text `id="go"` in a
+ * paragraph is not mistaken for the anchor.
+ */
+function designFrameLinksTo(html: string, id: string, screenId: string): boolean {
+  for (const tag of html.matchAll(/<a\b[^>]*>/gi)) {
+    const attributes = new Map<string, string>();
+    for (const attribute of tag[0].matchAll(
+      /([^\s"'<>/=]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g,
+    )) {
+      const name = attribute[1]?.toLowerCase();
+      if (name !== undefined)
+        attributes.set(name, attribute[2] ?? attribute[3] ?? attribute[4] ?? "");
+    }
+    if (attributes.get("id") === id && attributes.get("href") === `#octant-flow:${screenId}`) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function validateFlow(
+  block: Extract<CanvasBlock, { readonly kind: "flow" }>,
+  blocks: ReadonlyArray<CanvasBlock>,
+): void {
+  if (block.screens.length > CANVAS_MAX_FLOW_SCREENS) {
+    reject(
+      "flow-screens-budget-exceeded",
+      `Canvas flow ${block.blockId} places more than ${String(CANVAS_MAX_FLOW_SCREENS)} screens.`,
+    );
+  }
+  if (block.edges.length > CANVAS_MAX_FLOW_EDGES) {
+    reject(
+      "flow-edges-budget-exceeded",
+      `Canvas flow ${block.blockId} holds more than ${String(CANVAS_MAX_FLOW_EDGES)} edges.`,
+    );
+  }
+  const byId = new Map(blocks.map((candidate) => [String(candidate.blockId), candidate]));
+  const screenIds = new Set<string>();
+  const mockupByScreenId = new Map<string, Extract<CanvasBlock, { readonly kind: "mockup" }>>();
+  const screensById = new Map<
+    string,
+    { screen: CanvasFlowScreen; design?: Extract<CanvasBlock, { readonly kind: "design" }> }
+  >();
+  for (const screen of block.screens) {
+    const screenId = String(screen.screenId);
+    if (screenIds.has(screenId)) {
+      reject(
+        "duplicate-flow-screen",
+        `Canvas flow ${block.blockId} has two screens with the id ${screenId}.`,
+      );
+    }
+    screenIds.add(screenId);
+    const placed = byId.get(String(screen.blockId));
+    if (placed === undefined) {
+      reject(
+        "dangling-flow-screen",
+        `Canvas flow ${block.blockId} places block ${String(screen.blockId)}, which the Canvas does not hold.`,
+      );
+    }
+    if (placed.kind !== "mockup" && placed.kind !== "design") {
+      reject(
+        "flow-screen-kind-refused",
+        `Canvas flow ${block.blockId} cannot place a ${placed.kind} block; a screen is a mockup or a design.`,
+      );
+    }
+    screensById.set(screenId, {
+      screen,
+      ...(placed.kind === "design" ? { design: placed } : {}),
+    });
+    if (placed.kind === "mockup") {
+      mockupByScreenId.set(screenId, placed);
+      if (placed.variants !== undefined && screen.variantId === undefined) {
+        reject(
+          "flow-screen-variant-missing",
+          `Canvas flow ${block.blockId} places mockup ${String(screen.blockId)} without naming one of its variants.`,
+        );
+      }
+      if (
+        screen.variantId !== undefined &&
+        !placed.variants?.some((variant) => String(variant.variantId) === String(screen.variantId))
+      ) {
+        reject(
+          "flow-screen-variant-missing",
+          `Canvas flow ${block.blockId} places variant ${String(screen.variantId)}, which mockup ${String(screen.blockId)} does not declare.`,
+        );
+      }
+      continue;
+    }
+    if (placed.runsScript === true) {
+      reject(
+        "flow-screen-design-refused",
+        `Canvas flow ${block.blockId} places design ${String(screen.blockId)}, which runs script; a flow screen is a static frame.`,
+      );
+    }
+    if (screen.frameId === undefined) {
+      reject(
+        "flow-screen-frame-missing",
+        `Canvas flow ${block.blockId} places design ${String(screen.blockId)} without naming one of its frames.`,
+      );
+    }
+    if (
+      screen.frameId !== undefined &&
+      !placed.frames.some((frame) => String(frame.frameId) === String(screen.frameId))
+    ) {
+      reject(
+        "flow-screen-frame-missing",
+        `Canvas flow ${block.blockId} places frame ${String(screen.frameId)}, which design ${String(screen.blockId)} does not hold.`,
+      );
+    }
+  }
+  const edgeIds = new Set<string>();
+  for (const edge of block.edges) {
+    const edgeId = String(edge.edgeId);
+    if (edgeIds.has(edgeId)) {
+      reject(
+        "duplicate-flow-edge",
+        `Canvas flow ${block.blockId} has two edges with the id ${edgeId}.`,
+      );
+    }
+    edgeIds.add(edgeId);
+    if (!screenIds.has(String(edge.fromScreenId)) || !screenIds.has(String(edge.toScreenId))) {
+      reject(
+        "dangling-flow-edge",
+        `Canvas flow ${block.blockId} has an edge to a screen it does not hold.`,
+      );
+    }
+    if (String(edge.fromScreenId) === String(edge.toScreenId)) {
+      reject("flow-edge-self", `Canvas flow ${block.blockId} has an edge from a screen to itself.`);
+    }
+    if (edge.fromNodeId === undefined) continue;
+    const fromScreen = screensById.get(String(edge.fromScreenId));
+    const mockup = mockupByScreenId.get(String(edge.fromScreenId));
+    if (fromScreen === undefined) continue;
+    if (mockup !== undefined) {
+      const hotspot = mockup.nodes.find((node) => String(node.nodeId) === String(edge.fromNodeId));
+      if (hotspot === undefined || !FLOW_HOTSPOT_COMPONENTS.has(hotspot.component)) {
+        reject(
+          "flow-hotspot-refused",
+          `Canvas flow ${block.blockId} edge ${edgeId} names a hotspot the screen's mockup does not offer; a hotspot is a button, list row, navigation item, tab, select, checkbox, or toggle.`,
+        );
+      }
+      continue;
+    }
+    // A design screen's hotspot is an anchor in its frame's own markup: the
+    // author writes <a id="<fromNodeId>" href="#octant-flow:<toScreenId>">, so
+    // a finished screen participates in the click-through and the edge stays
+    // the authority on where the anchor goes. A rolled-back runtime refuses
+    // this edge whole (fail closed), so no schema bump is needed for the
+    // widening.
+    const design = fromScreen?.design;
+    if (design === undefined) {
+      reject(
+        "flow-hotspot-refused",
+        `Canvas flow ${block.blockId} edge ${edgeId} names a hotspot on a screen that is neither a mockup nor a design.`,
+      );
+    }
+    const frame =
+      design?.frames.find(
+        (authored) => String(authored.frameId) === String(fromScreen.screen.frameId),
+      ) ?? undefined;
+    if (
+      frame === undefined ||
+      !designFrameLinksTo(frame.html, String(edge.fromNodeId), String(edge.toScreenId))
+    ) {
+      reject(
+        "flow-hotspot-refused",
+        `Canvas flow ${block.blockId} edge ${edgeId} names the anchor ${String(edge.fromNodeId)}, which the screen's design frame does not hold as a link to ${String(edge.toScreenId)}; write <a id="${String(edge.fromNodeId)}" href="#octant-flow:${String(edge.toScreenId)}"> on the element the person taps.`,
+      );
+    }
+  }
+  // Callouts pin to a flow's screens: the marker draws on the board node and
+  // a comment on it anchors to the screen's node.
+  if ((block.annotations ?? []).length > CANVAS_MAX_FLOW_ANNOTATIONS) {
+    reject(
+      "flow-annotations-budget-exceeded",
+      `Canvas flow ${block.blockId} pins more than ${String(CANVAS_MAX_FLOW_ANNOTATIONS)} callouts.`,
+    );
+  }
+  const annotated = new Set<string>();
+  for (const annotation of block.annotations ?? []) {
+    const id = String(annotation.nodeId);
+    if (!screenIds.has(id)) {
+      reject(
+        "dangling-flow-annotation",
+        `Canvas flow ${block.blockId} pins a callout to ${id}, which it does not hold.`,
+      );
+    }
+    if (annotated.has(id)) {
+      reject(
+        "duplicate-flow-annotation",
+        `Canvas flow ${block.blockId} pins two callouts to ${id}.`,
+      );
+    }
+    annotated.add(id);
+    if (annotation.note.length > CANVAS_MAX_FLOW_ANNOTATION_LENGTH) {
+      reject(
+        "mockup-text-budget-exceeded",
+        `Canvas flow ${block.blockId} has a callout longer than ${String(CANVAS_MAX_FLOW_ANNOTATION_LENGTH)} characters.`,
+      );
     }
   }
 }
@@ -1711,13 +1975,159 @@ const MOCKUP_FIELD_COMPONENTS: ReadonlyArray<{
   readonly components: ReadonlyArray<CanvasMockupComponent>;
 }> = [
   { field: "on", components: ["toggle", "checkbox", "list-row"] },
-  { field: "value", components: ["form-field", "select"] },
+  { field: "value", components: ["form-field", "select", "search", "hero"] },
   { field: "tone", components: ["button", "badge", "toast"] },
   { field: "icon", components: ["icon", "button", "list-row"] },
   { field: "columns", components: ["table"] },
   { field: "rows", components: ["table"] },
   { field: "gridColumns", components: ["grid"] },
 ];
+
+/**
+ * What the mockup library added: a field belongs to the components that read
+ * it (a progress reading to progress, slider, and stepper; a defId to an
+ * instance), and a reusable definition is a small fixed subtree placed by
+ * instances. A definition is unique and within its budgets, its nodes count
+ * against the block's own node budget, it has exactly one top-level node (the
+ * one an instance places), every parent it names is its own node, and it
+ * never holds an instance, so a placed tree is acyclic by construction. Node
+ * ids are unique across the screen and every definition, so a callout, a
+ * comment, or a flow hotspot names exactly one node. An instance draws its
+ * definition and nothing else, so it names one and holds no children.
+ */
+function validateMockupLibrary(block: Extract<CanvasBlock, { readonly kind: "mockup" }>): void {
+  const name = `Canvas mockup ${block.blockId}`;
+  const progressComponents = new Set(["progress", "slider", "stepper"]);
+  const checkFields = (node: CanvasMockupNode, where: string): void => {
+    const id = String(node.nodeId);
+    if (node.progress !== undefined && !progressComponents.has(node.component)) {
+      reject(
+        "mockup-field-refused",
+        `${where} gives ${node.component} ${id} a progress reading; only progress, slider, and stepper take one.`,
+      );
+    }
+    if (node.defId !== undefined && node.component !== "instance") {
+      reject(
+        "mockup-field-refused",
+        `${where} gives ${node.component} ${id} a definition reference; only an instance takes one.`,
+      );
+    }
+  };
+  for (const node of block.nodes) checkFields(node, name);
+
+  const defIds = new Set<string>();
+  const nodeIds = new Set(block.nodes.map((node) => String(node.nodeId)));
+  let definitionNodes = 0;
+  const definitions = block.definitions ?? [];
+  if (definitions.length > CANVAS_MAX_MOCKUP_DEFINITIONS) {
+    reject(
+      "mockup-definitions-budget-exceeded",
+      `${name} declares more than ${String(CANVAS_MAX_MOCKUP_DEFINITIONS)} reusable components.`,
+    );
+  }
+  for (const definition of definitions) {
+    const defId = String(definition.defId);
+    const where = `${name} component ${defId}`;
+    if (defIds.has(defId)) {
+      reject("duplicate-mockup-definition", `${name} declares component ${defId} twice.`);
+    }
+    defIds.add(defId);
+    if (definition.nodes.length > CANVAS_MAX_MOCKUP_DEFINITION_NODES) {
+      reject(
+        "mockup-definitions-budget-exceeded",
+        `${where} holds more than ${String(CANVAS_MAX_MOCKUP_DEFINITION_NODES)} nodes.`,
+      );
+    }
+    definitionNodes += definition.nodes.length;
+    const parents = new Map<string, string | undefined>();
+    for (const node of definition.nodes) {
+      const id = String(node.nodeId);
+      if (nodeIds.has(id)) {
+        reject(
+          "duplicate-node-id",
+          `${where} reuses node id ${id}; every node of a mockup, on its screen or in a component, has its own id.`,
+        );
+      }
+      nodeIds.add(id);
+      parents.set(id, node.parentId === undefined ? undefined : String(node.parentId));
+      if (node.component === "instance") {
+        reject(
+          "mockup-definition-nested",
+          `${where} places an instance; a reusable component holds a plain subtree.`,
+        );
+      }
+      if (node.variantId !== undefined) {
+        reject(
+          "mockup-field-refused",
+          `${where} gives ${id} a variant; a component follows the variant of the screen that places it.`,
+        );
+      }
+      if (
+        node.label.length > CANVAS_MAX_MOCKUP_TEXT_LENGTH ||
+        (node.value !== undefined && node.value.length > CANVAS_MAX_MOCKUP_TEXT_LENGTH)
+      ) {
+        reject(
+          "mockup-text-budget-exceeded",
+          `${where} has text longer than ${CANVAS_MAX_MOCKUP_TEXT_LENGTH} characters.`,
+        );
+      }
+      for (const rule of MOCKUP_FIELD_COMPONENTS) {
+        if (node[rule.field] !== undefined && !rule.components.includes(node.component)) {
+          reject(
+            "mockup-field-refused",
+            `${where} gives ${node.component} ${id} the ${rule.field} field; only ${rule.components.join(", ")} draw it.`,
+          );
+        }
+      }
+      checkFields(node, where);
+    }
+    if ([...parents.values()].filter((parent) => parent === undefined).length !== 1) {
+      reject(
+        "mockup-definition-shape",
+        `${where} needs exactly one top-level node: the one an instance places.`,
+      );
+    }
+    for (const [id, parentId] of parents) {
+      if (parentId !== undefined && !parents.has(parentId)) {
+        reject(
+          "dangling-mockup-parent",
+          `${where} nests ${id} under a node the component does not hold.`,
+        );
+      }
+      const seen = new Set<string>([id]);
+      for (let current = parentId; current !== undefined; current = parents.get(current)) {
+        if (seen.has(current)) {
+          reject("mockup-nesting-cycle", `${where} nests a node inside itself.`);
+        }
+        seen.add(current);
+      }
+    }
+  }
+  if (block.nodes.length + definitionNodes > CANVAS_MAX_MOCKUP_NODES) {
+    reject(
+      "mockup-node-budget-exceeded",
+      `${name} holds more than ${String(CANVAS_MAX_MOCKUP_NODES)} nodes across its screen and its components.`,
+    );
+  }
+  for (const node of block.nodes) {
+    if (node.component !== "instance") continue;
+    const id = String(node.nodeId);
+    if (node.defId === undefined || !defIds.has(String(node.defId))) {
+      reject(
+        "dangling-mockup-definition",
+        node.defId === undefined
+          ? `${name} instance ${id} names no component to place.`
+          : `${name} places component ${String(node.defId)}, which the block does not define.`,
+      );
+    }
+    if (block.nodes.some((child) => String(child.parentId) === id)) {
+      reject(
+        "mockup-definition-shape",
+        `${name} instance ${id} holds children; an instance draws its component and nothing else.`,
+      );
+    }
+  }
+}
 
 /**
  * A mockup's nodes name their parent. A chain longer than the depth limit, a
@@ -1732,6 +2142,7 @@ function validateMockup(
   declared: number,
 ): void {
   const catalog = declared >= CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION;
+  validateMockupLibrary(block);
   const maxDepth = catalog ? CANVAS_MAX_MOCKUP_DEPTH : CANVAS_MOCKUP_LEGACY_MAX_DEPTH;
   const maxNodes = catalog ? CANVAS_MAX_MOCKUP_NODES : CANVAS_MOCKUP_LEGACY_MAX_NODES;
   const name = `Canvas mockup ${block.blockId}`;

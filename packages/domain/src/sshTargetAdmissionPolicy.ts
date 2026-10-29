@@ -235,12 +235,6 @@ export function decideSshAdmission(request: SshAdmissionRequest): SshAdmissionDe
   const platform = supportedPlatform(facts.platform.operatingSystem);
   if (platform === undefined) return refused("unsupported-platform");
   if (facts.platform.uid === 0) return refused("remote-root-user");
-  // A placed runtime always runs proxied or offline, and on macOS the proxied
-  // forwarder would be a loopback port the executor listens on, which no
-  // design has settled; so runtimes are placed on Linux targets only.
-  if (request.subject.kind === "provider-runtime" && platform === "macos") {
-    return refused("runtime-not-attestable");
-  }
 
   // Every posture launches through the same backend and executor, so an
   // escape in one is not evidence Octant can discount in another.

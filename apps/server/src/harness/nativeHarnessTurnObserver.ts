@@ -121,7 +121,6 @@ export class NativeHarnessTurnObserver {
    * after a restart until a person has looked.
    */
   admitTurn(scope: NativeHarnessTurnScope): NativeHarnessTurnAdmission {
-    if (!this.#options.isHarnessProvider(scope.providerInstanceId)) return { kind: "admitted" };
     const session = this.#options.sessions.read(scope.threadId)?.session;
     if (
       session?.status === "paused-by-advisor" ||
@@ -149,7 +148,6 @@ export class NativeHarnessTurnObserver {
    * so that race cannot charge the native session for the same turn twice.
    */
   turnEnded(scope: NativeHarnessTurnScope, turn?: TurnEndSummary): void {
-    if (!this.#options.isHarnessProvider(scope.providerInstanceId)) return;
     const response = this.#completedResponses.get(scope.threadId);
     this.#completedResponses.delete(scope.threadId);
     const finalTurn = turn ?? response?.turn;
@@ -179,7 +177,6 @@ export class NativeHarnessTurnObserver {
   }
 
   turnStarted(scope: NativeHarnessTurnScope): void {
-    if (!this.#options.isHarnessProvider(scope.providerInstanceId)) return;
     this.#options.sessions.ensure({
       threadId: scope.threadId,
       mode: scope.mode,

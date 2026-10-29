@@ -55,6 +55,9 @@ final class PrivacyCover {
   private var inactive = Set<ObjectIdentifier>()
   private var covers: [ObjectIdentifier: Cover] = [:]
   private var observers: [NSObjectProtocol] = []
+  /// Scenes whose capture state is already watched (iOS 17 and later).
+  private var watched = Set<ObjectIdentifier>()
+  private var traitRegistrations: [Any] = []
 
   func start() {
     if started { return }
@@ -108,17 +111,43 @@ final class PrivacyCover {
     UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
   }
 
+  /// Recording, AirPlay mirroring, and a wired capture. From iOS 17 the scene
+  /// reports its own capture state, which is what an iPad with several scenes
+  /// needs; earlier systems only have the screen's flag.
+  private func isCaptured(_ scene: UIWindowScene) -> Bool {
+    if #available(iOS 17.0, *) {
+      return scene.traitCollection.sceneCaptureState == .active
+    }
+    return scene.screen.isCaptured
+  }
+
+  /// A scene's capture state can change without the screen posting anything,
+  /// so from iOS 17 each connected scene is watched for it directly.
+  private func watchCaptureState(of scene: UIWindowScene) {
+    guard #available(iOS 17.0, *) else { return }
+    if !watched.insert(ObjectIdentifier(scene)).inserted { return }
+    // Every call here runs on the main thread, which `assumeIsolated` asserts.
+    let registration = MainActor.assumeIsolated {
+      scene.registerForTraitChanges([UITraitSceneCaptureState.self]) {
+        [weak self] (_: UIWindowScene, _: UITraitCollection) in
+        self?.update()
+      }
+    }
+    traitRegistrations.append(registration)
+  }
+
   private func update() {
     let scenes = windowScenes()
+    for scene in scenes { watchCaptureState(of: scene) }
     let connected = Set(scenes.map { ObjectIdentifier($0) })
+    watched.formIntersection(connected)
     for (id, cover) in covers where !connected.contains(id) {
       cover.window.isHidden = true
       covers[id] = nil
     }
     for scene in scenes {
       let id = ObjectIdentifier(scene)
-      // `isCaptured` covers recording, AirPlay mirroring, and a wired capture.
-      let captured = scene.screen.isCaptured
+      let captured = isCaptured(scene)
       if enabled && (captured || inactive.contains(id)) {
         let cover = covers[id] ?? makeCover(on: scene)
         covers[id] = cover
