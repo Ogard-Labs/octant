@@ -57,7 +57,7 @@ const offer = decodeHubOfferBody({
   trigger: { kind: "interval", anchorAt: "2026-11-01T08:00:00.000Z", intervalMinutes: 1_440 },
 }) as RoutineOffer;
 
-function host(overrides: Partial<RoutineOfferDependencies> = {}) {
+function host(overrides: Partial<RoutineOfferDependencies> = {}, commands: Array<string> = []) {
   const directory = mkdtempSync(join(tmpdir(), "octant-routine-offer-"));
   directories.push(directory);
   const connection = openSqlite(join(directory, "events.sqlite3"));
@@ -95,7 +95,12 @@ function host(overrides: Partial<RoutineOfferDependencies> = {}) {
       instanceId: AUTOMATION_TEST_IDS.providerInstance,
       modelId: "approved-model",
     }),
-    automations,
+    automations: {
+      execute: (command) => {
+        commands.push(command.kind);
+        return automations.execute(command);
+      },
+    },
     uuid,
     clock: () => AUTOMATION_TEST_NOW,
     ...overrides,
@@ -121,6 +126,16 @@ describe("a routine the hub offered, built on this host", () => {
         effective: { shell: false, git: false, executionPolicy: "approval-gated" },
       },
     });
+  });
+
+  it("is journaled paused from its first event, with no later pause step", async () => {
+    const commands: Array<string> = [];
+    const { author, projection } = host({}, commands);
+
+    await author(offer, PROJECT_ID);
+
+    expect(commands).toEqual(["create-automation"]);
+    expect(projection.listDefinitions()[0]).toMatchObject({ lifecycle: "paused", version: 1 });
   });
 
   it("is refused for a Project this host does not hold as an active Work Project, and makes nothing", async () => {

@@ -14,7 +14,6 @@ import {
   type AgentRunAuthority,
   type AutomationCommand,
   type AutomationCommandResult,
-  type AutomationId,
   type RoutineOffer,
 } from "@octant/contracts";
 import type { AgentProfile } from "@octant/contracts/agent-profile";
@@ -139,52 +138,16 @@ export function createRoutineOfferAuthor(deps: RoutineOfferDependencies) {
           principal,
           origin: { kind: "interactive" },
           definition: draft,
+          // Paused in its first journaled event, so a host that stops right after
+          // creating it cannot restore a routine that runs before the person resumes it.
+          initialLifecycle: "paused",
         }),
       );
-      if (created.kind !== "automation-created") return failed;
-      // Created enabled, so it is paused straight away: it runs only after the
-      // person resumes it, and a routine that cannot be paused is withdrawn.
-      const paused = deps.automations.execute(
-        decodeAutomationCommand({
-          kind: "pause-automation",
-          automationId,
-          expectedVersion: created.automation.version,
-          principal,
-          origin: { kind: "interactive" },
-        }),
-      );
-      if (paused.kind === "automation-paused") return { status: "applied" };
-      withdraw(deps, automationId, created.automation.version, principal);
-      return failed;
+      return created.kind === "automation-created" ? { status: "applied" } : failed;
     } catch {
       return failed;
     }
   };
-}
-
-function withdraw(
-  deps: RoutineOfferDependencies,
-  automationId: AutomationId,
-  expectedVersion: number,
-  principal: {
-    readonly kind: "local-window";
-    readonly windowId: string;
-    readonly capabilityGeneration: number;
-  },
-): void {
-  try {
-    deps.automations.execute(
-      decodeAutomationCommand({
-        kind: "archive-automation",
-        automationId,
-        expectedVersion,
-        principal,
-        origin: { kind: "interactive" },
-      }),
-    );
-  } catch {
-    // The routine stays as the host last held it; the apply is reported failed either way.
-  }
 }
 
 /**

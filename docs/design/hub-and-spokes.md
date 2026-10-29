@@ -1229,8 +1229,9 @@ maintainer's hardware, or names the maintainer gate.
       `kind-unsupported`); the profile is the first approval-gated one compatible
       with Work, and the model is Work's own default, so a host with neither refuses
       (`apply-failed`) rather than widen anything; authority is Work's, with no
-      shell or Git; and the routine is created paused, so it runs only after the
-      person resumes it in Automation Center. It is recorded under the host's own
+      shell or Git; and the routine is journaled paused from its first event (one create
+      command with a paused initial state, never a create then a pause), so it runs
+      only after the person resumes it in Automation Center. It is recorded under the host's own
       scope, never the hub's. The receipt derivations repeat the editor's.
     - **Journal.** Offers made and withdrawn, proposals received, applied (the
       principal and whether a person or the standing choice did it), dismissed, and
