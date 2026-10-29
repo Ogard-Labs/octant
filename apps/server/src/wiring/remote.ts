@@ -464,9 +464,9 @@ export function wireRemote(deps: RemoteDependencies) {
       host: createWorkDelegationHost({
         readProject: (projectId) => persistence.readProject(projectId),
         isWorkEnabled: () =>
-          enabledModes(persistence.readShellSettings()?.settings ?? defaultShellSettings()).includes(
-            "work",
-          ),
+          enabledModes(
+            persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+          ).includes("work"),
         threads: {
           execute: async (scope, command) =>
             workThreadServiceWithWorkflows.execute(scope, command as never),
