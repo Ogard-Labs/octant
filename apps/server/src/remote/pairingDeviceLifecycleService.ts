@@ -524,6 +524,81 @@ export class PairingDeviceLifecycleService {
     return { decision, device };
   }
 
+  /**
+   * Registers a device the host's own person did not approve one by one: a
+   * guest the hub vouched for and this host's Introduce item accepted. The
+   * caller has already checked the roster and the key's proof of possession.
+   * The device is an ordinary paired device from here on, with the same
+   * credential lifecycle, expiry, and revocation.
+   */
+  admitIntroducedDevice(input: {
+    readonly devicePublicKey: string;
+    readonly deviceLabel: string;
+    readonly origin: string;
+    readonly sourceClass: Exclude<SourceClass, "unknown">;
+  }): DeviceRegistrationV1 {
+    const label = normalizeDeviceLabel(input.deviceLabel);
+    const keyFacts = canonicalDeviceKeyFacts(input.devicePublicKey);
+    if (label.kind === "rejected" || keyFacts === undefined) {
+      throw new PairingDeviceLifecycleError("invalid", "Introduced device is invalid.");
+    }
+    const now = this.#now();
+    const createdAt = now;
+    const device = decodeDeviceRegistrationV1({
+      hostId: this.#hostId,
+      deviceId: this.#uuid() as DeviceId,
+      deviceKeyFingerprint: keyFacts.fingerprint,
+      devicePublicKey: keyFacts.canonicalPem,
+      deviceLabel: label.deviceLabel,
+      origin: input.origin,
+      protocolFloor: 1,
+      credentialGeneration: 1,
+      createdAt: new Date(createdAt).toISOString(),
+      expiresAt: new Date(nextDeviceExpiry({ createdAt, lastSeenAt: createdAt })).toISOString(),
+      lastSeenAt: new Date(createdAt).toISOString(),
+      state: "active",
+    });
+    const correlationId = this.#correlationId();
+    this.#journal.append({
+      aggregate: { aggregateType: "remote-device", aggregateId: device.deviceId },
+      expectedVersion: this.#aggregateVersion("remote-device", device.deviceId),
+      events: [
+        {
+          eventId: this.#uuid(),
+          eventName: REMOTE_ACCESS_EVENT_NAMES.deviceRegistered,
+          eventVersion: 1,
+          correlationId,
+          actor: { kind: "system", actorId: this.#actorId() },
+          occurredAt: new Date(now).toISOString(),
+          payload: { device },
+        },
+        {
+          eventId: this.#uuid(),
+          eventName: REMOTE_ACCESS_EVENT_NAMES.securityAuditRecorded,
+          eventVersion: 1,
+          correlationId,
+          actor: { kind: "system", actorId: this.#actorId() },
+          occurredAt: new Date(now).toISOString(),
+          payload: {
+            record: {
+              eventKind: "device-approved",
+              hostId: this.#hostId,
+              deviceId: device.deviceId,
+              protocolVersion: 1,
+              credentialGeneration: 1,
+              sourceClass: input.sourceClass,
+              resultCategory: "approved",
+              reasonCode: "hub-introduced",
+              correlationId,
+              occurredAt: new Date(now).toISOString(),
+            },
+          },
+        },
+      ],
+    });
+    return device;
+  }
+
   denyTicket(input: DenyPairingTicketInput): PairingDecisionV1 {
     const now = this.#now();
     this.#purgeExpired(now);

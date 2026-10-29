@@ -132,6 +132,13 @@ export const PeerGrant = Schema.Struct({
 }).annotations(strict);
 export type PeerGrant = typeof PeerGrant.Type;
 
+/**
+ * The pin a guest's roster entry holds. A guest runs no listener, so it has
+ * nothing to pin; the all-zero digest names no certificate and no member is
+ * ever held to it.
+ */
+export const NO_LISTENER_PIN = "0".repeat(64);
+
 export const RosterMember = Schema.Struct({
   memberId: HubMemberId,
   name: bounded(128),
@@ -140,6 +147,8 @@ export const RosterMember = Schema.Struct({
   listenerPin: digest,
   privateNames: Schema.Array(bounded(253)).pipe(Schema.maxItems(16)),
   addresses: Schema.Array(bounded(64)).pipe(Schema.maxItems(16)),
+  /** The port the member's listener serves on; absent means the HTTPS default. */
+  listenerPort: Schema.optional(Schema.Int.pipe(Schema.between(1, 65_535))),
   owner: Schema.Boolean,
 }).annotations(strict);
 export type RosterMember = typeof RosterMember.Type;

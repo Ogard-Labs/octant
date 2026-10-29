@@ -153,7 +153,7 @@ describe("a listener fetch over the phone's pinned exchange", () => {
     expect(host.port.open).not.toHaveBeenCalled();
   });
 
-  it("dials the resolved private address for a named origin and sends the name for the handshake", async () => {
+  it("dials the resolved private address for a named origin and sends no name for the handshake", async () => {
     const host = listener({ served: PIN, addresses: ["100.101.102.103"] });
     const fetch = createExchangeListenerFetch({
       origin: "https://studio.tail1234.ts.net:8443",
@@ -163,10 +163,7 @@ describe("a listener fetch over the phone's pinned exchange", () => {
 
     await fetch("https://studio.tail1234.ts.net:8443/api/remote/hello");
 
-    expect(host.sent[0]).toMatchObject({
-      address: "100.101.102.103",
-      serverName: "studio.tail1234.ts.net",
-    });
+    expect(host.sent[0]).toMatchObject({ address: "100.101.102.103", serverName: undefined });
   });
 
   it("accepts a staged key only inside its window", async () => {

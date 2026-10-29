@@ -8,6 +8,8 @@ import { InboxHomeScreen } from "../inbox/InboxHomeScreen";
 import { backMobileHomeView, type MobileHomeView } from "../inbox/homeView";
 import { ThreadScreen } from "../inbox/ThreadScreen";
 import { hostHealthTone } from "../hosts/hostHealthTone";
+import { GuestHubPanel, GuestHubRefusals } from "../hosts/GuestHubPanel";
+import type { GuestSpokeRefusal } from "../hosts/hubGuestFlow";
 import { PairingPanel } from "../hosts/PairingPanel";
 import { RemoveHostPanel } from "../hosts/RemoveHostPanel";
 import { createUnavailableNotificationPermissionPort } from "../notifications/notificationPermissionPort";
@@ -52,10 +54,19 @@ function HostsBody(props: {
     bridge,
     deviceKeyStore,
     hub,
+    guestHubStore,
     transportForHost,
     placementHostId,
     setPlacementHostId,
   } = useMobileSession();
+  const [notAccepted, setNotAccepted] = useState<ReadonlyArray<GuestSpokeRefusal>>([]);
+  useEffect(() => {
+    // The computers on a joined hub that refused this phone are listed beside the hosts.
+    void guestHubStore
+      .load()
+      .then((state) => setNotAccepted(state?.notAccepted ?? []))
+      .catch(() => undefined);
+  }, [guestHubStore, hosts]);
   const [keyNotDeleted, setKeyNotDeleted] = useState(false);
   const [removeFailed, setRemoveFailed] = useState(false);
   const removeMobileHostInTurn = useMemo(
@@ -199,16 +210,29 @@ function HostsBody(props: {
               </Text>
             </View>
           ) : (
-            <PairingPanel
-              registry={registry}
-              deviceKeyStore={deviceKeyStore}
-              bridge={bridge}
-              openScanner={props.entryMode === "scan"}
-              onPaired={() => {
-                void refreshHosts();
-                props.onPaired();
-              }}
-            />
+            <>
+              <PairingPanel
+                registry={registry}
+                deviceKeyStore={deviceKeyStore}
+                bridge={bridge}
+                openScanner={props.entryMode === "scan"}
+                onPaired={() => {
+                  void refreshHosts();
+                  props.onPaired();
+                }}
+              />
+              {props.entryMode === "add" ? (
+                <GuestHubPanel
+                  registry={registry}
+                  deviceKeyStore={deviceKeyStore}
+                  guestHubStore={guestHubStore}
+                  removeHost={removeMobileHostInTurn}
+                  onJoined={() => {
+                    void refreshHosts();
+                  }}
+                />
+              ) : null}
+            </>
           )
         ) : (
           <>
@@ -233,6 +257,7 @@ function HostsBody(props: {
                 {MOBILE_COPY.hostKeyNotDeleted}
               </Text>
             ) : null}
+            <GuestHubRefusals refused={notAccepted} />
             {hosts.length === 0 ? (
               <Text style={styles.sectionBody}>{MOBILE_COPY.hostsEmpty}</Text>
             ) : (

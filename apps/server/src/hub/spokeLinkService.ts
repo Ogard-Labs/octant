@@ -10,6 +10,7 @@ import {
   type AuditActingPrincipal,
   type HubGrant,
   type HubGrantItem,
+  type HubGuestAdmissionRequest,
   type HubJoinRequest,
   type HubMemberId,
   type HubPrincipal,
@@ -20,7 +21,9 @@ import {
   authorizeHubRequest,
   decideRosterReplacement,
   defaultHubGrant,
+  evaluateDeviceRegistration,
   hubRosterSigningPayload,
+  introduceGuests,
   reconcileHeldGrants,
   type RosterReplacement,
 } from "@octant/domain";
@@ -36,13 +39,90 @@ import { readPrivateListener } from "./privateListenerReading";
 
 const decodeMemberId = Schema.decodeUnknownSync(HubMemberIdSchema);
 
+/**
+ * Whether a paired device can still sign in: `expired` once its inactivity or
+ * absolute window has passed, `unknown` when this host holds no such device.
+ */
+export type SpokeDeviceLifecycle = "active" | "expired" | "revoked" | "unknown";
+
+/** What the spoke needs of its own device pairing to admit and drop a guest. */
+export interface SpokeDevicePort {
+  readonly admitIntroducedDevice: (input: {
+    readonly devicePublicKey: string;
+    readonly deviceLabel: string;
+    readonly origin: string;
+    readonly sourceClass: "lan-private" | "tailscale";
+  }) => { readonly deviceId: string };
+  readonly deviceLifecycle: (deviceId: string, now: number) => SpokeDeviceLifecycle;
+  readonly revokeDevice: (deviceId: string) => void;
+}
+
+/** Reads one device's lifecycle from the host's device list under the pairing's own expiry policy. */
+export function deviceLifecycleAt(
+  devices: ReadonlyArray<{
+    readonly deviceId: string;
+    readonly state: "active" | "revoked" | "expired";
+    readonly createdAt: string;
+    readonly lastSeenAt: string;
+  }>,
+  deviceId: string,
+  now: number,
+): SpokeDeviceLifecycle {
+  const device = devices.find((entry) => entry.deviceId === deviceId);
+  if (device === undefined) return "unknown";
+  if (device.state === "revoked") return "revoked";
+  const verdict = evaluateDeviceRegistration({
+    state: device.state,
+    now,
+    createdAt: Date.parse(device.createdAt),
+    lastSeenAt: Date.parse(device.lastSeenAt),
+  });
+  return verdict.kind === "active" ? "active" : "expired";
+}
+
+export type GuestAdmission =
+  | { readonly status: "admitted"; readonly spokeMemberId: HubMemberId; readonly deviceId: string }
+  | {
+      readonly status: "refused";
+      readonly kind:
+        | "not-a-spoke"
+        | "hub-revoked"
+        | "missing"
+        | "malformed"
+        | "stale"
+        | "unknown-sender"
+        | "signature-invalid"
+        | "replayed"
+        | "not-in-roster"
+        | "key-mismatch"
+        | "guest-not-accepted"
+        | "listener-not-running"
+        | "listener-not-private"
+        | "listener-has-no-pin"
+        | "devices-unavailable"
+        | "device-revoked";
+    };
+
+const publicKeyPem = (publicKey: string): string => {
+  const body = Buffer.from(publicKey, "base64url").toString("base64");
+  return `-----BEGIN PUBLIC KEY-----\n${body.match(/.{1,64}/g)?.join("\n") ?? body}\n-----END PUBLIC KEY-----`;
+};
+
 export interface SpokeLinkOptions {
   readonly state: HubStatePort;
   readonly identity: () => HubHostIdentity;
   readonly listener: () => PrivateListenerHostStatus;
   readonly transport: HubTransport;
+  /** The paired devices of this host, which an introduced guest becomes one of. */
+  readonly devices: () => SpokeDevicePort | undefined;
   readonly record: (change: {
-    readonly change: "joined-hub" | "left-hub" | "hub-grant-changed" | "roster-accepted";
+    readonly change:
+      | "joined-hub"
+      | "left-hub"
+      | "hub-grant-changed"
+      | "roster-accepted"
+      | "guest-admitted"
+      | "guest-dropped";
     readonly actingPrincipal: AuditActingPrincipal;
     readonly memberId?: HubMemberId;
     readonly sequence?: number;
@@ -90,6 +170,8 @@ export type SpokeLinkStatus =
       readonly hub: { readonly memberId: HubMemberId; readonly name: string };
       readonly grant: HubGrant;
       readonly roster: SignedHubRoster;
+      /** The roster members this host accepted: the ones it gave a peer grant, so a guest among them may knock. */
+      readonly acceptedMemberIds: ReadonlyArray<string>;
     };
 
 export type HubRequestOutcome =
@@ -138,6 +220,7 @@ export class SpokeLinkService {
   }
 
   status(): SpokeLinkStatus {
+    this.settlePendingRevocations();
     const link = this.#options.state.load().link;
     if (link === undefined) return { membership: "none" };
     return {
@@ -145,6 +228,7 @@ export class SpokeLinkService {
       hub: { memberId: link.hubMemberId, name: link.hubName },
       grant: link.grant,
       roster: link.roster,
+      acceptedMemberIds: link.peerGrants.map((grant) => String(grant.memberId)),
     };
   }
 
@@ -273,7 +357,15 @@ export class SpokeLinkService {
         rosterSigningPublicKey: response.hub.rosterSigningPublicKey,
         grant,
         roster: response.roster,
-        peerGrants: [],
+        // Introduce is ticked by default, so guests already in the roster are
+        // accepted here; they still knock before they hold a device.
+        peerGrants: introduceGuests({
+          spokeId: selfMemberId,
+          roster: response.roster.roster,
+          grants: [],
+          introduce: grant.items.includes("introduce"),
+          confirmNewMembers: false,
+        }).grants,
       },
     });
     this.#options.record({
@@ -324,6 +416,9 @@ export class SpokeLinkService {
     if (link === undefined) return { status: "refused", kind: "not-a-spoke" };
     let hubNotified = false;
     if (link.removed !== true) {
+      // Marked before the first await: a guest admitted while the hub is
+      // being told would hold a device no revocation below knows about.
+      this.#options.state.save({ ...state, link: { ...link, leaving: true } });
       const identity = this.#options.identity();
       const body = JSON.stringify({ memberId: link.selfMemberId });
       const answer = await sendHubLinkRequest({
@@ -339,7 +434,19 @@ export class SpokeLinkService {
       });
       hubNotified = answer.status === "answered" && answer.response.ok;
     }
-    this.#options.state.save(state.hub === undefined ? {} : { hub: state.hub });
+    // The link is read again: a roster that arrived while the hub was being
+    // told may have changed which guest devices exist.
+    const current = this.#options.state.load();
+    this.#options.state.save({
+      ...(current.hub === undefined ? {} : { hub: current.hub }),
+      ...(current.pendingDeviceRevocations === undefined
+        ? {}
+        : { pendingDeviceRevocations: current.pendingDeviceRevocations }),
+    });
+    this.#revokeGuestDevices(
+      current.link?.guestDevices ?? link.guestDevices ?? [],
+      link.hubMemberId,
+    );
     this.#pending = undefined;
     this.#options.record({
       change: "left-hub",
@@ -415,12 +522,33 @@ export class SpokeLinkService {
     const listsSelf = candidate.roster.members.some(
       (member) => String(member.memberId) === String(link.selfMemberId),
     );
-    // A spoke the roster no longer lists is out: the hub principal is revoked
-    // and every grant it gave ends. Its threads, Projects, and credentials stay.
+    // A spoke that ticked Introduce accepts a guest the verified roster adds;
+    // one that did not leaves it unaccepted, and the guest's knock is refused.
+    const introduced = introduceGuests({
+      spokeId: link.selfMemberId,
+      roster: candidate.roster,
+      grants: kept,
+      introduce: link.grant.items.includes("introduce"),
+      confirmNewMembers: false,
+    });
+    const guestDevices = link.guestDevices ?? [];
+    const listed = (memberId: HubMemberId) =>
+      candidate.roster.members.some((member) => String(member.memberId) === String(memberId));
+    // A guest the roster no longer lists loses its device here. A spoke the
+    // roster no longer lists is out: the hub principal is revoked and every
+    // grant it gave ends, with the guest devices. Its threads, Projects, and
+    // credentials stay.
+    const droppedDevices = guestDevices.filter((entry) => !listsSelf || !listed(entry.memberId));
     const next: HubLinkState = listsSelf
-      ? { ...link, roster: candidate, peerGrants: kept }
-      : { ...link, roster: candidate, peerGrants: [], removed: true };
+      ? {
+          ...link,
+          roster: candidate,
+          peerGrants: introduced.grants,
+          guestDevices: guestDevices.filter((entry) => listed(entry.memberId)),
+        }
+      : { ...link, roster: candidate, peerGrants: [], guestDevices: [], removed: true };
     this.#options.state.save({ ...state, link: next });
+    this.#revokeGuestDevices(droppedDevices, link.hubMemberId);
     this.#options.record({
       change: "roster-accepted",
       actingPrincipal: { kind: "hub", memberId: link.hubMemberId },
@@ -428,6 +556,159 @@ export class SpokeLinkService {
       sequence: candidate.roster.sequence,
     });
     return { status: "accepted", sequence: candidate.roster.sequence, removed: !listsSelf };
+  }
+
+  /**
+   * A guest asking to be admitted as a paired device here. The hub vouched for
+   * its device key in the roster; this spoke checks that the roster it holds
+   * lists the guest, that the key presented is that key (by fingerprint), that
+   * the request is signed with it, and that this spoke accepted the guest:
+   * Introduce was ticked when a verified roster first listed it. Anything else
+   * is refused before a device is made. The device it gets is an ordinary
+   * paired device; it carries no window authority and no hub grant.
+   */
+  admitGuest(input: {
+    readonly header: string | null;
+    readonly method: string;
+    readonly path: string;
+    readonly body: string;
+    readonly request: HubGuestAdmissionRequest;
+  }): GuestAdmission {
+    this.settlePendingRevocations();
+    const state = this.#options.state.load();
+    const link = state.link;
+    if (link === undefined) return { status: "refused", kind: "not-a-spoke" };
+    if (link.removed === true || link.leaving === true) {
+      return { status: "refused", kind: "hub-revoked" };
+    }
+    const { request } = input;
+    const listed = link.roster.roster.members.find(
+      (member) => String(member.memberId) === String(request.memberId) && member.role === "guest",
+    );
+    if (listed === undefined) return { status: "refused", kind: "not-in-roster" };
+    if (publicKeyFingerprint(request.devicePublicKey) !== listed.identityKeyFingerprint) {
+      return { status: "refused", kind: "key-mismatch" };
+    }
+    const verified = this.#verifier.verify({
+      header: input.header,
+      method: input.method,
+      path: input.path,
+      body: input.body,
+      recipientMemberId: String(link.selfMemberId),
+      publicKeyFor: (sender) =>
+        sender === String(request.memberId) ? request.devicePublicKey : undefined,
+    });
+    if (verified.status === "refused") return { status: "refused", kind: verified.kind };
+    const accepted = link.peerGrants.some(
+      (grant) => String(grant.memberId) === String(request.memberId),
+    );
+    if (!accepted) return { status: "refused", kind: "guest-not-accepted" };
+    const existing = link.guestDevices?.find(
+      (entry) => String(entry.memberId) === String(request.memberId),
+    );
+    const devices = this.#options.devices();
+    if (existing !== undefined) {
+      // Admitted once is not admitted for good: a device unused for its
+      // inactivity window expires, and the phone would keep a credential that
+      // can never sign in. An expired or lost device is replaced; a revoked one
+      // is the person's decision and stays refused.
+      if (devices === undefined) return { status: "refused", kind: "devices-unavailable" };
+      const lifecycle = devices.deviceLifecycle(existing.deviceId, this.#options.now());
+      if (lifecycle === "revoked") return { status: "refused", kind: "device-revoked" };
+      if (lifecycle === "active") {
+        return {
+          status: "admitted",
+          spokeMemberId: link.selfMemberId,
+          deviceId: existing.deviceId,
+        };
+      }
+    }
+    const own = readPrivateListener(this.#options.listener());
+    if (own.status === "refused") return { status: "refused", kind: own.kind };
+    if (devices === undefined) return { status: "refused", kind: "devices-unavailable" };
+    const device = devices.admitIntroducedDevice({
+      devicePublicKey: publicKeyPem(request.devicePublicKey),
+      deviceLabel: request.deviceLabel,
+      origin: own.origin,
+      sourceClass: own.sourceClass,
+    });
+    this.#options.state.save({
+      ...state,
+      link: {
+        ...link,
+        guestDevices: [
+          ...(link.guestDevices ?? []).filter(
+            (entry) => String(entry.memberId) !== String(request.memberId),
+          ),
+          { memberId: request.memberId, deviceId: device.deviceId },
+        ],
+      },
+    });
+    if (existing !== undefined) {
+      try {
+        devices.revokeDevice(existing.deviceId);
+      } catch {
+        // A device this host no longer holds leaves nothing to revoke.
+      }
+    }
+    this.#options.record({
+      change: "guest-admitted",
+      actingPrincipal: { kind: "hub", memberId: link.hubMemberId },
+      memberId: request.memberId,
+      sequence: link.roster.roster.sequence,
+    });
+    return { status: "admitted", spokeMemberId: link.selfMemberId, deviceId: device.deviceId };
+  }
+
+  #revokeGuestDevices(
+    entries: ReadonlyArray<{ readonly memberId: HubMemberId; readonly deviceId: string }>,
+    hubMemberId: HubMemberId,
+  ): void {
+    const devices = this.#options.devices();
+    const unrevoked: string[] = [];
+    for (const entry of entries) {
+      if (devices === undefined) {
+        unrevoked.push(entry.deviceId);
+      } else {
+        try {
+          devices.revokeDevice(entry.deviceId);
+        } catch {
+          // A device already revoked, or one this host no longer holds, leaves nothing to revoke.
+        }
+      }
+      this.#options.record({
+        change: "guest-dropped",
+        actingPrincipal: { kind: "hub", memberId: hubMemberId },
+        memberId: entry.memberId,
+      });
+    }
+    // The device pairing runs with the private listener. A device left active
+    // here would be usable once it starts, so its id is kept until it does.
+    if (unrevoked.length > 0) {
+      const state = this.#options.state.load();
+      this.#options.state.save({
+        ...state,
+        pendingDeviceRevocations: [...(state.pendingDeviceRevocations ?? []), ...unrevoked],
+      });
+    }
+  }
+
+  /** Revokes the guest devices a dropped link could not revoke, as soon as the device pairing exists. */
+  settlePendingRevocations(): void {
+    const state = this.#options.state.load();
+    const pending = state.pendingDeviceRevocations;
+    if (pending === undefined || pending.length === 0) return;
+    const devices = this.#options.devices();
+    if (devices === undefined) return;
+    for (const deviceId of pending) {
+      try {
+        devices.revokeDevice(deviceId);
+      } catch {
+        // A device already revoked, or one this host no longer holds, leaves nothing to revoke.
+      }
+    }
+    const { pendingDeviceRevocations: _settled, ...rest } = state;
+    this.#options.state.save(rest);
   }
 
   /** The status read the hub's Status item allows. */

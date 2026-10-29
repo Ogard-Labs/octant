@@ -46,7 +46,13 @@ import { HubService } from "../hub/hubService";
 import { createHubStateStore } from "../hub/hubStateStore";
 import { createPinnedHubTransport } from "../hub/pinnedHubTransport";
 import { createRosterSigningKeyStore } from "../hub/rosterSigningKey";
-import { SpokeLinkService } from "../hub/spokeLinkService";
+import { deviceLifecycleAt, SpokeLinkService } from "../hub/spokeLinkService";
+import {
+  TailscaleCertificateService,
+  createTailscaleCertificateSetting,
+  createListenerCertificateSink,
+} from "../hub/tailscaleCertificate";
+import { createTailscaleCliDaemon, execTailscale } from "../hub/tailscaleCliDaemon";
 import { createPrivateListenerLifecycleController } from "../remote/privateListenerLifecycleController";
 import {
   resolvePrivateListenerHostIdentity,
@@ -75,6 +81,9 @@ import type { WorkWiring } from "./work";
 import type { CanvasWiring } from "./canvas";
 import type { AutomationWiring } from "./automation";
 import type { RoutesWiring } from "./routes";
+
+const CERTIFICATE_CHECK_MS = 24 * 60 * 60 * 1_000;
+const STARTUP_CERTIFICATE_CHECK_MS = 60 * 1_000;
 
 export type RemoteDependencies = Pick<
   ServerStart,
@@ -286,6 +295,8 @@ export function wireRemote(deps: RemoteDependencies) {
         config,
       });
       currentRemoteGateway = gateway;
+      // Guest devices a left hub could not revoke while no gateway existed.
+      spokeLinkService.settlePendingRevocations();
       return gateway;
     },
     selfMadeCertificate: createSelfMadeListenerCertificateStore({
@@ -335,6 +346,7 @@ export function wireRemote(deps: RemoteDependencies) {
         revokeDevice: (deviceId) => {
           administration.revokeDevice({ deviceId });
         },
+        deviceKeyFingerprint: (deviceId) => gateway.pairedDeviceKeyFingerprint(deviceId),
       };
     },
     transport: hubTransport,
@@ -346,15 +358,47 @@ export function wireRemote(deps: RemoteDependencies) {
     identity: resolveHubIdentity,
     listener: () => privateListenerController.status(),
     transport: hubTransport,
+    devices: () => {
+      const gateway = currentRemoteGateway;
+      const administration = gateway?.localDeviceAdministration();
+      if (gateway === undefined || administration === undefined) return undefined;
+      return {
+        admitIntroducedDevice: (input) => gateway.admitIntroducedDevice(input),
+        deviceLifecycle: (deviceId, now) =>
+          deviceLifecycleAt(administration.listDevices(), deviceId, now),
+        revokeDevice: (deviceId) => {
+          administration.revokeDevice({ deviceId });
+        },
+      };
+    },
     record: recordHubMembership,
     serverBuildVersion: version,
     now: Date.now,
   });
+  const tailscaleCertificate = new TailscaleCertificateService({
+    setting: createTailscaleCertificateSetting(providerDataDirectory),
+    daemon: createTailscaleCliDaemon({
+      dataDirectory: providerDataDirectory,
+      exec: execTailscale,
+      platform: process.platform,
+    }),
+    sink: createListenerCertificateSink(privateListenerController),
+    listener: () => privateListenerController.status(),
+    now: Date.now,
+  });
+  // Renewal is checked once a day. The service does nothing while the
+  // certificate is off, and renews only inside the window the domain policy sets.
+  // The listener serves the certificate from memory only, so a host that just
+  // started asks once soon, after the listener had time to come up.
+  const checkCertificate = () => void tailscaleCertificate.renewIfDue().catch(() => undefined);
+  setInterval(checkCertificate, CERTIFICATE_CHECK_MS).unref();
+  setTimeout(checkCertificate, STARTUP_CERTIFICATE_CHECK_MS).unref();
   const hubAdministrationRoutes = createHubAdministrationRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
     windowAuthorityStore,
     hub: hubService,
     spoke: spokeLinkService,
+    certificate: tailscaleCertificate,
     maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   });
   const hubLinkRoutes = createHubLinkRouteHandler({ hub: hubService, spoke: spokeLinkService });

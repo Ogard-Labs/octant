@@ -693,6 +693,10 @@ export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
       "Member-to-member request that a hub or spoke signs and sends over the private listener from apps/server (hubService.ts, spokeLinkService.ts), which builds the path itself; no window or device calls it. Remove when the checker counts apps/server as a caller of its own listener's routes.",
     ],
   ),
+  ...["/api/hub/guest", "/api/hub/guest-roster"].map((endpoint): [string, string] => [
+    endpoint,
+    "Served to a guest's signed request from the phone app, which builds the path inside the guest client in packages/client-runtime (hubGuestClient.ts); no window script names it. Remove when the checker counts packages/client-runtime as a caller of a host route.",
+  ]),
   [
     "/api/v1/shares",
     "Served by the public Canvas share service (the octant-webapp repository) and called by the host's share-service port in apps/server, which builds the address from the configured service URL; no window or device calls it. Remove when the checker counts apps/server as a caller of an external service's routes.",

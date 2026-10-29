@@ -251,7 +251,9 @@ export type HubAdministrationOperation =
   | "join"
   | "join-finish"
   | "grant"
-  | "leave";
+  | "leave"
+  | "certificate-status"
+  | "certificate";
 
 /**
  * The loopback hub administration, which only a local window reaches. Absent

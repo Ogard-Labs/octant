@@ -32,13 +32,18 @@ import {
   type MobileHostRegistry,
   type MobileHostRegistration,
 } from "../hosts/HostRegistry";
+import { createGuestHubStore, reopenGuestHub, type GuestHubStore } from "../hosts/hubGuestFlow";
 import type { MobileMockScenario } from "../dev/mobileMockScenario";
 import {
   createMobileHostSessionHub,
   type MobileHostHealth,
   type MobileHostSessionHub,
 } from "./MobileHostSessionHub";
-import { disconnectLiveMobileSession, refreshLiveMobileSession } from "./mobileSessionLifecycle";
+import {
+  createMobileHostRemover,
+  disconnectLiveMobileSession,
+  refreshLiveMobileSession,
+} from "./mobileSessionLifecycle";
 
 export type MobileInboxHostFilter = "all" | string;
 
@@ -51,6 +56,8 @@ export interface MobileSessionContextValue {
         readonly label: string;
       };
   readonly registry: MobileHostRegistry;
+  /** The hub this phone joined as a guest, if any. */
+  readonly guestHubStore: GuestHubStore;
   readonly deviceKeyStore: ReturnType<typeof createExpoSecureDeviceKeyStore>;
   /** Primary bridge used by PairingPanel connect/resume flows. */
   readonly bridge: RemoteSessionBridge;
@@ -92,6 +99,7 @@ function LiveMobileSessionProvider(props: { readonly children: ReactNode }) {
     [secureStorage],
   );
   const registry = useMemo(() => createMobileHostRegistry(registryStorage), [registryStorage]);
+  const guestHubStore = useMemo(() => createGuestHubStore(registryStorage), [registryStorage]);
   const listenerFetch = useMemo(
     () =>
       createMobileListenerFetch({
@@ -175,6 +183,34 @@ function LiveMobileSessionProvider(props: { readonly children: ReactNode }) {
     void refreshHosts();
   }, [refreshHosts]);
 
+  // When the app opens, a hub this phone joined as a guest is asked for its
+  // roster again, so a removed member disappears and a new one is asked to
+  // admit the phone. It runs once; a hub that cannot be reached changes nothing.
+  const removeHost = useMemo(
+    () => createMobileHostRemover({ registry, hub, deviceKeyStore }),
+    [deviceKeyStore, hub, registry],
+  );
+  const guestHubReopened = useRef(false);
+  useEffect(() => {
+    if (guestHubReopened.current) return;
+    guestHubReopened.current = true;
+    const signal = lifetime.current.signal;
+    void reopenGuestHub({
+      store: guestHubStore,
+      transport: mobilePinnedListenerTransport,
+      deviceKeyStore,
+      registry,
+      removeHost,
+    })
+      .then((outcome) => {
+        if (!signal.aborted && (outcome.status === "updated" || outcome.status === "removed")) {
+          return refreshHosts();
+        }
+        return undefined;
+      })
+      .catch(() => undefined);
+  }, [deviceKeyStore, guestHubStore, refreshHosts, registry, removeHost]);
+
   useEffect(() => {
     setHealth(hub.health());
   }, [hub, hubEpoch]);
@@ -200,6 +236,7 @@ function LiveMobileSessionProvider(props: { readonly children: ReactNode }) {
   const value: MobileSessionContextValue = {
     environment: { kind: "live" },
     registry,
+    guestHubStore,
     deviceKeyStore,
     bridge,
     bridgeState,
@@ -235,6 +272,10 @@ function MockMobileSessionProvider(props: {
   const deviceKeyStore = useMemo(() => createExpoSecureDeviceKeyStore({ storage }), [storage]);
   const registry = useMemo(
     () => createMobileHostRegistry(createInMemoryMobileHostRegistryStorage()),
+    [],
+  );
+  const guestHubStore = useMemo(
+    () => createGuestHubStore(createInMemoryMobileHostRegistryStorage()),
     [],
   );
   const bridge = useMemo(
@@ -276,6 +317,7 @@ function MockMobileSessionProvider(props: {
       label: props.scenario.label,
     },
     registry,
+    guestHubStore,
     deviceKeyStore,
     bridge,
     bridgeState: bridge.getState(),

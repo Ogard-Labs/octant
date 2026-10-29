@@ -113,6 +113,8 @@ export const REMOTE_HUB_LINK_ROUTE_IDS = {
   leave: "hub-link-leave",
   roster: "hub-link-roster",
   status: "hub-link-status",
+  guestRoster: "hub-link-guest-roster",
+  guest: "hub-link-guest",
 } as const;
 
 const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
@@ -261,6 +263,26 @@ const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
     methods: ["GET"],
     allowQuery: false,
     allowedRequestHeaders: [HUB_LINK_HEADER],
+    maxResponseBytes: 4_096,
+  },
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.guestRoster,
+    match: { kind: "exact", path: "/api/hub/guest-roster" },
+    surface: "pre-auth",
+    methods: ["GET"],
+    allowQuery: false,
+    allowedRequestHeaders: [HUB_LINK_HEADER],
+    maxResponseBytes: 65_536,
+  },
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.guest,
+    match: { kind: "exact", path: "/api/hub/guest" },
+    surface: "pre-auth",
+    methods: ["POST"],
+    allowQuery: false,
+    allowedRequestHeaders: ["content-type", HUB_LINK_HEADER],
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: 4_096,
     maxResponseBytes: 4_096,
   },
 ];

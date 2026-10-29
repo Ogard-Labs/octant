@@ -114,6 +114,37 @@ describe("expoSecureDeviceKeyStore", () => {
     ).resolves.toMatchObject({ keyId, listenerTrust });
   });
 
+  it("records a saved key for another host without exporting the restored one", async () => {
+    const storage = createInMemoryExpoSecureStringStorage();
+    const pair = await generateExtractablePair();
+    const sourceId = await createExpoSecureDeviceKeyStore({ storage }).set(
+      { publicKey: pair.publicKey, privateKey: pair.privateKey },
+      { origin: "https://hub.example:8443", hostId },
+    );
+    const store = createExpoSecureDeviceKeyStore({ storage });
+    const restored = await store.get(sourceId);
+    expect(restored?.privateKey.extractable).toBe(false);
+
+    const copyId = await store.copyKey(sourceId, { origin: "https://spoke.example:8443", hostId });
+
+    expect(copyId).toBeDefined();
+    expect(copyId).not.toBe(sourceId);
+    const copy = await createExpoSecureDeviceKeyStore({ storage }).get(copyId ?? "");
+    expect(copy?.privateKey.extractable).toBe(false);
+    const payload = new TextEncoder().encode("copied-key-proof");
+    const signature = await crypto.subtle.sign(
+      { name: "ECDSA", hash: "SHA-256" },
+      copy!.privateKey,
+      payload,
+    );
+    await expect(
+      crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, pair.publicKey, signature, payload),
+    ).resolves.toBe(true);
+    await expect(store.copyKey("missing", { origin: "https://x.example", hostId })).resolves.toBe(
+      undefined,
+    );
+  });
+
   it("rejects non-extractable private keys with an actionable error", async () => {
     const store = createExpoSecureDeviceKeyStore({
       storage: createInMemoryExpoSecureStringStorage(),

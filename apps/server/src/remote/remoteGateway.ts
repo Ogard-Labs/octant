@@ -218,6 +218,13 @@ export interface RemoteGateway {
     readonly ticketId: string;
     readonly ticketProof: string;
   }) => string | undefined;
+  /** The key fingerprint of a paired device the host holds, for a hub to tie a member to it. */
+  readonly pairedDeviceKeyFingerprint: (deviceId: string) => string | undefined;
+  /**
+   * Registers a guest the hub vouched for as an ordinary paired device. The
+   * caller has checked the roster, Introduce, and the key's proof.
+   */
+  readonly admitIntroducedDevice: PairingDeviceLifecycleService["admitIntroducedDevice"];
 }
 
 /**
@@ -288,6 +295,8 @@ interface GatewayServices {
     readonly ticketProof: string;
   }) => boolean;
   readonly approvedPairingDevice: RemoteGateway["approvedPairingDevice"];
+  readonly pairedDeviceKeyFingerprint: RemoteGateway["pairedDeviceKeyFingerprint"];
+  readonly admitIntroducedDevice: RemoteGateway["admitIntroducedDevice"];
 }
 
 interface RemoteCredentialInvalidationResult {
@@ -447,6 +456,9 @@ export function createRemoteGateway(options: RemoteGatewayOptions): RemoteGatewa
     listener: () => listener,
     localDeviceAdministration: () => generation.services.localDeviceAdministration,
     approvedPairingDevice: (ticket) => generation.services.approvedPairingDevice(ticket),
+    pairedDeviceKeyFingerprint: (deviceId) =>
+      generation.services.pairedDeviceKeyFingerprint(deviceId),
+    admitIntroducedDevice: (input) => generation.services.admitIntroducedDevice(input),
   };
 }
 
@@ -837,6 +849,9 @@ function assembleServices(
       const status = lifecycle.ticketStatus(ticket);
       return status.status === "approved" ? String(status.deviceId) : undefined;
     },
+    pairedDeviceKeyFingerprint: (deviceId) =>
+      lifecycle.listDevices().find((device) => device.deviceId === deviceId)?.deviceKeyFingerprint,
+    admitIntroducedDevice: (input) => lifecycle.admitIntroducedDevice(input),
   };
 }
 

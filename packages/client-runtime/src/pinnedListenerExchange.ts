@@ -22,8 +22,12 @@ export interface PinnedListenerExchangeRequest {
   /** The IP address to dial, already judged private; never a name. */
   readonly address: string;
   readonly port: number;
-  /** The server name to send, when the origin names its host rather than an address. */
-  readonly serverName: string | undefined;
+  /**
+   * The server name to send. Always undefined: a pinned exchange asks for the
+   * listener's own certificate, which a listener that also holds one for its
+   * tailnet name serves only to a client sending no name.
+   */
+  readonly serverName: undefined;
   /** A served leaf whose SubjectPublicKeyInfo pin is not one of these is refused during the handshake. */
   readonly pins: ReadonlyArray<string>;
   /** The whole HTTP/1.1 request, written only after the handshake passed the pin. */
@@ -154,7 +158,7 @@ export function createExchangeListenerFetch(options: {
     const opening = await options.port.open({
       address: judged.address,
       port,
-      serverName: isAddress ? undefined : hostname,
+      serverName: undefined,
       pins,
       request,
       signal,

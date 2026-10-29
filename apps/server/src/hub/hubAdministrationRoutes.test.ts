@@ -7,6 +7,15 @@ import {
   createHubAdministrationRouteHandler,
 } from "./hubAdministrationRoutes";
 import { HubTestNetwork, startHubTestHost, type HubTestHost } from "./hubHost.test-support";
+import {
+  TailscaleCertificateService,
+  createTailscaleCertificateSetting,
+  type TailscaleDaemonPort,
+} from "./tailscaleCertificate";
+
+const unreachableTailscaleDaemon: TailscaleDaemonPort = {
+  certificateFor: async () => ({ status: "unavailable", kind: "daemon-not-reachable" }),
+};
 
 const cleanups: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
@@ -32,6 +41,17 @@ async function setup(listenerStatus?: Parameters<typeof startHubTestHost>[0]["li
     windowAuthorityStore: authority,
     hub: host.hub,
     spoke: host.spoke,
+    certificate: new TailscaleCertificateService({
+      setting: createTailscaleCertificateSetting(host.directory),
+      daemon: unreachableTailscaleDaemon,
+      sink: {
+        install: async () => ({ status: "refused", kind: "could-not-apply" }),
+        remove: async () => ({ status: "removed" }),
+        holdsCertificate: () => false,
+      },
+      listener: () => host.listener,
+      now: Date.now,
+    }),
   });
   return { host, handle };
 }
@@ -68,6 +88,41 @@ describe("hub administration over the loopback channel", () => {
     }
     expect(await handle(post("/api/desktop/hub/members"))).toBeUndefined();
     expect(await handle(post("/api/desktop/private-listener/enable"))).toBeUndefined();
+  });
+
+  it("turns the Tailscale certificate on only for a window that sends the acknowledgement", async () => {
+    const { handle } = await setup();
+    const certificate = HUB_ADMINISTRATION_ROUTES.certificate;
+
+    const unacknowledged = await handle(post(certificate, { action: "enable" }));
+    expect(unacknowledged?.status).toBe(409);
+    expect(await unacknowledged?.json()).toEqual({
+      status: "refused",
+      kind: "acknowledgement-required",
+    });
+    const guessed = await handle(
+      post(certificate, { action: "enable", acknowledgedCertificateTransparency: "yes" }),
+    );
+    expect(guessed?.status).toBe(409);
+    const unauthenticated = await handle(
+      post(
+        certificate,
+        { action: "enable", acknowledgedCertificateTransparency: true },
+        {
+          "x-octant-window-capability": "B".repeat(43),
+        },
+      ),
+    );
+    expect(unauthenticated?.status).toBe(401);
+    const status = await handle(
+      new Request(`http://127.0.0.1${certificate}`, {
+        headers: {
+          "x-octant-desktop-secret": secret,
+          "x-octant-window-capability": capability,
+        },
+      }),
+    );
+    expect(await status?.json()).toMatchObject({ enabled: false });
   });
 
   it("turns the hub role on and off for a window and journals each change with its principal", async () => {

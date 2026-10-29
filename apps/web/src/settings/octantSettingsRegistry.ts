@@ -1140,6 +1140,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "hub act as hub role roster members spokes add device join code tailscale",
         },
         {
+          id: settingId("hub-tailscale-certificate"),
+          label: "Use a Tailscale certificate",
+          scope: "host",
+          keywords:
+            "tailscale certificate https ts.net browser web app trusted certificate transparency hub",
+        },
+        {
           id: settingId("hub-join"),
           label: "Join a hub",
           scope: "host",

@@ -54,6 +54,8 @@ function setup(overrides: Partial<PrivateListenerLifecycleController> = {}) {
     enable: vi.fn(async () => readyStatus()),
     disable: vi.fn(async () => disabledStatus()),
     restart: vi.fn(async () => readyStatus()),
+    setTailnetCertificate: vi.fn(async () => ({ status: "applied" as const })),
+    tailnetCertificateName: vi.fn(() => undefined),
     ...overrides,
   };
   const setting = {

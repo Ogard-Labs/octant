@@ -33,7 +33,7 @@ import { createHubStateStore, type HubStatePort } from "./hubStateStore";
 import { HubService, type HubHostIdentity } from "./hubService";
 import { createPinnedHubTransport, type HubNetwork } from "./pinnedHubTransport";
 import { createRosterSigningKeyStore } from "./rosterSigningKey";
-import { SpokeLinkService } from "./spokeLinkService";
+import { deviceLifecycleAt, SpokeLinkService } from "./spokeLinkService";
 
 const tailscaleFacts: RequestTransportFacts = {
   listenerTrust: "remote",
@@ -98,6 +98,8 @@ export async function startHubTestHost(input: {
   readonly network: HubTestNetwork;
   readonly cleanups: Array<() => Promise<void> | void>;
   readonly listenerStatus?: Partial<PrivateListenerHostStatus>;
+  /** The clock the spoke role reads, so a test can let a device's inactivity window pass. */
+  readonly now?: () => number;
 }): Promise<HubTestHost> {
   const directory = mkdtempSync(join(tmpdir(), "octant-hub-"));
   input.cleanups.push(() => rmSync(directory, { recursive: true, force: true }));
@@ -195,6 +197,7 @@ export async function startHubTestHost(input: {
         revokeDevice: (deviceId) => {
           administration.revokeDevice({ deviceId });
         },
+        deviceKeyFingerprint: (deviceId) => current.pairedDeviceKeyFingerprint(deviceId),
       };
     },
     transport,
@@ -206,9 +209,22 @@ export async function startHubTestHost(input: {
     identity: () => identity,
     listener: () => listener,
     transport,
+    devices: () => {
+      const administration = gateway?.localDeviceAdministration();
+      if (gateway === undefined || administration === undefined) return undefined;
+      const current = gateway;
+      return {
+        admitIntroducedDevice: (input) => current.admitIntroducedDevice(input),
+        deviceLifecycle: (deviceId, now) =>
+          deviceLifecycleAt(administration.listDevices(), deviceId, now),
+        revokeDevice: (deviceId) => {
+          administration.revokeDevice({ deviceId });
+        },
+      };
+    },
     record: (change) => records.push(change),
     serverBuildVersion: "0.1.0",
-    now: Date.now,
+    now: input.now ?? Date.now,
   });
   const hubLink = createHubLinkRouteHandler({ hub, spoke });
 

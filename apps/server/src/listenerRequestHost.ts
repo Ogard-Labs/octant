@@ -9,6 +9,7 @@ export function parseListenerRequestHost(
   hostHeader: string | null | undefined,
   listenerUrl: URL,
   configuredHostname: string,
+  alsoAcceptedHostname?: string,
 ): URL | undefined {
   if (
     typeof hostHeader !== "string" ||
@@ -30,7 +31,13 @@ export function parseListenerRequestHost(
     hostUrl.pathname !== "/" ||
     hostUrl.search !== "" ||
     hostUrl.hash !== "" ||
-    !hostMatchesListener(hostUrl.hostname, hostUrl.port, listenerUrl, configuredHostname)
+    !hostMatchesListener(
+      hostUrl.hostname,
+      hostUrl.port,
+      listenerUrl,
+      configuredHostname,
+      alsoAcceptedHostname,
+    )
   ) {
     return undefined;
   }
@@ -46,6 +53,7 @@ function hostMatchesListener(
   port: string,
   listenerUrl: URL,
   configuredHostname: string,
+  alsoAcceptedHostname: string | undefined,
 ): boolean {
   const listenerHostname = normalizeHostname(listenerUrl.hostname);
   const configured = normalizeHostname(configuredHostname);
@@ -53,6 +61,8 @@ function hostMatchesListener(
   const hostMatches =
     requestHostname === listenerHostname ||
     requestHostname === configured ||
+    (alsoAcceptedHostname !== undefined &&
+      requestHostname === normalizeHostname(alsoAcceptedHostname)) ||
     (isLoopbackHostname(requestHostname) &&
       (isLoopbackHostname(listenerHostname) || isLoopbackHostname(configured)));
   if (!hostMatches) return false;

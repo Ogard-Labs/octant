@@ -124,6 +124,81 @@ The shell shows the same comparison code and asks whether to keep the default
 grant. Pass `--items roster,introduce` to choose items without a question, or
 `--items none` for none.
 
+## Join a phone as a guest
+
+A phone joins as a guest, not as a spoke. A guest runs no agents, has no files or
+Projects of its own, and receives no delegated work. It opens each computer on
+the hub the way an ordinary paired phone would.
+
+1. On the hub, make a join code (**Add a device**).
+2. On the phone, open **Add computer**. Under **Join a hub as a guest**, scan the
+   hub's QR code or paste the code, then choose **Join the hub**.
+3. The phone shows a comparison code. Check that it matches the one on the hub,
+   then approve on the hub.
+4. The phone asks each computer on the hub to let it in. Every computer that
+   does appears in the phone's list of computers, ready to open. A computer that
+   does not shows as **Not accepted on that computer**. There is nothing to do on
+   the phone for it: the choice is made on that computer.
+
+Each computer decides for itself. A spoke lets a guest in only if its hub grant
+has **Introduce** ticked and it accepted the guest from the hub's signed roster.
+The phone talks to each computer directly. Nothing a phone does on a computer
+passes through the hub.
+
+When the app opens, the phone asks the hub for its roster again. A computer that
+left the hub disappears from the phone's list, and a computer that joined is
+asked to let the phone in. If the hub is not reachable, the phone keeps what it
+has. If the hub removed the phone, the computers added through it are removed.
+
+A guest can do what a paired phone can do on each computer it was let into: read
+threads, answer approvals, and start work there, within what that computer
+allows. It cannot change the hub, the roster, or any computer's grant, and you can
+revoke it on any computer.
+
+This has not been tried on a real phone yet. It is built and tested without one,
+so expect rough edges the first time you use it on a device.
+
+## Open the web app from a browser on your tailnet
+
+The hub's listener serves the same web app as the desktop window, so a laptop or
+phone with no Octant installed can open it in a browser on your tailnet. A
+browser cannot check the certificate fingerprint the apps use, so it needs a
+certificate it already trusts. Tailscale can supply one.
+
+Turn it on under **Settings → Remote access → Tailscale certificate**, or run:
+
+```sh
+octant hub certificate --enable --acknowledge-transparency
+```
+
+It is off by default, and the switch stays off until you tick that you read the
+note below.
+
+**What you should know first.** Tailscale gets this certificate from a public
+authority. Public authorities publish every certificate they issue in open logs
+(certificate transparency). This computer's tailnet name, for example
+`mini.tail1234.ts.net`, will appear in those logs for anyone to read. The logs
+show the name, not your traffic.
+
+You also need HTTPS turned on for your tailnet in the Tailscale admin console,
+and Tailscale installed and signed in on this computer. Octant runs the
+`tailscale` command on this computer to ask for the certificate. If it cannot,
+it says which of these is missing.
+
+`octant hub certificate --status` shows whether it is on, the name, and whether
+a renewal is due. `octant hub certificate --disable` turns it off.
+
+Octant asks for a new certificate before the old one expires. Each new
+certificate, and turning the option on or off, briefly restarts the remote
+listener.
+
+The listener keeps the certificate Octant made and serves the Tailscale one only
+to a browser that opens this computer's tailnet name. The phone app, the desktop
+apps, and the other computers on the hub still see the original certificate and
+the same fingerprint, so nothing they hold changes. If Tailscale hands over a
+certificate that does not check out, Octant does not install it and the
+listener keeps serving the original.
+
 ## The hub grant
 
 The grant is a closed list. You can change every item, at any time, on the

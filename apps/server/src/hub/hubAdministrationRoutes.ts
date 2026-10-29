@@ -14,6 +14,7 @@ import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import type { HubService } from "./hubService";
 import type { SpokeLinkService } from "./spokeLinkService";
+import type { TailscaleCertificateService } from "./tailscaleCertificate";
 
 const DEFAULT_BODY_LIMIT = 64 * 1_024;
 const WINDOW_PRINCIPAL: AuditActingPrincipal = { kind: "local-window" };
@@ -28,6 +29,8 @@ export const HUB_ADMINISTRATION_ROUTES = {
   joinFinish: "/api/desktop/hub/join/finish",
   grant: "/api/desktop/hub/grant",
   leave: "/api/desktop/hub/leave",
+  /** The `*.ts.net` certificate for the web app: GET reads it, POST turns it on or off or renews it. */
+  certificate: "/api/desktop/hub/certificate",
 } as const;
 
 type RouteValue = (typeof HUB_ADMINISTRATION_ROUTES)[keyof typeof HUB_ADMINISTRATION_ROUTES];
@@ -37,6 +40,7 @@ export interface HubAdministrationRouteOptions {
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly hub: HubService;
   readonly spoke: SpokeLinkService;
+  readonly certificate: TailscaleCertificateService;
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
 }
@@ -78,6 +82,11 @@ export function createHubAdministrationRouteHandler(
     if (route === HUB_ADMINISTRATION_ROUTES.status) {
       if (request.method !== "GET") return failure("invalid", 400);
       return Response.json({ hub: options.hub.status(), spoke: options.spoke.status() });
+    }
+    if (route === HUB_ADMINISTRATION_ROUTES.certificate && request.method === "GET") {
+      return Response.json(options.certificate.status(), {
+        headers: { "cache-control": "no-store" },
+      });
     }
     if (request.method !== "POST") return failure("invalid", 400);
     const body = await readBody(request, maxBody);
@@ -123,6 +132,29 @@ export function createHubAdministrationRouteHandler(
         case HUB_ADMINISTRATION_ROUTES.leave: {
           requireNoBody(body.text);
           return outcome(await options.spoke.leave(WINDOW_PRINCIPAL));
+        }
+        case HUB_ADMINISTRATION_ROUTES.certificate: {
+          const value = parseJson(request, body.text);
+          if (typeof value !== "object" || value === null || Array.isArray(value)) {
+            throw new Error("invalid");
+          }
+          const { action, acknowledgedCertificateTransparency, ...rest } = value as Record<
+            string,
+            unknown
+          >;
+          if (Object.keys(rest).length !== 0) throw new Error("invalid");
+          if (action === "enable") {
+            // Anything but a literal true is not the person saying they read the note.
+            return outcome(
+              options.certificate.enable({
+                acknowledgedCertificateTransparency: acknowledgedCertificateTransparency === true,
+              }),
+            );
+          }
+          if (acknowledgedCertificateTransparency !== undefined) throw new Error("invalid");
+          if (action === "disable") return outcome(await options.certificate.disable());
+          if (action === "renew") return outcome(await options.certificate.renewIfDue());
+          throw new Error("invalid");
         }
         default:
           return failure("invalid", 400);

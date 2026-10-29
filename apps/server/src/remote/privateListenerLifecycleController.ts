@@ -33,8 +33,10 @@ import { classifyRemoteListenerAddress } from "@octant/domain";
 import {
   isPrivateListenerFailureCode,
   validatePrivateListenerConfig,
+  validatePrivateListenerNamedTls,
   type PrivateListenerConfig,
   type PrivateListenerFailureCode,
+  type PrivateListenerNamedTls,
 } from "../privateListener";
 import type { RemoteGatewayConfig } from "./remoteGateway";
 import type { SelfMadeListenerCertificateStore } from "./selfMadeListenerCertificate";
@@ -112,11 +114,27 @@ export interface CreatePrivateListenerLifecycleControllerOptions {
   readonly selfMadeCertificate?: SelfMadeListenerCertificateStore;
 }
 
+/** Why a tailnet certificate was not applied; the listener serves what it served before. */
+export type TailnetCertificateRefusal = "invalid-certificate" | "could-not-apply";
+
 export interface PrivateListenerLifecycleController {
   readonly status: () => PrivateListenerHostStatus;
   readonly enable: (config: RequestedPrivateListenerConfig) => Promise<PrivateListenerHostStatus>;
   readonly disable: () => Promise<PrivateListenerHostStatus>;
   readonly restart: (config: RequestedPrivateListenerConfig) => Promise<PrivateListenerHostStatus>;
+  /**
+   * Serves a tailnet certificate to clients that ask for its name by SNI, beside
+   * the certificate the listener already serves; `undefined` goes back to one
+   * certificate. Neither the certificate, the key, nor the pin changes. The
+   * certificate is checked first, so a bad one never touches the listener.
+   */
+  readonly setTailnetCertificate: (
+    tls: PrivateListenerNamedTls | undefined,
+  ) => Promise<
+    { readonly status: "applied" } | { status: "refused"; kind: TailnetCertificateRefusal }
+  >;
+  /** The tailnet name the listener serves a second certificate for, if any. */
+  readonly tailnetCertificateName: () => string | undefined;
 }
 
 export class PrivateListenerLifecycleError extends Error {
@@ -199,6 +217,13 @@ export function createPrivateListenerLifecycleController(
   // generation instead of losing the handle.
   let gateway: PrivateListenerGatewayLifecycle | undefined;
   let activeConfig: PrivateListenerConfig | undefined;
+  // What the host was last asked to serve, so a tailnet certificate change
+  // re-applies the same request: a self-made listener resolves to the same key,
+  // certificate, and pin, and a pasted one is served exactly as given.
+  let activeRequested: RequestedPrivateListenerConfig | undefined;
+  // Held across a disable and enable of the listener, and dropped when the
+  // listener's name is no longer the one the certificate was made for.
+  let tailnetTls: PrivateListenerNamedTls | undefined;
   let activeSource: PrivateListenerCertificateSource = "pasted";
   let activePin: string | null = null;
   let state: PrivateListenerHostState = "disabled";
@@ -243,7 +268,17 @@ export function createPrivateListenerLifecycleController(
   ): Promise<PrivateListenerHostStatus> => {
     const resolved = resolveCertificate(requested);
     if (resolved.status === "refused") return await refuse(resolved.code);
-    const { config, source, pin } = resolved;
+    const { source, pin } = resolved;
+    // A certificate made for another name is dropped, not just left unserved:
+    // renewal must see the listener holds none and fetch one for the new name.
+    if (
+      tailnetTls !== undefined &&
+      resolved.config.hostname.toLowerCase() !== tailnetTls.serverName.toLowerCase()
+    ) {
+      tailnetTls = undefined;
+    }
+    const config: PrivateListenerConfig =
+      tailnetTls !== undefined ? { ...resolved.config, tailnetTls } : resolved.config;
     const gatewayConfig: RemoteGatewayConfig = { listener: config };
     if (gateway !== undefined) {
       // A gateway already exists (enabled or retained after a failed shutdown).
@@ -252,6 +287,7 @@ export function createPrivateListenerLifecycleController(
       try {
         await gateway.restart(gatewayConfig);
         activeConfig = config;
+        activeRequested = requested;
         activeSource = source;
         activePin = pin;
         state = "ready";
@@ -286,6 +322,7 @@ export function createPrivateListenerLifecycleController(
       await created.start();
       gateway = created;
       activeConfig = config;
+      activeRequested = requested;
       activeSource = source;
       activePin = pin;
       state = "ready";
@@ -392,11 +429,50 @@ export function createPrivateListenerLifecycleController(
     return result;
   };
 
+  // Neither server can swap its TLS contexts in place, so a change restarts the
+  // listener the way the administration routes already do, onto the request it
+  // last served. A certificate that fails its checks never reaches the restart,
+  // and one that fails the restart is dropped and the listener restarted
+  // without it.
+  const setTailnetCertificate = async (
+    tls: PrivateListenerNamedTls | undefined,
+  ): Promise<
+    { readonly status: "applied" } | { status: "refused"; kind: TailnetCertificateRefusal }
+  > => {
+    if (tls !== undefined) {
+      try {
+        validatePrivateListenerNamedTls(tls);
+      } catch {
+        return { status: "refused", kind: "invalid-certificate" };
+      }
+    }
+    const previous = tailnetTls;
+    if (previous === undefined && tls === undefined) return { status: "applied" };
+    tailnetTls = tls;
+    if (state !== "ready" || gateway === undefined || activeRequested === undefined) {
+      return { status: "applied" };
+    }
+    try {
+      await apply(activeRequested);
+      return { status: "applied" };
+    } catch {
+      tailnetTls = previous;
+      try {
+        await apply(activeRequested);
+      } catch {
+        // The failed state is already projected; a later restart or disable retries.
+      }
+      return { status: "refused", kind: "could-not-apply" };
+    }
+  };
+
   return {
     status,
     enable: (config) => serialize(() => apply(config)),
     restart: (config) => serialize(() => apply(config)),
     disable: () => serialize(disable),
+    setTailnetCertificate: (tls) => serialize(() => setTailnetCertificate(tls)),
+    tailnetCertificateName: () => tailnetTls?.serverName,
   };
 }
 

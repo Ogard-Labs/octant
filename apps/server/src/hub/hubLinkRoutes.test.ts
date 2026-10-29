@@ -333,6 +333,8 @@ describe("the hub-link routes the private listener serves", () => {
       [REMOTE_HUB_LINK_ROUTE_IDS.leave, "POST", HUB_LINK_ROUTES.leave],
       [REMOTE_HUB_LINK_ROUTE_IDS.roster, "PUT", HUB_LINK_ROUTES.roster],
       [REMOTE_HUB_LINK_ROUTE_IDS.status, "GET", HUB_LINK_ROUTES.status],
+      [REMOTE_HUB_LINK_ROUTE_IDS.guestRoster, "GET", HUB_LINK_ROUTES.guestRoster],
+      [REMOTE_HUB_LINK_ROUTE_IDS.guest, "POST", HUB_LINK_ROUTES.guest],
     ] as const) {
       const decision = policy.inspect(
         new Request(`https://100.101.102.103:8443${path}`, {

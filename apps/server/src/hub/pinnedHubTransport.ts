@@ -94,7 +94,9 @@ export function createPinnedHubTransport(network: HubNetwork = SYSTEM_NETWORK): 
         // The pin judges the certificate, not a name or a chain.
         rejectUnauthorized: false,
         minVersion: "TLSv1.3",
-        ...(isIP(hostname) === 0 ? { servername: hostname } : {}),
+        // No server name: a listener that also holds a certificate for its
+        // tailnet name serves that one to a client naming it, and the pin
+        // is the key of the listener's own certificate.
       });
       try {
         await new Promise<void>((resolve, reject) => {

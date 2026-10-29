@@ -25,6 +25,8 @@ export const HubMembershipChange = Schema.Literal(
   "left-hub",
   "hub-grant-changed",
   "roster-accepted",
+  "guest-admitted",
+  "guest-dropped",
 );
 export type HubMembershipChange = typeof HubMembershipChange.Type;
 
@@ -55,7 +57,14 @@ export const HubJoinRequest = Schema.Struct({
   ticketProof: bounded(256),
   member: RosterMember.pipe(Schema.omit("role", "owner")).annotations(strict),
   identityPublicKey: base64Url(512),
-  listenerOrigin: bounded(300),
+  /** Absent for a guest, which runs no listener. */
+  listenerOrigin: Schema.optional(bounded(300)),
+  /**
+   * The member joins as a guest: its identity key is the device key it paired
+   * with, and the hub checks that it is. A guest has no listener and no hub
+   * grant to choose.
+   */
+  asGuest: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type HubJoinRequest = typeof HubJoinRequest.Type;
 export const decodeHubJoinRequest = Schema.decodeUnknownSync(HubJoinRequest);
@@ -89,3 +98,30 @@ export const HubSpokeStatus = Schema.Struct({
   rosterSequence: Schema.Int.pipe(Schema.positive()),
 }).annotations(strict);
 export type HubSpokeStatus = typeof HubSpokeStatus.Type;
+
+/** What a guest reads from the hub: the current signed roster, nothing beside it. */
+export const HubGuestRosterResponse = Schema.Struct({ roster: SignedHubRoster }).annotations(
+  strict,
+);
+export type HubGuestRosterResponse = typeof HubGuestRosterResponse.Type;
+export const decodeHubGuestRosterResponse = Schema.decodeUnknownSync(HubGuestRosterResponse);
+
+/**
+ * A guest asking a spoke to admit it as a paired device. It presents the
+ * device key the hub's roster vouches for (by fingerprint); the request is
+ * signed with that key, which proves the guest holds it.
+ */
+export const HubGuestAdmissionRequest = Schema.Struct({
+  memberId: HubMemberId,
+  devicePublicKey: base64Url(512),
+  deviceLabel: bounded(128),
+}).annotations(strict);
+export type HubGuestAdmissionRequest = typeof HubGuestAdmissionRequest.Type;
+export const decodeHubGuestAdmissionRequest = Schema.decodeUnknownSync(HubGuestAdmissionRequest);
+
+export const HubGuestAdmissionResponse = Schema.Struct({
+  spokeMemberId: HubMemberId,
+  deviceId: Schema.UUID,
+}).annotations(strict);
+export type HubGuestAdmissionResponse = typeof HubGuestAdmissionResponse.Type;
+export const decodeHubGuestAdmissionResponse = Schema.decodeUnknownSync(HubGuestAdmissionResponse);
