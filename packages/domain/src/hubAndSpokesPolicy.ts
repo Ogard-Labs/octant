@@ -384,6 +384,7 @@ export type HubFollowDecision =
       readonly kind:
         | "no-hub-roster"
         | "standby-not-granted"
+        | "roster-not-granted"
         | "not-signed-as-hub"
         | "not-a-named-standby"
         | "key-mismatch"
@@ -394,13 +395,13 @@ export type HubFollowDecision =
 
 /**
  * Whether a spoke takes a promoted standby as its hub without a person. The
- * spoke's own hub grant must tick Standby, the roster must be signed as hub by
+ * spoke's own hub grant must tick Standby and Roster, the roster must be signed as hub by
  * a member the latest hub-signed roster named as standby, with the key that
  * roster fingerprints, and must list this spoke and move the sequence
  * forward. Like a standby-signed roster, it is taken only after the old hub
  * has been silent for the whole failover time. A refusal other than
- * `standby-not-granted` leaves the spoke as it was; a spoke that did not tick
- * Standby waits for its person to accept the new hub. The caller verifies the
+ * `standby-not-granted` or `roster-not-granted` leaves the spoke as it was; a
+ * spoke that did not tick both waits for its person to accept the new hub. The caller verifies the
  * signature against the key the promoted hub presented and passes the
  * fingerprint of the identity key it proved in `promoterKeyFingerprint`.
  */
@@ -417,6 +418,11 @@ export function decideHubFollow(input: {
   if (input.anchor === undefined) return { status: "refused", kind: "no-hub-roster" };
   if (authorizeHubRequest({ grant: input.grant, item: "standby" }).status === "refused") {
     return { status: "refused", kind: "standby-not-granted" };
+  }
+  // The new hub's roster is installed without a person, so the Roster item
+  // governs it as it governs every roster that arrives.
+  if (authorizeHubRequest({ grant: input.grant, item: "roster" }).status === "refused") {
+    return { status: "refused", kind: "roster-not-granted" };
   }
   const { signedBy, roster: promoted } = input.candidate;
   if (

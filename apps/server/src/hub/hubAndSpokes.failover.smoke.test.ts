@@ -630,6 +630,26 @@ describe("replacing the hub for good", () => {
     });
   });
 
+  it("is not followed by a spoke that ticked Standby but unticked Roster", async () => {
+    const { network, hub, standby, laptop } = await promotedWithTwoMembers();
+    const narrowed: HubGrant = { items: ["standby"], actProjects: [] };
+    laptop.spoke.setGrant(narrowed, window);
+    network.stop(hub.address);
+    await pause(FAILOVER_AFTER_MS + 40);
+
+    expect(
+      await laptop.spoke.followPromotedHub({
+        silentForMs: FAILOVER_AFTER_MS,
+        failoverAfterMs: FAILOVER_AFTER_MS,
+      }),
+    ).toEqual({ status: "refused", kind: "roster-not-granted" });
+
+    const held = laptop.spoke.status();
+    if (held.membership !== "member") throw new Error("Laptop is not a member.");
+    expect(String(held.hub.memberId)).not.toBe(standby.hostId);
+    expect(laptop.state.load().link?.grant).toEqual(narrowed);
+  });
+
   it("is not followed while the old hub can still be reached", async () => {
     const { standby, laptop } = await promotedWithTwoMembers();
 

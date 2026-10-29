@@ -560,6 +560,12 @@ describe("decideHubFollow", () => {
     expect(kind(decide({ grant: undefined }))).toBe("standby-not-granted");
   });
 
+  it("does not follow for a spoke that ticked Standby but unticked Roster", () => {
+    expect(kind(decide({ grant: { items: ["standby"], actProjects: [] } }))).toBe(
+      "roster-not-granted",
+    );
+  });
+
   it("refuses a promotion from a member the last hub-signed roster did not name as standby", () => {
     expect(kind(decide({ candidate: signed(roster(6, promotedMembers, []), "hub", 4) }))).toBe(
       "not-signed-as-hub",

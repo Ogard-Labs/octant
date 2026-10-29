@@ -1032,7 +1032,7 @@ maintainer's hardware, or names the maintainer gate.
      `octant hub promote --confirm`, becomes the hub, clears the standby order,
      drops the old hub from the roster, and signs with its own roster key. A
      spoke whose hub grant ticks Standby takes it without a person
-     (`decideHubFollow`), but only on its own failover look: the old hub must have
+     (`decideHubFollow`) only if it also ticks Roster, and only on its own failover look: the old hub must have
      been silent for the whole failover time (so a promotion while the old hub is
      reachable waits for the person, as a standby-signed roster does), the signer
      must be a standby the last hub-signed roster named, with the key that roster
