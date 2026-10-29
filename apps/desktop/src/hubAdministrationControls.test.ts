@@ -53,6 +53,27 @@ describe("hub administration controls", () => {
     expect(calls[0]?.init?.body).toBeUndefined();
   });
 
+  it("sends the certificate choice to its fixed route and refuses a body that names anything else", async () => {
+    const { calls, runtime: controls } = runtime(() => Response.json({ status: "enabled" }));
+    await sendHubAdministrationOperation(controls, "certificate", {
+      action: "enable",
+      acknowledgedCertificateTransparency: true,
+    });
+    expect(calls[0]?.url).toBe("http://127.0.0.1:4317/api/desktop/hub/certificate");
+    expect(calls[0]?.init?.method).toBe("POST");
+
+    expect(
+      await sendHubAdministrationOperation(controls, "certificate", {
+        action: "enable",
+        path: "/",
+      }),
+    ).toMatchObject({ status: 400 });
+    expect(calls).toHaveLength(1);
+
+    await sendHubAdministrationOperation(controls, "certificate-status", undefined);
+    expect(calls[1]?.init?.method).toBe("GET");
+  });
+
   it("refuses an operation it does not name or a path in its place, sending nothing", async () => {
     const { calls, runtime: controls } = runtime(() => Response.json({}));
     for (const operation of ["../desktop/remote/pairing-tickets", "__proto__", "toString", 7]) {

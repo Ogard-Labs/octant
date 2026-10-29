@@ -138,6 +138,8 @@ export type SpokeLinkStatus =
       readonly hub: { readonly memberId: HubMemberId; readonly name: string };
       readonly grant: HubGrant;
       readonly roster: SignedHubRoster;
+      /** The roster members this host accepted: the ones it gave a peer grant, so a guest among them may knock. */
+      readonly acceptedMemberIds: ReadonlyArray<string>;
     };
 
 export type HubRequestOutcome =
@@ -193,6 +195,7 @@ export class SpokeLinkService {
       hub: { memberId: link.hubMemberId, name: link.hubName },
       grant: link.grant,
       roster: link.roster,
+      acceptedMemberIds: link.peerGrants.map((grant) => String(grant.memberId)),
     };
   }
 

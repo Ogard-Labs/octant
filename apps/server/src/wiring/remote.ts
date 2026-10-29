@@ -48,8 +48,8 @@ import {
   TailscaleCertificateService,
   createTailscaleCertificateSetting,
   unwiredCertificateSink,
-  unwiredTailscaleDaemon,
 } from "../hub/tailscaleCertificate";
+import { createTailscaleCliDaemon, execTailscale } from "../hub/tailscaleCliDaemon";
 import { createPrivateListenerLifecycleController } from "../remote/privateListenerLifecycleController";
 import {
   resolvePrivateListenerHostIdentity,
@@ -78,6 +78,8 @@ import type { WorkWiring } from "./work";
 import type { CanvasWiring } from "./canvas";
 import type { AutomationWiring } from "./automation";
 import type { RoutesWiring } from "./routes";
+
+const CERTIFICATE_CHECK_MS = 24 * 60 * 60 * 1_000;
 
 export type RemoteDependencies = Pick<
   ServerStart,
@@ -367,11 +369,21 @@ export function wireRemote(deps: RemoteDependencies) {
   });
   const tailscaleCertificate = new TailscaleCertificateService({
     setting: createTailscaleCertificateSetting(providerDataDirectory),
-    daemon: unwiredTailscaleDaemon,
+    daemon: createTailscaleCliDaemon({
+      dataDirectory: providerDataDirectory,
+      exec: execTailscale,
+      platform: process.platform,
+    }),
     sink: unwiredCertificateSink,
     listener: () => privateListenerController.status(),
     now: Date.now,
   });
+  // Renewal is checked once a day. The service does nothing while the
+  // certificate is off, and renews only inside the window the domain policy sets.
+  setInterval(
+    () => void tailscaleCertificate.renewIfDue().catch(() => undefined),
+    CERTIFICATE_CHECK_MS,
+  ).unref();
   const hubAdministrationRoutes = createHubAdministrationRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
     windowAuthorityStore,

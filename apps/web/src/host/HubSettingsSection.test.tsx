@@ -239,4 +239,78 @@ describe("HubSettingsSection", () => {
     await user.click(await screen.findByRole("button", { name: "Leave the hub" }));
     expect(await screen.findByText(/could not be reached/i)).toBeVisible();
   });
+
+  it("lists every member of the hub it joined with its role and whether this computer accepted it", async () => {
+    renderHub({
+      status: {
+        status: 200,
+        body: statusBody({
+          spoke: {
+            membership: "member",
+            hub: { memberId: "m-1", name: "Mac mini" },
+            grant: { items: ["roster"], actProjects: [] },
+            acceptedMemberIds: ["m-3"],
+            roster: {
+              roster: {
+                members: [
+                  { memberId: "m-1", name: "Mac mini", role: "hub", owner: true },
+                  { memberId: "m-3", name: "Henrik's iPhone", role: "guest", owner: false },
+                  { memberId: "m-4", name: "Old iPad", role: "guest", owner: false },
+                ],
+              },
+            },
+          },
+        }),
+      },
+    });
+
+    const members = await screen.findByRole("list", { name: "Members of this hub" });
+    expect(within(members).getByText(/Henrik's iPhone/)).toBeVisible();
+    const phone = within(members).getByText("Henrik's iPhone").closest("li");
+    const tablet = within(members).getByText("Old iPad").closest("li");
+    expect(phone).toHaveTextContent("guest · accepted here");
+    expect(tablet).toHaveTextContent("guest · not accepted here");
+    expect(within(members).queryByRole("button")).toBeNull();
+  });
+
+  it("keeps the Tailscale certificate off until the person reads the transparency note", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderHub({
+      status: { status: 200, body: statusBody({}) },
+      "certificate-status": {
+        status: 200,
+        body: { enabled: false, domain: "mini.tail1234.ts.net" },
+      },
+      certificate: { status: 200, body: { status: "enabled" } },
+    });
+
+    const toggle = await screen.findByRole("switch", { name: "Use a Tailscale certificate" });
+    expect(toggle).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText(/certificate-transparency logs/i)).toBeVisible();
+
+    await user.click(screen.getByRole("checkbox"));
+    expect(toggle).not.toHaveAttribute("aria-disabled", "true");
+    await user.click(toggle);
+
+    await waitFor(() =>
+      expect(calls.filter((call) => call.operation === "certificate").map((c) => c.body)).toEqual([
+        { action: "enable", acknowledgedCertificateTransparency: true },
+        { action: "renew" },
+      ]),
+    );
+  });
+
+  it("says why the host could not get the certificate", async () => {
+    const user = userEvent.setup();
+    renderHub({
+      status: { status: 200, body: statusBody({}) },
+      "certificate-status": { status: 200, body: { enabled: false } },
+      certificate: { status: 409, body: { status: "refused", kind: "https-not-enabled" } },
+    });
+
+    await user.click(await screen.findByRole("checkbox"));
+    await user.click(screen.getByRole("switch", { name: "Use a Tailscale certificate" }));
+
+    expect(await screen.findByText(/HTTPS certificates are not turned on/i)).toBeVisible();
+  });
 });

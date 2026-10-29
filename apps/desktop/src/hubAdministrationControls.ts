@@ -29,6 +29,11 @@ const JoinBody = Schema.Struct({ code: Schema.String.pipe(Schema.maxLength(4_096
   onExcessProperty: "error",
 });
 
+const CertificateBody = Schema.Struct({
+  action: Schema.Literal("enable", "disable", "renew"),
+  acknowledgedCertificateTransparency: Schema.optional(Schema.Boolean),
+}).annotations({ onExcessProperty: "error" });
+
 export const HUB_ADMINISTRATION_OPERATIONS = {
   status: { method: "GET", path: "/api/desktop/hub/status" },
   enable: { method: "POST", path: "/api/desktop/hub/enable" },
@@ -51,6 +56,13 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
   "join-finish": { method: "POST", path: "/api/desktop/hub/join/finish" },
   grant: { method: "POST", path: "/api/desktop/hub/grant", decodeBody: decodeHubGrant },
   leave: { method: "POST", path: "/api/desktop/hub/leave" },
+  "certificate-status": { method: "GET", path: "/api/desktop/hub/certificate" },
+  certificate: {
+    method: "POST",
+    path: "/api/desktop/hub/certificate",
+    decodeBody: (value) =>
+      Schema.decodeUnknownSync(CertificateBody)(value, { onExcessProperty: "error" }),
+  },
 } as const satisfies Readonly<Record<string, HubAdministrationRoute>>;
 
 export type HubAdministrationOperation = keyof typeof HUB_ADMINISTRATION_OPERATIONS;

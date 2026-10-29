@@ -595,6 +595,93 @@ describe("octant hub status, grant, leave and remove", () => {
   });
 });
 
+describe("octant hub certificate", () => {
+  it("reads the certificate flags and refuses an acknowledgement with anything but --enable", () => {
+    expect(resolveHubCliCommand(["certificate"], {})).toEqual({
+      action: "certificate",
+      mode: "status",
+      acknowledgeTransparency: false,
+    });
+    expect(
+      resolveHubCliCommand(["certificate"], { enable: true, "acknowledge-transparency": true }),
+    ).toEqual({ action: "certificate", mode: "enable", acknowledgeTransparency: true });
+    expect(resolveHubCliCommand(["certificate"], { disable: true })).toEqual({
+      action: "certificate",
+      mode: "disable",
+      acknowledgeTransparency: false,
+    });
+    expect(resolveHubCliCommand(["certificate"], { enable: true, disable: true })).toBeUndefined();
+    expect(
+      resolveHubCliCommand(["certificate"], { status: true, "acknowledge-transparency": true }),
+    ).toBeUndefined();
+    expect(resolveHubCliCommand(["certificate"], { enable: "yes" })).toBeUndefined();
+  });
+
+  it("asks nothing of the host and prints the transparency note when --enable comes without the acknowledgement", async () => {
+    const host = await fixture(() => ok({ status: "enabled" }));
+
+    expect(
+      await host.run({ action: "certificate", mode: "enable", acknowledgeTransparency: false }),
+    ).toBe(1);
+
+    expect(host.sent).toEqual([]);
+    expect(host.errors()).toContain("certificate-transparency logs");
+  });
+
+  it("turns the certificate on with the acknowledgement and then asks for it", async () => {
+    const host = await fixture((request) =>
+      ok(
+        (request.body as { action?: string } | undefined)?.action === "enable"
+          ? { status: "enabled" }
+          : { status: "renewed", notAfter: 1 },
+      ),
+    );
+
+    expect(
+      await host.run({ action: "certificate", mode: "enable", acknowledgeTransparency: true }),
+    ).toBe(0);
+
+    expect(host.sent.map((request) => request.body)).toEqual([
+      { action: "enable", acknowledgedCertificateTransparency: true },
+      { action: "renew" },
+    ]);
+    expect(host.text()).toContain("Tailscale certificate on");
+  });
+
+  it("says why the host could not get a certificate", async () => {
+    const host = await fixture((request) =>
+      (request.body as { action?: string } | undefined)?.action === "enable"
+        ? ok({ status: "enabled" })
+        : { status: 409, body: { status: "refused", kind: "https-not-enabled" } },
+    );
+
+    expect(
+      await host.run({ action: "certificate", mode: "enable", acknowledgeTransparency: true }),
+    ).toBe(1);
+
+    expect(host.errors()).toContain("HTTPS certificates are not turned on");
+    expect(host.errors()).toContain("(https-not-enabled)");
+  });
+
+  it("turns the certificate off and reports its state", async () => {
+    const off = await fixture(() => ok({ status: "disabled" }));
+    expect(
+      await off.run({ action: "certificate", mode: "disable", acknowledgeTransparency: false }),
+    ).toBe(0);
+    expect(off.sent[0]?.body).toEqual({ action: "disable" });
+
+    const state = await fixture(() =>
+      ok({ enabled: true, domain: "mini.tail1234.ts.net", renewal: "current" }),
+    );
+    expect(
+      await state.run({ action: "certificate", mode: "status", acknowledgeTransparency: false }),
+    ).toBe(0);
+    expect(state.sent[0]?.method).toBe("GET");
+    expect(state.text()).toContain("Tailscale certificate on");
+    expect(state.text()).toContain("mini.tail1234.ts.net");
+  });
+});
+
 describe("disk encryption reading", () => {
   const runnerReturning = (stdout: Record<string, string>): ServiceCommandRunner => ({
     run: async (command) => {

@@ -11,8 +11,12 @@ import {
   TailscaleCertificateService,
   createTailscaleCertificateSetting,
   unwiredCertificateSink,
-  unwiredTailscaleDaemon,
+  type TailscaleDaemonPort,
 } from "./tailscaleCertificate";
+
+const unreachableTailscaleDaemon: TailscaleDaemonPort = {
+  certificateFor: async () => ({ status: "unavailable", kind: "daemon-not-reachable" }),
+};
 
 const cleanups: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
@@ -40,7 +44,7 @@ async function setup(listenerStatus?: Parameters<typeof startHubTestHost>[0]["li
     spoke: host.spoke,
     certificate: new TailscaleCertificateService({
       setting: createTailscaleCertificateSetting(host.directory),
-      daemon: unwiredTailscaleDaemon,
+      daemon: unreachableTailscaleDaemon,
       sink: unwiredCertificateSink,
       listener: () => host.listener,
       now: Date.now,

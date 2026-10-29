@@ -22,7 +22,13 @@ export type HubCliCommand =
     }
   | { readonly action: "grant"; readonly items?: ReadonlyArray<HubGrantItem> }
   | { readonly action: "leave" }
-  | { readonly action: "remove"; readonly member: string };
+  | { readonly action: "remove"; readonly member: string }
+  | {
+      readonly action: "certificate";
+      readonly mode: "status" | "disable" | "enable";
+      /** Turning the certificate on needs the person to have read the transparency note. */
+      readonly acknowledgeTransparency: boolean;
+    };
 
 /** What the hub role asks of the hub itself, as opposed to a computer that joins one. */
 const HUB_SIDE_ACTIONS: ReadonlySet<HubCliCommand["action"]> = new Set([
@@ -30,6 +36,7 @@ const HUB_SIDE_ACTIONS: ReadonlySet<HubCliCommand["action"]> = new Set([
   "disable",
   "join-code",
   "remove",
+  "certificate",
 ]);
 
 const JOIN_APPROVAL_WINDOW_MS = 5 * 60_000;
@@ -76,6 +83,25 @@ export function resolveHubCliCommand(
       const [member] = rest;
       if (member === undefined || rest.length !== 1 || !only()) return undefined;
       return { action, member };
+    }
+    case "certificate": {
+      if (rest.length !== 0 || !only("enable", "disable", "status", "acknowledge-transparency")) {
+        return undefined;
+      }
+      const modes = (["enable", "disable", "status"] as const).filter(
+        (mode) => flags[mode] === true,
+      );
+      if (modes.length > 1) return undefined;
+      if (
+        ["enable", "disable", "status", "acknowledge-transparency"].some((f) => !isSwitch(flags[f]))
+      ) {
+        return undefined;
+      }
+      const mode = modes[0] ?? "status";
+      const acknowledgeTransparency = flags["acknowledge-transparency"] === true;
+      // The acknowledgement means something only with --enable.
+      if (acknowledgeTransparency && mode !== "enable") return undefined;
+      return { action, mode, acknowledgeTransparency };
     }
     default:
       return undefined;
@@ -162,7 +188,61 @@ export async function runHubCliCommand(input: Input): Promise<number> {
       return await runLeave(input);
     case "remove":
       return await runRemove(input, command.member);
+    case "certificate":
+      return await runCertificate(input, command.mode, command.acknowledgeTransparency);
   }
+}
+
+const CERTIFICATE_TRANSPARENCY_NOTE =
+  "Tailscale gets this certificate from a public authority, so this computer's tailnet name will appear in public certificate-transparency logs. Run again with --acknowledge-transparency to turn it on.";
+
+async function runCertificate(
+  input: Input,
+  mode: "status" | "disable" | "enable",
+  acknowledgeTransparency: boolean,
+): Promise<number> {
+  const path = "/api/desktop/hub/certificate";
+  if (mode === "enable") {
+    if (!acknowledgeTransparency) {
+      input.stderr.write(`${CERTIFICATE_TRANSPARENCY_NOTE}\n`);
+      return 1;
+    }
+    const enabled = await post(input, path, {
+      action: "enable",
+      acknowledgedCertificateTransparency: true,
+    });
+    if (!isOk(enabled, "enabled"))
+      return refusal(input, enabled, "Octant refused to turn the certificate on.");
+    // Turning it on only records the choice; asking for the certificate now
+    // shows the person at once whether this computer can get one.
+    const renewed = await post(input, path, { action: "renew" });
+    if (renewed.status !== 200) {
+      return refusal(input, renewed, "Octant could not get the certificate.");
+    }
+    input.stdout.write("Tailscale certificate on.\n");
+    return 0;
+  }
+  if (mode === "disable") {
+    const disabled = await post(input, path, { action: "disable" });
+    if (!isOk(disabled, "disabled")) {
+      return refusal(input, disabled, "Octant refused to turn the certificate off.");
+    }
+    input.stdout.write("Tailscale certificate off.\n");
+    return 0;
+  }
+  const response = await input.session.send({ path, method: "GET" });
+  if (response.status !== 200 || typeof field(response.body, "enabled") !== "boolean") {
+    input.stderr.write(`${failureMessage(response, "Octant refused to read the certificate.")}\n`);
+    return 1;
+  }
+  const domain = field(response.body, "domain");
+  const renewal = field(response.body, "renewal");
+  input.stdout.write(
+    `Tailscale certificate ${field(response.body, "enabled") === true ? "on" : "off"}\n`,
+  );
+  if (typeof domain === "string") input.stdout.write(`  name ${domain}\n`);
+  if (typeof renewal === "string") input.stdout.write(`  ${renewal}\n`);
+  return 0;
 }
 
 async function runStatus(input: Input): Promise<number> {
@@ -503,6 +583,16 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
   "cannot-remove-the-hub": "The hub cannot remove itself.",
   "not-a-spoke": "This computer has not joined a hub.",
   "hub-revoked": "The hub removed this computer.",
+  "acknowledgement-required": "Read the certificate-transparency note and acknowledge it first.",
+  "not-a-tailnet-name": "The remote listener is not served at a Tailscale name (*.ts.net).",
+  "turned-off": "The Tailscale certificate is off.",
+  "daemon-not-reachable":
+    "Octant could not reach Tailscale. Check that it is installed and signed in.",
+  "https-not-enabled":
+    "HTTPS certificates are not turned on for this tailnet in the Tailscale admin console.",
+  "name-not-served": "Tailscale does not serve a certificate for this computer's name.",
+  "nowhere-to-install":
+    "The remote listener cannot take a certificate Octant did not make without losing the pin that phones and other computers hold it to, so nothing was installed.",
 };
 
 /** The server's refusal as a sentence plus its own word for it, so nothing is hidden. */

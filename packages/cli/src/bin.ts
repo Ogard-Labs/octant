@@ -612,6 +612,7 @@ function printUsage(): void {
       "  octant hub status",
       "  octant hub enable [--install-service]",
       "  octant hub disable [--remove-service]",
+      "  octant hub certificate [--enable --acknowledge-transparency | --disable | --status]",
       "  octant hub join-code [--owner]",
       "  octant hub join <code> [--items <roster,status,introduce,wake,owners,standby,push,provision,act|none>]",
       "  octant hub grant [--items <list>|none]",

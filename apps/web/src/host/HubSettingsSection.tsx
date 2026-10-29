@@ -98,6 +98,15 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
   "cannot-remove-the-hub": "The hub cannot remove itself.",
   "not-a-spoke": "This computer has not joined a hub.",
   "hub-revoked": "The hub removed this computer.",
+  "acknowledgement-required": "Read the certificate-transparency note and tick it first.",
+  "not-a-tailnet-name": "The remote listener is not served at a Tailscale name (*.ts.net).",
+  "daemon-not-reachable":
+    "Octant could not reach Tailscale. Check that it is installed and signed in.",
+  "https-not-enabled":
+    "HTTPS certificates are not turned on for this tailnet in the Tailscale admin console.",
+  "name-not-served": "Tailscale does not serve a certificate for this computer's name.",
+  "nowhere-to-install":
+    "The remote listener cannot take a certificate Octant did not make without losing the pin that phones and other computers hold it to, so nothing was installed.",
 };
 
 interface Reply {
@@ -124,7 +133,15 @@ interface HubStatus {
     readonly membership: "member" | "removed";
     readonly hubName: string;
     readonly grant: Grant;
+    /** The hub's roster as this computer holds it, each with whether this computer accepted it. */
+    readonly roster: ReadonlyArray<Member & { readonly accepted: boolean }>;
   };
+}
+
+interface CertificateStatus {
+  readonly enabled: boolean;
+  readonly domain?: string;
+  readonly renewal?: "current" | "due" | "expired";
 }
 
 type StatusState =
@@ -168,6 +185,9 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
   const [pending, setPending] = useState<ReadonlyArray<RemotePendingPairingRequest>>([]);
   const [removing, setRemoving] = useState<Member>();
   const [leaving, setLeaving] = useState(false);
+  const [certificate, setCertificate] = useState<CertificateStatus>();
+  const [transparencyRead, setTransparencyRead] = useState(false);
+  const transparencyId = useId();
   const [joinCode, setJoinCode] = useState("");
   const [join, setJoin] = useState<JoinState>({ phase: "idle" });
   const [draft, setDraft] = useState<ReadonlyArray<HubGrantItem>>([]);
@@ -204,6 +224,49 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const refreshCertificate = useCallback(async () => {
+    try {
+      const reply = await request("certificate-status");
+      setCertificate(reply.status === 200 ? readCertificate(reply.body) : undefined);
+    } catch {
+      setCertificate(undefined);
+    }
+  }, [request]);
+
+  useEffect(() => {
+    void refreshCertificate();
+  }, [refreshCertificate]);
+
+  const setTailscaleCertificate = async (on: boolean) => {
+    if (on) {
+      const enabled = await act(
+        "certificate",
+        { action: "enable", acknowledgedCertificateTransparency: transparencyRead },
+        "enabled",
+        "Octant could not turn on the Tailscale certificate.",
+      );
+      // Turning it on only records the choice; asking now shows whether this
+      // computer can get a certificate, and why not.
+      if (enabled !== undefined) {
+        await act(
+          "certificate",
+          { action: "renew" },
+          "renewed",
+          "Octant could not get the Tailscale certificate.",
+        );
+      }
+    } else {
+      await act(
+        "certificate",
+        { action: "disable" },
+        "disabled",
+        "Octant could not turn off the Tailscale certificate.",
+      );
+      setTransparencyRead(false);
+    }
+    await refreshCertificate();
+  };
 
   const status = state.kind === "ready" ? state.status : undefined;
   const hubOn = status?.enabled === true;
@@ -642,6 +705,22 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
                   },
                 ]}
               />
+              {linked.roster.length === 0 ? null : (
+                <ul aria-label="Members of this hub" className="setgroup">
+                  {linked.roster.map((member) => (
+                    <li className="setrow" key={member.memberId}>
+                      <span className="setrow-label">{member.name}</span>
+                      <p className="setrow-hint">
+                        {member.role}
+                        {member.owner ? " · owner" : ""} ·{" "}
+                        {member.role === "hub" || member.accepted
+                          ? "accepted here"
+                          : "not accepted here"}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
               {grantEditor(linked.grant, "Save the grant")}
               <div className="host-settings__controls">
                 <OctantButton
@@ -728,6 +807,53 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
           )}
         </SettingsSection>
       )}
+
+      {certificate === undefined ? null : (
+        <SettingsSection title="Tailscale certificate">
+          <div className="setgroup">
+            <SettingRow
+              description="Lets a browser on your tailnet open this computer's web app without a warning. Off by default."
+              label="Use a Tailscale certificate"
+              scope="host"
+              settingId="hub-tailscale-certificate"
+            >
+              <OctantSwitch
+                checked={certificate.enabled}
+                disabled={busy || (!certificate.enabled && !transparencyRead)}
+                {...(!certificate.enabled && !transparencyRead
+                  ? { disabledReason: "Read and tick the note below first." }
+                  : {})}
+                label="Use a Tailscale certificate"
+                onCheckedChange={(on) => void setTailscaleCertificate(on)}
+              />
+            </SettingRow>
+          </div>
+          {certificate.enabled ? (
+            <SettingsFactList
+              facts={[
+                ...(certificate.domain === undefined
+                  ? []
+                  : [{ label: "Name", value: certificate.domain }]),
+                ...(certificate.renewal === undefined
+                  ? []
+                  : [{ label: "Renewal", value: certificate.renewal }]),
+              ]}
+            />
+          ) : (
+            <label className="check" htmlFor={transparencyId}>
+              <OctantCheckbox
+                checked={transparencyRead}
+                id={transparencyId}
+                onChange={(event) => setTransparencyRead(event.target.checked)}
+              />
+              <span>
+                Tailscale gets this certificate from a public authority, so this computer's tailnet
+                name will appear in public certificate-transparency logs. I have read this.
+              </span>
+            </label>
+          )}
+        </SettingsSection>
+      )}
     </>
   );
 }
@@ -752,7 +878,28 @@ function readStatus(body: unknown): HubStatus | undefined {
   const spoke = field(body, "spoke");
   const enabled = field(hub, "enabled");
   if (typeof enabled !== "boolean") return undefined;
-  const rows = field(field(field(hub, "roster"), "roster"), "members");
+  const members = readMembers(field(field(field(hub, "roster"), "roster"), "members"));
+  const membership = field(spoke, "membership");
+  const hubName = field(field(spoke, "hub"), "name");
+  const grant = readGrant(field(spoke, "grant"));
+  if (
+    (membership === "member" || membership === "removed") &&
+    typeof hubName === "string" &&
+    grant !== undefined
+  ) {
+    const acceptedIds = field(spoke, "acceptedMemberIds");
+    const accepted = new Set(
+      Array.isArray(acceptedIds) ? acceptedIds.filter((id) => typeof id === "string") : [],
+    );
+    const roster = readMembers(field(field(field(spoke, "roster"), "roster"), "members")).map(
+      (member) => ({ ...member, accepted: accepted.has(member.memberId) }),
+    );
+    return { enabled, members, link: { membership, hubName, grant, roster } };
+  }
+  return { enabled, members };
+}
+
+function readMembers(rows: unknown): Member[] {
   const members: Member[] = [];
   for (const entry of Array.isArray(rows) ? rows : []) {
     const memberId = field(entry, "memberId");
@@ -762,17 +909,19 @@ function readStatus(body: unknown): HubStatus | undefined {
       members.push({ memberId, name, role, owner: field(entry, "owner") === true });
     }
   }
-  const membership = field(spoke, "membership");
-  const hubName = field(field(spoke, "hub"), "name");
-  const grant = readGrant(field(spoke, "grant"));
-  if (
-    (membership === "member" || membership === "removed") &&
-    typeof hubName === "string" &&
-    grant !== undefined
-  ) {
-    return { enabled, members, link: { membership, hubName, grant } };
-  }
-  return { enabled, members };
+  return members;
+}
+
+function readCertificate(body: unknown): CertificateStatus | undefined {
+  const enabled = field(body, "enabled");
+  if (typeof enabled !== "boolean") return undefined;
+  const domain = field(body, "domain");
+  const renewal = field(body, "renewal");
+  return {
+    enabled,
+    ...(typeof domain === "string" ? { domain } : {}),
+    ...(renewal === "current" || renewal === "due" || renewal === "expired" ? { renewal } : {}),
+  };
 }
 
 function readGrant(value: unknown): Grant | undefined {

@@ -15,13 +15,17 @@ network calls
 release scope
 ([Current Release Boundary](../architecture.md#current-release-boundary)).
 
-**Status: approved design 2026-10-28; the hub role and joining are built.** A
-host can act as hub, make a join code, approve and remove members, and keep the
-roster; another computer can join, change its hub grant, and leave. This works
-from Settings in a desktop window and from `octant hub`, and the hub can run as
-a boot service. The hub uses only the Roster and Status grant items so far.
-Owners, guests, failover, the wake service, push, provisioning, and delegation
-are not built. The maintainer
+**Status: approved design 2026-10-28; the hub role, joining, and phone guests
+are built.** A host can act as hub, make a join code, approve and remove
+members, and keep the roster; another computer can join, change its hub grant,
+and leave. This works from Settings in a desktop window and from `octant hub`,
+and the hub can run as a boot service. A phone can join as a guest and reach
+each spoke that accepted it, and Settings and `octant hub certificate` turn on
+the Tailscale certificate request. The listener cannot yet serve that
+certificate beside the pinned one, so none is installed, and a browser guest
+screen is not built. The phone flow has not been run on a real device. The hub
+uses only the Roster and Status grant items so far. Owners, failover, the wake
+service, push, provisioning, and delegation are not built. The maintainer
 asked for this design and authorized it as post-preview, design-first work on
 2026-10-28, and set its shape the same day: a running instance enabled as hub,
 members paired by QR or manual code over a private network such as Tailscale,
@@ -232,6 +236,15 @@ the CLI. The hub depends on that:
   decides what it may do there ([decision H2](#decisions)). A guest acts
   on a spoke as a paired device does today, and can start work on a spoke the
   same way.
+  - A guest knocks on each spoke itself, with the device key it paired with at
+    the hub. The spoke checks the signature against the roster entry's
+    fingerprint and against its own Introduce item before it makes an
+    ordinary paired device. The hub never carries a guest's request to a spoke,
+    so a hub cannot admit a guest to a spoke that has not accepted it.
+  - A guest's roster entry has no listener: the all-zero pin and no addresses.
+    A guest is never dialled, so nothing in the roster could be pinned to it.
+  - A roster entry may carry the port its listener serves on. A listener is
+    not always on the default port, and a member without it cannot be reached.
 
 Rationale: making the hub an ordinary host with a role, rather than a separate
 product or service, keeps one server, one listener, one pairing protocol, and

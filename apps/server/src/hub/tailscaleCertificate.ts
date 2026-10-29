@@ -43,16 +43,14 @@ export interface TailscaleCertificateSink {
 }
 
 /**
- * The daemon's certificate interface differs by platform (a unix socket on
- * Linux, a local port with a token on macOS) and is not yet confirmed against
- * a running daemon, so the host ships no daemon client: it reports the daemon
- * as unreachable rather than guess at a protocol.
+ * The listener has one certificate, and a hub or spoke publishes the pin of its
+ * key in the roster. Serving a certificate the host did not make marks the
+ * listener as pasted, which carries no pin: the hub then refuses to name the
+ * listener ("listener-has-no-pin") and every member holding the old pin loses
+ * the connection. Until the listener can serve a second certificate beside the
+ * pinned one, an installation is reported unsupported rather than break
+ * membership.
  */
-export const unwiredTailscaleDaemon: TailscaleDaemonPort = {
-  certificateFor: async () => ({ status: "unavailable", kind: "daemon-not-reachable" }),
-};
-
-/** The listener reads no certificate from here yet, so an installation is reported unsupported. */
 export const unwiredCertificateSink: TailscaleCertificateSink = {
   install: async () => ({ status: "unsupported" }),
 };
