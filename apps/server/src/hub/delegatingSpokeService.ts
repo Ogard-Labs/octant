@@ -202,7 +202,13 @@ export class DelegatingSpokeService {
     const origin = memberOrigin(target.member);
     if (origin === undefined) return { status: "refused", kind: "target-has-no-listener" };
 
-    const requestId = decodeRequestId((this.#options.uuid ?? randomUUID)());
+    // A retry of a start still awaiting acceptance resends under the same id,
+    // which the target answers idempotently, so it never runs a second child.
+    const pendingRequest = this.#options.state
+      .load()
+      .sent.find((entry) => isSameStart(entry, command));
+    const requestId =
+      pendingRequest?.requestId ?? decodeRequestId((this.#options.uuid ?? randomUUID)());
     const request: DelegationRequest = {
       requestId,
       projectId: command.projectId,
@@ -213,22 +219,29 @@ export class DelegatingSpokeService {
     // The target may start the child and then fail to tell this host (a lost
     // answer, the 8-second timeout). The request is on file before it leaves,
     // so such a child can always be read and cancelled by its id.
-    const current = this.#options.state.load();
-    this.#options.state.save({
-      ...current,
-      sent: [
-        ...current.sent,
-        {
-          requestId,
-          targetMemberId: command.targetMemberId,
-          projectId: command.projectId,
-          parent: command.parent,
-          authority: command.authority,
-          state: "awaiting-acceptance",
-          sentAt: decodeTimestamp(new Date(this.#options.now()).toISOString()),
-        },
-      ],
-    });
+    const sentAt = decodeTimestamp(new Date(this.#options.now()).toISOString());
+    if (pendingRequest !== undefined) {
+      // The resend carries a fresh signature, so the window for its arrival restarts.
+      this.#update(requestId, { sentAt });
+    } else {
+      const current = this.#options.state.load();
+      this.#options.state.save({
+        ...current,
+        sent: [
+          ...current.sent,
+          {
+            requestId,
+            targetMemberId: command.targetMemberId,
+            projectId: command.projectId,
+            parent: command.parent,
+            authority: command.authority,
+            state: "awaiting-acceptance",
+            task: command.task,
+            sentAt,
+          },
+        ],
+      });
+    }
     const pending: DelegateOutcome = { status: "pending-acceptance", requestId };
     const answer = await this.#send(target, origin, PEER_DELEGATION_ROUTES.create, request);
     if (answer.status === "unreachable") return pending;
@@ -441,7 +454,7 @@ export class DelegatingSpokeService {
     this.#options.state.save({
       ...current,
       sent: current.sent.map((entry) =>
-        String(entry.requestId) === String(requestId) ? { ...entry, ...change } : entry,
+        String(entry.requestId) === String(requestId) ? updated(entry, change) : entry,
       ),
     });
   }
@@ -466,6 +479,30 @@ export class DelegatingSpokeService {
       now: this.#options.now(),
     });
   }
+}
+
+/** A pending record the same start would recreate: same parent, target, Project, authority and task. */
+function isSameStart(entry: SentDelegation, command: DelegationStartCommand): boolean {
+  return (
+    entry.state === "awaiting-acceptance" &&
+    entry.task === command.task &&
+    entry.parent.mode === command.parent.mode &&
+    entry.parent.threadId === command.parent.threadId &&
+    String(entry.targetMemberId) === String(command.targetMemberId) &&
+    String(entry.projectId) === String(command.projectId) &&
+    entry.authority.mode === command.authority.mode &&
+    entry.authority.posture === command.authority.posture &&
+    String(entry.authority.profileId) === String(command.authority.profileId)
+  );
+}
+
+/** The task text is needed only while the target has not answered; any later state drops it. */
+function updated(entry: SentDelegation, change: Partial<SentDelegation>): SentDelegation {
+  const { task: _task, ...rest } = entry;
+  const next = { ...rest, ...change };
+  return next.state === "awaiting-acceptance" && entry.task !== undefined
+    ? { ...next, task: entry.task }
+    : next;
 }
 
 /** The thread reference a request carries so the target knows which thread asked. */

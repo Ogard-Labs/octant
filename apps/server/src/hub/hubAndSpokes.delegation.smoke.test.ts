@@ -495,6 +495,54 @@ describe("a delegation whose answer never reached the delegating spoke", () => {
     expect(a.delegationRecords.map((entry) => entry.change)).toEqual(["sent"]);
   });
 
+  it("resends a retried start under the pending request's id, leaving one child and one record", async () => {
+    const flaky = flakyCreate();
+    const { a, b, child } = await threeHosts({ aTransport: flaky.transport });
+    flaky.fault.mode = "lose-answer";
+    const first = await a.delegating.delegate(startCommand(b), { windowId: "window-a" });
+    if (first.status !== "pending-acceptance") throw new Error(JSON.stringify(first));
+    flaky.fault.mode = "none";
+
+    const retried = await a.delegating.delegate(startCommand(b), { windowId: "window-a" });
+
+    expect(retried).toMatchObject({ status: "delegated", requestId: first.requestId });
+    expect(child.started).toHaveLength(1);
+    expect(a.delegationState.load().sent).toEqual([
+      expect.objectContaining({ requestId: first.requestId, state: "running" }),
+    ]);
+    expect(a.delegationState.load().sent[0]).not.toHaveProperty("task");
+  });
+
+  it("gives a different task a new request id while one is pending", async () => {
+    const flaky = flakyCreate();
+    const { a, b } = await threeHosts({ aTransport: flaky.transport });
+    flaky.fault.mode = "lose-answer";
+    const first = await a.delegating.delegate(startCommand(b), { windowId: "window-a" });
+    if (first.status !== "pending-acceptance") throw new Error(JSON.stringify(first));
+
+    const other = await a.delegating.delegate(
+      startCommand(b, { task: "Draft the release notes." }),
+      {
+        windowId: "window-a",
+      },
+    );
+
+    if (other.status !== "pending-acceptance") throw new Error(JSON.stringify(other));
+    expect(String(other.requestId)).not.toBe(String(first.requestId));
+    expect(a.delegationState.load().sent).toHaveLength(2);
+  });
+
+  it("erases the task text of a pending request with its parent thread", async () => {
+    const flaky = flakyCreate();
+    const { a, b } = await threeHosts({ aTransport: flaky.transport });
+    flaky.fault.mode = "lose-answer";
+    await a.delegating.delegate(startCommand(b), { windowId: "window-a" });
+
+    a.delegating.forgetParent(PARENT_THREAD);
+
+    expect(a.delegationState.load().sent).toEqual([]);
+  });
+
   it("does not leave a request pending when the target refuses it", async () => {
     const { a, b, child } = await threeHosts({ child: fakeChildHost({ modes: ["code"] }) });
 

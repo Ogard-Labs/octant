@@ -63,6 +63,12 @@ export const SentDelegation = Schema.Struct({
   authority: DelegatedAuthority,
   /** The child's state as the target last reported it. */
   state: SentDelegationState,
+  /**
+   * The task text, kept only while the request is `awaiting-acceptance` so a
+   * retried start can resend it under the same id. It is this host's own
+   * content, erased with the parent thread, and dropped once the target answers.
+   */
+  task: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(32_768))),
   /** Set once the result was recorded on the parent thread; a result is recorded once. */
   resultRecorded: Schema.optional(Schema.Literal(true)),
   /**
