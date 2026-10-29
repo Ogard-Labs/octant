@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { isMobileHighRiskPromptActive } from "../security/mobileAuthPromptState";
 import { createPhoneUnlockKey, type UnlockKeyRead } from "./ownerUnlockKey";
 
 type Presence = "confirmed" | "denied" | "unavailable";
@@ -8,11 +9,13 @@ function fixture(options: { presence?: Presence; vaultRead?: UnlockKeyRead } = {
   let storedPublic: string | null = null;
   const counts = { authenticate: 0, vaultRead: 0 };
   const order: string[] = [];
+  const active = { presence: false, vault: false };
   const key = createPhoneUnlockKey({
     vault: {
       read: async () => {
         counts.vaultRead += 1;
         order.push("vault");
+        active.vault = isMobileHighRiskPromptActive();
         if (options.vaultRead !== undefined) return options.vaultRead;
         return storedPrivate === undefined
           ? { status: "missing" }
@@ -38,11 +41,12 @@ function fixture(options: { presence?: Presence; vaultRead?: UnlockKeyRead } = {
       authenticate: async () => {
         counts.authenticate += 1;
         order.push("presence");
+        active.presence = isMobileHighRiskPromptActive();
         return options.presence ?? "confirmed";
       },
     },
   });
-  return { key, counts, order, stored: () => ({ private: storedPrivate, public: storedPublic }) };
+  return { key, counts, order, active, stored: () => ({ private: storedPrivate, public: storedPublic }) };
 }
 
 async function verifies(publicKey: string, text: string, signature: string): Promise<boolean> {
@@ -153,6 +157,29 @@ describe("phone unlock key", () => {
     if (signer?.shape !== "raw") throw new Error("expected a raw signer");
 
     expect(await signer.open()).toEqual({ status: "cancelled" });
+  });
+
+  it("holds the high-risk prompt guard through the system prompt and the store read, then lets go", async () => {
+    const { key, active } = fixture();
+    await key.ensure();
+    const signer = await key.signer();
+    if (signer?.shape !== "raw") throw new Error("expected a raw signer");
+
+    await signer.open();
+
+    expect(active).toEqual({ presence: true, vault: true });
+    expect(isMobileHighRiskPromptActive()).toBe(false);
+  });
+
+  it("lets go of the high-risk prompt guard when the person declines", async () => {
+    const { key } = fixture({ presence: "denied" });
+    await key.ensure();
+    const signer = await key.signer();
+    if (signer?.shape !== "raw") throw new Error("expected a raw signer");
+
+    await signer.open();
+
+    expect(isMobileHighRiskPromptActive()).toBe(false);
   });
 
   it("offers no signer until a key exists and none after the key is forgotten", async () => {

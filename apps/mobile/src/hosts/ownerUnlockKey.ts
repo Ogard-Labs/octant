@@ -16,6 +16,7 @@ import {
   type UnlockAttempt,
 } from "@octant/client-runtime";
 import type { BiometricAuthenticator } from "../security/BiometricGate";
+import { beginMobileHighRiskPrompt } from "../security/mobileAuthPromptState";
 
 const KEY_ALGORITHM = { name: "ECDSA", namedCurve: "P-256" } as const;
 const PROMPT = "Unlock this action on your computer";
@@ -92,12 +93,21 @@ export function createPhoneUnlockKey(ports: PhoneUnlockKeyPorts): PhoneUnlockKey
   // `close` drops it, so a confirmation and the proof for its action never ask twice.
   const open = async (): Promise<UnlockAttempt<RawUnlockSession>> => {
     // The system prompt comes first, and the store is read only after it passes.
-    const present = await ports.presence
-      .authenticate({ reason: "approve", promptMessage: PROMPT })
-      .catch(() => "unavailable" as const);
-    if (present === "denied") return { status: "cancelled" };
-    if (present !== "confirmed") return { status: "unavailable" };
-    const read = await ports.vault.read().catch((): UnlockKeyRead => ({ status: "refused" }));
+    // On iOS each of them moves the app to `inactive`; without the guard the
+    // vault gate locks the owner screen and asks for a second app unlock.
+    const releasePrompt = beginMobileHighRiskPrompt();
+    let present: Awaited<ReturnType<typeof ports.presence.authenticate>>;
+    let read: UnlockKeyRead;
+    try {
+      present = await ports.presence
+        .authenticate({ reason: "approve", promptMessage: PROMPT })
+        .catch(() => "unavailable" as const);
+      if (present === "denied") return { status: "cancelled" };
+      if (present !== "confirmed") return { status: "unavailable" };
+      read = await ports.vault.read().catch((): UnlockKeyRead => ({ status: "refused" }));
+    } finally {
+      releasePrompt();
+    }
     if (read.status === "refused") return { status: "cancelled" };
     if (read.status === "missing") return { status: "unavailable" };
     try {
