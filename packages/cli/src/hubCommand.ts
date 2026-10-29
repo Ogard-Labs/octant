@@ -30,6 +30,8 @@ export type HubCliCommand =
   | { readonly action: "accept-hub"; readonly member: string }
   /** On the hub: turns the wake service on or off. It is off until a person turns it on. */
   | { readonly action: "wake"; readonly enabled: boolean }
+  /** On the hub: turns the push sender on or off. It is off until a person turns it on. */
+  | { readonly action: "push"; readonly enabled: boolean }
   | { readonly action: "stand-in"; readonly step: "join-code" }
   | { readonly action: "stand-in"; readonly step: "remove"; readonly member: string }
   | {
@@ -51,6 +53,7 @@ const HUB_SIDE_ACTIONS: ReadonlySet<HubCliCommand["action"]> = new Set([
   "accept-hub",
   "stand-in",
   "wake",
+  "push",
 ]);
 
 const JOIN_APPROVAL_WINDOW_MS = 5 * 60_000;
@@ -113,7 +116,8 @@ export function resolveHubCliCommand(
       if (member === undefined || rest.length !== 1 || !only()) return undefined;
       return { action, member };
     }
-    case "wake": {
+    case "wake":
+    case "push": {
       const [setting] = rest;
       if (rest.length !== 1 || !only() || (setting !== "on" && setting !== "off")) return undefined;
       return { action, enabled: setting === "on" };
@@ -239,6 +243,8 @@ export async function runHubCliCommand(input: Input): Promise<number> {
       return await runAcceptHub(input, command.member);
     case "wake":
       return await runWake(input, command.enabled);
+    case "push":
+      return await runPush(input, command.enabled);
     case "stand-in":
       return command.step === "join-code"
         ? await runStandInJoinCode(input)
@@ -313,6 +319,35 @@ async function runWake(input: Input, enabled: boolean): Promise<number> {
   return 0;
 }
 
+async function runPush(input: Input, enabled: boolean): Promise<number> {
+  const response = await post(input, "/api/desktop/hub/push", { enabled });
+  if (!isOk(response, "changed")) {
+    return refusal(input, response, "Octant refused to change the push sender.");
+  }
+  input.stdout.write(
+    enabled
+      ? "The push sender is on. A spoke uses it only if its person ticked Push in its hub grant, and the hub forwards only to the gateway in its own Notifications setting.\n"
+      : "The push sender is off, and the hub forgot its counts.\n",
+  );
+  return 0;
+}
+
+function writePushSender(input: Input, status: HubStatusOutput): void {
+  const push = status.push?.hub;
+  if (push === undefined) return;
+  input.stdout.write(`Push sender ${push.enabled ? "on" : "off"}\n`);
+  for (const spoke of push.spokes) {
+    const name = status.members.find((member) => member.memberId === spoke.memberId)?.name;
+    const last =
+      spoke.lastResult === undefined
+        ? ""
+        : `, last ${spoke.lastResult.result} ${new Date(spoke.lastResult.at).toISOString()}`;
+    input.stdout.write(
+      `  ${name ?? spoke.memberId}  ${spoke.forwarded} forwarded, ${spoke.refused} refused${last}\n`,
+    );
+  }
+}
+
 function writeWakeService(input: Input, status: HubStatusOutput): void {
   const wake = status.wake?.hub;
   if (wake === undefined) return;
@@ -338,6 +373,7 @@ async function runStatus(input: Input): Promise<number> {
   }
   if (status.hubEnabled && status.standbyOrder.length > 0) writeStandbyOrder(input, status);
   if (status.hubEnabled) writeWakeService(input, status);
+  if (status.hubEnabled) writePushSender(input, status);
   if (status.link === undefined) {
     input.stdout.write("This computer has not joined a hub.\n");
     return 0;
@@ -363,6 +399,14 @@ async function runStatus(input: Input): Promise<number> {
       sharing.sharing
         ? `Wake: this computer tells the hub when its routines are due (${sharing.reported} now).${sharing.hardwareAddress === undefined ? "" : " It also shares the hardware address you entered."}\n`
         : "Wake: this computer shares no routine times (Wake is not ticked in its hub grant).\n",
+    );
+  }
+  const handing = status.push?.spoke;
+  if (handing !== undefined) {
+    input.stdout.write(
+      handing.handing
+        ? "Push: this computer hands its sealed phone notifications to the hub, and sends them itself if the hub cannot.\n"
+        : "Push: this computer sends its own phone notifications (Push is not ticked in its hub grant).\n",
     );
   }
   return 0;
@@ -837,6 +881,7 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
     "A standby that stands in cannot remove the hub or a standby; the hub's window changes those.",
   "roster-not-newer": "That hub's roster is not newer than the one this computer holds.",
   "wake-service-off": "The wake service is off. Turn it on with `octant hub wake on`.",
+  "push-service-off": "The push sender is off. Turn it on with `octant hub push on`.",
   "invalid-address": "That is not a hardware address (six hex pairs, such as aa:bb:cc:00:11:22).",
 };
 
@@ -895,6 +940,18 @@ interface HubStatusOutput {
       readonly hardwareAddress?: string;
     };
   };
+  readonly push?: {
+    readonly hub: {
+      readonly enabled: boolean;
+      readonly spokes: ReadonlyArray<{
+        readonly memberId: string;
+        readonly forwarded: number;
+        readonly refused: number;
+        readonly lastResult?: { readonly at: number; readonly result: string };
+      }>;
+    };
+    readonly spoke: { readonly handing: boolean };
+  };
   readonly link?: {
     readonly membership: "member" | "removed";
     readonly hubName: string;
@@ -933,6 +990,7 @@ async function readStatus(input: Input, fallback: string): Promise<HubStatusOutp
   const heldMembers = rosterMembersOf(heldRoster);
   const standbyOrder = stringList(field(heldRoster, "standbyOrder"));
   const wake = wakeOf(field(response.body, "wake"));
+  const push = pushOf(field(response.body, "push"));
   if (
     (membership === "member" || membership === "removed") &&
     typeof hubName === "string" &&
@@ -948,6 +1006,7 @@ async function readStatus(input: Input, fallback: string): Promise<HubStatusOutp
       heldMembers,
       standbyOrder,
       ...(wake === undefined ? {} : { wake }),
+      ...(push === undefined ? {} : { push }),
       link: {
         membership,
         hubName,
@@ -967,7 +1026,37 @@ async function readStatus(input: Input, fallback: string): Promise<HubStatusOutp
     heldMembers,
     standbyOrder,
     ...(wake === undefined ? {} : { wake }),
+    ...(push === undefined ? {} : { push }),
   };
+}
+
+function pushOf(value: unknown): HubStatusOutput["push"] {
+  const hub = field(value, "hub");
+  const enabled = field(hub, "enabled");
+  const rawSpokes = field(hub, "spokes");
+  const handing = field(field(value, "spoke"), "handing");
+  if (typeof enabled !== "boolean" || !Array.isArray(rawSpokes) || typeof handing !== "boolean") {
+    return undefined;
+  }
+  const spokes: Array<NonNullable<HubStatusOutput["push"]>["hub"]["spokes"][number]> = [];
+  for (const entry of rawSpokes) {
+    const memberId = field(entry, "memberId");
+    const forwarded = field(entry, "forwarded");
+    const refused = field(entry, "refused");
+    const at = field(field(entry, "lastResult"), "at");
+    const result = field(field(entry, "lastResult"), "result");
+    if (typeof memberId !== "string" || typeof forwarded !== "number") continue;
+    if (typeof refused !== "number") continue;
+    spokes.push({
+      memberId,
+      forwarded,
+      refused,
+      ...(typeof at === "number" && typeof result === "string"
+        ? { lastResult: { at, result } }
+        : {}),
+    });
+  }
+  return { hub: { enabled, spokes }, spoke: { handing } };
 }
 
 function wakeOf(value: unknown): HubStatusOutput["wake"] {

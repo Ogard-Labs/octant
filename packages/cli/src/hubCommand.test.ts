@@ -691,6 +691,98 @@ describe("octant hub wake", () => {
   });
 });
 
+describe("octant hub push", () => {
+  const SPOKE_ID = "44444444-4444-4444-8444-444444444444";
+  const status = (push: Record<string, unknown>) => ({
+    hub: {
+      enabled: true,
+      roster: {
+        roster: {
+          standbyOrder: [],
+          members: [{ memberId: SPOKE_ID, name: "Laptop", role: "spoke", owner: false }],
+        },
+      },
+    },
+    spoke: { membership: "none" },
+    push,
+  });
+
+  it("reads push on and off and nothing else", () => {
+    expect(resolveHubCliCommand(["push", "on"], {})).toEqual({ action: "push", enabled: true });
+    expect(resolveHubCliCommand(["push", "off"], {})).toEqual({ action: "push", enabled: false });
+    expect(resolveHubCliCommand(["push"], {})).toBeUndefined();
+    expect(resolveHubCliCommand(["push", "maybe"], {})).toBeUndefined();
+    expect(resolveHubCliCommand(["push", "on", "extra"], {})).toBeUndefined();
+    expect(resolveHubCliCommand(["push", "on"], { force: true })).toBeUndefined();
+  });
+
+  it("turns the push sender on and off through the window-only route", async () => {
+    const on = await fixture(() => ok({ status: "changed", enabled: true }));
+    expect(await on.run({ action: "push", enabled: true })).toBe(0);
+    expect(on.sent[0]).toMatchObject({ path: "/api/desktop/hub/push", body: { enabled: true } });
+    expect(on.text()).toContain("push sender is on");
+
+    const off = await fixture(() => ok({ status: "changed", enabled: false }));
+    expect(await off.run({ action: "push", enabled: false })).toBe(0);
+    expect(off.sent[0]).toMatchObject({ body: { enabled: false } });
+
+    const refused = await fixture(() => ({
+      status: 409,
+      body: { status: "refused", kind: "hub-role-off" },
+    }));
+    expect(await refused.run({ action: "push", enabled: true })).toBe(1);
+    expect(refused.errors()).toContain("hub-role-off");
+  });
+
+  it("shows the switch, each spoke's forward counts and the last result in the hub status", async () => {
+    const host = await fixture(() =>
+      ok(
+        status({
+          hub: {
+            enabled: true,
+            spokes: [
+              {
+                memberId: SPOKE_ID,
+                forwarded: 4,
+                refused: 1,
+                lastResult: { at: 0, result: "forwarded" },
+              },
+            ],
+          },
+          spoke: { handing: false },
+        }),
+      ),
+    );
+
+    expect(await host.run({ action: "status" })).toBe(0);
+
+    expect(host.text()).toContain("Push sender on");
+    expect(host.text()).toContain(
+      "Laptop  4 forwarded, 1 refused, last forwarded 1970-01-01T00:00:00.000Z",
+    );
+  });
+
+  it("shows on a spoke whether it hands its notifications to the hub", async () => {
+    const host = await fixture(() =>
+      ok({
+        hub: { enabled: false },
+        spoke: {
+          membership: "member",
+          hub: { memberId: MEMBER, name: "Mac mini" },
+          grant: DEFAULT_GRANT,
+          roster: { roster: { standbyOrder: [], members: [] } },
+          rosterSignedBy: "hub",
+        },
+        push: { hub: { enabled: false, spokes: [] }, spoke: { handing: true } },
+      }),
+    );
+
+    expect(await host.run({ action: "status" })).toBe(0);
+
+    expect(host.text()).toContain("hands its sealed phone notifications to the hub");
+  });
+});
+
 describe("octant hub failover commands", () => {
   const STANDBY = "33333333-3333-4333-8333-333333333333";
   const roster = (extra: Record<string, unknown> = {}) => ({

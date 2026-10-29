@@ -153,6 +153,13 @@ const WAKE_RESULT_COPY: Readonly<Record<string, string>> = {
   unreachable: "the computer could not be reached",
 };
 
+/** How the hub's last forward for a spoke went, in words. */
+const PUSH_RESULT_COPY: Readonly<Record<string, string>> = {
+  forwarded: "the gateway took it",
+  failed: "the gateway did not take it",
+  refused: "the hub refused it",
+};
+
 interface Reply {
   readonly status: number;
   readonly body: unknown;
@@ -180,6 +187,7 @@ interface HubStatus {
   /** The standby hubs this hub's roster names, in the order members try them. */
   readonly standbyOrder: ReadonlyArray<string>;
   readonly wake?: WakeView;
+  readonly push?: PushView;
   readonly link?: {
     readonly membership: "member" | "removed";
     readonly hubName: string;
@@ -204,6 +212,20 @@ interface HubStatus {
     readonly heldMembers: ReadonlyArray<HeldMemberRow>;
     readonly alerts: ReadonlyArray<NewMemberAlertRow>;
   };
+}
+
+/** The push sender as this window sees it: the hub's switch and what it counted, and whether this computer hands its notifications on. */
+interface PushView {
+  readonly hub: {
+    readonly enabled: boolean;
+    readonly spokes: ReadonlyArray<{
+      readonly memberId: string;
+      readonly forwarded: number;
+      readonly refused: number;
+      readonly lastResult?: { readonly at: number; readonly result: string };
+    }>;
+  };
+  readonly spoke: { readonly handing: boolean };
 }
 
 /** The wake service as this window sees it: the hub's switch and times, and this computer's side as a spoke. */
@@ -503,6 +525,25 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
     await refresh();
   };
 
+  const setPushSender = async (on: boolean) => {
+    const reply = await act(
+      "push",
+      { enabled: on },
+      "changed",
+      on
+        ? "Octant could not turn on the push sender."
+        : "Octant could not turn off the push sender.",
+    );
+    if (reply !== undefined) {
+      setMessage(
+        on
+          ? "Push sender is on. A computer uses it only if its person ticked Push."
+          : "Push sender is off. The hub forgot its counts.",
+      );
+    }
+    await refresh();
+  };
+
   const saveHardwareAddress = async (address: string | null) => {
     const reply = await act(
       "wake-hardware-address",
@@ -789,7 +830,7 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
         {message === undefined ? null : (
           <SettingsState
             kind={
-              /^(Approved|Denied|Removed|Left|Added|Confirm|Dismissed|The hub grant is saved|Standby order saved|This computer is now the hub|Wake service is|Hardware address)/.test(
+              /^(Approved|Denied|Removed|Left|Added|Confirm|Dismissed|The hub grant is saved|Standby order saved|This computer is now the hub|Wake service is|Push sender is|Hardware address)/.test(
                 message,
               )
                 ? "success"
@@ -1054,6 +1095,46 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
                       spoke.lastResult === undefined
                         ? "not woken yet"
                         : `last ${WAKE_RESULT_COPY[spoke.lastResult.result] ?? spoke.lastResult.result}`
+                    }`}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </SettingsSection>
+      )}
+
+      {!hubOn || status === undefined ? null : (
+        <SettingsSection title="Push sender">
+          <div className="setgroup">
+            <SettingRow
+              description="Send phone notifications for your spokes. A computer hands the hub notifications already sealed to your phone, signed by itself, and the hub passes them to the push gateway named in this computer's Notifications setting. The hub cannot read them or sign for a computer. A computer takes part only if its own person ticked Push in its hub grant. Off by default."
+              label="Push sender"
+              scope="host"
+              settingId="hub-push-sender"
+            >
+              <OctantSwitch
+                checked={status.push?.hub.enabled === true}
+                disabled={busy}
+                label="Push sender"
+                onCheckedChange={(on) => void setPushSender(on)}
+              />
+            </SettingRow>
+          </div>
+          {status.push?.hub.enabled !== true ? null : status.push.hub.spokes.length === 0 ? (
+            <SettingsState kind="empty">
+              The hub has not forwarded a notification yet.
+            </SettingsState>
+          ) : (
+            <ul aria-label="Spokes the hub forwards for" className="setgroup">
+              {status.push.hub.spokes.map((spoke) => (
+                <li className="setrow" key={spoke.memberId}>
+                  <span className="setrow-label">{nameOf(spoke.memberId)}</span>
+                  <p className="setrow-hint">
+                    {`${spoke.forwarded} forwarded · ${spoke.refused} refused · ${
+                      spoke.lastResult === undefined
+                        ? "nothing yet"
+                        : `last ${PUSH_RESULT_COPY[spoke.lastResult.result] ?? spoke.lastResult.result}`
                     }`}
                   </p>
                 </li>
@@ -1385,6 +1466,7 @@ function readStatus(body: unknown): HubStatus | undefined {
   const hubName = field(field(spoke, "hub"), "name");
   const grant = readGrant(field(spoke, "grant"));
   const wake = readWake(field(body, "wake"));
+  const push = readPush(field(body, "push"));
   if (
     (membership === "member" || membership === "removed") &&
     typeof hubName === "string" &&
@@ -1408,6 +1490,7 @@ function readStatus(body: unknown): HubStatus | undefined {
       ownerCandidates: readOwnerCandidates(field(hub, "ownerCandidates")),
       standbyOrder,
       ...(wake === undefined ? {} : { wake }),
+      ...(push === undefined ? {} : { push }),
       link: {
         membership,
         hubName,
@@ -1436,7 +1519,37 @@ function readStatus(body: unknown): HubStatus | undefined {
     ownerCandidates: readOwnerCandidates(field(hub, "ownerCandidates")),
     standbyOrder,
     ...(wake === undefined ? {} : { wake }),
+    ...(push === undefined ? {} : { push }),
   };
+}
+
+function readPush(value: unknown): PushView | undefined {
+  const hub = field(value, "hub");
+  const enabled = field(hub, "enabled");
+  const rows = field(hub, "spokes");
+  const handing = field(field(value, "spoke"), "handing");
+  if (typeof enabled !== "boolean" || !Array.isArray(rows) || typeof handing !== "boolean") {
+    return undefined;
+  }
+  const spokes: Array<PushView["hub"]["spokes"][number]> = [];
+  for (const row of rows) {
+    const memberId = field(row, "memberId");
+    const forwarded = field(row, "forwarded");
+    const refused = field(row, "refused");
+    const at = field(field(row, "lastResult"), "at");
+    const result = field(field(row, "lastResult"), "result");
+    if (typeof memberId !== "string" || typeof forwarded !== "number") continue;
+    if (typeof refused !== "number") continue;
+    spokes.push({
+      memberId,
+      forwarded,
+      refused,
+      ...(typeof at === "number" && typeof result === "string"
+        ? { lastResult: { at, result } }
+        : {}),
+    });
+  }
+  return { hub: { enabled, spokes }, spoke: { handing } };
 }
 
 function readWake(value: unknown): WakeView | undefined {

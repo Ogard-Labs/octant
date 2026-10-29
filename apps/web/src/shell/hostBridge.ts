@@ -263,7 +263,8 @@ export type HubAdministrationOperation =
   | "standby-order"
   | "promote"
   | "wake"
-  | "wake-hardware-address";
+  | "wake-hardware-address"
+  | "push";
 
 /**
  * The loopback hub administration, which only a local window reaches. Absent
