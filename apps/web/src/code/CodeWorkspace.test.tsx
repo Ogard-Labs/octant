@@ -26,7 +26,7 @@ describe("CodeWorkspace", () => {
     expect(screen.getByText("Loading exact checkout status and diff evidence.")).toBeVisible();
   });
 
-  it("says a remote thread's Git and terminal tabs are not available here, and asks the host nothing", () => {
+  it("says a thread on a remote folder's Git and terminal tabs are not available here, and asks the host nothing", () => {
     const client = codeClient();
     const base = controller("approval-gated") as {
       readonly activeView: { readonly checkout: object };
@@ -53,7 +53,7 @@ describe("CodeWorkspace", () => {
       expect(screen.getByRole("heading", { name: `${title} is not available here` })).toBeVisible();
       expect(
         screen.getByText(
-          "This thread's checkout is on an SSH target, where this operation is not available.",
+          "This thread's checkout is a folder on a remote machine, which Octant no longer supports.",
         ),
       ).toBeVisible();
       unmount();

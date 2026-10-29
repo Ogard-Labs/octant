@@ -70,23 +70,3 @@ function readInstalledArtifactVersion(artifactRoot: string): string | undefined 
     return undefined;
   }
 }
-
-/**
- * Runs the artifact's own SSH executor under the runtime running this CLI.
- * Like the server, it is handed the artifact root so it verifies the install
- * before it answers, and the version stamped on the artifact, which the host
- * that connected must match exactly.
- */
-export function installedArtifactExecutorCommand(
-  artifactRoot: string,
-  runtimeExecutable: string,
-): ServerStartCommand {
-  return {
-    command: runtimeExecutable,
-    args: [join(artifactRoot, "lib", "server", "sshTarget", "executorMain.mjs")],
-    env: {
-      OCTANT_ARTIFACT_ROOT: artifactRoot,
-      OCTANT_ARTIFACT_VERSION: readInstalledArtifactVersion(artifactRoot) ?? "",
-    },
-  };
-}

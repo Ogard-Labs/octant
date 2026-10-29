@@ -31,7 +31,6 @@ describe("octantSettingsRegistry", () => {
       "sync",
       "remote-access",
       "host",
-      "ssh-targets",
       "usage",
     ]);
   });
@@ -350,9 +349,6 @@ const COMPUTED_SETTING_ROWS: Readonly<Record<string, string>> = {
   "managed-tool-*": "managed-tools-automatic-updates",
   "paired-computer-*": "paired-computers-code",
   "hub-auto-apply-*": "hub-auto-apply",
-  "ssh-target-*": "ssh-targets-list",
-  "ssh-remote-project-*": "ssh-remote-projects",
-  "ssh-remote-worktree-*": "ssh-remote-projects",
   "sync-approver-*": "sync-members",
   "sync-join-request-*": "sync-members",
   "sync-member-*": "sync-members",

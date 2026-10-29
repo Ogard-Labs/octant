@@ -538,7 +538,6 @@ export interface WorkspaceViewProps {
   readonly onAttachFolder?: () => void;
   readonly onOpenDraftThread?: (mode: "work" | "code") => void;
   readonly onOpenCodeSettings?: () => void;
-  readonly onOpenSshTargetSettings?: () => void;
   readonly onOpenProviderSettings?: () => void;
   /** Opens Settings at Image generation, where a thread's Create image action points. */
   readonly onOpenImageSettings?: () => void;
@@ -1629,9 +1628,6 @@ function renderNonCodeTab(
           {...(props.onOpenCodeSettings === undefined
             ? {}
             : { onOpenCodeSettings: props.onOpenCodeSettings })}
-          {...(props.onOpenSshTargetSettings === undefined
-            ? {}
-            : { onOpenSshTargetSettings: props.onOpenSshTargetSettings })}
           {...(openProviderSettings === undefined ? {} : { onOpenSettings: openProviderSettings })}
           {...(props.codeDefaultFolderThreads === undefined
             ? {}

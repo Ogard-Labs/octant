@@ -72,7 +72,6 @@ import { AppleUpload } from "../apple/AppleUpload";
 import { useAppleUpload } from "../apple/useAppleUpload";
 import { AppleStoreVersion } from "../apple/AppleStoreVersion";
 import { useAppleStoreVersion } from "../apple/useAppleStoreVersion";
-import { REMOTE_CODE_THREAD_OPERATION_UNAVAILABLE } from "@octant/domain/ssh-target-recovery";
 import { useAppleDevices } from "../apple/useAppleDevices";
 
 const MonacoEditorPane = lazy(() =>
@@ -300,14 +299,13 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
     );
   }
 
-  // A remote thread's checkout is a folder on its SSH target. Its files,
-  // terminal, Git, tests, and pull request would act on this host, so the
-  // host refuses each and the tab says so instead of asking.
+  // A thread from a build that could run on a remote machine keeps that
+  // checkout kind. This host reads none of it, so the tab says so.
   if (view.checkout.kind === "remote-root") {
     return (
       <ShellState
-        eyebrow="On an SSH target"
-        message={REMOTE_CODE_THREAD_OPERATION_UNAVAILABLE}
+        eyebrow="Remote folder"
+        message="This thread's checkout is a folder on a remote machine, which Octant no longer supports."
         state="neutral"
         title={`${props.tab.title} is not available here`}
       />

@@ -32,7 +32,6 @@ export const SETTINGS_SECTION_IDS = [
   "sync",
   "remote-access",
   "host",
-  "ssh-targets",
   "usage",
 ] as const;
 
@@ -70,6 +69,7 @@ const RetiredSettingsSectionId = Schema.transformLiterals(
   ["provider-catalog", "providers"],
   ["navigator-assistant", "harness"],
   ["image-generation", "voice"],
+  ["ssh-targets", "host"],
 );
 
 export const SettingsDeepLink = Schema.Struct({

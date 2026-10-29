@@ -691,9 +691,9 @@ function checkoutFactText(kind: CodeBoardCard["checkoutKind"]): string {
   switch (kind) {
     case "managed-worktree":
       return "Managed worktree";
-    // A remote root is a folder on the target, never this host's checkout.
+    // A remote root is a folder on another machine, never this host's checkout.
     case "remote-root":
-      return "On an SSH target";
+      return "Remote folder";
     case "existing-worktree":
     case "plain-folder":
       return "Current checkout";
@@ -822,7 +822,7 @@ function cardDetailRows(
         card.checkoutKind === "managed-worktree"
           ? "Worktree"
           : card.checkoutKind === "remote-root"
-            ? "Folder on the SSH target"
+            ? "Remote folder"
             : "Checkout",
       value: card.worktree.path,
     });

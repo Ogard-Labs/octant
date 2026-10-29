@@ -111,38 +111,4 @@ describe("which live tools the dock may offer", () => {
       }),
     ).toBe(true);
   });
-
-  it("offers a thread on an SSH target none of the tools that act on this host", () => {
-    const remote = {
-      hasPlanArtifact: true,
-      hasDelivery: true,
-      hasCanvasDocument: false,
-      hasAppleSimulator: true,
-      hasWrittenDocument: false,
-      hasChildRuns: false,
-      addAgentInvoked: false,
-      hasExistingThread: true,
-      remoteCheckout: true,
-    } as const;
-    for (const surface of [
-      "files",
-      "terminal",
-      "tests",
-      "review",
-      "pull-requests",
-      "browser",
-      "debug",
-      "delivery",
-      "environment",
-      "ios-simulator",
-      "android-emulator",
-      "desktop",
-    ] as const) {
-      expect(isDockToolLaunchable(surface, remote)).toBe(false);
-      expect(isDockToolStillOpenable(surface, remote)).toBe(false);
-    }
-    expect(isDockToolLaunchable("plan", remote)).toBe(true);
-    expect(isDockToolLaunchable("side-chat", remote)).toBe(true);
-    expect(isDockToolLaunchable("terminal", { ...remote, remoteCheckout: false })).toBe(true);
-  });
 });

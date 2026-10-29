@@ -108,7 +108,6 @@ export default defineConfig({
             { text: "Browser for a CLI in a terminal", link: "/advanced/terminal-browser" },
             { text: "Apple Workbench", link: "/advanced/apple-workbench" },
             { text: "Android emulator", link: "/advanced/android-emulator" },
-            { text: "Code on an SSH target", link: "/advanced/ssh-targets" },
           ],
         },
         {

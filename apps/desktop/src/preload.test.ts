@@ -324,7 +324,6 @@ describe("desktop preload bridge", () => {
       "setSidebarMaterialPreference",
       "setSidebarVibrancyMode",
       "settlePairedComputer",
-      "sshTargetRequest",
       "subscribeAppUpdateState",
       "subscribeBrowserSurfaceState",
       "subscribeCanvasPrototypeEvents",

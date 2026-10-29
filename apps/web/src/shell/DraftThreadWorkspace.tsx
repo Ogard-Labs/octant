@@ -101,12 +101,7 @@ import { HomeStart } from "./HomeStart";
 import { WelcomeHeading } from "../composer/WelcomeHeading";
 import { HomeDashboard } from "../home/HomeDashboard";
 import type { HomeCardDefinition } from "../home/homeCards";
-import { sshTargetAdministrationOf, type OctantHostBridge } from "./hostBridge";
-import {
-  remoteCodeProjectFor,
-  remoteProjectEntries,
-  useRemoteCodeProjects,
-} from "../projects/sshRemoteProjectEntries";
+import type { OctantHostBridge } from "./hostBridge";
 import { WorkKindSwitch } from "./WorkKindSwitch";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
@@ -196,8 +191,6 @@ export interface DraftThreadWorkspaceProps {
   ) => void;
   readonly onAttachFolder?: () => void;
   readonly onOpenCodeSettings?: () => void;
-  /** Opens Settings › SSH targets, where a folder on a target is bound. Desktop windows only. */
-  readonly onOpenSshTargetSettings?: () => void;
   /** Opens Providers & Models from the start composer while none is ready. */
   readonly onOpenSettings?: () => void;
   /**
@@ -481,24 +474,12 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   const selectedProject = compatibleProjects.find(
     (project) => String(project.id) === String(selectedProjectId),
   );
-  // A remote-bound Project is the SSH target store's, not the catalog's. Only
-  // Code offers one, and only a window that reads SSH targets lists any.
-  const remoteCodeProjects = useRemoteCodeProjects().projects;
-  const offeredRemoteProjects = props.mode === "code" ? remoteCodeProjects : [];
-  const selectedRemoteProject =
-    selectedProject === undefined
-      ? remoteCodeProjectFor(offeredRemoteProjects, selectedProjectId)
-      : undefined;
   const projectSelection =
     selectedProjectId === undefined
       ? undefined
       : {
           projectId: selectedProjectId,
-          displayName:
-            selectedProject?.name ??
-            selectedRemoteProject?.name ??
-            selectedProjectLabel ??
-            "Selected Project",
+          displayName: selectedProject?.name ?? selectedProjectLabel ?? "Selected Project",
         };
   const defaultFolderEntry =
     props.defaultFolder !== undefined && props.onEnsureDefaultProject !== undefined
@@ -525,31 +506,21 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         rootPath: project.type === "chat" ? "" : project.binding.canonicalRoot,
       }),
     ),
-    ...remoteProjectEntries(offeredRemoteProjects),
     ...(props.mode === "chat"
       ? [{ kind: "unfiled" as const }]
       : [
           ...(defaultFolderEntry === undefined ? [] : [defaultFolderEntry]),
           { kind: "add-folder" as const },
-          ...(props.mode === "code" &&
-          props.onOpenSshTargetSettings !== undefined &&
-          sshTargetAdministrationOf(props.hostBridge) !== undefined
-            ? [{ kind: "add-remote" as const }]
-            : []),
         ]),
   ];
   const selectedProjectName =
-    selectedProjectId === undefined
-      ? undefined
-      : (selectedProject?.name ?? selectedRemoteProject?.name ?? selectedProjectLabel);
+    selectedProjectId === undefined ? undefined : (selectedProject?.name ?? selectedProjectLabel);
   const selectedProjectRoot =
     selectedProjectId === undefined
       ? undefined
-      : selectedRemoteProject !== undefined
-        ? selectedRemoteProject.location
-        : selectedProject === undefined || selectedProject.type === "chat"
-          ? props.projectRoot
-          : selectedProject.binding.canonicalRoot;
+      : selectedProject === undefined || selectedProject.type === "chat"
+        ? props.projectRoot
+        : selectedProject.binding.canonicalRoot;
   const connectedBaseRepository =
     selectedProject?.type === "code" && selectedProject.connectedRepository !== undefined
       ? `${selectedProject.connectedRepository.owner}/${selectedProject.connectedRepository.repository}`
@@ -566,10 +537,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     ...(props.codeExecute === undefined ? {} : { execute: props.codeExecute }),
     ...(selectedProjectId === undefined ? {} : { projectId: selectedProjectId }),
     enabled:
-      props.mode === "code" &&
-      selectedProjectId !== undefined &&
-      selectedRemoteProject === undefined &&
-      props.codeExecute !== undefined,
+      props.mode === "code" && selectedProjectId !== undefined && props.codeExecute !== undefined,
   });
 
   // A GitHub repository becomes a Project through the Project menu's "New
@@ -623,11 +591,8 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         {...(props.creating === undefined ? {} : { disabled: props.creating })}
         entries={projectEntries}
         onAddFolder={addFolder}
-        {...(props.onOpenSshTargetSettings === undefined
-          ? {}
-          : { onAddRemote: props.onOpenSshTargetSettings })}
         onSelect={(entry) => {
-          if (entry.kind === "saved-project" || entry.kind === "remote-project") {
+          if (entry.kind === "saved-project") {
             selectProject(entry.projectId);
             setSelectedProjectLabel(entry.displayName);
           } else if (entry.kind === "unfiled") {
@@ -760,17 +725,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         {...(promptRequest === undefined ? {} : { promptRequest })}
         {...hostSelectorBinding}
         {...(selectedProjectId === undefined ? {} : { projectId: selectedProjectId })}
-        projectAvailable={selectedProject !== undefined || selectedRemoteProject !== undefined}
-        {...(selectedRemoteProject === undefined
-          ? {}
-          : {
-              remote: {
-                location: selectedRemoteProject.location,
-                ...(selectedRemoteProject.target === undefined
-                  ? {}
-                  : { target: selectedRemoteProject.target }),
-              },
-            })}
+        projectAvailable={selectedProject !== undefined}
         {...(selectedProjectName === undefined ? {} : { projectName: selectedProjectName })}
         {...(selectedProjectRoot === undefined ? {} : { projectRoot: selectedProjectRoot })}
         {...(connectedBaseRepository === undefined

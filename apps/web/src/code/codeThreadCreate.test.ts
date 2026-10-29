@@ -196,65 +196,6 @@ describe("planCodeThreadCreate", () => {
     });
   });
 
-  describe("in a Project bound to a folder on an SSH target", () => {
-    const remoteRoot = () =>
-      decodeCodeCommandResult({
-        kind: "checkout-prepared",
-        bindingRevisionId: ids.binding,
-        checkout: {
-          id: ids.checkout,
-          repositoryId: `repo_${"a".repeat(64)}`,
-          kind: "remote-root",
-          availability: "available",
-          head: { kind: "none" },
-          observedAt: now,
-        },
-      });
-
-    it("creates the thread on the remote root the server prepared, with no branch to read", () => {
-      const result = planCodeThreadCreate({
-        composer: composer("current-checkout"),
-        modelId: "qwen-3.6" as never,
-        prepared: remoteRoot() as never,
-        projectId: ids.project as never,
-        providerInstanceId: ids.provider as never,
-        threadId: ids.thread,
-        timestamp: now,
-        title: "Fix search",
-      });
-      expect(result).toMatchObject({
-        kind: "command",
-        command: {
-          kind: "create-code-thread",
-          thread: {
-            bindingRevisionId: ids.binding,
-            checkoutId: ids.checkout,
-            executionPolicy: "approval-gated",
-            deliveryTarget: { branchIntent: "octant/abcd1234", confirmedAt: now },
-          },
-        },
-      });
-    });
-
-    it("refuses a managed worktree, which this host would create in a folder of its own", () => {
-      const result = planCodeThreadCreate({
-        composer: composer("managed-worktree"),
-        modelId: "qwen-3.6" as never,
-        prepared: remoteRoot() as never,
-        projectId: ids.project as never,
-        providerInstanceId: ids.provider as never,
-        threadId: ids.thread,
-        timestamp: now,
-        title: "Fix search",
-      });
-      expect(result).toEqual({
-        kind: "rejected",
-        message:
-          "A thread on an SSH target works in the folder bound there. Choose Current checkout to start it.",
-      });
-    });
-  });
-
   it("refuses the current checkout when the prepared head is detached", () => {
     const result = planCodeThreadCreate({
       composer: composer("current-checkout"),

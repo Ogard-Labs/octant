@@ -856,12 +856,6 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   setting: "code-require-git",
                 })
               }
-              onOpenSshTargetSettings={() =>
-                void openSettings({
-                  section: "ssh-targets",
-                  setting: "ssh-remote-project-bind",
-                })
-              }
               onOpenProviderSettings={() => void openSettings({ section: "providers" })}
               onOpenImageSettings={() =>
                 void openSettings({ section: "voice", setting: "custom-image-sources" })

@@ -52,30 +52,17 @@ export interface CodeComposerAccessMenuProps {
    */
   readonly persistence?: PermissionPersistence;
   readonly onPersistenceChange?: (persistence: PermissionPersistence) => void;
-  /**
-   * The postures this thread may start in, when fewer than all. A thread on
-   * an SSH target is offered only those the host would create it holding.
-   */
-  readonly offered?: ReadonlyArray<ProviderExecutionPolicy>;
 }
 
 /** New-thread access posture. The in-thread picker still owns raise-grant. */
 export function CodeComposerAccessMenu(props: CodeComposerAccessMenuProps) {
-  const offered = props.offered;
-  const options =
-    offered === undefined
-      ? CODE_COMPOSER_ACCESS_OPTIONS
-      : CODE_COMPOSER_ACCESS_OPTIONS.filter((option) => offered.includes(option.id));
+  const options = CODE_COMPOSER_ACCESS_OPTIONS;
   const selected =
     options.find((option) => option.id === props.value) ??
     options.find((option) => option.id === "approval-gated") ??
     options[0];
-  // Remembering a posture for the Project is offered only where Full access
-  // can be remembered at all.
   const rememberAvailable =
-    props.persistence !== undefined &&
-    props.onPersistenceChange !== undefined &&
-    (offered === undefined || offered.includes("full-access"));
+    props.persistence !== undefined && props.onPersistenceChange !== undefined;
 
   return (
     <OctantMenuRoot>
