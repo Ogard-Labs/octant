@@ -116,6 +116,24 @@ describe("remote route policy", () => {
     await response.arrayBuffer();
   });
 
+  it("lets the served document connect to each roster member's web origin and nothing else new", async () => {
+    let roster: readonly string[] = [];
+    const fixture = handler({ policy: policy({ spokeWebOrigins: () => roster }) });
+
+    const bare = await fixture.route(request("/"));
+    expect(bare.headers.get("content-security-policy")).toBe(
+      `default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; frame-src ${origin}/api/canvas/design-page`,
+    );
+    await bare.arrayBuffer();
+
+    roster = ["https://mac.tail1.ts.net", "https://studio.tail1.ts.net:8443"];
+    const named = await fixture.route(request("/"));
+    expect(named.headers.get("content-security-policy")).toBe(
+      `default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; connect-src 'self' https://mac.tail1.ts.net https://studio.tail1.ts.net:8443; frame-src ${origin}/api/canvas/design-page`,
+    );
+    await named.arrayBuffer();
+  });
+
   it("frames only a running design's page, which a frame loads by its ticket under the page's own policy", async () => {
     const page = `/api/canvas/design-page?ticket=${"a".repeat(43)}`;
     const preAuth = vi.fn(async () => new Response("<p>page</p>"));

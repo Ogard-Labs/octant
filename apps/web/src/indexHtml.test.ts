@@ -39,11 +39,13 @@ describe("packaged renderer policy", () => {
     // bracket sources are not valid host-sources and only produce console
     // noise; the host binds 127.0.0.1, so they are not a supported origin.
     expect(directives.get("connect-src")).toBe(
-      "'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*",
+      "'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:* https://*.ts.net:*",
     );
     // A computer paired through Other computers is reached through the desktop's
-    // main process, never by widening this policy to a remote origin.
-    expect(directives.get("connect-src")).not.toMatch(
+    // main process, never by widening this policy to a remote origin. The one
+    // exception is the tailnet pattern a browser on the hub's page needs to reach
+    // a spoke; the hub's served header narrows it to the roster's exact origins.
+    expect(directives.get("connect-src")?.replace(" https://*.ts.net:*", "")).not.toMatch(
       /https?:\/\/(?!127\.0\.0\.1|localhost)|wss:|\*\./,
     );
     // The app frames one page of its own: a running Canvas prototype, served

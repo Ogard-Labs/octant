@@ -866,6 +866,12 @@ export interface RemoteRoutePolicyOptions {
    * in `HUB_WEB_APP_REQUESTS` and no other.
    */
   readonly hubWebOrigin?: () => string | undefined;
+  /**
+   * The web origins of the roster members this host, as a hub, serves its web
+   * app to. The page may connect to exactly these besides itself, so a browser
+   * on it can reach each spoke; read per response so a roster change applies.
+   */
+  readonly spokeWebOrigins?: () => readonly string[];
 }
 
 export interface RemoteRoutePolicy {
@@ -977,6 +983,7 @@ export function createRemoteRoutePolicy(options: RemoteRoutePolicyOptions): Remo
         maxBodyBytes,
         maxResponseBytes,
         options.hubWebOrigin?.(),
+        options.spokeWebOrigins?.() ?? [],
       ),
   };
 }
@@ -1117,6 +1124,7 @@ function inspectRequest(
   defaultMaxBodyBytes: number,
   defaultMaxResponseBytes: number,
   hubWebOrigin: string | undefined,
+  spokeWebOrigins: readonly string[],
 ): RemoteRouteDecision {
   const url = new URL(request.url);
   const method = request.method.toUpperCase();
@@ -1174,9 +1182,13 @@ function inspectRequest(
     if (hasBody(request)) return reject(413, facts);
     const headers = remoteHeaders(headerOrigin === null ? undefined : headerOrigin, []);
     // The app frames one thing: a running design's page on this same origin.
+    // The page's own meta policy allows any tailnet name; this header narrows
+    // that to the spokes the roster names. A browser enforces both.
+    const connectSrc =
+      spokeWebOrigins.length === 0 ? "" : `; connect-src 'self' ${spokeWebOrigins.join(" ")}`;
     headers.set(
       "content-security-policy",
-      `${REMOTE_SECURITY_POLICY.csp}; frame-src ${origin.origin}${CANVAS_DESIGN_PAGE_PATH}`,
+      `${REMOTE_SECURITY_POLICY.csp}${connectSrc}; frame-src ${origin.origin}${CANVAS_DESIGN_PAGE_PATH}`,
     );
     return allow(
       "web-assets",
