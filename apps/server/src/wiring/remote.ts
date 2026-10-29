@@ -127,6 +127,7 @@ export type RemoteDependencies = Pick<
     WorkWiring,
     | "threadExportService"
     | "threadMessageQueue"
+    | "onWorkTurnCancelled"
     | "workThreadServiceWithWorkflows"
     | "workTurnService"
   > &
@@ -168,6 +169,7 @@ export function wireRemote(deps: RemoteDependencies) {
     debugConfigurationApprovals,
     debugService,
     languageServerApprovals,
+    onWorkTurnCancelled,
     options,
     persistence,
     providerDataDirectory,
@@ -532,6 +534,12 @@ export function wireRemote(deps: RemoteDependencies) {
   // A result arrives without anyone asking for it: the host reads each open
   // delegation now and then. With none sent, a pass reads nothing.
   setInterval(() => void delegatingSpoke.trackOpen().catch(() => undefined), 5_000).unref();
+  // A person stopping the parent thread's turn asks each target to stop the
+  // children that thread started there. Only Work parents have remote children:
+  // a Code request is refused by the target.
+  onWorkTurnCancelled((threadId) => {
+    void delegatingSpoke.cancelParent(String(threadId)).catch(() => undefined);
+  });
   const delegationAdministrationRoutes = createDelegationAdministrationRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
     windowAuthorityStore,

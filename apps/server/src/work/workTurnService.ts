@@ -318,6 +318,12 @@ export interface WorkTurnServiceDependencies {
    * while its turn ran would be a half-applied state.
    */
   readonly onTurnRequested?: (threadId: WorkThreadId) => void;
+  /**
+   * A person stopped the thread's running turn. Fires once the turn is
+   * recorded as cancelled, never for a turn that had already ended. A throw is
+   * ignored: the stop has happened and must not report as failed.
+   */
+  readonly onTurnCancelled?: (threadId: WorkThreadId) => void;
   readonly spendCeiling?: {
     readonly admit: SpendCeilingService["admit"];
     readonly settle: SpendCeilingService["settle"];
@@ -450,6 +456,7 @@ export class WorkTurnService {
     ReturnType<typeof decodeSpendCeilingReservationId>
   >();
   readonly #onTurnRequested: WorkTurnServiceDependencies["onTurnRequested"];
+  readonly #onTurnCancelled: WorkTurnServiceDependencies["onTurnCancelled"];
   readonly #turnFileObserver: WorkTurnFileObserver | undefined;
   readonly #projectStatusFiles: WorkProjectStatusFiles | undefined;
   readonly #statusStaleAfterDays: number;
@@ -495,6 +502,7 @@ export class WorkTurnService {
     this.#nativeHarness = dependencies.nativeHarness;
     this.#spendCeiling = dependencies.spendCeiling;
     this.#onTurnRequested = dependencies.onTurnRequested;
+    this.#onTurnCancelled = dependencies.onTurnCancelled;
     this.#turnFileObserver = dependencies.turnFileObserver;
     this.#projectStatusFiles = dependencies.projectStatusFiles;
     this.#statusStaleAfterDays =
@@ -1238,6 +1246,11 @@ export class WorkTurnService {
     });
     const cancelled = this.#projection.lookup(turn.requestId);
     if (cancelled !== undefined) this.#liveUpdates.settle(turn.threadId, cancelled);
+    try {
+      this.#onTurnCancelled?.(turn.threadId);
+    } catch {
+      // The turn is already recorded as cancelled; a listener's failure is its own.
+    }
     return decodeWorkTurnCancelResult({
       kind: "turn-cancelled",
       requestId: turn.requestId,

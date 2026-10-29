@@ -2003,6 +2003,65 @@ describe("WorkTurnService", () => {
     expect(transcript.liveCursor).toBe(2);
   });
 
+  it("tells the host which thread a person stopped, once, and not for a turn that already ended", async () => {
+    const gate = deferred<void>();
+    const onTurnCancelled = vi.fn();
+    const fixture = serviceFixture({
+      onTurnCancelled,
+      turnRuntime: {
+        run: async (input) => {
+          await gate.promise;
+          return input.signal.aborted
+            ? { kind: "cancelled" }
+            : { kind: "completed", response: "Provider reply" };
+        },
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    const cancel = {
+      kind: "cancel-work-turn",
+      requestId: ids.request,
+      threadId: ids.thread,
+      turnId: ids.turn,
+    };
+
+    await fixture.service.cancelFirstTurn(ids.window, cancel);
+    expect(onTurnCancelled).toHaveBeenCalledExactlyOnceWith(ids.thread);
+
+    const again = await fixture.service.cancelFirstTurn(ids.window, cancel);
+    expect(again.kind).toBe("turn-already-terminal");
+    expect(onTurnCancelled).toHaveBeenCalledTimes(1);
+    gate.resolve();
+    await fixture.waitForIdle();
+  });
+
+  it("still cancels the turn when the host's cancellation listener throws", async () => {
+    const gate = deferred<void>();
+    const fixture = serviceFixture({
+      onTurnCancelled: () => {
+        throw new Error("listener failed");
+      },
+      turnRuntime: {
+        run: async () => {
+          await gate.promise;
+          return { kind: "cancelled" };
+        },
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+
+    const cancelled = await fixture.service.cancelFirstTurn(ids.window, {
+      kind: "cancel-work-turn",
+      requestId: ids.request,
+      threadId: ids.thread,
+      turnId: ids.turn,
+    });
+
+    expect(cancelled.kind).toBe("turn-cancelled");
+    gate.resolve();
+    await fixture.waitForIdle();
+  });
+
   it("keeps the tool calls of a cancelled turn that wrote no file", async () => {
     const gate = deferred<void>();
     const fixture = serviceFixture({
@@ -3777,6 +3836,7 @@ function serviceFixture(
     readonly threadAccess?: "ask-first" | "auto-accept-edits";
     readonly documentDelivery?: "canvas" | "native-artifacts";
     readonly onTurnRequested?: WorkTurnServiceDependencies["onTurnRequested"];
+    readonly onTurnCancelled?: WorkTurnServiceDependencies["onTurnCancelled"];
     readonly agentRuns?: WorkTurnServiceDependencies["agentRuns"];
     readonly runningAccess?: RunningWorkTurnAccess;
     /** Read on every thread read, so a test can mark and reactivate between turns. */
@@ -3969,6 +4029,7 @@ function serviceFixture(
       ? {}
       : { turnFileObserver: options.turnFileObserver }),
     ...(options.onTurnRequested === undefined ? {} : { onTurnRequested: options.onTurnRequested }),
+    ...(options.onTurnCancelled === undefined ? {} : { onTurnCancelled: options.onTurnCancelled }),
     ...(options.agentRuns === undefined ? {} : { agentRuns: options.agentRuns }),
     ...(options.runningAccess === undefined ? {} : { runningAccess: options.runningAccess }),
     uuid: (() => {

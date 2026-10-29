@@ -41,6 +41,7 @@ const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 const PROJECT = decodeProjectId("11111111-1111-4111-8111-111111111111");
 const OTHER_PROJECT = decodeProjectId("22222222-2222-4222-8222-222222222222");
 const PARENT_THREAD = "33333333-3333-4333-8333-333333333333";
+const OTHER_THREAD = "55555555-5555-4555-8555-555555555555";
 
 /** B's side: ordinary threads the test can finish, and a record of what was asked of them. */
 function fakeChildHost(
@@ -407,6 +408,25 @@ describe("a spoke delegating work to another spoke", () => {
     // A second cancel finds nothing running and interrupts nothing more.
     expect(await a.delegating.cancelParent(PARENT_THREAD)).toEqual([]);
     expect(child.interrupted).toHaveLength(1);
+  });
+
+  it("leaves another thread's remote child running when one parent is cancelled", async () => {
+    const { a, b, child } = await threeHosts();
+    const other = await a.delegating.delegate(
+      startCommand(b, { parent: { mode: "work", threadId: OTHER_THREAD } }),
+      { windowId: "window-a" },
+    );
+    const mine = await a.delegating.delegate(startCommand(b), { windowId: "window-a" });
+    if (other.status !== "delegated" || mine.status !== "delegated") throw new Error("not sent");
+
+    const cancelled = await a.delegating.cancelParent(PARENT_THREAD);
+
+    expect(cancelled).toEqual([{ status: "cancelled", requestId: mine.requestId }]);
+    expect(child.interrupted).toHaveLength(1);
+    expect(await a.delegating.refresh(String(other.requestId))).toMatchObject({
+      status: "in-progress",
+      state: "running",
+    });
   });
 
   it("starts one thread however often the same request arrives", async () => {
