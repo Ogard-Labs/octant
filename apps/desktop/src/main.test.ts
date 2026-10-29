@@ -33,6 +33,7 @@ import {
   installNativeMenuIpcHandlers,
   installProviderCredentialIpcHandlers,
   installHubAdministrationIpcHandlers,
+  installOwnerUnlockIpcHandlers,
   installPrivateListenerIpcHandlers,
   installRemoteDeviceIpcHandlers,
   installHostIdentityIpcHandlers,
@@ -1322,6 +1323,55 @@ describe("hub administration IPC handlers", () => {
       body: { hub: {}, spoke: {} },
     });
     expect(fetch).toHaveBeenCalledOnce();
+  });
+});
+
+describe("owner unlock key IPC handlers", () => {
+  const service = {
+    makeKey: vi.fn(async () => ({ status: "done", publicKey: "a" }) as const),
+    sign: vi.fn(async () => ({ status: "done", signature: "s" }) as const),
+    forgetKey: vi.fn(async () => ({ status: "done" }) as const),
+  };
+  const install = (available: boolean) => {
+    const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
+    installOwnerUnlockIpcHandlers({
+      handle: (channel, handler) => {
+        handlers.set(channel, handler);
+      },
+      resolveOwnedWindow: (event) => {
+        if (event !== "owned") throw new Error("unauthorized");
+      },
+      service: () => (available ? service : undefined),
+    });
+    return handlers;
+  };
+
+  it("refuses a sender that is not an owned window and reaches the key for one that is", async () => {
+    const handlers = install(true);
+    const sign = handlers.get("octant:owner-unlock:sign");
+
+    await expect(sign?.("foreign", {})).rejects.toThrow(/unauthorized unlock request/);
+    expect(service.sign).not.toHaveBeenCalled();
+    await expect(sign?.("owned", { challengeId: "c" })).resolves.toEqual({
+      status: "done",
+      signature: "s",
+    });
+    expect(service.sign).toHaveBeenCalledWith({ challengeId: "c" });
+  });
+
+  it("exposes only make, sign, and forget", () => {
+    expect([...install(true).keys()].sort()).toEqual([
+      "octant:owner-unlock:forget",
+      "octant:owner-unlock:make",
+      "octant:owner-unlock:sign",
+    ]);
+  });
+
+  it("says the key is unavailable where there is no Secure Enclave helper", async () => {
+    await expect(install(false).get("octant:owner-unlock:make")?.("owned")).resolves.toEqual({
+      status: "refused",
+      kind: "unavailable",
+    });
   });
 });
 

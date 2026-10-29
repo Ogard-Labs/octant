@@ -74,6 +74,18 @@ export interface OwnerUnlockAssertion {
   readonly signature: string;
 }
 
+/**
+ * What a raw key's `sign` throws when the person declines the prompt it raises
+ * itself (a Mac asks for Touch ID at each signature), so a decline reads as a
+ * cancelled unlock rather than an unavailable one.
+ */
+export class OwnerUnlockDeclined extends Error {
+  constructor() {
+    super("The person declined the unlock.");
+    this.name = "OwnerUnlockDeclined";
+  }
+}
+
 /** A raw key, opened after one authentication. `close` drops the key from memory. */
 export interface RawUnlockSession {
   /** ES256 over the text (IEEE-P1363, base64url). May throw when the platform cannot sign. */
@@ -279,8 +291,10 @@ export function createOwnerClient(
         sign: async (text) => {
           try {
             return { status: "signed", value: { signature: await session.sign(text) } };
-          } catch {
-            return { status: "unavailable" };
+          } catch (error) {
+            return error instanceof OwnerUnlockDeclined
+              ? { status: "cancelled" }
+              : { status: "unavailable" };
           }
         },
         close: session.close,

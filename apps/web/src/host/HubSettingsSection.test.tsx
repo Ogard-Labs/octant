@@ -218,6 +218,82 @@ describe("HubSettingsSection", () => {
     );
   });
 
+  it("makes the Mac's unlock key when joining and presents only its public half", async () => {
+    const user = userEvent.setup();
+    const fixture = harness({
+      status: { status: 200, body: statusBody({}) },
+      join: {
+        status: 200,
+        body: {
+          status: "awaiting-approval",
+          hubName: "Mac mini",
+          hubKeyFingerprint: "ab".repeat(32),
+          comparisonCode: "719203",
+        },
+      },
+      "join-finish": { status: 200, body: { status: "awaiting-approval" } },
+    });
+    const ownerUnlock = {
+      ownerUnlockMakeKey: vi.fn(async () => ({ status: "done" as const, publicKey: "cHVibGlj" })),
+      ownerUnlockForgetKey: vi.fn(async () => ({ status: "done" as const })),
+    };
+    render(
+      <HubSettingsSection
+        hub={fixture.hub}
+        now={() => NOW}
+        ownerUnlock={ownerUnlock}
+        pairing={fixture.pairing}
+      />,
+    );
+    await user.type(await screen.findByLabelText("Join code"), "octant-join-abc123");
+    await user.click(screen.getByRole("button", { name: "Join the hub" }));
+    expect(await screen.findByText("719203")).toBeVisible();
+
+    await waitFor(() =>
+      expect(fixture.calls.find((call) => call.operation === "join-finish")?.body).toEqual({
+        unlockPublicKey: "cHVibGlj",
+      }),
+    );
+    expect(ownerUnlock.ownerUnlockMakeKey).toHaveBeenCalledOnce();
+  });
+
+  it("joins without a key and says so when this Mac cannot make one", async () => {
+    const user = userEvent.setup();
+    const fixture = harness({
+      status: { status: 200, body: statusBody({}) },
+      join: {
+        status: 200,
+        body: {
+          status: "awaiting-approval",
+          hubName: "Mac mini",
+          hubKeyFingerprint: "ab".repeat(32),
+          comparisonCode: "719203",
+        },
+      },
+      "join-finish": { status: 200, body: { status: "awaiting-approval" } },
+    });
+    const ownerUnlock = {
+      ownerUnlockMakeKey: vi.fn(async () => ({ status: "refused" as const, kind: "unavailable" })),
+      ownerUnlockForgetKey: vi.fn(async () => ({ status: "done" as const })),
+    };
+    render(
+      <HubSettingsSection
+        hub={fixture.hub}
+        now={() => NOW}
+        ownerUnlock={ownerUnlock}
+        pairing={fixture.pairing}
+      />,
+    );
+    await user.type(await screen.findByLabelText("Join code"), "octant-join-abc123");
+    await user.click(screen.getByRole("button", { name: "Join the hub" }));
+
+    expect(await screen.findByText(/could not make an unlock key/)).toBeVisible();
+    await waitFor(() =>
+      expect(fixture.calls.some((call) => call.operation === "join-finish")).toBe(true),
+    );
+    expect(fixture.calls.find((call) => call.operation === "join-finish")?.body).toBeUndefined();
+  });
+
   it("asks before leaving a hub and tells the person when the hub could not be told", async () => {
     const user = userEvent.setup();
     const { calls } = renderHub({

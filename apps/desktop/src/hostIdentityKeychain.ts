@@ -333,7 +333,7 @@ function decodeHelperResult(
   return decoded;
 }
 
-const executeHostSigningHelper: KeychainHelperExecutor = async (spec, limits) =>
+export const executeHostSigningHelper: KeychainHelperExecutor = async (spec, limits) =>
   await new Promise((resolve, reject) => {
     const child = spawn(spec.command, spec.args, {
       stdio: ["pipe", "pipe", "pipe"],
