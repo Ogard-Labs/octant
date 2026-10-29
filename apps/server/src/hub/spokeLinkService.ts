@@ -553,13 +553,7 @@ export class SpokeLinkService {
           : [...rejected, alert.memberId],
       },
     });
-    for (const entry of devices) {
-      try {
-        this.#options.devices()?.revokeDevice(entry.deviceId);
-      } catch {
-        // A device already revoked, or one this host no longer holds, leaves nothing to revoke.
-      }
-    }
+    this.#revokeOrKeepDevices(devices.map((entry) => entry.deviceId));
     this.#options.record({
       change: "new-member-removed",
       actingPrincipal: principal,
@@ -1043,23 +1037,29 @@ export class SpokeLinkService {
     entries: ReadonlyArray<{ readonly memberId: HubMemberId; readonly deviceId: string }>,
     hubMemberId: HubMemberId,
   ): void {
-    const devices = this.#options.devices();
-    const unrevoked: string[] = [];
+    this.#revokeOrKeepDevices(entries.map((entry) => entry.deviceId));
     for (const entry of entries) {
-      if (devices === undefined) {
-        unrevoked.push(entry.deviceId);
-      } else {
-        try {
-          devices.revokeDevice(entry.deviceId);
-        } catch {
-          // A device already revoked, or one this host no longer holds, leaves nothing to revoke.
-        }
-      }
       this.#options.record({
         change: "guest-dropped",
         actingPrincipal: { kind: "hub", memberId: hubMemberId },
         memberId: entry.memberId,
       });
+    }
+  }
+
+  #revokeOrKeepDevices(deviceIds: ReadonlyArray<string>): void {
+    const devices = this.#options.devices();
+    const unrevoked: string[] = [];
+    for (const deviceId of deviceIds) {
+      if (devices === undefined) {
+        unrevoked.push(deviceId);
+        continue;
+      }
+      try {
+        devices.revokeDevice(deviceId);
+      } catch {
+        // A device already revoked, or one this host no longer holds, leaves nothing to revoke.
+      }
     }
     // The device pairing runs with the private listener. A device left active
     // here would be usable once it starts, so its id is kept until it does.

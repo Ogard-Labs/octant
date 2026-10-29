@@ -8,6 +8,7 @@
 import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HubMemberId, type HubGrant, type NewMemberConfirmation } from "@octant/contracts";
+import { decodeStableHostId } from "@octant/contracts/remote-access";
 import { hubRosterSigningPayload, newMemberConfirmationSigningPayload } from "@octant/domain";
 import {
   admitGuestOnSpoke,
@@ -26,6 +27,7 @@ import {
 } from "./hubOwner.test-support";
 import { createPinnedHubTransport } from "./pinnedHubTransport";
 import { createRosterSigningKeyStore } from "./rosterSigningKey";
+import { SpokeLinkService, type SpokeDevicePort } from "./spokeLinkService";
 
 const cleanups: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
@@ -1143,6 +1145,58 @@ describe("new-member alerts on a spoke", () => {
     const later = spoke.spoke.status();
     if (later.membership !== "member") throw new Error("Not a member.");
     expect(later.acceptedMemberIds).not.toContain(second.memberId);
+  });
+
+  it("keeps an admitted guest's device to revoke when an alert removes it while the device pairing is not running", async () => {
+    const { network, hub, spoke } = await startOwnerWorld();
+    const guest = await joinGuest(hub, network, spoke, "Spare");
+    expect((await guest.knock()).status).toBe("admitted");
+    const status = spoke.spoke.status();
+    if (status.membership !== "member") throw new Error("Not a member.");
+    const [alert] = status.alerts;
+    if (alert === undefined) throw new Error("No alert.");
+    const [device] = spoke.administration.listDevices();
+    if (device === undefined) throw new Error("The spoke holds no guest device.");
+    // The same spoke after a restart: its link is on disk, the gateway is not built.
+    let pairing: SpokeDevicePort | undefined;
+    const restarted = new SpokeLinkService({
+      state: spoke.state,
+      identity: () => ({
+        hostId: decodeStableHostId(spoke.hostId),
+        displayName: spoke.name,
+        signing: {
+          hostKeyFingerprint: publicKeyFingerprint(spoke.hostPublicKey),
+          hostPublicKey: spoke.hostPublicKey,
+          signHostPayload: spoke.signHostPayload,
+        },
+      }),
+      listener: () => spoke.listener,
+      transport: createPinnedHubTransport(network.network),
+      devices: () => pairing,
+      record: () => undefined,
+      serverBuildVersion: "0.1.0",
+      now: Date.now,
+    });
+
+    expect(restarted.removeFromAlert(String(alert.alertId), window)).toMatchObject({
+      status: "removed",
+    });
+
+    expect(spoke.administration.listDevices().map((entry) => entry.state)).toEqual(["active"]);
+    expect(spoke.state.load().pendingDeviceRevocations).toEqual([device.deviceId]);
+
+    pairing = {
+      admitIntroducedDevice: () => {
+        throw new Error("No admission is expected.");
+      },
+      revokeDevice: (deviceId) => {
+        spoke.administration.revokeDevice({ deviceId });
+      },
+    };
+    restarted.settlePendingRevocations();
+
+    expect(spoke.administration.listDevices().map((entry) => entry.state)).toEqual(["revoked"]);
+    expect(spoke.state.load().pendingDeviceRevocations).toBeUndefined();
   });
 
   it("raises an alert the hub cannot write, dismiss, or remove", async () => {
