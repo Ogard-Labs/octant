@@ -358,6 +358,9 @@ export class DelegatingSpokeService {
     for (const entry of this.#options.state.load().sent) {
       if (entry.resultRecorded === true) continue;
       if (entry.state === "failed" || entry.state === "cancelled") continue;
+      if (entry.cancelRequested === true) {
+        await this.cancel(String(entry.requestId)).catch(() => undefined);
+      }
       await this.refresh(String(entry.requestId)).catch(() => undefined);
     }
   }
@@ -369,19 +372,30 @@ export class DelegatingSpokeService {
     const target = this.#options.target(String(sent.targetMemberId));
     const origin = target.status === "member" ? memberOrigin(target.member) : undefined;
     if (target.status !== "member" || origin === undefined) {
+      this.#update(sent.requestId, { cancelRequested: true });
       return { status: "target-unreachable" };
     }
     const answer = await this.#send(target, origin, PEER_DELEGATION_ROUTES.cancel, {
       requestId: sent.requestId,
     });
-    if (answer.status === "unreachable") return { status: "target-unreachable" };
+    if (answer.status === "unreachable") {
+      this.#update(sent.requestId, { cancelRequested: true });
+      return { status: "target-unreachable" };
+    }
     if (!answer.response.ok) {
-      return { status: "refused-by-target", ...(await refusalOf(answer.response)) };
+      const refusal = await refusalOf(answer.response);
+      // The target may not have finished starting a request this host sent, so
+      // "unknown" is not yet an answer: the poll asks again.
+      if (sent.state === "awaiting-acceptance" && refusal.reason === "unknown-request") {
+        this.#update(sent.requestId, { cancelRequested: true });
+      }
+      return { status: "refused-by-target", ...refusal };
     }
     let cancelled;
     try {
       cancelled = decodeDelegationCancelAnswer(await answer.response.json());
     } catch {
+      this.#update(sent.requestId, { cancelRequested: true });
       return { status: "target-unreachable" };
     }
     if (cancelled.status === "cancelled") {

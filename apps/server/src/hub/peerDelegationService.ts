@@ -275,6 +275,7 @@ export class PeerDelegationService {
   async status(signed: SignedRequest): Promise<DelegationStatusReceipt> {
     const found = this.#find(signed);
     if (found.status === "refused") return found;
+    if (found.status === "starting") return refusal("unknown-request");
     const reading = await this.#options.host.readThread(
       found.delegation.threadId,
       found.delegation.turnId,
@@ -291,8 +292,19 @@ export class PeerDelegationService {
   }
 
   async cancel(signed: SignedRequest): Promise<DelegationCancelReceipt> {
-    const found = this.#find(signed);
-    if (found.status === "refused") return found;
+    const looked = this.#find(signed);
+    if (looked.status === "refused") return looked;
+    let found = looked;
+    if (looked.status === "starting") {
+      // A cancel that overtakes the start waits for it: otherwise the child
+      // would start after the sender asked for it to stop, and run on.
+      const started = await looked.outcome;
+      if (started.status === "refused") return refusal("unknown-request");
+      const delegation = this.#received(looked.requestId, looked.principal);
+      if (delegation === undefined) return refusal("unknown-request");
+      found = { ...looked, status: "found", delegation };
+    }
+    if (found.status !== "found") return refusal("unknown-request");
     const outcome = await this.#options.host.interrupt(
       found.delegation.threadId,
       found.delegation.turnId,
@@ -313,12 +325,32 @@ export class PeerDelegationService {
     };
   }
 
-  /** A delegation is read or cancelled only by the member that sent it. */
+  #received(requestId: string, principal: PeerPrincipal): ReceivedDelegation | undefined {
+    return this.#options.state
+      .load()
+      .received.find(
+        (entry) =>
+          String(entry.requestId) === requestId &&
+          String(entry.senderMemberId) === String(principal.memberId),
+      );
+  }
+
+  /**
+   * A delegation is read or cancelled only by the member that sent it. One still
+   * starting is reported as such to that member alone, so a cancel can wait for it.
+   */
   #find(signed: SignedRequest):
     | DelegationRefusal
     | {
         readonly status: "found";
         readonly delegation: ReceivedDelegation;
+        readonly principal: PeerPrincipal;
+        readonly selfMemberId: HubMemberId;
+      }
+    | {
+        readonly status: "starting";
+        readonly requestId: string;
+        readonly outcome: Promise<DelegationReceipt>;
         readonly principal: PeerPrincipal;
         readonly selfMemberId: HubMemberId;
       } {
@@ -330,14 +362,24 @@ export class PeerDelegationService {
     } catch {
       return refusal("invalid");
     }
-    const delegation = this.#options.state
-      .load()
-      .received.find(
-        (entry) =>
-          String(entry.requestId) === String(reference.requestId) &&
-          String(entry.senderMemberId) === String(authenticated.principal.memberId),
-      );
-    if (delegation === undefined) return refusal("unknown-request");
+    const requestId = String(reference.requestId);
+    const delegation = this.#received(requestId, authenticated.principal);
+    if (delegation === undefined) {
+      const inFlight = this.#starting.get(requestId);
+      if (
+        inFlight === undefined ||
+        inFlight.senderMemberId !== String(authenticated.principal.memberId)
+      ) {
+        return refusal("unknown-request");
+      }
+      return {
+        status: "starting",
+        requestId,
+        outcome: inFlight.outcome,
+        principal: authenticated.principal,
+        selfMemberId: authenticated.selfMemberId,
+      };
+    }
     return {
       status: "found",
       delegation,

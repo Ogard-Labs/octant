@@ -72,6 +72,12 @@ export const SentDelegation = Schema.Struct({
   /** Set once the result was recorded on the parent thread; a result is recorded once. */
   resultRecorded: Schema.optional(Schema.Literal(true)),
   /**
+   * Set when a cancel got no definite answer (the target was unreachable, or did
+   * not yet know a request still awaiting acceptance); the background poll
+   * sends it again until the child ends.
+   */
+  cancelRequested: Schema.optional(Schema.Literal(true)),
+  /**
    * What the target returned, kept so a read after the background poll recorded
    * it still hands the parent thread the text; the journal holds only the mark.
    */

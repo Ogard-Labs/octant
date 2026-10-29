@@ -489,6 +489,59 @@ describe("a spoke delegating work to another spoke", () => {
     expect(await againAnswer?.json()).toEqual(await firstAnswer?.json());
     expect(child.started).toHaveLength(1);
   });
+
+  it("interrupts a child once its start finishes when the sender cancels mid-start, and refuses another sender", async () => {
+    const child = fakeChildHost();
+    const startThread = child.host.startThread;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const slow: PeerDelegationHost = {
+      ...child.host,
+      startThread: async (input) => {
+        const result = await startThread(input);
+        await gate;
+        return result;
+      },
+    };
+    const { hub, a, b } = await threeHosts({ child: { ...child, host: slow } });
+    const body = requestBody(a);
+    const reference = JSON.stringify({ requestId: JSON.parse(body).requestId });
+
+    const first = b.hubLink(signedDelegation({ signer: a, recipient: b, body }));
+    await vi.waitFor(() => expect(child.started).toHaveLength(1));
+    const cancelling = b.hubLink(
+      signedDelegation({
+        signer: a,
+        recipient: b,
+        path: PEER_DELEGATION_ROUTES.cancel,
+        body: reference,
+      }),
+    );
+    const fromOther = b.hubLink(
+      signedDelegation({
+        signer: hub,
+        recipient: b,
+        path: PEER_DELEGATION_ROUTES.cancel,
+        body: reference,
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(child.interrupted).toHaveLength(0);
+    release();
+
+    const [firstAnswer, cancelAnswer, otherAnswer] = await Promise.all([
+      first,
+      cancelling,
+      fromOther,
+    ]);
+    expect(firstAnswer?.status).toBe(201);
+    expect(cancelAnswer?.status).toBe(200);
+    expect(await cancelAnswer?.json()).toMatchObject({ status: "cancelled" });
+    expect(otherAnswer?.status).toBe(403);
+    expect(child.interrupted).toHaveLength(1);
+  });
 });
 
 /**
@@ -633,6 +686,35 @@ describe("a delegation whose answer never reached the delegating spoke", () => {
     const cancelled = await a.delegating.cancel(String(delegated.requestId));
 
     expect(cancelled).toEqual({ status: "cancelled", requestId: delegated.requestId });
+    expect(child.interrupted).toHaveLength(1);
+    expect(a.delegationState.load().sent[0]?.state).toBe("cancelled");
+  });
+
+  it("retries a cancel that got no answer on the next background poll", async () => {
+    const cancelFault = { drop: false };
+    const dropCancel: Parameters<typeof startHubTestHost>[0]["delegatingTransport"] = (inner) => {
+      return (target) => {
+        const send = inner(target);
+        return async (url, init) => {
+          if (cancelFault.drop && url.endsWith(PEER_DELEGATION_ROUTES.cancel)) {
+            throw new Error("connection reset");
+          }
+          return send(url, init);
+        };
+      };
+    };
+    const { a, b, child } = await threeHosts({ aTransport: dropCancel });
+    const delegated = await a.delegating.delegate(startCommand(b), { windowId: "window-a" });
+    if (delegated.status !== "delegated") throw new Error(JSON.stringify(delegated));
+
+    cancelFault.drop = true;
+    expect(await a.delegating.cancelParent(PARENT_THREAD)).toEqual([
+      { status: "target-unreachable" },
+    ]);
+    expect(child.interrupted).toHaveLength(0);
+    cancelFault.drop = false;
+    await a.delegating.trackOpen();
+
     expect(child.interrupted).toHaveLength(1);
     expect(a.delegationState.load().sent[0]?.state).toBe("cancelled");
   });
