@@ -84,6 +84,10 @@ const IGNORED_DIRECTORIES = new Set([
 export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
   // ── Remaining ──
   [
+    "packages/client-runtime/src/hubGuestClient.ts",
+    "A guest's side of a hub: join as a guest, check the signed roster, and reach each spoke directly. Delivered with its tests ahead of the phone and web screens that call it. Remove once the phone app or web app imports it.",
+  ],
+  [
     "apps/server/src/remote/remoteExitEvidenceADriver.ts",
     "Browser-realm bundle entry built by remoteExitEvidenceA.smoke.test.ts via `bun build`; excluded from the server tsconfig on purpose. Remove once that evidence is served by a product caller or the smoke is retired.",
   ],
@@ -693,6 +697,14 @@ export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
       "Member-to-member request that a hub or spoke signs and sends over the private listener from apps/server (hubService.ts, spokeLinkService.ts), which builds the path itself; no window or device calls it. Remove when the checker counts apps/server as a caller of its own listener's routes.",
     ],
   ),
+  [
+    "/api/desktop/hub/certificate",
+    "Loopback administration of the hub's Tailscale certificate, served ahead of the Settings control and the `octant hub` command that call it. Remove once either calls it.",
+  ],
+  ...["/api/hub/guest", "/api/hub/guest-roster"].map((endpoint): [string, string] => [
+    endpoint,
+    "Served to a guest's signed request ahead of the phone and web screens that join a hub as a guest; the guest client in packages/client-runtime (hubGuestClient.ts) builds the path itself. Remove once the phone app or web app calls the guest client.",
+  ]),
   [
     "/api/v1/shares",
     "Served by the public Canvas share service (the octant-webapp repository) and called by the host's share-service port in apps/server, which builds the address from the configured service URL; no window or device calls it. Remove when the checker counts apps/server as a caller of an external service's routes.",

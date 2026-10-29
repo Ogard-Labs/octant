@@ -7,6 +7,7 @@
 import {
   EventActorDeviceId,
   HubMemberId,
+  NO_LISTENER_PIN,
   encodeSignedHubRoster,
   type AuditActingPrincipal,
   type HubJoinRequest,
@@ -49,6 +50,8 @@ export interface HubPairingPort {
     readonly ticketProof: string;
   }) => string | undefined;
   readonly revokeDevice: (deviceId: string) => void;
+  /** The key fingerprint of a device this hub paired, so a guest's identity key can be tied to it. */
+  readonly deviceKeyFingerprint: (deviceId: string) => string | undefined;
 }
 
 export interface HubServiceOptions {
@@ -63,6 +66,13 @@ export interface HubServiceOptions {
 }
 
 const hubMemberId = (identity: HubHostIdentity) => decodeMemberId(String(identity.hostId));
+
+/** The port a member's listener origin names, which the hub states in the roster instead of trusting a claim. */
+function listenerPortOf(origin: string | undefined): { readonly listenerPort?: number } {
+  if (origin === undefined) return {};
+  const port = new URL(origin).port;
+  return port === "" ? {} : { listenerPort: Number(port) };
+}
 
 export type HubRoleRefusal =
   | "listener-not-running"
@@ -128,6 +138,26 @@ export class HubService {
     const hub = this.#options.state.load().hub;
     if (hub?.enabled !== true) return undefined;
     return hub.members.find((member) => String(member.memberId) === memberId)?.identityPublicKey;
+  }
+
+  /**
+   * The key a guest's request to the hub is checked against: the device key it
+   * joined with. A spoke, a standby, or an unknown id has none here, so a
+   * member that is not a guest cannot use the guest routes.
+   */
+  guestKey(memberId: string): string | undefined {
+    const hub = this.#options.state.load().hub;
+    if (hub?.enabled !== true) return undefined;
+    const listed = hub.roster?.roster.members.find(
+      (member) => String(member.memberId) === memberId,
+    );
+    return listed?.role === "guest" ? this.memberKey(memberId) : undefined;
+  }
+
+  /** The current signed roster, for a guest that has proved it holds its key. */
+  rosterForGuest(): SignedHubRoster | undefined {
+    const hub = this.#options.state.load().hub;
+    return hub?.enabled === true ? hub.roster : undefined;
   }
 
   hubMemberId(): string {
@@ -230,7 +260,12 @@ export class HubService {
     if (publicKeyFingerprint(request.identityPublicKey) !== request.member.identityKeyFingerprint) {
       return { status: "refused", kind: "identity-mismatch" };
     }
-    if (!originIsPrivate(request.listenerOrigin)) {
+    const asGuest = request.asGuest === true;
+    // A guest runs no listener; any other member must name a private one.
+    if (
+      !asGuest &&
+      !(request.listenerOrigin !== undefined && originIsPrivate(request.listenerOrigin))
+    ) {
       return { status: "refused", kind: "member-origin-not-private" };
     }
     const ticket = hub.joinTickets.find((entry) => entry.ticketId === request.ticketId);
@@ -248,8 +283,34 @@ export class HubService {
     }
     const reading = readPrivateListener(this.#options.listener());
     if (reading.status === "refused") return { status: "refused", kind: reading.kind };
+    // A guest's identity key is the device key the person approved on this
+    // hub, so a spoke can later tie the roster entry to that device's key.
+    if (
+      asGuest &&
+      this.#options.pairing()?.deviceKeyFingerprint(deviceId) !==
+        request.member.identityKeyFingerprint
+    ) {
+      return { status: "refused", kind: "identity-mismatch" };
+    }
 
-    const member: RosterMember = { ...request.member, role: "spoke", owner: ticket.owner };
+    // The roster states what the hub checked, not what the member claimed: a
+    // guest has no listener, no names, no addresses, and no owner mark.
+    const { listenerPort: _claimedPort, ...claimed } = request.member;
+    const member: RosterMember = asGuest
+      ? {
+          ...claimed,
+          role: "guest",
+          listenerPin: NO_LISTENER_PIN,
+          privateNames: [],
+          addresses: [],
+          owner: false,
+        }
+      : {
+          ...claimed,
+          role: "spoke",
+          ...listenerPortOf(request.listenerOrigin),
+          owner: ticket.owner,
+        };
     const signed = this.#sign({
       ...roster,
       sequence: roster.sequence + 1,
@@ -266,7 +327,9 @@ export class HubService {
             memberId: member.memberId,
             identityPublicKey: request.identityPublicKey,
             deviceId,
-            listenerOrigin: request.listenerOrigin,
+            ...(asGuest || request.listenerOrigin === undefined
+              ? {}
+              : { listenerOrigin: request.listenerOrigin }),
           },
         ],
         joinTickets: hub.joinTickets.filter((entry) => entry.ticketId !== request.ticketId),
@@ -389,7 +452,8 @@ export class HubService {
     await Promise.allSettled(
       targets.map(async (member) => {
         const pin = pins.get(String(member.memberId));
-        if (pin === undefined) return;
+        // A guest runs no listener; it reads the roster from the hub.
+        if (pin === undefined || member.listenerOrigin === undefined) return;
         await sendHubLinkRequest({
           transport: this.#options.transport,
           target: { origin: member.listenerOrigin, pin: listenerPinFromDigest(pin) },
@@ -417,6 +481,7 @@ export class HubService {
       listenerPin: reading.pinDigest,
       privateNames: reading.privateNames,
       addresses: reading.addresses,
+      ...(reading.port === undefined ? {} : { listenerPort: reading.port }),
       owner: false,
     };
   }

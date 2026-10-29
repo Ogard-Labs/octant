@@ -44,6 +44,12 @@ import { createHubStateStore } from "../hub/hubStateStore";
 import { createPinnedHubTransport } from "../hub/pinnedHubTransport";
 import { createRosterSigningKeyStore } from "../hub/rosterSigningKey";
 import { SpokeLinkService } from "../hub/spokeLinkService";
+import {
+  TailscaleCertificateService,
+  createTailscaleCertificateSetting,
+  unwiredCertificateSink,
+  unwiredTailscaleDaemon,
+} from "../hub/tailscaleCertificate";
 import { createPrivateListenerLifecycleController } from "../remote/privateListenerLifecycleController";
 import {
   resolvePrivateListenerHostIdentity,
@@ -332,6 +338,7 @@ export function wireRemote(deps: RemoteDependencies) {
         revokeDevice: (deviceId) => {
           administration.revokeDevice({ deviceId });
         },
+        deviceKeyFingerprint: (deviceId) => gateway.pairedDeviceKeyFingerprint(deviceId),
       };
     },
     transport: hubTransport,
@@ -343,8 +350,26 @@ export function wireRemote(deps: RemoteDependencies) {
     identity: resolveHubIdentity,
     listener: () => privateListenerController.status(),
     transport: hubTransport,
+    devices: () => {
+      const gateway = currentRemoteGateway;
+      const administration = gateway?.localDeviceAdministration();
+      if (gateway === undefined || administration === undefined) return undefined;
+      return {
+        admitIntroducedDevice: (input) => gateway.admitIntroducedDevice(input),
+        revokeDevice: (deviceId) => {
+          administration.revokeDevice({ deviceId });
+        },
+      };
+    },
     record: recordHubMembership,
     serverBuildVersion: version,
+    now: Date.now,
+  });
+  const tailscaleCertificate = new TailscaleCertificateService({
+    setting: createTailscaleCertificateSetting(providerDataDirectory),
+    daemon: unwiredTailscaleDaemon,
+    sink: unwiredCertificateSink,
+    listener: () => privateListenerController.status(),
     now: Date.now,
   });
   const hubAdministrationRoutes = createHubAdministrationRouteHandler({
@@ -352,6 +377,7 @@ export function wireRemote(deps: RemoteDependencies) {
     windowAuthorityStore,
     hub: hubService,
     spoke: spokeLinkService,
+    certificate: tailscaleCertificate,
     maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   });
   const hubLinkRoutes = createHubLinkRouteHandler({ hub: hubService, spoke: spokeLinkService });

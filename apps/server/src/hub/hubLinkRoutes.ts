@@ -7,6 +7,7 @@
 // and the product routes never read it.
 
 import {
+  decodeHubGuestAdmissionRequest,
   decodeHubJoinRequest,
   decodeHubLeaveRequest,
   decodeSignedHubRoster,
@@ -21,9 +22,23 @@ export const HUB_LINK_ROUTES = {
   leave: "/api/hub/leave",
   roster: "/api/hub/roster",
   status: "/api/hub/status",
+  /** A guest reads the current signed roster from the hub. */
+  guestRoster: "/api/hub/guest-roster",
+  /** A guest asks a spoke to admit it as a paired device. */
+  guest: "/api/hub/guest",
 } as const;
 
 type RouteValue = (typeof HUB_LINK_ROUTES)[keyof typeof HUB_LINK_ROUTES];
+
+/** Refusals that mean the request did not prove who sent it, as opposed to a refusal of what it asked. */
+const GUEST_REFUSAL_STATUS: ReadonlySet<string> = new Set([
+  "missing",
+  "malformed",
+  "stale",
+  "unknown-sender",
+  "signature-invalid",
+  "replayed",
+]);
 
 const MAX_BODY_BYTES = 64 * 1_024;
 const NO_STORE = { "cache-control": "no-store" } as const;
@@ -45,7 +60,11 @@ export function createHubLinkRouteHandler(
       : undefined;
     if (route === undefined) return undefined;
     const expectedMethod =
-      route === HUB_LINK_ROUTES.roster ? "PUT" : route === HUB_LINK_ROUTES.status ? "GET" : "POST";
+      route === HUB_LINK_ROUTES.roster
+        ? "PUT"
+        : route === HUB_LINK_ROUTES.status || route === HUB_LINK_ROUTES.guestRoster
+          ? "GET"
+          : "POST";
     if (request.method !== expectedMethod || url.search !== "") return refused(405, "invalid");
     const body = await readBody(request);
     if (body === undefined) return refused(413, "invalid");
@@ -80,8 +99,45 @@ export function createHubLinkRouteHandler(
         : refused(409, receipt.kind);
     }
 
+    if (route === HUB_LINK_ROUTES.guest) {
+      let admission;
+      try {
+        admission = decodeHubGuestAdmissionRequest(JSON.parse(body));
+      } catch {
+        return refused(400, "invalid");
+      }
+      const admitted = options.spoke.admitGuest({
+        header,
+        method: request.method,
+        path: route,
+        body,
+        request: admission,
+      });
+      return admitted.status === "admitted"
+        ? Response.json(
+            { spokeMemberId: admitted.spokeMemberId, deviceId: admitted.deviceId },
+            { status: 201, headers: NO_STORE },
+          )
+        : refused(GUEST_REFUSAL_STATUS.has(admitted.kind) ? 401 : 403, admitted.kind);
+    }
+
     // The hub's side: a member completing its join or leaving.
     if (!options.hub.status().enabled) return refused(403, "hub-role-off");
+    if (route === HUB_LINK_ROUTES.guestRoster) {
+      const verified = memberVerifier.verify({
+        header,
+        method: request.method,
+        path: route,
+        body,
+        recipientMemberId: options.hub.hubMemberId(),
+        publicKeyFor: (sender) => options.hub.guestKey(sender),
+      });
+      if (verified.status === "refused") return refused(401, verified.kind);
+      const roster = options.hub.rosterForGuest();
+      return roster === undefined
+        ? refused(403, "hub-role-off")
+        : Response.json({ roster: encodeSignedHubRoster(roster) }, { headers: NO_STORE });
+    }
     if (route === HUB_LINK_ROUTES.join) {
       let joining;
       try {

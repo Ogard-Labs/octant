@@ -195,6 +195,7 @@ export async function startHubTestHost(input: {
         revokeDevice: (deviceId) => {
           administration.revokeDevice({ deviceId });
         },
+        deviceKeyFingerprint: (deviceId) => current.pairedDeviceKeyFingerprint(deviceId),
       };
     },
     transport,
@@ -206,6 +207,17 @@ export async function startHubTestHost(input: {
     identity: () => identity,
     listener: () => listener,
     transport,
+    devices: () => {
+      const administration = gateway?.localDeviceAdministration();
+      if (gateway === undefined || administration === undefined) return undefined;
+      const current = gateway;
+      return {
+        admitIntroducedDevice: (input) => current.admitIntroducedDevice(input),
+        revokeDevice: (deviceId) => {
+          administration.revokeDevice({ deviceId });
+        },
+      };
+    },
     record: (change) => records.push(change),
     serverBuildVersion: "0.1.0",
     now: Date.now,

@@ -67,6 +67,7 @@ export * from "./remoteShellHealth";
 export * from "./remoteSurfaceMatrix";
 export * from "./remotePairingClient";
 export * from "./appPairingCode";
+export * from "./hubGuestClient";
 export * from "./remoteListenerTrust";
 export * from "./pinnedListenerExchange";
 export * from "./remoteSessionBridge";

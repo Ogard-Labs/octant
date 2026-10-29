@@ -7,6 +7,7 @@ export type PrivateListenerReading =
   | {
       readonly status: "private";
       readonly origin: string;
+      readonly port: number | undefined;
       readonly sourceClass: "lan-private" | "tailscale";
       /** The listener's certificate pin as a roster holds it. */
       readonly pinDigest: string;
@@ -38,6 +39,7 @@ export function readPrivateListener(status: PrivateListenerHostStatus): PrivateL
   return {
     status: "private",
     origin: status.origin,
+    port: status.port ?? undefined,
     sourceClass,
     pinDigest,
     privateNames: isAddress ? [] : [status.hostname],

@@ -24,7 +24,8 @@ export const HubMemberRecord = Schema.Struct({
   memberId: HubMemberId,
   identityPublicKey: key,
   deviceId: Schema.UUID,
-  listenerOrigin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(300)),
+  /** Absent for a guest, which runs no listener the hub could reach. */
+  listenerOrigin: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(300))),
 }).annotations(strict);
 export type HubMemberRecord = typeof HubMemberRecord.Type;
 
@@ -43,6 +44,12 @@ export const HubSideState = Schema.Struct({
 }).annotations(strict);
 export type HubSideState = typeof HubSideState.Type;
 
+export const GuestDeviceRecord = Schema.Struct({
+  memberId: HubMemberId,
+  deviceId: Schema.UUID,
+}).annotations(strict);
+export type GuestDeviceRecord = typeof GuestDeviceRecord.Type;
+
 /** The hub as a spoke knows it, and what that spoke lets it do. */
 export const HubLinkState = Schema.Struct({
   selfMemberId: HubMemberId,
@@ -56,6 +63,8 @@ export const HubLinkState = Schema.Struct({
   roster: SignedHubRoster,
   /** What this spoke lets other members do to it. A newer roster ends the grants of a member it drops. */
   peerGrants: Schema.Array(PeerGrant),
+  /** The paired devices this spoke made for guests it accepted; a dropped guest's device is revoked. */
+  guestDevices: Schema.optional(Schema.Array(GuestDeviceRecord)),
   /** Set once a newer roster no longer lists this spoke: the hub principal is revoked. */
   removed: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);

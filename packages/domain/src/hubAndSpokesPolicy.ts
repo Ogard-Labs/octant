@@ -425,6 +425,9 @@ export function hubRosterSigningPayload(roster: HubRoster): string {
       listenerPin: member.listenerPin,
       privateNames: member.privateNames,
       addresses: member.addresses,
+      // Written only when present, so a roster signed before ports were named
+      // keeps the bytes it was signed over.
+      ...(member.listenerPort === undefined ? {} : { listenerPort: member.listenerPort }),
       owner: member.owner,
     })),
     standbyOrder: roster.standbyOrder,
