@@ -192,6 +192,20 @@ export async function finishGuestJoin(
   const finished = await input.finish();
   if (finished.status === "awaiting-approval") return { status: "waiting" };
   if (finished.status === "refused") return { status: "refused", kind: finished.kind };
+  // The hub is a host in its own right, for the threads it runs. It is reached
+  // with the pairing the person just approved, not through spoke admission.
+  try {
+    await input.registry.upsert({
+      hostId: finished.approval.hostId,
+      origin: finished.approval.origin,
+      label: finished.record.hub.name,
+      keyId: finished.approval.deviceKeyId,
+      credentialGeneration: finished.approval.credentialGeneration,
+      hostKeyFingerprint: finished.approval.hostKeyFingerprint,
+    });
+  } catch {
+    // The join is done at the hub; a full store must not forget the hub or retry it.
+  }
   const connected = await connectGuestSpokes({
     ...input,
     record: finished.record,
@@ -206,6 +220,8 @@ export type GuestReopenOutcome =
   | { readonly status: "none" }
   | { readonly status: "unchanged"; readonly state: GuestHubState }
   | { readonly status: "updated"; readonly state: GuestHubState }
+  /** The hub refused the read for a reason that is not membership; nothing changed, ask again later. */
+  | { readonly status: "retry-later"; readonly state: GuestHubState }
   | { readonly status: "removed" };
 
 /**
@@ -226,11 +242,12 @@ export async function reopenGuestHub(
     signer,
     transport: input.transport,
   });
-  if (
-    refreshed.status === "hub-refused" &&
-    (refreshed.httpStatus === 401 || refreshed.httpStatus === 403)
-  ) {
+  if (refreshed.status === "hub-refused") {
+    // Only the hub saying it does not know this guest ends membership. A stale
+    // signed request (clock drift), a replay or a hub that is off is transient.
+    if (refreshed.kind !== "unknown-sender") return { status: "retry-later", state: held };
     for (const spoke of held.spokes) await input.removeHost(spoke.hostId);
+    await input.removeHost(held.record.hub.memberId);
     await input.store.clear();
     return { status: "removed" };
   }

@@ -4,19 +4,38 @@ import {
   type RosterMember,
   type SignedHubRoster,
 } from "@octant/contracts";
+import { decodeStableHostId } from "@octant/contracts/remote-access";
 import {
   createGuestSigner,
   type GuestHubRecord,
   type PinnedListenerTransportPort,
   type RemoteDeviceKeyPair,
   type RemoteDeviceKeyStore,
+  type RemotePairingApproval,
 } from "@octant/client-runtime";
 import { describe, expect, it, vi } from "vitest";
 import { createInMemoryMobileHostRegistryStorage, createMobileHostRegistry } from "./HostRegistry";
-import { connectGuestSpokes, createGuestHubStore, finishGuestJoin } from "./hubGuestFlow";
+import {
+  connectGuestSpokes,
+  createGuestHubStore,
+  finishGuestJoin,
+  reopenGuestHub,
+} from "./hubGuestFlow";
 
 const id = (suffix: string) => `00000000-0000-4000-8000-${suffix.padStart(12, "0")}` as HubMemberId;
 const DEVICE_ID = "11111111-1111-4111-8111-111111111111";
+
+// What the hub's pairing approved while the phone joined: the phone reaches the hub itself with it.
+const hubApproval: RemotePairingApproval = {
+  ticketId: "ticket",
+  hostId: decodeStableHostId(String(id("1"))),
+  deviceId: DEVICE_ID,
+  credentialGeneration: 1,
+  deviceKeyId: "paired-key",
+  origin: "https://100.101.102.103:8443",
+  hostKeyFingerprint: "a".repeat(64),
+  listenerTrust: { current: { kind: "pinned", pin: "sha256-HUB" } },
+};
 
 const member = (
   suffix: string,
@@ -214,6 +233,7 @@ describe("a phone that joined a hub as a guest", () => {
       status: "joined" as const,
       record: recordWith(laptop),
       signer: world.signer,
+      approval: hubApproval,
     }));
 
     const joined = await finishGuestJoin({
@@ -233,6 +253,89 @@ describe("a phone that joined a hub as a guest", () => {
     expect(finish).toHaveBeenCalledTimes(1);
   });
 
+  it("adds the hub itself as a host when it joins, even with no other spokes", async () => {
+    const world = await setup({});
+    const store = createGuestHubStore(createInMemoryMobileHostRegistryStorage());
+
+    const joined = await finishGuestJoin({
+      ...world,
+      finish: async () => ({
+        status: "joined",
+        record: recordWith(),
+        signer: world.signer,
+        approval: hubApproval,
+      }),
+      deviceLabel: "Phone",
+      store,
+    });
+
+    expect(joined.status).toBe("joined");
+    expect(await world.registry.list()).toEqual({
+      kind: "ok",
+      hosts: [
+        {
+          hostId: String(id("1")),
+          origin: "https://100.101.102.103:8443",
+          label: "Mac mini",
+          keyId: "paired-key",
+          credentialGeneration: 1,
+          hostKeyFingerprint: hubApproval.hostKeyFingerprint,
+        },
+      ],
+    });
+  });
+
+  it("keeps the hosts and the hub when the hub refuses a roster read for a reason other than membership", async () => {
+    for (const kind of ["stale", "replayed", "signature-invalid"]) {
+      const world = await setup({ "100.101.102.104": "admit" });
+      const store = createGuestHubStore(createInMemoryMobileHostRegistryStorage());
+      const held = await connectGuestSpokes({
+        ...world,
+        record: recordWith(laptop),
+        deviceLabel: "Phone",
+      });
+      await store.save(held);
+
+      const reopened = await reopenGuestHub({
+        ...world,
+        store,
+        transport: () => ({
+          status: "available",
+          fetch: async () => Response.json({ status: "refused", kind }, { status: 401 }),
+        }),
+      });
+
+      expect(reopened).toEqual({ status: "retry-later", state: held });
+      expect(world.removed).toEqual([]);
+      expect(await store.load()).toBeDefined();
+    }
+  });
+
+  it("removes the hub and its spokes when the hub says this phone is not on its roster", async () => {
+    const world = await setup({ "100.101.102.104": "admit" });
+    const store = createGuestHubStore(createInMemoryMobileHostRegistryStorage());
+    const held = await connectGuestSpokes({
+      ...world,
+      record: recordWith(laptop),
+      deviceLabel: "Phone",
+    });
+    await store.save(held);
+
+    const reopened = await reopenGuestHub({
+      ...world,
+      store,
+      transport: () => ({
+        status: "available",
+        fetch: async () =>
+          Response.json({ status: "refused", kind: "unknown-sender" }, { status: 401 }),
+      }),
+    });
+
+    expect(reopened).toEqual({ status: "removed" });
+    expect(world.removed).toEqual([String(id("2")), String(id("1"))]);
+    expect(await store.load()).toBeUndefined();
+  });
+
   it("waits while the hub has not approved and remembers the hub once it has", async () => {
     const world = await setup({ "100.101.102.104": "admit" });
     const store = createGuestHubStore(createInMemoryMobileHostRegistryStorage());
@@ -249,7 +352,12 @@ describe("a phone that joined a hub as a guest", () => {
 
     const joined = await finishGuestJoin({
       ...world,
-      finish: async () => ({ status: "joined", record, signer: world.signer }),
+      finish: async () => ({
+        status: "joined",
+        record,
+        signer: world.signer,
+        approval: hubApproval,
+      }),
       deviceLabel: "Phone",
       store,
     });

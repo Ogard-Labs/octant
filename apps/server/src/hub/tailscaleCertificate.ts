@@ -164,6 +164,8 @@ const isTailnetName = (hostname: string): boolean =>
 
 export class TailscaleCertificateService {
   readonly #options: TailscaleCertificateOptions;
+  /** Counts the times the person turned the certificate off, so a renewal in flight can tell. */
+  #turnedOff = 0;
 
   constructor(options: TailscaleCertificateOptions) {
     this.#options = options;
@@ -205,6 +207,7 @@ export class TailscaleCertificateService {
   }
 
   async disable(): Promise<TailscaleCertificateOutcome> {
+    this.#turnedOff += 1;
     this.#options.setting.save({ enabled: false });
     await this.#options.sink.remove();
     return { status: "disabled" };
@@ -228,13 +231,21 @@ export class TailscaleCertificateService {
       });
       if (renewal.status === "current") return { status: "current", notAfter: setting.notAfter };
     }
+    const turnedOffAt = this.#turnedOff;
     const reading = await this.#options.daemon.certificateFor(named.domain);
     if (reading.status === "unavailable") return { status: "refused", kind: reading.kind };
+    // The person may turn the certificate off while the daemon or the listener
+    // is still answering; a late renewal must not bring it back.
+    if (this.#turnedOff !== turnedOffAt) return { status: "refused", kind: "turned-off" };
     const installed = await this.#options.sink.install({
       domain: named.domain,
       certificatePem: reading.certificatePem,
       privateKeyPem: reading.privateKeyPem,
     });
+    if (this.#turnedOff !== turnedOffAt) {
+      await this.#options.sink.remove();
+      return { status: "refused", kind: "turned-off" };
+    }
     if (installed.status === "refused") return { status: "refused", kind: installed.kind };
     this.#options.setting.save({ ...setting, notAfter: reading.notAfter });
     return { status: "renewed", notAfter: reading.notAfter };

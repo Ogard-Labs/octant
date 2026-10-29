@@ -33,7 +33,11 @@ import {
   sha256,
 } from "./hubLinkSigning";
 import { listenerPinFromSha256 } from "./remoteListenerTrust";
-import type { RemoteDeviceKeyPair, RemoteDeviceKeyStore } from "./remotePairingClient";
+import type {
+  RemoteDeviceKeyPair,
+  RemoteDeviceKeyStore,
+  RemotePairingApproval,
+} from "./remotePairingClient";
 
 const HUB_GUEST_ROUTES = {
   join: "/api/hub/join",
@@ -141,7 +145,13 @@ export type GuestJoinStart =
 
 export type GuestJoinFinish =
   | { readonly status: "awaiting-approval" }
-  | { readonly status: "joined"; readonly record: GuestHubRecord; readonly signer: GuestSigner }
+  | {
+      readonly status: "joined";
+      readonly record: GuestHubRecord;
+      readonly signer: GuestSigner;
+      /** The pairing the hub approved: what the guest reaches the hub itself with, as a host. */
+      readonly approval: RemotePairingApproval;
+    }
   | { readonly status: "refused"; readonly kind: GuestJoinRefusal };
 
 export interface JoinHubAsGuestOptions {
@@ -267,6 +277,7 @@ export async function joinHubAsGuest(options: JoinHubAsGuestOptions): Promise<Gu
     return {
       status: "joined",
       signer,
+      approval: polled.approval,
       record: {
         hub: {
           memberId: String(answer.hub.memberId),
@@ -340,7 +351,12 @@ export async function acceptGuestRoster(input: {
 export type GuestRosterRefresh =
   | GuestRosterAcceptance
   | { readonly status: "unreachable" }
-  | { readonly status: "hub-refused"; readonly httpStatus: number };
+  | {
+      readonly status: "hub-refused";
+      readonly httpStatus: number;
+      /** What the hub said; `unknown-sender` is the hub saying this guest is not on its roster. */
+      readonly kind: string;
+    };
 
 /** Reads the current signed roster from the hub, signed as the guest, and accepts it only if it verifies. */
 export async function refreshGuestRoster(input: {
@@ -376,7 +392,16 @@ export async function refreshGuestRoster(input: {
   } catch {
     return { status: "unreachable" };
   }
-  if (!response.ok) return { status: "hub-refused", httpStatus: response.status };
+  if (!response.ok) {
+    const said = (await response.json().catch(() => undefined)) as
+      | { readonly kind?: unknown }
+      | undefined;
+    return {
+      status: "hub-refused",
+      httpStatus: response.status,
+      kind: typeof said?.kind === "string" ? said.kind : "refused",
+    };
+  }
   let candidate: SignedHubRoster;
   try {
     candidate = decodeHubGuestRosterResponse(await response.json()).roster;

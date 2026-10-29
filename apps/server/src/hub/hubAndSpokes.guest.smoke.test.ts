@@ -259,7 +259,7 @@ describe("a guest joining a hub that has a spoke", () => {
       signer,
       transport: guestTransport(network),
     });
-    expect(refresh).toEqual({ status: "hub-refused", httpStatus: 401 });
+    expect(refresh).toEqual({ status: "hub-refused", httpStatus: 401, kind: "unknown-sender" });
   });
 
   it("reads a newer roster from the hub and keeps the one it holds when nothing changed", async () => {
