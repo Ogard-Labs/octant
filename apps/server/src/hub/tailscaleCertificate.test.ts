@@ -195,6 +195,55 @@ describe("the Tailscale certificate for the web app", () => {
     expect(JSON.stringify(service.status())).not.toContain("PRIVATE-KEY-BODY");
   });
 
+  it("stays off when the person turns it off while a renewal is still waiting on the daemon", async () => {
+    const { service, certificateFor, install, remove } = setup({});
+    service.enable({ acknowledgedCertificateTransparency: true });
+    let answer: (reading: TailscaleCertificateReading) => void = () => undefined;
+    certificateFor.mockImplementationOnce(
+      () =>
+        new Promise<TailscaleCertificateReading>((resolve) => {
+          answer = resolve;
+        }),
+    );
+
+    const renewal = service.renewIfDue();
+    await service.disable();
+    answer({
+      status: "issued",
+      certificatePem: "CERTIFICATE-BODY",
+      privateKeyPem: "PRIVATE-KEY-BODY",
+      notAfter: NOW + 90 * DAY,
+    });
+
+    expect(await renewal).toEqual({ status: "refused", kind: "turned-off" });
+    expect(install).not.toHaveBeenCalled();
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(service.status().enabled).toBe(false);
+    expect(service.status().notAfter).toBeUndefined();
+  });
+
+  it("takes the certificate away again when the person turns it off while it is being installed", async () => {
+    const { service, install, remove } = setup({});
+    service.enable({ acknowledgedCertificateTransparency: true });
+    let finish: () => void = () => undefined;
+    install.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = () => resolve({ status: "installed" });
+        }),
+    );
+
+    const renewal = service.renewIfDue();
+    await Promise.resolve();
+    await Promise.resolve();
+    await service.disable();
+    finish();
+
+    expect(await renewal).toEqual({ status: "refused", kind: "turned-off" });
+    expect(remove).toHaveBeenCalledTimes(2);
+    expect(service.status().enabled).toBe(false);
+  });
+
   it("turns off again by taking the tailnet certificate away and leaving the pinned one", async () => {
     const { service, install, remove } = setup({});
     service.enable({ acknowledgedCertificateTransparency: true });
