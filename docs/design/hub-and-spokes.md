@@ -1041,6 +1041,18 @@ maintainer's hardware, or names the maintainer gate.
      A routine that is removed or disabled drops out of the list, which withdraws
      it, and loses its id. The body carries no member id: the hub files it under
      the member whose key signed it, and refuses a guest or the hub itself.
+   - **Reports are numbered and sent one at a time.** Every way into a report
+     (the timer, a new hardware address, a grant change, a new hub wake
+     generation) goes through one path on the spoke: a change asked for while a
+     report is in flight is sent once when it completes, never in parallel. Each
+     report carries a sequence the spoke keeps in its hub-link state, above its
+     last and never below the clock in milliseconds, so it survives a restart. The
+     hub (or a standing-in standby) applies a report only when its sequence is
+     above the last it applied for that spoke, counting a withdrawal's, and
+     answers `stale-report` otherwise; the spoke counts that as done. Without
+     this a withdrawal that outran an older report was undone by it, and later
+     looks never withdrew again. Hand-backs still use `reportedAt` and the
+     withdrawal record.
    - **Wake is its own switch on the hub, window only.** `octant hub wake on|off`
      and Settings › Hub reach the loopback administration route; a remote client
      never does. Turning it off forgets every held time and tells the standbys to

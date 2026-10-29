@@ -283,7 +283,7 @@ describe("what a spoke tells the hub", () => {
     expect(bodies).toHaveLength(1);
     const [body] = bodies;
     const parsed = JSON.parse(body ?? "") as { times: Array<Record<string, string>> };
-    expect(Object.keys(parsed)).toEqual(["times"]);
+    expect(Object.keys(parsed).sort()).toEqual(["sequence", "times"]);
     expect(parsed.times).toHaveLength(1);
     expect(Object.keys(parsed.times[0] ?? {}).sort()).toEqual(["nextAt", "routineId"]);
     for (const content of ["automation", "secret", "paused", "exhausted", "prompt", "project"]) {
@@ -406,6 +406,83 @@ describe("what a spoke tells the hub", () => {
     expect(await restarted.report()).toEqual({ status: "refused", kind: "wake-not-granted" });
   });
 
+  it("sends one follow-up report with the latest state when the address changes while a report is in flight", async () => {
+    const bodies: string[] = [];
+    let inFlight = 0;
+    let mostInFlight = 0;
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const spy =
+      (transport: HubTransport): HubTransport =>
+      (target) => {
+        const fetcher = transport(target);
+        return async (url, init) => {
+          if (!String(url).endsWith(HUB_LINK_ROUTES.wakeTimes)) return fetcher(url, init);
+          bodies.push(String(init?.body));
+          inFlight += 1;
+          mostInFlight = Math.max(mostInFlight, inFlight);
+          try {
+            if (bodies.length === 1) await held;
+            return await fetcher(url, init);
+          } finally {
+            inFlight -= 1;
+          }
+        };
+      };
+    const { clock, hub, laptop } = await startPair({ wakeTransport: spy });
+    laptop.spoke.setGrant(wakeGrant, window);
+    laptop.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 30 * MINUTE),
+    });
+
+    const ticking = laptop.spokeWake.tick();
+    await vi.waitFor(() => expect(bodies).toHaveLength(1));
+    expect(laptop.spokeWake.setHardwareAddress("AA-BB-CC-00-11-22").status).toBe("changed");
+    await pause(20);
+    expect(bodies).toHaveLength(1);
+    release();
+    await ticking;
+
+    expect(bodies).toHaveLength(2);
+    expect(mostInFlight).toBe(1);
+    expect(JSON.parse(bodies[0] ?? "")).not.toHaveProperty("hardwareAddress");
+    expect(JSON.parse(bodies[1] ?? "")).toHaveProperty("hardwareAddress", "aa:bb:cc:00:11:22");
+    expect(hub.state.load().hub?.wake?.spokes[0]?.hardwareAddress).toBe("aa:bb:cc:00:11:22");
+  });
+
+  it("does not restore times or address when an older report arrives after a withdrawal", async () => {
+    const { clock, hub, laptop } = await startPair();
+    const older = {
+      sequence: 10,
+      times: [{ routineId: decodeNudgeId("r".repeat(22)), nextAt: iso(clock.now() + 5 * MINUTE) }],
+      hardwareAddress: decodeHardwareAddress("aa:bb:cc:00:11:22"),
+    };
+
+    expect(await hub.wake.receiveReport(laptop.hostId, { sequence: 9, times: [] })).toMatchObject({
+      status: "recorded",
+    });
+    expect(await hub.wake.receiveReport(laptop.hostId, { ...older, sequence: 11 })).toMatchObject({
+      status: "recorded",
+    });
+    expect(await hub.wake.receiveReport(laptop.hostId, { sequence: 12, times: [] })).toMatchObject({
+      status: "recorded",
+    });
+    expect(await hub.wake.receiveReport(laptop.hostId, older)).toEqual({ status: "stale-report" });
+    expect(hub.state.load().hub?.wake?.spokes).toEqual([]);
+
+    expect(await hub.wake.receiveReport(laptop.hostId, { ...older, sequence: 13 })).toMatchObject({
+      status: "recorded",
+    });
+    expect(hub.state.load().hub?.wake?.spokes[0]?.hardwareAddress).toBe("aa:bb:cc:00:11:22");
+    expect(await hub.wake.receiveReport(laptop.hostId, { ...older, sequence: 13 })).toEqual({
+      status: "stale-report",
+    });
+  });
+
   it("drops the times and hardware address a hub held for a spoke that left", async () => {
     const { clock, hub, laptop } = await startPair();
     laptop.spoke.setGrant(wakeGrant, window);
@@ -435,7 +512,7 @@ describe("what a spoke tells the hub", () => {
       clock,
       method: "POST",
       path: HUB_LINK_ROUTES.wakeTimes,
-      body: { times, memberId: hub.hostId },
+      body: { sequence: 1, times, memberId: hub.hostId },
     });
     expect(named?.status).toBe(400);
 
@@ -445,7 +522,7 @@ describe("what a spoke tells the hub", () => {
       clock,
       method: "POST",
       path: HUB_LINK_ROUTES.wakeTimes,
-      body: { times },
+      body: { sequence: 1, times },
     });
     expect(filed?.status).toBe(200);
     expect(hub.state.load().hub?.wake?.spokes.map((spoke) => String(spoke.memberId))).toEqual([
@@ -453,7 +530,7 @@ describe("what a spoke tells the hub", () => {
     ]);
 
     // The hub's own id is not a spoke, and a stranger's signature proves nothing.
-    expect(await hub.wake.receiveReport(hub.hostId, { times })).toEqual({
+    expect(await hub.wake.receiveReport(hub.hostId, { sequence: 1, times })).toEqual({
       status: "refused",
       kind: "not-a-spoke",
     });
@@ -482,7 +559,7 @@ describe("what a spoke tells the hub", () => {
       clock,
       method: "POST",
       path: HUB_LINK_ROUTES.wakeTimes,
-      body: { times },
+      body: { sequence: 1, times },
     });
     expect(off?.status).toBe(403);
     expect(await off?.json()).toEqual({ status: "refused", kind: "wake-service-off" });
@@ -493,7 +570,7 @@ describe("what a spoke tells the hub", () => {
       clock,
       method: "POST",
       path: HUB_LINK_ROUTES.wakeTimes,
-      body: { times },
+      body: { sequence: 1, times },
     });
     expect(notAHub?.status).toBe(403);
     expect(await notAHub?.json()).toEqual({ status: "refused", kind: "hub-role-off" });
@@ -1193,7 +1270,7 @@ describe("a spoke that withdrew its wake state while a hand-back answer was lost
 
     clock.state.offset += MINUTE;
     // The spoke's person unticks Wake, so it sends an empty report.
-    expect(await hub.wake.receiveReport(laptop.hostId, { times: [] })).toMatchObject({
+    expect(await hub.wake.receiveReport(laptop.hostId, { sequence: 1, times: [] })).toMatchObject({
       status: "recorded",
       count: 0,
     });

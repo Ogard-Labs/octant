@@ -12,24 +12,42 @@ const nextAt = "2026-10-29T08:00:00.000Z";
 
 describe("hub wake wire shapes", () => {
   it("decodes a report of opaque ids and times, with an address only when one was entered", () => {
-    expect(decodeHubWakeReport({ times: [{ routineId, nextAt }] }).times).toHaveLength(1);
+    expect(decodeHubWakeReport({ sequence: 1, times: [{ routineId, nextAt }] }).times).toHaveLength(
+      1,
+    );
     expect(
-      decodeHubWakeReport({ times: [], hardwareAddress: "aa:bb:cc:dd:ee:ff" }).hardwareAddress,
+      decodeHubWakeReport({ sequence: 1, times: [], hardwareAddress: "aa:bb:cc:dd:ee:ff" })
+        .hardwareAddress,
     ).toBe("aa:bb:cc:dd:ee:ff");
-    expect(() => decodeHubWakeReport({ times: [], hardwareAddress: "AA-BB" })).toThrow();
+    expect(() =>
+      decodeHubWakeReport({ sequence: 1, times: [], hardwareAddress: "AA-BB" }),
+    ).toThrow();
+  });
+
+  it("refuses a report that carries no positive whole sequence number", () => {
+    expect(() => decodeHubWakeReport({ times: [] })).toThrow();
+    expect(() => decodeHubWakeReport({ sequence: 0, times: [] })).toThrow();
+    expect(() => decodeHubWakeReport({ sequence: 1.5, times: [] })).toThrow();
   });
 
   it("refuses any field that could carry routine content", () => {
     for (const extra of ["prompt", "projectId", "profileId", "name", "schedule", "memberId"]) {
-      expect(() => decodeHubWakeReport({ times: [{ routineId, nextAt }], [extra]: "x" })).toThrow();
-      expect(() => decodeHubWakeReport({ times: [{ routineId, nextAt, [extra]: "x" }] })).toThrow();
+      expect(() =>
+        decodeHubWakeReport({ sequence: 1, times: [{ routineId, nextAt }], [extra]: "x" }),
+      ).toThrow();
+      expect(() =>
+        decodeHubWakeReport({ sequence: 1, times: [{ routineId, nextAt, [extra]: "x" }] }),
+      ).toThrow();
     }
   });
 
   it("refuses a routine id that could be a real routine's own id or a repeat", () => {
-    expect(() => decodeHubWakeReport({ times: [{ routineId: "short", nextAt }] })).toThrow();
+    expect(() =>
+      decodeHubWakeReport({ sequence: 1, times: [{ routineId: "short", nextAt }] }),
+    ).toThrow();
     expect(() =>
       decodeHubWakeReport({
+        sequence: 1,
         times: [
           { routineId, nextAt },
           { routineId, nextAt },

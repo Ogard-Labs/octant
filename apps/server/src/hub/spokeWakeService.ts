@@ -59,6 +59,9 @@ export interface SpokeWakeOptions {
   readonly maxLeadMs?: number;
 }
 
+/** What a report says before the spoke numbers it. */
+type WakeReportContent = Omit<HubWakeReport, "sequence">;
+
 export type WakeReportResult =
   | { readonly status: "sent"; readonly count: number }
   | { readonly status: "unchanged" }
@@ -106,7 +109,12 @@ export class SpokeWakeService {
   readonly #options: SpokeWakeOptions;
   #lastSent: string | undefined;
   #lastCount = 0;
-  #reporting = false;
+  /** The report being sent, with any follow-up it owes; never more than one at a time. */
+  #flight: Promise<WakeReportResult> | undefined;
+  /** Something changed while a report was in flight, so the latest state is sent when it completes. */
+  #pending = false;
+  /** Moves each time what the hub holds is forgotten, so an answer that predates it is not believed. */
+  #forgotten = 0;
   /** The hub's wake generation as of the last report it took or heartbeat that carried it. */
   #hubGeneration: number | undefined;
 
@@ -146,6 +154,7 @@ export class SpokeWakeService {
           routines: link.wake?.routines ?? [],
           ...(address === undefined ? {} : { hardwareAddress: address }),
           ...(link.wake?.shared === true ? { shared: true as const } : {}),
+          ...keptSequence(link.wake),
         },
       },
     });
@@ -162,28 +171,47 @@ export class SpokeWakeService {
   noteHubWakeGeneration(generation: number): void {
     if (this.#hubGeneration !== undefined && this.#hubGeneration !== generation) {
       this.#lastSent = undefined;
+      this.#forgotten += 1;
+      if (this.#flight !== undefined) this.#pending = true;
     }
     this.#hubGeneration = generation;
   }
 
   /** One look at this spoke's routines; called on a timer by the server. */
   async tick(): Promise<void> {
-    if (this.#reporting) return;
-    this.#reporting = true;
-    try {
-      await this.report();
-    } finally {
-      this.#reporting = false;
-    }
+    await this.report();
   }
 
   /**
    * Sends the hub every enabled routine's next occurrence, when that differs
    * from what it last accepted. A routine that is removed or disabled is left
    * out, which withdraws it. A spoke that does not tick Wake sends nothing, and
-   * withdraws what it sent before it was unticked.
+   * withdraws what it sent before it was unticked. Every way into a report comes
+   * here: one is in flight at most, and a change asked for meanwhile is sent once
+   * when it completes, so an older report cannot overtake a newer one.
    */
-  async report(): Promise<WakeReportResult> {
+  report(): Promise<WakeReportResult> {
+    if (this.#flight !== undefined) {
+      this.#pending = true;
+      return this.#flight;
+    }
+    const flight = this.#sendUntilCurrent().finally(() => {
+      this.#flight = undefined;
+    });
+    this.#flight = flight;
+    return flight;
+  }
+
+  async #sendUntilCurrent(): Promise<WakeReportResult> {
+    let result: WakeReportResult;
+    do {
+      this.#pending = false;
+      result = await this.#send();
+    } while (this.#pending);
+    return result;
+  }
+
+  async #send(): Promise<WakeReportResult> {
     const link = this.#options.state.load().link;
     if (link === undefined) return { status: "refused", kind: "not-a-spoke" };
     if (link.removed === true) return { status: "refused", kind: "hub-revoked" };
@@ -194,13 +222,14 @@ export class SpokeWakeService {
     if (!granted && link.wake?.shared !== true) {
       return { status: "refused", kind: "wake-not-granted" };
     }
-    const report: HubWakeReport = granted ? this.#build(link) : { times: [] };
+    const report: WakeReportContent = granted ? this.#build(link) : { times: [] };
     const target = coordinator(link);
     if (target === undefined) return { status: "unreachable" };
     if (granted) this.#markShared(true);
-    const body = JSON.stringify(report);
-    const signature = `${target.memberId}|${body}`;
+    const signature = `${target.memberId}|${JSON.stringify(report)}`;
     if (signature === this.#lastSent) return { status: "unchanged" };
+    const body = JSON.stringify({ ...report, sequence: this.#nextSequence() });
+    const forgotten = this.#forgotten;
     const identity = this.#options.identity();
     const answer = await sendHubLinkRequest({
       transport: this.#options.transport,
@@ -219,10 +248,13 @@ export class SpokeWakeService {
     if (!answer.response.ok) {
       return { status: "declined", kind: await declinedKind(answer.response) };
     }
-    this.#lastSent = granted ? signature : undefined;
+    const { status, generation } = await answered(answer.response);
+    // What the hub forgot while this was in flight is not on the hub, whatever it answered.
+    this.#lastSent = granted && forgotten === this.#forgotten ? signature : undefined;
     if (!granted) this.#markShared(false);
-    const generation = await answeredGeneration(answer.response);
     if (generation !== undefined) this.#hubGeneration = generation;
+    // The hub already applied a newer report from this spoke: there is nothing to resend.
+    if (status === "stale-report") return { status: "unchanged" };
     this.#lastCount = report.times.length;
     return { status: "sent", count: report.times.length };
   }
@@ -290,9 +322,24 @@ export class SpokeWakeService {
             ? {}
             : { hardwareAddress: link.wake.hardwareAddress }),
           ...(shared ? { shared: true as const } : {}),
+          ...keptSequence(link.wake),
         },
       },
     });
+  }
+
+  /** Above the last one this spoke used, and never below the clock, so it keeps rising across a restart or lost state. */
+  #nextSequence(): number {
+    const state = this.#options.state.load();
+    const link = state.link;
+    const sequence = Math.max((link?.wake?.reportSequence ?? 0) + 1, this.#options.now());
+    if (link !== undefined) {
+      this.#options.state.save({
+        ...state,
+        link: { ...link, wake: { routines: [], ...link.wake, reportSequence: sequence } },
+      });
+    }
+    return sequence;
   }
 
   #wakeGranted(): boolean {
@@ -313,7 +360,7 @@ export class SpokeWakeService {
   }
 
   /** Every enabled, scheduled routine under its random id; ids of routines that are gone or disabled are dropped. */
-  #build(link: HubLinkState): HubWakeReport {
+  #build(link: HubLinkState): WakeReportContent {
     const scheduled = this.#options
       .routines()
       .filter((routine) => routine.enabled && routine.nextDueAt !== null);
@@ -344,6 +391,7 @@ export class SpokeWakeService {
                 ? {}
                 : { hardwareAddress: state.link.wake.hardwareAddress }),
               ...(state.link.wake?.shared === true ? { shared: true as const } : {}),
+              ...keptSequence(state.link.wake),
             },
           },
         });
@@ -385,18 +433,28 @@ function coordinator(
   return { memberId: String(link.hubMemberId), origin: link.hubOrigin, pin: link.hubListenerPin };
 }
 
-/** The wake generation the hub filed a report under; a standing-in standby sends none. */
-async function answeredGeneration(response: Response): Promise<number | undefined> {
+/** What the hub answered a report: whether it was too old to apply, and the wake generation it was filed under (a standing-in standby sends none). */
+async function answered(
+  response: Response,
+): Promise<{ readonly status?: string; readonly generation?: number }> {
   try {
     const body: unknown = await response.json();
-    if (typeof body === "object" && body !== null && "generation" in body) {
-      return typeof body.generation === "number" ? body.generation : undefined;
+    if (typeof body === "object" && body !== null) {
+      return {
+        ...("status" in body && typeof body.status === "string" ? { status: body.status } : {}),
+        ...("generation" in body && typeof body.generation === "number"
+          ? { generation: body.generation }
+          : {}),
+      };
     }
   } catch {
-    // An answer without a readable body carries no generation.
+    // An answer without a readable body carries neither.
   }
-  return undefined;
+  return {};
 }
+
+const keptSequence = (wake: HubLinkState["wake"]) =>
+  wake?.reportSequence === undefined ? {} : { reportSequence: wake.reportSequence };
 
 async function declinedKind(response: Response): Promise<string> {
   try {
