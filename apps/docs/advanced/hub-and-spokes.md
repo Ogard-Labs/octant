@@ -241,8 +241,21 @@ a member asks you once. The phone drops the key when the action ends.
 **Browser.** A browser on your tailnet that joined as an owner uses a passkey as
 its unlock key, one passkey for each computer address it uses. A browser without
 a built-in authenticator cannot be an owner. The desktop app never offers a
-passkey, because its window already has the computer's authority. A browser
-screen to join a hub is not built yet.
+passkey, because its window already has the computer's authority.
+
+To join from a browser, open the hub's web app at its tailnet name, then go to
+**Settings → Remote access → Hub**. Paste the hub's join code, compare the short
+code with the one the hub shows, and approve there. For an owner code, tick **This
+is an owner code**: the browser makes a passkey for that address first and sends
+only its public key. If the browser cannot make a passkey, the box stays off and
+it can join only as a plain guest. If you cancel the passkey, nothing is sent to
+the hub. **Leave the hub** forgets the hub on this browser; remove the browser on
+the hub too.
+
+A browser can reach only the address that served its page, so it cannot read a
+spoke's alerts from the hub's page, and it does not yet reach the other computers
+on the hub. Owner alerts show in a browser only on a computer's own address, and
+none of that has been tried yet.
 
 An agent, a routine, the hub, a standby hub, and another computer can never
 unlock. Joining a spoke to a hub still happens on that spoke.
@@ -267,8 +280,8 @@ Confirming a member signs a note with the unlock key. A passkey can sign it too.
 A passkey asks twice: once for the note, once for the action. A phone asks once.
 
 **Not checked on real hardware.** The owner features are built and tested with
-software keys. A phone with Face ID or a fingerprint, a real passkey, and
-Android have not been tried. Expect rough edges the first time you use them.
+software keys. A phone with Face ID or a fingerprint, a real passkey (none has been
+run, in a browser or anywhere else), and Android have not been tried. Expect rough edges the first time you use them.
 
 ## The hub grant
 

@@ -202,6 +202,21 @@ describe("the agent's approval card in a thread", () => {
   });
 
   describe("after a host restart", () => {
+    it("offers a continuation even when the interrupted turn had no pending approval", async () => {
+      const user = userEvent.setup();
+      const client = clientFor(async () => view({ status: "recovery-required", approvals: [] }));
+      client.command.mockResolvedValue({ kind: "native-harness-session", session: view().session });
+      render(<ThreadHarnessCards client={client as never} threadId={threadId} />);
+      expect(await screen.findByText(/Review any changes before continuing/)).toBeVisible();
+      await user.click(screen.getByRole("button", { name: "Resume" }));
+      expect(client.command).toHaveBeenCalledWith(threadId, {
+        kind: "resume-native-harness-session",
+        sessionId: "00000000-0000-4000-8000-000000000010",
+        expectedVersion: 4,
+        continueInterrupted: true,
+      });
+    });
+
     it("says the call did not run and offers only Resume, never Allow or Deny", async () => {
       const user = userEvent.setup();
       const client = clientFor(async () => view({ status: "recovery-required" }));
@@ -222,6 +237,7 @@ describe("the agent's approval card in a thread", () => {
           kind: "resume-native-harness-session",
           sessionId: "00000000-0000-4000-8000-000000000010",
           expectedVersion: 4,
+          continueInterrupted: true,
         }),
       );
       expect(client.decideApproval).not.toHaveBeenCalled();

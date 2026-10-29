@@ -727,7 +727,8 @@ describe("RemoteServerGrantService", () => {
     expect(JSON.parse(events[1]?.actor_json ?? "")).toMatchObject({ kind: "system" });
     for (const event of events) {
       expect(event.payload_json).not.toContain("127.0.0.1");
-      expect(event.payload_json).not.toContain("4001");
+      // The listener's pid is 4001; a substring check also matched random grant ids.
+      expect(Object.values(JSON.parse(event.payload_json) as object)).not.toContain(4001);
     }
   });
 

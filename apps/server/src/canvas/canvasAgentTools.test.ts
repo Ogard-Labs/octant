@@ -190,12 +190,18 @@ describe("createCanvasAgentTools", () => {
     expect(set.definitions[0]?.description).toContain("document recipe");
     const recipes = (
       outcome.result as {
-        recipes: ReadonlyArray<{ skeleton: ReadonlyArray<{ kind: string }> }>;
+        recipes: ReadonlyArray<{ id: string; skeleton: ReadonlyArray<{ kind: string }> }>;
       }
     ).recipes;
-    expect(recipes.some((recipe) => recipe.skeleton.some((block) => block.kind === "mockup"))).toBe(
-      false,
-    );
+    // The mockup is the closed wireframe catalog: inert, and no recipe asked
+    // for one before flows existed. The app-flow recipe starts from typed
+    // screens on purpose — the ask is how the screens connect — so it is the
+    // one recipe whose skeleton names a mockup.
+    expect(
+      recipes
+        .filter((recipe) => recipe.skeleton.some((block) => block.kind === "mockup"))
+        .map((recipe) => recipe.id),
+    ).toEqual(["app-flow"]);
     expect(create).not.toHaveBeenCalled();
   });
 

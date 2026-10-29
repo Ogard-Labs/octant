@@ -498,6 +498,7 @@ function commentDenialCode(code: CanvasBoardRejectionCode): CanvasCommentDenialC
     case "missing-position":
     case "not-a-plan":
     case "unknown-task":
+    case "nothing-to-present":
       return "malformed-request";
   }
 }

@@ -2,7 +2,7 @@
 // client it is (the phone app or a browser): read every computer's alerts, act
 // on one, and say plainly how the action went. The protocol is in hubOwnerClient.
 
-import type { NewMemberAlert } from "@octant/contracts";
+import type { HeldMember, NewMemberAlert } from "@octant/contracts";
 import { describeOwnerRefusal, type OwnerActionResult, type OwnerClient } from "./hubOwnerClient";
 
 /** A computer on the hub that this device is an owner of, with the client that reaches it. */
@@ -14,7 +14,10 @@ export interface OwnerSpoke {
 
 export interface OwnerAlertRow {
   readonly spoke: { readonly memberId: string; readonly name: string };
-  readonly alert: NewMemberAlert;
+  /** The member this row is about: named by its alert, or by the computer's hold when no alert is left. */
+  readonly member: HeldMember;
+  /** The alert that raised the member; none once it was dismissed or the computer dropped it. Remove and Dismiss need it. */
+  readonly alert: NewMemberAlert | undefined;
   /** Whether that computer holds the member under Confirm new members; Confirm applies only then. */
   readonly held: boolean;
 }
@@ -38,19 +41,28 @@ export async function readOwnerAlerts(
   return {
     rows: answers.flatMap(({ spoke, answer, held }) => {
       // A computer that did not say what it holds shows no Confirm.
-      const heldIds = new Set(
-        held.status === "read" ? held.members.map((member) => String(member.memberId)) : [],
+      const heldMembers = held.status === "read" ? held.members : [];
+      const heldIds = new Set(heldMembers.map((member) => String(member.memberId)));
+      const alerts = answer.status === "read" ? answer.alerts : [];
+      const where = { memberId: spoke.memberId, name: spoke.name };
+      const raised = alerts.map(
+        (alert): OwnerAlertRow => ({
+          spoke: where,
+          member: alert,
+          alert,
+          held: heldIds.has(String(alert.memberId)),
+        }),
       );
-      return answer.status === "read"
-        ? answer.alerts.map((alert) => ({
-            spoke: { memberId: spoke.memberId, name: spoke.name },
-            alert,
-            held: heldIds.has(String(alert.memberId)),
-          }))
-        : [];
+      // A held member stays confirmable without an alert: the person may have
+      // dismissed it, and a computer keeps only its newest alerts.
+      const alerted = new Set(alerts.map((alert) => String(alert.memberId)));
+      const holdOnly = heldMembers
+        .filter((member) => !alerted.has(String(member.memberId)))
+        .map((member): OwnerAlertRow => ({ spoke: where, member, alert: undefined, held: true }));
+      return [...raised, ...holdOnly];
     }),
     unanswered: answers
-      .filter(({ answer }) => answer.status !== "read")
+      .filter(({ answer, held }) => answer.status !== "read" || held.status !== "read")
       .map(({ spoke }) => spoke.name),
   };
 }
@@ -59,11 +71,13 @@ export type OwnerAlertAction = "dismiss" | "remove" | "confirm";
 
 export function runOwnerAlertAction(
   spoke: OwnerSpoke,
-  alert: NewMemberAlert,
+  row: Pick<OwnerAlertRow, "member" | "alert">,
   action: OwnerAlertAction,
 ): Promise<OwnerActionResult> {
-  if (action === "confirm") return spoke.client.confirmNewMember(alert);
-  const alertId = String(alert.alertId);
+  if (action === "confirm") return spoke.client.confirmNewMember(row.member);
+  // Dismiss and Remove name an alert; a member the computer only holds has none.
+  if (row.alert === undefined) return Promise.resolve({ status: "refused", kind: "no-such-alert" });
+  const alertId = String(row.alert.alertId);
   return action === "dismiss"
     ? spoke.client.dismissAlert(alertId)
     : spoke.client.removeFromAlert(alertId);

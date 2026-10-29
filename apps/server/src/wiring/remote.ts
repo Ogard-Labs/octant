@@ -16,6 +16,9 @@ import { managedWorktreeRoot } from "../code/managedWorktreeService";
 import { purgeThreadArtifacts, removeMirrorFiles } from "../persistence/threadArtifactPurge";
 import { readHostIdentity } from "../persistence/remoteAccessProjection";
 import { createProviderCredentialRouteHandler } from "../providers/providerCredentialRoutes";
+import { makeAppStoreConnectKeyBrokerClient } from "../providers/credentialBrokerClient";
+import { createAppStoreConnectKeyRouteHandler } from "../apple/appStoreConnectKeyRoutes";
+import { APPLE_DISTRIBUTION_ADMITTED } from "../apple/appleDeviceService";
 import { ProviderServiceError } from "../providers/providerService";
 import { providerKeyJournal, reconcileProviderKeyChanges } from "../providers/providerKeyJournal";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -60,7 +63,7 @@ import { HubService, type HubPairingPort } from "../hub/hubService";
 import { createHubStateStore } from "../hub/hubStateStore";
 import { createPinnedHubTransport } from "../hub/pinnedHubTransport";
 import { createRosterSigningKeyStore } from "../hub/rosterSigningKey";
-import { SpokeLinkService } from "../hub/spokeLinkService";
+import { deviceLifecycleAt, SpokeLinkService } from "../hub/spokeLinkService";
 import {
   TailscaleCertificateService,
   createTailscaleCertificateSetting,
@@ -415,6 +418,8 @@ export function wireRemote(deps: RemoteDependencies) {
       if (gateway === undefined || administration === undefined) return undefined;
       return {
         admitIntroducedDevice: (input) => gateway.admitIntroducedDevice(input),
+        deviceLifecycle: (deviceId, now) =>
+          deviceLifecycleAt(administration.listDevices(), deviceId, now),
         revokeDevice: (deviceId) => {
           administration.revokeDevice({ deviceId });
         },
@@ -624,6 +629,19 @@ export function wireRemote(deps: RemoteDependencies) {
         throw error;
       }
     },
+  });
+  const appStoreConnectKeyRoutes = createAppStoreConnectKeyRouteHandler({
+    desktopBridgeSecret: options.desktopBridgeSecret,
+    windowAuthorityStore,
+    macos: process.platform === "darwin",
+    distributionEnabled: APPLE_DISTRIBUTION_ADMITTED,
+    keys:
+      options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+        ? undefined
+        : makeAppStoreConnectKeyBrokerClient({
+            url: options.credentialBrokerUrl,
+            token: options.credentialBrokerToken,
+          }),
   });
   const privateListenerSetting = createPrivateListenerSetting(providerDataDirectory);
   const privateListenerAdministrationRoutes = createPrivateListenerAdministrationRouteHandler({
@@ -885,6 +903,7 @@ export function wireRemote(deps: RemoteDependencies) {
     }),
   });
   return {
+    appStoreConnectKeyRoutes,
     composeHostDiagnostics,
     delegationAdministrationRoutes,
     externalContentRoutes,

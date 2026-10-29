@@ -327,6 +327,31 @@ describe("a phone that joined a hub as a guest", () => {
     expect(world.removed).toEqual([]);
   });
 
+  it("keeps a saved spoke when it says its device pairing is not running yet", async () => {
+    const world = await setup({ "100.101.102.104": "admit" });
+    const first = await connectGuestSpokes({
+      ...world,
+      record: recordWith(laptop),
+      deviceLabel: "Phone",
+    });
+
+    const second = await connectGuestSpokes({
+      ...world,
+      transport: () => ({
+        status: "available",
+        fetch: async () =>
+          Response.json({ status: "refused", kind: "devices-unavailable" }, { status: 403 }),
+      }),
+      record: recordWith(laptop),
+      deviceLabel: "Phone",
+      previous: first,
+    });
+
+    expect(second.spokes).toEqual(first.spokes);
+    expect(second.notAccepted).toEqual([]);
+    expect(world.removed).toEqual([]);
+  });
+
   it("remembers the hub it joined even when a spoke cannot be added, so the join is not retried", async () => {
     const world = await setup({ "100.101.102.104": "admit" });
     const store = createGuestHubStore(createInMemoryMobileHostRegistryStorage());

@@ -330,7 +330,7 @@ function cloudHostOver(
     backend: fake.backend,
     version: () => saved()?.version ?? 0,
     savedRef: () => saved()?.desktopRecipe?.credentialRef,
-    keyView: () => recipeKeys.view(saved()?.desktopRecipe),
+    keyView: () => recipeKeys.view(projectId, saved()?.desktopRecipe),
   };
 }
 
@@ -457,7 +457,12 @@ describe("a cloud desktop recipe's key", () => {
         key: { action: "remove" },
       });
       expect(savedRef()).toBeUndefined();
-      await expect(keyView()).resolves.toEqual({ key: "none", store: "available" });
+      // The editor keeps saying the old key is waiting on its desktop.
+      await expect(keyView()).resolves.toEqual({
+        key: "none",
+        store: "available",
+        releasing: true,
+      });
       await host.recipeKeys.settle();
       expect([...keys.held.keys()]).toEqual([String(secondRef)]);
 
@@ -465,6 +470,7 @@ describe("a cloud desktop recipe's key", () => {
       expect(host.backend.desktops()).toHaveLength(0);
       await host.recipeKeys.settle();
       expect(keys.held.size).toBe(0);
+      await expect(keyView()).resolves.toEqual({ key: "none", store: "available" });
       await expect(leases.acquire(billedCaller)).resolves.toEqual({
         status: "refused",
         reason: "no-provider-configured",

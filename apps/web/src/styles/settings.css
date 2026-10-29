@@ -717,7 +717,12 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="execution-context"],
 .setrow[data-setting-id="transcription"],
 .setrow[data-setting-id="synthesis"],
-.setrow[data-setting-id="custom-image-sources"] {
+.setrow[data-setting-id="custom-image-sources"],
+.setrow[data-setting-id="app-store-connect-issuer"],
+.setrow[data-setting-id="app-store-connect-key-id"],
+.setrow[data-setting-id="app-store-connect-private-key"],
+.setrow[data-setting-id="browser-hub-code"],
+.setrow[data-setting-id="browser-hub-claim"] {
   grid-template-columns: minmax(0, 1fr);
 }
 
@@ -731,11 +736,30 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="code-editor-arguments"] > .setrow-control,
 .setrow[data-setting-id="execution-context"] > .setrow-control,
 .setrow[data-setting-id="transcription"] > .setrow-control,
-.setrow[data-setting-id="synthesis"] > .setrow-control {
+.setrow[data-setting-id="synthesis"] > .setrow-control,
+.setrow[data-setting-id="app-store-connect-issuer"] > .setrow-control,
+.setrow[data-setting-id="app-store-connect-key-id"] > .setrow-control,
+.setrow[data-setting-id="app-store-connect-private-key"] > .setrow-control,
+.setrow[data-setting-id="browser-hub-code"] > .setrow-control,
+.setrow[data-setting-id="browser-hub-claim"] > .setrow-control {
   grid-column: 1;
   grid-row: auto;
   justify-self: stretch;
   margin-top: var(--oct-space-3);
+}
+
+/* The App Store Connect key is three fields saved together. In a right-hand
+   control column the pasted .p8 textarea shrank to a sliver beside its hint,
+   so the fields stack under their labels and the save button sits in the
+   group's own padded footer instead of on its border. */
+.app-store-connect-key__fields .setrow-control {
+  max-width: 64ch;
+}
+
+.app-store-connect-key__save {
+  justify-content: flex-end;
+  padding: var(--oct-space-4) var(--oct-space-5);
+  border-top: 1px solid var(--oct-border-soft);
 }
 
 /* A speech endpoint is three fields and two actions; they read as one form

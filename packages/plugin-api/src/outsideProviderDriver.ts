@@ -55,6 +55,8 @@ export const OutsideProviderDriverRefusalReason = Schema.Literal(
   "ships-native-code",
   "ships-install-script",
   "package-metadata-invalid",
+  "signature-missing",
+  "signature-invalid",
 );
 export type OutsideProviderDriverRefusalReason = typeof OutsideProviderDriverRefusalReason.Type;
 
@@ -148,4 +150,113 @@ export function readOutsideProviderDriverEntry(value: unknown): OutsideProviderD
   return reason === undefined
     ? { status: "accepted", entry: decoded.right }
     : { status: "refused", reason };
+}
+
+/**
+ * The file beside the driver document that carries a publisher's signature.
+ * Every source uses this one format: a local folder, an npm package, and any
+ * later source alike.
+ */
+export const OUTSIDE_PROVIDER_DRIVER_SIGNATURE_PATH = "octant-signature.json";
+
+/** The signature format this version of Octant reads. */
+export const OUTSIDE_PROVIDER_DRIVER_SIGNATURE_FORMAT = "octant-signature/1";
+
+const sha256Hex = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/));
+
+/**
+ * A package-relative file path as the signature names it: `/`-separated,
+ * with no empty, `.` or `..` segment and no control character, since the
+ * signed message holds one path per line.
+ */
+const signedPath = Schema.String.pipe(
+  Schema.minLength(1),
+  Schema.maxLength(1024),
+  Schema.filter(
+    (path) =>
+      // oxlint-disable-next-line no-control-regex -- control characters are what this refuses
+      !/[\u0000-\u001f\u007f\\]/.test(path) &&
+      !path.startsWith("/") &&
+      path.split("/").every((segment) => segment !== "" && segment !== "." && segment !== ".."),
+  ),
+);
+
+/**
+ * `octant-signature.json`: the publisher's Ed25519 signature over the
+ * package's name, version, protocol versions, and the SHA-256 of every other
+ * file in it, with the public key that made it. The host recomputes every
+ * hash itself and builds the signed message from its own reading, so this
+ * file's `files` list is checked, never trusted.
+ */
+export const OutsideProviderDriverSignatureDocument = Schema.Struct({
+  format: Schema.Literal(OUTSIDE_PROVIDER_DRIVER_SIGNATURE_FORMAT),
+  name: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(214)),
+  version: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(64)),
+  protocolVersions: Schema.Array(OutsideProviderDriverProtocolVersion).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(8),
+  ),
+  files: Schema.Array(
+    Schema.Struct({ path: signedPath, sha256: sha256Hex }).annotations(strict),
+  ).pipe(Schema.maxItems(4096)),
+  /** The 32 raw bytes of the Ed25519 public key, in standard base64. */
+  publicKey: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9+/]{43}=$/)),
+  /** The 64-byte Ed25519 signature over the signed message, in standard base64. */
+  signature: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9+/]{86}==$/)),
+}).annotations(strict);
+export type OutsideProviderDriverSignatureDocument =
+  typeof OutsideProviderDriverSignatureDocument.Type;
+
+export const decodeOutsideProviderDriverSignatureDocument = Schema.decodeUnknownEither(
+  OutsideProviderDriverSignatureDocument,
+);
+
+/** What a signature covers; the signed message is built from these alone. */
+export interface OutsideProviderDriverSignedContent {
+  readonly name: string;
+  readonly version: string;
+  readonly protocolVersions: ReadonlyArray<string>;
+  readonly files: ReadonlyArray<{ readonly path: string; readonly sha256: string }>;
+}
+
+/**
+ * The exact bytes a publisher signs, as UTF-8 text of lines each ended by
+ * one LF:
+ *
+ *     octant-signature/1
+ *     name <name>
+ *     version <version>
+ *     protocol <version>           one line each, sorted, no repeats
+ *     file <sha256 hex> <path>     one line each, sorted by the path's UTF-8 bytes
+ *
+ * A file line is every file in the package except the signature file
+ * itself. Sorting by UTF-8 bytes is sorting by code point, which a plain
+ * JavaScript string comparison is not for characters outside the Basic
+ * Multilingual Plane, so the comparison here encodes first.
+ */
+export function outsideProviderDriverSignedMessage(
+  content: OutsideProviderDriverSignedContent,
+): Uint8Array {
+  const encoder = new TextEncoder();
+  const protocols = [...new Set(content.protocolVersions)].sort();
+  const files = content.files
+    .map((file) => ({ ...file, bytes: encoder.encode(file.path) }))
+    .sort((left, right) => compareBytes(left.bytes, right.bytes));
+  const lines = [
+    OUTSIDE_PROVIDER_DRIVER_SIGNATURE_FORMAT,
+    `name ${content.name}`,
+    `version ${content.version}`,
+    ...protocols.map((protocol) => `protocol ${protocol}`),
+    ...files.map((file) => `file ${file.sha256} ${file.path}`),
+  ];
+  return encoder.encode(lines.map((line) => `${line}\n`).join(""));
+}
+
+function compareBytes(left: Uint8Array, right: Uint8Array): number {
+  const length = Math.min(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    const difference = (left[index] ?? 0) - (right[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return left.length - right.length;
 }

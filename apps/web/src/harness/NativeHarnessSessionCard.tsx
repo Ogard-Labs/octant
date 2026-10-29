@@ -159,6 +159,9 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
         kind: held ? "resume-native-harness-session" : "pause-native-harness-session",
         sessionId: view.session.id,
         expectedVersion: view.session.version,
+        ...(view.session.status === "recovery-required"
+          ? { continueInterrupted: true as const }
+          : {}),
       });
       // A resume the host refused says what stands in the way; dropping it
       // would leave a button that silently does nothing.

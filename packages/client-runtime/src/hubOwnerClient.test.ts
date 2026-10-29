@@ -209,6 +209,28 @@ async function ownerFixture(host: ReturnType<typeof fakeHost>, unlock: OwnerUnlo
   });
 }
 
+describe("owner client from a browser", () => {
+  it("reaches the host under the platform's certificate check when the target names no pin", async () => {
+    const trusts: string[] = [];
+    const client = createOwnerClient({
+      target: { memberId: HOST_ID, origin: "https://spoke.tail1234.ts.net" },
+      identity: { memberId: OWNER_ID, publicKey: "AAAA", sign: async () => "AA" },
+      unlock: {
+        shape: "webauthn",
+        publicKey: "AAAA",
+        assert: async () => ({ status: "cancelled" }),
+      },
+      transport: ({ trust }) => {
+        trusts.push(trust.current.kind);
+        return { status: "available", fetch: (async () => Response.json({ alerts: [] })) as never };
+      },
+    });
+
+    expect(await client.alerts()).toEqual({ status: "read", alerts: [] });
+    expect(trusts).toEqual(["platform"]);
+  });
+});
+
 describe("owner client", () => {
   it("asks for a challenge bound to the action, signs it with the unlock key, and sends the action with the proof", async () => {
     const keys = await p256();

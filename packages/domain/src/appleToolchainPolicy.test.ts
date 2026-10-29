@@ -644,6 +644,12 @@ describe("evaluateAppleDeviceRequest", () => {
     });
   }
 
+  const storeVersion = {
+    bundleIdentifier: "app.octant.simulatorfixture",
+    version: "1.0",
+    buildNumber: "1",
+    platform: "ios",
+  };
   const fieldsByKind: Readonly<Record<string, Readonly<Record<string, unknown>>>> = {
     build: { projectPath: "Fixture.xcodeproj", teamId: "A1B2C3D4E5" },
     run: { projectPath: "Fixture.xcodeproj", teamId: "A1B2C3D4E5" },
@@ -652,6 +658,19 @@ describe("evaluateAppleDeviceRequest", () => {
     terminate: { bundleIdentifier: "sh.octant.Fixture" },
     uninstall: { bundleIdentifier: "sh.octant.Fixture" },
     logs: { bundleIdentifier: "sh.octant.Fixture" },
+    upload: {
+      projectPath: "Fixture.xcodeproj",
+      teamId: "A1B2C3D4E5",
+      upload: {
+        bundleIdentifier: "sh.octant.Fixture",
+        version: "1.0",
+        buildNumber: "1",
+        signing: { teamId: "A1B2C3D4E5", identity: "3".repeat(40) },
+        profileId: "40000000-0000-4000-8000-000000000040",
+      },
+    },
+    "submit-for-review": { storeVersion },
+    "release-version": { storeVersion },
   };
 
   const distributionKinds: ReadonlyArray<string> = [
@@ -1440,5 +1459,59 @@ describe("chooseAppleDevelopmentSigning", () => {
     expect(choose([profile("a-sooner"), later])).toMatchObject({ profileId: "b-later" });
     expect(choose([later, profile("a-sooner")])).toMatchObject({ profileId: "b-later" });
     expect(choose([profile("b"), profile("a")])).toMatchObject({ profileId: "a" });
+  });
+});
+
+describe("chooseAppleAppStoreSigning", () => {
+  const team = "A1B2C3D4E5";
+  const now = Date.parse("2026-10-28T12:00:00.000Z");
+  const distribution = decodeAppleSigningIdentityFingerprint(
+    "3333333333333333333333333333333333333333",
+  );
+  const development = decodeAppleSigningIdentityFingerprint(
+    "1111111111111111111111111111111111111111",
+  );
+  const appStore = (
+    profileId: string,
+    extra: Partial<ApplePolicy.AppleProvisioningProfileFacts> = {},
+  ): ApplePolicy.AppleProvisioningProfileFacts => ({
+    profileId,
+    teamIds: [team],
+    platforms: ["iOS"],
+    applicationIdentifier: `${team}.sh.octant.Fixture`,
+    getTaskAllow: false,
+    provisionsAllDevices: false,
+    listsDevices: false,
+    expiresAtMs: now + 86_400_000,
+    certificates: [distribution],
+    ...extra,
+  });
+  const choose = (profiles: ReadonlyArray<ApplePolicy.AppleProvisioningProfileFacts>) =>
+    ApplePolicy.chooseAppleAppStoreSigning({
+      teamId: team as never,
+      bundleIdentifier: "sh.octant.Fixture" as never,
+      identities: [development, distribution] as never,
+      profiles,
+      nowMs: now,
+    });
+
+  it("signs an upload with the team's App Store profile and the distribution identity it lists", () => {
+    expect(choose([appStore("store")])).toEqual({
+      kind: "chosen",
+      profileId: "store",
+      signing: { teamId: team, identity: distribution },
+    });
+  });
+
+  it("never signs an upload with a development, ad hoc, enterprise, or unreadable profile", () => {
+    for (const unusable of [
+      appStore("development", { getTaskAllow: true, listsDevices: true }),
+      appStore("ad-hoc", { listsDevices: true }),
+      appStore("enterprise", { provisionsAllDevices: true }),
+      (({ listsDevices: _unread, ...unread }) => unread)(appStore("unknown-devices")),
+      appStore("expired", { expiresAtMs: now - 1 }),
+    ]) {
+      expect(choose([unusable])).toEqual({ kind: "missing", gap: "no-provisioning-profile" });
+    }
   });
 });

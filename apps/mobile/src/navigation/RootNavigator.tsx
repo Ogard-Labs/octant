@@ -75,9 +75,13 @@ function HostsBody(props: {
     () => createMobileHostRemover({ registry, hub, deviceKeyStore }),
     [deviceKeyStore, hub, registry],
   );
+  const notificationPermission = useMemo(() => createUnavailableNotificationPermissionPort(), []);
   const removeHost = useCallback(
     (hostId: string) => {
       setRemoveFailed(false);
+      // Notifications already shown for this computer go with it, and so does
+      // the key that opens them, whether or not the rest of the removal lands.
+      void notificationPermission.forgetHost(hostId).catch(() => undefined);
       removeMobileHostInTurn(hostId)
         .then((result) => {
           if (!result.localCredentialRemoved) setKeyNotDeleted(true);
@@ -85,11 +89,10 @@ function HostsBody(props: {
         })
         .catch(() => setRemoveFailed(true));
     },
-    [refreshHosts, removeMobileHostInTurn],
+    [notificationPermission, refreshHosts, removeMobileHostInTurn],
   );
   const authenticator = useMemo(() => createExpoBiometricAuthenticator(), []);
   const unlockKey = useMemo(() => createExpoPhoneUnlockKey(), []);
-  const notificationPermission = useMemo(() => createUnavailableNotificationPermissionPort(), []);
   const deviceIntegrity = useMemo(() => createUnavailableDeviceIntegrityPort(), []);
   const healthTint = {
     neutral: colors.textSecondary,
@@ -317,6 +320,7 @@ function HostsBody(props: {
                     {environment.kind === "live" && status?.kind === "ready" ? (
                       <>
                         <PushNotificationsPanel
+                          hostKeyFingerprint={host.hostKeyFingerprint}
                           permission={notificationPermission}
                           transport={transportForHost(host.hostId)}
                         />

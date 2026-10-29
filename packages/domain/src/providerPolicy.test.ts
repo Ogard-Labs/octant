@@ -43,6 +43,7 @@ import {
   createOpenAiImageProvider,
   createCodexProvider,
   createOpenCodeProvider,
+  changeOutsideHarnessEndpointConfiguration,
   createOutsideHarnessEndpointProvider,
   effectiveProviderAuthority,
   rebindOutsideHarnessEndpointDriver,
@@ -2671,6 +2672,79 @@ describe("outside driver provider policy", () => {
     expect(create({ baseUrl: "http://127.0.0.1:8080", key: undefined }).configuration).toEqual(
       keyless,
     );
+  });
+
+  const changedAt = "2026-10-28T10:00:00.000Z" as UtcTimestamp;
+
+  it("changes an outside provider's address, key placement, and models and keeps its driver, switch, and hold", () => {
+    const base = create({});
+    const held = {
+      ...base,
+      enabled: true,
+      driverQuarantine: {
+        reason: "crash-limit" as const,
+        digest: base.configuration.driver.digest,
+        quarantinedAt: createdAt,
+      },
+    };
+    const changed = changeOutsideHarnessEndpointConfiguration(
+      held,
+      {
+        ...held.configuration,
+        baseUrl: "https://other.example.test/v2",
+        key: { header: "x-api-key" },
+        modelIds: [decodeProviderModelId("model-b"), decodeProviderModelId("model-c")],
+      },
+      changedAt,
+    );
+    expect(decodeProviderInstance(changed)).toEqual(changed);
+    expect(changed).toEqual({
+      ...held,
+      configuration: {
+        ...held.configuration,
+        baseUrl: "https://other.example.test/v2/",
+        key: { header: "x-api-key" },
+        modelIds: ["model-b", "model-c"],
+      },
+      version: 2,
+      updatedAt: changedAt,
+    });
+  });
+
+  it("refuses to change an outside provider onto another driver or digest", () => {
+    const instance = create({});
+    for (const other of [
+      { packageId: "00000000-0000-4000-8000-000000000914" },
+      { componentId: "other" },
+      { version: "0.2.0" },
+      { digest: `sha256:${"d".repeat(64)}` },
+    ]) {
+      expect(() =>
+        changeOutsideHarnessEndpointConfiguration(
+          instance,
+          { ...instance.configuration, driver: { ...driver, ...other } } as never,
+          changedAt,
+        ),
+      ).toThrow(ProviderPolicyRejected);
+    }
+  });
+
+  it("applies the adding rules when changing an outside provider and waits for its sessions", () => {
+    const instance = create({});
+    expect(() =>
+      changeOutsideHarnessEndpointConfiguration(
+        instance,
+        { ...instance.configuration, baseUrl: "http://models.example.test/" },
+        changedAt,
+      ),
+    ).toThrow(ProviderPolicyRejected);
+    const { key: _key, ...keyless } = instance.configuration;
+    expect(() => changeOutsideHarnessEndpointConfiguration(instance, keyless, changedAt)).toThrow(
+      "Unauthenticated providers must use a loopback endpoint.",
+    );
+    expect(() =>
+      changeOutsideHarnessEndpointConfiguration(instance, instance.configuration, changedAt, 1),
+    ).toThrow("Stop active sessions before changing this provider endpoint.");
   });
 
   const reboundAt = "2026-10-28T09:00:00.000Z" as UtcTimestamp;

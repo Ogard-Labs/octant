@@ -690,7 +690,7 @@ describe("SSH target admission", () => {
     }
   });
 
-  it("refuses a placed runtime on a macOS target, whose forwarder is not settled", () => {
+  it("admits a placed runtime on a macOS target once its runtime canaries were refused", () => {
     const wrapped = {
       kind: "provider-runtime",
       octantWrapsInPosture: true,
@@ -702,7 +702,7 @@ describe("SSH target admission", () => {
         decideSshAdmission(
           request({ attestation: attested(macosFacts()), posture, subject: wrapped }),
         ),
-      ).toEqual({ status: "refused", reason: "runtime-not-attestable" });
+      ).toEqual({ status: "admitted" });
     }
   });
 

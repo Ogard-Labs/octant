@@ -64,7 +64,11 @@ describe("octantSettingsRegistry", () => {
     ]);
     expect(section("host")?.keywords).toMatch(/lifecycle/);
     expect(section("host")?.keywords).toMatch(/diagnostics/);
-    expect(ids("notifications")).toEqual(["host-automation-notifications"]);
+    expect(ids("notifications")).toEqual([
+      "host-phone-notifications",
+      "host-push-gateway",
+      "host-automation-notifications",
+    ]);
     expect(section("permissions")?.label).toBe("Permissions");
     expect(ids("permissions")).toEqual([
       "public-links",
@@ -236,6 +240,25 @@ describe("octantSettingsRegistry", () => {
     expect(results[0]?.sectionId).toBe("voice");
   });
 
+  it("finds the App Store Connect key on Device tools only in a desktop window", () => {
+    const desktop = searchSettings(
+      listAvailableSections(octantSettingsRegistry, capabilities),
+      capabilities,
+      "app store connect",
+    );
+    expect(desktop[0]).toMatchObject({
+      sectionId: "device-tools",
+      settingId: "app-store-connect-key-state",
+    });
+    const browserCapabilities = { ...capabilities, nativeBoundsAvailable: false };
+    const browser = searchSettings(
+      listAvailableSections(octantSettingsRegistry, browserCapabilities),
+      browserCapabilities,
+      "app store connect",
+    );
+    expect(browser.filter((result) => result.kind === "setting")).toEqual([]);
+  });
+
   it("lands a link to the model endpoints on the add-endpoint row of Octant Harness", () => {
     const resolved = resolveDeepLink(octantSettingsRegistry, capabilities, {
       section: "harness",
@@ -275,6 +298,8 @@ describe("octantSettingsRegistry", () => {
  * they are not things a person looks up.
  */
 const UNLISTED_SETTING_ROWS = new Set([
+  "browser-hub-claim",
+  "browser-hub-joined",
   "first-run-task-mode",
   "first-run-task-project",
   "managed-tools-empty",
@@ -305,6 +330,7 @@ const COMPUTED_SETTING_ROWS: Readonly<Record<string, string>> = {
   "provider-*-bedrock-*": "provider-authentication",
   "provider-*-bedrock-models": "provider-manual-model-ids",
   "provider-*-api-key": "provider-api-key",
+  "provider-*-key-header": "provider-authentication",
   "provider-*-base-url": "provider-base-url",
   "provider-*-protocol": "provider-protocol",
   "provider-*-protocol-version": "provider-protocol",

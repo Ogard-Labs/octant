@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createServer } from "node:net";
+import { connect as connectSocket, createServer, type Socket } from "node:net";
 import { realpath } from "node:fs/promises";
 import type {
   CodeCheckoutId,
@@ -14,15 +14,22 @@ import { decodeCodeRelativePath } from "@octant/contracts";
 import {
   CODE_DEBUG_CONFIGURATION_AGGREGATE,
   MAX_CODE_DEBUG_APPROVED_CONFIGURATIONS,
+  MAX_CODE_DEBUG_BREAKPOINT_FILES,
+  MAX_CODE_DEBUG_CHILDREN_AT_ONCE,
+  MAX_CODE_DEBUG_CHILDREN_PER_SESSION,
+  MAX_CODE_DEBUG_NAME_LENGTH,
   MAX_CODE_DEBUG_MESSAGE_LENGTH,
   MAX_CODE_DEBUG_OUTPUT_ENTRIES,
   MAX_CODE_DEBUG_OUTPUT_TEXT_LENGTH,
   MAX_CODE_DEBUG_SOURCE_LENGTH,
+  decodeCodeDebugChildId,
   decodeCodeDebugConfigurationDigest,
   decodeCodeDebugSessionId,
   type CodeDebugApprovalRequest,
   type CodeDebugApprovalResult,
   type CodeDebugApprovedConfiguration,
+  type CodeDebugChildId,
+  type CodeDebugChildSummary,
   type CodeDebugConfiguration,
   type CodeDebugConfigurationApproved,
   type CodeDebugConfigurationDigest,
@@ -63,6 +70,7 @@ import type {
   DebugAdapterLaunchInput,
   DebugAdapterLaunchOutcome,
   DebugAdapterProcess,
+  DebugChildEndpoint,
 } from "./debugAdapterProcess";
 import type { DebugSessionRecords } from "./debugSessionRecords";
 import {
@@ -97,6 +105,12 @@ import { LINUX_EGRESS_FORWARDER_PORT } from "../process/proxiedNetworkEgress";
  * checkout, or no approval covers the configuration and adapter any more, when
  * the Project is erased, and when the host stops. Nothing restarts it on its
  * own: that would run the program again, which only the person may cause.
+ *
+ * An adapter that declares children may announce one on the session's own
+ * connection (§ Child processes, decision DB9). The host opens a second
+ * connection only to the session's own host-chosen child port, `attach`es
+ * once with the announced configuration, and lists the child under the
+ * session. Every end of the session ends its children first.
  */
 
 export const DEBUG_REQUEST_DEADLINE_MS = 10_000;
@@ -109,6 +123,9 @@ const LAUNCH_FILE_PATH = ".vscode/launch.json";
 const MAX_LAUNCH_FILE_BYTES = 256 * 1024;
 const SWEEP_INTERVAL_MS = 60_000;
 const MAX_REMEMBERED_ENDINGS = 64;
+/** The bound on a child announcement's configuration, as on a `launch` body. */
+const MAX_CHILD_CONFIGURATION_BYTES = 8 * 1024;
+const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(["127.0.0.1", "localhost", "::1"]);
 
 export interface CodeDebugAuthority {
   readonly readThread: (threadId: CodeThreadId) => CodeThread | undefined;
@@ -159,6 +176,8 @@ export interface CodeDebugServiceOptions {
   readonly files?: CodeTestSourcePort;
   /** The loopback port a session that declares one gets; the host picks a free one. */
   readonly choosePort?: () => Promise<number>;
+  /** Opens a child connection; tests replace it to see what the host connects to. */
+  readonly connectChild?: (endpoint: DebugChildEndpoint, deadlineMs: number) => Promise<Socket>;
   readonly requestDeadlineMs?: number;
   readonly disconnectGraceMs?: number;
 }
@@ -183,7 +202,25 @@ interface OutputRing {
   nextSequence: number;
 }
 
-interface SessionRecord {
+/** What a session and each of its children hold of one DAP connection's program. */
+interface DebugTarget {
+  connection: DebugAdapterConnection | undefined;
+  state: CodeDebugSessionState;
+  revision: number;
+  exceptionFilters: ReadonlyArray<CodeDebugExceptionFilter>;
+  exitCode: number | undefined;
+  ending: Promise<void> | undefined;
+  readonly initialized: { promise: Promise<void>; resolve: () => void };
+}
+
+/** One child process the session attached, on a connection of its own. */
+interface ChildRecord extends DebugTarget {
+  readonly child: CodeDebugChildId;
+  readonly name: string;
+  socket: Socket | undefined;
+}
+
+interface SessionRecord extends DebugTarget {
   readonly sessionId: CodeDebugSessionId;
   readonly projectId: ProjectId;
   readonly threadId: CodeThreadId;
@@ -198,16 +235,19 @@ interface SessionRecord {
    */
   readonly startedBy: WindowId;
   process: DebugAdapterProcess | undefined;
-  connection: DebugAdapterConnection | undefined;
-  state: CodeDebugSessionState;
-  revision: number;
-  exceptionFilters: ReadonlyArray<CodeDebugExceptionFilter>;
   readonly output: OutputRing;
-  exitCode: number | undefined;
-  ending: Promise<void> | undefined;
   /** Requests the adapter made of the host, each refused, by command. */
   readonly refusedRequests: Map<string, number>;
-  readonly initialized: { promise: Promise<void>; resolve: () => void };
+  /** The window's breakpoints as last sent, by file, for each child that attaches later. */
+  readonly breakpoints: Map<string, CodeDebugFileBreakpoints>;
+  /** The children attached now, by their id. */
+  readonly children: Map<number, ChildRecord>;
+  /** The host-chosen port a child's announcement must name; absent when no children are declared. */
+  childPort: number | undefined;
+  /** Children attached over the session's life. */
+  childrenAttached: number;
+  /** Announcements dropped or refused; those children ran undebugged. */
+  undebuggedChildren: number;
 }
 
 interface Ending {
@@ -227,6 +267,7 @@ export class CodeDebugService {
   readonly #uuid: () => string;
   readonly #files: CodeTestSourcePort;
   readonly #choosePort: () => Promise<number>;
+  readonly #connectChild: NonNullable<CodeDebugServiceOptions["connectChild"]>;
   readonly #requestDeadlineMs: number;
   readonly #disconnectGraceMs: number;
   readonly #sessions = new Map<string, SessionRecord>();
@@ -246,6 +287,7 @@ export class CodeDebugService {
     this.#uuid = options.uuid;
     this.#files = options.files ?? liveCodeTestSourcePort;
     this.#choosePort = options.choosePort ?? chooseLoopbackPort;
+    this.#connectChild = options.connectChild ?? openChildSocket;
     this.#requestDeadlineMs = options.requestDeadlineMs ?? DEBUG_REQUEST_DEADLINE_MS;
     this.#disconnectGraceMs = options.disconnectGraceMs ?? DEBUG_DISCONNECT_GRACE_MS;
   }
@@ -412,14 +454,21 @@ export class CodeDebugService {
       this.#sessions.delete(String(sessionId));
       return { status: "failed", reason: "launch-failed" };
     }
-    let debugPort: number | undefined;
-    if (adapter.declaration.debugPorts === 1) {
-      debugPort = await this.#choosePort().catch(() => undefined);
-      if (debugPort === undefined) {
-        await this.#end(record, "start-failed");
-        return { status: "failed", reason: "launch-failed" };
-      }
+    const ports = await this.#chooseSessionPorts(
+      adapter.declaration.debugPorts === 1 ? 1 : 0,
+      adapter.declaration.childSessions === 1 ? 2 : 0,
+    );
+    if (ports === undefined) {
+      await this.#end(record, "start-failed");
+      return { status: "failed", reason: "launch-failed" };
     }
+    const [debugPort] = ports.debug;
+    const [childPort, childServerPort] = ports.child;
+    const childPorts =
+      childPort === undefined || childServerPort === undefined
+        ? undefined
+        : { child: childPort, childServer: childServerPort };
+    for (const file of request.breakpoints) rememberBreakpoints(record, file);
     if (record.ending !== undefined) {
       await record.ending;
       return { status: "failed", reason: "launch-failed" };
@@ -446,6 +495,7 @@ export class CodeDebugService {
         value: entry.value,
       })),
       ...(debugPort === undefined ? {} : { debugPort }),
+      ...(childPorts === undefined ? {} : { childPorts }),
     });
     if (outcome.status !== "launched") {
       await this.#end(record, "start-failed");
@@ -454,6 +504,7 @@ export class CodeDebugService {
         : { status: "failed", reason: "launch-failed" };
     }
     record.process = outcome.process;
+    record.childPort = childPorts?.child;
     if (record.ending !== undefined) {
       // Ended while it launched (the thread moved to Plan, the host is
       // stopping); the capsule goes with it.
@@ -491,38 +542,53 @@ export class CodeDebugService {
       await this.#end(record, lapsed);
       return this.#endedAnswer(call);
     }
+    let target: SessionRecord | ChildRecord = record;
+    if (call.child !== undefined) {
+      const child = record.children.get(Number(call.child));
+      // A child that has ended, or never was, reads as no session; the panel
+      // goes back to the program.
+      if (child === undefined || child.ending !== undefined) return refused("no-session");
+      target = child;
+    }
     const request = call.request;
     switch (request.kind) {
       case "state":
-        return this.#stateAnswer(record, request.afterOutput ?? 0);
+        return this.#stateAnswer(record, target, request.afterOutput ?? 0);
       case "stop":
-        await this.#end(record, "stopped");
+        if ("child" in target) {
+          await this.#endChild(record, target, "stopped");
+        } else {
+          await this.#end(record, "stopped");
+        }
         return { status: "ended", endReason: "stopped" };
       case "set-breakpoints": {
-        const answered = await this.#ask(
-          record,
-          "setBreakpoints",
-          breakpointArguments(record.checkoutRoot, request.file),
-        );
+        // The window's breakpoints apply to the program and every child, so
+        // each connection gets them; the answer is the named one's.
+        rememberBreakpoints(record, request.file);
+        const args = breakpointArguments(record.checkoutRoot, request.file);
+        for (const other of [record, ...record.children.values()]) {
+          if (other !== target) void other.connection?.request("setBreakpoints", args);
+        }
+        const answered = await this.#ask(record, target, "setBreakpoints", args);
         return answered.status === "answered"
           ? { status: "breakpoints", breakpoints: toBreakpoints(answered.body) }
           : answered;
       }
       case "set-exception-breakpoints": {
-        const advertised = new Set(record.exceptionFilters.map((filter) => filter.filter));
-        const answered = await this.#ask(record, "setExceptionBreakpoints", {
+        const advertised = new Set(target.exceptionFilters.map((filter) => filter.filter));
+        const answered = await this.#ask(record, target, "setExceptionBreakpoints", {
           filters: request.filters.filter((filter) => advertised.has(filter)),
         });
         return answered.status === "answered" ? { status: "done" } : answered;
       }
       case "threads": {
-        const answered = await this.#ask(record, "threads", undefined);
+        const answered = await this.#ask(record, target, "threads", undefined);
         return answered.status === "answered"
           ? { status: "threads", threads: toThreads(answered.body, record.checkoutRoot) }
           : answered;
       }
       case "stack-trace": {
-        const answered = await this.#ask(record, "stackTrace", {
+        const answered = await this.#ask(record, target, "stackTrace", {
           threadId: request.programThreadId,
           startFrame: request.startFrame ?? 0,
           levels: 200,
@@ -535,13 +601,13 @@ export class CodeDebugService {
         return { status: "stack", ...placed };
       }
       case "scopes": {
-        const answered = await this.#ask(record, "scopes", { frameId: request.frameId });
+        const answered = await this.#ask(record, target, "scopes", { frameId: request.frameId });
         return answered.status === "answered"
           ? { status: "scopes", scopes: toScopes(answered.body, record.checkoutRoot) }
           : answered;
       }
       case "variables": {
-        const answered = await this.#ask(record, "variables", {
+        const answered = await this.#ask(record, target, "variables", {
           variablesReference: request.variablesReference,
           ...(request.start === undefined ? {} : { start: request.start, count: 200 }),
         });
@@ -552,7 +618,7 @@ export class CodeDebugService {
       case "source": {
         // By reference only: a source the adapter holds, never a path the
         // host would open outside the checkout.
-        const answered = await this.#ask(record, "source", {
+        const answered = await this.#ask(record, target, "source", {
           sourceReference: request.sourceReference,
           source: { sourceReference: request.sourceReference },
         });
@@ -565,7 +631,7 @@ export class CodeDebugService {
         return { status: "source", text: bounded.text, truncated: bounded.truncated };
       }
       case "exception-info": {
-        const answered = await this.#ask(record, "exceptionInfo", {
+        const answered = await this.#ask(record, target, "exceptionInfo", {
           threadId: request.programThreadId,
         });
         if (answered.status !== "answered") return answered;
@@ -579,13 +645,13 @@ export class CodeDebugService {
       case "step-in":
       case "step-out":
       case "pause": {
-        const answered = await this.#ask(record, STEP_COMMANDS[request.kind], {
+        const answered = await this.#ask(record, target, STEP_COMMANDS[request.kind], {
           threadId: request.programThreadId,
         });
         return answered.status === "answered" ? { status: "done" } : answered;
       }
       case "evaluate": {
-        const answered = await this.#ask(record, "evaluate", {
+        const answered = await this.#ask(record, target, "evaluate", {
           expression: request.expression,
           context: request.context,
           ...(request.frameId === undefined ? {} : { frameId: request.frameId }),
@@ -851,10 +917,15 @@ export class CodeDebugService {
       output: process.stdin,
       requestDeadlineMs: this.#requestDeadlineMs,
       onViolation: () => void this.#end(record, "protocol-violation"),
-      onEvent: (event, body) => this.#receive(record, event, body),
-      onRefusedRequest: (command) => {
-        record.refusedRequests.set(command, (record.refusedRequests.get(command) ?? 0) + 1);
-      },
+      onEvent: (event, body) => this.#receive(record, record, event, body),
+      onRefusedRequest: (command) => countRefused(record, command),
+      ...(record.adapter.declaration.childAnnouncement === undefined
+        ? {}
+        : {
+            childAnnouncement: record.adapter.declaration.childAnnouncement,
+            onChildAnnounced: (configuration: unknown) =>
+              this.#announceChild(record, configuration),
+          }),
     });
     record.connection = connection;
     // An adapter that leaves without saying the program ended took the
@@ -878,21 +949,13 @@ export class CodeDebugService {
     debugPort: number | undefined,
   ): Promise<boolean> {
     const initialized = await connection.request("initialize", {
-      clientID: "octant",
-      clientName: "Octant",
       adapterID: String(record.adapter.adapter),
-      locale: "en",
-      linesStartAt1: true,
-      columnsStartAt1: true,
-      pathFormat: "path",
-      supportsVariableType: true,
-      supportsVariablePaging: true,
-      supportsRunInTerminalRequest: false,
-      supportsStartDebuggingRequest: false,
-      supportsMemoryReferences: false,
-      supportsProgressReporting: true,
-      supportsInvalidatedEvent: true,
-      supportsArgsCanBeInterpretedByShell: false,
+      ...INITIALIZE_ARGUMENTS,
+      // Only an adapter that declared `startDebugging` as its announcement is
+      // told the host answers it; debugpy, told so, would announce that way
+      // rather than by the event its package declared.
+      supportsStartDebuggingRequest:
+        record.adapter.declaration.childAnnouncement?.kind === "start-debugging",
     });
     if (initialized.status !== "answered") return false;
     record.exceptionFilters = toExceptionFilters(initialized.body);
@@ -939,12 +1002,22 @@ export class CodeDebugService {
     return true;
   }
 
-  #receive(record: SessionRecord, event: DebugAdapterEvent, body: unknown): void {
-    if (record.ending !== undefined) return;
+  /**
+   * One accepted event on the session's connection or a child's. Output from
+   * either reaches the session's one console; `terminated` ends the
+   * connection's own program, so a child's ends that child only.
+   */
+  #receive(
+    record: SessionRecord,
+    target: SessionRecord | ChildRecord,
+    event: DebugAdapterEvent,
+    body: unknown,
+  ): void {
+    if (record.ending !== undefined || target.ending !== undefined) return;
     const fields = isRecord(body) ? body : {};
     switch (event) {
       case "initialized":
-        record.initialized.resolve();
+        target.initialized.resolve();
         return;
       case "stopped": {
         const description =
@@ -953,7 +1026,7 @@ export class CodeDebugService {
             : typeof fields.text === "string"
               ? adapterText(fields.text, record.checkoutRoot, MAX_CODE_DEBUG_MESSAGE_LENGTH)
               : undefined;
-        record.state = {
+        target.state = {
           status: "stopped",
           programThreadId:
             typeof fields.threadId === "number" &&
@@ -966,20 +1039,21 @@ export class CodeDebugService {
           ...(description === undefined ? {} : { description }),
           allThreadsStopped: fields.allThreadsStopped === true,
         };
-        record.revision += 1;
+        target.revision += 1;
         return;
       }
       case "continued":
-        record.state = { status: "running" };
-        record.revision += 1;
+        target.state = { status: "running" };
+        target.revision += 1;
         return;
       case "exited":
         if (typeof fields.exitCode === "number" && Number.isInteger(fields.exitCode)) {
-          record.exitCode = fields.exitCode;
+          target.exitCode = fields.exitCode;
         }
         return;
       case "terminated":
-        void this.#end(record, "program-exited");
+        if ("child" in target) void this.#endChild(record, target, "program-exited");
+        else void this.#end(record, "program-exited");
         return;
       case "output": {
         if (typeof fields.output !== "string") return;
@@ -999,9 +1073,9 @@ export class CodeDebugService {
       case "capabilities": {
         const capabilities = fields.capabilities;
         if (isRecord(capabilities) && Array.isArray(capabilities.exceptionBreakpointFilters)) {
-          record.exceptionFilters = toExceptionFilters(capabilities);
+          target.exceptionFilters = toExceptionFilters(capabilities);
         }
-        record.revision += 1;
+        target.revision += 1;
         return;
       }
       case "thread":
@@ -1011,20 +1085,21 @@ export class CodeDebugService {
       case "progressStart":
       case "progressUpdate":
       case "progressEnd":
-        record.revision += 1;
+        target.revision += 1;
         return;
     }
   }
 
   async #ask(
     record: SessionRecord,
+    target: SessionRecord | ChildRecord,
     command: Parameters<DebugAdapterConnection["request"]>[0],
     args: unknown,
   ): Promise<
     | { readonly status: "answered"; readonly body: unknown }
     | Extract<CodeDebugSessionResult, { status: "unavailable" }>
   > {
-    const connection = record.connection;
+    const connection = target.connection;
     if (connection === undefined) return { status: "unavailable", reason: "ended" };
     const response: DebugAdapterResponse = await connection.request(command, args);
     switch (response.status) {
@@ -1051,14 +1126,27 @@ export class CodeDebugService {
     }
   }
 
-  #stateAnswer(record: SessionRecord, afterOutput: number): CodeDebugSessionResult {
+  #stateAnswer(
+    record: SessionRecord,
+    target: SessionRecord | ChildRecord,
+    afterOutput: number,
+  ): CodeDebugSessionResult {
     const newer = record.output.entries.filter((entry) => entry.sequence > afterOutput);
     const first = newer[0];
+    const declaresChildren = record.childPort !== undefined;
     return {
       status: "state",
-      state: record.state,
-      revision: record.revision,
-      exceptionFilters: record.exceptionFilters,
+      state: target.state,
+      revision: target.revision,
+      exceptionFilters: target.exceptionFilters,
+      ...(declaresChildren
+        ? {
+            children: [...record.children.values()]
+              .filter((child) => child.ending === undefined)
+              .map(childSummary),
+            undebuggedChildren: record.undebuggedChildren,
+          }
+        : {}),
       output: newer
         .slice(0, MAX_CODE_DEBUG_OUTPUT_ENTRIES)
         .map(({ sequence, category, text }) => ({ sequence, category, text })),
@@ -1135,9 +1223,197 @@ export class CodeDebugService {
   }
 
   /**
-   * Ends a session once: `disconnect` with the program terminated, then the
-   * capsule's group stopped after the grace period, then the end journaled.
-   * Its values (output, variables, breakpoints) go with it.
+   * A child announcement on the session's own connection, as the adapter
+   * declared it. The child is taken only while the session runs and is not
+   * ending, within the bounds, and only when it names loopback and the
+   * session's own child port: under Full access on Linux the capsule shares
+   * the host's network, so a port the adapter chose could be any local
+   * service, Octant's own listener included. Anything else is refused before
+   * a connection is opened, and that child runs undebugged.
+   */
+  #announceChild(record: SessionRecord, configuration: unknown): "accepted" | "refused" {
+    if (record.ending !== undefined || record.process?.childEndpoint === undefined) {
+      return "refused";
+    }
+    const refuse = () => {
+      record.undebuggedChildren += 1;
+      return "refused" as const;
+    };
+    if (!isRecord(configuration)) return refuse();
+    const connect = configuration.connect;
+    if (
+      !isRecord(connect) ||
+      typeof connect.host !== "string" ||
+      !LOOPBACK_HOSTS.has(connect.host) ||
+      connect.port !== record.childPort
+    ) {
+      return refuse();
+    }
+    const body = Object.fromEntries(
+      Object.entries(configuration).filter(([key]) => key !== "connect"),
+    );
+    if (Buffer.byteLength(JSON.stringify(body), "utf8") > MAX_CHILD_CONFIGURATION_BYTES) {
+      return refuse();
+    }
+    const live = [...record.children.values()].filter((child) => child.ending === undefined);
+    if (
+      live.length >= MAX_CODE_DEBUG_CHILDREN_AT_ONCE ||
+      record.childrenAttached >= MAX_CODE_DEBUG_CHILDREN_PER_SESSION
+    ) {
+      return refuse();
+    }
+    record.childrenAttached += 1;
+    const id = decodeCodeDebugChildId(record.childrenAttached);
+    const named = typeof configuration.name === "string" ? configuration.name : "";
+    const child: ChildRecord = {
+      ...newTarget(),
+      child: id,
+      name:
+        named.length === 0
+          ? `Child ${String(id)}`
+          : adapterText(named, record.checkoutRoot, MAX_CODE_DEBUG_NAME_LENGTH),
+      socket: undefined,
+    };
+    record.children.set(Number(id), child);
+    void this.#attachChild(record, child, record.process.childEndpoint, body);
+    return "accepted";
+  }
+
+  /**
+   * The child's connection: opened to the session's own child endpoint, then
+   * `initialize`, `attach` once with the announced configuration (its
+   * `connect` removed, nothing added), the window's breakpoints, the
+   * adapter's default exception filters, and `configurationDone`. The host
+   * launches nothing: the adapter attaches to a process already in the
+   * capsule.
+   */
+  async #attachChild(
+    record: SessionRecord,
+    child: ChildRecord,
+    endpoint: DebugChildEndpoint,
+    body: Readonly<Record<string, unknown>>,
+  ): Promise<void> {
+    let socket: Socket;
+    try {
+      socket = await this.#connectChild(endpoint, this.#requestDeadlineMs);
+    } catch {
+      await this.#endChild(record, child, "start-failed");
+      return;
+    }
+    child.socket = socket;
+    if (child.ending !== undefined || record.ending !== undefined) {
+      socket.destroy();
+      return;
+    }
+    const connection = new DebugAdapterConnection({
+      role: "child",
+      input: socket,
+      output: socket,
+      requestDeadlineMs: this.#requestDeadlineMs,
+      onViolation: () => void this.#endChild(record, child, "protocol-violation"),
+      onEvent: (event, eventBody) => this.#receive(record, child, event, eventBody),
+      onRefusedRequest: (command) => countRefused(record, command),
+    });
+    child.connection = connection;
+    socket.once("close", () => void this.#endChild(record, child, "adapter-exited"));
+    const initialized = await connection.request("initialize", {
+      ...INITIALIZE_ARGUMENTS,
+      adapterID: String(record.adapter.adapter),
+      supportsStartDebuggingRequest: false,
+    });
+    if (initialized.status !== "answered") {
+      await this.#endChild(record, child, "start-failed");
+      return;
+    }
+    child.exceptionFilters = toExceptionFilters(initialized.body);
+    const attached = connection.request("attach", body);
+    const ready = await Promise.race([
+      child.initialized.promise.then(() => "initialized" as const),
+      attached.then((response) => (response.status === "answered" ? "waiting" : "failed")),
+      delay(this.#requestDeadlineMs).then(() => "timed-out" as const),
+    ]);
+    const initializedLate =
+      ready === "waiting"
+        ? await Promise.race([
+            child.initialized.promise.then(() => true),
+            delay(this.#requestDeadlineMs).then(() => false),
+          ])
+        : ready === "initialized";
+    if (!initializedLate || child.ending !== undefined) {
+      await this.#endChild(record, child, "start-failed");
+      return;
+    }
+    for (const file of record.breakpoints.values()) {
+      await connection.request("setBreakpoints", breakpointArguments(record.checkoutRoot, file));
+    }
+    await connection.request("setExceptionBreakpoints", {
+      filters: child.exceptionFilters
+        .filter((filter) => filter.default)
+        .map((filter) => filter.filter),
+    });
+    const done = await connection.request("configurationDone");
+    const answered = await attached;
+    if (done.status === "failed" || done.status === "closed" || answered.status !== "answered") {
+      await this.#endChild(record, child, "start-failed");
+      return;
+    }
+    if (child.state.status === "starting") child.state = { status: "running" };
+    child.revision += 1;
+  }
+
+  /**
+   * Ends one child once: `disconnect` with its process terminated on its own
+   * connection, then the connection closed. The session goes on; a child's
+   * end never ends it.
+   */
+  #endChild(
+    record: SessionRecord,
+    child: ChildRecord,
+    reason: CodeDebugSessionEndReason,
+  ): Promise<void> {
+    child.ending ??= (async () => {
+      child.state = { status: "ended", endReason: reason };
+      child.initialized.resolve();
+      const connection = child.connection;
+      if (connection !== undefined && !connection.closed) {
+        const closed = new Promise<void>((resolve) => {
+          if (child.socket === undefined || child.socket.closed) resolve();
+          else child.socket.once("close", () => resolve());
+        });
+        void connection.request("disconnect", { terminateDebuggee: true }, this.#disconnectGraceMs);
+        await Promise.race([closed, delay(this.#disconnectGraceMs)]);
+      }
+      connection?.close();
+      child.socket?.destroy();
+      record.children.delete(Number(child.child));
+    })();
+    return child.ending;
+  }
+
+  /**
+   * The session's host-chosen loopback ports, all distinct: its debug port
+   * when the adapter declares one, and its two child ports when it declares
+   * children. Undefined when the host found none.
+   */
+  async #chooseSessionPorts(
+    debug: number,
+    child: number,
+  ): Promise<{ readonly debug: number[]; readonly child: number[] } | undefined> {
+    const chosen: number[] = [];
+    for (let attempt = 0; chosen.length < debug + child && attempt < 16; attempt += 1) {
+      const port = await this.#choosePort().catch(() => undefined);
+      if (port === undefined) return undefined;
+      if (!chosen.includes(port)) chosen.push(port);
+    }
+    if (chosen.length < debug + child) return undefined;
+    return { debug: chosen.slice(0, debug), child: chosen.slice(debug) };
+  }
+
+  /**
+   * Ends a session once: its children first, then `disconnect` with the
+   * program terminated, then the capsule's group stopped after the grace
+   * period, then the end journaled with how many children it attached. Its
+   * values (output, variables, breakpoints) go with it.
    */
   #end(record: SessionRecord, reason: CodeDebugSessionEndReason): Promise<void> {
     record.ending ??= (async () => {
@@ -1147,6 +1423,9 @@ export class CodeDebugService {
         ...(record.exitCode === undefined ? {} : { exitCode: record.exitCode }),
       };
       record.initialized.resolve();
+      await Promise.all(
+        [...record.children.values()].map((child) => this.#endChild(record, child, reason)),
+      );
       const connection = record.connection;
       const process = record.process;
       if (connection !== undefined && !connection.closed && process !== undefined) {
@@ -1161,6 +1440,7 @@ export class CodeDebugService {
         threadId: record.threadId,
         configurationDigest: record.configurationDigest,
         endReason: reason,
+        ...(record.childPort === undefined ? {} : { childSessions: record.childrenAttached }),
       });
       record.output.entries.length = 0;
       this.#sessions.delete(String(record.sessionId));
@@ -1207,23 +1487,108 @@ function newRecord(input: {
   readonly checkoutRoot: string;
   readonly startedBy: WindowId;
 }): SessionRecord {
+  return {
+    ...input,
+    ...newTarget(),
+    process: undefined,
+    output: { entries: [], bytes: 0, nextSequence: 1 },
+    refusedRequests: new Map(),
+    breakpoints: new Map(),
+    children: new Map(),
+    childPort: undefined,
+    childrenAttached: 0,
+    undebuggedChildren: 0,
+  };
+}
+
+function newTarget(): DebugTarget {
   let resolve = () => {};
   const promise = new Promise<void>((settle) => {
     resolve = settle;
   });
   return {
-    ...input,
-    process: undefined,
     connection: undefined,
     state: { status: "starting" },
     revision: 0,
     exceptionFilters: [],
-    output: { entries: [], bytes: 0, nextSequence: 1 },
     exitCode: undefined,
     ending: undefined,
-    refusedRequests: new Map(),
     initialized: { promise, resolve },
   };
+}
+
+/** What the host tells an adapter about itself, on every connection. */
+const INITIALIZE_ARGUMENTS = {
+  clientID: "octant",
+  clientName: "Octant",
+  locale: "en",
+  linesStartAt1: true,
+  columnsStartAt1: true,
+  pathFormat: "path",
+  supportsVariableType: true,
+  supportsVariablePaging: true,
+  supportsRunInTerminalRequest: false,
+  supportsMemoryReferences: false,
+  supportsProgressReporting: true,
+  supportsInvalidatedEvent: true,
+  supportsArgsCanBeInterpretedByShell: false,
+} as const;
+
+function countRefused(record: SessionRecord, command: string): void {
+  record.refusedRequests.set(command, (record.refusedRequests.get(command) ?? 0) + 1);
+}
+
+/**
+ * Keeps the window's breakpoints as last sent, for a child that attaches
+ * later; a file with none left is forgotten, and no more files are kept
+ * than a Start may carry.
+ */
+function rememberBreakpoints(record: SessionRecord, file: CodeDebugFileBreakpoints): void {
+  const key = String(file.path);
+  if (file.breakpoints.length === 0) {
+    record.breakpoints.delete(key);
+    return;
+  }
+  if (!record.breakpoints.has(key) && record.breakpoints.size >= MAX_CODE_DEBUG_BREAKPOINT_FILES) {
+    return;
+  }
+  record.breakpoints.set(key, file);
+}
+
+function childSummary(child: ChildRecord): CodeDebugChildSummary {
+  return {
+    child: child.child,
+    name: child.name,
+    status:
+      child.state.status === "stopped"
+        ? "stopped"
+        : child.state.status === "running"
+          ? "running"
+          : "starting",
+  };
+}
+
+/** Opens a child connection to the session's own endpoint, or fails by the deadline. */
+function openChildSocket(endpoint: DebugChildEndpoint, deadlineMs: number): Promise<Socket> {
+  return new Promise((resolve, reject) => {
+    const socket =
+      endpoint.kind === "loopback"
+        ? connectSocket({ host: "127.0.0.1", port: endpoint.port })
+        : connectSocket({ path: endpoint.path });
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error("The child connection timed out."));
+    }, deadlineMs);
+    timer.unref?.();
+    socket.once("connect", () => {
+      clearTimeout(timer);
+      resolve(socket);
+    });
+    socket.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
 }
 
 /** Keeps the newest output within the ring's byte bound. */

@@ -144,7 +144,7 @@ export async function connectGuestSpokes(
       },
       input.retryDelay ?? wait,
     );
-    if (admission.status === "refused") {
+    if (admission.status === "refused" && admission.kind !== "devices-unavailable") {
       if (saved !== undefined) {
         await input.removeHost(saved.hostId);
         held.delete(target.memberId);
@@ -152,7 +152,9 @@ export async function connectGuestSpokes(
       notAccepted.set(target.memberId, { memberId: target.memberId, name: target.name });
       continue;
     }
-    if (admission.status === "unreachable") {
+    // A spoke whose device pairing is not running yet will admit the phone once
+    // it is: that is "ask again later", not a refusal.
+    if (admission.status === "unreachable" || admission.status === "refused") {
       const before = refusedBefore.get(target.memberId);
       if (before !== undefined && saved === undefined) notAccepted.set(target.memberId, before);
       continue;

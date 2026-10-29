@@ -13,6 +13,7 @@ import {
   createGuestSigner,
   guestSpokeTargets,
   joinHubAsGuest,
+  joinHubAsGuestAtOrigin,
   type GuestHubRecord,
 } from "./hubGuestClient";
 import type { PinnedListenerTransportPort } from "./appPairingCode";
@@ -331,6 +332,87 @@ describe("a guest joining with an owner code", () => {
 
   it("sends no unlock key when the person did not choose an owner code", async () => {
     expect(await joinBody()).not.toHaveProperty("ownerUnlockPublicKey");
+  });
+});
+
+describe("a browser guest joining over the origin that served the page", () => {
+  const PAGE = "https://hub.tail1234.ts.net:8443";
+  const HUB_HOST_ID = "11111111-1111-4111-8111-111111111111";
+
+  it("reaches the hub only at that origin under the platform's certificate check and sends its owner key", async () => {
+    const calls: Array<{ origin: string; trust: string; path: string }> = [];
+    let sent: Record<string, unknown> | undefined;
+    const transport: PinnedListenerTransportPort = ({ origin, trust }) => ({
+      status: "available",
+      fetch: async (input, init) => {
+        const url = new URL(typeof input === "string" ? input : input.toString());
+        calls.push({ origin, trust: trust.current.kind, path: url.pathname });
+        if (url.pathname === "/api/remote/hello") {
+          return Response.json(
+            signTestHostHello(HOST_KEY, {
+              productId: "octant",
+              hostId: HUB_HOST_ID,
+              displayName: "Mac mini",
+              serverBuildVersion: "0.1.0",
+              supportedProtocolRange: { min: 1, max: 1 },
+              authenticationProtocolVersions: [1],
+              securityFloor: 1,
+              remoteOrigin: PAGE,
+              nonce: "host-nonce-1234567890",
+              clientNonce: url.searchParams.get("clientNonce") ?? "",
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            }),
+          );
+        }
+        if (url.pathname === "/api/remote/pairing") {
+          const body = JSON.parse(String(init?.body)) as Record<string, string>;
+          return Response.json({
+            kind: "pending",
+            ticketId: body.ticketId,
+            hostId: HUB_HOST_ID,
+            deviceLabel: body.deviceLabel,
+            deviceKeyFingerprint: body.deviceKeyFingerprint,
+            origin: PAGE,
+            sourceClass: "tailscale",
+            comparisonCode: "123456",
+            claimedAt: new Date().toISOString(),
+            expiresAt: new Date(Date.now() + 300_000).toISOString(),
+          });
+        }
+        if (url.pathname === "/api/hub/join") {
+          sent = JSON.parse(String(init?.body)) as Record<string, unknown>;
+          return Response.json({ status: "refused", kind: "not-approved" }, { status: 403 });
+        }
+        return Response.json({
+          status: "approved",
+          deviceId: "00000000-0000-4000-8000-000000000002",
+          credentialGeneration: 1,
+        });
+      },
+    });
+
+    const started = await joinHubAsGuestAtOrigin({
+      origin: PAGE,
+      ticket: {
+        ticketId: "3f6c1d2e-8a4b-4c5d-9e6f-7a8b9c0d1e2f",
+        ticketProof: Buffer.alloc(32, 7).toString("base64url"),
+      },
+      deviceLabel: "Laptop browser",
+      transport,
+      webBuildVersion: "0.1.0",
+      deviceKeyStore: createInMemoryDeviceKeyStore(),
+      ownerUnlockPublicKey: "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE",
+    });
+    if (started.status !== "awaiting-approval") throw new Error(JSON.stringify(started));
+    await started.finish();
+
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls.every((call) => call.origin === PAGE && call.trust === "platform")).toBe(true);
+    expect(calls.map((call) => call.path)).toContain("/api/hub/join");
+    expect(sent).toMatchObject({
+      asGuest: true,
+      ownerUnlockPublicKey: "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE",
+    });
   });
 });
 

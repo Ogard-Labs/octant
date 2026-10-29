@@ -91,8 +91,12 @@ export type OwnerUnlockSigner =
 export interface OwnerTarget {
   readonly memberId: string;
   readonly origin: string;
-  /** The host listener's certificate pin, `sha256-` and base64url. */
-  readonly pin: string;
+  /**
+   * The host listener's certificate pin, `sha256-` and base64url. A browser
+   * cannot check a pin and names none: it reaches only the origin that served
+   * its page, under the platform's own certificate check.
+   */
+  readonly pin?: string;
 }
 
 export type OwnerActionResult =
@@ -127,8 +131,10 @@ export interface OwnerClient {
   readonly dismissAlert: (alertId: string) => Promise<OwnerActionResult>;
   readonly removeFromAlert: (alertId: string) => Promise<OwnerActionResult>;
   readonly setConfirmNewMembers: (enabled: boolean) => Promise<OwnerActionResult>;
-  /** Confirms the member an alert names: the unlock key signs the confirmation, then the action. */
-  readonly confirmNewMember: (alert: NewMemberAlert) => Promise<OwnerActionResult>;
+  /** Confirms a member: the unlock key signs the confirmation, then the action. */
+  readonly confirmNewMember: (
+    member: Pick<HeldMember, "memberId" | "identityKeyFingerprint">,
+  ) => Promise<OwnerActionResult>;
 }
 
 /** What a signer answers for one text: a raw signature, or a passkey's assertion. */
@@ -165,7 +171,10 @@ export function createOwnerClient(options: OwnerClientOptions): OwnerClient {
   }): Promise<Answer | undefined> => {
     const transport = options.transport({
       origin: target.origin,
-      trust: { current: { kind: "pinned", pin: target.pin } },
+      trust: {
+        current:
+          target.pin === undefined ? { kind: "platform" } : { kind: "pinned", pin: target.pin },
+      },
     });
     if (transport.status === "unavailable") return undefined;
     try {
@@ -316,7 +325,7 @@ export function createOwnerClient(options: OwnerClientOptions): OwnerClient {
       unlocked((signer) =>
         act(OWNER_ROUTES.confirmNewMembers, JSON.stringify({ enabled }), signer),
       ),
-    confirmNewMember: (alert) =>
+    confirmNewMember: (member) =>
       unlocked(async (signer) => {
         // The confirmation is its own signature by the unlock key, over the
         // member and key it names, so the spoke can check it against the key it
@@ -327,8 +336,8 @@ export function createOwnerClient(options: OwnerClientOptions): OwnerClient {
         try {
           const { signature: _standIn, ...fields } = decodeNewMemberConfirmation({
             spokeId: target.memberId,
-            memberId: String(alert.memberId),
-            identityKeyFingerprint: alert.identityKeyFingerprint,
+            memberId: String(member.memberId),
+            identityKeyFingerprint: member.identityKeyFingerprint,
             confirmedBy: identity.memberId,
             unlockKeyFingerprint: await unlockKeyFingerprint(unlock.publicKey),
             confirmedAt: new Date(now()).toISOString(),
