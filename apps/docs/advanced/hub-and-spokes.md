@@ -188,13 +188,16 @@ it says which of these is missing.
 `octant hub certificate --status` shows whether it is on, the name, and whether
 a renewal is due. `octant hub certificate --disable` turns it off.
 
-Octant asks for a new certificate before the old one expires.
+Octant asks for a new certificate before the old one expires. Each new
+certificate, and turning the option on or off, briefly restarts the remote
+listener.
 
-Not finished yet: the listener has one certificate, and the phone and the other
-computers on the hub check its fingerprint. Serving a Tailscale certificate in
-its place would break that check, so Octant does not install it yet. Turning the
-option on records your choice and tells you that nothing was installed. The
-phone app and desktop apps do not use this certificate and are not affected.
+The listener keeps the certificate Octant made and serves the Tailscale one only
+to a browser that opens this computer's tailnet name. The phone app, the desktop
+apps, and the other computers on the hub still see the original certificate and
+the same fingerprint, so nothing they hold changes. If Tailscale hands over a
+certificate that does not check out, Octant does not install it and the
+listener keeps serving the original.
 
 ## The hub grant
 

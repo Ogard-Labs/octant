@@ -55,6 +55,14 @@ export interface PrivateListenerTls {
   readonly key: string | Buffer;
 }
 
+/**
+ * A second certificate, served only to a client whose SNI name is exactly
+ * `serverName`. Every other client still gets the listener's own certificate.
+ */
+export interface PrivateListenerNamedTls extends PrivateListenerTls {
+  readonly serverName: string;
+}
+
 export interface PrivateListenerConfig {
   readonly hostname: string;
   readonly port: number;
@@ -62,6 +70,8 @@ export interface PrivateListenerConfig {
   readonly allowEphemeralPort?: true;
   readonly origin?: string;
   readonly tls: PrivateListenerTls;
+  /** The tailnet certificate browsers get beside `tls`; the pinned certificate is unchanged. */
+  readonly tailnetTls?: PrivateListenerNamedTls;
   /**
    * Override admission bucket limits (disposable-host/smoke seam). Product
    * configurations keep the default remote admission limits.
@@ -122,6 +132,7 @@ export function createPrivateListener(options: PrivateListenerOptions): PrivateL
   validatePrivateListenerConfig(options.config);
   const validateTls = options.validateTls ?? validatePrivateListenerTls;
   validateTls(options.config.tls, tlsValidationOptions(options.config));
+  validateNamedTls(options.config);
 
   const admission = createRemoteAdmissionPolicy(
     options.admissionLimits === undefined ? {} : { limits: options.admissionLimits },
@@ -194,6 +205,7 @@ export function createPrivateListener(options: PrivateListenerOptions): PrivateL
             listenerTrust: "remote",
             fetch: boundaryFetch,
             tls: config.tls,
+            ...(config.tailnetTls === undefined ? {} : { tailnetTls: config.tailnetTls }),
           }),
         options.signal,
       );
@@ -227,6 +239,7 @@ export function createPrivateListener(options: PrivateListenerOptions): PrivateL
     restart: async (nextConfig) => {
       validatePrivateListenerConfig(nextConfig);
       validateTls(nextConfig.tls, tlsValidationOptions(nextConfig));
+      validateNamedTls(nextConfig);
       await stop();
       config = nextConfig;
       await start();
@@ -302,6 +315,28 @@ export function validatePrivateListenerTls(
   } catch {
     throw new PrivateListenerError("invalid-tls");
   }
+}
+
+/**
+ * The second certificate gets the checks the first one does, for the name it is
+ * served under: it parses, its key matches, it is inside its validity window,
+ * and it covers that name. Only a tailnet name may be served this way, so the
+ * pinned certificate cannot be shadowed for an address or any other name.
+ */
+export function validatePrivateListenerNamedTls(tls: PrivateListenerNamedTls): void {
+  const serverName = normalizeHostname(tls.serverName);
+  if (
+    tls.serverName !== tls.serverName.trim() ||
+    isIP(serverName) !== 0 ||
+    !serverName.endsWith(".ts.net")
+  ) {
+    throw new PrivateListenerError("invalid-tls");
+  }
+  validatePrivateListenerTls(tls, { hostname: serverName });
+}
+
+function validateNamedTls(config: PrivateListenerConfig): void {
+  if (config.tailnetTls !== undefined) validatePrivateListenerNamedTls(config.tailnetTls);
 }
 
 function tlsValidationOptions(config: PrivateListenerConfig): PrivateListenerTlsValidationOptions {

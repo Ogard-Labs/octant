@@ -13,7 +13,10 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "n
 import { join } from "node:path";
 import { tailscaleCertificateRenewal } from "@octant/domain";
 import { Schema } from "effect";
-import type { PrivateListenerHostStatus } from "../remote/privateListenerLifecycleController";
+import type {
+  PrivateListenerHostStatus,
+  PrivateListenerLifecycleController,
+} from "../remote/privateListenerLifecycleController";
 
 /** What the local daemon hands back; the PEM bodies go to the sink and nowhere else. */
 export type TailscaleCertificateReading =
@@ -33,27 +36,51 @@ export interface TailscaleDaemonPort {
   readonly certificateFor: (domain: string) => Promise<TailscaleCertificateReading>;
 }
 
-/** Where the listener reads the certificate it serves the web app with. */
+/** Where the listener reads the certificate it serves browsers with. */
 export interface TailscaleCertificateSink {
   readonly install: (input: {
     readonly domain: string;
     readonly certificatePem: string;
     readonly privateKeyPem: string;
-  }) => Promise<{ readonly status: "installed" } | { readonly status: "unsupported" }>;
+  }) => Promise<
+    | { readonly status: "installed" }
+    | { readonly status: "refused"; readonly kind: "invalid-certificate" | "could-not-apply" }
+  >;
+  /** Goes back to the one certificate the listener made. */
+  readonly remove: () => Promise<void>;
+  /** Whether a certificate is being served now; the host forgets it when it restarts. */
+  readonly holdsCertificate: () => boolean;
 }
 
 /**
- * The listener has one certificate, and a hub or spoke publishes the pin of its
- * key in the roster. Serving a certificate the host did not make marks the
- * listener as pasted, which carries no pin: the hub then refuses to name the
- * listener ("listener-has-no-pin") and every member holding the old pin loses
- * the connection. Until the listener can serve a second certificate beside the
- * pinned one, an installation is reported unsupported rather than break
- * membership.
+ * The listener keeps serving the certificate whose key the roster pins, and
+ * serves this one only to a client that asks for the machine's tailnet name:
+ * one port and one listener, and the phone and desktop apps that pin the
+ * self-made certificate are unaffected.
  */
-export const unwiredCertificateSink: TailscaleCertificateSink = {
-  install: async () => ({ status: "unsupported" }),
-};
+export function createListenerCertificateSink(
+  listener: Pick<
+    PrivateListenerLifecycleController,
+    "setTailnetCertificate" | "tailnetCertificateName"
+  >,
+): TailscaleCertificateSink {
+  return {
+    install: async (input) => {
+      const applied = await listener.setTailnetCertificate({
+        cert: input.certificatePem,
+        key: input.privateKeyPem,
+        serverName: input.domain.toLowerCase(),
+      });
+      return applied.status === "applied"
+        ? { status: "installed" }
+        : { status: "refused", kind: applied.kind };
+    },
+    remove: async () => {
+      await listener.setTailnetCertificate(undefined);
+    },
+    holdsCertificate: () => listener.tailnetCertificateName() !== undefined,
+  };
+}
 
 const SUBDIR = "hub";
 const FILE = "tailscale-certificate.json";
@@ -107,7 +134,8 @@ export type TailscaleCertificateRefusal =
   | "daemon-not-reachable"
   | "https-not-enabled"
   | "name-not-served"
-  | "nowhere-to-install";
+  | "invalid-certificate"
+  | "could-not-apply";
 
 export type TailscaleCertificateStatus = {
   readonly enabled: boolean;
@@ -176,22 +204,24 @@ export class TailscaleCertificateService {
     return { status: "enabled" };
   }
 
-  disable(): TailscaleCertificateOutcome {
+  async disable(): Promise<TailscaleCertificateOutcome> {
     this.#options.setting.save({ enabled: false });
+    await this.#options.sink.remove();
     return { status: "disabled" };
   }
 
   /**
-   * Asks the daemon for a certificate when none is held, one is due for
-   * renewal, or the last one expired; otherwise leaves it. A refusal keeps the
-   * certificate the listener already serves.
+   * Asks the daemon for a certificate when the listener serves none (the host
+   * keeps it in memory only), one is due for renewal, or the last one expired;
+   * otherwise leaves it. A refusal keeps the certificate the listener already
+   * serves.
    */
   async renewIfDue(): Promise<TailscaleCertificateOutcome> {
     const setting = this.#options.setting.load();
     if (!setting.enabled) return { status: "refused", kind: "turned-off" };
     const named = this.#tailnetName();
     if (named.status === "refused") return named;
-    if (setting.notAfter !== undefined) {
+    if (setting.notAfter !== undefined && this.#options.sink.holdsCertificate()) {
       const renewal = tailscaleCertificateRenewal({
         notAfter: setting.notAfter,
         now: this.#options.now(),
@@ -205,8 +235,7 @@ export class TailscaleCertificateService {
       certificatePem: reading.certificatePem,
       privateKeyPem: reading.privateKeyPem,
     });
-    if (installed.status === "unsupported")
-      return { status: "refused", kind: "nowhere-to-install" };
+    if (installed.status === "refused") return { status: "refused", kind: installed.kind };
     this.#options.setting.save({ ...setting, notAfter: reading.notAfter });
     return { status: "renewed", notAfter: reading.notAfter };
   }

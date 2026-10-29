@@ -21,9 +21,8 @@ members, and keep the roster; another computer can join, change its hub grant,
 and leave. This works from Settings in a desktop window and from `octant hub`,
 and the hub can run as a boot service. A phone can join as a guest and reach
 each spoke that accepted it, and Settings and `octant hub certificate` turn on
-the Tailscale certificate request. The listener cannot yet serve that
-certificate beside the pinned one, so none is installed, and a browser guest
-screen is not built. The phone flow has not been run on a real device. The hub
+the Tailscale certificate request, which the listener serves to browsers beside
+the pinned one. A browser guest screen is not built. The phone flow has not been run on a real device. The hub
 uses only the Roster and Status grant items so far. Owners, failover, the wake
 service, push, provisioning, and delegation are not built. The maintainer
 asked for this design and authorized it as post-preview, design-first work on
@@ -203,7 +202,18 @@ the CLI. The hub depends on that:
   certificate from a public certificate authority, so the machine's tailnet
   name appears in public certificate-transparency logs; the hub says so
   before it asks. The phone and desktop apps keep using the pinned self-made
-  certificate and need none of this.
+  certificate and need none of this. The listener serves the self-made
+  certificate by default, to every client that sends no server name, an
+  address, or any other name, and serves the Tailscale certificate only to a
+  client whose TLS server name (SNI) is exactly this machine's `*.ts.net` name,
+  which it also accepts as the Host. The second certificate is checked as the
+  first is (it parses, its key matches, it is current, and it covers that
+  name) and is refused otherwise, leaving the listener on its own certificate.
+  Turning it on or off, and each renewal, restarts the listener the way its
+  administration does, because neither server swaps TLS in place; the
+  self-made key, certificate, and pin do not change, and the roster's pin
+  never does. One port and one listener, so pinned clients are unaffected and
+  nothing new is exposed.
 - **Administration needs window authority.** Turning the hub role on, the
   listener, and the join codes are administered over the loopback channel
   (Settings in a desktop window on the hub, or `octant hub` and

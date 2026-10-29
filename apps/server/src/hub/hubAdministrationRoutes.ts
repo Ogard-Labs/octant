@@ -152,7 +152,7 @@ export function createHubAdministrationRouteHandler(
             );
           }
           if (acknowledgedCertificateTransparency !== undefined) throw new Error("invalid");
-          if (action === "disable") return outcome(options.certificate.disable());
+          if (action === "disable") return outcome(await options.certificate.disable());
           if (action === "renew") return outcome(await options.certificate.renewIfDue());
           throw new Error("invalid");
         }

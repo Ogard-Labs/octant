@@ -36,7 +36,7 @@ function listener(hostname: string | null): PrivateListenerHostStatus {
 function setup(input: {
   readonly hostname?: string | null;
   readonly reading?: TailscaleCertificateReading;
-  readonly installs?: "installed" | "unsupported";
+  readonly installs?: "installed" | "invalid-certificate" | "could-not-apply";
 }) {
   const directory = mkdtempSync(join(tmpdir(), "octant-ts-cert-"));
   cleanups.push(() => rmSync(directory, { recursive: true, force: true }));
@@ -50,13 +50,20 @@ function setup(input: {
         notAfter: NOW + 90 * DAY,
       },
   );
-  const install = vi.fn<TailscaleCertificateSink["install"]>(async () => ({
-    status: input.installs ?? "installed",
-  }));
+  let held = false;
+  const install = vi.fn<TailscaleCertificateSink["install"]>(async () => {
+    const outcome = input.installs ?? "installed";
+    if (outcome !== "installed") return { status: "refused", kind: outcome };
+    held = true;
+    return { status: "installed" };
+  });
+  const remove = vi.fn(async () => {
+    held = false;
+  });
   const service = new TailscaleCertificateService({
     setting: createTailscaleCertificateSetting(directory),
     daemon: { certificateFor },
-    sink: { install },
+    sink: { install, remove, holdsCertificate: () => held },
     listener: () =>
       listener(input.hostname === undefined ? "mini.tail1234.ts.net" : input.hostname),
     now: () => now,
@@ -65,6 +72,10 @@ function setup(input: {
     service,
     certificateFor,
     install,
+    remove,
+    forgetHeld: () => {
+      held = false;
+    },
     directory,
     advance: (ms: number) => {
       now += ms;
@@ -143,7 +154,19 @@ describe("the Tailscale certificate for the web app", () => {
     expect(certificateFor).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps what it holds and says why when the daemon refuses or nothing can install the certificate", async () => {
+  it("asks the daemon again after the host restarted and the listener serves no certificate", async () => {
+    const { service, certificateFor, install, forgetHeld } = setup({});
+    service.enable({ acknowledgedCertificateTransparency: true });
+    await service.renewIfDue();
+
+    forgetHeld();
+
+    expect((await service.renewIfDue()).status).toBe("renewed");
+    expect(certificateFor).toHaveBeenCalledTimes(2);
+    expect(install).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps what it holds and says why when the daemon refuses or the listener will not take the certificate", async () => {
     const unreachable = setup({ reading: { status: "unavailable", kind: "https-not-enabled" } });
     unreachable.service.enable({ acknowledgedCertificateTransparency: true });
     expect(await unreachable.service.renewIfDue()).toEqual({
@@ -152,13 +175,12 @@ describe("the Tailscale certificate for the web app", () => {
     });
     expect(unreachable.install).not.toHaveBeenCalled();
 
-    const nowhere = setup({ installs: "unsupported" });
-    nowhere.service.enable({ acknowledgedCertificateTransparency: true });
-    expect(await nowhere.service.renewIfDue()).toEqual({
-      status: "refused",
-      kind: "nowhere-to-install",
-    });
-    expect(nowhere.service.status().notAfter).toBeUndefined();
+    for (const kind of ["invalid-certificate", "could-not-apply"] as const) {
+      const refused = setup({ installs: kind });
+      refused.service.enable({ acknowledgedCertificateTransparency: true });
+      expect(await refused.service.renewIfDue()).toEqual({ status: "refused", kind });
+      expect(refused.service.status().notAfter).toBeUndefined();
+    }
   });
 
   it("never writes certificate or key material to the state it keeps", async () => {
@@ -173,14 +195,15 @@ describe("the Tailscale certificate for the web app", () => {
     expect(JSON.stringify(service.status())).not.toContain("PRIVATE-KEY-BODY");
   });
 
-  it("turns off again without touching the certificate the listener serves", async () => {
-    const { service, install } = setup({});
+  it("turns off again by taking the tailnet certificate away and leaving the pinned one", async () => {
+    const { service, install, remove } = setup({});
     service.enable({ acknowledgedCertificateTransparency: true });
     await service.renewIfDue();
 
-    expect(service.disable()).toEqual({ status: "disabled" });
+    expect(await service.disable()).toEqual({ status: "disabled" });
 
     expect(service.status().enabled).toBe(false);
     expect(install).toHaveBeenCalledTimes(1);
+    expect(remove).toHaveBeenCalledTimes(1);
   });
 });

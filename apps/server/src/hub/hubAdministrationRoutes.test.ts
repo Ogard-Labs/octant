@@ -10,7 +10,6 @@ import { HubTestNetwork, startHubTestHost, type HubTestHost } from "./hubHost.te
 import {
   TailscaleCertificateService,
   createTailscaleCertificateSetting,
-  unwiredCertificateSink,
   type TailscaleDaemonPort,
 } from "./tailscaleCertificate";
 
@@ -45,7 +44,11 @@ async function setup(listenerStatus?: Parameters<typeof startHubTestHost>[0]["li
     certificate: new TailscaleCertificateService({
       setting: createTailscaleCertificateSetting(host.directory),
       daemon: unreachableTailscaleDaemon,
-      sink: unwiredCertificateSink,
+      sink: {
+        install: async () => ({ status: "refused", kind: "could-not-apply" }),
+        remove: async () => undefined,
+        holdsCertificate: () => false,
+      },
       listener: () => host.listener,
       now: Date.now,
     }),

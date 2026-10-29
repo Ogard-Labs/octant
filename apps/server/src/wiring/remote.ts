@@ -47,7 +47,7 @@ import { SpokeLinkService } from "../hub/spokeLinkService";
 import {
   TailscaleCertificateService,
   createTailscaleCertificateSetting,
-  unwiredCertificateSink,
+  createListenerCertificateSink,
 } from "../hub/tailscaleCertificate";
 import { createTailscaleCliDaemon, execTailscale } from "../hub/tailscaleCliDaemon";
 import { createPrivateListenerLifecycleController } from "../remote/privateListenerLifecycleController";
@@ -80,6 +80,7 @@ import type { AutomationWiring } from "./automation";
 import type { RoutesWiring } from "./routes";
 
 const CERTIFICATE_CHECK_MS = 24 * 60 * 60 * 1_000;
+const STARTUP_CERTIFICATE_CHECK_MS = 60 * 1_000;
 
 export type RemoteDependencies = Pick<
   ServerStart,
@@ -374,16 +375,17 @@ export function wireRemote(deps: RemoteDependencies) {
       exec: execTailscale,
       platform: process.platform,
     }),
-    sink: unwiredCertificateSink,
+    sink: createListenerCertificateSink(privateListenerController),
     listener: () => privateListenerController.status(),
     now: Date.now,
   });
   // Renewal is checked once a day. The service does nothing while the
   // certificate is off, and renews only inside the window the domain policy sets.
-  setInterval(
-    () => void tailscaleCertificate.renewIfDue().catch(() => undefined),
-    CERTIFICATE_CHECK_MS,
-  ).unref();
+  // The listener serves the certificate from memory only, so a host that just
+  // started asks once soon, after the listener had time to come up.
+  const checkCertificate = () => void tailscaleCertificate.renewIfDue().catch(() => undefined);
+  setInterval(checkCertificate, CERTIFICATE_CHECK_MS).unref();
+  setTimeout(checkCertificate, STARTUP_CERTIFICATE_CHECK_MS).unref();
   const hubAdministrationRoutes = createHubAdministrationRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
     windowAuthorityStore,

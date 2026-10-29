@@ -42,12 +42,30 @@ export const bunServe: Serve = (options) => {
     // as ERR_EMPTY_RESPONSE while the host kept working on it. 255 seconds is
     // Bun's maximum; the endpoint's own deadlines still bound the wait.
     idleTimeout: 255,
-    ...(options.tls === undefined ? {} : { tls: options.tls }),
+    // Bun picks an entry by the client's SNI name; the entry without a name
+    // answers every client that names no other, so the pinned certificate
+    // stays the default.
+    ...(options.tls === undefined
+      ? {}
+      : {
+          tls:
+            options.tailnetTls === undefined
+              ? options.tls
+              : [
+                  options.tls,
+                  {
+                    cert: options.tailnetTls.cert,
+                    key: options.tailnetTls.key,
+                    serverName: options.tailnetTls.serverName,
+                  },
+                ],
+        }),
     fetch: (request, runtime: BunServer) => {
       const hostUrl = parseListenerRequestHost(
         request.headers.get("host"),
         runtime.url,
         options.hostname,
+        options.tailnetTls?.serverName,
       );
       if (hostUrl === undefined) return invalidHostResponse();
       let requestUrl: URL;

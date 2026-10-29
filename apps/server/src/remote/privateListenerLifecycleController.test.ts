@@ -538,3 +538,143 @@ describe("private listener lifecycle controller with a self-made certificate", (
     await expect(controller.enable(SELF_MADE)).rejects.toMatchObject({ code: "invalid-tls" });
   });
 });
+
+describe("private listener lifecycle controller with a tailnet certificate", () => {
+  const NAME = "mini.tail1234.ts.net";
+  const OTHER_NAME = "other.tail1234.ts.net";
+  const SELF_MADE_TAILNET = {
+    hostname: NAME,
+    port: 8443,
+    origin: `https://${NAME}:8443`,
+    tls: "self-made",
+  } as const;
+  const directories: string[] = [];
+  afterEach(() => {
+    for (const directory of directories.splice(0)) {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  function directory(): string {
+    const made = mkdtempSync(join(tmpdir(), "octant-listener-tailnet-"));
+    directories.push(made);
+    return made;
+  }
+
+  function tailnetCertificate(name = NAME) {
+    const made = createSelfMadeListenerCertificateStore({ dataDirectory: directory() }).ensure(
+      name,
+    );
+    if (made.status !== "ready") throw new Error("expected a certificate");
+    return { cert: made.tls.cert, key: made.tls.key, serverName: name };
+  }
+
+  function setup(failRestartsWithTailnet = false) {
+    const served: RemoteGatewayConfig[] = [];
+    const { gateway } = fakeGateway({
+      facts: () => ({ state: "ready", origin: `https://${NAME}:8443` }),
+      restart: vi.fn(async (config: RemoteGatewayConfig) => {
+        if (failRestartsWithTailnet && config.listener.tailnetTls !== undefined) {
+          throw new PrivateListenerLifecycleError("bind-failed");
+        }
+        served.push(config);
+      }),
+    });
+    const controller = createPrivateListenerLifecycleController({
+      createGateway: (config) => {
+        served.push(config);
+        return gateway;
+      },
+      selfMadeCertificate: createSelfMadeListenerCertificateStore({ dataDirectory: directory() }),
+    });
+    return { served, controller, gateway };
+  }
+
+  it("serves the tailnet certificate beside the pinned one and keeps the pin", async () => {
+    const { served, controller } = setup();
+    const before = await controller.enable(SELF_MADE_TAILNET);
+    const tailnet = tailnetCertificate();
+
+    expect(await controller.setTailnetCertificate(tailnet)).toEqual({ status: "applied" });
+
+    const config = served.at(-1)?.listener;
+    expect(config?.tailnetTls).toEqual(tailnet);
+    expect(config?.tls).toEqual(served[0]?.listener.tls);
+    expect(controller.status().tlsPin).toBe(before.tlsPin);
+    expect(controller.status().certificateFingerprint).toBe(before.certificateFingerprint);
+    expect(controller.tailnetCertificateName()).toBe(NAME);
+  });
+
+  it("refuses a certificate that fails its checks and leaves the listener serving", async () => {
+    const { served, controller, gateway } = setup();
+    const before = await controller.enable(SELF_MADE_TAILNET);
+    const good = tailnetCertificate();
+    const other = tailnetCertificate();
+
+    expect(await controller.setTailnetCertificate({ ...good, key: other.key })).toEqual({
+      status: "refused",
+      kind: "invalid-certificate",
+    });
+    expect(
+      await controller.setTailnetCertificate({
+        ...tailnetCertificate(OTHER_NAME),
+        serverName: NAME,
+      }),
+    ).toEqual({ status: "refused", kind: "invalid-certificate" });
+
+    expect(gateway.restart).not.toHaveBeenCalled();
+    expect(served).toHaveLength(1);
+    expect(controller.status()).toEqual(before);
+    expect(controller.tailnetCertificateName()).toBeUndefined();
+  });
+
+  it("goes back to one certificate when the tailnet certificate is turned off", async () => {
+    const { served, controller } = setup();
+    const before = await controller.enable(SELF_MADE_TAILNET);
+    await controller.setTailnetCertificate(tailnetCertificate());
+
+    expect(await controller.setTailnetCertificate(undefined)).toEqual({ status: "applied" });
+
+    expect(served.at(-1)?.listener.tailnetTls).toBeUndefined();
+    expect(controller.status().tlsPin).toBe(before.tlsPin);
+    expect(controller.tailnetCertificateName()).toBeUndefined();
+  });
+
+  it("restarts onto the pinned certificate alone when serving the second one fails", async () => {
+    const { served, controller } = setup(true);
+    const before = await controller.enable(SELF_MADE_TAILNET);
+
+    expect(await controller.setTailnetCertificate(tailnetCertificate())).toEqual({
+      status: "refused",
+      kind: "could-not-apply",
+    });
+
+    expect(served.at(-1)?.listener.tailnetTls).toBeUndefined();
+    expect(controller.status()).toEqual(before);
+    expect(controller.tailnetCertificateName()).toBeUndefined();
+  });
+
+  it("serves a certificate set while the listener is off once the listener is enabled", async () => {
+    const { served, controller } = setup();
+    const tailnet = tailnetCertificate();
+
+    await controller.setTailnetCertificate(tailnet);
+    expect(served).toHaveLength(0);
+    await controller.enable(SELF_MADE_TAILNET);
+
+    expect(served[0]?.listener.tailnetTls).toEqual(tailnet);
+  });
+
+  it("does not serve the certificate under a listener that has another name", async () => {
+    const { served, controller } = setup();
+    await controller.setTailnetCertificate(tailnetCertificate());
+
+    await controller.enable({
+      ...SELF_MADE_TAILNET,
+      hostname: OTHER_NAME,
+      origin: `https://${OTHER_NAME}:8443`,
+    });
+
+    expect(served[0]?.listener.tailnetTls).toBeUndefined();
+  });
+});

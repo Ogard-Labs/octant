@@ -44,6 +44,7 @@ import type {
   PrivateListener,
   PrivateListenerConfig,
   PrivateListenerFailureCode,
+  PrivateListenerNamedTls,
   PrivateListenerTls,
 } from "../privateListener";
 import type { RemoteGatewayServices } from "../remote/remoteGateway";
@@ -99,6 +100,8 @@ export interface ServeOptions {
   readonly listenerTrust?: RemoteListenerTrust;
   readonly fetch: (request: Request, facts?: RequestTransportFacts) => Response | Promise<Response>;
   readonly tls?: PrivateListenerTls;
+  /** Served beside `tls` to clients that ask for this name by SNI; also accepted as a Host. */
+  readonly tailnetTls?: PrivateListenerNamedTls;
 }
 
 export const MAX_REQUEST_BODY_SIZE = 1_048_576;

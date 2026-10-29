@@ -4,7 +4,7 @@ import type { AddressInfo, Socket } from "node:net";
 import { parseListenerRequestHost, requestUrlStaysOnHost } from "./listenerRequestHost";
 import { deriveTransportFactsFromPeer } from "./remoteRequestFacts";
 import { MAX_CHAT_ATTACHMENT_BYTES, type OctantServer, type RequestTransportFacts } from "./server";
-import type { PrivateListenerTls } from "./privateListener";
+import type { PrivateListenerNamedTls, PrivateListenerTls } from "./privateListener";
 import {
   WEBSOCKET_RELAY_MAX_MESSAGE_BYTES,
   WebSocketEndpoint,
@@ -20,6 +20,7 @@ export interface NodeServeOptions {
   readonly listenerTrust?: "loopback" | "remote";
   readonly fetch: (request: Request, facts?: RequestTransportFacts) => Response | Promise<Response>;
   readonly tls?: PrivateListenerTls;
+  readonly tailnetTls?: PrivateListenerNamedTls;
 }
 
 class RequestBodyTooLarge extends Error {}
@@ -37,6 +38,7 @@ export async function nodeServe(options: NodeServeOptions): Promise<OctantServer
       options.fetch,
       baseUrl,
       options.hostname,
+      options.tailnetTls?.serverName,
       listenerTrust,
       options.maxRequestBodySize ?? MAX_CHAT_ATTACHMENT_BYTES,
       activeBridges,
@@ -46,10 +48,18 @@ export async function nodeServe(options: NodeServeOptions): Promise<OctantServer
       outgoing.end("Octant could not handle the local request.");
     });
   };
-  const server =
-    options.tls === undefined
-      ? createServer(requestHandler)
-      : createHttpsServer(options.tls, requestHandler);
+  const httpsServer =
+    options.tls === undefined ? undefined : createHttpsServer(options.tls, requestHandler);
+  // The https server's own certificate answers every client that names no
+  // other context, so a client without SNI, with an address, or with another
+  // name still gets the pinned certificate.
+  if (options.tailnetTls !== undefined) {
+    httpsServer?.addContext(options.tailnetTls.serverName, {
+      cert: options.tailnetTls.cert,
+      key: options.tailnetTls.key,
+    });
+  }
+  const server = httpsServer ?? createServer(requestHandler);
   // Upgraded sockets leave the HTTP server's own connection list, so stopping
   // the server closes them from here.
   const upgradedSockets = new Set<Socket>();
@@ -63,6 +73,7 @@ export async function nodeServe(options: NodeServeOptions): Promise<OctantServer
       options.fetch,
       baseUrl,
       options.hostname,
+      options.tailnetTls?.serverName,
       listenerTrust,
     ).catch(() => socket.destroy());
   });
@@ -114,6 +125,7 @@ async function bridgeRequest(
   handler: NodeServeOptions["fetch"],
   baseUrl: URL | undefined,
   configuredHostname: string,
+  tailnetName: string | undefined,
   listenerTrust: "loopback" | "remote",
   maxRequestBodySize: number,
   activeBridges: Set<() => void>,
@@ -122,7 +134,7 @@ async function bridgeRequest(
   if (baseUrl === undefined) throw new Error("Octant Node server is not ready.");
   let requestUrl: string;
   try {
-    requestUrl = resolveRequestUrl(incoming, baseUrl, configuredHostname);
+    requestUrl = resolveRequestUrl(incoming, baseUrl, configuredHostname, tailnetName);
   } catch (error) {
     if (error instanceof InvalidRequestHost) {
       respondInvalidHost(outgoing);
@@ -235,13 +247,14 @@ async function bridgeUpgrade(
   handler: NodeServeOptions["fetch"],
   baseUrl: URL | undefined,
   configuredHostname: string,
+  tailnetName: string | undefined,
   listenerTrust: "loopback" | "remote",
 ): Promise<void> {
   socket.on("error", () => undefined);
   if (baseUrl === undefined) throw new Error("Octant Node server is not ready.");
   let requestUrl: string;
   try {
-    requestUrl = resolveRequestUrl(incoming, baseUrl, configuredHostname);
+    requestUrl = resolveRequestUrl(incoming, baseUrl, configuredHostname, tailnetName);
   } catch (error) {
     if (!(error instanceof InvalidRequestHost)) throw error;
     await writeRawResponse(socket, new Response("Invalid Host header", { status: 400 }), "GET");
@@ -356,9 +369,15 @@ function resolveRequestUrl(
   incoming: IncomingMessage,
   listenerUrl: URL,
   configuredHostname: string,
+  tailnetName: string | undefined,
 ): string {
   const hostHeader = incoming.headers.host;
-  const hostUrl = parseListenerRequestHost(hostHeader, listenerUrl, configuredHostname);
+  const hostUrl = parseListenerRequestHost(
+    hostHeader,
+    listenerUrl,
+    configuredHostname,
+    tailnetName,
+  );
   if (hostUrl === undefined) throw new InvalidRequestHost();
 
   const target = incoming.url ?? "/";
