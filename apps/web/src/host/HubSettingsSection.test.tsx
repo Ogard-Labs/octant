@@ -850,3 +850,156 @@ describe("HubSettingsSection failover", () => {
     ).not.toBeInTheDocument();
   });
 });
+
+describe("HubSettingsSection wake service", () => {
+  const hubWithWake = (wake: unknown) => ({
+    hub: {
+      enabled: true,
+      roster: {
+        roster: {
+          standbyOrder: [],
+          members: [
+            { memberId: "m-1", name: "Mac mini", role: "hub", owner: false },
+            { memberId: "m-2", name: "Laptop", role: "spoke", owner: false },
+          ],
+        },
+      },
+    },
+    spoke: { membership: "none" },
+    wake,
+  });
+  const joinedSpoke = (wake: unknown) => ({
+    hub: { enabled: false },
+    spoke: {
+      membership: "member",
+      hub: { memberId: "m-1", name: "Mac mini" },
+      grant: { items: ["roster", "wake"], actProjects: [] },
+      acceptedMemberIds: [],
+      roster: { roster: { members: [] } },
+      namedStandby: false,
+      rosterSignedBy: "hub",
+    },
+    wake,
+  });
+
+  it("is off until the window turns it on, and then says so", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderHub({
+      status: {
+        status: 200,
+        body: hubWithWake({
+          hub: { enabled: false, spokes: [] },
+          spoke: { sharing: false, reported: 0 },
+        }),
+      },
+      wake: { status: 200, body: { status: "changed", enabled: true } },
+    });
+
+    const toggle = await screen.findByRole("switch", { name: "Wake service" });
+    expect(toggle).not.toBeChecked();
+    expect(calls.some((call) => call.operation === "wake")).toBe(false);
+    await user.click(toggle);
+
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "wake")?.body).toEqual({ enabled: true }),
+    );
+    expect(await screen.findByText(/Wake service is on/)).toBeVisible();
+  });
+
+  it("shows each spoke's upcoming wakes and how the last one went", async () => {
+    renderHub({
+      status: {
+        status: 200,
+        body: hubWithWake({
+          hub: {
+            enabled: true,
+            spokes: [
+              { memberId: "m-2", upcoming: 2, lastResult: { at: NOW, result: "unreachable" } },
+            ],
+          },
+          spoke: { sharing: false, reported: 0 },
+        }),
+      },
+    });
+
+    const list = await screen.findByRole("list", { name: "Spokes the hub wakes" });
+    expect(within(list).getByText("Laptop")).toBeVisible();
+    expect(
+      within(list).getByText("2 wakes ahead · last the computer could not be reached"),
+    ).toBeVisible();
+  });
+
+  it("says plainly when the server refused the switch", async () => {
+    const user = userEvent.setup();
+    renderHub({
+      status: {
+        status: 200,
+        body: hubWithWake({
+          hub: { enabled: false, spokes: [] },
+          spoke: { sharing: false, reported: 0 },
+        }),
+      },
+      wake: { status: 409, body: { status: "refused", kind: "hub-role-off" } },
+    });
+
+    await user.click(await screen.findByRole("switch", { name: "Wake service" }));
+
+    expect(await screen.findByText("The hub role is off.")).toBeVisible();
+  });
+
+  it("lets a spoke's window enter the optional hardware address", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderHub({
+      status: {
+        status: 200,
+        body: joinedSpoke({
+          hub: { enabled: false, spokes: [] },
+          spoke: { sharing: true, reported: 1 },
+        }),
+      },
+      "wake-hardware-address": { status: 200, body: { status: "changed" } },
+    });
+
+    const field = await screen.findByRole("textbox", {
+      name: "Hardware address for Wake-on-LAN (optional)",
+    });
+    expect(field).toHaveValue("");
+    const save = screen.getByRole("button", { name: "Save the address" });
+    expect(save).toBeDisabled();
+    await user.type(field, "aa:bb:cc:00:11:22");
+    await user.click(save);
+
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "wake-hardware-address")?.body).toEqual({
+        address: "aa:bb:cc:00:11:22",
+      }),
+    );
+    expect(await screen.findByText("Hardware address saved on this computer.")).toBeVisible();
+  });
+
+  it("shows the address the spoke holds and says when the server refuses a bad one", async () => {
+    const user = userEvent.setup();
+    renderHub({
+      status: {
+        status: 200,
+        body: joinedSpoke({
+          hub: { enabled: false, spokes: [] },
+          spoke: { sharing: true, reported: 0, hardwareAddress: "aa:bb:cc:00:11:22" },
+        }),
+      },
+      "wake-hardware-address": {
+        status: 409,
+        body: { status: "refused", kind: "invalid-address" },
+      },
+    });
+
+    const field = await screen.findByRole("textbox", {
+      name: "Hardware address for Wake-on-LAN (optional)",
+    });
+    expect(field).toHaveValue("aa:bb:cc:00:11:22");
+    await user.type(field, "x");
+    await user.click(screen.getByRole("button", { name: "Save the address" }));
+
+    expect(await screen.findByText(/not a hardware address/)).toBeVisible();
+  });
+});

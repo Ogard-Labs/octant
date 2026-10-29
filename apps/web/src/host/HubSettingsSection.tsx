@@ -17,6 +17,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantField, OctantFieldLabel } from "../ui/base/OctantField";
+import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import {
@@ -141,6 +142,15 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
   "duplicate-member": "A computer can be named only once.",
   "not-a-named-standby": "The hub has not named this computer a standby.",
   "already-hub": "This computer is already the hub.",
+  "invalid-address": "That is not a hardware address (six hex pairs, such as aa:bb:cc:00:11:22).",
+};
+
+/** How the hub's last attempt to wake a spoke went, in words. */
+const WAKE_RESULT_COPY: Readonly<Record<string, string>> = {
+  nudged: "nudged, and the computer answered",
+  ignored: "the computer did not act on it",
+  refused: "the computer refused it",
+  unreachable: "the computer could not be reached",
 };
 
 interface Reply {
@@ -169,6 +179,7 @@ interface HubStatus {
   readonly ownerCandidates: ReadonlyArray<OwnerCandidateRow>;
   /** The standby hubs this hub's roster names, in the order members try them. */
   readonly standbyOrder: ReadonlyArray<string>;
+  readonly wake?: WakeView;
   readonly link?: {
     readonly membership: "member" | "removed";
     readonly hubName: string;
@@ -193,6 +204,19 @@ interface HubStatus {
     readonly heldMembers: ReadonlyArray<HeldMemberRow>;
     readonly alerts: ReadonlyArray<NewMemberAlertRow>;
   };
+}
+
+/** The wake service as this window sees it: the hub's switch and times, and this computer's side as a spoke. */
+interface WakeView {
+  readonly hub: {
+    readonly enabled: boolean;
+    readonly spokes: ReadonlyArray<{
+      readonly memberId: string;
+      readonly upcoming: number;
+      readonly lastResult?: { readonly at: number; readonly result: string };
+    }>;
+  };
+  readonly spoke: { readonly sharing: boolean; readonly hardwareAddress?: string };
 }
 
 interface CertificateStatus {
@@ -245,6 +269,9 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
   const [promoting, setPromoting] = useState(false);
   /** The standby order being edited; absent while the window shows the order the hub holds. */
   const [standbyDraft, setStandbyDraft] = useState<ReadonlyArray<string>>();
+  /** The hardware address being typed; absent while the field shows the one this computer holds. */
+  const [addressDraft, setAddressDraft] = useState<string>();
+  const addressId = useId();
   const promoteOpener = useRef<HTMLButtonElement>(null);
   const [certificate, setCertificate] = useState<CertificateStatus>();
   const [transparencyRead, setTransparencyRead] = useState(false);
@@ -453,6 +480,41 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
     if (reply !== undefined) {
       setStandbyDraft(undefined);
       setMessage("Standby order saved.");
+    }
+    await refresh();
+  };
+
+  const setWakeService = async (on: boolean) => {
+    const reply = await act(
+      "wake",
+      { enabled: on },
+      "changed",
+      on
+        ? "Octant could not turn on the wake service."
+        : "Octant could not turn off the wake service.",
+    );
+    if (reply !== undefined) {
+      setMessage(
+        on
+          ? "Wake service is on. A computer takes part only if its person ticked Wake."
+          : "Wake service is off. The hub forgot every time it held.",
+      );
+    }
+    await refresh();
+  };
+
+  const saveHardwareAddress = async (address: string | null) => {
+    const reply = await act(
+      "wake-hardware-address",
+      { address },
+      "changed",
+      "Octant could not save the hardware address.",
+    );
+    if (reply !== undefined) {
+      setMessage(
+        address === null ? "Hardware address cleared." : "Hardware address saved on this computer.",
+      );
+      setAddressDraft(undefined);
     }
     await refresh();
   };
@@ -727,7 +789,7 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
         {message === undefined ? null : (
           <SettingsState
             kind={
-              /^(Approved|Denied|Removed|Left|Added|Confirm|Dismissed|The hub grant is saved|Standby order saved|This computer is now the hub)/.test(
+              /^(Approved|Denied|Removed|Left|Added|Confirm|Dismissed|The hub grant is saved|Standby order saved|This computer is now the hub|Wake service is|Hardware address)/.test(
                 message,
               )
                 ? "success"
@@ -962,6 +1024,46 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
       )}
 
       {!hubOn || status === undefined ? null : (
+        <SettingsSection title="Wake service">
+          <div className="setgroup">
+            <SettingRow
+              description="Wake a spoke's computer just before one of its routines is due. A computer takes part only if its own person ticked Wake in its hub grant. The hub learns only a time and an opaque id for each routine, never what it does. Off by default."
+              label="Wake service"
+              scope="host"
+              settingId="hub-wake-service"
+            >
+              <OctantSwitch
+                checked={status.wake?.hub.enabled === true}
+                disabled={busy}
+                label="Wake service"
+                onCheckedChange={(on) => void setWakeService(on)}
+              />
+            </SettingRow>
+          </div>
+          {status.wake?.hub.enabled !== true ? null : status.wake.hub.spokes.length === 0 ? (
+            <SettingsState kind="empty">
+              No spoke has told the hub a routine time yet.
+            </SettingsState>
+          ) : (
+            <ul aria-label="Spokes the hub wakes" className="setgroup">
+              {status.wake.hub.spokes.map((spoke) => (
+                <li className="setrow" key={spoke.memberId}>
+                  <span className="setrow-label">{nameOf(spoke.memberId)}</span>
+                  <p className="setrow-hint">
+                    {`${spoke.upcoming} wake${spoke.upcoming === 1 ? "" : "s"} ahead · ${
+                      spoke.lastResult === undefined
+                        ? "not woken yet"
+                        : `last ${WAKE_RESULT_COPY[spoke.lastResult.result] ?? spoke.lastResult.result}`
+                    }`}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </SettingsSection>
+      )}
+
+      {!hubOn || status === undefined ? null : (
         <SettingsSection title="Owner devices">
           <p className="settings-section-line">
             An owner device can act on this hub with a window's powers after a fresh unlock. A
@@ -1089,6 +1191,35 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
                 </ul>
               )}
               {grantEditor(linked.grant, "Save the grant")}
+              <OctantField>
+                <OctantFieldLabel htmlFor={addressId}>
+                  Hardware address for Wake-on-LAN (optional)
+                </OctantFieldLabel>
+                <OctantInput
+                  autoComplete="off"
+                  id={addressId}
+                  onChange={(event) => setAddressDraft(event.target.value)}
+                  placeholder="aa:bb:cc:00:11:22"
+                  spellCheck={false}
+                  value={addressDraft ?? status?.wake?.spoke.hardwareAddress ?? ""}
+                />
+                <p className="settings-section-line">
+                  Stays on this computer unless the hub grant above ticks Wake. Then it goes to the
+                  hub so it can send a magic packet on your home network. The hub never learns what
+                  your routines do.
+                </p>
+                <div className="host-settings__controls">
+                  <OctantButton
+                    disabled={busy || addressDraft === undefined}
+                    onClick={() => void saveHardwareAddress(addressDraft?.trim() || null)}
+                    size="sm"
+                    type="button"
+                    variant="secondary"
+                  >
+                    Save the address
+                  </OctantButton>
+                </div>
+              </OctantField>
               <div className="host-settings__controls">
                 <OctantButton
                   aria-expanded={leaving}
@@ -1253,6 +1384,7 @@ function readStatus(body: unknown): HubStatus | undefined {
   const membership = field(spoke, "membership");
   const hubName = field(field(spoke, "hub"), "name");
   const grant = readGrant(field(spoke, "grant"));
+  const wake = readWake(field(body, "wake"));
   if (
     (membership === "member" || membership === "removed") &&
     typeof hubName === "string" &&
@@ -1275,6 +1407,7 @@ function readStatus(body: unknown): HubStatus | undefined {
       owners: readOwners(field(hub, "owners")),
       ownerCandidates: readOwnerCandidates(field(hub, "ownerCandidates")),
       standbyOrder,
+      ...(wake === undefined ? {} : { wake }),
       link: {
         membership,
         hubName,
@@ -1302,6 +1435,38 @@ function readStatus(body: unknown): HubStatus | undefined {
     owners: readOwners(field(hub, "owners")),
     ownerCandidates: readOwnerCandidates(field(hub, "ownerCandidates")),
     standbyOrder,
+    ...(wake === undefined ? {} : { wake }),
+  };
+}
+
+function readWake(value: unknown): WakeView | undefined {
+  const hub = field(value, "hub");
+  const spoke = field(value, "spoke");
+  const enabled = field(hub, "enabled");
+  const rows = field(hub, "spokes");
+  const sharing = field(spoke, "sharing");
+  if (typeof enabled !== "boolean" || !Array.isArray(rows) || typeof sharing !== "boolean") {
+    return undefined;
+  }
+  const spokes: Array<WakeView["hub"]["spokes"][number]> = [];
+  for (const row of rows) {
+    const memberId = field(row, "memberId");
+    const upcoming = field(row, "upcoming");
+    const at = field(field(row, "lastResult"), "at");
+    const result = field(field(row, "lastResult"), "result");
+    if (typeof memberId !== "string" || typeof upcoming !== "number") continue;
+    spokes.push({
+      memberId,
+      upcoming,
+      ...(typeof at === "number" && typeof result === "string"
+        ? { lastResult: { at, result } }
+        : {}),
+    });
+  }
+  const hardwareAddress = field(spoke, "hardwareAddress");
+  return {
+    hub: { enabled, spokes },
+    spoke: { sharing, ...(typeof hardwareAddress === "string" ? { hardwareAddress } : {}) },
   };
 }
 
