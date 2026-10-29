@@ -529,6 +529,36 @@ takes the fail-closed option.
   `set-cookie`. No redirect is followed, even on the same origin, because a
   redirect could only carry the key somewhere the person did not enter. An
   instance has at most eight brokered calls in flight.
+- **A cancel mid-body.** A brokered call made for a send names it: `http/request`
+  carries the send's `requestId`, optional, because a probe's call serves no
+  send. It must name a `session/send` the host issued, or the driver stops.
+  When the host cancels that send, or its deadline passes, the host closes
+  everything the send opened: it aborts each of the send's brokered calls
+  upstream (the fetch is aborted and its body reader cancelled, so the service
+  sees the connection close), answers one still waiting for its head with an
+  `interrupted` error, ends one already streaming with `http/end` `failed`
+  `interrupted`, and frees its slot. No `http/chunk` follows that end. A call
+  that names a send the host already settled is refused `interrupted` before
+  anything goes upstream; like a late answer, it is not a violation, since the
+  driver cannot see the cancel before it asks. The driver closes only its own
+  side: the serve helper aborts the send's signal, drops any chunk for a call
+  it no longer holds, and streams no more events for the send. A late event
+  still reaches nothing, because the host settled the send at the cancel. The
+  proxy journals nothing of its own; the harness loop records the turn as
+  `interrupted`, as it does for every provider's cancel. A call made without
+  `requestId` is not tied to a send and runs until it ends or the driver
+  stops, as before. A send that settles normally leaves its calls alone, since
+  a driver may answer before reading `http/end`.
+  _Rationale:_ the host could not tell which send a brokered call served, so a
+  cancel after the body started left the upstream request generating until it
+  ended, holding one of the eight slots and spending the person's tokens. The
+  rule changes no wire version. A protocol change that a v1 driver could
+  misread is a new major, and this one is not: the field is optional and
+  written only by the driver, and every answer the host sends for it is a
+  message a v1 driver already reads. A driver that sends the field to a host
+  without it would be stopped, but no host speaking `harness-endpoint/1` has
+  been released, so it joins v1 now; once the first release ships, an
+  addition like this needs a new major version.
 - **Bounds.** A driver line is at most 4 MiB. `initialize`, `probe`, and
   `session/open` get 30 seconds and `session/send` ten minutes; a brokered call
   gets 10 seconds to connect, 120 seconds between response chunks (including
@@ -932,9 +962,10 @@ These rules resolve what slice 7 left to implementation.
   holds the example's copy byte-identical to the SDK's.
 - **What the helper does for a driver.** It answers `initialize` on
   `harness-endpoint/1` alone and refuses any other offer as `incompatible`;
-  numbers brokered requests and hands back their head, then their body as the
-  host streams it; aborts a send's signal on `session/cancel` and stops
-  streaming its events; and writes every failure as the structure the host
+  numbers brokered requests, names the send on each one made from `send`, and
+  hands back their head, then their body as the host streams it; aborts a
+  send's signal on `session/cancel`, settles that send's open brokered calls
+  as `interrupted`, and stops streaming its events; and writes every failure as the structure the host
   reads (a category, `retryAfterMs`, `contextOverflow`), dropping a value the
   host's schema would refuse and turning any other thrown value into
   `provider-failed`, so a driver's own text never needs to cross. On stdio it
@@ -951,8 +982,9 @@ These rules resolve what slice 7 left to implementation.
   body in pieces a few characters long, because the host relays it wherever
   its reads end. The run passes when the handshake agrees on a version the
   host speaks, the probe reports a listed model, a send settles with text or
-  tool calls, the driver still answers after a cancel and after a release,
-  and every failure carries a category the host reads.
+  tool calls, the driver still answers after a cancel (also one in the middle
+  of a brokered body, whose call must name its send) and after a release, and
+  every failure carries a category the host reads.
 - **The key placement is the person's.** `initialize` carries no key facts,
   so a driver asks for the key in the header its service reads, and the
   person chooses that placement when they add the provider; the driver's own

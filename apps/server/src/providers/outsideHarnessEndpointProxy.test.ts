@@ -818,4 +818,264 @@ describe("outside driver brokered requests", () => {
 
     expect(call.seen()?.end).toMatchObject({ outcome: "failed", category: "protocol" });
   });
+
+  describe("a cancel mid-body", () => {
+    /** A service that sends one piece, then stays open until the host closes the connection. */
+    function stallingService() {
+      const state = { aborted: false };
+      const fetch = vi.fn<OutsideDriverFetch>(async (_url, init) => {
+        const encoder = new TextEncoder();
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(encoder.encode("first "));
+            init.signal?.addEventListener("abort", () => {
+              state.aborted = true;
+              controller.error(new Error("aborted"));
+            });
+          },
+        });
+        return new Response(body);
+      });
+      return { fetch, state };
+    }
+
+    /** A driver that asks for the stalling body for its send and waits for the host to end it. */
+    function streamingDriver(options: { readonly tag?: boolean } = {}) {
+      let ended: FixtureHttpResult | undefined;
+      const handler: FixtureDriverHandler = async (_params, context) => {
+        ended = await context.http({
+          ...(options.tag === false ? {} : { requestId: context.id }),
+          url: `${baseUrl}chat`,
+          method: "GET",
+        });
+        return { text: "late", toolCalls: [] };
+      };
+      return { handler, ended: () => ended };
+    }
+
+    const chunksAfterEnd = (driver: ReturnType<typeof harness>["driver"]) => {
+      const methods = driver.received.map(({ method }) => method);
+      const end = methods.indexOf("http/end");
+      return end === -1 ? 0 : methods.slice(end + 1).filter((m) => m === "http/chunk").length;
+    };
+
+    it("closes the upstream request and ends the driver's body as interrupted, with no chunk after the end", async () => {
+      const service = stallingService();
+      const streaming = streamingDriver();
+      const { probe, proxy, driver } = harness(
+        { "session/send": streaming.handler },
+        { fetch: service.fetch },
+      );
+      await probe();
+      const session = await proxy.harnessEndpoint.open(modelId);
+      const cancel = new AbortController();
+      const sending = session.send(request(), { signal: cancel.signal, onEvent: () => {} });
+      await vi.waitFor(() =>
+        expect(driver.received.map(({ method }) => method)).toContain("http/chunk"),
+      );
+      cancel.abort();
+
+      expect(await rejection(sending)).toMatchObject({ category: "interrupted" });
+      await vi.waitFor(() => expect(streaming.ended()).toBeDefined());
+      expect(service.state.aborted).toBe(true);
+      expect(streaming.ended()?.end).toMatchObject({ outcome: "failed", category: "interrupted" });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(chunksAfterEnd(driver)).toBe(0);
+    });
+
+    it("lets nothing the driver streams after the cancel reach the caller", async () => {
+      const service = stallingService();
+      const onEvent = vi.fn();
+      const handler: FixtureDriverHandler = async (_params, context) => {
+        await context.http({ requestId: context.id, url: `${baseUrl}chat`, method: "GET" });
+        context.emit({ kind: "text-delta", text: HOSTILE });
+        return { text: HOSTILE, toolCalls: [] };
+      };
+      const { probe, proxy, driver } = harness(
+        { "session/send": handler },
+        { fetch: service.fetch },
+      );
+      await probe();
+      const session = await proxy.harnessEndpoint.open(modelId);
+      const cancel = new AbortController();
+      const sending = session.send(request(), { signal: cancel.signal, onEvent });
+      await vi.waitFor(() =>
+        expect(driver.received.map(({ method }) => method)).toContain("http/chunk"),
+      );
+      cancel.abort();
+      await rejection(sending);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      expect(onEvent).not.toHaveBeenCalled();
+    });
+
+    it("frees the slots the cancelled send held", async () => {
+      const service = stallingService();
+      const first = streamingDriver();
+      let sends = 0;
+      const handler: FixtureDriverHandler = async (params, context) => {
+        sends += 1;
+        if (sends === 1) return first.handler(params, context);
+        const calls = await Promise.all(
+          Array.from({ length: 8 }, () => context.http({ url: `${baseUrl}models`, method: "GET" })),
+        );
+        return { text: calls.map(({ end }) => end?.outcome).join(","), toolCalls: [] };
+      };
+      const ok = vi.fn<OutsideDriverFetch>(async () => new Response("ok"));
+      const fetch: OutsideDriverFetch = (url, init) =>
+        url.endsWith("/chat") ? service.fetch(url, init) : ok(url, init);
+      const { probe, proxy, driver } = harness({ "session/send": handler }, { fetch });
+      await probe();
+      const session = await proxy.harnessEndpoint.open(modelId);
+      const cancel = new AbortController();
+      const sending = session.send(request(), { signal: cancel.signal, onEvent: () => {} });
+      await vi.waitFor(() =>
+        expect(driver.received.map(({ method }) => method)).toContain("http/chunk"),
+      );
+      cancel.abort();
+      await rejection(sending);
+      await vi.waitFor(() => expect(first.ended()).toBeDefined());
+
+      const next = await session.send(request(), {
+        signal: new AbortController().signal,
+        onEvent: () => {},
+      });
+      expect(next.text).toBe(Array(8).fill("complete").join(","));
+    });
+
+    it("refuses a brokered call that names a send already cancelled, without reaching the service", async () => {
+      const fetch = vi.fn<OutsideDriverFetch>(async () => new Response("ok"));
+      let askLate: (() => Promise<FixtureHttpResult>) | undefined;
+      const handler: FixtureDriverHandler = (_params, context) =>
+        new Promise(() => {
+          askLate = () =>
+            context.http({ requestId: context.id, url: `${baseUrl}chat`, method: "GET" });
+        });
+      const { probe, proxy, channel } = harness({ "session/send": handler }, { fetch });
+      await probe();
+      const session = await proxy.harnessEndpoint.open(modelId);
+      const cancel = new AbortController();
+      const sending = session.send(request(), { signal: cancel.signal, onEvent: () => {} });
+      await vi.waitFor(() => expect(askLate).toBeDefined());
+      cancel.abort();
+      await rejection(sending);
+
+      const late = await askLate?.();
+      expect(late?.error).toMatchObject({ data: { category: "interrupted" } });
+      expect(fetch).not.toHaveBeenCalled();
+      expect(channel.driver.stopped()).toBe(false);
+    });
+
+    it("sends nothing upstream when the send is cancelled while the key is being read", async () => {
+      let keyRead: (() => void) | undefined;
+      const resolver: ProviderCredentialResolver = {
+        has: async () => true,
+        resolve: async () => "KEY-A",
+        lease: () =>
+          new Promise((resolve) => {
+            keyRead = () => resolve({ credential: "KEY-A", reportRejected: () => {} });
+          }),
+      };
+      const fetch = vi.fn<OutsideDriverFetch>(async () => new Response("ok"));
+      let asked: Promise<FixtureHttpResult> | undefined;
+      const handler: FixtureDriverHandler = (_params, context) => {
+        asked = context.http({
+          requestId: context.id,
+          url: `${baseUrl}chat`,
+          method: "GET",
+          auth: { header: "authorization", scheme: "Bearer" },
+        });
+        return new Promise(() => {});
+      };
+      const { probe, proxy } = harness(
+        { "session/send": handler },
+        {
+          fetch,
+          credentialResolver: resolver,
+          key: { header: "authorization", scheme: "Bearer" },
+        },
+      );
+      await probe();
+      const session = await proxy.harnessEndpoint.open(modelId);
+      const cancel = new AbortController();
+      const sending = session.send(request(), { signal: cancel.signal, onEvent: () => {} });
+      await vi.waitFor(() => expect(keyRead).toBeDefined());
+      cancel.abort();
+      await rejection(sending);
+      keyRead?.();
+
+      expect((await asked)?.error).toMatchObject({ data: { category: "interrupted" } });
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it("stops a driver whose brokered call names a send the host never issued, or a probe", async () => {
+      for (const requestId of [999, 2]) {
+        const handler: FixtureDriverHandler = async (_params, context) => {
+          await context.http({ requestId, url: `${baseUrl}chat`, method: "GET" });
+          return { text: "x", toolCalls: [] };
+        };
+        const fetch = vi.fn<OutsideDriverFetch>(async () => new Response("ok"));
+        // Call 1 is initialize and call 2 is the probe, so id 2 is not a send.
+        const { probe, proxy, channel } = harness({ "session/send": handler }, { fetch });
+        await probe();
+        const session = await proxy.harnessEndpoint.open(modelId);
+        await rejection(
+          session.send(request(), { signal: new AbortController().signal, onEvent: () => {} }),
+        );
+
+        expect(channel.driver.stopped()).toBe(true);
+        expect(fetch).not.toHaveBeenCalled();
+      }
+    });
+
+    it("closes a send's brokered calls when its deadline passes", async () => {
+      const service = stallingService();
+      const streaming = streamingDriver();
+      const channel = makeInMemoryOutsideDriverChannel();
+      serveFixtureDriver(channel.driver, { "session/send": streaming.handler });
+      const proxy = makeOutsideHarnessEndpointProxy({
+        instanceId: instanceA,
+        channel: channel.host,
+        baseUrl,
+        key: undefined,
+        modelIds: [modelId],
+        runtimeRegistry: new ProviderRuntimeRegistry(),
+        fetch: service.fetch,
+        limits: { callTimeoutMs: 2_000, sendTimeoutMs: 50 },
+        clock: () => now,
+      });
+      await Effect.runPromise(Effect.scoped(proxy.probe({ instanceId: instanceA })));
+      const session = await proxy.harnessEndpoint.open(modelId);
+
+      expect(
+        await rejection(
+          session.send(request(), { signal: new AbortController().signal, onEvent: () => {} }),
+        ),
+      ).toMatchObject({ category: "unavailable" });
+      await vi.waitFor(() => expect(streaming.ended()).toBeDefined());
+      expect(service.state.aborted).toBe(true);
+      expect(streaming.ended()?.end).toMatchObject({ outcome: "failed", category: "interrupted" });
+    });
+
+    it("leaves a call alone when its send settles normally", async () => {
+      const service = stallingService();
+      let ended: FixtureHttpResult | undefined;
+      const handler: FixtureDriverHandler = (_params, context) => {
+        void context
+          .http({ requestId: context.id, url: `${baseUrl}chat`, method: "GET" })
+          .then((result) => {
+            ended = result;
+          });
+        return { text: "answered first", toolCalls: [] };
+      };
+      const { probe, proxy } = harness({ "session/send": handler }, { fetch: service.fetch });
+      await probe();
+      const session = await proxy.harnessEndpoint.open(modelId);
+      await session.send(request(), { signal: new AbortController().signal, onEvent: () => {} });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      expect(service.state.aborted).toBe(false);
+      expect(ended).toBeUndefined();
+    });
+  });
 });

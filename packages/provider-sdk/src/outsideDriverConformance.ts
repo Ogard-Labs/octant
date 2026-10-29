@@ -58,6 +58,7 @@ export interface OutsideDriverConformanceEvidence {
   readonly probeReportedAListedModel: true;
   readonly answeredWithASettledResponse: true;
   readonly keptServingAfterACancel: true;
+  readonly keptServingAfterAMidBodyCancel: true;
   readonly keptServingAfterARelease: true;
   readonly everyMessageDecoded: true;
   readonly brokeredCallsStayedOnTheConfiguredOrigin: true;
@@ -95,7 +96,9 @@ interface PendingCall {
  * Runs the driver through what the host relies on: a handshake on a version
  * the host speaks; a probe that decodes and reports a listed model; a send
  * whose events and answer decode and that settles with text or tool calls;
- * a cancel and a release after which it still answers; failures written as
+ * a cancel (once at the start, once in the middle of a brokered body, which
+ * the brokered call must name its send for) and a release after which it still
+ * answers; failures written as
  * the structure the host reads; and brokered requests only to the configured
  * origin, with the key asked for only where the provider sends it.
  */
@@ -143,7 +146,21 @@ export async function runOutsideDriverConformance(
   };
   const notify = (method: string, params: unknown) => write({ jsonrpc: "2.0", method, params });
 
+  const sendIds = new Set<number>();
+  // The kit holds the first brokered body a driver asks for while this is set,
+  // so a cancel can land in the middle of it.
+  let holding:
+    | { readonly sendId: number; readonly relayed: (httpId: number) => void; held: boolean }
+    | undefined;
+
   const broker = async (httpId: number, params: OutsideDriverHttpRequestParams) => {
+    if (params.requestId !== undefined && !sendIds.has(params.requestId)) {
+      return violate("a brokered request named a send the host never issued");
+    }
+    const holder = holding !== undefined && !holding.held ? holding : undefined;
+    if (holder !== undefined && params.requestId !== holder.sendId) {
+      return violate("a brokered request made for a send did not name it with requestId");
+    }
     const refusal = brokeredRequestRefusal(params, origin, fixture.key);
     if (refusal !== undefined) return violate(refusal);
     const headers = new Headers();
@@ -184,6 +201,15 @@ export async function runOutsideDriverConformance(
     // it small: a driver that parses only whole lines per chunk fails here
     // rather than on the first long answer.
     const text = await response.text();
+    if (holder !== undefined && text.length > 0) {
+      holder.held = true;
+      notify(OUTSIDE_DRIVER_METHODS.httpChunk, {
+        httpId,
+        data: text.slice(0, CHUNK_CHARACTERS),
+      });
+      holder.relayed(httpId);
+      return;
+    }
     for (let offset = 0; offset < text.length; offset += CHUNK_CHARACTERS) {
       notify(OUTSIDE_DRIVER_METHODS.httpChunk, {
         httpId,
@@ -283,8 +309,20 @@ export async function runOutsideDriverConformance(
       }).settled,
     ),
   );
-  const send = () =>
-    call(OUTSIDE_DRIVER_METHODS.sessionSend, { sessionRef, request: fixture.request });
+  const send = () => {
+    const sent = call(OUTSIDE_DRIVER_METHODS.sessionSend, { sessionRef, request: fixture.request });
+    sendIds.add(sent.id);
+    return sent;
+  };
+  // The host answers a cancel itself and ignores the driver's late reply, so
+  // the driver only has to keep serving.
+  const cancel = (sent: { id: number; settled: Promise<unknown> }) => {
+    sent.settled.catch(() => undefined);
+    const cancelledCall = pending.get(sent.id);
+    pending.delete(sent.id);
+    cancelledCall?.reject(conformanceError("the send was cancelled"));
+    notify(OUTSIDE_DRIVER_METHODS.sessionCancel, { requestId: sent.id });
+  };
   const answer = read(
     "the session/send answer",
     decodeOutsideDriverSessionSendResult(await send().settled),
@@ -293,15 +331,27 @@ export async function runOutsideDriverConformance(
     fail("a send settled with neither text nor tool calls");
   }
 
-  // The host answers a cancel itself and ignores the driver's late reply, so
-  // the driver only has to keep serving.
-  const cancelled = send();
-  cancelled.settled.catch(() => undefined);
-  const cancelledCall = pending.get(cancelled.id);
-  pending.delete(cancelled.id);
-  cancelledCall?.reject(conformanceError("the send was cancelled"));
-  notify(OUTSIDE_DRIVER_METHODS.sessionCancel, { requestId: cancelled.id });
+  cancel(send());
   await probe();
+
+  // A driver that makes a brokered call is cancelled with its body half read.
+  // The host then ends the call as interrupted; a late event from the driver
+  // reaches nothing, so only the driver's staying alive is checked.
+  const midBody = send();
+  const relayed = new Promise<number>((resolve) => {
+    holding = { sendId: midBody.id, relayed: resolve, held: false };
+  });
+  const reached = await Promise.race([relayed, midBody.settled.then(() => undefined)]);
+  holding = undefined;
+  if (reached !== undefined) {
+    cancel(midBody);
+    notify(OUTSIDE_DRIVER_METHODS.httpEnd, {
+      httpId: reached,
+      outcome: "failed",
+      category: "interrupted",
+    });
+    await probe();
+  }
 
   notify(OUTSIDE_DRIVER_METHODS.sessionRelease, { sessionRef });
   await probe();
@@ -312,6 +362,7 @@ export async function runOutsideDriverConformance(
     probeReportedAListedModel: true,
     answeredWithASettledResponse: true,
     keptServingAfterACancel: true,
+    keptServingAfterAMidBodyCancel: true,
     keptServingAfterARelease: true,
     everyMessageDecoded: true,
     brokeredCallsStayedOnTheConfiguredOrigin: true,
