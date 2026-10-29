@@ -292,6 +292,8 @@ export function wireRemote(deps: RemoteDependencies) {
         config,
       });
       currentRemoteGateway = gateway;
+      // Guest devices a left hub could not revoke while no gateway existed.
+      spokeLinkService.settlePendingRevocations();
       return gateway;
     },
     selfMadeCertificate: createSelfMadeListenerCertificateStore({

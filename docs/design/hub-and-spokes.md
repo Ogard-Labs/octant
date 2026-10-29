@@ -315,7 +315,11 @@ member are the ones it gave other members on itself.
 - **Leave** (on the member) revokes the hub principal, drops every grant given
   by the member, and forgets the roster. It also tells the hub, when the hub is
   reachable, so the hub drops the member from the next roster. A spoke's
-  threads, Projects, and credentials are untouched.
+  threads, Projects, and credentials are untouched. From the moment Leave
+  starts, the spoke admits no more guests, and it revokes every guest device it
+  holds when Leave ends. A device it cannot revoke yet, because the private
+  listener has not started, is kept on a pending list on disk and revoked as
+  soon as the listener's device pairing exists.
 - **Remove** (on the hub) revokes the member's device on the hub and drops it
   from the roster.
 - **Every spoke drops the grants held for a member** when it sees a newer

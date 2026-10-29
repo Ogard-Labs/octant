@@ -67,12 +67,16 @@ export const HubLinkState = Schema.Struct({
   guestDevices: Schema.optional(Schema.Array(GuestDeviceRecord)),
   /** Set once a newer roster no longer lists this spoke: the hub principal is revoked. */
   removed: Schema.optional(Schema.Literal(true)),
+  /** Set while Leave waits on the hub, so no guest is admitted after the devices to revoke were read. */
+  leaving: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type HubLinkState = typeof HubLinkState.Type;
 
 export const HubState = Schema.Struct({
   hub: Schema.optional(HubSideState),
   link: Schema.optional(HubLinkState),
+  /** Guest devices a dropped link could not revoke because the device pairing was not running; revoked once it is. */
+  pendingDeviceRevocations: Schema.optional(Schema.Array(Schema.UUID)),
 }).annotations(strict);
 export type HubState = typeof HubState.Type;
 
