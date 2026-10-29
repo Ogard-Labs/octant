@@ -132,6 +132,8 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
   "not-awaiting-confirmation": "That member is not waiting for confirmation.",
   "confirmation-invalid": "That confirmation did not check out, so the member stays as it was.",
   "no-such-alert": "That alert is already gone.",
+  "could-not-remove":
+    "The remote listener could not restart without the Tailscale certificate, so it is still on. Try turning it off again.",
 };
 
 interface Reply {

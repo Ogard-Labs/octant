@@ -49,7 +49,7 @@ async function setup(
       daemon: unreachableTailscaleDaemon,
       sink: {
         install: async () => ({ status: "refused", kind: "could-not-apply" }),
-        remove: async () => undefined,
+        remove: async () => ({ status: "removed" }),
         holdsCertificate: () => false,
       },
       listener: () => host.listener,
