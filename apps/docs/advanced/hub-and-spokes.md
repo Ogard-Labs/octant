@@ -289,8 +289,11 @@ spoke. Only the spoke can change it.
 
 Ticking an item records your choice. In this release the hub can use only
 Roster and Status. Owners works for your own owner devices (see
-[Owner devices](#owner-devices)). The other items, including Introduce, do
-nothing yet, because the features behind them are not available yet.
+[Owner devices](#owner-devices)). Introduce makes this computer accept the other
+spokes and your phones as full members (see
+[Delegate work to another computer](#delegate-work-to-another-computer)). The
+other items do nothing yet, because the features behind them are not available
+yet.
 
 Whatever you tick, the computer keeps its files, sign-ins, sandbox, and every
 approval.
@@ -298,6 +301,40 @@ approval.
 To change the grant later, open **Settings → Remote access → Join a hub**, or
 run `octant hub grant --items <list>`. `octant hub grant` on its own shows the
 current grant.
+
+## Delegate work to another computer
+
+A thread on one spoke can hand a piece of work to another spoke and get the
+result back. Nothing is delegated until a thread asks for it.
+
+- **The asking computer checks first.** The thread must be allowed to start
+  helpers. The work runs in the same mode as the thread, with no more access than
+  the thread has. A thread that already read outside content cannot start
+  helpers.
+- **The other computer decides.** It accepts a request only from a spoke in the
+  roster it holds, signed with that spoke's key. Each member it accepts gets a
+  peer grant. A new full member may hand work to every Project there, asking
+  before each edit, and never at Full access. A request for more than the grant
+  or the Project allows is refused, not run as something smaller. The hub and
+  phones cannot hand work over at all.
+- **The work is an ordinary thread there.** In Work, it appears in that
+  computer's sidebar and board, runs in the Project folder, and uses that
+  computer's sign-ins. No sign-in travels with the request.
+- **Approvals stay there.** Every approval the work raises goes to that
+  computer's own windows and to members it lets answer. The computer that asked
+  and the hub cannot answer them, and cannot mark the thread Done. Only you can,
+  on that computer.
+- **The result comes back as data.** The asking thread gets the summary, the final
+  message, and any artifact references, framed as outside content, and the thread
+  is marked as having read it. Nothing in it is treated as an instruction.
+- **Cancel.** Cancelling the asking thread asks the other computer to stop the
+  work.
+
+In this release only Work Projects take delegated work; a Code Project refuses
+it. Work runs on the default model that computer's Work settings name. A plan-only
+request or one that names a provider profile is refused. An agent's helper
+request does not carry a target computer yet: you start, read, and cancel a
+delegation through the local administration channel on the asking computer.
 
 ## Leave a hub and remove a device
 

@@ -31,7 +31,9 @@ confirms, or dismisses alerts, and a passkey owner can confirm too. The browser 
 written and tested with a faked authenticator, but no browser screen joins a hub
 yet, so nothing mounts them. Nothing here has been run on a real phone, a real
 passkey, or Android. Sign-in copy, posture routes, a Mac Touch ID unlock key,
-failover, the wake service, push, provisioning, and delegation are not built.
+failover, the wake service, push, and provisioning are not built. Delegation is
+built for Work Projects, read narrowly as the last item of the delivery plan's
+slice 6 records.
 The hub uses only the Roster and Status grant items, and the Owners item for
 owner devices. The maintainer
 asked for this design and authorized it as post-preview, design-first work on
@@ -889,6 +891,28 @@ maintainer's hardware, or names the maintainer gate.
    approval on B cannot be answered from A or the hub; the result is recorded
    on A as external content. Verification: server tests and a three-host smoke
    with a fake provider; a real-provider run is a maintainer gate.
+
+   Built, with these narrower readings:
+   - A spoke now introduces the other spokes as well as guests (the hub is never
+     introduced), so a new spoke holds the full-member peer grant for each.
+   - The sender's identity public key travels beside its signature
+     (`x-octant-hub-peer-key`); the receiver accepts it only if its fingerprint is
+     the one the held roster lists, then checks the signature.
+   - The hub and a standby never send delegated work; a guest neither sends nor
+     receives it. A request asking for more than the clamp allows is refused with
+     the posture it could have had, never run narrower.
+   - A remote child has the parent's mode and no more than the parent's posture.
+   - Only Work Projects take delegated work. A Code Project reports no delegable
+     mode, because a Code thread needs a managed worktree and a delivery target a
+     person confirmed. Work asks first and has no read-only posture, so a plan-only
+     request is refused; a named provider profile is refused, and the thread runs on
+     the default model the Work settings name.
+   - Artifact references are empty: a Work turn reports the paths it changed, not
+     content digests.
+   - An agent's helper request carries no target member yet. The delegating service
+     is started, read, and cancelled through loopback administration routes on A.
+     Wiring a target member into the agent tool surface is a seam change of its own.
+
 7. **Failover.** Standby order, roster and wake-time copies, stand-in and
    step-down. Acceptance: members switch after the set time and return when
    the hub is back; a standby's membership changes merge back with removal
