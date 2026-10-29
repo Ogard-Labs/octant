@@ -14,6 +14,10 @@ import {
 } from "@octant/domain/canvas-diagram-layout";
 import { layoutCanvasSankey } from "@octant/domain/canvas-sankey-layout";
 import { formatCanvasNumber } from "@octant/domain/canvas-number-format";
+import {
+  layoutCanvasFlow,
+  type CanvasFlowScreenSourceBlock,
+} from "@octant/domain/canvas-flow-layout";
 import { layoutCanvasTreemap } from "@octant/domain/canvas-treemap-layout";
 import {
   layoutCanvasHeatmapCalendar,
@@ -27,6 +31,7 @@ import { layoutCanvasComparisonMatrix } from "@octant/domain/canvas-comparison-m
 import {
   canvasReadingOrder,
   packCanvasDashboardGrid,
+  type CanvasPlacedReadingItem,
   type CanvasReadingItem,
 } from "@octant/domain/canvas-dashboard-layout";
 import {
@@ -172,9 +177,11 @@ export function renderArtifactSvg(
     const drawn =
       item.kind === "dashboard"
         ? dashboardGrid(item, y, palette, width, height - PADDING)
-        : DRAWN_KINDS.has(item.block.kind)
-          ? drawBlock(item.block, y, palette, width)
-          : undefined;
+        : item.kind === "flow"
+          ? flowBoard(item, y, palette, width, definition.blocks)
+          : DRAWN_KINDS.has(item.block.kind)
+            ? drawBlock(item.block, y, palette, width)
+            : undefined;
     if (drawn === undefined) continue;
     parts.push(drawn.markup);
     y += drawn.height + ROW_GAP;
@@ -1088,6 +1095,48 @@ function mindmapThumbnail(
     .join("");
   const rootLabel = text(rootX + 4, rootY + 11, clamp(root.label, 15), 7, palette.ink, 600);
   return links + rootBox + rootLabel + childBoxes;
+}
+
+/**
+ * A flow as a small board: its screens as mini frames laid out by the shared
+ * pure layout, scaled into the row, with elbow edges between them. The sidecar
+ * and the screen draw the same picture at different scales.
+ */
+function flowBoard(
+  item: CanvasPlacedReadingItem<CanvasBlock> & { readonly kind: "flow" },
+  y: number,
+  palette: ArtifactThumbnailPalette,
+  width: number,
+  blocks: ReadonlyArray<CanvasBlock>,
+): DrawnBlock {
+  const sources = blocks.filter(
+    (block) => block.kind === "mockup" || block.kind === "design",
+  ) as ReadonlyArray<CanvasFlowScreenSourceBlock>;
+  const layout = layoutCanvasFlow(item.flow, sources);
+  const available = width - PADDING * 2;
+  const scale = layout.width === 0 ? 0 : Math.min(1, available / layout.width);
+  const height = Math.round(layout.height * scale);
+  const screens = layout.screens
+    .map((screen) => {
+      const x = PADDING + screen.x * scale;
+      const drawn = y + screen.y * scale;
+      return `<rect data-flow-screen="${screen.screenId}" x="${String(x)}" y="${String(drawn)}" width="${String(Math.max(1, screen.width * scale))}" height="${String(Math.max(1, screen.height * scale))}" rx="3" fill="none" stroke="${palette.muted}" stroke-width="1"/>`;
+    })
+    .join("");
+  const edges = layout.edges
+    .map((edge) => {
+      const points = edge.points
+        .map((point) => `${String(PADDING + point.x * scale)},${String(y + point.y * scale)}`)
+        .join(" ");
+      return points.length === 0
+        ? ""
+        : `<polyline data-flow-edge="${edge.edgeId}" points="${points}" fill="none" stroke="${palette.muted}" stroke-width="1"/>`;
+    })
+    .join("");
+  return {
+    markup: `<g class="canvas-flow-thumb">${screens}${edges}</g>`,
+    height: Math.max(height + 6, 24),
+  };
 }
 
 function mockupFrame(

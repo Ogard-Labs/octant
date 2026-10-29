@@ -2298,6 +2298,60 @@
   color: var(--oct-danger-fg);
 }
 
+/* A flow board draws real screens, so its nodes are HTML inside the board's
+   coordinate space: a mockup reflows at the node's width, a design frame is
+   scaled to it. The label sits under the screen, and a focusable screen the
+   person can drag carries the keyboard's focus ring. */
+/* A focusable screen keeps the workspace's one neutral keyboard focus edge:
+   no surface repaints it (the visual-language contract), so focus shows the
+   browser's own outline, as a diagram node's does. */
+.canvas-flow-board__screen {
+  display: grid;
+  justify-items: stretch;
+  gap: 4px;
+  border-radius: var(--oct-radius-sm);
+}
+
+.canvas-flow-board__screen .canvas-mockup__frame,
+.canvas-flow-board__design-frame {
+  border-radius: var(--oct-radius-sm);
+  overflow: hidden;
+}
+
+.canvas-flow-board__design-frame {
+  position: relative;
+  border: 1px solid var(--oct-border);
+  background: var(--oct-surface);
+}
+
+.canvas-flow-board__design-frame .canvas-design__page {
+  position: absolute;
+  inset: 0;
+  transform-origin: top left;
+  border: 0;
+}
+
+.canvas-flow-board__screen-label {
+  font-size: var(--oct-text-xs);
+  color: var(--oct-fg-2);
+  text-align: center;
+}
+
+.canvas-flow-board__edge {
+  stroke-width: 1.5;
+}
+
+.canvas-flow-board__outline {
+  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
+}
+
+/* A screen the person can drag says so with the cursor, as a diagram node
+   does; a shared snapshot or paired browser keeps the reading cursor. */
+.canvas-flow-board[data-editable="true"] .canvas-flow-board__screen {
+  cursor: move;
+}
+
 .canvas-block__diagram-edge {
   fill: none;
   stroke: var(--oct-chart-axis);

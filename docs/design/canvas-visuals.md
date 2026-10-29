@@ -416,15 +416,40 @@ system border and the chosen tab a `Highlight` underline. The kit never sets a
 colour of its own, so a page written only with it matches the workspace in
 every theme.
 
+## Flow boards
+
+A flow draws screens, so its board reads as devices connected by transitions
+rather than as labelled boxes. Each screen draws at its declared size: a
+mockup reflows through the same frame drawing the document uses at the node's
+width (a phone 200px, a tablet 260px, a desktop or browser window 440px, a
+dock panel 360px), and a design screen is its live page, scaled into the node
+and lazy-loaded when it or its neighbour is in view, exactly as the design
+board loads; the node keeps the frame's aspect from its viewport, so the
+layout is pure and the exports draw the same picture. The screen's label sits
+under it in `--oct-fg-2`; an edge is the diagram edge ink with an arrowhead,
+elbowed between the screens it joins, and a transition that runs backward
+steps below them rather than crossing the boxes. A tone is a theme role, as
+on a diagram edge, and always sits beside a label that says what it means.
+
+The board keeps the diagram board's interaction: zoom (0.25 to 4) about the
+centre, pan, fit, focusable screens with arrow-key nudge, and a finished drag
+journaled when the surface can. The screen's focus ring is the ordinary focus
+outline, and a screen the person can drag says so with the cursor. Under
+forced colours every edge falls to system ink and the arrowhead keeps the
+direction; the outline under the board lists each screen and each transition
+with its hotspot, so a reader who cannot use the board still walks the flow.
+
 ## Verification
 
 - Marks, scales, and number reading: `packages/theme/src/chartMarks.test.ts`,
   `packages/theme/src/chartScales.test.ts`, and
   `packages/domain/src/canvasNumberFormat.test.ts`.
 - Deterministic layouts shared by the renderer and the static export: the
-  treemap, heatmap, bar-list, and comparison-matrix tests and snapshots beside
-  their layouts in `packages/domain/src/`.
+  treemap, heatmap, bar-list, comparison-matrix, and flow tests and snapshots
+  beside their layouts in `packages/domain/src/`.
 - Palette and context-tone contracts: `apps/web/src/theme/visualLanguageContract.test.ts`.
 - Frame kit: `packages/domain/src/canvasDesignFrameKit.ts`.
+- Flow board: `apps/web/src/canvas/blocks/FlowBoard.test.tsx` and
+  `packages/domain/src/canvasFlowLayout.test.ts`.
 - Render changed blocks in light, dark, forced colours, and at phone width. A
   documentation-only move is not evidence of fresh rendered QA.

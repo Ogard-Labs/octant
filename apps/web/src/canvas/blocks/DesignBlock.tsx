@@ -536,6 +536,42 @@ function writeNotesShown(shown: boolean): void {
  * stopped painting sandboxed frames that were `inert` or had
  * `pointer-events: none` until one that took the pointer appeared beside them.
  */
+/**
+ * One static frame of a design, drawn scaled inside a surface that is not the
+ * design's own board — a flow board's screen node. It resolves the design's
+ * declared images itself, so each screen asks the host as its own drawing
+ * does; a design that runs script never reaches a flow, so the frame is
+ * always the still picture.
+ */
+export function DesignFrameView({
+  block,
+  frameId,
+  scale,
+  assetRuntime,
+}: {
+  readonly block: CanvasDesignBlock;
+  readonly frameId: string;
+  readonly scale: number;
+  readonly assetRuntime?: DesignAssetRuntime;
+}) {
+  const size = block.size === "document" ? "desktop" : block.size;
+  const theme = useWorkspaceFrameTheme(designFrameTheme(block) === "workspace");
+  const assetUrls = useDesignAssetUrls(block, assetRuntime);
+  const frame = block.frames.find((candidate) => String(candidate.frameId) === frameId);
+  if (frame === undefined) return null;
+  return (
+    <FrameView
+      block={block}
+      frameIds={[frameId]}
+      size={size}
+      still
+      scale={scale}
+      frame={{ theme, assetUrls }}
+      title={`${frame.title}, design screen`}
+    />
+  );
+}
+
 function FrameView({
   block,
   size,

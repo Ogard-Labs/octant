@@ -16,6 +16,10 @@ import {
 import { isCanvasShareSafeText } from "@octant/contracts/canvas-share";
 import { formatCanvasNumber } from "@octant/domain/canvas-number-format";
 import {
+  layoutCanvasFlow,
+  type CanvasFlowScreenSourceBlock,
+} from "@octant/domain/canvas-flow-layout";
+import {
   treemapChildren,
   treemapRootId,
   treemapTotals,
@@ -427,15 +431,18 @@ function renderDocument(
   // A dashboard reads where it sits: its title, then each placed block in
   // cell order, which is the order the screen's grid reads at one column. A
   // tab reads under its label and a column in track order, and a dashboard in
-  // a pane or column reads there exactly as it does at the top level. A
+  // a pane or column reads there exactly as it does at the top level. A flow
+  // reads as its graph: each screen, then each transition with its hotspot. A
   // placed block never reads again where it sits in the block list.
   const placedPieces = (item: CanvasPlacedReadingItem<CanvasBlock>): ReadonlyArray<Piece> =>
     item.kind === "block"
       ? read(item.block)
-      : [
-          { kind: "heading", level: 2, text: reading(item.dashboard.title) },
-          ...item.cells.flatMap((cell) => read(cell.block)),
-        ];
+      : item.kind === "flow"
+        ? flowPieces(item.flow, definition.blocks)
+        : [
+            { kind: "heading", level: 2, text: reading(item.dashboard.title) },
+            ...item.cells.flatMap((cell) => read(cell.block)),
+          ];
   for (const item of canvasReadingOrder(definition.blocks)) {
     if (item.kind !== "group") {
       pieces.push(...placedPieces(item));
@@ -454,8 +461,33 @@ function renderDocument(
   return { title, body, writesDesignMarkup: pieces.some((piece) => piece.kind === "frame") };
 }
 
-/** A design as its title and its drawn frames, when the export can draw it. */
-function designFramePieces(
+/**
+ * A flow as the graph a reader walks: its screens, then each transition with
+ * the control that starts it. The reading comes from the same pure layout the
+ * board draws, so an export and the screen name the same screens.
+ */
+function flowPieces(
+  flow: Extract<CanvasBlock, { readonly kind: "flow" }>,
+  blocks: ReadonlyArray<CanvasBlock>,
+): ReadonlyArray<Piece> {
+  const sources = blocks.filter(
+    (block) => block.kind === "mockup" || block.kind === "design",
+  ) as ReadonlyArray<CanvasFlowScreenSourceBlock>;
+  const layout = layoutCanvasFlow(flow, sources);
+  const transitions = layout.edges.map((edge) => {
+    const joined = `${reading(edge.from.label)} → ${reading(edge.to.label)}`;
+    const label = edge.label === undefined ? "" : `: ${reading(edge.label)}`;
+    const hotspot = edge.hotspot === undefined ? "" : ` (via ${reading(edge.hotspot.label)})`;
+    return `${joined}${label}${hotspot}`;
+  });
+  return [
+    { kind: "heading", level: 2, text: reading(flow.title) },
+    { kind: "list", items: layout.screens.map((screen) => reading(screen.label)) },
+    ...(transitions.length === 0 ? [] : [{ kind: "list" as const, items: transitions }]),
+  ];
+}
+
+/** A design as its title and its drawn frames, when the export can draw it. */ function designFramePieces(
   block: Extract<CanvasBlock, { readonly kind: "design" }>,
   theme: DesignFrameThemeValues | undefined,
   images: CanvasExportImages | undefined,
@@ -963,6 +995,10 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
     case "tabs":
     case "columns":
       // Drawn by the reading order with what it places; one met alone has nothing to say.
+      return [];
+    case "flow":
+      // Drawn by the reading order with the screens it places; one met alone
+      // has nothing to say.
       return [];
     case "action":
       return paragraph(

@@ -34,10 +34,12 @@ import {
   canvasReadingOrder,
   type CanvasPlacedReadingItem,
 } from "@octant/domain/canvas-dashboard-layout";
+import type { CanvasFlowBlock } from "@octant/contracts/canvas";
 import { CanvasBlockRenderer } from "./blocks/CanvasBlock";
 import { designDrawnInHere, type DesignRunRuntime } from "./blocks/designRunningFrame";
 import { CanvasLayoutGroup } from "./blocks/LayoutGroups";
 import { DashboardBlock } from "./blocks/DashboardBlock";
+import { FlowBoard } from "./blocks/FlowBoard";
 
 /**
  * Canvas sharing.
@@ -411,6 +413,13 @@ function SharedSnapshotView(props: {
   const placed = (item: CanvasPlacedReadingItem<SharedBlock>): ReactNode =>
     item.kind === "block" ? (
       <SnapshotBlock block={item.block} designRun={designRun} key={item.block.blockId} />
+    ) : item.kind === "flow" ? (
+      <section key={item.flow.blockId} className="canvas-block" data-block-kind="flow">
+        <FlowBoard
+          block={item.flow as CanvasFlowBlock}
+          blocks={props.document.blocks as CanvasBlock[]}
+        />
+      </section>
     ) : (
       <section key={item.dashboard.blockId} className="canvas-block" data-block-kind="dashboard">
         <DashboardBlock

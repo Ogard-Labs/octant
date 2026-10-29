@@ -438,7 +438,7 @@ describe("Canvas share policy", () => {
     expect(JSON.stringify(shared.document)).not.toContain("screens/home.png");
   });
 
-  it("shares a validated brand and richer diagram fields at share version 11, and leaves presenter notes and a captured page behind", () => {
+  it("shares a validated brand and richer diagram fields at share version 12, and leaves presenter notes and a captured page behind", () => {
     const captureId = "66666666-6666-4666-8666-666666666666";
     const design = {
       ...onboardingFlowExample,
@@ -478,8 +478,8 @@ describe("Canvas share policy", () => {
       });
     const receipt = share([design, diagram]);
     expect(receipt.document.schemaVersion).toBe(CANVAS_SHARE_SCHEMA_VERSION);
-    expect(CANVAS_SHARE_SCHEMA_VERSION).toBe(11);
-    expect(CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION).toBe(21);
+    expect(CANVAS_SHARE_SCHEMA_VERSION).toBe(12);
+    expect(CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION).toBe(23);
     const { assets: _assets, ...withoutAssets } = design;
     expect(receipt.document.blocks).toEqual([
       {

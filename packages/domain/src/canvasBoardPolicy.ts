@@ -2,6 +2,8 @@ import {
   CANVAS_MAX_DIAGRAM_NODES,
   CanvasDiagramBlock,
   CanvasDiagramNode,
+  CanvasFlowBlock,
+  CanvasFlowScreen,
   CanvasVersion,
   decodeCanvasVersion,
   type CanvasBlock,
@@ -350,6 +352,10 @@ function isDiagramBlock(block: CanvasBlock): block is CanvasDiagramBlock {
   return block.kind === "diagram";
 }
 
+function isFlowBlock(block: CanvasBlock): block is CanvasFlowBlock {
+  return block.kind === "flow";
+}
+
 function applyNodePositions(
   block: CanvasDiagramBlock,
   positions: ReadonlyArray<CanvasDiagramNodePosition>,
@@ -372,6 +378,28 @@ function applyNodePositions(
   };
 }
 
+function applyScreenPositions(
+  block: CanvasFlowBlock,
+  positions: ReadonlyArray<CanvasDiagramNodePosition>,
+): CanvasFlowBlock {
+  const positionMap = new Map(positions.map((position) => [String(position.nodeId), position]));
+  const updatedScreens: CanvasFlowScreen[] = block.screens.map((screen) => {
+    const position = positionMap.get(String(screen.screenId));
+    if (position === undefined) return screen;
+    return {
+      ...screen,
+      x: position.x,
+      y: position.y,
+      positioned: true,
+    };
+  });
+  return {
+    ...block,
+    layout: "manual",
+    screens: updatedScreens,
+  };
+}
+
 function replaceBlock(
   blocks: ReadonlyArray<CanvasBlock>,
   blockId: string,
@@ -381,13 +409,15 @@ function replaceBlock(
 }
 
 /**
- * Apply an immutable diagram layout revision to a Canvas version.
+ * Apply an immutable board layout revision to a Canvas version. The target is
+ * a board — a diagram's nodes or a flow's screens — and the positions apply
+ * as journaled manual placement.
  *
- * The command carries only the requested node positions. The policy verifies
- * that the actor is a user or agent, the target block is a diagram, every
- * positioned node exists, and the resulting definition still passes the Canvas
- * budget and cross-reference policy. The next version keeps the same version
- * identity rules as any other version append.
+ * The command carries only the requested node or screen positions. The policy
+ * verifies that the actor is a user or agent, the target block is a board,
+ * every positioned node or screen exists, and the resulting definition still
+ * passes the Canvas budget and cross-reference policy. The next version keeps
+ * the same version identity rules as any other version append.
  */
 export function admitCanvasDiagramLayoutRevision(
   input: unknown,
@@ -433,11 +463,15 @@ export function admitCanvasDiagramLayoutRevision(
   const block = current.definition.blocks.find(
     (candidate) => String(candidate.blockId) === String(command.blockId),
   );
-  if (block === undefined || !isDiagramBlock(block)) {
-    return reject("not-a-diagram", "Canvas layout revision target is not a diagram block.");
+  if (block === undefined || (!isDiagramBlock(block) && !isFlowBlock(block))) {
+    return reject("not-a-diagram", "Canvas layout revision target is not a board block.");
   }
 
-  const nodeIds = new Set(block.nodes.map((node) => String(node.nodeId)));
+  const nodeIds = new Set(
+    isDiagramBlock(block)
+      ? block.nodes.map((node) => String(node.nodeId))
+      : block.screens.map((screen) => String(screen.screenId)),
+  );
   if (command.positions.length > CANVAS_MAX_DIAGRAM_NODES) {
     return reject(
       "oversized-payload",
@@ -450,7 +484,9 @@ export function admitCanvasDiagramLayoutRevision(
     }
   }
 
-  const revisedBlock = applyNodePositions(block, command.positions);
+  const revisedBlock = isDiagramBlock(block)
+    ? applyNodePositions(block, command.positions)
+    : applyScreenPositions(block, command.positions);
   const revisedDefinition = {
     ...current.definition,
     blocks: replaceBlock(current.definition.blocks, String(command.blockId), revisedBlock),

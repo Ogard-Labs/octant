@@ -53,6 +53,10 @@ import {
   CANVAS_THREAD_OWNED_SCHEMA_VERSION,
   CANVAS_DESIGN_FIELDS_SCHEMA_VERSION,
   CANVAS_CHART_CALLOUTS_SCHEMA_VERSION,
+  CANVAS_FLOW_SCHEMA_VERSION,
+  CANVAS_MAX_FLOW_EDGES,
+  CANVAS_MAX_FLOW_SCREENS,
+  CANVAS_FLOW_HOTSPOT_COMPONENTS,
   canvasChartUsesCallouts,
   CANVAS_MAX_DIAGRAM_GROUP_DEPTH,
   canvasProvenanceIsThreadOwned,
@@ -125,9 +129,10 @@ const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
   CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION,
   CANVAS_THREAD_OWNED_SCHEMA_VERSION,
   CANVAS_DESIGN_FIELDS_SCHEMA_VERSION,
+  CANVAS_CHART_CALLOUTS_SCHEMA_VERSION,
+  CANVAS_FLOW_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
 ];
-
 // A block kind that a document may only carry from the version that
 // introduced it. A document declaring an older version but carrying the kind
 // fails closed as a declared future version rather than a corrupt document.
@@ -146,6 +151,7 @@ const VERSION_GATED_BLOCK_KINDS: ReadonlyArray<{ readonly kind: string; readonly
     { kind: "dashboard", since: CANVAS_DASHBOARD_SCHEMA_VERSION },
     { kind: "tabs", since: CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION },
     { kind: "columns", since: CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION },
+    { kind: "flow", since: CANVAS_FLOW_SCHEMA_VERSION },
   ];
 
 export type CanvasPolicyRejectionCode =
@@ -265,6 +271,18 @@ export type CanvasPolicyRejectionCode =
   | "diagram-group-nesting-cycle"
   | "diagram-group-depth-exceeded"
   | "design-brand-refused"
+  | "flow-screens-budget-exceeded"
+  | "flow-edges-budget-exceeded"
+  | "duplicate-flow-screen"
+  | "dangling-flow-screen"
+  | "flow-screen-kind-refused"
+  | "flow-screen-variant-missing"
+  | "flow-screen-frame-missing"
+  | "flow-screen-design-refused"
+  | "duplicate-flow-edge"
+  | "dangling-flow-edge"
+  | "flow-edge-self"
+  | "flow-hotspot-refused"
   | "block-placed-twice";
 
 export class CanvasPolicyRejected extends Error {
@@ -596,6 +614,7 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
       lanes?: unknown;
       steps?: unknown;
       connections?: unknown;
+      screens?: unknown;
       title?: unknown;
       columns?: unknown;
       cells?: unknown;
@@ -827,6 +846,14 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
       block.cells.length > CANVAS_MAX_DASHBOARD_CELLS
     ) {
       return "dashboard-cells-budget-exceeded";
+    }
+    if (block.kind === "flow") {
+      if (Array.isArray(block.screens) && block.screens.length > CANVAS_MAX_FLOW_SCREENS) {
+        return "flow-screens-budget-exceeded";
+      }
+      if (Array.isArray(block.edges) && block.edges.length > CANVAS_MAX_FLOW_EDGES) {
+        return "flow-edges-budget-exceeded";
+      }
     }
   }
   if (imageCount > CANVAS_MAX_IMAGES) return "image-budget-exceeded";
@@ -1098,6 +1125,7 @@ function validateCrossReferences(definition: CanvasDefinition): void {
     if (block.kind === "mindmap") validateMindmap(block);
     if (block.kind === "mockup") validateMockup(block, definition.schemaVersion);
     if (block.kind === "design") validateDesign(block, definition.provenance.mode);
+    if (block.kind === "flow") validateFlow(block, definition.blocks);
     if (block.kind === "treemap") validateTreemap(block);
     if (block.kind === "heatmap") validateHeatmap(block);
     if (block.kind === "bar-list") validateBarList(block);
@@ -1221,11 +1249,16 @@ function validatePlacedOnce(definition: CanvasDefinition): void {
         ? block.cells.map((cell) => cell.blockId)
         : block.kind === "tabs" || block.kind === "columns"
           ? canvasLayoutGroupChildIds(block)
-          : [];
+          : block.kind === "flow"
+            ? block.screens.map((screen) => screen.blockId)
+            : [];
     for (const childId of childIds) {
       const id = String(childId);
       const first = placedBy.get(id);
-      if (first !== undefined) {
+      // One placer naming a block again is a second frame or variant of the
+      // same screen (a flow from Home to About of one design); placed once
+      // means one placer, so only a second placer is refused.
+      if (first !== undefined && first !== block) {
         reject(
           "block-placed-twice",
           `Canvas block ${id} is placed by both ${first.kind} ${first.blockId} and ${block.kind} ${block.blockId}; a block is placed once.`,
@@ -1391,6 +1424,131 @@ function validateDesign(
     const refusal = canvasDesignMarkupRefusal(frame.html, assetIds, runsScript);
     if (refusal !== undefined) {
       reject("design-markup-refused", `Canvas design ${block.blockId} frame ${id} ${refusal}`);
+    }
+  }
+}
+
+const FLOW_HOTSPOT_COMPONENTS: ReadonlySet<string> = new Set(CANVAS_FLOW_HOTSPOT_COMPONENTS);
+
+/**
+ * A flow places screens the document already holds, so every screen must name
+ * a block of a kind it can draw — a mockup, at a variant it declares when it
+ * declares any, or one frame of a design that runs no script — and every edge
+ * must land on two screens the flow holds. A hotspot names the control a
+ * person taps, so it must be a node of the from-screen's mockup from the
+ * interactive list: a design screen has no hotspots, and an inert part of a
+ * mockup is not a link.
+ */
+function validateFlow(
+  block: Extract<CanvasBlock, { readonly kind: "flow" }>,
+  blocks: ReadonlyArray<CanvasBlock>,
+): void {
+  if (block.screens.length > CANVAS_MAX_FLOW_SCREENS) {
+    reject(
+      "flow-screens-budget-exceeded",
+      `Canvas flow ${block.blockId} places more than ${String(CANVAS_MAX_FLOW_SCREENS)} screens.`,
+    );
+  }
+  if (block.edges.length > CANVAS_MAX_FLOW_EDGES) {
+    reject(
+      "flow-edges-budget-exceeded",
+      `Canvas flow ${block.blockId} holds more than ${String(CANVAS_MAX_FLOW_EDGES)} edges.`,
+    );
+  }
+  const byId = new Map(blocks.map((candidate) => [String(candidate.blockId), candidate]));
+  const screenIds = new Set<string>();
+  const mockupByScreenId = new Map<string, Extract<CanvasBlock, { readonly kind: "mockup" }>>();
+  for (const screen of block.screens) {
+    const screenId = String(screen.screenId);
+    if (screenIds.has(screenId)) {
+      reject(
+        "duplicate-flow-screen",
+        `Canvas flow ${block.blockId} has two screens with the id ${screenId}.`,
+      );
+    }
+    screenIds.add(screenId);
+    const placed = byId.get(String(screen.blockId));
+    if (placed === undefined) {
+      reject(
+        "dangling-flow-screen",
+        `Canvas flow ${block.blockId} places block ${String(screen.blockId)}, which the Canvas does not hold.`,
+      );
+    }
+    if (placed.kind !== "mockup" && placed.kind !== "design") {
+      reject(
+        "flow-screen-kind-refused",
+        `Canvas flow ${block.blockId} cannot place a ${placed.kind} block; a screen is a mockup or a design.`,
+      );
+    }
+    if (placed.kind === "mockup") {
+      mockupByScreenId.set(screenId, placed);
+      if (placed.variants !== undefined && screen.variantId === undefined) {
+        reject(
+          "flow-screen-variant-missing",
+          `Canvas flow ${block.blockId} places mockup ${String(screen.blockId)} without naming one of its variants.`,
+        );
+      }
+      if (
+        screen.variantId !== undefined &&
+        !placed.variants?.some((variant) => String(variant.variantId) === String(screen.variantId))
+      ) {
+        reject(
+          "flow-screen-variant-missing",
+          `Canvas flow ${block.blockId} places variant ${String(screen.variantId)}, which mockup ${String(screen.blockId)} does not declare.`,
+        );
+      }
+      continue;
+    }
+    if (placed.runsScript === true) {
+      reject(
+        "flow-screen-design-refused",
+        `Canvas flow ${block.blockId} places design ${String(screen.blockId)}, which runs script; a flow screen is a static frame.`,
+      );
+    }
+    if (screen.frameId === undefined) {
+      reject(
+        "flow-screen-frame-missing",
+        `Canvas flow ${block.blockId} places design ${String(screen.blockId)} without naming one of its frames.`,
+      );
+    }
+    if (
+      screen.frameId !== undefined &&
+      !placed.frames.some((frame) => String(frame.frameId) === String(screen.frameId))
+    ) {
+      reject(
+        "flow-screen-frame-missing",
+        `Canvas flow ${block.blockId} places frame ${String(screen.frameId)}, which design ${String(screen.blockId)} does not hold.`,
+      );
+    }
+  }
+  const edgeIds = new Set<string>();
+  for (const edge of block.edges) {
+    const edgeId = String(edge.edgeId);
+    if (edgeIds.has(edgeId)) {
+      reject(
+        "duplicate-flow-edge",
+        `Canvas flow ${block.blockId} has two edges with the id ${edgeId}.`,
+      );
+    }
+    edgeIds.add(edgeId);
+    if (!screenIds.has(String(edge.fromScreenId)) || !screenIds.has(String(edge.toScreenId))) {
+      reject(
+        "dangling-flow-edge",
+        `Canvas flow ${block.blockId} has an edge to a screen it does not hold.`,
+      );
+    }
+    if (String(edge.fromScreenId) === String(edge.toScreenId)) {
+      reject("flow-edge-self", `Canvas flow ${block.blockId} has an edge from a screen to itself.`);
+    }
+    if (edge.fromNodeId !== undefined) {
+      const mockup = mockupByScreenId.get(String(edge.fromScreenId));
+      const hotspot = mockup?.nodes.find((node) => String(node.nodeId) === String(edge.fromNodeId));
+      if (hotspot === undefined || !FLOW_HOTSPOT_COMPONENTS.has(hotspot.component)) {
+        reject(
+          "flow-hotspot-refused",
+          `Canvas flow ${block.blockId} edge ${edgeId} names a hotspot the screen's mockup does not offer; a hotspot is a button, list row, navigation item, tab, select, checkbox, or toggle.`,
+        );
+      }
     }
   }
 }
