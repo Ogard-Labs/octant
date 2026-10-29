@@ -1888,8 +1888,9 @@ function PublisherKeys(props: {
     <div className="extensions-settings__publisher">
       {held ? (
         <p className="extensions-settings__effective" data-blocked="true" role="status">
-          Another publisher signed this version. It stays held until you trust the new publisher or
-          forget the old one.
+          {selected === undefined
+            ? "This version is unsigned. It stays held until you forget the pinned publisher."
+            : "Another publisher signed this version. It stays held until you trust the new publisher or forget the old one."}
         </p>
       ) : null}
       <dl className="extensions-settings__compatibility" aria-label="Publisher keys">
@@ -1962,6 +1963,12 @@ function InstalledPackageCard(props: InstalledPackageCardProps) {
   const pluginEnableDisabled =
     (pluginRuntimeBlocked && !pkg.activation.pluginDesired) || props.busy;
 
+  const publisherHeld = pkg.publisher?.held === "publisher-changed";
+  // The publisher keys block already says why the package is held.
+  const diagnostics = publisherHeld
+    ? pkg.diagnostics.filter((diagnostic) => diagnostic.code !== "outside-driver-publisher-changed")
+    : pkg.diagnostics;
+
   return (
     <li className="extcard">
       <span aria-hidden="true" className="icon-mark">
@@ -1973,7 +1980,9 @@ function InstalledPackageCard(props: InstalledPackageCardProps) {
           size="sm"
           variant="outline"
           aria-label={pkg.activation.trusted ? "Revoke trust" : "Trust source"}
-          disabled={props.busy}
+          // The host refuses to trust a package held for a new publisher; the
+          // hold line above explains what to do instead.
+          disabled={props.busy || (publisherHeld && !pkg.activation.trusted)}
           onClick={() => void props.onTrust(!pkg.activation.trusted)}
           type="button"
         >
@@ -2134,9 +2143,9 @@ function InstalledPackageCard(props: InstalledPackageCardProps) {
           </ul>
         </SettingsDisclosure>
       ) : null}
-      {pkg.diagnostics.length > 0 ? (
+      {diagnostics.length > 0 ? (
         <ul className="extensions-settings__diagnostics">
-          {pkg.diagnostics.map((diagnostic) => (
+          {diagnostics.map((diagnostic) => (
             <li key={diagnostic.code}>{diagnostic.message}</li>
           ))}
         </ul>
