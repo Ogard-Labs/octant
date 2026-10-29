@@ -4152,3 +4152,214 @@ describe("mockup library", () => {
     );
   });
 });
+
+describe("deck slides", () => {
+  const mockupBlock = (blockId: string) => ({
+    blockId,
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "mockup" as const,
+    device: "phone" as const,
+    title: blockId,
+    nodes: [{ nodeId: "window", component: "window", label: blockId }],
+  });
+  const chart = {
+    blockId: "signups",
+    schemaVersion: 1,
+    kind: "chart",
+    chartType: "line",
+    series: [{ seriesId: "s", label: "Signups", points: [{ x: "Q1", y: 3 }] }],
+  };
+  const deck = (slides: ReadonlyArray<unknown>) => ({
+    blockId: "deck",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "deck" as const,
+    title: "Launch deck",
+    slides,
+  });
+
+  it("shows the document's own screens and data blocks, once each", () => {
+    expect(() =>
+      validateCanvasDefinition(
+        withBlocks([
+          chart,
+          mockupBlock("screen"),
+          deck([
+            { slideId: "a", blockId: "signups" },
+            { slideId: "b", blockId: "screen" },
+          ]),
+        ]),
+      ),
+    ).not.toThrow();
+  });
+
+  it("refuses a missing block, the wrong kind, a duplicate slide, and a block placed twice", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            chart,
+            mockupBlock("screen"),
+            deck([
+              { slideId: "a", blockId: "gone" },
+              { slideId: "b", blockId: "screen" },
+            ]),
+          ]),
+        ),
+      "dangling-deck-slide",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            {
+              blockId: "note",
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              kind: "rich-text",
+              text: "Hi",
+            },
+            chart,
+            deck([
+              { slideId: "a", blockId: "note" },
+              { slideId: "b", blockId: "signups" },
+            ]),
+          ]),
+        ),
+      "deck-slide-kind-refused",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            chart,
+            deck([
+              { slideId: "a", blockId: "signups" },
+              { slideId: "a", blockId: "signups" },
+            ]),
+          ]),
+        ),
+      "duplicate-deck-slide",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            chart,
+            mockupBlock("screen"),
+            deck([
+              { slideId: "a", blockId: "signups" },
+              { slideId: "b", blockId: "signups" },
+            ]),
+          ]),
+        ),
+      "duplicate-deck-slide",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            chart,
+            mockupBlock("screen"),
+            {
+              blockId: "board",
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              kind: "dashboard",
+              title: "Board",
+              cells: [{ blockId: "signups" }],
+            },
+            deck([
+              { slideId: "a", blockId: "signups" },
+              { slideId: "b", blockId: "screen" },
+            ]),
+          ]),
+        ),
+      "block-placed-twice",
+    );
+  });
+
+  it("shows several frames of one design as several slides", () => {
+    const design = {
+      blockId: "site",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "design" as const,
+      title: "Site",
+      size: "slide" as const,
+      frames: [
+        { frameId: "intro", title: "Intro", html: "<h1>Intro</h1>" },
+        { frameId: "plan", title: "Plan", html: "<h1>Plan</h1>" },
+      ],
+    };
+    expect(() =>
+      validateCanvasDefinition(
+        withBlocks([
+          design,
+          deck([
+            { slideId: "a", blockId: "site", frameId: "intro" },
+            { slideId: "b", blockId: "site", frameId: "plan" },
+          ]),
+        ]),
+      ),
+    ).not.toThrow();
+  });
+
+  it("refuses a deck in a document that declares the version before it", () => {
+    const earlier = CANVAS_SCHEMA_VERSION - 1;
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: earlier,
+          blocks: [
+            chart,
+            {
+              ...deck([
+                { slideId: "a", blockId: "signups" },
+                { slideId: "b", blockId: "signups" },
+              ]),
+              schemaVersion: earlier,
+            },
+          ],
+        }),
+      "unsupported-schema-version",
+    );
+  });
+});
+
+describe("deck slide design tiers", () => {
+  it("refuses a deck slide that names a running design frame", () => {
+    const chart = {
+      blockId: "chart",
+      schemaVersion: 1,
+      kind: "chart",
+      chartType: "line",
+      series: [{ seriesId: "s", label: "Signups", points: [{ x: "Q1", y: 3 }] }],
+    };
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            chart,
+            {
+              blockId: "runner",
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              kind: "design" as const,
+              title: "Runner",
+              size: "phone" as const,
+              runsScript: true,
+              frames: [{ frameId: "app", title: "App", html: "<button>Go</button>" }],
+            },
+            {
+              blockId: "deck",
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              kind: "deck" as const,
+              title: "Launch deck",
+              slides: [
+                { slideId: "a", blockId: "runner", frameId: "app" },
+                { slideId: "b", blockId: "chart" },
+              ],
+            },
+          ]),
+        ),
+      "deck-slide-design-refused",
+    );
+  });
+});

@@ -128,6 +128,9 @@ export const CANVAS_MAX_FLOW_LABEL_LENGTH = 80;
 // and their nodes count against the block's own node budget as well.
 export const CANVAS_MAX_MOCKUP_DEFINITIONS = 8;
 export const CANVAS_MAX_MOCKUP_DEFINITION_NODES = 24;
+// A deck is an ordered set of references, so its budget is small: as many
+// slides as a design may hold frames.
+export const CANVAS_MAX_DECK_SLIDES = 24;
 // A diagram node's detail is a subtitle under its label, not a paragraph.
 export const CANVAS_MAX_DIAGRAM_DETAIL_LENGTH = 120;
 // A group inside a group inside a group: deeper boundaries stop reading as
@@ -266,6 +269,9 @@ export const CANVAS_CHART_CALLOUTS_SCHEMA_VERSION = 22;
 // The flow block, which places mockup and design screens on a board with
 // labeled edges between them.
 export const CANVAS_FLOW_SCHEMA_VERSION = 23;
+// The deck block, which presents the document's own screens and data blocks
+// as one ordered set of slides.
+export const CANVAS_DECK_SCHEMA_VERSION = 25;
 // The metric's sparkline, goodDirection, and caption arrived with the bar list.
 export const CANVAS_METRIC_TREND_SCHEMA_VERSION = 7;
 
@@ -567,6 +573,7 @@ export const CanvasBlockKind = Schema.Literal(
   "tabs",
   "columns",
   "flow",
+  "deck",
 );
 export type CanvasBlockKind = typeof CanvasBlockKind.Type;
 
@@ -2585,6 +2592,53 @@ export const CanvasFlowBlock = Schema.Struct({
 }).annotations(strict);
 export type CanvasFlowBlock = typeof CanvasFlowBlock.Type;
 
+// ── Deck ──────────────────────────────────────────────────────────────────────
+//
+// A deck presents what the document already holds, in the order the author
+// chooses: a design's frame, a mockup screen, or a data block, each with the
+// presenter's own notes. It references rather than copies, so a slide keeps
+// its block's one definition, comments, and identity, and Present walks the
+// set across blocks.
+
+/** The block kinds a slide may show. */
+export const CANVAS_DECK_SLIDE_KINDS = [
+  "design",
+  "mockup",
+  "chart",
+  "table",
+  "metric",
+  "progress",
+  "status",
+] as const;
+export type CanvasDeckSlideKind = (typeof CANVAS_DECK_SLIDE_KINDS)[number];
+
+/**
+ * One slide: a block the document holds, with the frames and variants named
+ * where the block has them, and the presenter's own notes, which never
+ * leave the host.
+ */
+export const CanvasDeckSlide = Schema.Struct({
+  slideId: CanvasNodeId,
+  blockId: CanvasBlockId,
+  /** A design slide names the frame it shows; required for a design. */
+  frameId: Schema.optional(CanvasDesignFrameId),
+  /** A mockup slide names the variant it shows; required when the mockup declares variants. */
+  variantId: Schema.optional(CanvasMockupVariantId),
+  notes: Schema.optional(boundedNonEmptyText(CANVAS_MAX_DESIGN_NOTES_LENGTH)),
+}).annotations(strict);
+export type CanvasDeckSlide = typeof CanvasDeckSlide.Type;
+
+export const CanvasDeckBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("deck"),
+  title: CanvasLabel,
+  slides: Schema.Array(CanvasDeckSlide).pipe(
+    Schema.minItems(2),
+    Schema.maxItems(CANVAS_MAX_DECK_SLIDES),
+  ),
+}).annotations(strict);
+export type CanvasDeckBlock = typeof CanvasDeckBlock.Type;
+
 /**
  * Where the host serves a running design's page. A reader never names a
  * design here: the only query is a ticket the host issued for one Canvas
@@ -2880,6 +2934,7 @@ export const CanvasBlock = Schema.Union(
   CanvasTabsBlock,
   CanvasColumnsBlock,
   CanvasFlowBlock,
+  CanvasDeckBlock,
 );
 export type CanvasBlock = typeof CanvasBlock.Type;
 
@@ -3099,10 +3154,12 @@ export const CanvasDefinition = Schema.Struct({
         (definition.schemaVersion >= CANVAS_FLOW_SCHEMA_VERSION ||
           !definition.blocks.some((block) => block.kind === "flow")) &&
         (definition.schemaVersion >= CANVAS_MOCKUP_LIBRARY_SCHEMA_VERSION ||
-          !definition.blocks.some(canvasMockupUsesLibrary)),
+          !definition.blocks.some(canvasMockupUsesLibrary)) &&
+        (definition.schemaVersion >= CANVAS_DECK_SCHEMA_VERSION ||
+          !definition.blocks.some((block) => block.kind === "deck")),
       {
         message: () =>
-          `Tabs and columns require Canvas schema version ${String(CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION)}, a flow block requires Canvas schema version ${String(CANVAS_FLOW_SCHEMA_VERSION)}, and the mockup library requires Canvas schema version ${String(CANVAS_MOCKUP_LIBRARY_SCHEMA_VERSION)}.`,
+          `Tabs and columns require Canvas schema version ${String(CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION)}, a flow block requires Canvas schema version ${String(CANVAS_FLOW_SCHEMA_VERSION)}, the mockup library requires Canvas schema version ${String(CANVAS_MOCKUP_LIBRARY_SCHEMA_VERSION)}, and a deck block requires Canvas schema version ${String(CANVAS_DECK_SCHEMA_VERSION)}.`,
       },
     ),
     Schema.filter(

@@ -484,6 +484,11 @@ const BLOCK_GUIDANCE: Readonly<Record<string, { readonly use: string; readonly d
       detail:
         "Use diagram for a generic graph of nodes and edges, such as a flowchart or a zone map: a node's role is process (a box), decision (a diamond), or terminator (a pill), or left out for a plain box; an edge's style is line, arrow, or dashed (a dashed arrow, for an optional or asynchronous step); an edge or a group may take a tone of neutral, accent, success, warning, or danger, and a toned group reads as a region. Tones are theme roles, never colours, and a label still says what the tone means. Lay out a system or architecture diagram by tier: one group per tier (clients, services, data), the flow left to right, node labels of a few words, and the protocol or data on each edge label. For an architecture diagram give each node an icon (client, browser, mobile, server, service, database, cache, queue, storage, cdn, gateway, auth, function, external, user, or analytics) and a short detail such as a technology or port, and nest a group inside another with parentGroupId (up to three levels) for a region that holds zones. Prefer sequence, state, er, swimlane, or mindmap when the drawing is one of those.",
     },
+    deck: {
+      use: "A presentation that mixes screens with data blocks, as slides.",
+      detail:
+        "A deck presents the document's own blocks as one ordered set of slides: a design's frame (with its frameId), a mockup's screen (with its variantId when it declares variants), or a chart, table, metric, progress, or status block (a dashboard is not a slide; place its numbers as slides of their own). Each slide may carry presenter notes (never carried by a share). A block is placed once in the whole Canvas, so a slide is never also a dashboard cell or a flow screen; Present walks the set across blocks, and a plain design block keeps its own Present.",
+    },
     flow: {
       use: "An app or site's screens connected by their transitions, on a board.",
       detail:

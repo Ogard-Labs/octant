@@ -24,6 +24,7 @@ export function canvasBlockLabel(block: CanvasDefinition["blocks"][number]): str
     case "mockup":
     case "design":
     case "flow":
+    case "deck":
       return block.title;
     case "plan":
     case "dashboard":

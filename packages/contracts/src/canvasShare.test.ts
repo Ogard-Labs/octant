@@ -735,6 +735,7 @@ describe("Canvas share contracts", () => {
     // know, so a shared chart leaves as its readings.
     const refusedKinds = new Set(["action"]);
     const flattened = new Set([
+      "deck.slides[].notes",
       "table.rows[].id",
       "table.rows[].cells",
       "chart.title",
@@ -807,7 +808,7 @@ describe("Canvas share contracts", () => {
     ).toThrow();
     // And a version this runtime has not learned is still a future version.
     expect(() =>
-      decodeCanvasStaticExportDocument({ ...document, schemaVersion: 14, blocks: [] }),
+      decodeCanvasStaticExportDocument({ ...document, schemaVersion: 15, blocks: [] }),
     ).toThrow();
   });
 

@@ -147,6 +147,20 @@ const inTreeCanvasDocumentRecipeDocuments = [
     ],
   },
   {
+    id: "data-deck",
+    title: "Data deck",
+    summary: "A presentation that mixes the key numbers and screens as slides, in order.",
+    whenToUse: "When someone asks for a deck that presents the Canvas's own findings.",
+    skeleton: [
+      { kind: "metric", role: "The headline numbers, one per slide." },
+      { kind: "chart", role: "The trend each slide shows, one chart per slide." },
+      {
+        kind: "deck",
+        role: "The blocks above as its slides, in order, each with presenter notes.",
+      },
+    ],
+  },
+  {
     id: "app-flow",
     title: "App flow",
     summary: "Screens of an app or site connected by their transitions on a board.",
