@@ -192,21 +192,23 @@ const credentialName = Schema.NonEmptyTrimmedString.pipe(
 
 /**
  * The receiving host's half of a sign-in copy: the owner unlocks on the host
- * that will store the key and names the host that may send it and the sign-in.
+ * that will store the key and names the host that may send it and this host's
+ * own provider row that will hold the key. Provider rows get a fresh id on every
+ * host, so each half names the row on the host it is sent to.
  */
 export const OwnerCredentialReceiveRequest = Schema.Struct({
   sourceMemberId: HubMemberId,
-  credentialName,
+  targetCredentialName: credentialName,
 }).annotations(strict);
 export type OwnerCredentialReceiveRequest = typeof OwnerCredentialReceiveRequest.Type;
 export const decodeOwnerCredentialReceiveRequest = Schema.decodeUnknownSync(
   OwnerCredentialReceiveRequest,
 );
 
-/** The sending host's half: the owner unlocks on the host that holds the key and names the ticket the receiver issued. */
+/** The sending host's half: the owner unlocks on the host that holds the key and names its own provider row and the ticket the receiver issued. */
 export const OwnerCredentialCopyRequest = Schema.Struct({
   targetMemberId: HubMemberId,
-  credentialName,
+  sourceCredentialName: credentialName,
   ticketId: Schema.UUID,
 }).annotations(strict);
 export type OwnerCredentialCopyRequest = typeof OwnerCredentialCopyRequest.Type;
@@ -214,10 +216,9 @@ export const decodeOwnerCredentialCopyRequest = Schema.decodeUnknownSync(
   OwnerCredentialCopyRequest,
 );
 
-/** What travels from the sending host to the receiving one, over the pinned member link. The value is a secret and is never journaled. */
+/** What travels from the sending host to the receiving one, over the pinned member link. The ticket, not the sender, names the row that stores it. The value is a secret and is never journaled. */
 export const CredentialTransfer = Schema.Struct({
   ticketId: Schema.UUID,
-  credentialName,
   value: Schema.NonEmptyString.pipe(Schema.maxLength(8_192)),
 }).annotations(strict);
 export type CredentialTransfer = typeof CredentialTransfer.Type;

@@ -41,7 +41,10 @@ const decodeThreadId = Schema.decodeUnknownSync(CodeThreadId);
 const THREAD = "77777777-7777-4777-8777-777777777777";
 const TICKET = "66666666-6666-4666-8666-666666666666";
 const SECRET = "sk-test-0123456789abcdef";
-const NAME = "provider-1";
+// The same provider on two hosts: each host gave its row its own id.
+const SOURCE_ROW = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa";
+const TARGET_ROW = "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb";
+const SUBSCRIPTION_ROW = "cccccccc-3333-4333-8333-cccccccccccc";
 const MINUTE = 60_000;
 
 const GRANT_WITH_STATUS: HubGrant = {
@@ -201,10 +204,13 @@ describe("one unlock covering five minutes of administration", () => {
       [HUB_OWNER_ROUTES.ownersRemove, { memberId: phone.hostId }],
       [HUB_OWNER_ROUTES.confirmMember, {}],
       [HUB_OWNER_ROUTES.leave, undefined],
-      [HUB_OWNER_ROUTES.credentialReceive, { sourceMemberId: b.hostId, credentialName: NAME }],
+      [
+        HUB_OWNER_ROUTES.credentialReceive,
+        { sourceMemberId: b.hostId, targetCredentialName: TARGET_ROW },
+      ],
       [
         HUB_OWNER_ROUTES.credentialCopy,
-        { targetMemberId: b.hostId, credentialName: NAME, ticketId: TICKET },
+        { targetMemberId: b.hostId, sourceCredentialName: SOURCE_ROW, ticketId: TICKET },
       ],
       [
         HUB_OWNER_ROUTES.postureChange,
@@ -448,16 +454,17 @@ describe("owner routes for a Project's or thread's posture", () => {
 describe("copying an API-key sign-in from one host to another", () => {
   async function startCopyWorld() {
     const world = await startWorld();
-    world.a.credentials.providers.add(NAME);
-    world.a.credentials.keys.set(NAME, SECRET);
-    world.b.credentials.providers.add(NAME);
-    const receive = (body: unknown = { sourceMemberId: world.a.hostId, credentialName: NAME }) =>
-      world.asPhone(world.b, HUB_OWNER_ROUTES.credentialReceive, body, { unlock: world.unlock });
-    const send = (ticketId: string, name = NAME) =>
+    world.a.credentials.providers.add(SOURCE_ROW);
+    world.a.credentials.keys.set(SOURCE_ROW, SECRET);
+    world.b.credentials.providers.add(TARGET_ROW);
+    const receive = (
+      body: unknown = { sourceMemberId: world.a.hostId, targetCredentialName: TARGET_ROW },
+    ) => world.asPhone(world.b, HUB_OWNER_ROUTES.credentialReceive, body, { unlock: world.unlock });
+    const send = (ticketId: string, name = SOURCE_ROW) =>
       world.asPhone(
         world.a,
         HUB_OWNER_ROUTES.credentialCopy,
-        { targetMemberId: world.b.hostId, credentialName: name, ticketId },
+        { targetMemberId: world.b.hostId, sourceCredentialName: name, ticketId },
         { unlock: world.unlock },
       );
     return { ...world, receive, send };
@@ -465,7 +472,7 @@ describe("copying an API-key sign-in from one host to another", () => {
   const ticketOf = (answered: { readonly json: unknown }) =>
     (answered.json as { ticketId: string }).ticketId;
 
-  it("moves the key between the two hosts' brokers, journals the names, and never the value", async () => {
+  it("moves the key between the two hosts' brokers under each host's own row id, journals the names, and never the value", async () => {
     const { a, b, receive, send } = await startCopyWorld();
 
     const ticket = await receive();
@@ -473,30 +480,44 @@ describe("copying an API-key sign-in from one host to another", () => {
 
     expect(copied.status).toBe(200);
     expect(copied.json).toEqual({ status: "copied" });
-    expect(b.credentials.keys.get(NAME)).toBe(SECRET);
-    expect(a.credentials.keys.get(NAME)).toBe(SECRET);
+    expect(b.credentials.keys.get(TARGET_ROW)).toBe(SECRET);
+    expect(b.credentials.keys.has(SOURCE_ROW)).toBe(false);
+    expect(a.credentials.keys.get(SOURCE_ROW)).toBe(SECRET);
     expect(changes(a, "credential-copy-sent")).toMatchObject([
-      { credentialName: NAME, actingPrincipal: { kind: "owner-unlock" } },
+      { credentialName: SOURCE_ROW, actingPrincipal: { kind: "owner-unlock" } },
     ]);
     expect(changes(b, "credential-copy-received")).toMatchObject([
-      { credentialName: NAME, actingPrincipal: { kind: "owner-unlock" } },
+      { credentialName: TARGET_ROW, actingPrincipal: { kind: "owner-unlock" } },
     ]);
     const everything = JSON.stringify([a.records, b.records, ticket.json, copied.json]);
     expect(everything).not.toContain(SECRET);
   });
 
+  it("stores once when two tickets are redeemed together, and tells the second the key is already there", async () => {
+    const { b, receive, send } = await startCopyWorld();
+    const first = ticketOf(await receive());
+    const second = ticketOf(await receive());
+
+    const [one, two] = await Promise.all([send(first), send(second)]);
+
+    expect([one.json, two.json]).toContainEqual({ status: "copied" });
+    expect([one.json, two.json]).toContainEqual({ status: "refused", kind: "already-stored" });
+    expect(b.credentials.stores).toEqual([TARGET_ROW]);
+    expect(b.credentials.keys.get(TARGET_ROW)).toBe(SECRET);
+  });
+
   it("refuses a subscription sign-in with its reason and stores nothing", async () => {
     const { a, b, receive, send } = await startCopyWorld();
-    a.credentials.subscriptions.add("claude-login");
-    const ticket = await receive({ sourceMemberId: a.hostId, credentialName: "claude-login" });
+    a.credentials.subscriptions.add(SUBSCRIPTION_ROW);
+    const ticket = await receive();
 
-    const answered = await send(ticketOf(ticket), "claude-login");
+    const answered = await send(ticketOf(ticket), SUBSCRIPTION_ROW);
 
     expect(answered.status).toBe(409);
     expect(answered.json).toEqual({ status: "refused", kind: "subscription-sign-in" });
     expect(b.credentials.keys.size).toBe(0);
     expect(changes(a, "credential-copy-refused")).toMatchObject([
-      { credentialName: "claude-login", credentialReason: "subscription-sign-in" },
+      { credentialName: SUBSCRIPTION_ROW, credentialReason: "subscription-sign-in" },
     ]);
   });
 
@@ -505,11 +526,11 @@ describe("copying an API-key sign-in from one host to another", () => {
 
     const receiveNone = await asPhone(b, HUB_OWNER_ROUTES.credentialReceive, {
       sourceMemberId: a.hostId,
-      credentialName: NAME,
+      targetCredentialName: TARGET_ROW,
     });
     const copyNone = await asPhone(a, HUB_OWNER_ROUTES.credentialCopy, {
       targetMemberId: b.hostId,
-      credentialName: NAME,
+      sourceCredentialName: SOURCE_ROW,
       ticketId: TICKET,
     });
 
@@ -518,35 +539,42 @@ describe("copying an API-key sign-in from one host to another", () => {
     expect(b.credentials.keys.size).toBe(0);
   });
 
-  it("refuses a key that arrives without a ticket, with a used ticket, or for another name", async () => {
-    const { a, b, receive, send } = await startCopyWorld();
-    a.credentials.providers.add("provider-2");
-    a.credentials.keys.set("provider-2", "sk-test-other");
-    b.credentials.providers.add("provider-2");
+  it("refuses a key that arrives without a ticket or with a used ticket", async () => {
+    const { b, receive, send } = await startCopyWorld();
 
     const noTicket = await send(TICKET);
     const ticket = ticketOf(await receive());
     const first = await send(ticket);
-    b.credentials.keys.delete(NAME);
+    b.credentials.keys.delete(TARGET_ROW);
     const reused = await send(ticket);
-    const other = ticketOf(await receive());
-    const mismatch = await send(other, "provider-2");
 
     expect(noTicket.json).toEqual({ status: "refused", kind: "no-such-ticket" });
     expect(first.status).toBe(200);
     expect(reused.json).toEqual({ status: "refused", kind: "no-such-ticket" });
-    expect(mismatch.json).toEqual({ status: "refused", kind: "ticket-mismatch" });
+    expect(b.credentials.keys.size).toBe(0);
+  });
+
+  it("refuses a receiving row that does not exist on the receiving host", async () => {
+    const { a, b, receive, send } = await startCopyWorld();
+    const ticket = await receive({
+      sourceMemberId: a.hostId,
+      targetCredentialName: SOURCE_ROW,
+    });
+
+    const answered = await send(ticketOf(ticket));
+
+    expect(answered.json).toEqual({ status: "refused", kind: "no-such-provider" });
     expect(b.credentials.keys.size).toBe(0);
   });
 
   it("refuses to replace a key the person already holds on the receiving host", async () => {
     const { b, receive, send } = await startCopyWorld();
-    b.credentials.keys.set(NAME, "sk-test-typed-here");
+    b.credentials.keys.set(TARGET_ROW, "sk-test-typed-here");
 
     const answered = await send(ticketOf(await receive()));
 
     expect(answered.json).toEqual({ status: "refused", kind: "already-stored" });
-    expect(b.credentials.keys.get(NAME)).toBe("sk-test-typed-here");
+    expect(b.credentials.keys.get(TARGET_ROW)).toBe("sk-test-typed-here");
   });
 
   it("refuses the copy when the owner was removed on the receiving host after asking", async () => {
@@ -567,7 +595,7 @@ describe("copying an API-key sign-in from one host to another", () => {
     const hubAsTarget = await asPhone(
       a,
       HUB_OWNER_ROUTES.credentialCopy,
-      { targetMemberId: hub.hostId, credentialName: NAME, ticketId: ticket },
+      { targetMemberId: hub.hostId, sourceCredentialName: SOURCE_ROW, ticketId: ticket },
       { unlock },
     );
     const fromHub = await ownerCall({
@@ -575,7 +603,7 @@ describe("copying an API-key sign-in from one host to another", () => {
       network,
       target: b,
       route: HUB_OWNER_ROUTES.credentialReceive,
-      body: { sourceMemberId: a.hostId, credentialName: NAME },
+      body: { sourceMemberId: a.hostId, targetCredentialName: TARGET_ROW },
       unlock,
     });
     const fromStranger = await ownerCall({
@@ -583,14 +611,14 @@ describe("copying an API-key sign-in from one host to another", () => {
       network,
       target: a,
       route: HUB_OWNER_ROUTES.credentialCopy,
-      body: { targetMemberId: b.hostId, credentialName: NAME, ticketId: ticket },
+      body: { targetMemberId: b.hostId, sourceCredentialName: SOURCE_ROW, ticketId: ticket },
       unlock,
     });
     const unsigned = await b.hubLink(
       new Request(`${b.origin}${PEER_CREDENTIAL_ROUTE}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ticketId: ticket, credentialName: NAME, value: SECRET }),
+        body: JSON.stringify({ ticketId: ticket, value: SECRET }),
       }),
     );
     const signedByHub = await b.hubLink(
@@ -605,11 +633,11 @@ describe("copying an API-key sign-in from one host to another", () => {
             recipientMemberId: b.hostId,
             method: "POST",
             path: PEER_CREDENTIAL_ROUTE,
-            body: JSON.stringify({ ticketId: ticket, credentialName: NAME, value: SECRET }),
+            body: JSON.stringify({ ticketId: ticket, value: SECRET }),
             now: Date.now(),
           }),
         },
-        body: JSON.stringify({ ticketId: ticket, credentialName: NAME, value: SECRET }),
+        body: JSON.stringify({ ticketId: ticket, value: SECRET }),
       }),
     );
 

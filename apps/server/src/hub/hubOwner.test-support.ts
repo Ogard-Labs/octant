@@ -10,10 +10,12 @@ import {
   sign as cryptoSign,
   type KeyObject,
 } from "node:crypto";
+import { Schema } from "effect";
 import {
   OWNER_IDENTITY_KEY_HEADER,
   OWNER_SESSION_HEADER,
   OWNER_UNLOCK_HEADER,
+  ProviderInstance,
   type OwnerPosture,
   type OwnerPostureChangeRequest,
   type OwnerPostureSubject,
@@ -22,6 +24,7 @@ import { ownerUnlockSigningPayload } from "@octant/domain";
 import { publicKeyFingerprint } from "./hubCrypto";
 import type { HubTestHost, HubTestNetwork } from "./hubHost.test-support";
 import { HUB_LINK_HEADER, signHubLinkRequest } from "./hubLink";
+import { createProviderCredentialCopyBroker } from "./ownerCredentialBroker";
 import type {
   CredentialCopyBroker,
   CredentialReadResult,
@@ -207,7 +210,12 @@ export async function ownerCall(input: {
   return proofHeader === undefined ? answered : { ...answered, proofHeader };
 }
 
-/** A host's credential broker as a test sees it: which rows exist, what they hold, and which are subscription sign-ins. */
+/**
+ * A host's credential broker as a test sees it: which rows exist, what they hold,
+ * and which are subscription sign-ins. It is the real copy broker over an
+ * in-memory store whose reads and writes take a turn, so two copies that race
+ * for one row meet the same gap a keychain gives them.
+ */
 export class TestCredentialBroker implements CredentialCopyBroker {
   /** Provider rows that send an API key, by the name a copy uses. */
   readonly providers = new Set<string>();
@@ -215,23 +223,53 @@ export class TestCredentialBroker implements CredentialCopyBroker {
   readonly subscriptions = new Set<string>();
   readonly keys = new Map<string, string>();
   readonly stores: string[] = [];
+  readonly #broker: CredentialCopyBroker = createProviderCredentialCopyBroker({
+    readProviderInstances: () => [
+      ...[...this.providers].map((id) => testProviderInstance(id, "api-key")),
+      ...[...this.subscriptions].map((id) => testProviderInstance(id, "subscription")),
+    ],
+    credentials: {
+      has: async (name) => {
+        await nextTurn();
+        return this.keys.has(name);
+      },
+      readStored: async (name) => this.keys.get(name) ?? "",
+      set: async (name, value) => {
+        await nextTurn();
+        this.keys.set(name, value);
+        this.stores.push(name);
+      },
+      delete: async (name) => {
+        this.keys.delete(name);
+      },
+    },
+  });
 
-  async read(name: string): Promise<CredentialReadResult> {
-    if (this.subscriptions.has(name)) return { status: "refused", kind: "subscription-sign-in" };
-    const value = this.keys.get(name);
-    return value === undefined
-      ? { status: "refused", kind: "no-such-credential" }
-      : { status: "found", value };
+  read(name: string): Promise<CredentialReadResult> {
+    return this.#broker.read(name);
   }
 
-  async store(name: string, value: string): Promise<CredentialStoreResult> {
-    if (this.subscriptions.has(name)) return { status: "refused", kind: "subscription-sign-in" };
-    if (!this.providers.has(name)) return { status: "refused", kind: "no-such-provider" };
-    if (this.keys.has(name)) return { status: "refused", kind: "already-stored" };
-    this.keys.set(name, value);
-    this.stores.push(name);
-    return { status: "stored" };
+  store(name: string, value: string): Promise<CredentialStoreResult> {
+    return this.#broker.store(name, value);
   }
+}
+
+const nextTurn = () => new Promise<void>((resolve) => setTimeout(resolve, 1));
+const decodeProviderInstance = Schema.decodeUnknownSync(ProviderInstance);
+
+function testProviderInstance(id: string, authentication: "api-key" | "subscription") {
+  const at = "2026-10-30T00:00:00.000Z";
+  return decodeProviderInstance({
+    id,
+    displayName: "Claude",
+    driverKind: "claude",
+    configuration: { kind: "claude-agent-sdk", binaryPath: "/usr/bin/claude", authentication },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1,
+    createdAt: at,
+    updatedAt: at,
+  });
 }
 
 /** A host's postures as a test sees them: seeded by subject, and every accepted change recorded. */

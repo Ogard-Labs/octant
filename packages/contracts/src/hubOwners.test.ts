@@ -178,24 +178,33 @@ describe("owner administration session, posture, and sign-in copy contracts", ()
     expect(
       decodeOwnerCredentialCopyRequest({
         targetMemberId: uuid,
-        credentialName: "provider-1",
+        sourceCredentialName: "provider-1",
         ticketId: uuid,
-      }).credentialName,
+      }).sourceCredentialName,
     ).toBe("provider-1");
     expect(() =>
       decodeOwnerCredentialCopyRequest({
         targetMemberId: uuid,
-        credentialName: "provider-1",
+        sourceCredentialName: "provider-1",
         ticketId: uuid,
         value: "sk-secret",
       }),
     ).toThrow();
     expect(() =>
-      decodeOwnerCredentialReceiveRequest({ sourceMemberId: uuid, credentialName: "has space" }),
+      decodeOwnerCredentialReceiveRequest({
+        sourceMemberId: uuid,
+        targetCredentialName: "has space",
+      }),
     ).toThrow();
-    expect(
-      decodeCredentialTransfer({ ticketId: uuid, credentialName: "provider-1", value: "sk-secret" })
-        .value,
-    ).toBe("sk-secret");
+    expect(decodeCredentialTransfer({ ticketId: uuid, value: "sk-secret" }).value).toBe(
+      "sk-secret",
+    );
+    expect(() =>
+      decodeCredentialTransfer({
+        ticketId: uuid,
+        credentialName: "provider-1",
+        value: "sk-secret",
+      }),
+    ).toThrow();
   });
 });
