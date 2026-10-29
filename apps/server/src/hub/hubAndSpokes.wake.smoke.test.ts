@@ -6,7 +6,13 @@
 
 import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HubMemberId, UtcTimestamp, WakeRoutineId, type HubGrant } from "@octant/contracts";
+import {
+  HardwareAddress,
+  HubMemberId,
+  UtcTimestamp,
+  WakeRoutineId,
+  type HubGrant,
+} from "@octant/contracts";
 import { HUB_LINK_HEADER, HUB_PEER_KEY_HEADER, signHubLinkRequest } from "./hubLink";
 import { HubTestNetwork, startHubTestHost, type HubTestHost } from "./hubHost.test-support";
 import { HUB_LINK_ROUTES } from "./hubLinkRoutes";
@@ -20,6 +26,7 @@ afterEach(async () => {
 const window = { kind: "local-window" } as const;
 const decodeMemberId = Schema.decodeUnknownSync(HubMemberId);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
+const decodeHardwareAddress = Schema.decodeUnknownSync(HardwareAddress);
 const MINUTE = 60_000;
 const FAILOVER_AFTER_MS = 60;
 const wakeGrant: HubGrant = { items: ["roster", "introduce", "owners", "wake"], actProjects: [] };
@@ -1163,5 +1170,44 @@ describe("the wake service's own switch", () => {
     await hub.wake.setEnabled(false, window);
     expect(hub.wake.status()).toEqual({ enabled: false, spokes: [] });
     expect(hub.records.filter((record) => record.change === "wake-switch-changed")).toHaveLength(2);
+  });
+});
+
+describe("a spoke that withdrew its wake state while a hand-back answer was lost", () => {
+  it("holds no times or address for the spoke when the standby retries the same hand-back", async () => {
+    const { clock, hub, laptop } = await startPair();
+    const report = {
+      memberId: decodeMemberId(laptop.hostId),
+      times: [
+        {
+          routineId: decodeNudgeId("routine-aaaaaaaaaaaaaaaaaaaaaa"),
+          nextAt: iso(clock.now() + 10 * MINUTE),
+        },
+      ],
+      hardwareAddress: decodeHardwareAddress("aa:bb:cc:00:11:22"),
+      reportedAt: clock.now(),
+    };
+    const handed = [report];
+    // The hub takes the hand-back, but its answer never reaches the standby.
+    expect(hub.wake.mergeHandback(laptop.hostId, handed)).toEqual({ merged: 1 });
+
+    clock.state.offset += MINUTE;
+    // The spoke's person unticks Wake, so it sends an empty report.
+    expect(await hub.wake.receiveReport(laptop.hostId, { times: [] })).toMatchObject({
+      status: "recorded",
+      count: 0,
+    });
+    expect(hub.state.load().hub?.wake?.spokes).toEqual([]);
+
+    // The standby retries the same hand-back.
+    expect(hub.wake.mergeHandback(laptop.hostId, handed)).toEqual({ merged: 0 });
+    expect(hub.state.load().hub?.wake?.spokes).toEqual([]);
+    expect(hub.wake.status().spokes).toEqual([]);
+
+    // A later real report replaces the withdrawal.
+    clock.state.offset += MINUTE;
+    expect(hub.wake.mergeHandback(laptop.hostId, [{ ...report, reportedAt: clock.now() }])).toEqual(
+      { merged: 1 },
+    );
   });
 });

@@ -28,7 +28,7 @@ import { Schema } from "effect";
 import { listenerPinFromDigest } from "./hubCrypto";
 import { HUB_PEER_KEY_HEADER, sendHubLinkRequest } from "./hubLink";
 import type { HubHostIdentity } from "./hubService";
-import type { HubStatePort, HubWakeState, WakeSpokeRecord } from "./hubStateStore";
+import type { HubStatePort, HubWakeState, WakeSpokeRecord, WakeWithdrawal } from "./hubStateStore";
 import { memberOrigin } from "./memberOrigin";
 import type { HubTransport } from "./pinnedHubTransport";
 import type { WakeOnLanPort } from "./wakeOnLan";
@@ -40,6 +40,8 @@ const STALE_AFTER_MS = 600_000;
 /** How often the hub hands its standbys a fresh copy even if no spoke reported. */
 const COPY_EVERY_MS = 300_000;
 const REMEMBER_FOR_MS = 3_600_000;
+/** How long the hub remembers that a spoke withdrew, so a late hand-back older than that is still refused. */
+const WITHDRAWAL_KEPT_FOR_MS = 30 * 86_400_000;
 
 export interface WakeServiceOptions {
   readonly state: HubStatePort;
@@ -95,6 +97,18 @@ interface Book {
 
 const isSpokeLike = (member: RosterMember) =>
   member.role === "spoke" || member.role === "standby-hub";
+
+/** Withdrawals still worth keeping: the member is still listed and the withdrawal is recent. */
+const liveWithdrawals = (
+  wake: HubWakeState,
+  roster: SignedHubRoster["roster"],
+  now: number,
+): ReadonlyArray<WakeWithdrawal> =>
+  (wake.withdrawals ?? []).filter(
+    (withdrawal) =>
+      now - withdrawal.withdrawnAt < WITHDRAWAL_KEPT_FOR_MS &&
+      roster.members.some((member) => String(member.memberId) === String(withdrawal.memberId)),
+  );
 
 const times = (spoke: WakeSpokeRecord): HubWakeSpokeTimes => ({
   memberId: spoke.memberId,
@@ -180,24 +194,32 @@ export class WakeService {
           String(spoke.memberId) !== senderMemberId &&
           roster.members.some((member) => String(member.memberId) === String(spoke.memberId)),
       );
-      const next: WakeSpokeRecord[] =
-        report.times.length === 0 && report.hardwareAddress === undefined
-          ? held
-          : [
-              ...held,
-              {
-                memberId,
-                times: report.times,
-                ...(report.hardwareAddress === undefined
-                  ? {}
-                  : { hardwareAddress: report.hardwareAddress }),
-                reportedAt: now,
-                ...(previous?.lastResult === undefined ? {} : { lastResult: previous.lastResult }),
-              },
-            ];
+      const withdrawing = report.times.length === 0 && report.hardwareAddress === undefined;
+      // A withdrawal is remembered so a standby's older hand-back, retried after its answer
+      // was lost, cannot bring the times and address back; a real report replaces it.
+      const withdrawals: ReadonlyArray<WakeWithdrawal> = [
+        ...liveWithdrawals(hub.wake, roster, now).filter(
+          (withdrawal) => String(withdrawal.memberId) !== senderMemberId,
+        ),
+        ...(withdrawing ? [{ memberId, withdrawnAt: now }] : []),
+      ];
+      const next: WakeSpokeRecord[] = withdrawing
+        ? held
+        : [
+            ...held,
+            {
+              memberId,
+              times: report.times,
+              ...(report.hardwareAddress === undefined
+                ? {}
+                : { hardwareAddress: report.hardwareAddress }),
+              reportedAt: now,
+              ...(previous?.lastResult === undefined ? {} : { lastResult: previous.lastResult }),
+            },
+          ];
       this.#options.state.save({
         ...state,
-        hub: { ...hub, wake: { ...hub.wake, enabled: true, spokes: next } },
+        hub: { ...hub, wake: { ...hub.wake, enabled: true, spokes: next, withdrawals } },
       });
       this.#options.record({
         change: "wake-times-reported",
@@ -308,9 +330,21 @@ export class WakeService {
     const roster = hub.roster.roster;
     const now = this.#options.now();
     const previous = hub.wake.spokes;
+    const withdrawals = liveWithdrawals(hub.wake, roster, now);
+    // A withdrawal counts as a report at the time it was made, so an older hand-back loses to it.
     const newerThanHeld = (spoke: HubHandbackWakeTimes) => {
       const held = previous.find((record) => String(record.memberId) === String(spoke.memberId));
-      return held === undefined || (spoke.reportedAt ?? Number.NEGATIVE_INFINITY) > held.reportedAt;
+      const withdrawn = withdrawals.find(
+        (withdrawal) => String(withdrawal.memberId) === String(spoke.memberId),
+      );
+      const heldAt = Math.max(
+        held?.reportedAt ?? Number.NEGATIVE_INFINITY,
+        withdrawn?.withdrawnAt ?? Number.NEGATIVE_INFINITY,
+      );
+      return (
+        heldAt === Number.NEGATIVE_INFINITY ||
+        (spoke.reportedAt ?? Number.NEGATIVE_INFINITY) > heldAt
+      );
     };
     const accepted = handed.filter(
       (spoke) =>
@@ -336,7 +370,17 @@ export class WakeService {
     ];
     this.#options.state.save({
       ...state,
-      hub: { ...hub, wake: { ...hub.wake, enabled: true, spokes: next } },
+      hub: {
+        ...hub,
+        wake: {
+          ...hub.wake,
+          enabled: true,
+          spokes: next,
+          withdrawals: withdrawals.filter(
+            (withdrawal) => !replaced.has(String(withdrawal.memberId)),
+          ),
+        },
+      },
     });
     this.#options.record({
       change: "wake-times-merged",
@@ -571,6 +615,7 @@ export class WakeService {
     const wake: HubWakeState = {
       enabled: hub.wake?.enabled === true,
       spokes: hub.wake?.spokes ?? [],
+      ...(hub.wake?.withdrawals === undefined ? {} : { withdrawals: hub.wake.withdrawals }),
       ...(hub.wake?.generation === undefined ? {} : { generation: hub.wake.generation }),
       copyRevision: revision,
     };
