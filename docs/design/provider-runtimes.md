@@ -370,6 +370,20 @@ distribution.
 fx ships as an ACP profile (`fx`) but is not in the registry; see
 [fx-acp-compatibility.md](../fx-acp-compatibility.md).
 
+fx is also withheld from users. `WITHHELD_BUNDLED_PROVIDER_DRIVERS` in
+`packages/plugin-host/src/bundledProviderDrivers.ts` holds its driver out of
+the activation ladder, so discovery does not offer it, a new instance cannot be
+created, and no `fx` process starts, not even a version probe. A stored fx
+instance and its threads stay: it reports `unavailable` with reason
+`driver-not-admitted` and a message that names why. Measured 2026-10-28 on fx
+0.0.15, under the deny-default Seatbelt profile (System Keychain reads
+denied), fx's HTTP pool aborts certificate loading instead of falling back to
+`/etc/ssl/cert.pem`, so it cannot reach the Vercel AI Gateway and its model
+catalog drops to one model. Octant does not grant fx Keychain reads. Removing
+the table entry offers fx again; do that at the first stock fx release that
+falls back to `/etc/ssl/cert.pem`, and raise `minimumVersion` in `fxProfile` to
+that release at the same time.
+
 ### Probe before a profile ships
 
 A profile ships only after a live probe against a signed-in install on Apple

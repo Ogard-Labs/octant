@@ -9,6 +9,56 @@ import {
 } from "./providerSettingsPresentation";
 
 describe("provider Settings presentation", () => {
+  it("tells a person with a stored fx provider why fx is not offered and that their data is kept", () => {
+    const instance = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-000000000095",
+      displayName: "fx local",
+      driverKind: "fx",
+      configuration: {
+        kind: "fx-acp",
+        binaryPath: "/Users/example/.local/bin/fx",
+        authentication: "api-key",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-07-15T10:00:00.000Z",
+      updatedAt: "2026-07-15T10:00:00.000Z",
+    });
+    const blocked = decodeProviderObservedState({
+      instanceId: instance.id,
+      readiness: "unavailable",
+      processState: "stopped",
+      models: [],
+      capabilities: Object.fromEntries(
+        [
+          "streaming",
+          "resume",
+          "interruption",
+          "approvals",
+          "userQuestions",
+          "reasoning",
+          "usage",
+          "toolActivity",
+          "fileChanges",
+          "diffs",
+          "taskProgress",
+          "nativeChildAgents",
+          "harnessAutoReview",
+          "nativeAttachments",
+          "nativeWebResearch",
+          "appManagedTools",
+          "citations",
+        ].map((capability) => [capability, "unavailable"]),
+      ),
+      reason: "driver-not-admitted",
+      observedAt: "2026-07-15T10:00:00.000Z",
+    });
+    const guidance = providerRefusalGuidance(instance, blocked);
+    expect(guidance?.reason).toMatch(/fx is not offered yet.*certificates/);
+    expect(guidance?.nextStep).toMatch(/provider and its threads are kept/);
+  });
+
   it("names every image profile driver kind, not only chat and code runtimes", () => {
     expect(driverLabel("openai-image")).toBe("OpenAI Image");
     expect(driverLabel("gemini-native-image")).toBe("Gemini Image");

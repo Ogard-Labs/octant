@@ -9,6 +9,7 @@ import {
   bundledProviderDriverCatalog,
   bundledProviderDriverComponent,
   bundledProviderDriverPlugin,
+  bundledProviderDriverWithheldReason,
   isBundledProviderDriverEffective,
   resolveBundledProviderDriverActivation,
 } from "./bundledProviderDrivers";
@@ -111,12 +112,31 @@ describe("bundled provider-driver plugins", () => {
     }
   });
 
-  it("admits every bundled driver by default", () => {
-    expect([...admittedBundledProviderDriverKinds()].sort()).toEqual([...everyDriverKind].sort());
+  it("admits every bundled driver by default except the withheld fx", () => {
+    expect([...admittedBundledProviderDriverKinds()].sort()).toEqual(
+      everyDriverKind.filter((kind) => kind !== "fx").sort(),
+    );
     for (const plugin of BUNDLED_PROVIDER_DRIVER_PLUGINS) {
-      expect(isBundledProviderDriverEffective(plugin)).toBe(true);
+      expect(isBundledProviderDriverEffective(plugin), plugin.driverKind).toBe(
+        plugin.driverKind !== "fx",
+      );
       expect(bundledProviderDriverPlugin(plugin.driverKind)).toBe(plugin);
     }
+  });
+
+  it("withholds fx with a reason a person can read, and no other driver", () => {
+    expect(bundledProviderDriverWithheldReason("fx")).toMatch(
+      /certificates inside Octant's sandbox/,
+    );
+    for (const kind of everyDriverKind.filter((candidate) => candidate !== "fx")) {
+      expect(bundledProviderDriverWithheldReason(kind), kind).toBeUndefined();
+    }
+    const fx = bundledProviderDriverPlugin("fx");
+    if (fx === undefined) throw new Error("fx plugin is missing");
+    expect(resolveBundledProviderDriverActivation(fx)).toEqual({
+      kind: "blocked",
+      reason: "incompatible",
+    });
   });
 
   it("contributes no driver kinds when the plugin or component is disabled", () => {
@@ -161,7 +181,11 @@ describe("bundled provider-driver plugins", () => {
     for (const listing of catalog) {
       expect(listing.installed).toBe(true);
       expect(listing.trusted).toBe(true);
-      expect(listing.activation).toEqual({ kind: "effective" });
+      expect(listing.activation, listing.entry.driverKind).toEqual(
+        listing.entry.driverKind === "fx"
+          ? { kind: "blocked", reason: "incompatible" }
+          : { kind: "effective" },
+      );
       expect(listing.entry.manifest.source.kind).toBe("bundled");
     }
   });

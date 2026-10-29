@@ -153,6 +153,14 @@ export function providerRefusalCopy(
       nextStep: `Sign in to ${label} with its provider-owned login, then check the connection again.`,
     };
   }
+  if (reason === "driver-not-admitted" && instance.driverKind === "fx") {
+    return {
+      reason:
+        "fx is not offered yet: the current fx release cannot load certificates inside Octant's sandbox, so it cannot reach the Vercel AI Gateway.",
+      nextStep:
+        "Your fx provider and its threads are kept. Octant offers fx again once a stock fx release can load certificates in the sandbox; until then, use another provider for new turns.",
+    };
+  }
   if (reason === "driver-not-admitted") {
     return {
       reason: "This provider's driver package is not admitted, so it offers no models.",

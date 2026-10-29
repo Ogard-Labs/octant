@@ -852,6 +852,40 @@ describe("ProviderService", () => {
     });
   });
 
+  it("keeps a stored fx provider but reports it unavailable with the reason fx is withheld and never starts it", async () => {
+    const fx = provider({
+      displayName: "fx local",
+      driverKind: "fx",
+      configuration: {
+        kind: "fx-acp",
+        binaryPath: "/opt/homebrew/bin/fx",
+        authentication: "api-key",
+      },
+    });
+    const fixture = serviceFixture({
+      instances: [fx],
+      withCatalogPersistence: true,
+      initialCatalog: persistedCatalog(),
+    });
+    fixture.runtime.setObservedState(observation());
+
+    const snapshot = await fixture.service.bootstrap(windowId);
+    expect(snapshot.instances).toEqual([fx]);
+    expect(snapshot.observedStates).toHaveLength(1);
+    expect(snapshot.observedStates[0]).toMatchObject({
+      readiness: "unavailable",
+      processState: "stopped",
+      models: [],
+      reason: "driver-not-admitted",
+      message: expect.stringMatching(/fx is not offered yet.*certificates inside Octant's sandbox/),
+    });
+
+    await expect(fixture.service.probe(windowId, instanceId)).rejects.toThrow(
+      /fx is not offered yet/,
+    );
+    expect(fixture.probe).not.toHaveBeenCalled();
+  });
+
   it("refuses to probe or create a provider whose driver plugin is not effective", async () => {
     const fixture = serviceFixture({
       instances: [provider()],
