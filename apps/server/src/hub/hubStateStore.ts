@@ -98,12 +98,16 @@ export const HubLinkState = Schema.Struct({
   alerts: Schema.optional(Schema.Array(NewMemberAlert)),
   /** Members a person removed from an alert here: a later roster still lists them, and this spoke does not accept them again. */
   rejectedMemberIds: Schema.optional(Schema.Array(HubMemberId)),
+  /** Set while Leave waits on the hub, so no guest is admitted after the devices to revoke were read. */
+  leaving: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type HubLinkState = typeof HubLinkState.Type;
 
 export const HubState = Schema.Struct({
   hub: Schema.optional(HubSideState),
   link: Schema.optional(HubLinkState),
+  /** Guest devices a dropped link could not revoke because the device pairing was not running; revoked once it is. */
+  pendingDeviceRevocations: Schema.optional(Schema.Array(Schema.UUID)),
 }).annotations(strict);
 export type HubState = typeof HubState.Type;
 

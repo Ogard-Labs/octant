@@ -319,6 +319,7 @@ export class SpokeLinkService {
   }
 
   status(): SpokeLinkStatus {
+    this.settlePendingRevocations();
     const link = this.#options.state.load().link;
     if (link === undefined) return { membership: "none" };
     return {
@@ -794,6 +795,9 @@ export class SpokeLinkService {
     if (link === undefined) return { status: "refused", kind: "not-a-spoke" };
     let hubNotified = false;
     if (link.removed !== true) {
+      // Marked before the first await: a guest admitted while the hub is
+      // being told would hold a device no revocation below knows about.
+      this.#options.state.save({ ...state, link: { ...link, leaving: true } });
       const identity = this.#options.identity();
       const body = JSON.stringify({ memberId: link.selfMemberId });
       const answer = await sendHubLinkRequest({
@@ -809,8 +813,19 @@ export class SpokeLinkService {
       });
       hubNotified = answer.status === "answered" && answer.response.ok;
     }
-    this.#options.state.save(state.hub === undefined ? {} : { hub: state.hub });
-    this.#revokeGuestDevices(link.guestDevices ?? [], link.hubMemberId);
+    // The link is read again: a roster that arrived while the hub was being
+    // told may have changed which guest devices exist.
+    const current = this.#options.state.load();
+    this.#options.state.save({
+      ...(current.hub === undefined ? {} : { hub: current.hub }),
+      ...(current.pendingDeviceRevocations === undefined
+        ? {}
+        : { pendingDeviceRevocations: current.pendingDeviceRevocations }),
+    });
+    this.#revokeGuestDevices(
+      current.link?.guestDevices ?? link.guestDevices ?? [],
+      link.hubMemberId,
+    );
     this.#pending = undefined;
     this.#options.record({
       change: "left-hub",
@@ -1063,10 +1078,13 @@ export class SpokeLinkService {
     readonly body: string;
     readonly request: HubGuestAdmissionRequest;
   }): GuestAdmission {
+    this.settlePendingRevocations();
     const state = this.#options.state.load();
     const link = state.link;
     if (link === undefined) return { status: "refused", kind: "not-a-spoke" };
-    if (link.removed === true) return { status: "refused", kind: "hub-revoked" };
+    if (link.removed === true || link.leaving === true) {
+      return { status: "refused", kind: "hub-revoked" };
+    }
     const { request } = input;
     const listed = link.roster.roster.members.find(
       (member) => String(member.memberId) === String(request.memberId) && member.role === "guest",
@@ -1135,11 +1153,16 @@ export class SpokeLinkService {
     hubMemberId: HubMemberId,
   ): void {
     const devices = this.#options.devices();
+    const unrevoked: string[] = [];
     for (const entry of entries) {
-      try {
-        devices?.revokeDevice(entry.deviceId);
-      } catch {
-        // A device already revoked, or one this host no longer holds, leaves nothing to revoke.
+      if (devices === undefined) {
+        unrevoked.push(entry.deviceId);
+      } else {
+        try {
+          devices.revokeDevice(entry.deviceId);
+        } catch {
+          // A device already revoked, or one this host no longer holds, leaves nothing to revoke.
+        }
       }
       this.#options.record({
         change: "guest-dropped",
@@ -1147,6 +1170,33 @@ export class SpokeLinkService {
         memberId: entry.memberId,
       });
     }
+    // The device pairing runs with the private listener. A device left active
+    // here would be usable once it starts, so its id is kept until it does.
+    if (unrevoked.length > 0) {
+      const state = this.#options.state.load();
+      this.#options.state.save({
+        ...state,
+        pendingDeviceRevocations: [...(state.pendingDeviceRevocations ?? []), ...unrevoked],
+      });
+    }
+  }
+
+  /** Revokes the guest devices a dropped link could not revoke, as soon as the device pairing exists. */
+  settlePendingRevocations(): void {
+    const state = this.#options.state.load();
+    const pending = state.pendingDeviceRevocations;
+    if (pending === undefined || pending.length === 0) return;
+    const devices = this.#options.devices();
+    if (devices === undefined) return;
+    for (const deviceId of pending) {
+      try {
+        devices.revokeDevice(deviceId);
+      } catch {
+        // A device already revoked, or one this host no longer holds, leaves nothing to revoke.
+      }
+    }
+    const { pendingDeviceRevocations: _settled, ...rest } = state;
+    this.#options.state.save(rest);
   }
 
   /** The status read the hub's Status item allows. */
