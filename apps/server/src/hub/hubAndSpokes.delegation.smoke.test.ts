@@ -746,6 +746,73 @@ describe("a delegation whose answer never reached the delegating spoke", () => {
     expect(a.delegationState.load().sent).toEqual([]);
     expect(child.started).toHaveLength(0);
   });
+
+  it("keeps a pending request whose start on the target outlasts the signature window, and reconciles it once the start finishes", async () => {
+    const child = fakeChildHost();
+    const startThread = child.host.startThread;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const slow: PeerDelegationHost = {
+      ...child.host,
+      startThread: async (input) => {
+        const result = await startThread(input);
+        await gate;
+        return result;
+      },
+    };
+    const flaky = flakyCreate();
+    const { a, b } = await threeHosts({
+      child: { ...child, host: slow },
+      aTransport: flaky.transport,
+    });
+    flaky.fault.mode = "drop-request";
+    const delegated = await a.delegating.delegate(startCommand(b), { windowId: "window-a" });
+    if (delegated.status !== "pending-acceptance") throw new Error(JSON.stringify(delegated));
+    flaky.fault.mode = "none";
+    // The request reaches B late, and B's start is still running.
+    const [sent] = a.delegationState.load().sent;
+    if (sent === undefined) throw new Error("A holds no request.");
+    const arriving = b.hubLink(
+      signedDelegation({
+        signer: a,
+        recipient: b,
+        body: JSON.stringify({
+          requestId: sent.requestId,
+          projectId: sent.projectId,
+          task: sent.task,
+          authority: sent.authority,
+          delegatedFrom: { kind: "work", memberId: a.hostId, threadId: PARENT_THREAD },
+        }),
+      }),
+    );
+    await vi.waitFor(() => expect(child.started).toHaveLength(1));
+    // Five minutes pass: the saved request is that much older.
+    const saved = a.delegationState.load();
+    a.delegationState.save({
+      ...saved,
+      sent: saved.sent.map((entry) => ({
+        ...entry,
+        sentAt: decodeTimestamp(new Date(Date.parse(entry.sentAt) - 5 * 60_000).toISOString()),
+      })),
+    });
+
+    expect(await a.delegating.refresh(String(delegated.requestId))).toMatchObject({
+      status: "in-progress",
+      state: "awaiting-acceptance",
+    });
+    expect(a.delegationState.load().sent).toHaveLength(1);
+
+    release();
+    expect((await arriving)?.status).toBe(201);
+    expect(await a.delegating.refresh(String(delegated.requestId))).toMatchObject({
+      status: "in-progress",
+      state: "running",
+    });
+    expect(a.delegationState.load().sent[0]?.state).toBe("running");
+    expect(child.started).toHaveLength(1);
+  });
 });
 
 describe("erasing a parent thread", () => {
@@ -771,6 +838,84 @@ describe("erasing a parent thread", () => {
       String(other.requestId),
     ]);
     expect(JSON.stringify(reloaded)).not.toContain("Private findings.");
+  });
+});
+
+describe("erasing a parent thread whose remote child could not be reached", () => {
+  function unreachableCancel() {
+    const fault = { drop: false };
+    const transport = (inner: HubTransport): HubTransport => {
+      return (target) => {
+        const send = inner(target);
+        return async (url, init) => {
+          if (fault.drop && url.endsWith(PEER_DELEGATION_ROUTES.cancel)) {
+            throw new Error("connection reset");
+          }
+          return send(url, init);
+        };
+      };
+    };
+    return { fault, transport };
+  }
+
+  it("keeps only a cancellation owed to the target, with no task or result, and cancels the child on the next poll once it is reachable", async () => {
+    const lost = flakyCreate();
+    const cancelling = unreachableCancel();
+    const { a, b, child } = await threeHosts({
+      aTransport: (inner) => cancelling.transport(lost.transport(inner)),
+    });
+    lost.fault.mode = "lose-answer";
+    const delegated = await a.delegating.delegate(startCommand(b), { windowId: "window-a" });
+    if (delegated.status !== "pending-acceptance") throw new Error(JSON.stringify(delegated));
+    lost.fault.mode = "none";
+    cancelling.fault.drop = true;
+    expect(await a.delegating.cancelParent(PARENT_THREAD)).toEqual([
+      { status: "target-unreachable" },
+    ]);
+
+    a.delegating.forgetParent(PARENT_THREAD);
+
+    const reloaded = createDelegationStateStore(a.directory).load();
+    expect(reloaded.sent).toEqual([]);
+    expect(reloaded.owedCancels).toEqual([
+      expect.objectContaining({
+        requestId: delegated.requestId,
+        targetMemberId: b.hostId,
+      }),
+    ]);
+    const saved = JSON.stringify(reloaded);
+    expect(saved).not.toContain("Summarize the open questions");
+    expect(saved).not.toContain(PARENT_THREAD);
+    expect(child.interrupted).toHaveLength(0);
+
+    cancelling.fault.drop = false;
+    await a.delegating.trackOpen();
+
+    expect(child.interrupted).toHaveLength(1);
+    expect(createDelegationStateStore(a.directory).load().owedCancels ?? []).toEqual([]);
+  });
+
+  it("stops owing a cancellation that is a day old, however long the target stayed unreachable", async () => {
+    const cancelling = unreachableCancel();
+    const { a, b } = await threeHosts({ aTransport: cancelling.transport });
+    const delegated = await a.delegating.delegate(startCommand(b), { windowId: "window-a" });
+    if (delegated.status !== "delegated") throw new Error(JSON.stringify(delegated));
+    cancelling.fault.drop = true;
+    await a.delegating.cancelParent(PARENT_THREAD);
+    a.delegating.forgetParent(PARENT_THREAD);
+    const saved = a.delegationState.load();
+    expect(saved.owedCancels).toHaveLength(1);
+    a.delegationState.save({
+      ...saved,
+      owedCancels: (saved.owedCancels ?? []).map((owed) => ({
+        ...owed,
+        owedSince: decodeTimestamp(new Date(Date.now() - 25 * 3_600_000).toISOString()),
+      })),
+    });
+
+    await a.delegating.trackOpen();
+
+    expect(a.delegationState.load().owedCancels ?? []).toEqual([]);
   });
 });
 

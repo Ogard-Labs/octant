@@ -635,9 +635,12 @@ timeout, a reset connection, a reply that cannot be read), B may already run the
 child, so the request stays pending under its id: A reports it as pending, a
 later read finds B's child by that id, and cancel reaches B the same way. A
 refusal B itself wrote removes the request. A pending request B has no record of
-is dropped once its signature could no longer be accepted. Erasing the parent
-thread stops its remote children and erases what A kept of them, a result
-included; a read for them then answers as unknown.
+is dropped once its signature could no longer be accepted; a request B has
+accepted and is still starting reads as starting, never as unknown, so A keeps
+it. Erasing the parent thread stops its remote children and erases what A kept
+of them, a result included; a read for them then answers as unknown. If B could
+not be reached for that stop, A keeps only the request id and target, no task,
+result or thread, and asks again until B answers or a day has passed.
 
 **Credentials.** No credential crosses with a delegation. The work on B uses
 B's own provider sign-ins and B's own Git and SSH identities, including any an

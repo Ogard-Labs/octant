@@ -31,7 +31,7 @@ import {
 import { delegationPostureWithin } from "@octant/domain";
 import { Schema } from "effect";
 import { frameExternalContentForModel } from "../context/externalContentFraming";
-import type { DelegationStatePort, SentDelegation } from "./delegationStateStore";
+import type { DelegationStatePort, OwedCancel, SentDelegation } from "./delegationStateStore";
 import { FRESHNESS_WINDOW_MS, HUB_PEER_KEY_HEADER, sendHubLinkRequest } from "./hubLink";
 import { listenerPinFromDigest } from "./hubCrypto";
 import type { HubHostIdentity } from "./hubService";
@@ -50,6 +50,8 @@ const DELEGATION_TARGET_ROLES: ReadonlyArray<RosterMember["role"]> = ["spoke", "
  * the time it was signed. Past this, a target that does not know it never will.
  */
 const UNCONFIRMED_REQUEST_MS = 2 * FRESHNESS_WINDOW_MS;
+/** How long a host keeps asking for a cancellation it still owes after the thread was erased. */
+const OWED_CANCEL_LIFETIME_MS = 24 * 60 * 60 * 1_000;
 
 /** This host's own rules for a parent thread, judged where the thread lives. */
 export interface DelegatingParentPort {
@@ -275,11 +277,38 @@ export class DelegatingSpokeService {
     return { status: "delegated", requestId, authority: accepted.authority };
   }
 
-  /** Erasing a parent thread erases what it delegated, a kept result included. */
+  /**
+   * Erasing a parent thread erases what it delegated, a kept result included.
+   * A cancel that got no definite answer is the one thing kept, as a record of
+   * the request and its target alone, so the child is still stopped later.
+   */
   forgetParent(threadId: string): void {
     const current = this.#options.state.load();
     const kept = current.sent.filter((entry) => entry.parent.threadId !== threadId);
-    if (kept.length !== current.sent.length) this.#options.state.save({ ...current, sent: kept });
+    if (kept.length === current.sent.length) return;
+    const owedSince = decodeTimestamp(new Date(this.#options.now()).toISOString());
+    const owed = current.sent
+      .filter(
+        (entry) =>
+          entry.parent.threadId === threadId &&
+          entry.cancelRequested === true &&
+          entry.resultRecorded !== true &&
+          entry.state !== "failed" &&
+          entry.state !== "cancelled",
+      )
+      .map((entry) => ({
+        requestId: entry.requestId,
+        targetMemberId: entry.targetMemberId,
+        sentAt: entry.sentAt,
+        owedSince,
+      }));
+    this.#options.state.save({
+      ...current,
+      sent: kept,
+      ...(owed.length === 0 && current.owedCancels === undefined
+        ? {}
+        : { owedCancels: [...(current.owedCancels ?? []), ...owed] }),
+    });
   }
 
   /** Reads the remote child's state from its spoke and, once it completed, records its result here. */
@@ -332,6 +361,11 @@ export class DelegatingSpokeService {
     if (String(status.requestId) !== String(sent.requestId)) {
       return { status: "target-unreachable" };
     }
+    if (status.state === "starting") {
+      // The target has the request and is still starting the child; the record
+      // stays as it is until a later read finds it running.
+      return { status: "in-progress", requestId: sent.requestId, state: sent.state };
+    }
     if (sent.state === "awaiting-acceptance") {
       // The target does run the child: the lost answer was an acceptance.
       this.#update(sent.requestId, { state: status.state });
@@ -363,6 +397,64 @@ export class DelegatingSpokeService {
       }
       await this.refresh(String(entry.requestId)).catch(() => undefined);
     }
+    for (const owed of this.#options.state.load().owedCancels ?? []) {
+      await this.#settleOwedCancel(owed).catch(() => undefined);
+    }
+  }
+
+  /**
+   * Sends a cancellation left behind by an erased parent thread. It is settled
+   * when the target answers it, says it never knew the request once that
+   * request's signature could no longer be accepted, or the day is up.
+   */
+  async #settleOwedCancel(owed: OwedCancel): Promise<void> {
+    const now = this.#options.now();
+    if (now - Date.parse(owed.owedSince) > OWED_CANCEL_LIFETIME_MS) {
+      this.#settle(owed);
+      return;
+    }
+    const target = this.#options.target(String(owed.targetMemberId));
+    const origin = target.status === "member" ? memberOrigin(target.member) : undefined;
+    if (target.status !== "member" || origin === undefined) return;
+    const answer = await this.#send(target, origin, PEER_DELEGATION_ROUTES.cancel, {
+      requestId: owed.requestId,
+    });
+    if (answer.status === "unreachable") return;
+    if (!answer.response.ok) {
+      const refusal = await refusalOf(answer.response);
+      if (
+        refusal.reason === "unknown-request" &&
+        now - Date.parse(owed.sentAt) > UNCONFIRMED_REQUEST_MS
+      ) {
+        this.#settle(owed);
+      }
+      return;
+    }
+    let cancelled;
+    try {
+      cancelled = decodeDelegationCancelAnswer(await answer.response.json());
+    } catch {
+      return;
+    }
+    this.#settle(owed);
+    if (cancelled.status === "cancelled") {
+      this.#options.record({
+        change: "cancel-sent",
+        actingPrincipal: { kind: "local-window" },
+        requestId: owed.requestId,
+        memberId: owed.targetMemberId,
+      });
+    }
+  }
+
+  #settle(owed: OwedCancel): void {
+    const current = this.#options.state.load();
+    this.#options.state.save({
+      ...current,
+      owedCancels: (current.owedCancels ?? []).filter(
+        (entry) => String(entry.requestId) !== String(owed.requestId),
+      ),
+    });
   }
 
   /** Asks the target to interrupt one remote child. */

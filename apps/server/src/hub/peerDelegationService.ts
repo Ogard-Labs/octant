@@ -7,6 +7,7 @@
 // approvals go to this host's windows and to members it lets answer.
 
 import {
+  DelegationRequestId as DelegationRequestIdSchema,
   UtcTimestamp,
   decodeDelegationReference,
   decodeDelegationRequest,
@@ -29,6 +30,7 @@ import type { DelegationStatePort, ReceivedDelegation } from "./delegationStateS
 import type { PeerRequestOutcome } from "./spokeLinkService";
 
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
+const decodeRequestId = Schema.decodeUnknownSync(DelegationRequestIdSchema);
 const MAX_SUMMARY = 8_192;
 const MAX_FINAL_MESSAGE = 65_536;
 // The status route allows 131,072 response bytes. Together these two take 98,304
@@ -275,7 +277,15 @@ export class PeerDelegationService {
   async status(signed: SignedRequest): Promise<DelegationStatusReceipt> {
     const found = this.#find(signed);
     if (found.status === "refused") return found;
-    if (found.status === "starting") return refusal("unknown-request");
+    if (found.status === "starting") {
+      // Told to the sender alone (see #find). A refusal here would read as "this
+      // spoke never got the request" and the sender would forget a child that is
+      // about to exist.
+      return {
+        status: "read",
+        delegation: { requestId: decodeRequestId(found.requestId), state: "starting" },
+      };
+    }
     const reading = await this.#options.host.readThread(
       found.delegation.threadId,
       found.delegation.turnId,

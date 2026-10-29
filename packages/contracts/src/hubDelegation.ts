@@ -73,11 +73,13 @@ export type DelegationChildState = typeof DelegationChildState.Type;
 
 /**
  * The remote child's state as its spoke reads it. `result` is present only once
- * the child completed, and it is data for the delegating thread.
+ * the child completed, and it is data for the delegating thread. `starting`
+ * answers the sender of a request the spoke has accepted for processing but not
+ * yet started: a pending answer, not a refusal, so the sender keeps its record.
  */
 export const DelegationStatus = Schema.Struct({
   requestId: DelegationRequestId,
-  state: DelegationChildState,
+  state: Schema.Union(DelegationChildState, Schema.Literal("starting")),
   result: Schema.optional(DelegationResult),
 }).annotations(strict);
 export type DelegationStatus = typeof DelegationStatus.Type;

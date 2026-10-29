@@ -86,9 +86,25 @@ export const SentDelegation = Schema.Struct({
 }).annotations(strict);
 export type SentDelegation = typeof SentDelegation.Type;
 
+/**
+ * A cancellation still owed to a target after the parent thread was erased, when
+ * the target gave no definite answer to the cancel. It names the request and the
+ * target and nothing else: no task, no result, no parent thread. It is dropped
+ * once the target answers, or a day after it was left.
+ */
+export const OwedCancel = Schema.Struct({
+  requestId: DelegationRequestId,
+  targetMemberId: HubMemberId,
+  /** When the request was sent, to tell a target that never got it from one still starting it. */
+  sentAt: UtcTimestamp,
+  owedSince: UtcTimestamp,
+}).annotations(strict);
+export type OwedCancel = typeof OwedCancel.Type;
+
 export const DelegationState = Schema.Struct({
   received: Schema.Array(ReceivedDelegation),
   sent: Schema.Array(SentDelegation),
+  owedCancels: Schema.optional(Schema.Array(OwedCancel)),
 }).annotations(strict);
 export type DelegationState = typeof DelegationState.Type;
 
@@ -119,6 +135,9 @@ export function createDelegationStateStore(dataDirectory: string): DelegationSta
       const kept: DelegationState = {
         received: state.received.slice(-MAX_REMEMBERED),
         sent: state.sent.slice(-MAX_REMEMBERED),
+        ...(state.owedCancels === undefined
+          ? {}
+          : { owedCancels: state.owedCancels.slice(-MAX_REMEMBERED) }),
       };
       writeFileSync(staging, JSON.stringify(Schema.encodeSync(DelegationState)(kept)), {
         mode: 0o600,
