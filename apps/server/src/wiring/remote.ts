@@ -46,7 +46,7 @@ import { HubService } from "../hub/hubService";
 import { createHubStateStore } from "../hub/hubStateStore";
 import { createPinnedHubTransport } from "../hub/pinnedHubTransport";
 import { createRosterSigningKeyStore } from "../hub/rosterSigningKey";
-import { SpokeLinkService } from "../hub/spokeLinkService";
+import { deviceLifecycleAt, SpokeLinkService } from "../hub/spokeLinkService";
 import {
   TailscaleCertificateService,
   createTailscaleCertificateSetting,
@@ -364,6 +364,8 @@ export function wireRemote(deps: RemoteDependencies) {
       if (gateway === undefined || administration === undefined) return undefined;
       return {
         admitIntroducedDevice: (input) => gateway.admitIntroducedDevice(input),
+        deviceLifecycle: (deviceId, now) =>
+          deviceLifecycleAt(administration.listDevices(), deviceId, now),
         revokeDevice: (deviceId) => {
           administration.revokeDevice({ deviceId });
         },
