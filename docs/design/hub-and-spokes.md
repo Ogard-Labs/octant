@@ -990,7 +990,10 @@ maintainer's hardware, or names the maintainer gate.
      removals by sequence and merges with `mergeStandInMembership`. The hub drops
      an unsigned claim of an owner mark, an unlock key, or a port from an added
      member and records the member with no paired device, so the hub holds no owner
-     power for it until a person confirms one.
+     power for it until a person confirms one. The hub refuses the whole hand-back
+     (`handback-invalid`, journaled as `stand-in-refused`) if it removes the hub, a
+     standby, or the sender, or adds anything but a spoke: the hub signs the merge,
+     so it must not carry a change members refuse from a standby.
    - **Promotion changes no spoke by itself.** A named standby, on the person's
      confirmation in its own window or `octant hub promote --confirm`, becomes the
      hub, clears the standby order, drops the old hub from the roster, and signs
