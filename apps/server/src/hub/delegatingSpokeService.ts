@@ -178,6 +178,11 @@ export class DelegatingSpokeService {
     return this.#options.state.load().sent.filter((entry) => entry.parent.threadId === threadId);
   }
 
+  /** The parent thread a sent delegation belongs to, so a caller can be authorized against it. */
+  parentThreadOf(requestId: string): string | undefined {
+    return this.#find(requestId)?.parent.threadId;
+  }
+
   async delegate(
     command: DelegationStartCommand,
     context: { readonly windowId: string },

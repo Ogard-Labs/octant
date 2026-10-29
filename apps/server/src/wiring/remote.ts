@@ -83,7 +83,7 @@ import { boundHostRuntimeDiagnostics, type HostRuntimeDiagnostics } from "@octan
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
-import type { AgentRunsWiring } from "./agentRuns";
+import { type AgentRunsWiring, authorizeAgentRunParentThread } from "./agentRuns";
 import type { HarnessStateWiring } from "./harnessState";
 import { checkDelegationParent } from "../hub/delegationParentCheck";
 import type { IntegrationsWiring } from "./integrations";
@@ -533,6 +533,13 @@ export function wireRemote(deps: RemoteDependencies) {
     desktopBridgeSecret: options.desktopBridgeSecret,
     windowAuthorityStore,
     delegation: delegatingSpoke,
+    authorizeParent: ({ threadId, windowId }) =>
+      authorizeAgentRunParentThread({
+        persistence,
+        workThreadProjection,
+        parentThreadId: decodeAgentRunParentThreadId(threadId),
+        windowId,
+      }),
   });
   const hubOwnerRoutes = createHubOwnerRouteHandler({
     hub: hubService,

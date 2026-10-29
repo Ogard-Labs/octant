@@ -28,6 +28,11 @@ export interface DelegationAdministrationRouteOptions {
   readonly desktopBridgeSecret: string | undefined;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly delegation: DelegatingSpokeService;
+  /** Whether the window currently holds the parent thread on its Project. */
+  readonly authorizeParent: (input: {
+    readonly threadId: string;
+    readonly windowId: string;
+  }) => boolean;
   readonly now?: () => number;
 }
 
@@ -88,6 +93,16 @@ export function createDelegationAdministrationRouteHandler(
         );
       }
       const reference = String(decodeDelegationReference(value).requestId);
+      // The capability proves a live window, not that this window holds the
+      // parent thread: the same check ordinary child results and cancellation
+      // meet. An unknown id falls through to its own answer.
+      const parentThreadId = options.delegation.parentThreadOf(reference);
+      if (
+        parentThreadId !== undefined &&
+        !options.authorizeParent({ threadId: parentThreadId, windowId })
+      ) {
+        return outcome({ status: "refused", kind: "parent-unavailable" });
+      }
       return route === DELEGATION_ADMINISTRATION_ROUTES.read
         ? outcome(await options.delegation.refresh(reference))
         : outcome(await options.delegation.cancel(reference));

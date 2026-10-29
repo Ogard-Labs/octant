@@ -1314,14 +1314,25 @@ describe("delegation administration on the delegating spoke", () => {
   const capability = "A".repeat(43);
   const secret = "desktop-secret";
 
+  const otherWindowId = decodeWindowId("55555555-5555-4555-8555-555555555555");
+  const otherCapability = `${"A".repeat(42)}E`;
+
+  /** Only the first window holds the parent thread on its Project; the second is live but holds nothing. */
   async function setup() {
     const hosts = await threeHosts();
     const authority = new WindowAuthorityStore();
     authority.register({ windowId, capability, now: Date.now() });
+    authority.register({
+      windowId: otherWindowId,
+      capability: otherCapability,
+      now: Date.now(),
+    });
     const handle = createDelegationAdministrationRouteHandler({
       desktopBridgeSecret: secret,
       windowAuthorityStore: authority,
       delegation: hosts.a.delegating,
+      authorizeParent: (input) =>
+        input.threadId === PARENT_THREAD && input.windowId === String(windowId),
     });
     return { ...hosts, handle };
   }
@@ -1376,6 +1387,30 @@ describe("delegation administration on the delegating spoke", () => {
     expect(child.interrupted).toHaveLength(1);
   });
 
+  it("refuses a window that does not hold the parent thread from reading or cancelling its child", async () => {
+    const { handle, b, child } = await setup();
+    const started = await handle(post(DELEGATION_ADMINISTRATION_ROUTES.start, startCommand(b)));
+    const { requestId } = (await started?.json()) as { requestId: string };
+    const asOtherWindow = { "x-octant-window-capability": otherCapability };
+
+    for (const path of [
+      DELEGATION_ADMINISTRATION_ROUTES.read,
+      DELEGATION_ADMINISTRATION_ROUTES.cancel,
+    ]) {
+      const response = await handle(post(path, { requestId }, asOtherWindow));
+      expect(response?.status, path).toBe(409);
+      expect(await response?.json(), path).toEqual({
+        status: "refused",
+        kind: "parent-unavailable",
+      });
+    }
+    expect(child.interrupted).toHaveLength(0);
+
+    const stillOwned = await handle(post(DELEGATION_ADMINISTRATION_ROUTES.cancel, { requestId }));
+    expect(await stillOwned?.json()).toMatchObject({ status: "cancelled" });
+    expect(child.interrupted).toHaveLength(1);
+  });
+
   it("refuses a request without the desktop secret, a window capability, or with an Origin", async () => {
     const { handle, b, child } = await setup();
     const command = startCommand(b);
@@ -1385,7 +1420,7 @@ describe("delegation administration on the delegating spoke", () => {
     );
     const noCapability = await handle(
       post(DELEGATION_ADMINISTRATION_ROUTES.start, command, {
-        "x-octant-window-capability": `${"A".repeat(42)}E`,
+        "x-octant-window-capability": `${"A".repeat(42)}Q`,
       }),
     );
     const withOrigin = await handle(
