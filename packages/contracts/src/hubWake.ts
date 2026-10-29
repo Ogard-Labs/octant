@@ -32,6 +32,8 @@ export type HubWakeTime = typeof HubWakeTime.Type;
 export const HUB_WAKE_MAX_TIMES_PER_SPOKE = 256;
 export const HUB_WAKE_MAX_SPOKES = 256;
 
+const HubWakeSequence = Schema.Int.pipe(Schema.positive());
+
 const wakeTimes = Schema.Array(HubWakeTime).pipe(
   Schema.maxItems(HUB_WAKE_MAX_TIMES_PER_SPOKE),
   Schema.filter((times) => unique(times.map((time) => time.routineId)), uniqueMessage),
@@ -43,8 +45,12 @@ const wakeTimes = Schema.Array(HubWakeTime).pipe(
  * removed or disabled is withdrawn by leaving it out. The address is present
  * only when the person entered it on the spoke. Nothing else travels: the
  * hub never receives a routine's prompt, Project, profile, name, or schedule.
+ * `sequence` is the spoke's own count, kept across restarts and never below the
+ * clock in milliseconds; reports can overtake each other on the way, and the hub
+ * ignores one that is not newer than the last it applied for that spoke.
  */
 export const HubWakeReport = Schema.Struct({
+  sequence: HubWakeSequence,
   times: wakeTimes,
   hardwareAddress: Schema.optional(HardwareAddress),
 }).annotations(strict);
@@ -78,6 +84,8 @@ export const HubWakeSpokeTimes = Schema.Struct({
   memberId: HubMemberId,
   times: wakeTimes,
   hardwareAddress: Schema.optional(HardwareAddress),
+  /** The sequence of the report these times came from, when they came from one. */
+  sequence: Schema.optional(HubWakeSequence),
 }).annotations(strict);
 export type HubWakeSpokeTimes = typeof HubWakeSpokeTimes.Type;
 
