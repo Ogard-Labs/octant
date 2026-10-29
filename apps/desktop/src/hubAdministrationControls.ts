@@ -15,6 +15,7 @@ import {
   decodeHubGrant,
   decodeHubLeaveRequest,
   decodeHubPromoteRequest,
+  decodeHubPushSwitchRequest,
   decodeHubStandbyOrderRequest,
   decodeHubWakeHardwareAddressRequest,
   decodeHubWakeSwitchRequest,
@@ -124,6 +125,11 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     method: "POST",
     path: "/api/desktop/hub/wake/hardware-address",
     decodeBody: decodeHubWakeHardwareAddressRequest,
+  },
+  push: {
+    method: "POST",
+    path: "/api/desktop/hub/push",
+    decodeBody: decodeHubPushSwitchRequest,
   },
 } as const satisfies Readonly<Record<string, HubAdministrationRoute>>;
 

@@ -39,7 +39,7 @@ the hub's page (decision H15's links, and a browser identity a spoke can accept)
 is not built. The browser flow is tested with a faked authenticator and has not
 been run against a real hub. Nothing here has been run on a real phone, a real
 passkey, or Android. Sign-in copy, posture routes, a Mac Touch ID unlock key,
-push, and provisioning are not built. The wake service is built (the hub's own
+and provisioning are not built. The wake service is built (the hub's own
 switch, spokes reporting opaque routine times, the Wake-on-LAN packet and signed
 nudge, standbys holding the times), read narrowly as the last item of slice 8
 records; it has run only between hosts on loopback with a fake socket, and a real
@@ -49,10 +49,15 @@ slice 6 records. Failover is built (a named standby, member switching, stand-in,
 step-down with merge-back, and promotion), read narrowly as the last item of
 slice 7 records; it has run only between hosts on loopback, with the hub
 stopped by blocking its address, never on a real network or after a real
-reboot.
+reboot. Push through the hub is built (the hub's own switch, a spoke handing it
+sealed, spoke-signed delivery requests, the hub forwarding them unchanged to the
+push gateway, and a standing-in standby doing the same), read narrowly as the
+last item of slice 9 records; it has run only between hosts on loopback against a
+local stand-in for the gateway, never against the real gateway or to a real
+phone, and it never sends to Apple or Google itself.
 The hub uses only the Roster and Status grant items, the Owners item for
-owner devices, the Standby item for naming a standby, and the Wake item for the
-wake service. The maintainer
+owner devices, the Standby item for naming a standby, the Wake item for the
+wake service, and the Push item for push. The maintainer
 asked for this design and authorized it as post-preview, design-first work on
 2026-10-28, and set its shape the same day: a running instance enabled as hub,
 members paired by QR or manual code over a private network such as Tailscale,
@@ -1111,6 +1116,56 @@ maintainer's hardware, or names the maintainer gate.
    forwards per H7. Depends on the push gateway slices in Mobile maturity.
    Verification: transport tests against a local gateway; a device delivery
    is a maintainer gate.
+
+   Built, with these narrower readings:
+   - **The capability names no gateway, so the request may.** A capability is
+     opaque (`v1.<key id>.<sealed>`), so nothing in it says where to send. The
+     hand-off carries the spoke's own gateway address only when its Notifications
+     setting names one other than the default. The hub forwards to the gateway its
+     own Notifications setting names, when the request names none or names that
+     same one, and refuses any other (`gateway-mismatch`): a spoke cannot aim the
+     hub's forward at an address the hub's person never chose. The spoke then
+     falls back to its own gateway.
+   - **The hub forwards only if its own Notifications setting is on.** That
+     switch is what lets a host contact a gateway at all, so push through the hub
+     adds no external call the person did not allow on that host. The push
+     sender is a second switch on top of it, off by default, window only
+     (`octant hub push on|off`, Settings › Hub). A standing-in standby uses its
+     own Notifications setting the same way.
+   - **The hub asks the spoke; it never assumes a grant.** Only the spoke knows
+     its grant, so before each forward the hub (or a standing-in standby) sends the
+     spoke a signed question over the pinned link and forwards only on `granted`.
+     A spoke it cannot reach, or one that says no, gets no forward
+     (`grant-unconfirmed`, `push-not-granted`). No answer is cached, so unticking
+     Push takes effect on the next notification.
+   - **A standby needs more, and the spoke checks it twice.** A standby forwards
+     only while it stands in, only if the hub's switch was on when the hub last
+     told it (a signed copy of the switch, taken only by a spoke that ticked
+     Standby), and only for a spoke that ticked Push and Standby and cannot reach
+     the hub for the failover time. The spoke applies the last rule when it hands
+     over and again when the standby asks.
+   - **A spoke hands over to one place.** The hub, or the standby whose
+     roster it follows because it could not reach the hub; it does not try other
+     standbys. A standing-in standby sends its own notifications itself.
+   - **The hub's switch is not the spoke's.** A spoke that ticked Push uses the
+     hub even when its own Notifications setting is off, and reports delivery
+     available. If the hub cannot or will not forward, it sends to the gateway
+     itself only when its own setting is on; otherwise the delivery is not sent,
+     as a failure categorized `hub-unreachable` (retryable) or `hub-refused`
+     (retryable only for a busy hub or a gateway it could not reach). A gateway
+     that answered is relayed as data and is never followed by a second send.
+   - **Bounds.** A hand-off body is at most 16 KiB and must decode as a delivery
+     request (a capability and one sealed envelope); the hub reads no field of the
+     envelope. One spoke may ask 60 times a minute, counted in memory.
+   - **What the hub keeps.** Counts of forwards and refusals per spoke and the
+     last result, which a switch-off forgets. The journal records the spoke, the
+     size, and a reason word; rate-limit refusals once a minute per spoke. A
+     standing-in standby journals and keeps no counts.
+   - **The window bridge.** The desktop's allow-list of hub operations gained
+     `push`, decoded against its contract before it is forwarded.
+   - **Not built.** Sending to Apple or Google directly (decision H7's second
+     path), and any delivery to a real phone.
+
 10. **Provisioning.** Update-feed mirror, catalog offers, profiles, and routine
     offers as proposals, with per-kind auto-apply per H5. Acceptance: nothing
     offered installs trusted, enables, or carries a secret. **Yes.**

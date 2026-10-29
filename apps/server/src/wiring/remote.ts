@@ -62,8 +62,10 @@ import { FailoverService } from "../hub/failoverService";
 import { HubService, type HubPairingPort } from "../hub/hubService";
 import { createHubStateStore } from "../hub/hubStateStore";
 import { createPinnedHubTransport } from "../hub/pinnedHubTransport";
+import { PushService } from "../hub/pushService";
 import { createRosterSigningKeyStore } from "../hub/rosterSigningKey";
 import { deviceLifecycleAt, SpokeLinkService } from "../hub/spokeLinkService";
+import { SpokePushService } from "../hub/spokePushService";
 import {
   TailscaleCertificateService,
   createTailscaleCertificateSetting,
@@ -109,6 +111,8 @@ const FAILOVER_LOOK_MS = 15_000;
 /** How often the hub looks for an occurrence to wake a spoke for, and a spoke for a changed routine time to report. */
 const WAKE_LOOK_MS = 15_000;
 const WAKE_REPORT_MS = 30_000;
+/** How often the push sender forgets old rate marks and hands standbys its switch. */
+const PUSH_LOOK_MS = 60_000;
 const CERTIFICATE_CHECK_MS = 24 * 60 * 60 * 1_000;
 const STARTUP_CERTIFICATE_CHECK_MS = 60 * 1_000;
 
@@ -147,7 +151,13 @@ export type RemoteDependencies = Pick<
     | "workTurnService"
   > &
   Pick<CanvasWiring, "canvasRoutes" | "canvasPublicShareService"> &
-  Pick<AutomationWiring, "automationScheduler" | "pushNotificationTokenStore"> &
+  Pick<
+    AutomationWiring,
+    | "automationScheduler"
+    | "hubPushHandoffSlot"
+    | "pushGatewaySetting"
+    | "pushNotificationTokenStore"
+  > &
   Pick<RoutesWiring, "authenticatedProductDispatch"> &
   Pick<FoundationsWiring, "workThreadProjection"> &
   Pick<FoundationsWiring, "providerRuntimeRegistry"> &
@@ -173,6 +183,7 @@ export function wireRemote(deps: RemoteDependencies) {
     authenticatedProductDispatch,
     automationScheduler,
     browserCaptureStore,
+    hubPushHandoffSlot,
     nativeHarnessSessions,
     canvasPublicShareService,
     canvasRoutes,
@@ -192,6 +203,7 @@ export function wireRemote(deps: RemoteDependencies) {
     providerDataDirectory,
     providerRuntimeRegistry,
     providerService,
+    pushGatewaySetting,
     pushNotificationTokenStore,
     remoteServerGrants,
     serve,
@@ -481,6 +493,31 @@ export function wireRemote(deps: RemoteDependencies) {
     now: Date.now,
   });
   setInterval(() => void spokeWakeService.tick().catch(() => undefined), WAKE_REPORT_MS).unref();
+  // The push sender is off until the person turns it on in the hub's window. A
+  // spoke hands the hub its sealed envelopes only if its hub grant ticks Push; the
+  // hub forwards them to the gateway its own Notifications setting names.
+  const pushService = new PushService({
+    state: hubStateStore,
+    identity: resolveHubIdentity,
+    transport: hubTransport,
+    gateway: pushGatewaySetting.current,
+    record: recordHubMembership,
+    now: Date.now,
+  });
+  setInterval(() => void pushService.tick().catch(() => undefined), PUSH_LOOK_MS).unref();
+  const spokePushService = new SpokePushService({
+    state: hubStateStore,
+    identity: resolveHubIdentity,
+    transport: hubTransport,
+    spoke: spokeLinkService,
+    hubUnreachable: () => failoverService.hubUnreachable(),
+    record: recordHubMembership,
+    now: Date.now,
+  });
+  hubPushHandoffSlot.bind({
+    granted: () => spokePushService.granted(),
+    hand: (delivery) => spokePushService.hand(delivery),
+  });
   const tailscaleCertificate = new TailscaleCertificateService({
     setting: createTailscaleCertificateSetting(providerDataDirectory),
     daemon: createTailscaleCliDaemon({
@@ -507,6 +544,8 @@ export function wireRemote(deps: RemoteDependencies) {
     failover: failoverService,
     wake: wakeService,
     spokeWake: spokeWakeService,
+    push: pushService,
+    spokePush: spokePushService,
     certificate: tailscaleCertificate,
     maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   });
@@ -516,6 +555,8 @@ export function wireRemote(deps: RemoteDependencies) {
     failover: failoverService,
     wake: wakeService,
     spokeWake: spokeWakeService,
+    push: pushService,
+    spokePush: spokePushService,
   });
   // Delegation between spokes: the receiving side starts an ordinary Work
   // thread under this host's own scope, and the sending side checks this host's

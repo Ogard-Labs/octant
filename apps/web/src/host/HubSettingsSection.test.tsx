@@ -1003,3 +1003,86 @@ describe("HubSettingsSection wake service", () => {
     expect(await screen.findByText(/not a hardware address/)).toBeVisible();
   });
 });
+
+describe("HubSettingsSection push sender", () => {
+  const hubWithPush = (push: unknown) => ({
+    hub: {
+      enabled: true,
+      roster: {
+        roster: {
+          standbyOrder: [],
+          members: [
+            { memberId: "m-1", name: "Mac mini", role: "hub", owner: false },
+            { memberId: "m-2", name: "Laptop", role: "spoke", owner: false },
+          ],
+        },
+      },
+    },
+    spoke: { membership: "none" },
+    push,
+  });
+
+  it("is off until the window turns it on, and then says so", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderHub({
+      status: {
+        status: 200,
+        body: hubWithPush({ hub: { enabled: false, spokes: [] }, spoke: { handing: false } }),
+      },
+      push: { status: 200, body: { status: "changed", enabled: true } },
+    });
+
+    const toggle = await screen.findByRole("switch", { name: "Push sender" });
+    expect(toggle).not.toBeChecked();
+    expect(calls.some((call) => call.operation === "push")).toBe(false);
+    await user.click(toggle);
+
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "push")?.body).toEqual({ enabled: true }),
+    );
+    expect(await screen.findByText(/Push sender is on/)).toBeVisible();
+  });
+
+  it("shows each spoke's forward counts and how the last one went", async () => {
+    renderHub({
+      status: {
+        status: 200,
+        body: hubWithPush({
+          hub: {
+            enabled: true,
+            spokes: [
+              {
+                memberId: "m-2",
+                forwarded: 4,
+                refused: 1,
+                lastResult: { at: NOW, result: "refused" },
+              },
+            ],
+          },
+          spoke: { handing: false },
+        }),
+      },
+    });
+
+    const list = await screen.findByRole("list", { name: "Spokes the hub forwards for" });
+    expect(within(list).getByText("Laptop")).toBeVisible();
+    expect(
+      within(list).getByText("4 forwarded · 1 refused · last the hub refused it"),
+    ).toBeVisible();
+  });
+
+  it("says plainly when the server refused the switch", async () => {
+    const user = userEvent.setup();
+    renderHub({
+      status: {
+        status: 200,
+        body: hubWithPush({ hub: { enabled: false, spokes: [] }, spoke: { handing: false } }),
+      },
+      push: { status: 409, body: { status: "refused", kind: "hub-role-off" } },
+    });
+
+    await user.click(await screen.findByRole("switch", { name: "Push sender" }));
+
+    expect(await screen.findByText("The hub role is off.")).toBeVisible();
+  });
+});

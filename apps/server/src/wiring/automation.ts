@@ -32,6 +32,7 @@ import {
   createPushNotificationTokenStore,
   pushDestinationStands,
 } from "../remote/pushNotificationTokenStore";
+import { createHubPushDeliveryTransport, createHubPushHandoffSlot } from "../hub/hubPushTransport";
 import { createGatewayPushDeliveryTransport } from "../remote/gatewayPushDeliveryTransport";
 import {
   existingPrivateListenerSigning,
@@ -108,12 +109,23 @@ export function wireAutomation(deps: AutomationDependencies) {
   const pushGatewaySetting = createPushGatewaySetting(persistence.dataDirectory);
   // The key is read once it exists and kept: every send signs with it.
   let pushSigning: HostSigningPort | undefined;
-  const pushDeliveryTransport = createGatewayPushDeliveryTransport({
+  const signPush = () => {
+    pushSigning ??= existingPrivateListenerSigning(persistence.dataDirectory);
+    return pushSigning;
+  };
+  // Where this host's hub grant ticks Push, sealed envelopes go to the hub to
+  // forward, and fall back to this host's own gateway when the hub cannot. The
+  // remote wiring binds the hub's side once it exists; until then, and on a host
+  // that is no hub's spoke, every delivery is the host's own.
+  const hubPushHandoffSlot = createHubPushHandoffSlot();
+  const pushDeliveryTransport = createHubPushDeliveryTransport({
+    direct: createGatewayPushDeliveryTransport({
+      settings: pushGatewaySetting.current,
+      signing: signPush,
+    }),
     settings: pushGatewaySetting.current,
-    signing: () => {
-      pushSigning ??= existingPrivateListenerSigning(persistence.dataDirectory);
-      return pushSigning;
-    },
+    signing: signPush,
+    handoff: hubPushHandoffSlot.current,
   });
   const hasPushStanding = (hostId: string, deviceId: string): boolean =>
     pushDestinationStands(readDeviceRegistrations(persistence.connection), {
@@ -395,8 +407,10 @@ export function wireAutomation(deps: AutomationDependencies) {
     automationScheduler,
     completedThreadArchiveSweep,
     hasPushStanding,
+    hubPushHandoffSlot,
     pushComputerLabel,
     pushDeliveryTransport,
+    pushGatewaySetting,
     pushNotificationTokenStore,
   };
 }

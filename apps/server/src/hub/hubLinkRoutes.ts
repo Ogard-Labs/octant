@@ -10,6 +10,7 @@ import {
   decodeHubGuestAdmissionRequest,
   decodeHubJoinRequest,
   decodeHubLeaveRequest,
+  decodeHubPushCopy,
   decodeHubStandInHandback,
   decodeHubWakeCopy,
   decodeHubWakeNudge,
@@ -21,7 +22,9 @@ import { HUB_HANDBACK_MAX_BODY_BYTES, HUB_WAKE_COPY_MAX_BODY_BYTES } from "../re
 import type { FailoverService } from "./failoverService";
 import { HUB_LINK_HEADER, HUB_PEER_KEY_HEADER, HubLinkVerifier } from "./hubLink";
 import type { HubService } from "./hubService";
+import type { PushService } from "./pushService";
 import type { SpokeLinkService } from "./spokeLinkService";
+import type { SpokePushService } from "./spokePushService";
 import type { SpokeWakeService } from "./spokeWakeService";
 import type { WakeService } from "./wakeService";
 
@@ -46,6 +49,12 @@ export const HUB_LINK_ROUTES = {
   wakeNudge: "/api/hub/wake-nudge",
   /** The hub hands a standby the wake times it holds. */
   wakeCopy: "/api/hub/wake-copy",
+  /** A spoke whose hub grant ticks Push hands the hub, or a standing-in standby, a sealed delivery request to forward. */
+  push: "/api/hub/push",
+  /** The hub, or a standing-in standby, asks a spoke whether its grant ticks Push before it forwards. */
+  pushGrant: "/api/hub/push-grant",
+  /** The hub tells a standby whether its push switch is on. */
+  pushCopy: "/api/hub/push-copy",
 } as const;
 
 type RouteValue = (typeof HUB_LINK_ROUTES)[keyof typeof HUB_LINK_ROUTES];
@@ -69,8 +78,20 @@ export interface HubLinkRouteOptions {
   readonly failover: FailoverService;
   readonly wake: WakeService;
   readonly spokeWake: SpokeWakeService;
+  readonly push: PushService;
+  readonly spokePush: SpokePushService;
   readonly now?: () => number;
 }
+
+/** The HTTP status a forward's refusal answers with; every one is data the spoke reads, none an error to retry blindly. */
+const PUSH_REFUSAL_STATUS: ReadonlyMap<string, number> = new Map([
+  ["malformed", 400],
+  ["too-large", 413],
+  ["rate-limited", 429],
+  ["gateway-mismatch", 409],
+  ["handing-back", 409],
+  ["gateway-unreachable", 502],
+]);
 
 /** Refusals that mean the sender is not who a spoke trusts, as opposed to a grant it did not give. */
 const SENDER_REFUSAL_STATUS: ReadonlySet<string> = new Set([
@@ -97,7 +118,8 @@ export function createHubLinkRouteHandler(
     const expectedMethod =
       route === HUB_LINK_ROUTES.roster ||
       route === HUB_LINK_ROUTES.standby ||
-      route === HUB_LINK_ROUTES.wakeCopy
+      route === HUB_LINK_ROUTES.wakeCopy ||
+      route === HUB_LINK_ROUTES.pushCopy
         ? "PUT"
         : route === HUB_LINK_ROUTES.status ||
             route === HUB_LINK_ROUTES.guestRoster ||
@@ -231,6 +253,79 @@ export function createHubLinkRouteHandler(
       const held = options.wake.receiveCopy(copy);
       if (held.status === "recorded") return Response.json(held, { headers: NO_STORE });
       return refused(held.kind === "stale-copy" ? 409 : 403, held.kind);
+    }
+
+    if (route === HUB_LINK_ROUTES.pushGrant) {
+      const sender = options.spoke.authenticateRosterSender({
+        header,
+        publicKey: presentedKey,
+        method: request.method,
+        path: route,
+        body,
+      });
+      if (sender.status === "refused") {
+        return refused(SENDER_REFUSAL_STATUS.has(sender.kind) ? 401 : 403, sender.kind);
+      }
+      // Only the hub, or a named standby, reaches this far; the spoke's own grant answers.
+      const result = await options.spokePush.checkGrant(
+        sender.status === "hub"
+          ? { kind: "hub", memberId: sender.principal.memberId }
+          : { kind: "standby", memberId: sender.memberId },
+      );
+      return result.status === "refused"
+        ? refused(403, result.kind)
+        : Response.json(result, { headers: NO_STORE });
+    }
+
+    if (route === HUB_LINK_ROUTES.pushCopy) {
+      const authenticated = options.spoke.authenticateHub({
+        header,
+        method: request.method,
+        path: route,
+        body,
+      });
+      if (authenticated.status === "refused") return refused(401, authenticated.kind);
+      // Whether the switch is on matters only to a standby, so only a spoke whose person ticked Standby takes it.
+      const allowed = options.spoke.hubMayUse("standby");
+      if (allowed.status === "refused") return refused(403, allowed.kind);
+      let copy;
+      try {
+        copy = decodeHubPushCopy(JSON.parse(body));
+      } catch {
+        return refused(400, "invalid");
+      }
+      const held = options.push.receiveCopy(copy);
+      return held.status === "recorded"
+        ? Response.json(held, { headers: NO_STORE })
+        : refused(403, held.kind);
+    }
+
+    if (route === HUB_LINK_ROUTES.push) {
+      const hubOn = options.hub.status().enabled;
+      if (!hubOn && !options.failover.standingIn()) return refused(403, "hub-role-off");
+      const verified = memberVerifier.verify({
+        header,
+        method: request.method,
+        path: route,
+        body,
+        recipientMemberId: options.hub.hubMemberId(),
+        publicKeyFor: (sender) =>
+          hubOn
+            ? options.hub.memberKey(sender, presentedKey ?? undefined)
+            : options.failover.memberKey(sender, presentedKey ?? undefined),
+      });
+      if (verified.status === "refused") return refused(401, verified.kind);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(body);
+      } catch {
+        return refused(400, "invalid");
+      }
+      // The delivery request is filed under the member whose key signed the link request; the body names no one.
+      const forwarded = await options.push.forward(verified.senderMemberId, parsed);
+      return forwarded.status === "forwarded"
+        ? Response.json(forwarded.answer, { headers: NO_STORE })
+        : refused(PUSH_REFUSAL_STATUS.get(forwarded.kind) ?? 403, forwarded.kind);
     }
 
     if (route === HUB_LINK_ROUTES.wakeTimes) {

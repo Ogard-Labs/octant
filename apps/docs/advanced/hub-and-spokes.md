@@ -301,14 +301,17 @@ spoke. Only the spoke can change it.
 | Act       | Act here as a paired device would, in Projects you name.                                  |
 
 Ticking an item records your choice. In this release the hub can use only
-Roster, Status, and Wake. Wake works only once you turn on the hub's wake service
-(see [Wake a sleeping computer](#wake-a-sleeping-computer)). Owners works for your own owner devices (see
+Roster, Status, Wake, and Push. Wake works only once you turn on the hub's wake
+service (see [Wake a sleeping computer](#wake-a-sleeping-computer)). Push works
+only once you turn on the hub's push sender (see
+[Send phone notifications through the hub](#send-phone-notifications-through-the-hub)).
+Owners works for your own owner devices (see
 [Owner devices](#owner-devices)). Introduce makes this computer accept the other
 spokes and your phones as full members (see
 [Delegate work to another computer](#delegate-work-to-another-computer)).
 Standby lets a standby hub you named act here while the hub is down (see
-[If the hub goes down](#if-the-hub-goes-down)). The other items do nothing yet,
-because the features behind them are not available yet.
+[If the hub goes down](#if-the-hub-goes-down)). The other items (Provision and
+Act) do nothing yet, because the features behind them are not available yet.
 
 Whatever you tick, the computer keeps its files, sign-ins, sandbox, and every
 approval.
@@ -408,6 +411,11 @@ A standby also holds a copy of the wake times (see
 wakes the computers that ticked both **Wake** and **Standby**, takes their new
 routine times, and hands those back to the hub with the rest.
 
+A standby also forwards phone notifications while it stands in (see
+[Send phone notifications through the hub](#send-phone-notifications-through-the-hub)),
+for the computers that ticked both **Push** and **Standby**, and only while they
+cannot reach the hub.
+
 ## Wake a sleeping computer
 
 Routines run only while their computer is awake. The hub can wake a computer
@@ -454,6 +462,53 @@ computer, how many wakes are ahead and how the last one went.
 
 A machine that is powered off, away from home, or not set to wake cannot be
 woken. A real Wake-on-LAN wake of a sleeping Mac has not been tried yet.
+
+## Send phone notifications through the hub
+
+A computer sends phone notifications through the push gateway named in its own
+**Settings › Notifications › Phone notifications** (see
+[Remote Access](/advanced/remote-access#phone-notifications)). With the
+hub's push sender, a spoke can hand its notifications to the hub, and the hub
+passes them on. This is off until you turn it on, and a computer takes part only
+if its own person ticked **Push**.
+
+**Turn it on (the hub).** On the computer that is the hub, open **Settings →
+Remote access → Push sender** and switch it on, or run `octant hub push on`.
+`octant hub push off` turns it off. Only the hub's own window changes this. The
+hub forwards only to the gateway in its own **Notifications** setting, so turn
+phone notifications on there too, or the hub refuses every request.
+
+**Take part (a spoke).** Tick **Push** in the spoke's hub grant (see
+[The hub grant](#the-hub-grant)).
+
+**What happens.**
+
+- The spoke seals each notification to your phone's key and signs the delivery
+  request with its own key, exactly as it would to send it itself. It hands that
+  request to the hub instead of calling the gateway.
+- The hub checks that the sender is a spoke in its list, that its own switch is
+  on, and that the request is small and not too frequent. Then it asks the spoke
+  whether its grant still ticks Push, and only if the spoke says so does it pass
+  the request to the gateway, unchanged. It never signs for the spoke, never opens
+  the content (it has no key to), and keeps nothing of the request afterwards.
+- The gateway's answer goes back to the spoke, which treats it as if it had sent
+  the request itself.
+- If the hub cannot be reached, or refuses, the spoke sends to the gateway itself
+  when its own **Notifications** setting allows it. Otherwise the notification is
+  reported as not sent.
+- While a standby stands in, it forwards for the computers that ticked both
+  **Push** and **Standby**, and only while those computers cannot reach the hub.
+  It uses the gateway in its own **Notifications** setting, and only if the hub's
+  push sender was on.
+
+`octant hub status` and the hub's **Push sender** section show, for each
+computer, how many notifications the hub forwarded and refused and how the last
+one went. The hub's journal records which computer, how large, and why a request
+was refused, never what was in it.
+
+The hub passes notifications to the push gateway only. It does not send to Apple
+or Google itself. A delivery to a real phone through the hub has not been tried
+yet.
 
 ## Leave a hub and remove a device
 
