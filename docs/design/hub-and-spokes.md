@@ -792,7 +792,8 @@ may run a self-hosted wake service for spokes whose hub grant includes Wake:
   switch is on; a copy that does not say so (missing, or from an older hub)
   counts as off, and the standby refuses a report with `wake-service-off`.
 - **Times the hub cleared are sent again.** Turning the switch off or on
-  clears the hub's times and moves a wake generation. The hub's report answer
+  clears the hub's times and moves a wake generation. Turning the hub role off
+  and on does the same, and the generation never goes backwards. The hub's report answer
   and heartbeat carry it, and a spoke that sees it change forgets what it last
   sent and reports in full on its next look, without any routine changing.
 - **Hub-held schedules.** A routine the person wants to run "on whichever
@@ -1054,7 +1055,11 @@ maintainer's hardware, or names the maintainer gate.
      never does. Turning it off forgets every held time and tells the standbys to
      do the same. While it is off the hub refuses reports.
    - **A spoke reports only while its grant ticks Wake.** Unticking withdraws the
-     list. The hub cannot know a spoke's grant, so the spoke is the only check:
+     list and the hardware address. The spoke keeps, in its hub state, that it
+     has shared wake state not yet withdrawn, and clears that only after the hub
+     confirms, so a restart before its next look still withdraws. The hub also
+     drops a spoke's held times and address when that spoke leaves or is removed.
+     The hub cannot know a spoke's grant, so the spoke is the only check:
      it also refuses a nudge once Wake is unticked, so stale hub-held times cost
      nothing.
    - **The hardware address is the spoke's, entered in its own window or never.**

@@ -297,9 +297,20 @@ export class HubService {
         joinTickets: [],
         // The switch and held times start over, but the copy number must not: a standby
         // that held a higher number would refuse every copy as stale until it caught up.
-        ...(hub?.wake?.copyRevision === undefined
+        // The generation moves too, so a spoke that reported under the old one sees the
+        // hub dropped its times and sends them again; it never goes backwards.
+        ...(hub?.wake === undefined
           ? {}
-          : { wake: { enabled: false, spokes: [], copyRevision: hub.wake.copyRevision } }),
+          : {
+              wake: {
+                enabled: false,
+                spokes: [],
+                generation: Math.max((hub.wake.generation ?? 0) + 1, this.#options.now()),
+                ...(hub.wake.copyRevision === undefined
+                  ? {}
+                  : { copyRevision: hub.wake.copyRevision }),
+              },
+            }),
         ...(hub?.owners === undefined ? {} : { owners: hub.owners }),
       },
     });
@@ -938,6 +949,15 @@ export class HubService {
         ...hub,
         roster: signed,
         members: hub.members.filter((member) => String(member.memberId) !== memberId),
+        // What the hub held to wake the member goes with it, hardware address included.
+        ...(hub.wake === undefined
+          ? {}
+          : {
+              wake: {
+                ...hub.wake,
+                spokes: hub.wake.spokes.filter((spoke) => String(spoke.memberId) !== memberId),
+              },
+            }),
         // A removed member loses its owner powers here with the roster entry.
         ...(hub.owners === undefined ? {} : { owners: withoutOwner(hub.owners, memberId) }),
         removals: [
