@@ -269,11 +269,16 @@ export function createPrivateListenerLifecycleController(
     const resolved = resolveCertificate(requested);
     if (resolved.status === "refused") return await refuse(resolved.code);
     const { source, pin } = resolved;
-    const config: PrivateListenerConfig =
+    // A certificate made for another name is dropped, not just left unserved:
+    // renewal must see the listener holds none and fetch one for the new name.
+    if (
       tailnetTls !== undefined &&
-      resolved.config.hostname.toLowerCase() === tailnetTls.serverName.toLowerCase()
-        ? { ...resolved.config, tailnetTls }
-        : resolved.config;
+      resolved.config.hostname.toLowerCase() !== tailnetTls.serverName.toLowerCase()
+    ) {
+      tailnetTls = undefined;
+    }
+    const config: PrivateListenerConfig =
+      tailnetTls !== undefined ? { ...resolved.config, tailnetTls } : resolved.config;
     const gatewayConfig: RemoteGatewayConfig = { listener: config };
     if (gateway !== undefined) {
       // A gateway already exists (enabled or retained after a failed shutdown).

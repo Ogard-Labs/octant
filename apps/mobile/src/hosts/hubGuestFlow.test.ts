@@ -156,7 +156,9 @@ describe("a phone that joined a hub as a guest", () => {
       deviceLabel: "Phone",
     });
 
-    expect(state.spokes).toEqual([{ memberId: String(id("2")), hostId: String(id("2")) }]);
+    expect(state.spokes).toEqual([
+      { memberId: String(id("2")), hostId: String(id("2")), deviceId: DEVICE_ID },
+    ]);
     expect(await world.registry.list()).toEqual({
       kind: "ok",
       hosts: [
@@ -224,6 +226,105 @@ describe("a phone that joined a hub as a guest", () => {
 
     expect(world.removed).toEqual([String(id("2"))]);
     expect(second.spokes.map((spoke) => spoke.memberId)).toEqual([String(id("3"))]);
+  });
+
+  it("asks the spoke again after it answers not in its roster, because its roster may still be arriving", async () => {
+    const world = await setup({});
+    const answers = [
+      Response.json({ status: "refused", kind: "not-in-roster" }, { status: 403 }),
+      Response.json({ spokeMemberId: String(id("2")), deviceId: DEVICE_ID }, { status: 201 }),
+    ];
+    const retryDelay = vi.fn(async () => undefined);
+
+    const state = await connectGuestSpokes({
+      ...world,
+      transport: () => ({
+        status: "available",
+        fetch: async () => answers.shift() ?? Response.json({}, { status: 500 }),
+      }),
+      retryDelay,
+      record: recordWith(laptop),
+      deviceLabel: "Phone",
+    });
+
+    expect(state.spokes.map((spoke) => spoke.memberId)).toEqual([String(id("2"))]);
+    expect(state.notAccepted).toEqual([]);
+    expect(retryDelay).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a spoke that keeps answering not in its roster as not accepted after a few tries", async () => {
+    const world = await setup({});
+    const retryDelay = vi.fn(async () => undefined);
+
+    const state = await connectGuestSpokes({
+      ...world,
+      transport: () => ({
+        status: "available",
+        fetch: async () =>
+          Response.json({ status: "refused", kind: "not-in-roster" }, { status: 403 }),
+      }),
+      retryDelay,
+      record: recordWith(laptop),
+      deviceLabel: "Phone",
+    });
+
+    expect(state.notAccepted).toEqual([{ memberId: String(id("2")), name: "member 2" }]);
+    expect(retryDelay).toHaveBeenCalledTimes(3);
+  });
+
+  it("admits the phone again when a spoke left and rejoined while the phone was offline", async () => {
+    const world = await setup({ "100.101.102.104": "admit" });
+    const first = await connectGuestSpokes({
+      ...world,
+      record: recordWith(laptop),
+      deviceLabel: "Phone",
+    });
+    const freshDeviceId = "22222222-2222-4222-8222-222222222222";
+
+    // The spoke revoked the phone's device when it left; the same member id now
+    // answers with a new device.
+    const second = await connectGuestSpokes({
+      ...world,
+      transport: () => ({
+        status: "available",
+        fetch: async () =>
+          Response.json(
+            { spokeMemberId: String(id("2")), deviceId: freshDeviceId },
+            { status: 201 },
+          ),
+      }),
+      record: recordWith(laptop),
+      deviceLabel: "Phone",
+      previous: first,
+    });
+
+    expect(world.removed).toEqual([String(id("2"))]);
+    expect(second.spokes).toEqual([
+      { memberId: String(id("2")), hostId: String(id("2")), deviceId: freshDeviceId },
+    ]);
+    const listed = await world.registry.list();
+    expect(listed.kind === "ok" && listed.hosts.map((host) => host.keyId)).toEqual(["key-2"]);
+    expect(world.stored.get("key-2")?.metadata).toMatchObject({ deviceId: freshDeviceId });
+  });
+
+  it("keeps a saved spoke when it cannot be reached on reopening", async () => {
+    const world = await setup({ "100.101.102.104": "admit" });
+    const first = await connectGuestSpokes({
+      ...world,
+      record: recordWith(laptop),
+      deviceLabel: "Phone",
+    });
+
+    const second = await connectGuestSpokes({
+      ...world,
+      transport: () => ({ status: "unavailable" }),
+      record: recordWith(laptop),
+      deviceLabel: "Phone",
+      previous: first,
+    });
+
+    expect(second.spokes).toEqual(first.spokes);
+    expect(world.removed).toEqual([]);
   });
 
   it("remembers the hub it joined even when a spoke cannot be added, so the join is not retried", async () => {
