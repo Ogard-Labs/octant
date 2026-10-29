@@ -47,6 +47,8 @@ export interface FailoverOptions {
   readonly spoke: SpokeLinkService;
   readonly record: (change: HubMembershipChangedPayload) => void;
   readonly now: () => number;
+  /** Told the wake generation the hub's heartbeat carried, so the spoke can resend times the hub cleared. */
+  readonly noteHubWakeGeneration?: (generation: number) => void;
   /** Replaces the failover time the hub's roster carries; tests cannot wait minutes. */
   readonly failoverAfterMs?: () => number | undefined;
 }
@@ -432,7 +434,8 @@ export class FailoverService {
     });
     if (answer === undefined) return false;
     if (answer.heartbeat !== undefined && !answer.heartbeat.standingIn) {
-      const { roster } = answer.heartbeat;
+      const { roster, wakeGeneration } = answer.heartbeat;
+      if (wakeGeneration !== undefined) this.#options.noteHubWakeGeneration?.(wakeGeneration);
       if (roster.signedBy.kind === "hub" && roster.roster.sequence > link.roster.roster.sequence) {
         this.#options.spoke.receiveRoster(roster);
       }

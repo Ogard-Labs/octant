@@ -107,6 +107,8 @@ export class SpokeWakeService {
   #lastSent: string | undefined;
   #lastCount = 0;
   #reporting = false;
+  /** The hub's wake generation as of the last report it took or heartbeat that carried it. */
+  #hubGeneration: number | undefined;
 
   constructor(options: SpokeWakeOptions) {
     this.#options = options;
@@ -148,6 +150,19 @@ export class SpokeWakeService {
     });
     void this.report().catch(() => undefined);
     return { status: "changed", ...(address === undefined ? {} : { hardwareAddress: address }) };
+  }
+
+  /**
+   * The wake generation the hub's heartbeat carried. A hub that cleared its wake
+   * state (the person turned the service off and on) moves it, and what this
+   * spoke last sent is then gone from the hub: forget it so the next report is
+   * sent in full instead of answering "unchanged".
+   */
+  noteHubWakeGeneration(generation: number): void {
+    if (this.#hubGeneration !== undefined && this.#hubGeneration !== generation) {
+      this.#lastSent = undefined;
+    }
+    this.#hubGeneration = generation;
   }
 
   /** One look at this spoke's routines; called on a timer by the server. */
@@ -202,6 +217,8 @@ export class SpokeWakeService {
       return { status: "declined", kind: await declinedKind(answer.response) };
     }
     this.#lastSent = granted ? signature : undefined;
+    const generation = await answeredGeneration(answer.response);
+    if (generation !== undefined) this.#hubGeneration = generation;
     this.#lastCount = report.times.length;
     return { status: "sent", count: report.times.length };
   }
@@ -342,6 +359,19 @@ function coordinator(
       : { memberId: String(entry.memberId), origin, pin: entry.listenerPin };
   }
   return { memberId: String(link.hubMemberId), origin: link.hubOrigin, pin: link.hubListenerPin };
+}
+
+/** The wake generation the hub filed a report under; a standing-in standby sends none. */
+async function answeredGeneration(response: Response): Promise<number | undefined> {
+  try {
+    const body: unknown = await response.json();
+    if (typeof body === "object" && body !== null && "generation" in body) {
+      return typeof body.generation === "number" ? body.generation : undefined;
+    }
+  } catch {
+    // An answer without a readable body carries no generation.
+  }
+  return undefined;
 }
 
 async function declinedKind(response: Response): Promise<string> {

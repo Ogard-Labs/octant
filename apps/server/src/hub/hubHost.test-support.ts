@@ -330,6 +330,7 @@ export async function startHubTestHost(input: {
     spoke,
     record: (change) => records.push(change),
     now: Date.now,
+    noteHubWakeGeneration: (generation) => spokeWake.noteHubWakeGeneration(generation),
     ...(input.failoverAfterMs === undefined
       ? {}
       : { failoverAfterMs: () => input.failoverAfterMs }),

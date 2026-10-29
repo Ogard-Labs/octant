@@ -228,6 +228,12 @@ export const HubHeartbeatResponse = Schema.Struct({
   hub: Schema.optional(HubIdentityFacts),
   /** The identity key of a standby that signed `roster`; a member checks its fingerprint against the roster. */
   signerPublicKey: Schema.optional(base64Url(512)),
+  /**
+   * Changes whenever the hub clears the wake times it holds (its wake switch
+   * turned off or on), so a spoke that remembers what it sent knows to send it
+   * again. Absent from a standby.
+   */
+  wakeGeneration: Schema.optional(Schema.Int),
 }).annotations(strict);
 export type HubHeartbeatResponse = typeof HubHeartbeatResponse.Type;
 export const decodeHubHeartbeatResponse = Schema.decodeUnknownSync(HubHeartbeatResponse);

@@ -449,6 +449,7 @@ export function wireRemote(deps: RemoteDependencies) {
     spoke: spokeLinkService,
     record: recordHubMembership,
     now: Date.now,
+    noteHubWakeGeneration: (generation) => spokeWakeService.noteHubWakeGeneration(generation),
   });
   setInterval(() => void failoverService.tick().catch(() => undefined), FAILOVER_LOOK_MS).unref();
   // The wake service is off until the person turns it on in the hub's window; its

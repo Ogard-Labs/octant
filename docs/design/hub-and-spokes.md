@@ -772,6 +772,15 @@ may run a self-hosted wake service for spokes whose hub grant includes Wake:
   and the spoke handles it on return under its missed-run policy. The hub
   stores each spoke's hardware address only if the person entered it on the
   spoke.
+- **The switch is the hub's own, and a stand-in obeys it.** The hub hands each
+  standby its wake switch with the copy of the times. A standby that is
+  standing in takes reports and wakes spokes only while the copy says the
+  switch is on; a copy that does not say so (missing, or from an older hub)
+  counts as off, and the standby refuses a report with `wake-service-off`.
+- **Times the hub cleared are sent again.** Turning the switch off or on
+  clears the hub's times and moves a wake generation. The hub's report answer
+  and heartbeat carry it, and a spoke that sees it change forgets what it last
+  sent and reports in full on its next look, without any routine changing.
 - **Hub-held schedules.** A routine the person wants to run "on whichever
   spoke is awake" is not in this design; a routine always belongs to one
   spoke's Project.

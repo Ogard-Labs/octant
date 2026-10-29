@@ -227,6 +227,7 @@ export class HubService {
     return {
       standingIn: false,
       roster: hub.roster,
+      wakeGeneration: hub.wake?.generation ?? 0,
       ...(reading.status === "refused"
         ? {}
         : {
