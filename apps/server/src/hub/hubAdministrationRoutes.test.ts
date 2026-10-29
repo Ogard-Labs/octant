@@ -286,4 +286,58 @@ describe("who may administer the hub role", () => {
         }),
     );
   });
+
+  it("lets a window decide a host's owners and refuses a window-less request for any owner route", async () => {
+    const { host, handle } = await setup();
+    host.hub.enable({ kind: "local-window" });
+    const candidate = {
+      memberId: "44444444-4444-4444-8444-444444444444",
+      identityKeyFingerprint: "a".repeat(64),
+      unlockPublicKey: "AAAA",
+    };
+
+    const unknown = await handle(
+      post(HUB_ADMINISTRATION_ROUTES.ownersAdd, { owners: [candidate] }),
+    );
+    const removed = await handle(
+      post(HUB_ADMINISTRATION_ROUTES.ownersRemove, { memberId: candidate.memberId }),
+    );
+    const unauthenticated = await handle(
+      post(
+        HUB_ADMINISTRATION_ROUTES.ownersAdd,
+        { owners: [candidate] },
+        { "x-octant-window-capability": "B".repeat(43) },
+      ),
+    );
+
+    expect(unknown?.status).toBe(409);
+    expect(await unknown?.json()).toMatchObject({ status: "refused", kind: "not-in-roster" });
+    expect(removed?.status).toBe(409);
+    expect(await removed?.json()).toMatchObject({ status: "refused", kind: "not-an-owner" });
+    expect(unauthenticated?.status).toBe(401);
+    expect(host.hub.listOwners()).toEqual([]);
+  });
+
+  it("refuses to confirm a member or dismiss an alert on a host that is not a spoke", async () => {
+    const { handle } = await setup();
+
+    const confirmed = await handle(
+      post(HUB_ADMINISTRATION_ROUTES.confirmMember, {
+        memberId: "44444444-4444-4444-8444-444444444444",
+      }),
+    );
+    const dismissed = await handle(
+      post(HUB_ADMINISTRATION_ROUTES.alertDismiss, {
+        alertId: "55555555-5555-4555-8555-555555555555",
+      }),
+    );
+    const setting = await handle(
+      post(HUB_ADMINISTRATION_ROUTES.confirmNewMembers, { enabled: true }),
+    );
+
+    for (const response of [confirmed, dismissed, setting]) {
+      expect(response?.status).toBe(409);
+      expect(await response?.json()).toMatchObject({ status: "refused", kind: "not-a-spoke" });
+    }
+  });
 });

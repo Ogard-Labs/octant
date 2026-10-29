@@ -9,7 +9,15 @@
 // prefix, and a request signed as a member carries no window capability.
 
 import { createHash, timingSafeEqual } from "node:crypto";
-import { decodeHubGrant, type AuditActingPrincipal } from "@octant/contracts";
+import {
+  decodeConfirmNewMembersRequest,
+  decodeHubGrant,
+  decodeOwnerAdditionRequest,
+  decodeOwnerAlertRequest,
+  decodeOwnerMemberRequest,
+  decodeOwnerRemovalRequest,
+  type AuditActingPrincipal,
+} from "@octant/contracts";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import type { HubService } from "./hubService";
@@ -29,6 +37,13 @@ export const HUB_ADMINISTRATION_ROUTES = {
   joinFinish: "/api/desktop/hub/join/finish",
   grant: "/api/desktop/hub/grant",
   leave: "/api/desktop/hub/leave",
+  /** A window adds owner devices to this host's owner list: the hub's, or a spoke's after the person confirmed them by name and fingerprint. */
+  ownersAdd: "/api/desktop/hub/owners/add",
+  ownersRemove: "/api/desktop/hub/owners/remove",
+  confirmNewMembers: "/api/desktop/hub/confirm-new-members",
+  confirmMember: "/api/desktop/hub/members/confirm",
+  alertDismiss: "/api/desktop/hub/alerts/dismiss",
+  alertRemove: "/api/desktop/hub/alerts/remove",
   /** The `*.ts.net` certificate for the web app: GET reads it, POST turns it on or off or renews it. */
   certificate: "/api/desktop/hub/certificate",
 } as const;
@@ -81,7 +96,10 @@ export function createHubAdministrationRouteHandler(
 
     if (route === HUB_ADMINISTRATION_ROUTES.status) {
       if (request.method !== "GET") return failure("invalid", 400);
-      return Response.json({ hub: options.hub.status(), spoke: options.spoke.status() });
+      return Response.json({
+        hub: { ...options.hub.status(), owners: options.hub.listOwners() },
+        spoke: options.spoke.status(),
+      });
     }
     if (route === HUB_ADMINISTRATION_ROUTES.certificate && request.method === "GET") {
       return Response.json(options.certificate.status(), {
@@ -121,8 +139,56 @@ export function createHubAdministrationRouteHandler(
           return outcome(await options.spoke.startJoin({ code: value.code }));
         }
         case HUB_ADMINISTRATION_ROUTES.joinFinish: {
-          requireNoBody(body.text);
-          return outcome(await options.spoke.finishJoin(WINDOW_PRINCIPAL));
+          // The unlock public key is optional: the device that joins with an
+          // owner code presents the one it made for this hub.
+          if (body.text.trim() === "")
+            return outcome(await options.spoke.finishJoin(WINDOW_PRINCIPAL));
+          const value = requireJson(request, body.text, ["unlockPublicKey"]);
+          if (typeof value.unlockPublicKey !== "string") throw new Error("invalid");
+          return outcome(
+            await options.spoke.finishJoin(WINDOW_PRINCIPAL, {
+              unlockPublicKey: value.unlockPublicKey,
+            }),
+          );
+        }
+        case HUB_ADMINISTRATION_ROUTES.ownersAdd: {
+          const added = decodeOwnerAdditionRequest(parseJson(request, body.text));
+          // A window decides who this host's owners are: the hub's list when it
+          // acts as hub, otherwise the spoke's, after the person confirmed the
+          // devices by name and fingerprint.
+          return outcome(
+            options.hub.ownerContext() === undefined
+              ? options.spoke.addOwners(added.owners, WINDOW_PRINCIPAL)
+              : options.hub.addOwners(added.owners, WINDOW_PRINCIPAL),
+          );
+        }
+        case HUB_ADMINISTRATION_ROUTES.ownersRemove: {
+          const memberId = String(
+            decodeOwnerRemovalRequest(parseJson(request, body.text)).memberId,
+          );
+          return outcome(
+            options.hub.ownerContext() === undefined
+              ? options.spoke.removeOwner(memberId, WINDOW_PRINCIPAL)
+              : options.hub.removeOwner(memberId, WINDOW_PRINCIPAL),
+          );
+        }
+        case HUB_ADMINISTRATION_ROUTES.confirmNewMembers: {
+          const value = decodeConfirmNewMembersRequest(parseJson(request, body.text));
+          return outcome(options.spoke.setConfirmNewMembers(value.enabled, WINDOW_PRINCIPAL));
+        }
+        case HUB_ADMINISTRATION_ROUTES.confirmMember: {
+          const value = decodeOwnerMemberRequest(parseJson(request, body.text));
+          return outcome(
+            options.spoke.confirmMemberFromWindow(String(value.memberId), WINDOW_PRINCIPAL),
+          );
+        }
+        case HUB_ADMINISTRATION_ROUTES.alertDismiss: {
+          const value = decodeOwnerAlertRequest(parseJson(request, body.text));
+          return outcome(options.spoke.dismissAlert(String(value.alertId), WINDOW_PRINCIPAL));
+        }
+        case HUB_ADMINISTRATION_ROUTES.alertRemove: {
+          const value = decodeOwnerAlertRequest(parseJson(request, body.text));
+          return outcome(options.spoke.removeFromAlert(String(value.alertId), WINDOW_PRINCIPAL));
         }
         case HUB_ADMINISTRATION_ROUTES.grant: {
           return outcome(

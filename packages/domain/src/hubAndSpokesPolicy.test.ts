@@ -15,6 +15,7 @@ import {
 import {
   admitNewMember,
   authorizeHubRequest,
+  authorizeOwnerRequest,
   authorizePeer,
   clampDelegation,
   decideRosterReplacement,
@@ -22,6 +23,9 @@ import {
   honorOwner,
   hubRosterSigningPayload,
   mergeStandInMembership,
+  newMemberConfirmationSigningPayload,
+  OWNER_UNLOCK_LIFETIME_MS,
+  ownerUnlockSigningPayload,
   reconcileHeldGrants,
 } from "./hubAndSpokesPolicy";
 
@@ -546,6 +550,136 @@ describe("honorOwner", () => {
         identityKeyFingerprint: key(4),
       }),
     ).toEqual({ status: "not-owner", kind: "not-in-roster" });
+  });
+});
+
+describe("authorizeOwnerRequest", () => {
+  const owners: HostOwnerEntry[] = [
+    { memberId: memberId(4), identityKeyFingerprint: key(4), unlockKeyFingerprint: key(8) },
+  ];
+  const held = roster(5, [...baseMembers, member(5, "spoke", true)]);
+  const ask = (overrides: Partial<Parameters<typeof authorizeOwnerRequest>[0]> = {}) =>
+    authorizeOwnerRequest({
+      host: "spoke",
+      grant: defaultHubGrant(),
+      owners,
+      roster: held,
+      memberId: memberId(4),
+      identityKeyFingerprint: key(4),
+      unlock: "fresh",
+      ...overrides,
+    });
+
+  it("allows a listed owner with a fresh unlock on a spoke that ticked Owners", () => {
+    expect(ask().status).toBe("allowed");
+  });
+
+  it("refuses an owner without a fresh unlock", () => {
+    expect(ask({ unlock: "absent" })).toEqual({ status: "refused", kind: "unlock-required" });
+  });
+
+  it("asks for no unlock when the request only reads or asks for a challenge", () => {
+    expect(ask({ unlock: "not-needed" }).status).toBe("allowed");
+    expect(
+      ask({ unlock: "not-needed", memberId: memberId(5), identityKeyFingerprint: key(5) }),
+    ).toEqual({ status: "refused", kind: "not-an-owner" });
+  });
+
+  it("refuses the hub and a standby even if an owner list names them", () => {
+    const withHub: HostOwnerEntry[] = [
+      ...owners,
+      { memberId: memberId(1), identityKeyFingerprint: key(1), unlockKeyFingerprint: key(8) },
+      { memberId: memberId(2), identityKeyFingerprint: key(2), unlockKeyFingerprint: key(8) },
+    ];
+
+    expect(ask({ owners: withHub, memberId: memberId(1), identityKeyFingerprint: key(1) })).toEqual(
+      {
+        status: "refused",
+        kind: "hub-principal",
+      },
+    );
+    expect(ask({ owners: withHub, memberId: memberId(2), identityKeyFingerprint: key(2) })).toEqual(
+      {
+        status: "refused",
+        kind: "hub-principal",
+      },
+    );
+  });
+
+  it("refuses on a spoke whose hub grant leaves Owners unticked, but not on the hub", () => {
+    const unticked = { items: ["roster"], actProjects: [] } as const;
+
+    expect(ask({ grant: unticked })).toEqual({ status: "refused", kind: "owners-not-honored" });
+    expect(ask({ grant: undefined })).toEqual({ status: "refused", kind: "owners-not-honored" });
+    expect(ask({ host: "hub", grant: undefined }).status).toBe("allowed");
+  });
+
+  it("refuses a member that the roster marks as an owner but this host never listed", () => {
+    expect(ask({ memberId: memberId(5), identityKeyFingerprint: key(5) })).toEqual({
+      status: "refused",
+      kind: "not-an-owner",
+    });
+  });
+
+  it("refuses an owner that presents another identity key", () => {
+    expect(ask({ identityKeyFingerprint: key(7) })).toEqual({
+      status: "refused",
+      kind: "identity-mismatch",
+    });
+  });
+});
+
+describe("the text an owner's unlock key signs", () => {
+  const unlock = {
+    challengeId: "c",
+    nonce: "n",
+    hostMemberId: "h",
+    ownerMemberId: "o",
+    method: "post",
+    path: "/api/hub/owner/grant",
+    bodyHash: key(1),
+    expiresAt: 1,
+  };
+
+  it("binds the owner, the host, the method, the path, the body, and the expiry", () => {
+    const base = ownerUnlockSigningPayload(unlock);
+
+    expect(base).toBe(ownerUnlockSigningPayload({ ...unlock, method: "POST" }));
+    for (const changed of [
+      { challengeId: "x" },
+      { nonce: "x" },
+      { hostMemberId: "x" },
+      { ownerMemberId: "x" },
+      { method: "put" },
+      { path: "/api/hub/owner/leave" },
+      { bodyHash: key(2) },
+      { expiresAt: 2 },
+    ]) {
+      expect(ownerUnlockSigningPayload({ ...unlock, ...changed })).not.toBe(base);
+    }
+  });
+
+  it("names the spoke, the member, the key, and the owner a confirmation covers", () => {
+    const confirmation = {
+      spokeId: memberId(3),
+      memberId: memberId(4),
+      identityKeyFingerprint: key(4),
+      confirmedBy: memberId(5),
+      unlockKeyFingerprint: key(8),
+      confirmedAt: "2026-10-29T10:00:00.000Z" as NewMemberConfirmation["confirmedAt"],
+    };
+    const base = newMemberConfirmationSigningPayload(confirmation);
+
+    expect(
+      newMemberConfirmationSigningPayload({ ...confirmation, memberId: memberId(6) }),
+    ).not.toBe(base);
+    expect(newMemberConfirmationSigningPayload({ ...confirmation, spokeId: memberId(6) })).not.toBe(
+      base,
+    );
+  });
+
+  it("keeps a challenge for under two minutes", () => {
+    expect(OWNER_UNLOCK_LIFETIME_MS).toBeLessThanOrEqual(120_000);
   });
 });
 

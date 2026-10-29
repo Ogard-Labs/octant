@@ -4,8 +4,11 @@
 // principal of kind `hub` whose authority is exactly that grant; it never
 // carries a window's authority and never answers an approval.
 
+import { randomUUID } from "node:crypto";
 import {
   HubMemberId as HubMemberIdSchema,
+  NewMemberAlertId,
+  UtcTimestamp,
   decodeHubJoinResponse,
   type AuditActingPrincipal,
   type HubGrant,
@@ -15,15 +18,25 @@ import {
   type HubMemberId,
   type HubPrincipal,
   type HubSpokeStatus,
+  type NewMemberAlert,
+  type NewMemberConfirmation,
+  type OwnerCandidate,
+  type OwnerListEntry,
+  type RosterMember,
   type SignedHubRoster,
 } from "@octant/contracts";
 import {
+  admitNewMember,
   authorizeHubRequest,
   decideRosterReplacement,
   defaultHubGrant,
+  fullMemberPeerGrant,
+  holdsOnlyStatusGrant,
   hubRosterSigningPayload,
   introduceGuests,
+  newMemberConfirmationSigningPayload,
   reconcileHeldGrants,
+  type NewMemberAdmission,
   type RosterReplacement,
 } from "@octant/domain";
 import { Schema } from "effect";
@@ -32,11 +45,22 @@ import { listenerPinFromDigest, publicKeyFingerprint, verifySignature } from "./
 import { HubLinkVerifier, sendHubLinkRequest } from "./hubLink";
 import { openHubPairing, type HubPairingRefusal, type HubPairingSession } from "./hubPairing";
 import type { HubHostIdentity } from "./hubService";
-import type { HubLinkState, HubStatePort } from "./hubStateStore";
+import type { HostOwnerRecord, HubLinkState, HubStatePort } from "./hubStateStore";
+import {
+  addOwnerRecords,
+  ownerEntries,
+  ownerListView,
+  withoutOwner,
+  type OwnerChange,
+} from "./ownerRecords";
 import type { HubTransport } from "./pinnedHubTransport";
 import { readPrivateListener } from "./privateListenerReading";
 
 const decodeMemberId = Schema.decodeUnknownSync(HubMemberIdSchema);
+const decodeAlertId = Schema.decodeUnknownSync(NewMemberAlertId);
+const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
+/** Alerts a spoke keeps; the oldest go first once a person leaves them undismissed. */
+const MAX_ALERTS = 64;
 
 /** What the spoke needs of its own device pairing to admit and drop a guest. */
 export interface SpokeDevicePort {
@@ -65,6 +89,7 @@ export type GuestAdmission =
         | "not-in-roster"
         | "key-mismatch"
         | "guest-not-accepted"
+        | "guest-not-confirmed"
         | "listener-not-running"
         | "listener-not-private"
         | "listener-has-no-pin"
@@ -90,7 +115,14 @@ export interface SpokeLinkOptions {
       | "hub-grant-changed"
       | "roster-accepted"
       | "guest-admitted"
-      | "guest-dropped";
+      | "guest-dropped"
+      | "owner-added"
+      | "owner-removed"
+      | "new-member-alerted"
+      | "new-member-confirmed"
+      | "new-member-removed"
+      | "alert-dismissed"
+      | "confirm-new-members-changed";
     readonly actingPrincipal: AuditActingPrincipal;
     readonly memberId?: HubMemberId;
     readonly sequence?: number;
@@ -140,6 +172,38 @@ export type SpokeLinkStatus =
       readonly roster: SignedHubRoster;
       /** The roster members this host accepted: the ones it gave a peer grant, so a guest among them may knock. */
       readonly acceptedMemberIds: ReadonlyArray<string>;
+      /** This host's own owner list, by name and fingerprint. */
+      readonly owners: ReadonlyArray<OwnerListEntry>;
+      readonly confirmNewMembers: boolean;
+      /** Members this host holds status-only until a window or an owner's signed unlock confirms them. */
+      readonly awaitingConfirmation: ReadonlyArray<string>;
+      readonly alerts: ReadonlyArray<NewMemberAlert>;
+    };
+
+export type SpokeOwnerContext = {
+  readonly roster: SignedHubRoster["roster"];
+  readonly owners: ReadonlyArray<HostOwnerRecord>;
+  readonly grant: HubGrant;
+  readonly hubMemberId: HubMemberId;
+};
+
+export type MemberConfirmation =
+  | { readonly status: "confirmed"; readonly memberId: HubMemberId }
+  | {
+      readonly status: "refused";
+      readonly kind:
+        | "not-a-spoke"
+        | "hub-revoked"
+        | "not-awaiting-confirmation"
+        | "confirmation-invalid";
+      readonly reason?: string;
+    };
+
+export type AlertOutcome =
+  | { readonly status: "dismissed" | "removed"; readonly alertId: string }
+  | {
+      readonly status: "refused";
+      readonly kind: "not-a-spoke" | "hub-revoked" | "no-such-alert";
     };
 
 export type HubRequestOutcome =
@@ -196,7 +260,240 @@ export class SpokeLinkService {
       grant: link.grant,
       roster: link.roster,
       acceptedMemberIds: link.peerGrants.map((grant) => String(grant.memberId)),
+      owners: ownerListView(link.owners ?? []),
+      confirmNewMembers: link.confirmNewMembers === true,
+      awaitingConfirmation: link.peerGrants
+        .filter(holdsOnlyStatusGrant)
+        .map((grant) => String(grant.memberId)),
+      alerts: link.alerts ?? [],
     };
+  }
+
+  /** What the owner routes check a request against; absent when this host is not a member of a hub. */
+  ownerContext(): SpokeOwnerContext | undefined {
+    const link = this.#options.state.load().link;
+    if (link === undefined || link.removed === true) return undefined;
+    return {
+      roster: link.roster.roster,
+      owners: link.owners ?? [],
+      grant: link.grant,
+      hubMemberId: link.hubMemberId,
+    };
+  }
+
+  /** Adds devices to this spoke's owner list; the caller has checked who may ask. */
+  addOwners(
+    candidates: ReadonlyArray<OwnerCandidate>,
+    principal: AuditActingPrincipal,
+  ): OwnerChange {
+    const state = this.#options.state.load();
+    const link = state.link;
+    if (link === undefined) return { status: "refused", kind: "not-a-spoke" };
+    if (link.removed === true) return { status: "refused", kind: "hub-revoked" };
+    const added = addOwnerRecords({
+      roster: link.roster.roster,
+      selfMemberId: String(link.selfMemberId),
+      owners: link.owners ?? [],
+      candidates,
+    });
+    if (added.status === "refused") return added;
+    this.#options.state.save({ ...state, link: { ...link, owners: added.owners } });
+    for (const candidate of candidates) {
+      this.#options.record({
+        change: "owner-added",
+        actingPrincipal: principal,
+        memberId: candidate.memberId,
+      });
+    }
+    return { status: "changed", owners: ownerListView(added.owners) };
+  }
+
+  removeOwner(memberId: string, principal: AuditActingPrincipal): OwnerChange {
+    const state = this.#options.state.load();
+    const link = state.link;
+    if (link === undefined) return { status: "refused", kind: "not-a-spoke" };
+    const owners = link.owners ?? [];
+    const target = owners.find((owner) => String(owner.memberId) === memberId);
+    if (target === undefined) return { status: "refused", kind: "not-an-owner", memberId };
+    const remaining = withoutOwner(owners, memberId);
+    this.#options.state.save({ ...state, link: { ...link, owners: remaining } });
+    this.#options.record({
+      change: "owner-removed",
+      actingPrincipal: principal,
+      memberId: target.memberId,
+    });
+    return { status: "changed", owners: ownerListView(remaining) };
+  }
+
+  /** Confirm new members is this spoke's own setting, off by default. */
+  setConfirmNewMembers(
+    enabled: boolean,
+    principal: AuditActingPrincipal,
+  ):
+    | { readonly status: "changed"; readonly enabled: boolean }
+    | { readonly status: "refused"; readonly kind: "not-a-spoke" | "hub-revoked" } {
+    const state = this.#options.state.load();
+    const link = state.link;
+    if (link === undefined) return { status: "refused", kind: "not-a-spoke" };
+    if (link.removed === true) return { status: "refused", kind: "hub-revoked" };
+    const { confirmNewMembers: _previous, ...rest } = link;
+    this.#options.state.save({
+      ...state,
+      link: enabled ? { ...rest, confirmNewMembers: true } : rest,
+    });
+    this.#options.record({
+      change: "confirm-new-members-changed",
+      actingPrincipal: principal,
+      memberId: link.hubMemberId,
+    });
+    return { status: "changed", enabled };
+  }
+
+  /** A window on this spoke confirms a member it holds status-only. */
+  confirmMemberFromWindow(memberId: string, principal: AuditActingPrincipal): MemberConfirmation {
+    return this.#confirm(memberId, principal, (member) => ({
+      status: "full-member",
+      grant: fullMemberPeerGrant(member),
+    }));
+  }
+
+  /**
+   * An owner device confirms a member with a `NewMemberConfirmation` signed by
+   * its unlock key. The owner must be on this spoke's own list and the
+   * signature must verify against the unlock key recorded there; the hub holds
+   * neither, so it cannot produce one.
+   */
+  confirmMemberByOwner(
+    confirmation: NewMemberConfirmation,
+    principal: AuditActingPrincipal,
+  ): MemberConfirmation {
+    const link = this.#options.state.load().link;
+    const owners = link?.owners ?? [];
+    const owner = owners.find(
+      (entry) => String(entry.memberId) === String(confirmation.confirmedBy),
+    );
+    const signatureVerified =
+      owner !== undefined &&
+      verifySignature({
+        payload: newMemberConfirmationSigningPayload(confirmation),
+        signature: confirmation.signature,
+        publicKey: owner.unlockPublicKey,
+      });
+    return this.#confirm(String(confirmation.memberId), principal, (member) =>
+      admitNewMember({
+        spokeId: link?.selfMemberId ?? confirmation.spokeId,
+        member,
+        confirmNewMembers: true,
+        owners: ownerEntries(owners),
+        confirmation: { confirmation, signatureVerified },
+      }),
+    );
+  }
+
+  #confirm(
+    memberId: string,
+    principal: AuditActingPrincipal,
+    admit: (member: RosterMember) => NewMemberAdmission,
+  ): MemberConfirmation {
+    const state = this.#options.state.load();
+    const link = state.link;
+    if (link === undefined) return { status: "refused", kind: "not-a-spoke" };
+    if (link.removed === true) return { status: "refused", kind: "hub-revoked" };
+    const member = link.roster.roster.members.find((entry) => String(entry.memberId) === memberId);
+    const held = link.peerGrants.find((grant) => String(grant.memberId) === memberId);
+    if (member === undefined || held === undefined || !holdsOnlyStatusGrant(held)) {
+      return { status: "refused", kind: "not-awaiting-confirmation" };
+    }
+    const admission = admit(member);
+    if (admission.status !== "full-member") {
+      return {
+        status: "refused",
+        kind: "confirmation-invalid",
+        ...(admission.reason === undefined ? {} : { reason: admission.reason }),
+      };
+    }
+    this.#options.state.save({
+      ...state,
+      link: {
+        ...link,
+        peerGrants: link.peerGrants.map((grant) =>
+          String(grant.memberId) === memberId ? admission.grant : grant,
+        ),
+      },
+    });
+    this.#options.record({
+      change: "new-member-confirmed",
+      actingPrincipal: principal,
+      memberId: member.memberId,
+    });
+    return { status: "confirmed", memberId: member.memberId };
+  }
+
+  /** Dismisses an alert. Owner devices and windows read and dismiss; the hub does neither. */
+  dismissAlert(alertId: string, principal: AuditActingPrincipal): AlertOutcome {
+    const state = this.#options.state.load();
+    const link = state.link;
+    if (link === undefined) return { status: "refused", kind: "not-a-spoke" };
+    const alert = link.alerts?.find((entry) => String(entry.alertId) === alertId);
+    if (alert === undefined) return { status: "refused", kind: "no-such-alert" };
+    this.#options.state.save({
+      ...state,
+      link: { ...link, alerts: (link.alerts ?? []).filter((entry) => entry !== alert) },
+    });
+    this.#options.record({
+      change: "alert-dismissed",
+      actingPrincipal: principal,
+      memberId: alert.memberId,
+    });
+    return { status: "dismissed", alertId };
+  }
+
+  /**
+   * Remove on an alert: revokes what this spoke gave the member (its peer
+   * grant and any paired device) and marks it not accepted, so a later roster
+   * that still lists it does not bring it back. Removing the member from the
+   * hub's roster needs the hub's own authority and is not done here.
+   */
+  removeFromAlert(alertId: string, principal: AuditActingPrincipal): AlertOutcome {
+    const state = this.#options.state.load();
+    const link = state.link;
+    if (link === undefined) return { status: "refused", kind: "not-a-spoke" };
+    const alert = link.alerts?.find((entry) => String(entry.alertId) === alertId);
+    if (alert === undefined) return { status: "refused", kind: "no-such-alert" };
+    const memberId = String(alert.memberId);
+    const devices = (link.guestDevices ?? []).filter(
+      (entry) => String(entry.memberId) === memberId,
+    );
+    const rejected = link.rejectedMemberIds ?? [];
+    this.#options.state.save({
+      ...state,
+      link: {
+        ...link,
+        peerGrants: link.peerGrants.filter((grant) => String(grant.memberId) !== memberId),
+        guestDevices: (link.guestDevices ?? []).filter(
+          (entry) => String(entry.memberId) !== memberId,
+        ),
+        alerts: (link.alerts ?? []).filter((entry) => String(entry.memberId) !== memberId),
+        // A member this spoke refuses loses any owner entry here with it.
+        ...(link.owners === undefined ? {} : { owners: withoutOwner(link.owners, memberId) }),
+        rejectedMemberIds: rejected.some((id) => String(id) === memberId)
+          ? rejected
+          : [...rejected, alert.memberId],
+      },
+    });
+    for (const entry of devices) {
+      try {
+        this.#options.devices()?.revokeDevice(entry.deviceId);
+      } catch {
+        // A device already revoked, or one this host no longer holds, leaves nothing to revoke.
+      }
+    }
+    this.#options.record({
+      change: "new-member-removed",
+      actingPrincipal: principal,
+      memberId: alert.memberId,
+    });
+    return { status: "removed", alertId };
   }
 
   /** The peer grants this spoke has given, which a newer roster or Leave can end. */
@@ -241,7 +538,10 @@ export class SpokeLinkService {
    * hub this host's identity key and listener, and keep the signed roster it
    * answers with. Until then it reports that approval is still awaited.
    */
-  async finishJoin(principal: AuditActingPrincipal): Promise<JoinFinishOutcome> {
+  async finishJoin(
+    principal: AuditActingPrincipal,
+    options: { readonly unlockPublicKey?: string } = {},
+  ): Promise<JoinFinishOutcome> {
     const pending = this.#pending;
     if (pending === undefined) return { status: "refused", kind: "no-join-in-progress" };
     const { session, ownListener } = pending;
@@ -268,6 +568,11 @@ export class SpokeLinkService {
       },
       identityPublicKey: identity.signing.hostPublicKey,
       listenerOrigin: ownListener.origin,
+      // The hub adds this key to its owner list only if the code was an owner
+      // code; for any other code it is ignored.
+      ...(options.unlockPublicKey === undefined
+        ? {}
+        : { ownerUnlockPublicKey: options.unlockPublicKey }),
     };
     const answer = await sendHubLinkRequest({
       transport: this.#options.transport,
@@ -475,18 +780,48 @@ export class SpokeLinkService {
     const listsSelf = candidate.roster.members.some(
       (member) => String(member.memberId) === String(link.selfMemberId),
     );
-    // A spoke that ticked Introduce accepts a guest the verified roster adds;
-    // one that did not leaves it unaccepted, and the guest's knock is refused.
-    const introduced = introduceGuests({
-      spokeId: link.selfMemberId,
-      roster: candidate.roster,
-      grants: kept,
-      introduce: link.grant.items.includes("introduce"),
-      confirmNewMembers: false,
-    });
-    const guestDevices = link.guestDevices ?? [];
     const listed = (memberId: HubMemberId) =>
       candidate.roster.members.some((member) => String(member.memberId) === String(memberId));
+    // A member this spoke's person removed from an alert stays out while the
+    // roster lists it; the entry goes once the roster stops listing it.
+    const rejected = (link.rejectedMemberIds ?? []).filter(listed);
+    // A spoke that ticked Introduce accepts a guest the verified roster adds;
+    // one that did not leaves it unaccepted, and the guest's knock is refused.
+    // With Confirm new members on the guest is held status-only.
+    const introduced = introduceGuests({
+      spokeId: link.selfMemberId,
+      roster: {
+        ...candidate.roster,
+        members: candidate.roster.members.filter(
+          (member) => !rejected.some((id) => String(id) === String(member.memberId)),
+        ),
+      },
+      grants: kept,
+      introduce: link.grant.items.includes("introduce"),
+      confirmNewMembers: link.confirmNewMembers === true,
+    });
+    const guestDevices = link.guestDevices ?? [];
+    // Every member a newer roster adds is raised here, from this spoke's own
+    // comparison with the roster it held, so the hub cannot hide one.
+    const heldIds = new Set(link.roster.roster.members.map((member) => String(member.memberId)));
+    const added = listsSelf
+      ? candidate.roster.members.filter(
+          (member) =>
+            !heldIds.has(String(member.memberId)) &&
+            String(member.memberId) !== String(link.selfMemberId) &&
+            member.role !== "hub",
+        )
+      : [];
+    const raisedAt = decodeTimestamp(new Date(this.#options.now()).toISOString());
+    const raised = added.map((member) => ({
+      alertId: decodeAlertId(randomUUID()),
+      memberId: member.memberId,
+      name: member.name,
+      role: member.role,
+      identityKeyFingerprint: member.identityKeyFingerprint,
+      raisedAt,
+    }));
+    const alerts = [...(link.alerts ?? []), ...raised].slice(-MAX_ALERTS);
     // A guest the roster no longer lists loses its device here. A spoke the
     // roster no longer lists is out: the hub principal is revoked and every
     // grant it gave ends, with the guest devices. Its threads, Projects, and
@@ -498,10 +833,31 @@ export class SpokeLinkService {
           roster: candidate,
           peerGrants: introduced.grants,
           guestDevices: guestDevices.filter((entry) => listed(entry.memberId)),
+          alerts,
+          rejectedMemberIds: rejected,
+          // A dropped member loses any owner entry with its roster entry.
+          ...(link.owners === undefined
+            ? {}
+            : { owners: link.owners.filter((owner) => listed(owner.memberId)) }),
         }
-      : { ...link, roster: candidate, peerGrants: [], guestDevices: [], removed: true };
+      : {
+          ...link,
+          roster: candidate,
+          peerGrants: [],
+          guestDevices: [],
+          removed: true,
+          owners: [],
+        };
     this.#options.state.save({ ...state, link: next });
     this.#revokeGuestDevices(droppedDevices, link.hubMemberId);
+    for (const alert of raised) {
+      this.#options.record({
+        change: "new-member-alerted",
+        actingPrincipal: { kind: "hub", memberId: link.hubMemberId },
+        memberId: alert.memberId,
+        sequence: candidate.roster.sequence,
+      });
+    }
     this.#options.record({
       change: "roster-accepted",
       actingPrincipal: { kind: "hub", memberId: link.hubMemberId },
@@ -549,10 +905,12 @@ export class SpokeLinkService {
         sender === String(request.memberId) ? request.devicePublicKey : undefined,
     });
     if (verified.status === "refused") return { status: "refused", kind: verified.kind };
-    const accepted = link.peerGrants.some(
-      (grant) => String(grant.memberId) === String(request.memberId),
+    const grant = link.peerGrants.find(
+      (entry) => String(entry.memberId) === String(request.memberId),
     );
-    if (!accepted) return { status: "refused", kind: "guest-not-accepted" };
+    if (grant === undefined) return { status: "refused", kind: "guest-not-accepted" };
+    // A guest held for Confirm new members has no device until it is confirmed.
+    if (holdsOnlyStatusGrant(grant)) return { status: "refused", kind: "guest-not-confirmed" };
     const existing = link.guestDevices?.find(
       (entry) => String(entry.memberId) === String(request.memberId),
     );

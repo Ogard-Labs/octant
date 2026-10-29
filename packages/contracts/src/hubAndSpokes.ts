@@ -43,6 +43,17 @@ export const PeerPrincipal = Schema.Struct({
 }).annotations(strict);
 export type PeerPrincipal = typeof PeerPrincipal.Type;
 
+/**
+ * An owner device acting on a host with a window's powers after a fresh
+ * unlock. It names the owner for the journal only; a request resolves to it
+ * after the host checked its owner list and the unlock, never from the request.
+ */
+export const OwnerUnlockPrincipal = Schema.Struct({
+  kind: Schema.Literal("owner-unlock"),
+  memberId: HubMemberId,
+}).annotations(strict);
+export type OwnerUnlockPrincipal = typeof OwnerUnlockPrincipal.Type;
+
 export const HubAndSpokesPrincipal = Schema.Union(HubPrincipal, PeerPrincipal);
 export type HubAndSpokesPrincipal = typeof HubAndSpokesPrincipal.Type;
 

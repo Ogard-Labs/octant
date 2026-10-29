@@ -27,6 +27,14 @@ export const HubMembershipChange = Schema.Literal(
   "roster-accepted",
   "guest-admitted",
   "guest-dropped",
+  "owner-added",
+  "owner-removed",
+  "new-member-alerted",
+  "new-member-confirmed",
+  "new-member-removed",
+  "alert-dismissed",
+  "confirm-new-members-changed",
+  "join-code-minted",
 );
 export type HubMembershipChange = typeof HubMembershipChange.Type;
 
@@ -65,6 +73,11 @@ export const HubJoinRequest = Schema.Struct({
    * grant to choose.
    */
   asGuest: Schema.optional(Schema.Literal(true)),
+  /**
+   * The joining member's unlock public key. The hub adds it to its owner list
+   * only when the join code was an owner code; any other code ignores it.
+   */
+  ownerUnlockPublicKey: Schema.optional(base64Url(512)),
 }).annotations(strict);
 export type HubJoinRequest = typeof HubJoinRequest.Type;
 export const decodeHubJoinRequest = Schema.decodeUnknownSync(HubJoinRequest);

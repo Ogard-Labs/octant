@@ -697,6 +697,21 @@ export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
     endpoint,
     "Served to a guest's signed request from the phone app, which builds the path inside the guest client in packages/client-runtime (hubGuestClient.ts); no window script names it. Remove when the checker counts packages/client-runtime as a caller of a host route.",
   ]),
+  ...[
+    "/api/desktop/hub/alerts/dismiss",
+    "/api/desktop/hub/alerts/remove",
+    "/api/desktop/hub/confirm-new-members",
+    "/api/desktop/hub/members/confirm",
+    "/api/desktop/hub/owners/add",
+    "/api/desktop/hub/owners/remove",
+  ].map((endpoint): [string, string] => [
+    endpoint,
+    "Window administration of a host's owner list, Confirm new members, and new-member alerts, served ahead of the Settings screens that call them (docs/design/hub-and-spokes.md, delivery plan slice 5). Remove once those screens or `octant hub` call it.",
+  ]),
+  ...["/api/hub/owner", "/api/hub/owner/challenge"].map((endpoint): [string, string] => [
+    endpoint,
+    "Signed request from an owner device, built by the phone and browser clients that come with the unlock keys (docs/design/hub-and-spokes.md, delivery plan slice 5); no window script names it. Remove when a client in packages/client-runtime or apps/mobile calls it.",
+  ]),
   [
     "/api/v1/shares",
     "Served by the public Canvas share service (the octant-webapp repository) and called by the host's share-service port in apps/server, which builds the address from the configured service URL; no window or device calls it. Remove when the checker counts apps/server as a caller of an external service's routes.",

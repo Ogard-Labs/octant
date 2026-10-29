@@ -38,6 +38,8 @@ import { ThreadRetentionService } from "../threadRetentionService";
 import { createLiveHostExportService } from "../hostExportService";
 import { createHubAdministrationRouteHandler } from "../hub/hubAdministrationRoutes";
 import { createHubLinkRouteHandler } from "../hub/hubLinkRoutes";
+import { createHubOwnerRouteHandler } from "../hub/hubOwnerRoutes";
+import { OwnerUnlockService } from "../hub/ownerUnlock";
 import { createHubMembershipJournal } from "../hub/hubMembershipJournal";
 import { HubService } from "../hub/hubService";
 import { createHubStateStore } from "../hub/hubStateStore";
@@ -286,7 +288,9 @@ export function wireRemote(deps: RemoteDependencies) {
       const gateway = createRemoteGateway({
         ...services,
         productDispatch: services.productDispatch ?? authenticatedProductDispatch,
-        hubLink: services.hubLink ?? ((request) => hubLinkRoutes(request)),
+        hubLink:
+          services.hubLink ??
+          (async (request) => (await hubLinkRoutes(request)) ?? hubOwnerRoutes(request)),
         remoteServerGrants: services.remoteServerGrants ?? remoteServerGrantGatewayPort,
         serve: options.remoteServe ?? serve,
         config,
@@ -395,6 +399,11 @@ export function wireRemote(deps: RemoteDependencies) {
     maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   });
   const hubLinkRoutes = createHubLinkRouteHandler({ hub: hubService, spoke: spokeLinkService });
+  const hubOwnerRoutes = createHubOwnerRouteHandler({
+    hub: hubService,
+    spoke: spokeLinkService,
+    unlock: new OwnerUnlockService({ now: Date.now, hostMemberId: () => hubService.hubMemberId() }),
+  });
   const localDeviceAdministrationRoutes = createLocalDeviceAdministrationRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
     windowAuthorityStore,
