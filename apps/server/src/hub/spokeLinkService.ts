@@ -267,6 +267,8 @@ export type SpokeOwnerContext = {
   readonly hubMemberId: HubMemberId;
   /** Members whose paired device on this host is revoked or unknown: they hold no owner powers here. */
   readonly inactiveDeviceMemberIds: ReadonlyArray<string>;
+  /** Rises with every owner added or removed since this process started, so an open unlock session ends even when the list ends up as it was. */
+  readonly ownerListRevision: number;
 };
 
 export type MemberConfirmation =
@@ -382,6 +384,7 @@ interface PendingJoin {
 
 export class SpokeLinkService {
   readonly #options: SpokeLinkOptions;
+  #ownerListRevision = 0;
   readonly #verifier: HubLinkVerifier;
   #pending: PendingJoin | undefined;
 
@@ -480,6 +483,7 @@ export class SpokeLinkService {
       inactiveDeviceMemberIds: (link.guestDevices ?? [])
         .filter((entry) => this.#options.devices()?.deviceActive(entry.deviceId) !== true)
         .map((entry) => String(entry.memberId)),
+      ownerListRevision: this.#ownerListRevision,
     };
   }
 
@@ -500,6 +504,7 @@ export class SpokeLinkService {
     });
     if (added.status === "refused") return added;
     this.#options.state.save({ ...state, link: { ...link, owners: added.owners } });
+    this.#ownerListRevision += 1;
     for (const candidate of candidates) {
       this.#options.record({
         change: "owner-added",
@@ -519,6 +524,7 @@ export class SpokeLinkService {
     if (target === undefined) return { status: "refused", kind: "not-an-owner", memberId };
     const remaining = withoutOwner(owners, memberId);
     this.#options.state.save({ ...state, link: { ...link, owners: remaining } });
+    this.#ownerListRevision += 1;
     this.#options.record({
       change: "owner-removed",
       actingPrincipal: principal,

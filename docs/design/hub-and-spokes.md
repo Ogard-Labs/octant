@@ -38,8 +38,12 @@ own origin, with the browser's join and passkey held there; reaching spokes from
 the hub's page (decision H15's links, and a browser identity a spoke can accept)
 is not built. The browser flow is tested with a faked authenticator and has not
 been run against a real hub. Nothing here has been run on a real phone, a real
-passkey, or Android. Sign-in copy, posture routes, and a Mac Touch ID unlock key
-are not built. The wake service is built (the hub's own
+passkey, or Android. An owner device's one unlock covers five minutes of
+administration (the host keeps the session in memory), copies an API-key
+sign-in between two spokes, reads a Code posture, and applies or dismisses a
+provisioning proposal, read narrowly as slice 5 and slice 10 record; a host
+changes no posture for an owner device yet, and a Mac Touch ID unlock key is not
+built. The wake service is built (the hub's own
 switch, spokes reporting opaque routine times, the Wake-on-LAN packet and signed
 nudge, standbys holding the times), read narrowly as the last item of slice 8
 records; it has run only between hosts on loopback with a fake socket, and a real
@@ -472,11 +476,20 @@ from their phone or laptop what they could do sitting at any of them. An
 - **One unlock, one action, 60 seconds.** The host's challenge names the
   owner, the method, the path, and the hash of the request body, ends 60
   seconds after the host issued it, and is forgotten once any request answers
-  it, whether or not that request succeeds. This build asks for a new unlock
-  for every change; the five-minute reuse for administration screens in
-  [decision H17](#decisions) is not built. Rationale: a signature that names
+  it, whether or not that request succeeds. Rationale: a signature that names
   its action cannot be replayed for another, and a client that never keeps an
   unlock open has nothing to leak.
+- **An administration session, five minutes.** An owner device may spend one
+  such unlock on a session for the administration scope
+  ([decision H17](#decisions)). The host answers with a secret id, keeps it in
+  memory only (a restart ends it), and binds it to that owner device and to the
+  owner list as it stood; the device presents it beside its signed requests for
+  actions of the administration class. It ends five minutes after it opened,
+  when anything is added to or removed from the host's owner list, and when the
+  device is revoked or no longer listed. Full access, merge, a sign-in copy, an
+  owner change, leaving the hub, and opening a session each need their own
+  challenge and are refused with `own-unlock-required` when a session is all
+  that is presented.
 - **Alerts live on spokes.** Each spoke compares a newer roster with the one it
   held and keeps an alert for every member added, whatever Confirm new members
   says. An owner device reads them from the spoke it concerns; the hub holds no
@@ -953,6 +966,45 @@ maintainer's hardware, or names the maintainer gate.
    every owner device is recovered from a spoke's window or the hub's shell.
    Verification: server permission negatives and a two-host smoke with a
    software authenticator; phone and Touch ID runs are maintainer gates.
+
+   The five-minute session, the posture routes, and the API-key copy are built,
+   with these narrower readings:
+   - **Administration is a short list.** A session covers dismissing or removing
+     from an alert, changing the hub grant, Confirm new members, a join code
+     without the owner mark, the hub role, Remove, reading a posture, any
+     posture change but Full access, and applying or dismissing an offer. Opening a
+     session, adding or removing an owner, confirming a member, leaving the hub,
+     an owner join code, Full access, and a sign-in copy are the own-unlock
+     class, stricter than the decision's list names (confirming and leaving are
+     placed there because each is a one-way membership act).
+   - **A session is checked against the owner list, not a clock alone.** The host
+     compares a counter of owner-list changes (kept in memory, raised on every
+     add and remove) with the one the session opened against, so a window that
+     removes a device and lists it again ends the session too.
+   - **Postures are a Code Project's and a Code thread's.** A Project's posture is
+     whether it remembers Full access for its threads; Work asks first and has
+     none. Reading one asks for an unlock or an open session, which is stricter
+     than reading an alert. The route accepts a change, holds Full access to its
+     own unlock, and journals it with the owner device, but the host as it runs
+     today answers every change `unsupported`: the Code service's Full access
+     confirmation is bound to a local window, and a window-free path for an owner
+     device is not built. The routes are proved against a fake host.
+   - **A sign-in copy is two unlocks on two hosts.** Each host keeps its own owner
+     list, so the owner device unlocks on the receiving host first, which makes
+     a one-time ticket (two minutes) naming the sending host and the sign-in,
+     then on the sending host, which reads the key from its broker and hands it
+     over the pinned link against that ticket. It runs between spokes only: the
+     hub is neither source nor target. Only an API key or bearer token on a
+     provider row that exists under the same name on both hosts is copied; the
+     receiving host never replaces a key already stored, a pool of several keys is
+     refused, and a subscription sign-in is refused as `subscription-sign-in`.
+     Both hosts journal the names and the owner device, never the value, and the
+     key is never returned to the owner device. The hub's view of copies and
+     Remove everywhere are not built.
+   - **No window for these yet.** The server routes and the client-runtime calls
+     (`openSession`, `readPosture`, `changePosture`, `copyApiKeySignIn`) are built;
+     the Settings rows and the phone screens that call them are not.
+
 6. **Delegation.** Remote child runs from A to B with the peer grant, `peer:A`
    principal, approvals on B, results as data, and cancel. Acceptance: B
    refuses a request outside the grant or above approval-gated Code; an
@@ -1197,9 +1249,12 @@ maintainer's hardware, or names the maintainer gate.
     - **The spoke refuses what it cannot apply.** A kind with no service behind it
       on that host is refused on arrival (`kind-unsupported`). Proposals lapse after
       a week and a spoke holds at most 32; unticking Provision drops them.
-    - **Applying is the window's.** Apply and Dismiss are loopback administration
-      routes, so a remote device, the hub, a peer, and an owner device never apply;
-      an owner device applying is not built. Each kind goes through the service a
+    - **Applying is the window's, or an owner device's after an unlock.** Apply and
+      Dismiss are loopback administration routes, so a remote device, the hub, and
+      a peer never apply. An owner device on this spoke's owner list does, with a
+      fresh unlock or an open administration session, through the same apply path
+      and journaled with `owner-unlock` as the principal; it has no Settings row
+      or phone screen yet. Each kind goes through the service a
       person would use: the plugin service's inspect then install (nothing trusts
       or enables it), the profile service, the provider service (the row is made
       switched off, with authentication that wants a key the person adds), and the

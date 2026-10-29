@@ -1,6 +1,9 @@
 import { Schema } from "effect";
+import { CodeThreadId } from "./code";
 import { UtcTimestamp } from "./events";
 import { HubMemberId, HubMemberRole } from "./hubAndSpokes";
+import { ProjectId } from "./projects";
+import { PermissionPersistence, ProviderExecutionPolicy } from "./providers";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const digest = Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/));
@@ -129,3 +132,93 @@ export type HeldMember = typeof HeldMember.Type;
 
 export const OwnerAlertRequest = Schema.Struct({ alertId: NewMemberAlertId }).annotations(strict);
 export const decodeOwnerAlertRequest = Schema.decodeUnknownSync(OwnerAlertRequest);
+
+/** Carries the id of an open administration session beside the signed request (decision H17). */
+export const OWNER_SESSION_HEADER = "x-octant-owner-session";
+
+/**
+ * What a host answers to a fresh unlock for the administration scope. The id
+ * is a secret the owner device keeps in memory; the host keeps it in memory
+ * too and forgets it at `expiresAt`, when the owner list changes, or when the
+ * device is removed.
+ */
+export const OwnerAdministrationSession = Schema.Struct({
+  sessionId: base64Url(64),
+  expiresAt: Schema.Int.pipe(Schema.positive()),
+}).annotations(strict);
+export type OwnerAdministrationSession = typeof OwnerAdministrationSession.Type;
+export const decodeOwnerAdministrationSession = Schema.decodeUnknownSync(
+  OwnerAdministrationSession,
+);
+
+/**
+ * What a posture belongs to: a Code Project's remembered default, or one Code
+ * thread's own posture. Work asks first and has no posture to set.
+ */
+export const OwnerPostureSubject = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("project"), projectId: ProjectId }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("code-thread"), threadId: CodeThreadId }).annotations(
+    strict,
+  ),
+);
+export type OwnerPostureSubject = typeof OwnerPostureSubject.Type;
+
+export const OwnerPostureReadRequest = Schema.Struct({
+  subject: OwnerPostureSubject,
+}).annotations(strict);
+export type OwnerPostureReadRequest = typeof OwnerPostureReadRequest.Type;
+export const decodeOwnerPostureReadRequest = Schema.decodeUnknownSync(OwnerPostureReadRequest);
+
+/** A posture as a host reports it. `persistence` is absent where the host has none to report. */
+export const OwnerPosture = Schema.Struct({
+  subject: OwnerPostureSubject,
+  posture: ProviderExecutionPolicy,
+  persistence: Schema.optional(PermissionPersistence),
+}).annotations(strict);
+export type OwnerPosture = typeof OwnerPosture.Type;
+
+export const OwnerPostureChangeRequest = Schema.Struct({
+  subject: OwnerPostureSubject,
+  posture: ProviderExecutionPolicy,
+  persistence: PermissionPersistence,
+}).annotations(strict);
+export type OwnerPostureChangeRequest = typeof OwnerPostureChangeRequest.Type;
+export const decodeOwnerPostureChangeRequest = Schema.decodeUnknownSync(OwnerPostureChangeRequest);
+
+const credentialName = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(128),
+  Schema.pattern(/^[A-Za-z0-9._:-]+$/),
+);
+
+/**
+ * The receiving host's half of a sign-in copy: the owner unlocks on the host
+ * that will store the key and names the host that may send it and the sign-in.
+ */
+export const OwnerCredentialReceiveRequest = Schema.Struct({
+  sourceMemberId: HubMemberId,
+  credentialName,
+}).annotations(strict);
+export type OwnerCredentialReceiveRequest = typeof OwnerCredentialReceiveRequest.Type;
+export const decodeOwnerCredentialReceiveRequest = Schema.decodeUnknownSync(
+  OwnerCredentialReceiveRequest,
+);
+
+/** The sending host's half: the owner unlocks on the host that holds the key and names the ticket the receiver issued. */
+export const OwnerCredentialCopyRequest = Schema.Struct({
+  targetMemberId: HubMemberId,
+  credentialName,
+  ticketId: Schema.UUID,
+}).annotations(strict);
+export type OwnerCredentialCopyRequest = typeof OwnerCredentialCopyRequest.Type;
+export const decodeOwnerCredentialCopyRequest = Schema.decodeUnknownSync(
+  OwnerCredentialCopyRequest,
+);
+
+/** What travels from the sending host to the receiving one, over the pinned member link. The value is a secret and is never journaled. */
+export const CredentialTransfer = Schema.Struct({
+  ticketId: Schema.UUID,
+  credentialName,
+  value: Schema.NonEmptyString.pipe(Schema.maxLength(8_192)),
+}).annotations(strict);
+export type CredentialTransfer = typeof CredentialTransfer.Type;
+export const decodeCredentialTransfer = Schema.decodeUnknownSync(CredentialTransfer);
