@@ -19,12 +19,19 @@ not redesign it.
 and drops them with the device), slice 2 (the host builds sealed, redacted
 thread notifications), slice 3 (camera and file capture), and slice 4 (voice
 input through the host) are implemented and verified in the container; their
-physical-device passes are maintainer gates. Slice 5 (Android internal builds)
+physical-device passes are maintainer gates. Slice 7's host side (the
+Notifications setting and the gateway transport) is implemented and verified
+against a local gateway; the gateway service itself is built in
+`octant-webapp`, and its deployment, platform credentials, and live delivery
+are maintainer gates. Slice 5 (Android internal builds)
 is built in part: the workflow, the `android-internal` profile, and the
 Android hardening adapters are in the repository and verified in the
 container, and its EAS build and Android device pass wait on the maintainer
-steps in [Android build rules](#android-build-rules). Slices 6 to 9 are not
-started. The
+steps in [Android build rules](#android-build-rules). Slice 6 is built in
+part: the phone's enable flow and its forgetting of a computer's
+notifications are implemented and verified in the container, and the native
+pieces wait on the gates in [Phone rules](#phone-rules). Slices 8 and 9 are
+not started. The
 maintainer authorized this scope as post-preview work and accepted the
 [maintainer decisions](#maintainer-decisions) below on 2026-10-26. That
 authorizes design, planning, and implementation of the slices below that need
@@ -85,17 +92,17 @@ These rules hold for every phase and are not reopened by any slice:
 
 ## Exists today
 
-| Area              | Current state                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| iOS distribution  | Internal TestFlight through EAS (`apps/mobile/eas.json`, `.github/workflows/mobile-testflight.yml`); App ID enables no optional capability                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| Android           | Package `app.octant.mobile`, built by the `android-internal` EAS profile (signed APK, internal distribution, keystore in EAS) from the manually dispatched `.github/workflows/mobile-android-internal.yml`; no backup, no overlay or location permission. The in-tree `octant-device-protection` module sets the secure window and reports key storage; pinned TLS (`modules/octant-pinned-tls/android`) is exercised on a JVM against a real listener by the server pairing smoke test, which CI's server job requires. CI resolves the Expo configuration for each release profile. No EAS build or device acceptance yet                                                                                                    |
-| Push contracts    | `packages/contracts/src/remotePushNotifications.ts`: registration (token, the phone's notification public key, per-kind preferences and the thread-title opt-in), its receipts, the sealed content (kind, host, thread, mode, title ≤ 80 B, body ≤ 120 B), the delivery envelope, and the journaled delivery receipt                                                                                                                                                                                                                                                                                                                                                                                                           |
-| Push policy       | `packages/domain/src/pushNotificationPolicy.ts` builds display text under [decision M2](#maintainer-decisions) (kind and computer label; a thread title or Automation name only for a phone that opted in) and owns per-kind preferences, deduplication keys, the per-device rate limit, and urgency                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| Push on the host  | `PUT`/`DELETE /api/remote/auth/push-token` (`remoteHttpAuthentication.ts`) store a registration per `{hostId, deviceId}` in the owner-only `remote/push-registrations.json` (`apps/server/src/remote/pushNotificationTokenStore.ts`), as [What the host keeps](#what-the-host-keeps) describes: it survives a restart and is cleared with the device. Ordinary threads in every mode (`threadNotificationDeliveryService.ts`) and Automation runs (`automationNotificationDeliveryService.ts`) seal each notification to the phone (`pushNotificationSealing.ts`) as [Sealing](#sealing) and [Sending](#sending) describe, and hand the envelope to `createUnavailablePushDeliveryTransport`, which never sends, until slice 7 |
-| Push on the phone | `notificationPermissionPort.ts` is the unavailable stub; `PushNotificationsPanel.tsx` offers only clearing a registered token; `deepLinks.ts` parses `octant://hosts/{hostId}/threads/[{mode}/]{threadId}`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| Capture           | Chat, Work, and Code threads attach a camera photo, a library image, or a document-picker file (`apps/mobile/src/inbox/thread/pickAttachment.ts`, `useThreadAttachments.ts`) through each mode's own attachment route (`packages/client-runtime/src/mobileAttachmentClient.ts`), offered only for media the thread's model takes. The listener admits those routes for a paired device (`remoteRoutePolicy.ts`), and the host removes image metadata from every paired upload before a route sees it (`apps/server/src/attachments/imageMetadataRemoval.ts`, applied in `authenticatedProductRoutes.ts`). The camera and photo-library permission strings name both uses; the physical-device camera pass is a maintainer gate |
-| Voice             | The listener forwards `/api/speech/status` and `/api/speech/transcriptions` to a paired device and never `/api/speech/synthesis`; `speechRoutes.ts` holds each device to its own budget and clip bound, as [Voice](#voice) describes. The phone composers draw a microphone only while the host reports transcription `ready` (`apps/mobile/src/voice/`), recording through `expo-audio`; `app.config.ts` names the one microphone use                                                                                                                                                                                                                                                                                         |
-| Hardening ports   | On Android, screenshot privacy is the secure-window flag and key storage is reported (`deviceProtection.native.ts`). On iOS the same module covers the app in the app switcher and while the screen is captured, and reports whether a Secure Enclave protects the Keychain; secure storage keeps its items on that phone only (`hosts/expoSecureStorage.ts`), as [iOS capture and key storage rules](#ios-capture-and-key-storage-rules) describes. Device integrity is an unavailable stub (`deviceIntegrityPort.ts`) on both. Each unavailable port is disclosed in Settings                                                                                                                                                |
+| Area              | Current state                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| iOS distribution  | Internal TestFlight through EAS (`apps/mobile/eas.json`, `.github/workflows/mobile-testflight.yml`); App ID enables no optional capability                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Android           | Package `app.octant.mobile`, built by the `android-internal` EAS profile (signed APK, internal distribution, keystore in EAS) from the manually dispatched `.github/workflows/mobile-android-internal.yml`; no backup, no overlay or location permission. The in-tree `octant-device-protection` module sets the secure window and reports key storage; pinned TLS (`modules/octant-pinned-tls/android`) is exercised on a JVM against a real listener by the server pairing smoke test, which CI's server job requires. CI resolves the Expo configuration for each release profile. No EAS build or device acceptance yet                                                                                                                                                                                                                                                                                                       |
+| Push contracts    | `packages/contracts/src/remotePushNotifications.ts`: registration (token, the phone's notification public key, per-kind preferences and the thread-title opt-in), its receipts, the sealed content (kind, host, thread, mode, title ≤ 80 B, body ≤ 120 B), the delivery envelope, and the journaled delivery receipt                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Push policy       | `packages/domain/src/pushNotificationPolicy.ts` builds display text under [decision M2](#maintainer-decisions) (kind and computer label; a thread title or Automation name only for a phone that opted in) and owns per-kind preferences, deduplication keys, the per-device rate limit, and urgency                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Push on the host  | `PUT`/`DELETE /api/remote/auth/push-token` (`remoteHttpAuthentication.ts`) store a registration per `{hostId, deviceId}` in the owner-only `remote/push-registrations.json` (`apps/server/src/remote/pushNotificationTokenStore.ts`), as [What the host keeps](#what-the-host-keeps) describes: it survives a restart and is cleared with the device. Ordinary threads in every mode (`threadNotificationDeliveryService.ts`) and Automation runs (`automationNotificationDeliveryService.ts`) seal each notification to the phone (`pushNotificationSealing.ts`) as [Sealing](#sealing) and [Sending](#sending) describe, and hand the envelope to the gateway transport (`gatewayPushDeliveryTransport.ts`), which sends only while Settings › Notifications › Phone notifications is on (`pushGatewaySetting.ts`, owner-only `remote/push-gateway-setting.json`, off by default), as [Gateway rules](#gateway-rules) describes |
+| Push on the phone | `enablePhoneNotifications.ts` trades the platform token for a gateway capability bound to the paired computer's key fingerprint at the gateway compiled into the build (`MOBILE_PUSH_GATEWAY_URL`) and registers only the capability with the computer, as [Phone rules](#phone-rules) describes; removing a computer or revoking this phone from it calls the port's `forgetHost`. `notificationPermissionPort.ts` is still the unavailable stub in every build (no platform token, notification key, notification service extension, or Android receiver yet), so `PushNotificationsPanel.tsx` offers only turning a registration off; `deepLinks.ts` parses `octant://hosts/{hostId}/threads/[{mode}/]{threadId}`                                                                                                                                                                                                              |
+| Capture           | Chat, Work, and Code threads attach a camera photo, a library image, or a document-picker file (`apps/mobile/src/inbox/thread/pickAttachment.ts`, `useThreadAttachments.ts`) through each mode's own attachment route (`packages/client-runtime/src/mobileAttachmentClient.ts`), offered only for media the thread's model takes. The listener admits those routes for a paired device (`remoteRoutePolicy.ts`), and the host removes image metadata from every paired upload before a route sees it (`apps/server/src/attachments/imageMetadataRemoval.ts`, applied in `authenticatedProductRoutes.ts`). The camera and photo-library permission strings name both uses; the physical-device camera pass is a maintainer gate                                                                                                                                                                                                    |
+| Voice             | The listener forwards `/api/speech/status` and `/api/speech/transcriptions` to a paired device and never `/api/speech/synthesis`; `speechRoutes.ts` holds each device to its own budget and clip bound, as [Voice](#voice) describes. The phone composers draw a microphone only while the host reports transcription `ready` (`apps/mobile/src/voice/`), recording through `expo-audio`; `app.config.ts` names the one microphone use                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Hardening ports   | On Android, screenshot privacy is the secure-window flag and key storage is reported (`deviceProtection.native.ts`). On iOS the same module covers the app in the app switcher and while the screen is captured, and reports whether a Secure Enclave protects the Keychain; secure storage keeps its items on that phone only (`hosts/expoSecureStorage.ts`), as [iOS capture and key storage rules](#ios-capture-and-key-storage-rules) describes. Device integrity is an unavailable stub (`deviceIntegrityPort.ts`) on both. Each unavailable port is disclosed in Settings                                                                                                                                                                                                                                                                                                                                                   |
 
 ## Phase B (Android): internal builds of the same client
 
@@ -180,8 +187,11 @@ The operator steps live in the
 ### iOS capture and key storage rules
 
 The iOS side of `modules/octant-device-protection` gives the same two ports
-their iOS answers. The Swift is first compiled by the next TestFlight build,
-and the iOS items in the
+their iOS answers. The `Mobile (iOS native modules)` workflow compiles the
+Swift for the Simulator on a pull request that changes a module, the app
+configuration, or the lockfile (it is not a required check, since path filters
+do not reach the merge queue); the first run on a device is the next
+TestFlight build, and the iOS items in the
 [device acceptance pass](../mobile-testflight.md#device-acceptance-pass) are
 its acceptance.
 
@@ -189,7 +199,9 @@ its acceptance.
   screenshot from showing an app. The module covers each of the app's scenes
   with an opaque window while the scene is not active, which is when iOS
   takes the app switcher's snapshot, and while its screen is captured
-  (recording, AirPlay mirroring, a wired capture). While captured, the cover
+  (recording, AirPlay mirroring, a wired capture; from iOS 17 each scene's own
+  capture state, watched for changes; earlier the screen's flag and
+  notification). While captured, the cover
   says why Octant is hidden and how to show it. Settings names what is covered
   and says that a screenshot is not blocked. Reason: the known way to hide
   content from a screenshot rests on an undocumented UIKit layer that an iOS
@@ -224,8 +236,8 @@ its acceptance.
 
 ### Off until the person turns it on
 
-- Settings › Remote access › **Notifications** on the host is off by default.
-  Its row names the delivery path's URL. While it is off, no request reaches
+- Settings › Notifications › **Phone notifications** on the host is off by
+  default. Its row names the delivery path's URL. While it is off, no request reaches
   the delivery path, the host reports push `unavailable` (the current honest
   state), and the phone does not offer enablement.
 - Push is off for every device until the person enables it on that phone. The
@@ -398,7 +410,7 @@ A notification has two layers:
   rest; a later send would be stale.
 - While the transport is unavailable, ordinary threads seal, send, and journal
   nothing. The transport is unavailable while the Notifications setting is
-  off, and always until slice 7. Automation runs keep their existing receipts.
+  off. Automation runs keep their existing receipts.
 
 ### Delivery path
 
@@ -427,6 +439,93 @@ sender holding it. The sender is a minimal Octant push gateway
   host's gateway URL is the Notifications setting, with the Octant service as
   the default; a capability is valid only at the gateway that issued it, and a
   mismatch reports `unavailable` rather than failing silently.
+
+#### Gateway rules
+
+The wire shapes are in `packages/contracts/src/remotePushNotifications.ts` and
+the signing text in `packages/domain/src/pushNotificationPolicy.ts`; the
+gateway service implements them in `octant-webapp` (`apps/push`).
+
+- **Capability.** The phone posts `RemotePushCapabilityRequestV1` (platform,
+  platform token, the host key fingerprint it saw at pairing) to
+  `<gateway>/v1/capabilities` and receives `v1.<key id>.<sealed>`: a random
+  12-byte nonce, then AES-256-GCM over the JSON of those three fields under the
+  named gateway key, with `octant-push-capability-v1\n<key id>` as associated
+  data, unpadded base64url. The gateway records nothing when it issues one. It
+  refuses a token over 512 bytes, a platform it holds no credential for
+  (`unavailable`), and more than thirty requests from one client address in a
+  minute (`rate-limited`). Keys are named so one can be retired: a capability whose key
+  the gateway does not hold is answered `421 capability-not-issued-here`.
+- **Delivery.** The host posts `RemotePushDeliveryRequestV1` (the capability
+  and the envelope) to `<gateway>/v1/deliveries` with three headers: the
+  listener identity key's SPKI DER, a timestamp, and an ECDSA P-256 SHA-256
+  signature (IEEE P1363) over `octant-push-delivery-v1`, the timestamp, and the
+  body's SHA-256, one per line, made with the key the phone paired with. The
+  gateway checks, in order: the body's shape and an 8 KiB bound (`400
+malformed`); that it can open the capability (`421`); that the key's SHA-256
+  is the sealed fingerprint (`403 host-key-mismatch`); that the timestamp is
+  within five minutes of its clock and the signature verifies, and that it has
+  not seen that signature in the last ten minutes (`401 signature-invalid`);
+  and at most twelve deliveries per capability, and twelve per phone across
+  every capability that names it (keyed by a SHA-256 hash of the platform and
+  token, in memory), in any sixty seconds (`429
+rate-limited`). Then it sends, and answers `202` when the platform accepted
+  it, `410 destination-gone` when the platform refused the token as gone, `502
+platform-failed` otherwise, and `503 unavailable` without that platform's
+  credential. _Reason:_ the fingerprint check is what makes a leaked capability
+  useless without the host's private key; the replay window stops a captured
+  request from being sent twice.
+- **What reaches Apple and Google.** APNs gets the placeholder alert with
+  `mutable-content`, so the notification service extension runs, the collapse
+  id as `apns-collapse-id`, priority 10 for `high` and 5 for `normal`, and the
+  sealed content under one custom key (`octant`: version, encapsulated key,
+  ciphertext). FCM gets a data-only message holding the version, encapsulated
+  key, and ciphertext, with the collapse id as `collapse_key` and the urgency as
+  Android priority, so the app's receiver opens it and posts the notification
+  itself. No other field is added.
+- **What the gateway keeps.** Its keys, its platform credentials, per-capability
+  rate counters and recently seen signed requests (keyed by the signed text,
+  since an ECDSA signature has a second valid form), all in memory except the
+  credentials. Its logs hold counts and failure categories only: never a
+  token, capability, fingerprint, envelope, or address.
+- **The host's side.** The transport reports delivery `available` only while
+  the setting is on, and reads the setting before every send, so turning it off
+  stops the next one. It signs with the listener identity key and sends
+  nothing when the host has none (`host-identity-unavailable`): a host that
+  never enabled its listener has no paired phone. It follows no redirect, waits
+  at most ten seconds, and reads the gateway's answer as `delivered`,
+  `destination-gone` (which clears the registration), or a failure category:
+  `gateway-mismatch` for a capability another gateway issued, which the person
+  fixes by pointing the setting back or the phone registering again,
+  `gateway-refused`, `gateway-rate-limited`, `gateway-malformed`,
+  `gateway-unreachable`, or `gateway-failed`. Only a window on the computer can
+  change the setting; a paired device reads it and is refused a change.
+
+#### Phone rules
+
+- The phone offers to turn notifications on for a computer only while its
+  build has a notification port. Turning them on asks the system for
+  permission, takes the platform token, makes or reads this computer's
+  notification key, and trades the token at the gateway compiled into the build
+  for a capability bound to the fingerprint the phone recorded at pairing. The
+  computer is then given the capability, the public key, and preferences with
+  thread titles off; it never receives the platform token. A refusal at any
+  step registers nothing.
+- Removing a computer and the phone revoking itself call the port's
+  `forgetHost` before the rest of the removal, so delivered notifications for
+  that computer and the key that opens them go even if a later step fails. A
+  revoke made on the computer reaches the phone as a refused session; the
+  phone forgets that computer's notifications when the person removes it, and
+  the host has already dropped the registration.
+- Still to build, each behind an account gate decision M1 names: the iOS
+  notification service extension (it needs the push capability and a Keychain
+  access group shared with the app, both App ID capabilities), which opens the
+  sealed content with CryptoKit's HPKE for this suite; the Android data-message
+  receiver (it needs the Firebase project's `google-services.json`), which
+  opens it and posts the notification; the native port that returns the
+  platform token and keeps each computer's X25519 key in secure storage the
+  extension can read; and the device pass on both platforms against a test
+  gateway.
 
 ## Phase D: capture and voice as remote input
 
@@ -587,24 +686,27 @@ D have been dogfooded so that store presence is the remaining gap.
 Extends [Mobile remote-control threat model](../security/mobile-remote-control-threat-model.md);
 its T2, T7, and T9 residuals are closed by Phase C.
 
-| Id  | Threat                                                    | Mitigation                                                                                                                            |
-| --- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| P1  | Apple, Google, or the gateway read what a thread is about | Envelope carries only a placeholder and a keyed collapse hash; content is sealed to a key only the phone holds                        |
-| P2  | Lock-screen bystander reads thread detail                 | Default text is kind and computer label; thread titles opt-in per phone; scrubber as second guard                                     |
-| P3  | Revoked or lost phone keeps receiving                     | Destination deleted with the device; phone forgets keys and clears delivered notifications on revoke, sign-out, or host removal       |
-| P4  | Leaked capability used to spam or phish a phone           | Gateway requires the sealed host fingerprint's signature; per-capability rate limit; undecryptable content shows only the placeholder |
-| P5  | Notification used to approve or act without the vault     | Notifications carry no actions; approval runs only in the authenticated session behind the biometric gate                             |
-| P6  | Gateway becomes a relay or an authority                   | Gateway has no host route, stores no per-device state, and carries nothing toward a host; host checks stay as today                   |
-| P7  | Photo reveals location or device identity to providers    | Host strips image metadata for every paired-device upload; phone requests no location                                                 |
-| P8  | Microphone or camera used without the person knowing      | Explicit, visible acts only; foreground only; 60-second clip cap; audio not persisted on phone or host                                |
-| P9  | Phone spends the host owner's transcription budget        | Per-device budget; same `ready` gate; host owner can revoke the device                                                                |
-| P10 | Android build weaker than iOS (screenshots, key storage)  | Parity adapters are acceptance criteria; missing ones named unavailable, never passed                                                 |
-| P11 | Release credential exposed through CI                     | Manual dispatch from `main`, protected environment, Expo token only; signing material stays in EAS                                    |
-| P12 | Store build or demo exposes host data or bypasses pairing | Demo has no network and no pairing; store build is the same client with the same authority                                            |
+| Id  | Threat                                                            | Mitigation                                                                                                                                                                                                                          |
+| --- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1  | Apple, Google, or the gateway read what a thread is about         | Envelope carries only a placeholder and a keyed collapse hash; content is sealed to a key only the phone holds                                                                                                                      |
+| P2  | Lock-screen bystander reads thread detail                         | Default text is kind and computer label; thread titles opt-in per phone; scrubber as second guard                                                                                                                                   |
+| P3  | Revoked or lost phone keeps receiving                             | Destination deleted with the device; phone forgets keys and clears delivered notifications on revoke, sign-out, or host removal                                                                                                     |
+| P4  | Leaked capability or platform token used to spam or phish a phone | Gateway requires the sealed host fingerprint's signature; per-capability and per-phone rate limits; undecryptable content shows only the placeholder; a leaked platform token is accepted as residual ([M7](#maintainer-decisions)) |
+| P5  | Notification used to approve or act without the vault             | Notifications carry no actions; approval runs only in the authenticated session behind the biometric gate                                                                                                                           |
+| P6  | Gateway becomes a relay or an authority                           | Gateway has no host route, stores no per-device state, and carries nothing toward a host; host checks stay as today                                                                                                                 |
+| P7  | Photo reveals location or device identity to providers            | Host strips image metadata for every paired-device upload; phone requests no location                                                                                                                                               |
+| P8  | Microphone or camera used without the person knowing              | Explicit, visible acts only; foreground only; 60-second clip cap; audio not persisted on phone or host                                                                                                                              |
+| P9  | Phone spends the host owner's transcription budget                | Per-device budget; same `ready` gate; host owner can revoke the device                                                                                                                                                              |
+| P10 | Android build weaker than iOS (screenshots, key storage)          | Parity adapters are acceptance criteria; missing ones named unavailable, never passed                                                                                                                                               |
+| P11 | Release credential exposed through CI                             | Manual dispatch from `main`, protected environment, Expo token only; signing material stays in EAS                                                                                                                                  |
+| P12 | Store build or demo exposes host data or bypasses pairing         | Demo has no network and no pairing; store build is the same client with the same authority                                                                                                                                          |
 
 Residual: a compromised host can still send whatever notifications its policy
 allows; the gateway operator can observe delivery timing, host and phone IP
-addresses, and platform tokens.
+addresses, and platform tokens. Anyone holding a phone's platform token can mint
+their own capability for it and send that phone placeholder notifications, at most
+twelve a minute however many capabilities they mint, and that flood shares
+the phone's limit with its real notifications ([M7](#maintainer-decisions)).
 
 ## Settled by existing specifications
 
@@ -630,14 +732,15 @@ The maintainer accepted these on 2026-10-26. Each rule is decided; the
 alternatives considered stay beside it as rationale, and the gates a rule
 names are still maintainer actions, not facts.
 
-| Id  | Decision                       | Rule                                                                                                        | Alternatives considered, and remaining gates                                                                                                                                                                                                         |
-| --- | ------------------------------ | ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| M1  | Push delivery path             | The Octant push gateway described above, in `octant-webapp` beside the Canvas share service, off by default | Rejected: Expo's push service, which sees envelopes and whose token is itself a send capability; no remote push, notifying only while the phone runs. Gates: the Apple push capability, a Firebase project, deployment, and a release-boundary entry |
-| M2  | Lock-screen text               | Kind and computer label; thread titles only when the person opts in for that phone                          | Rejected: thread title always (the current policy); placeholder only                                                                                                                                                                                 |
-| M3  | Android internal distribution  | EAS internal distribution (signed APK by link) now                                                          | Play internal testing track only when Phase E opens; it needs a Play Console account and fee                                                                                                                                                         |
-| M4  | Signing and publisher identity | Organization accounts before Phase E; internal tracks stay on the current accounts                          | Rejected: personal accounts for the store. Gate: creating the organization accounts (a D-U-N-S number; new personal Google developer accounts must run a closed test before production access)                                                       |
-| M5  | Where speech is transcribed    | The host's Voice endpoint                                                                                   | Rejected: the phone's operating-system recognizer, which may send audio to Apple or Google outside host policy                                                                                                                                       |
-| M6  | Store review path              | An offline, clearly labelled demo                                                                           | Rejected: a reviewer-reachable demo host, which would be a hosted, always-on Octant host                                                                                                                                                             |
+| Id  | Decision                       | Rule                                                                                                                                               | Alternatives considered, and remaining gates                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| --- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| M1  | Push delivery path             | The Octant push gateway described above, in `octant-webapp` beside the Canvas share service, off by default                                        | Rejected: Expo's push service, which sees envelopes and whose token is itself a send capability; no remote push, notifying only while the phone runs. Gates: the Apple push capability, a Firebase project, deployment, and a release-boundary entry                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| M2  | Lock-screen text               | Kind and computer label; thread titles only when the person opts in for that phone                                                                 | Rejected: thread title always (the current policy); placeholder only                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| M3  | Android internal distribution  | EAS internal distribution (signed APK by link) now                                                                                                 | Play internal testing track only when Phase E opens; it needs a Play Console account and fee                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| M4  | Signing and publisher identity | Organization accounts before Phase E; internal tracks stay on the current accounts                                                                 | Rejected: personal accounts for the store. Gate: creating the organization accounts (a D-U-N-S number; new personal Google developer accounts must run a closed test before production access)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| M5  | Where speech is transcribed    | The host's Voice endpoint                                                                                                                          | Rejected: the phone's operating-system recognizer, which may send audio to Apple or Google outside host policy                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| M6  | Store review path              | An offline, clearly labelled demo                                                                                                                  | Rejected: a reviewer-reachable demo host, which would be a hosted, always-on Octant host                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| M7  | Capability issuance            | Accepted 2026-10-28: the gateway issues a capability to any caller that presents a platform token, without proof that the caller is the Octant app | Rejected for now: requiring App Attest (iOS) or Play Integrity (Android) before issuing, which adds a dependency on Apple's and Google's checking services and, on Android, on Google Play. Reason: someone holding a phone's platform token can mint capabilities bound to their own key and send that phone placeholder notifications, which reveal nothing and carry no action (P4). Capabilities can be minted repeatedly (thirty a minute per client address), so the gateway also limits deliveries per phone, twelve a minute across every capability; a flood can therefore hold back that phone's real notifications for the rest of the minute, and several computers paired to one phone share the twelve. Revisit if the gateway's failure counts show abuse |
 
 ## Delivery plan
 

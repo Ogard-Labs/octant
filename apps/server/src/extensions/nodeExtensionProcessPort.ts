@@ -320,28 +320,29 @@ async function prepareProcessLaunch(
  * libraries in `lib` and the ICU and zone data in `share`: the rest holds
  * programs it may not exec and, in `local`, whatever the person installed.
  * `/private/var/db` is narrowed to the zone data the time-zone link leads
- * to. Each narrowing is listed in the
- * outside driver specification, so a runtime that fails to start without one
- * can have that one restored.
+ * to. `/System` is not read at all: Bun and Electron's Node started, served
+ * a driver's handshake, probe, and streamed send, and gave the same Intl,
+ * crypto, zlib, worker, and `os` answers with no read under it, since the
+ * system frameworks they link come from the shared cache the loader maps
+ * without a file read. Each narrowing is listed in the outside driver
+ * specification, so a runtime that fails to start without one can have that
+ * one restored.
  */
 const OUTSIDE_DRIVER_SYSTEM_READ_ROOTS = [
-  "/System",
   "/usr/lib",
   "/usr/share",
   "/private/var/db/timezone",
 ] as const;
 /**
- * The data volume, beneath the `/System` read root. Since macOS 10.15 the
- * person's files live on a volume mounted at `/System/Volumes/Data`, and every
- * folder the sealed system volume links there (`/Users`, `/private`, `/opt`,
- * `/Applications`, `/Library`, `/usr/local`) can be spelled beneath it too:
+ * The data volume. Since macOS 10.15 the person's files live on a volume
+ * mounted at `/System/Volumes/Data`, and every folder the sealed system volume
+ * links there (`/Users`, `/private`, `/opt`, `/Applications`, `/Library`,
+ * `/usr/local`) can be spelled beneath it too:
  * `/System/Volumes/Data/Users/<name>/...` is the file `/Users/<name>/...`. The
- * home and `/private` denials name only the short spelling, so the volume is
- * denied whole after every grant. A runtime names nothing by that spelling
- * to start: its loader, libraries, and ICU data sit on the system volume and
- * its Preboot cryptex, and the zone data it reaches through `/private` is
- * read by that short path. The other volumes under `/System/Volumes`
- * (Preboot among them, which holds that cryptex) stay readable.
+ * home and `/private` denials name only the short spelling. No grant reaches
+ * `/System` now, but the volume stays denied whole after every grant, so a
+ * `/System` grant restored for some runtime cannot reopen the home folder
+ * by that spelling.
  */
 const OUTSIDE_DRIVER_DENIED_SYSTEM_ROOTS = ["/System/Volumes/Data"];
 const OUTSIDE_DRIVER_DEVICE_READS = ["/dev/null", "/dev/zero", "/dev/random", "/dev/urandom"];
@@ -350,8 +351,12 @@ const OUTSIDE_DRIVER_DEVICE_READS = ["/dev/null", "/dev/zero", "/dev/random", "/
  * runtime follows to give the driver local time. The rest (the host's user
  * and group lists, its hosts and name-service files, its SSH and sudo
  * configuration) is nothing a driver with no network or exec has a use for.
+ * A runtime opens that link as `/etc/localtime`, through the root link `/etc`;
+ * without a read of that link itself, Bun and Electron's Node both fell back
+ * to UTC. The link is granted alone, never as a folder, so every other name
+ * through it still resolves into the denied `/private/etc`.
  */
-const OUTSIDE_DRIVER_SYSTEM_FILE_READS = ["/private/etc/localtime"];
+const OUTSIDE_DRIVER_SYSTEM_FILE_READS = ["/etc", "/private/etc/localtime"];
 
 /**
  * The whole environment an outside driver gets, whatever the caller passed:
@@ -503,7 +508,7 @@ async function prepareOutsideDriverLaunch(
     // driver never opens a socket, so it reads none of them.
     additionalDenyReadPaths: ["/private/etc/ssl"],
     // Denied after the read roots, not among the denials above: those come
-    // before the roots, and the `/System` grant would open the volume again.
+    // before the roots, so a later `/System` grant would open the volume again.
     isolatedRoots: OUTSIDE_DRIVER_DENIED_SYSTEM_ROOTS,
     allowProcessExec: false,
     allowProcessFork: false,

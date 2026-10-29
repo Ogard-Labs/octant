@@ -209,3 +209,156 @@ describe("mockup wireframe", () => {
     expect(themed).toMatch(/@media \(forced-colors: active\)/);
   });
 });
+
+describe("mockup library", () => {
+  const libraryBlock = {
+    blockId: "screen",
+    schemaVersion: canvasFixture.schemaVersion,
+    kind: "mockup",
+    device: "phone",
+    title: "Search",
+    definitions: [
+      {
+        defId: "row",
+        label: "Result row",
+        nodes: [{ nodeId: "r1", component: "list-row", label: "One" }],
+      },
+    ],
+    nodes: [
+      { nodeId: "window", component: "window", label: "Search" },
+      { nodeId: "go", parentId: "window", component: "search", label: "Search", value: "Ada" },
+      { nodeId: "bar", parentId: "window", component: "progress", label: "Loading", progress: 40 },
+      {
+        nodeId: "one",
+        parentId: "window",
+        component: "instance",
+        label: "Result row",
+        defId: "row",
+      },
+    ],
+  };
+
+  it("draws the library components inert and speaks each one's reading", () => {
+    draw(libraryBlock);
+    const mockup = screen.getByRole("region", { name: "Search, Phone mockup" });
+    const tree = within(mockup).getByRole("tree", { name: "Search" });
+    expect(within(tree).getByRole("treeitem", { name: "Search, Search, Ada" })).toBeInTheDocument();
+    expect(within(tree).getByRole("treeitem", { name: "Progress, Loading" })).toBeInTheDocument();
+    expect(
+      within(tree).getByRole("treeitem", { name: "Component, Result row" }),
+    ).toBeInTheDocument();
+    expectInert(mockup);
+  });
+
+  it("draws the component an instance places, and a hero's title and lede", () => {
+    draw({
+      ...libraryBlock,
+      nodes: [
+        ...libraryBlock.nodes,
+        { nodeId: "intro", parentId: "window", component: "hero", label: "Welcome", value: "Lede" },
+      ],
+    });
+    const mockup = screen.getByRole("region", { name: "Search, Phone mockup" });
+    const instance = within(mockup).getByRole("treeitem", { name: "Component, Result row" });
+    expect(within(instance).getByRole("treeitem", { name: "List row, One" })).toBeInTheDocument();
+    expect(within(mockup).getByText("Welcome")).toBeInTheDocument();
+    expect(within(mockup).getByText("Lede")).toBeInTheDocument();
+  });
+
+  it("pins a callout to a library component and to an instance, and lists the notes", () => {
+    draw({
+      ...libraryBlock,
+      annotations: [
+        { nodeId: "go", note: "Search as you type." },
+        { nodeId: "one", note: "One placed row." },
+      ],
+    });
+    const mockup = screen.getByRole("region", { name: "Search, Phone mockup" });
+    const tree = within(mockup).getByRole("tree", { name: "Search" });
+    // The treeitem's spoken reading carries the callout number.
+    expect(
+      within(tree).getByRole("treeitem", { name: "Search, Search, Ada, callout 1" }),
+    ).toBeInTheDocument();
+    expect(
+      within(tree).getByRole("treeitem", { name: "Component, Result row, callout 2" }),
+    ).toBeInTheDocument();
+    // The notes list under the frame, numbered in the order written.
+    const callouts = screen.getByLabelText("Callouts on Search");
+    expect(within(callouts).getByText(/Search as you type/)).toBeInTheDocument();
+    expect(within(callouts).getByText(/One placed row/)).toBeInTheDocument();
+  });
+});
+
+describe("mockup node comment markers", () => {
+  it("shows where the open threads are on the node that holds them", () => {
+    render(
+      <CanvasDocument
+        definition={{
+          ...canvasFixture,
+          blocks: [
+            decodeCanvasBlock({
+              blockId: "screen",
+              schemaVersion: canvasFixture.schemaVersion,
+              kind: "mockup",
+              device: "phone",
+              title: "Search",
+              nodes: [
+                { nodeId: "window", component: "window", label: "Search" },
+                { nodeId: "go", parentId: "window", component: "button", label: "Go" },
+              ],
+            }),
+          ],
+        }}
+        comments={{
+          openCounts: new Map([["screen", 2]]),
+          openRowCounts: new Map(),
+          openNodeCounts: new Map([["screen", new Map([["go", 2]])]]),
+          onOpen: () => {},
+        }}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "2 open comments on Go" })).toBeInTheDocument();
+  });
+
+  it("marks threads on a window, a modal, and a node inside the modal", () => {
+    render(
+      <CanvasDocument
+        definition={{
+          ...canvasFixture,
+          blocks: [
+            decodeCanvasBlock({
+              blockId: "screen",
+              schemaVersion: canvasFixture.schemaVersion,
+              kind: "mockup",
+              device: "phone",
+              title: "Search",
+              nodes: [
+                { nodeId: "window", component: "window", label: "Search" },
+                { nodeId: "dialog", parentId: "window", component: "modal", label: "Confirm" },
+                { nodeId: "ok", parentId: "dialog", component: "button", label: "OK" },
+              ],
+            }),
+          ],
+        }}
+        comments={{
+          openCounts: new Map([["screen", 3]]),
+          openRowCounts: new Map(),
+          openNodeCounts: new Map([
+            [
+              "screen",
+              new Map([
+                ["window", 1],
+                ["dialog", 1],
+                ["ok", 1],
+              ]),
+            ],
+          ]),
+          onOpen: () => {},
+        }}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "1 open comment on Search" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "1 open comment on Confirm" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "1 open comment on OK" })).toBeInTheDocument();
+  });
+});

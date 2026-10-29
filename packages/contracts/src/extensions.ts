@@ -9,6 +9,7 @@ import {
   ExtensionContentDigest,
   ExtensionPackageId,
   ExtensionPackageVersion,
+  ExtensionPublisherKeyFingerprint,
   extensionSemverPattern,
 } from "./extensionIdentity";
 
@@ -17,6 +18,7 @@ export {
   ExtensionContentDigest,
   ExtensionPackageId,
   ExtensionPackageVersion,
+  ExtensionPublisherKeyFingerprint,
 } from "./extensionIdentity";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -147,9 +149,19 @@ const canonicalHttpUrl = Schema.NonEmptyTrimmedString.pipe(
   }),
 );
 
+/**
+ * Why an installed outside provider driver is held for its publisher: the
+ * selected version is not signed by the key pinned for its package name and
+ * source. Only re-trusting the new publisher or forgetting the pin lifts it.
+ */
+export const ExtensionPublisherHoldReason = Schema.Literal("publisher-changed");
+export type ExtensionPublisherHoldReason = typeof ExtensionPublisherHoldReason.Type;
+
 export const ExtensionProvenance = Schema.Struct({
   canonicalUrl: Schema.optional(canonicalHttpUrl),
   publisher: Schema.optional(boundedText(256)),
+  /** The key whose signature the host verified, set by the host only. */
+  publisherKey: Schema.optional(ExtensionPublisherKeyFingerprint),
   sourceCommit: Schema.optional(
     Schema.String.pipe(Schema.pattern(/^[a-f0-9]{7,64}$/), Schema.maxLength(64)),
   ),
@@ -427,17 +439,37 @@ export const ExtensionDebugLaunchArguments = Schema.declare(isDebugLaunchArgumen
 export type ExtensionDebugLaunchArguments = typeof ExtensionDebugLaunchArguments.Type;
 
 /**
+ * How an adapter that debugs the program's children announces one on the
+ * session's own connection: the standard `startDebugging` request, or one
+ * event of the adapter's own (debugpy's `debugpyAttach`). Canonical:
+ * docs/design/language-services.md § Child processes.
+ */
+export const ExtensionDebugChildAnnouncement = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("start-debugging") }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("event"),
+    event: Schema.String.pipe(Schema.pattern(/^[A-Za-z][A-Za-z0-9_]{0,63}$/)),
+  }).annotations(strict),
+);
+export type ExtensionDebugChildAnnouncement = typeof ExtensionDebugChildAnnouncement.Type;
+
+/**
  * What a `debug-adapter` component needs to start a session. The adapter and
  * the program it launches share one confined capsule, so the declaration has
  * no field that widens confinement; `debugPorts` only asks for one loopback
- * port to reach the program. Canonical: docs/design/language-services.md
- * § Component and package.
+ * port to reach the program, and `childSessions` for the host-chosen ports a
+ * child's connection uses. Canonical: docs/design/language-services.md
+ * § Component and package and § Child processes.
  */
 export const ExtensionDebugAdapterDeclaration = Schema.Struct({
   runtimes: Schema.Array(ExtensionDebugRuntimeId).pipe(Schema.minItems(1), Schema.maxItems(8)),
   launchArguments: ExtensionDebugLaunchArguments,
   importTypes: Schema.Array(ExtensionDebugImportType).pipe(Schema.maxItems(8)),
   debugPorts: Schema.Literal(0, 1),
+  /** `1` when the adapter also debugs the child processes of the program it starts. */
+  childSessions: Schema.optional(Schema.Literal(0, 1)),
+  /** Present exactly when `childSessions` is `1`. */
+  childAnnouncement: Schema.optional(ExtensionDebugChildAnnouncement),
 })
   .annotations(strict)
   .pipe(
@@ -446,9 +478,12 @@ export const ExtensionDebugAdapterDeclaration = Schema.Struct({
       // The body must run the program the person confirmed, and a port is
       // declared exactly when the body hands it to the adapter: an unfilled
       // port is a grant nothing uses, and an undeclared one is never chosen.
+      // A child announcement is named exactly when children are declared, so
+      // the review card never shows one without the other.
       return (
         placeholders.has("{{program}}") &&
-        placeholders.has("{{debugPort}}") === (declaration.debugPorts === 1)
+        placeholders.has("{{debugPort}}") === (declaration.debugPorts === 1) &&
+        (declaration.childAnnouncement !== undefined) === (declaration.childSessions === 1)
       );
     }),
   );
@@ -875,6 +910,18 @@ export const ExtensionPackageState = Schema.Struct({
   addedInSettings: Schema.optional(Schema.Literal(true)),
   compatibility: ExtensionCompatibility,
   activation: ExtensionActivationState,
+  /**
+   * An outside provider driver's publisher keys: the one pinned for its
+   * package name and source, the one that signed the selected version, and
+   * the hold when they differ. Absent when neither key exists.
+   */
+  publisher: Schema.optional(
+    Schema.Struct({
+      pinned: Schema.optional(ExtensionPublisherKeyFingerprint),
+      selected: Schema.optional(ExtensionPublisherKeyFingerprint),
+      held: Schema.optional(ExtensionPublisherHoldReason),
+    }).annotations(strict),
+  ),
   components: Schema.Array(
     Schema.Struct({
       component: ExtensionComponent,
@@ -913,6 +960,9 @@ export type ExtensionEffectivePackageState = typeof ExtensionEffectivePackageSta
 export const decodeExtensionPackageId = Schema.decodeUnknownSync(ExtensionPackageId);
 export const decodeExtensionComponentId = Schema.decodeUnknownSync(ExtensionComponentId);
 export const decodeExtensionContentDigest = Schema.decodeUnknownSync(ExtensionContentDigest);
+export const decodeExtensionPublisherKeyFingerprint = Schema.decodeUnknownSync(
+  ExtensionPublisherKeyFingerprint,
+);
 export const decodeExtensionPackageManifest = Schema.decodeUnknownSync(ExtensionPackageManifest);
 export const decodeExtensionActivationState = Schema.decodeUnknownSync(ExtensionActivationState);
 export const decodeExtensionSelection = Schema.decodeUnknownSync(ExtensionSelection);

@@ -79,7 +79,12 @@ describe("dashboard layout", () => {
     const onOpen = vi.fn();
     render(
       <CanvasDocument
-        comments={{ openCounts: new Map(), openRowCounts: new Map(), onOpen }}
+        comments={{
+          openCounts: new Map(),
+          openNodeCounts: new Map(),
+          openRowCounts: new Map(),
+          onOpen,
+        }}
         definition={{ ...canvasFixture, blocks: releaseHealthBoardExampleBlocks }}
       />,
     );

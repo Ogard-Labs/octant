@@ -531,26 +531,34 @@ function BundledPackageFacts(props: {
 
 /**
  * An outside driver's package as the person admitted it. A local folder is
- * unsigned developer input: nobody but the person reviewed it, and trust holds
- * for this digest only.
+ * developer input: nobody but the person reviewed it, and trust holds for
+ * this digest only. A signed folder also names the publisher key Octant
+ * verified and pinned.
  */
 function OutsidePackageFacts(props: {
   readonly listing: OutsideProviderDriverListing;
   readonly state: ProviderCatalogState;
 }) {
   const { listing, state } = props;
+  const signed = listing.publisherKey !== undefined;
   return (
     <SettingsSection title="Package">
       <p className="settings-section-line">
-        Installed from a folder on this computer. It is unsigned developer input: Octant checked its
-        files against the digest you trusted, and nobody else reviewed it. Trust, switches, and
-        removal are under Plugins.
+        {signed
+          ? "Installed from a folder on this computer and signed by its publisher: Octant verified the signature and checked its files against the digest you trusted. Nobody else reviewed it. Trust, switches, and removal are under Plugins."
+          : "Installed from a folder on this computer. It is unsigned developer input: Octant checked its files against the digest you trusted, and nobody else reviewed it. Trust, switches, and removal are under Plugins."}
       </p>
       <dl className="provider-catalog__facts">
         <div className="provider-catalog__fact">
           <dt>Source</dt>
-          <dd>Local folder, unsigned</dd>
+          <dd>{signed ? "Local folder, signed" : "Local folder, unsigned"}</dd>
         </div>
+        {listing.publisherKey === undefined ? null : (
+          <div className="provider-catalog__fact">
+            <dt>Publisher key</dt>
+            <dd className="oct-meta--mono">{listing.publisherKey}</dd>
+          </div>
+        )}
         <div className="provider-catalog__fact">
           <dt>Installed</dt>
           <dd>{state.installed ? "Yes" : "No"}</dd>

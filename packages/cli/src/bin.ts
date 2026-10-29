@@ -25,6 +25,10 @@ import {
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { openLocalControlSession, type OpenedLocalControlSession } from "./localControl";
+import {
+  resolveAppStoreConnectKeyCliCommand,
+  runAppStoreConnectKeyCliCommand,
+} from "./appStoreConnectKeyCommand";
 import { resolveProjectCliCommand, runProjectCliCommand } from "./projectCommand";
 import { resolveAgentCliCommand, runAgentCliCommand } from "./agentCommand";
 import { runMcpCliCommand } from "./mcpCommand";
@@ -318,6 +322,22 @@ async function main(): Promise<number> {
       }),
     );
   }
+  if (args.command === "apple") {
+    const command = resolveAppStoreConnectKeyCliCommand(args.positional, args.flags);
+    if (command === undefined) {
+      printUsage();
+      return 1;
+    }
+    return await withLocalControlSession((session) =>
+      runAppStoreConnectKeyCliCommand({
+        command,
+        session,
+        readStdin: () => readAllStdin(process.stdin),
+        stdout: process.stdout,
+        stderr: process.stderr,
+      }),
+    );
+  }
   if (args.command === "ssh-target") {
     const command = resolveSshTargetCliCommand(args.positional, args.flags);
     if (command === undefined) {
@@ -606,6 +626,9 @@ function printUsage(): void {
       "  octant provider key status|remove <instance>",
       "  octant provider remove <instance>",
       "  octant provider sign-in <instance>",
+      "  octant apple key set --issuer <issuer-id> --key-id <key-id> --stdin [--replace] < AuthKey_<key-id>.p8",
+      "  octant apple key set --issuer <issuer-id> --key-id <key-id> --op-reference op://<vault>/<item>/<field> [--replace]",
+      "  octant apple key status|remove",
       "  octant listener [status]",
       "  octant listener enable --hostname <lan-or-tailscale-address> --port <port> --cert <path> --key <path>",
       "  octant listener disable",

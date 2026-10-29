@@ -88,6 +88,58 @@ function turn(
 }
 
 describe("native harness session totals", () => {
+  it.each(["chat", "work", "code"] as const)(
+    "restores a runtime provider's cut-off %s turn and forgets recovery after an explicit resume",
+    (mode) => {
+      const connection = openConnection();
+      try {
+        const sessions = storeOn(connection);
+        const observer = new NativeHarnessTurnObserver({
+          sessions,
+          router: { resolve: () => ({ kind: "unroutable" }) as never },
+          isHarnessProvider: () => false,
+          resolveDriver: () => undefined,
+          hostId: String(lead.hostId),
+          scratchRoot: "/tmp",
+          uuid,
+          clock: () => now,
+        });
+        const scope = {
+          threadId,
+          mode,
+          providerInstanceId: lead.providerInstanceId,
+          modelId: lead.modelId,
+        };
+        observer.turnStarted(scope);
+        expect(sessions.read(threadId)?.session.status).toBe("running");
+        const restarted = storeOn(connection);
+        expect(restarted.read(threadId)?.session.status).toBe("recovery-required");
+        const identity = restarted.recoveryIdentity(threadId);
+        expect(identity).toBeDefined();
+        expect(storeOn(connection).recoveryIdentity(threadId)).toBe(identity);
+        expect(restarted.resume(threadId)).toBe(true);
+        expect(storeOn(connection).read(threadId)?.session.status).toBe("idle");
+        expect(storeOn(connection).recoveryIdentity(threadId)).toBeUndefined();
+        const next = new NativeHarnessTurnObserver({
+          sessions: restarted,
+          router: { resolve: () => ({ kind: "unroutable" }) as never },
+          isHarnessProvider: () => false,
+          resolveDriver: () => undefined,
+          hostId: String(lead.hostId),
+          scratchRoot: "/tmp",
+          uuid,
+          clock: () => now,
+        });
+        next.turnStarted(scope);
+        expect(storeOn(connection).recoveryIdentity(threadId)).not.toBe(identity);
+        next.turnEnded(scope);
+        expect(storeOn(connection).read(threadId)?.session.status).toBe("idle");
+      } finally {
+        connection.close();
+      }
+    },
+  );
+
   it("replays one interrupted turn when cancellation follows a completed response", async () => {
     const connection = openConnection();
     try {

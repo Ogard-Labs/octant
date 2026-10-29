@@ -41,6 +41,9 @@ back to the composer — unless you have already typed something newer, which is
 kept instead. The waiting message lives on this client only; a restart drops it
 rather than sending it behind your back.
 
+See [Continuing after a restart](/guide/work#continuing-after-a-restart) if Octant
+stopped while the agent was working.
+
 ## Unsent drafts
 
 New-task text stays with its mode and pane while you visit Settings or switch

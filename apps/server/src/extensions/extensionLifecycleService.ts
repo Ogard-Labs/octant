@@ -14,6 +14,10 @@ import {
 import type { InspectedExtensionPackage } from "./packageInspector";
 import type { ExtensionPackageManifest } from "@octant/contracts/extensions";
 import type { ExtensionPackageStore, ExtensionVersionReference } from "./extensionPackageStore";
+import {
+  decideOutsideDriverNewPublisher,
+  outsideDriverPublisherPinAtTrust,
+} from "@octant/domain/outside-driver-publisher-policy";
 import type { ExtensionRuntimeEvidence } from "./extensionSupervisor";
 
 export type ExtensionLifecycleFaultPoint = "after-prepared" | "after-promotion" | "after-commit";
@@ -173,9 +177,97 @@ export class ExtensionLifecycleService {
   ): Promise<ExtensionSnapshot> {
     const record = this.#stateMutationRecord(command.extensionId, command.expectedStateVersion);
     if (record.trusted === command.trusted) return this.snapshot();
+    // Trust is not how a new publisher is accepted; that is its own action,
+    // which shows the person both keys.
+    if (command.trusted && record.publisherChanged === true) {
+      throw new ExtensionLifecycleServiceError(
+        "invalid",
+        "Another publisher signed this package; trust the new publisher first.",
+      );
+    }
+    const manifest = installedManifest(record);
+    const pin =
+      command.trusted && holdsProviderDriver(manifest)
+        ? outsideDriverPublisherPinAtTrust(record.publisherPin, manifest.provenance.publisherKey)
+        : undefined;
     this.#append(
       command.extensionId,
-      { kind: "source-trust-changed", trusted: command.trusted },
+      [
+        { kind: "source-trust-changed", trusted: command.trusted },
+        // The first trust of a signed version pins its key for this package
+        // name and source, in the same append as the trust it rests on.
+        ...(pin === undefined
+          ? []
+          : [
+              {
+                kind: "publisher-pinned" as const,
+                packageId: manifest.packageId,
+                publisherKey: pin,
+              },
+            ]),
+      ],
+      command.expectedStateVersion,
+    );
+    return this.snapshot();
+  }
+
+  /**
+   * Re-trusts the publisher of an outside driver held because another key,
+   * the one the person confirms, signed its selected version. The new key
+   * replaces the pin and the package stays held until the person trusts it.
+   */
+  async trustNewPublisher(
+    command: ExtensionDesiredStateCommand<"trust-new-publisher">,
+  ): Promise<ExtensionSnapshot> {
+    const record = this.#stateMutationRecord(command.extensionId, command.expectedStateVersion);
+    const manifest = installedManifest(record);
+    const decision = holdsProviderDriver(manifest)
+      ? decideOutsideDriverNewPublisher({
+          pinned: record.publisherPin,
+          selected: manifest.provenance.publisherKey,
+          confirmed: command.publisherKey,
+        })
+      : ({ kind: "refused", reason: "not-held" } as const);
+    if (decision.kind === "refused") {
+      throw new ExtensionLifecycleServiceError("invalid", "No new publisher is waiting for trust.");
+    }
+    this.#append(
+      command.extensionId,
+      {
+        kind: "publisher-replaced",
+        packageId: manifest.packageId,
+        previousPublisherKey: decision.previous,
+        publisherKey: decision.next,
+      },
+      command.expectedStateVersion,
+    );
+    return this.snapshot();
+  }
+
+  /**
+   * Forgets the publisher key pinned for a package name and source. The pin
+   * outlives an uninstall, so this works on an uninstalled package as well.
+   */
+  async forgetPublisher(
+    command: ExtensionDesiredStateCommand<"forget-publisher">,
+  ): Promise<ExtensionSnapshot> {
+    const record = readExtensionRecord(this.#connection, command.extensionId);
+    if (record === undefined || record.publisherPin !== command.publisherKey) {
+      throw new ExtensionLifecycleServiceError("invalid", "That publisher is not pinned.");
+    }
+    if (record.aggregateVersion !== command.expectedStateVersion) {
+      throw new ExtensionLifecycleServiceError(
+        "conflict",
+        "Extension desired state changed; retry.",
+      );
+    }
+    this.#append(
+      command.extensionId,
+      {
+        kind: "publisher-forgotten",
+        packageId: record.packageId as never,
+        publisherKey: command.publisherKey,
+      },
       command.expectedStateVersion,
     );
     return this.snapshot();
@@ -478,7 +570,9 @@ export class ExtensionLifecycleService {
 
   #append(
     extensionId: string,
-    payload: ExtensionLifecycleEvent["payload"],
+    payloads:
+      | ExtensionLifecycleEvent["payload"]
+      | ReadonlyArray<ExtensionLifecycleEvent["payload"]>,
     expectedStateVersion?: number,
   ): void {
     const current = readExtensionRecord(this.#connection, extensionId);
@@ -489,11 +583,13 @@ export class ExtensionLifecycleService {
         "Extension desired state changed; retry.",
       );
     }
-    const event: ExtensionLifecycleEvent = {
-      eventVersion: 1 as never,
-      extensionId: extensionId as never,
-      payload,
-    };
+    const events = (Array.isArray(payloads) ? payloads : [payloads]).map(
+      (payload: ExtensionLifecycleEvent["payload"]): ExtensionLifecycleEvent => ({
+        eventVersion: 1 as never,
+        extensionId: extensionId as never,
+        payload,
+      }),
+    );
     try {
       this.#journal.append({
         aggregate: {
@@ -501,17 +597,15 @@ export class ExtensionLifecycleService {
           aggregateId: extensionId,
         },
         expectedVersion: expectedStateVersion ?? currentVersion,
-        events: [
-          {
-            eventId: this.#uuid(),
-            eventName: EXTENSION_LIFECYCLE_EVENT,
-            eventVersion: 1,
-            correlationId: this.#uuid(),
-            actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
-            occurredAt: this.#clock(),
-            payload: event,
-          },
-        ],
+        events: events.map((event) => ({
+          eventId: this.#uuid(),
+          eventName: EXTENSION_LIFECYCLE_EVENT,
+          eventVersion: 1,
+          correlationId: this.#uuid(),
+          actor: { kind: "local-user" as const, actorId: OCTANT_LOCAL_ACTOR_ID },
+          occurredAt: this.#clock(),
+          payload: event,
+        })),
       });
     } catch {
       throw new ExtensionLifecycleServiceError(
@@ -559,6 +653,18 @@ export class ExtensionLifecycleService {
       },
     });
   }
+}
+
+function installedManifest(record: ProjectedExtensionRecord): ExtensionPackageManifest {
+  if (record.current === undefined) {
+    throw new ExtensionLifecycleServiceError("invalid", "Extension package is not installed.");
+  }
+  return record.current;
+}
+
+/** Bundled drivers are never stored as packages, so one that holds a driver is an outside driver. */
+function holdsProviderDriver(manifest: ExtensionPackageManifest): boolean {
+  return manifest.components.some((component) => component.kind === "provider-driver");
 }
 
 export const NOOP_EXTENSION_SUPERVISOR: ExtensionSupervisorPort = {

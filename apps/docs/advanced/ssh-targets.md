@@ -19,19 +19,21 @@ computer while its file tools and commands act on the target with the usual
 approvals, or on GitHub Copilot running on the target itself
 ([Where a provider runs on the target](#where-a-provider-runs-on-the-target)).
 Any other provider is refused for it, and Full access is not offered there.
-macOS targets are not admitted yet.
+A Mac works as a target too, in the same modes as a Linux machine
+([A Mac as a target](#a-mac-as-a-target)).
 
 ## What the target needs
 
-- Linux on an x64 or arm64 CPU, reachable with `ssh` from this computer as you
+- Linux on an x64 or arm64 CPU, or macOS, reachable with `ssh` from this computer as you
   already set it up (aliases, `ProxyJump`, and hardware keys in your SSH
   configuration all work).
 - A user other than root. Octant refuses a root login.
 - The headless Octant of **exactly this version**, installed by you. Octant
   never installs software on the target. See [Linux host](/guide/linux-host)
   for the install; you only need the files, not a running server.
-- Bubblewrap (`bwrap`), with unprivileged user namespaces enabled for that
-  user, and an existing `~/.ssh` folder (Octant proves it cannot be read).
+- On Linux, Bubblewrap (`bwrap`), with unprivileged user namespaces enabled
+  for that user, and an existing `~/.ssh` folder (Octant proves it cannot be
+  read). macOS uses its own sandbox, which every Mac has.
 
 ## Add a target
 
@@ -210,6 +212,19 @@ the target (for example what `command -v copilot` prints there). Copilot then
 runs on the target in **Plan** or **Ask for approvals**: each file it writes
 and each command it runs on the target asks you first, and the task offers no
 send while the target has not proven it confines the agent in that posture.
+
+## A Mac as a target
+
+A Mac is confined with its own sandbox, which cannot give each command a
+private network of its own as Linux does. So when a task's command or a
+provider's runtime on a Mac target needs the network, Octant opens a
+loopback port on the target for that one launch, and the sandbox lets the
+launch reach that port and nothing else. Every connection to the port must
+carry that launch's secret token, which only the launch was given; any other
+connection, for example from another user on that Mac, is refused before
+anything reaches your computer, where each request is still decided by the
+task's egress rules. The port closes when the command ends or the runtime
+stops.
 
 ## Removing a target
 
