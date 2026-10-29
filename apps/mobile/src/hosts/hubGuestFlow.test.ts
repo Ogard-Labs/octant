@@ -288,7 +288,10 @@ describe("a phone that joined a hub as a guest", () => {
       transport: () => ({
         status: "available",
         fetch: async () =>
-          Response.json({ spokeMemberId: String(id("2")), deviceId: freshDeviceId }, { status: 201 }),
+          Response.json(
+            { spokeMemberId: String(id("2")), deviceId: freshDeviceId },
+            { status: 201 },
+          ),
       }),
       record: recordWith(laptop),
       deviceLabel: "Phone",
