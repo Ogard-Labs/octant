@@ -4,6 +4,10 @@ import {
   DESKTOP_ARTIFACT_MAXIMUM_BYTES,
   DESKTOP_LEASE_AGGREGATE_TYPE,
   DESKTOP_LEASE_EVENT_NAMES,
+  DESKTOP_SPEND_AGGREGATE_ID,
+  DESKTOP_SPEND_MAXIMUM_USD_CENTS,
+  DESKTOP_SPEND_AGGREGATE_TYPE,
+  DESKTOP_SPEND_EVENT_NAMES,
   EventId,
   decodeAggregateVersion,
   decodeDesktopLeaseId,
@@ -15,6 +19,7 @@ import {
   type ComputerControlResult,
   type DesktopArtifactRefusal,
   type DesktopArtifactSent,
+  type DesktopBilledLeaseRefused,
   type DesktopCredentialRef,
   type DesktopHostTag,
   type DesktopInputEvent,
@@ -27,6 +32,7 @@ import {
   type DesktopLeaseOwner,
   type DesktopLeaseRefusal,
   type DesktopLeaseRefusalReason,
+  type DesktopLeaseLeftoverCleared,
   type DesktopLeaseRequested,
   type DesktopLeaseState,
   type DesktopLeaseTransitioned,
@@ -39,6 +45,9 @@ import {
   type DesktopProviderId,
   type DesktopProviderLocality,
   type DesktopRecipe,
+  type DesktopLeaseSpend,
+  type DesktopSpendCapChanged,
+  type DesktopSpendSummary,
   type DesktopViewId,
   type EventActor,
   type LeasableDesktopProvider,
@@ -50,15 +59,20 @@ import {
   cacheBackoffHolds,
   clampTurnAccessPosture,
   decideDesktopArtifactTransfer,
+  decideDesktopBilledSpend,
   decideDesktopLeaseAcquire,
   decideDesktopLeaseExtension,
   desktopInputOperation,
   desktopLeaseClockEnds,
   desktopLeaseFits,
   desktopLeaseHoldsDesktop,
+  desktopLeaseSpendEstimate,
   desktopLeaseTransitionAllowed,
+  desktopMonthSpent,
   desktopNetworkAllowed,
   desktopProviderExpiryHolds,
+  desktopSpendCapChangeAllowed,
+  desktopSpendMonth,
   extendCacheBackoff,
   type CacheBackoff,
 } from "@octant/domain";
@@ -267,6 +281,13 @@ export interface DesktopLeaseService {
       readonly confirmedProvider?: DesktopProviderId;
       readonly confirmedPlacement?: DesktopPlacementId;
       readonly confirmedMachine?: DesktopMachineId;
+      /**
+       * The estimate a person saw when confirming a billed lease. A lease
+       * whose estimate is now different, because the recipe's hourly cost or
+       * limits changed meanwhile, is declined rather than started at a price
+       * nobody confirmed.
+       */
+      readonly confirmedEstimateUsdCents?: number;
     },
   ) => Promise<DesktopLeaseAcquireResult>;
   /**
@@ -351,6 +372,22 @@ export interface DesktopLeaseService {
   ) => Promise<{ readonly status: "view-closed" } | DesktopPaneRefusal>;
   /** Ends leases whose clock, thread, recipe, provider, or setting ended them; retries failed releases. */
   readonly sweep: () => Promise<void>;
+  /**
+   * This month's billed desktop spend and the cap. Only a person at a local
+   * window reads it, as only they set the cap.
+   */
+  readonly spend: (input: {
+    readonly actor: EventActor;
+  }) => { readonly status: "spend"; readonly summary: DesktopSpendSummary } | DesktopLeaseRefusal;
+  /**
+   * A person at a local window setting the monthly cap, or clearing it, which
+   * turns billed desktops off. Every other actor is refused before anything
+   * is journaled, an agent in any posture included.
+   */
+  readonly setSpendCap: (input: {
+    readonly actor: EventActor;
+    readonly monthlyCapUsdCents: number | undefined;
+  }) => { readonly status: "spend"; readonly summary: DesktopSpendSummary } | DesktopLeaseRefusal;
   /**
    * Whether teardown may still need the key this reference names: a lease
    * that recorded it may still hold a desktop, or a desktop made on that
@@ -571,6 +608,8 @@ interface DesktopLeaseTerms {
   readonly placementId?: DesktopPlacementId;
   /** The person's machine, for a placement that chooses one. */
   readonly machine?: DesktopMachine;
+  /** For a billed placement: how long its provider bills once this host can no longer end it. */
+  readonly billedIfHostStopsMinutes?: number;
 }
 
 /**
@@ -612,12 +651,30 @@ function recipeTerms(
   if (placement.choosesMachine === true ? machine === undefined : machine !== undefined) {
     return undefined;
   }
+  const billedIfHostStopsMinutes = placement.billed
+    ? hostStopsMinutes(placement.billedIfHostStopsMinutes)
+    : undefined;
   return {
     locality: placement.locality,
     billed: placement.billed,
     placementId: placement.id,
     ...(machine === undefined ? {} : { machine }),
+    ...(billedIfHostStopsMinutes === undefined ? {} : { billedIfHostStopsMinutes }),
   };
+}
+
+/**
+ * A driver's declared worst case, read only when it is a whole number of
+ * minutes the contract can carry. A driver is untrusted; any other value
+ * counts as none, which leaves the provider-expiry check in force.
+ */
+function hostStopsMinutes(declared: unknown): number | undefined {
+  return typeof declared === "number" &&
+    Number.isSafeInteger(declared) &&
+    declared >= 1 &&
+    declared <= 1_440
+    ? declared
+    : undefined;
 }
 
 /**
@@ -653,13 +710,19 @@ function leasableOf(
   provider: DesktopProvider,
   terms: Pick<DesktopLeaseTerms, "locality" | "billed"> = provider,
 ): LeasableDesktopProvider {
-  const placements = (provider.placements ?? []).slice(0, 16).map((placement) => ({
-    placementId: placement.id,
-    displayName: cutName(placement.displayName) || String(placement.id),
-    locality: placement.locality,
-    billed: placement.billed,
-    ...(placement.choosesMachine === true ? { choosesMachine: true as const } : {}),
-  }));
+  const placements = (provider.placements ?? []).slice(0, 16).map((placement) => {
+    const stops = placement.billed
+      ? hostStopsMinutes(placement.billedIfHostStopsMinutes)
+      : undefined;
+    return {
+      placementId: placement.id,
+      displayName: cutName(placement.displayName) || String(placement.id),
+      locality: placement.locality,
+      billed: placement.billed,
+      ...(placement.choosesMachine === true ? { choosesMachine: true as const } : {}),
+      ...(stops === undefined ? {} : { billedIfHostStopsMinutes: stops }),
+    };
+  });
   return {
     providerId: provider.id,
     displayName: cutName(provider.displayName) || String(provider.id),
@@ -745,7 +808,12 @@ export function createDesktopLeaseService(
     extra: Partial<
       Pick<
         DesktopLeaseTransitioned,
-        "endReason" | "requestedBy" | "detail" | "credentialRejected" | "credentialMissing"
+        | "endReason"
+        | "requestedBy"
+        | "detail"
+        | "credentialRejected"
+        | "credentialMissing"
+        | "leftoverUnverified"
       >
     > = {},
   ): DesktopLease {
@@ -765,6 +833,7 @@ export function createDesktopLeaseService(
       ...(extra.detail === undefined ? {} : { detail: extra.detail.slice(0, 512) }),
       ...(extra.credentialRejected === undefined ? {} : { credentialRejected: true }),
       ...(extra.credentialMissing === undefined ? {} : { credentialMissing: true }),
+      ...(extra.leftoverUnverified === undefined ? {} : { leftoverUnverified: true }),
     };
     append(record, leaseId, DESKTOP_LEASE_EVENT_NAMES.transitioned, payload, actor);
     return read(leaseId).lease;
@@ -937,6 +1006,23 @@ export function createDesktopLeaseService(
     );
     if (destroyed.kind === "gone") {
       orphans.delete(key);
+      // The lease counted its whole estimate against the month's cap from its
+      // failed transition, which journaled the leftover, until this.
+      const record = projection.get(orphan.leaseId);
+      if (record?.lease.leftoverUnverified === true) {
+        const cleared: DesktopLeaseLeftoverCleared = {
+          leaseId: orphan.leaseId,
+          owner: record.lease.owner,
+          providerId: record.lease.providerId,
+        };
+        append(
+          record,
+          orphan.leaseId,
+          DESKTOP_LEASE_EVENT_NAMES.leftoverCleared,
+          cleared,
+          options.systemActor,
+        );
+      }
       return true;
     }
     orphan.backoff = extendCacheBackoff(orphan.backoff, options.now());
@@ -1002,6 +1088,27 @@ export function createDesktopLeaseService(
         }
       }
     }
+    // A refused or failed acquire the last run left unverified: the journal
+    // still marks it, so look for its desktop again by lease id. A provider
+    // that is not loaded here leaves it marked, and counted against the cap.
+    for (const record of projection.list()) {
+      if (record.lease.leftoverUnverified !== true) continue;
+      const leaseId = record.lease.leaseId;
+      if ([...orphans.values()].some((orphan) => String(orphan.leaseId) === String(leaseId))) {
+        continue;
+      }
+      const loaded = registered(String(record.lease.providerId));
+      if (loaded === undefined) continue;
+      await inOrder(leaseId, () =>
+        destroyOrphan(`stray:${String(leaseId)}`, {
+          teardown: teardownPortOf(loaded.provider),
+          leaseId,
+          ...(record.lease.credentialRef === undefined
+            ? {}
+            : { credentialRef: record.lease.credentialRef }),
+        }),
+      );
+    }
     for (const record of unreleased) {
       const leaseId = record.lease.leaseId;
       const providerId = String(record.lease.providerId);
@@ -1033,9 +1140,131 @@ export function createDesktopLeaseService(
     readonly recipe: DesktopRecipe;
     readonly provider: DesktopProvider;
     readonly terms: DesktopLeaseTerms;
+    /** A billed lease's estimate, and the month's spend it was checked against. */
+    readonly spend?: { readonly lease: DesktopLeaseSpend; readonly summary: DesktopSpendSummary };
   };
 
-  function admitAcquire(caller: DesktopLeaseCaller): Admitted | DesktopLeaseRefusal {
+  /** A billed lease the cap refused, with the figures the journal records for it. */
+  type SpendRefused = {
+    readonly status: "spend-refused";
+    readonly refusal: DesktopLeaseRefusal;
+    readonly record: DesktopBilledLeaseRefused;
+  };
+
+  /**
+   * This month's billed spend as the journal shows it. Each billed lease
+   * journaled its own estimate, so a restart rebuilds the same figure; a
+   * lease requested in an earlier month counts toward that month only.
+   */
+  function spendSummary(): DesktopSpendSummary {
+    const month = desktopSpendMonth(options.now());
+    const cap = projection.spend().monthlyCapUsdCents;
+    const spent = desktopMonthSpent({
+      month,
+      holdings: projection.list().map(({ lease }) => ({
+        state: lease.state,
+        requestedAt: Date.parse(lease.requestedAt),
+        updatedAt: Date.parse(lease.updatedAt),
+        ...(lease.spend === undefined ? {} : { spend: lease.spend }),
+        unverifiedDesktop: lease.leftoverUnverified === true,
+      })),
+    });
+    return {
+      month,
+      spentUsdCents: Math.min(spent, DESKTOP_SPEND_MAXIMUM_USD_CENTS),
+      ...(cap === undefined ? {} : { monthlyCapUsdCents: cap }),
+    };
+  }
+
+  /**
+   * A billed lease's estimate checked against the cap. Only a person's own
+   * hourly figure on the recipe prices it; with none, nothing is estimated
+   * and nothing starts.
+   */
+  function admitSpend(
+    owner: DesktopLeaseOwner,
+    recipe: DesktopRecipe,
+    terms: DesktopLeaseTerms,
+    providerId: DesktopProvider["id"],
+  ): Admitted["spend"] | SpendRefused | DesktopLeaseRefusal {
+    if (!terms.billed) return undefined;
+    const hourlyCostUsdCents = recipe.hourlyCostUsdCents;
+    if (hourlyCostUsdCents === undefined) return refused("spend-unestimated");
+    const lease: DesktopLeaseSpend = {
+      hourlyCostUsdCents,
+      estimateUsdCents: Math.min(
+        desktopLeaseSpendEstimate({
+          hourlyCostUsdCents,
+          maximumLeaseMinutes: recipe.maximumLeaseMinutes,
+          billedIfHostStopsMinutes: terms.billedIfHostStopsMinutes,
+        }),
+        DESKTOP_SPEND_MAXIMUM_USD_CENTS,
+      ),
+    };
+    const summary = spendSummary();
+    const decision = decideDesktopBilledSpend({
+      monthlyCapUsdCents: summary.monthlyCapUsdCents,
+      spentUsdCents: summary.spentUsdCents,
+      estimateUsdCents: lease.estimateUsdCents,
+    });
+    if (decision.kind === "proceed") return { lease, summary };
+    return {
+      status: "spend-refused",
+      refusal: refused(decision.reason),
+      record: {
+        owner,
+        providerId,
+        ...(terms.placementId === undefined ? {} : { placementId: terms.placementId }),
+        reason: decision.reason,
+        month: summary.month,
+        estimateUsdCents: lease.estimateUsdCents,
+        spentUsdCents: summary.spentUsdCents,
+        ...(summary.monthlyCapUsdCents === undefined
+          ? {}
+          : { monthlyCapUsdCents: summary.monthlyCapUsdCents }),
+      },
+    };
+  }
+
+  function appendSpend(eventName: string, payload: unknown, actor: EventActor): void {
+    journal.append({
+      aggregate: {
+        aggregateType: DESKTOP_SPEND_AGGREGATE_TYPE,
+        aggregateId: decodeAggregateId(DESKTOP_SPEND_AGGREGATE_ID),
+      },
+      expectedVersion: decodeAggregateVersion(projection.spend().version),
+      events: [
+        {
+          eventId: decodeEventId(options.uuid()),
+          eventName,
+          eventVersion: 1,
+          correlationId: decodeCorrelationId(options.uuid()),
+          actor,
+          occurredAt: iso(options.now()),
+          payload,
+        },
+      ],
+    });
+  }
+
+  /**
+   * An admission as the caller sees it. A cap refusal reaches the person or
+   * agent who asked as its reason, and is journaled with its figures when it
+   * stopped an acquire; a tab's overview only reads it.
+   */
+  function admitted(
+    caller: DesktopLeaseCaller,
+    journalSpendRefusal: boolean,
+  ): Admitted | DesktopLeaseRefusal {
+    const admission = admitAcquire(caller);
+    if (admission.status !== "spend-refused") return admission;
+    if (journalSpendRefusal) {
+      appendSpend(DESKTOP_SPEND_EVENT_NAMES.billedLeaseRefused, admission.record, caller.actor);
+    }
+    return admission.refusal;
+  }
+
+  function admitAcquire(caller: DesktopLeaseCaller): Admitted | DesktopLeaseRefusal | SpendRefused {
     const { mode, threadId } = caller.owner;
     if (mode !== "work" && mode !== "code") return refused("not-leasable-mode");
     const owner: DesktopLeaseOwner = { mode, threadId };
@@ -1069,7 +1298,17 @@ export function createDesktopLeaseService(
       locality: terms.locality,
     });
     if (!fits) return refused("lease-limit");
-    return { status: "admitted", owner, thread, recipe, provider: loaded.provider, terms };
+    const spend = admitSpend(owner, recipe, terms, loaded.provider.id);
+    if (spend !== undefined && "status" in spend) return spend;
+    return {
+      status: "admitted",
+      owner,
+      thread,
+      recipe,
+      provider: loaded.provider,
+      terms,
+      ...(spend === undefined ? {} : { spend }),
+    };
   }
 
   function refuseCaller(
@@ -1087,7 +1326,7 @@ export function createDesktopLeaseService(
 
   const acquire: DesktopLeaseService["acquire"] = async (caller) => {
     await start();
-    const first = admitAcquire(caller);
+    const first = admitted(caller, true);
     if (first.status === "refused") return first;
     const status = await driverCall(() => first.provider.status()).catch(() => ({
       status: "not-connected" as const,
@@ -1108,7 +1347,9 @@ export function createDesktopLeaseService(
         gate.asks !== "in-thread" && isPerson(caller.actor)
           ? String(caller.confirmedProvider ?? "") === String(first.provider.id) &&
             String(caller.confirmedPlacement ?? "") === String(first.terms.placementId ?? "") &&
-            String(caller.confirmedMachine ?? "") === String(first.terms.machine?.machineId ?? "")
+            String(caller.confirmedMachine ?? "") ===
+              String(first.terms.machine?.machineId ?? "") &&
+            caller.confirmedEstimateUsdCents === first.spend?.lease.estimateUsdCents
             ? "approved"
             : "declined"
           : await options
@@ -1126,23 +1367,27 @@ export function createDesktopLeaseService(
       if (answer !== "approved") return refused("declined");
     }
     // Authority may have changed while a person was deciding, and an answer
-    // given for one provider, placement, or machine never covers another.
-    const admitted = admitAcquire(caller);
-    if (admitted.status === "refused") return admitted;
+    // given for one provider, placement, or machine never covers another, nor
+    // one estimate another. Between this check and the journaled request
+    // nothing awaits, so two acquires cannot both fit under the cap's last
+    // room.
+    const second = admitted(caller, true);
+    if (second.status === "refused") return second;
     if (
-      String(admitted.provider.id) !== String(first.provider.id) ||
-      String(admitted.terms.placementId ?? "") !== String(first.terms.placementId ?? "") ||
-      String(admitted.terms.machine?.machineId ?? "") !==
+      String(second.provider.id) !== String(first.provider.id) ||
+      String(second.terms.placementId ?? "") !== String(first.terms.placementId ?? "") ||
+      String(second.terms.machine?.machineId ?? "") !==
         String(first.terms.machine?.machineId ?? "") ||
-      admitted.terms.billed !== first.terms.billed ||
-      admitted.terms.locality !== first.terms.locality ||
-      admitted.thread.executionPolicy !== first.thread.executionPolicy
+      second.terms.billed !== first.terms.billed ||
+      second.terms.locality !== first.terms.locality ||
+      second.thread.executionPolicy !== first.thread.executionPolicy ||
+      second.spend?.lease.estimateUsdCents !== first.spend?.lease.estimateUsdCents
     ) {
       return refused("declined");
     }
     if (caller.signal?.aborted === true) return refused("declined");
 
-    const { owner, recipe, provider, terms } = admitted;
+    const { owner, recipe, provider, terms, spend } = second;
     const leaseId = decodeDesktopLeaseId(options.uuid());
     const now = options.now();
     const expiresAt = now + recipe.leaseMinutes * 60_000;
@@ -1161,6 +1406,7 @@ export function createDesktopLeaseService(
         : {
             daemon: { socketPath: provider.daemon.socketPath, userId: options.daemonUserId },
           }),
+      ...(spend === undefined ? {} : { spend: spend.lease }),
       network: recipe.network,
       expiresAt: iso(expiresAt),
       maximumExpiresAt: iso(now + recipe.maximumLeaseMinutes * 60_000),
@@ -1220,6 +1466,7 @@ export function createDesktopLeaseService(
             ...(keyMissing ? { credentialMissing: true as const } : {}),
             ...(pending === undefined ? {} : { endReason: pending.reason }),
             ...(pending?.requestedBy === undefined ? {} : { requestedBy: pending.requestedBy }),
+            leftoverUnverified: true,
           },
         );
         await reapStray(teardownPortOf(provider), leaseId, recipe.credentialRef);
@@ -1234,11 +1481,19 @@ export function createDesktopLeaseService(
       }
       const providerExpiresAt =
         result.providerExpiresAt === undefined ? undefined : Date.parse(result.providerExpiresAt);
-      if (!desktopProviderExpiryHolds({ billed: terms.billed, expiresAt, providerExpiresAt })) {
+      if (
+        !desktopProviderExpiryHolds({
+          billed: terms.billed,
+          expiresAt,
+          providerExpiresAt,
+          billedIfHostStopsMinutes: terms.billedIfHostStopsMinutes,
+        })
+      ) {
         // A billed desktop that could outlive this host is never kept.
         live.delete(String(leaseId));
         const lease = transition(leaseId, "failed", caller.actor, {
           detail: "The provider set no expiry of its own for a billed desktop.",
+          leftoverUnverified: true,
         });
         await destroyOrphan(`stray:${String(leaseId)}`, {
           teardown: teardownPortOf(provider),
@@ -1544,22 +1799,30 @@ export function createDesktopLeaseService(
    * pressed. Acquire still checks each of them itself.
    */
   function startFor(caller: DesktopLeaseCaller): DesktopPaneStart {
-    const admitted = admitAcquire(caller);
-    if (admitted.status === "refused") return admitted;
+    const admission = admitted(caller, false);
+    if (admission.status === "refused") return admission;
     const gate = decideDesktopLeaseAcquire({
-      executionPolicy: admitted.thread.executionPolicy,
-      billed: admitted.terms.billed,
-      locality: admitted.terms.locality,
+      executionPolicy: admission.thread.executionPolicy,
+      billed: admission.terms.billed,
+      locality: admission.terms.locality,
       initiator: caller.actor.kind,
     });
     if (gate.kind === "refused") return refused(gate.reason);
     return {
       status: "available",
-      provider: leasableOf(admitted.provider, admitted.terms),
-      ...(admitted.terms.placementId === undefined
+      provider: leasableOf(admission.provider, admission.terms),
+      ...(admission.terms.placementId === undefined
         ? {}
-        : { placementId: admitted.terms.placementId }),
-      ...(admitted.terms.machine === undefined ? {} : { machine: admitted.terms.machine }),
+        : { placementId: admission.terms.placementId }),
+      ...(admission.terms.machine === undefined ? {} : { machine: admission.terms.machine }),
+      ...(admission.spend === undefined
+        ? {}
+        : {
+            spend: {
+              estimateUsdCents: admission.spend.lease.estimateUsdCents,
+              summary: admission.spend.summary,
+            },
+          }),
     };
   }
 
@@ -1859,10 +2122,32 @@ export function createDesktopLeaseService(
         String(credentialRef),
     );
 
+  const spend: DesktopLeaseService["spend"] = ({ actor }) =>
+    desktopSpendCapChangeAllowed(actor.kind)
+      ? { status: "spend", summary: spendSummary() }
+      : refused("spend-cap-local-only");
+
+  const setSpendCap: DesktopLeaseService["setSpendCap"] = ({ actor, monthlyCapUsdCents }) => {
+    // Checked before anything is journaled: no agent, device, or system
+    // actor moves the cap, whichever way.
+    if (!desktopSpendCapChangeAllowed(actor.kind)) return refused("spend-cap-local-only");
+    const previous = projection.spend().monthlyCapUsdCents;
+    if (previous !== monthlyCapUsdCents) {
+      const changed: DesktopSpendCapChanged = {
+        ...(previous === undefined ? {} : { previousMonthlyCapUsdCents: previous }),
+        ...(monthlyCapUsdCents === undefined ? {} : { monthlyCapUsdCents }),
+      };
+      appendSpend(DESKTOP_SPEND_EVENT_NAMES.capChanged, changed, actor);
+    }
+    return { status: "spend", summary: spendSummary() };
+  };
+
   return {
     start,
     destination,
     acquire,
+    spend,
+    setSpendCap,
     recipeMachines,
     release,
     retryRelease,

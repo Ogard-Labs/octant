@@ -100,7 +100,23 @@ interface RecipeDraft {
   readonly leaseMinutes: number;
   readonly maximumLeaseMinutes: number;
   readonly idleMinutes: number;
+  /** The person's cost per hour in dollars as typed, for a desktop that bills them. */
+  readonly hourlyCost: string;
 }
+
+/**
+ * Dollars as a person types them (`0.40`, `$1.25`) in whole cents, or
+ * undefined for anything else. The contract takes at least a cent and at
+ * most $10,000 an hour.
+ */
+function centsOf(typed: string): number | undefined {
+  const match = /^\$?\s*(\d{1,5})(?:\.(\d{1,2}))?$/.exec(typed.trim());
+  if (match === null) return undefined;
+  const cents = Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0"));
+  return cents >= 1 && cents <= 1_000_000 ? cents : undefined;
+}
+
+const dollarsOf = (cents: number) => (cents / 100).toFixed(2);
 
 type OfferedProviders =
   | { readonly status: "loading" }
@@ -155,6 +171,7 @@ function draftOf(
       machineName: "",
       screen: DEFAULT_SCREEN,
       ...DEFAULT_LIMITS,
+      hourlyCost: "",
     };
   }
   return {
@@ -166,6 +183,7 @@ function draftOf(
     leaseMinutes: saved.leaseMinutes,
     maximumLeaseMinutes: saved.maximumLeaseMinutes,
     idleMinutes: saved.idleMinutes,
+    hourlyCost: saved.hourlyCostUsdCents === undefined ? "" : dollarsOf(saved.hourlyCostUsdCents),
   };
 }
 
@@ -177,7 +195,8 @@ function sameDraft(left: RecipeDraft, right: RecipeDraft): boolean {
     left.screen === right.screen &&
     left.leaseMinutes === right.leaseMinutes &&
     left.maximumLeaseMinutes === right.maximumLeaseMinutes &&
-    left.idleMinutes === right.idleMinutes
+    left.idleMinutes === right.idleMinutes &&
+    centsOf(left.hourlyCost) === centsOf(right.hourlyCost)
   );
 }
 
@@ -195,6 +214,7 @@ function recipeOf(
   providers: ReadonlyArray<LeasableDesktopProvider>,
 ): DesktopRecipe {
   const [width, height] = draft.screen.split("x").map(Number);
+  const hourlyCostUsdCents = draftBilled(draft, providers) ? centsOf(draft.hourlyCost) : undefined;
   const daemon = providers.some(
     (provider) => String(provider.providerId) === draft.providerId && provider.daemon === true,
   );
@@ -226,7 +246,20 @@ function recipeOf(
     leaseMinutes: draft.leaseMinutes,
     maximumLeaseMinutes: draft.maximumLeaseMinutes,
     idleMinutes: draft.idleMinutes,
+    ...(hourlyCostUsdCents === undefined ? {} : { hourlyCostUsdCents }),
   };
+}
+
+/** Whether the draft's provider, or its placement when it has one, bills the person. */
+function draftBilled(
+  draft: RecipeDraft,
+  providers: ReadonlyArray<LeasableDesktopProvider>,
+): boolean {
+  const provider = providers.find((candidate) => String(candidate.providerId) === draft.providerId);
+  const placement = provider?.placements?.find(
+    (candidate) => String(candidate.placementId) === draft.placementId,
+  );
+  return placement?.billed ?? provider?.billed ?? false;
 }
 
 /**
@@ -501,6 +534,14 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
     draft.leaseMinutes > draft.maximumLeaseMinutes
       ? "A desktop can't start with longer than its longest run."
       : undefined;
+  // A desktop that bills the person is estimated from their own figure
+  // before it starts; Octant knows no provider's price.
+  const billed = draftBilled(draft, providers);
+  const costRefusal =
+    billed && draft.hourlyCost.trim() !== "" && centsOf(draft.hourlyCost) === undefined
+      ? "Enter a cost per hour in dollars, such as 0.40."
+      : undefined;
+  const costReady = !billed || centsOf(draft.hourlyCost) !== undefined;
   const unchanged = saved !== undefined && sameDraft(draft, draftOf(saved, providers));
   const canSave =
     !disabled &&
@@ -508,6 +549,7 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
     placementOffered &&
     machineOffered &&
     limitsRefusal === undefined &&
+    costReady &&
     keyReady &&
     !(unchanged && !keyTyped);
 
@@ -682,6 +724,30 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
               ) : null}
             </>
           ) : null}
+          {billed ? (
+            <>
+              <label className="project-provider-policy__mode">
+                <span>Cost per hour</span>
+                <OctantInput
+                  aria-label="What an hour of this desktop costs you, in US dollars"
+                  disabled={disabled}
+                  inputMode="decimal"
+                  onChange={(event) => {
+                    const hourlyCost = event.currentTarget.value;
+                    setDraft((current) => ({ ...current, hourlyCost }));
+                  }}
+                  placeholder="0.40"
+                  value={draft.hourlyCost}
+                />
+              </label>
+              <p className="project-provider-policy__hint">
+                What an hour of this desktop costs on your account, in US dollars. Before each
+                desktop starts, Octant estimates its most from this and checks it against your
+                monthly cap in Settings › Computer use.
+              </p>
+            </>
+          ) : null}
+          {costRefusal === undefined ? null : <OctantFieldError>{costRefusal}</OctantFieldError>}
           {limitsRefusal === undefined ? null : (
             <OctantFieldError>{limitsRefusal}</OctantFieldError>
           )}

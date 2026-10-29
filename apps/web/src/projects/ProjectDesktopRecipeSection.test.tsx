@@ -306,7 +306,7 @@ describe("ProjectDesktopRecipeSection", () => {
       return { request };
     }
 
-    it("sets a recipe only with a key, sends the key once, and clears the field", async () => {
+    it("sets a recipe that bills only with a key and the person's cost per hour, sends the key once, and clears the field", async () => {
       const user = userEvent.setup();
       const onChange = vi.fn(async () => true);
       const asked = keyClient({ key: "none", store: "available" });
@@ -323,6 +323,14 @@ describe("ProjectDesktopRecipeSection", () => {
       const field = screen.getByLabelText("Cloud desktops API key");
       expect(field).toHaveAttribute("type", "password");
       await user.type(field, "  cloud-key-123  ");
+      // A desktop that bills starts from the person's own figure, never a guess.
+      expect(screen.getByRole("button", { name: "Set recipe" })).toBeDisabled();
+      const cost = screen.getByLabelText("What an hour of this desktop costs you, in US dollars");
+      await user.type(cost, "four");
+      expect(screen.getByText("Enter a cost per hour in dollars, such as 0.40.")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Set recipe" })).toBeDisabled();
+      await user.clear(cost);
+      await user.type(cost, "0.4");
       await user.click(screen.getByRole("button", { name: "Set recipe" }));
 
       expect(onChange).toHaveBeenCalledWith(
@@ -333,6 +341,7 @@ describe("ProjectDesktopRecipeSection", () => {
           leaseMinutes: 30,
           maximumLeaseMinutes: 240,
           idleMinutes: 15,
+          hourlyCostUsdCents: 40,
         },
         { action: "enter", key: "cloud-key-123" },
       );
@@ -346,6 +355,7 @@ describe("ProjectDesktopRecipeSection", () => {
       const keyed = decodeDesktopRecipe({
         ...savedRecipe,
         credentialRef: "80000000-0000-4000-8000-0000000000c1",
+        hourlyCostUsdCents: 125,
       });
       render(
         <ProjectDesktopRecipeSection

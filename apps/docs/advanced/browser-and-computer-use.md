@@ -263,6 +263,19 @@ says **Not shown: the connection could be read**, the desktop keeps running,
 and **Try again** looks once more. This version does not offer a cloud
 provider or another computer yet.
 
+A desktop that bills you starts only under a monthly cap you set in
+**Settings → Computer use → Desktops that bill you**; until you set one, none
+starts. Before each one starts, Octant estimates the most it could cost from
+the recipe's **Cost per hour**, over its longest run or, for a Cua Space in
+your AWS, Google Cloud, or Modal account, over the time that cloud keeps it
+running if this computer stops (8 hours for AWS and Google Cloud by default,
+up to a day for Modal), whichever is longer. If this month's spending plus
+that estimate would pass the cap, the desktop doesn't start and the pane says
+why; desktops already running keep running. The confirmation shows the
+estimate and what this month has counted. A month is a calendar month in UTC.
+Only a window on the host itself can see or change the cap; an agent never
+can.
+
 A paired phone or browser that can open the thread can watch and use its
 desktop too.
 
@@ -299,6 +312,9 @@ settings:
   desktops; no desktop starts until you enter a key again. A key you replace
   or remove is deleted from the credential store once every desktop started
   with it is gone, because Octant needs it to end them.
+- **Cost per hour** appears for a desktop that bills you. Enter what an hour
+  of it costs on your account, in US dollars; Octant knows no provider's
+  price and estimates each desktop from this before it starts.
 
 **Set recipe** saves it; the next desktop uses it. The desktop never has
 network access. **Remove recipe** asks first: removing it, or changing its

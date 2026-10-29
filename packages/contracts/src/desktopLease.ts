@@ -114,6 +114,33 @@ export const DESKTOP_LEASE_MAXIMUM_MINUTES = 240;
 
 const leaseMinutes = Schema.Int.pipe(Schema.between(1, DESKTOP_LEASE_MAXIMUM_MINUTES));
 
+/** Whole US cents, the unit every desktop spend figure uses. */
+export const DESKTOP_SPEND_MAXIMUM_USD_CENTS = 100_000_000;
+const usdCents = Schema.Int.pipe(Schema.between(0, DESKTOP_SPEND_MAXIMUM_USD_CENTS));
+/** A person's figure for one hour of a billed desktop: at least a cent, at most $10,000. */
+const hourlyUsdCents = Schema.Int.pipe(Schema.between(1, 1_000_000));
+/**
+ * How long, at most, a billed placement's provider keeps a desktop running
+ * and billing once this host can no longer end it, by the provider's own
+ * documented default: a day at most.
+ */
+const billedIfHostStopsMinutes = Schema.Int.pipe(Schema.between(1, 1_440));
+
+/** The calendar month, in UTC, a desktop's spend counts toward: `2026-10`. */
+export const DesktopSpendMonth = Schema.String.pipe(Schema.pattern(/^\d{4}-(0[1-9]|1[0-2])$/));
+export type DesktopSpendMonth = typeof DesktopSpendMonth.Type;
+
+/**
+ * What a billed lease was estimated at before it started. The estimate is the
+ * hourly cost times the longest the desktop could bill: the recipe's maximum
+ * lease, or the provider's own stop if this host died, whichever is longer.
+ */
+export const DesktopLeaseSpend = Schema.Struct({
+  hourlyCostUsdCents: hourlyUsdCents,
+  estimateUsdCents: usdCents,
+}).annotations(strict);
+export type DesktopLeaseSpend = typeof DesktopLeaseSpend.Type;
+
 /**
  * A Project's one desktop recipe. A person configures it; an agent cannot
  * create or edit it.
@@ -142,6 +169,12 @@ export const DesktopRecipe = Schema.Struct({
   leaseMinutes,
   maximumLeaseMinutes: leaseMinutes,
   idleMinutes: leaseMinutes,
+  /**
+   * The person's own figure for what one hour of this desktop costs on their
+   * account, required before a billed desktop starts. Octant knows no
+   * provider's price; the host estimates each billed lease from this.
+   */
+  hourlyCostUsdCents: Schema.optional(hourlyUsdCents),
 })
   .annotations(strict)
   .pipe(
@@ -164,6 +197,11 @@ export const LeasableDesktopPlacement = Schema.Struct({
   locality: DesktopProviderLocality,
   billed: Schema.Boolean,
   choosesMachine: Schema.optional(Schema.Literal(true)),
+  /**
+   * For a billed placement whose provider keeps a desktop past the lease
+   * when this host stops: how long, at most, by the provider's own default.
+   */
+  billedIfHostStopsMinutes: Schema.optional(billedIfHostStopsMinutes),
 }).annotations(strict);
 export type LeasableDesktopPlacement = typeof LeasableDesktopPlacement.Type;
 
@@ -249,6 +287,14 @@ export const DesktopLeaseRefusalReason = Schema.Literal(
   "agent-cannot-extend",
   "beyond-maximum",
   "extension-unconfirmed",
+  /** A billed desktop's recipe names no hourly cost, so the host cannot estimate it. */
+  "spend-unestimated",
+  /** No monthly cap is set, so no billed desktop starts. */
+  "spend-cap-unset",
+  /** This lease's estimate would take this month's billed desktop spend past the cap. */
+  "spend-cap-reached",
+  /** Only a person at a local window reads or changes the spend cap. */
+  "spend-cap-local-only",
 );
 export type DesktopLeaseRefusalReason = typeof DesktopLeaseRefusalReason.Type;
 
@@ -269,6 +315,11 @@ export const DesktopLease = Schema.Struct({
   placementId: Schema.optional(DesktopPlacementId),
   machine: Schema.optional(DesktopMachine),
   daemon: Schema.optional(DesktopLeaseDaemon),
+  /**
+   * A billed lease's spend terms: the recipe's hourly cost and the most the
+   * host estimated it could spend, reserved against its month's cap.
+   */
+  spend: Schema.optional(DesktopLeaseSpend),
   state: DesktopLeaseState,
   requestedAt: UtcTimestamp,
   expiresAt: UtcTimestamp,
@@ -279,6 +330,11 @@ export const DesktopLease = Schema.Struct({
   credentialRejected: Schema.optional(Schema.Literal(true)),
   /** The host's credential store no longer held the recipe's key when this lease asked for a desktop. */
   credentialMissing: Schema.optional(Schema.Literal(true)),
+  /**
+   * A refused or failed acquire may have left a desktop the host has not yet
+   * verified gone. It stays set, across restarts, until a destroy is verified.
+   */
+  leftoverUnverified: Schema.optional(Schema.Literal(true)),
   updatedAt: UtcTimestamp,
 }).annotations(strict);
 export type DesktopLease = typeof DesktopLease.Type;
@@ -290,6 +346,7 @@ export const DESKTOP_LEASE_EVENT_NAMES = {
   extended: "desktop.lease-extended@1",
   artifactSent: "desktop.artifact-sent@1",
   operated: "desktop.operated@1",
+  leftoverCleared: "desktop.leftover-cleared@1",
 } as const;
 
 /**
@@ -312,6 +369,8 @@ export const DesktopLeaseRequested = Schema.Struct({
   placementId: Schema.optional(DesktopPlacementId),
   machine: Schema.optional(DesktopMachine),
   daemon: Schema.optional(DesktopLeaseDaemon),
+  /** A billed lease's spend terms, journaled before the provider is asked. */
+  spend: Schema.optional(DesktopLeaseSpend),
   network: DesktopNetworkPosture,
   expiresAt: UtcTimestamp,
   maximumExpiresAt: UtcTimestamp,
@@ -340,8 +399,22 @@ export const DesktopLeaseTransitioned = Schema.Struct({
   credentialRejected: Schema.optional(Schema.Literal(true)),
   /** On a refused acquisition: the credential store held no key for the lease's reference. */
   credentialMissing: Schema.optional(Schema.Literal(true)),
+  /**
+   * On a refused or failed acquisition: the provider may have kept a desktop
+   * under this lease that no destroy has yet verified gone. Journaled with the
+   * transition, before the first destroy, so a crash cannot lose it.
+   */
+  leftoverUnverified: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type DesktopLeaseTransitioned = typeof DesktopLeaseTransitioned.Type;
+
+/** A destroy verified the lease's leftover desktop gone. */
+export const DesktopLeaseLeftoverCleared = Schema.Struct({
+  leaseId: DesktopLeaseId,
+  owner: DesktopLeaseOwner,
+  providerId: DesktopProviderId,
+}).annotations(strict);
+export type DesktopLeaseLeftoverCleared = typeof DesktopLeaseLeftoverCleared.Type;
 
 /** Written only after the driver confirmed the provider-side expiry moved. */
 export const DesktopLeaseExtended = Schema.Struct({
@@ -429,6 +502,54 @@ export const DesktopLeaseOperated = Schema.Struct({
   appId: Schema.optional(text(256)),
 }).annotations(strict);
 export type DesktopLeaseOperated = typeof DesktopLeaseOperated.Type;
+
+/**
+ * The host's one spend record for billed desktops: the monthly cap a person
+ * set and every billed lease the cap refused. Spend itself is rebuilt from
+ * the leases' own journaled estimates, so this aggregate holds no total.
+ */
+export const DESKTOP_SPEND_AGGREGATE_TYPE = "desktop-spend";
+/** The one spend aggregate every host journals under; a fixed id, since a host has one cap. */
+export const DESKTOP_SPEND_AGGREGATE_ID = "d5e7d000-0000-4000-8000-000000000001";
+export const DESKTOP_SPEND_EVENT_NAMES = {
+  capChanged: "desktop.spend-cap-changed@1",
+  billedLeaseRefused: "desktop.billed-lease-refused@1",
+} as const;
+
+/**
+ * A person at a local window set or cleared the monthly cap. No cap means no
+ * billed desktop starts. The actor on the event is that person.
+ */
+export const DesktopSpendCapChanged = Schema.Struct({
+  previousMonthlyCapUsdCents: Schema.optional(usdCents),
+  monthlyCapUsdCents: Schema.optional(usdCents),
+}).annotations(strict);
+export type DesktopSpendCapChanged = typeof DesktopSpendCapChanged.Type;
+
+/**
+ * A billed lease the cap refused before anything was journaled for it or
+ * asked of a provider: the figures the decision used, never a key.
+ */
+export const DesktopBilledLeaseRefused = Schema.Struct({
+  owner: DesktopLeaseOwner,
+  providerId: DesktopProviderId,
+  placementId: Schema.optional(DesktopPlacementId),
+  reason: Schema.Literal("spend-cap-unset", "spend-cap-reached"),
+  month: DesktopSpendMonth,
+  estimateUsdCents: usdCents,
+  spentUsdCents: usdCents,
+  monthlyCapUsdCents: Schema.optional(usdCents),
+}).annotations(strict);
+export type DesktopBilledLeaseRefused = typeof DesktopBilledLeaseRefused.Type;
+
+/** This month's billed desktop spend against the cap, as the host counts it. */
+export const DesktopSpendSummary = Schema.Struct({
+  month: DesktopSpendMonth,
+  /** Ended leases at their running time; leases that may still bill at their whole estimate. */
+  spentUsdCents: usdCents,
+  monthlyCapUsdCents: Schema.optional(usdCents),
+}).annotations(strict);
+export type DesktopSpendSummary = typeof DesktopSpendSummary.Type;
 
 /**
  * A send's Computer use destination when it is not this Mac: one of the
@@ -524,6 +645,8 @@ export const DesktopPaneRequest = Schema.Union(
     confirmedProvider: Schema.optional(DesktopProviderId),
     confirmedPlacement: Schema.optional(DesktopPlacementId),
     confirmedMachine: Schema.optional(DesktopMachineId),
+    /** For a billed desktop: the estimate the person saw, which must still be the host's. */
+    confirmedEstimateUsdCents: Schema.optional(usdCents),
   }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("release"), ...paneLease }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("retry-release"), ...paneLease }).annotations(strict),
@@ -556,6 +679,16 @@ export const DesktopPaneRequest = Schema.Union(
    * this one.
    */
   Schema.Struct({ kind: Schema.Literal("recipe-key"), projectId: Schema.UUID }).annotations(strict),
+  /** This month's billed desktop spend and the cap, for Settings in a local window. */
+  Schema.Struct({ kind: Schema.Literal("spend") }).annotations(strict),
+  /**
+   * A person at a local window setting the monthly cap; no cap turns billed
+   * desktops off. No agent, paired device, or turn reaches this.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("set-spend-cap"),
+    monthlyCapUsdCents: Schema.optional(usdCents),
+  }).annotations(strict),
 );
 export type DesktopPaneRequest = typeof DesktopPaneRequest.Type;
 
@@ -572,6 +705,13 @@ export const DesktopPaneStart = Schema.Union(
     placementId: Schema.optional(DesktopPlacementId),
     /** The person's machine the recipe names, for a placement that chooses one. */
     machine: Schema.optional(DesktopMachine),
+    /** For a billed desktop: what it is estimated at, and this month's spend against the cap. */
+    spend: Schema.optional(
+      Schema.Struct({
+        estimateUsdCents: usdCents,
+        summary: DesktopSpendSummary,
+      }).annotations(strict),
+    ),
   }).annotations(strict),
   DesktopLeaseRefusal,
 );
@@ -626,6 +766,9 @@ export const DesktopPaneAnswer = Schema.Union(
     /** A key the Project's recipe stopped naming stays until its desktops are gone. */
     releasing: Schema.optional(Schema.Literal(true)),
   }).annotations(strict),
+  Schema.Struct({ status: Schema.Literal("spend"), summary: DesktopSpendSummary }).annotations(
+    strict,
+  ),
   DesktopPaneRefusal,
 );
 export type DesktopPaneAnswer = typeof DesktopPaneAnswer.Type;
@@ -643,10 +786,16 @@ export const decodeDesktopLeaseDaemon = Schema.decodeUnknownSync(DesktopLeaseDae
 export const decodeDesktopLease = Schema.decodeUnknownSync(DesktopLease);
 export const decodeDesktopLeaseRequested = Schema.decodeUnknownSync(DesktopLeaseRequested);
 export const decodeDesktopLeaseTransitioned = Schema.decodeUnknownSync(DesktopLeaseTransitioned);
+export const decodeDesktopLeaseLeftoverCleared = Schema.decodeUnknownSync(
+  DesktopLeaseLeftoverCleared,
+);
 export const decodeDesktopLeaseExtended = Schema.decodeUnknownSync(DesktopLeaseExtended);
 export const decodeDesktopArtifactSent = Schema.decodeUnknownSync(DesktopArtifactSent);
 export const decodeDesktopInputEvent = Schema.decodeUnknownSync(DesktopInputEvent);
 export const decodeDesktopLeaseOperated = Schema.decodeUnknownSync(DesktopLeaseOperated);
+export const decodeDesktopSpendCapChanged = Schema.decodeUnknownSync(DesktopSpendCapChanged);
+export const decodeDesktopBilledLeaseRefused = Schema.decodeUnknownSync(DesktopBilledLeaseRefused);
+export const decodeDesktopSpendSummary = Schema.decodeUnknownSync(DesktopSpendSummary);
 export const decodeComputerUseDestinationSelection = Schema.decodeUnknownSync(
   ComputerUseDestinationSelection,
 );

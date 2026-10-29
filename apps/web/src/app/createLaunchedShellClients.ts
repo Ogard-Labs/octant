@@ -35,6 +35,10 @@ import {
   type BrowserAutomationClient,
 } from "@octant/client-runtime/browser-automation-client";
 import { createCanvasClient, type CanvasClient } from "@octant/client-runtime/canvas-client";
+import {
+  createDesktopPaneClient,
+  type DesktopPaneClient,
+} from "@octant/client-runtime/desktop-pane-client";
 import { createChatClient, type ChatClient } from "@octant/client-runtime/chat-client";
 import { createCodeClient, type CodeClient } from "@octant/client-runtime/code-client";
 import {
@@ -145,6 +149,8 @@ export interface LaunchedShellClients {
   readonly automationNotificationClient: ReturnType<typeof createAutomationNotificationClient>;
   readonly browserAutomationClient: BrowserAutomationClient;
   readonly canvasClient: CanvasClient;
+  /** Absent where the base URL is one the client refuses; the spend cap is local-window only. */
+  readonly desktopPaneClient: DesktopPaneClient | undefined;
   readonly chatClient: ChatClient;
   readonly codeClient: CodeClient;
   readonly computerUseClient: ComputerUseClient;
@@ -238,6 +244,15 @@ export function createLaunchedShellClients(
     pendingRequestClient = undefined;
   }
 
+  let desktopPaneClient: DesktopPaneClient | undefined;
+  try {
+    desktopPaneClient = createDesktopPaneClient(port);
+  } catch {
+    // The host answers the spend cap only to a local window; a base URL the
+    // client refuses leaves Settings without the section rather than broken.
+    desktopPaneClient = undefined;
+  }
+
   let replicaStoreSettingsClient: ReplicaStoreSettingsClient | undefined;
   try {
     replicaStoreSettingsClient = createReplicaStoreSettingsClient(port);
@@ -268,6 +283,7 @@ export function createLaunchedShellClients(
     automationNotificationClient: createAutomationNotificationClient(port),
     browserAutomationClient: options.browserAutomationClient ?? createBrowserAutomationClient(port),
     canvasClient: options.canvasClient ?? createCanvasClient(port),
+    desktopPaneClient,
     chatClient: options.chatClient ?? createChatClient(port),
     codeClient: options.codeClient ?? createCodeClient(port),
     computerUseClient: options.computerUseClient ?? createComputerUseClient(port),

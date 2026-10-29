@@ -6314,7 +6314,12 @@ same. This holds in Chat, Work, and Code.
   HTTPS port, which sends nothing outside the hosts the driver declares and
   attaches the person's key from the credential broker's
   `/v1/desktop-provider-credentials/*` namespace itself; a person confirms
-  every billed desktop and every desktop off this machine. No host offers a
+  every billed desktop and every desktop off this machine. Billed desktops
+  are off until a person at a local window sets a monthly spend cap; each
+  billed lease is estimated from the recipe's hourly cost before it starts
+  and refused if it would pass the cap, and no agent can change the cap
+  ([Disposable desktops: C5](design/disposable-desktops.md#expiry-and-teardown-when-the-daemons-host-may-die)).
+  No host offers a
   cloud provider yet, so a recipe can
   name only the host-local provider.
 

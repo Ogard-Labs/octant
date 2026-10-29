@@ -10,6 +10,12 @@ import {
   desktopLeaseFits,
   desktopLeaseTransitionAllowed,
   desktopProviderExpiryHolds,
+  decideDesktopBilledSpend,
+  desktopLeaseSpendEstimate,
+  desktopLeaseSpent,
+  desktopMonthSpent,
+  desktopSpendCapChangeAllowed,
+  desktopSpendMonth,
 } from "./desktopLeasePolicy";
 
 const owner = (threadId: string): DesktopLeaseOwner => ({ mode: "code", threadId });
@@ -279,5 +285,112 @@ describe("desktop lease policy", () => {
     expect(desktopInputOperation({ kind: "scroll", x: 1, y: 2, deltaX: 0, deltaY: 120 })).toBe(
       "scroll",
     );
+  });
+
+  it("keeps billed desktops off until a cap is set, and starts one only when its whole estimate fits", () => {
+    expect(
+      decideDesktopBilledSpend({
+        monthlyCapUsdCents: undefined,
+        spentUsdCents: 0,
+        estimateUsdCents: 1,
+      }),
+    ).toEqual({ kind: "refused", reason: "spend-cap-unset" });
+    expect(
+      decideDesktopBilledSpend({
+        monthlyCapUsdCents: 1_000,
+        spentUsdCents: 600,
+        estimateUsdCents: 400,
+      }),
+    ).toEqual({ kind: "proceed" });
+    expect(
+      decideDesktopBilledSpend({
+        monthlyCapUsdCents: 1_000,
+        spentUsdCents: 601,
+        estimateUsdCents: 400,
+      }),
+    ).toEqual({ kind: "refused", reason: "spend-cap-reached" });
+    // A cap of zero is set, and refuses every billed lease.
+    expect(
+      decideDesktopBilledSpend({ monthlyCapUsdCents: 0, spentUsdCents: 0, estimateUsdCents: 1 }),
+    ).toEqual({ kind: "refused", reason: "spend-cap-reached" });
+  });
+
+  it("estimates a billed lease over the longer of its maximum and its provider's stop if the host dies", () => {
+    expect(desktopLeaseSpendEstimate({ hourlyCostUsdCents: 100, maximumLeaseMinutes: 240 })).toBe(
+      400,
+    );
+    expect(
+      desktopLeaseSpendEstimate({
+        hourlyCostUsdCents: 100,
+        maximumLeaseMinutes: 240,
+        billedIfHostStopsMinutes: 1_440,
+      }),
+    ).toBe(2_400);
+    expect(desktopLeaseSpendEstimate({ hourlyCostUsdCents: 7, maximumLeaseMinutes: 15 })).toBe(2);
+  });
+
+  it("counts a lease that may still bill at its estimate and an ended one at its running time", () => {
+    const spend = { hourlyCostUsdCents: 60, estimateUsdCents: 240 };
+    const at = (state: Parameters<typeof desktopLeaseSpent>[0]["state"], minutes: number) =>
+      desktopLeaseSpent({ state, requestedAt: 0, updatedAt: minutes * minute, spend });
+    expect(at("ready", 5)).toBe(240);
+    expect(at("release-failed", 5)).toBe(240);
+    expect(at("released", 5)).toBe(5);
+    expect(at("failed", 0)).toBe(0);
+    // A failed lease whose leftover desktop is not yet verified gone keeps its estimate.
+    expect(
+      desktopLeaseSpent({
+        state: "failed",
+        requestedAt: 0,
+        updatedAt: 0,
+        spend,
+        unverifiedDesktop: true,
+      }),
+    ).toBe(240);
+    expect(at("released", 10_000)).toBe(240);
+    expect(desktopLeaseSpent({ state: "ready", requestedAt: 0, updatedAt: 0 })).toBe(0);
+  });
+
+  it("counts each lease toward the UTC month it was requested in, so a new month starts at zero", () => {
+    const october = Date.parse("2026-10-31T23:59:00.000Z");
+    const november = Date.parse("2026-11-01T00:00:00.000Z");
+    expect(desktopSpendMonth(october)).toBe("2026-10");
+    expect(desktopSpendMonth(november)).toBe("2026-11");
+    const holdings = [
+      {
+        state: "ready" as const,
+        requestedAt: october,
+        updatedAt: october,
+        spend: { hourlyCostUsdCents: 100, estimateUsdCents: 400 },
+      },
+    ];
+    expect(desktopMonthSpent({ holdings, month: "2026-10" })).toBe(400);
+    expect(desktopMonthSpent({ holdings, month: "2026-11" })).toBe(0);
+  });
+
+  it("lets only a person at a local window change the cap, never an agent or a paired device", () => {
+    expect(desktopSpendCapChangeAllowed("local-user")).toBe(true);
+    expect(desktopSpendCapChangeAllowed("agent")).toBe(false);
+    expect(desktopSpendCapChangeAllowed("remote-device")).toBe(false);
+    expect(desktopSpendCapChangeAllowed("system")).toBe(false);
+  });
+
+  it("keeps a billed placement with a declared stop without a provider expiry, and no other billed one", () => {
+    expect(
+      desktopProviderExpiryHolds({
+        billed: true,
+        expiresAt: 100,
+        providerExpiresAt: undefined,
+        billedIfHostStopsMinutes: 480,
+      }),
+    ).toBe(true);
+    expect(
+      desktopProviderExpiryHolds({
+        billed: true,
+        expiresAt: 100,
+        providerExpiresAt: undefined,
+        billedIfHostStopsMinutes: undefined,
+      }),
+    ).toBe(false);
   });
 });

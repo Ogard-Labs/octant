@@ -165,6 +165,16 @@ export interface DesktopPlacement {
   readonly locality: DesktopProviderLocality;
   readonly billed: boolean;
   readonly choosesMachine?: boolean;
+  /**
+   * For a billed placement whose provider keeps a desktop running past the
+   * lease when the host stops: the longest it bills then, in minutes, by the
+   * provider's own documented default. A billed placement that declares it
+   * is kept without a provider-side expiry the host can verify; the person
+   * is told this worst case before it starts, and the host's spend estimate
+   * counts it. One that declares none must report a provider expiry that
+   * outlives the lease.
+   */
+  readonly billedIfHostStopsMinutes?: number;
 }
 
 /** One of the person's machines a placement can run a desktop on, as the provider reports it. */

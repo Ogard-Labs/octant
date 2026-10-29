@@ -131,6 +131,24 @@ export function desktopWhere(
   return placement?.displayName ?? String(lease.placementId);
 }
 
+/** Whole US cents as the person reads money: `$4.00`. */
+export function desktopDollars(cents: number): string {
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    currencyDisplay: "narrowSymbol",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(cents / 100);
+}
+
+/** A worst-case duration in plain words: `8 hours`, `1 day`. */
+export function desktopHours(minutes: number): string {
+  if (minutes === 1_440) return "1 day";
+  if (minutes % 60 === 0) return minutes === 60 ? "1 hour" : `${minutes / 60} hours`;
+  return `${minutes} minutes`;
+}
+
 /** Why the thread cannot start a desktop, in one sentence a person can act on or accept. */
 export function startRefusalMessage(
   reason: DesktopLeaseRefusalReason | DesktopViewRefusalReason,
@@ -168,6 +186,14 @@ export function startRefusalMessage(
       return "The desktop can't run longer than its recipe allows.";
     case "extension-unconfirmed":
       return "The provider didn't confirm the new end time, so the desktop still ends when it was going to.";
+    case "spend-unestimated":
+      return "This desktop bills you, and its recipe has no cost per hour yet. Enter one under Disposable desktop in the Project's settings.";
+    case "spend-cap-unset":
+      return "Desktops that bill you are off until you set a monthly cap in Settings › Computer use.";
+    case "spend-cap-reached":
+      return "Starting this desktop could take this month's spending past your cap. Desktops already running keep running; raise the cap in Settings › Computer use, or wait for next month.";
+    case "spend-cap-local-only":
+      return "The monthly cap for desktops that bill you is set on the computer Octant runs on.";
     case "view-ended":
       return "This view of the desktop has ended.";
     case "view-limit":

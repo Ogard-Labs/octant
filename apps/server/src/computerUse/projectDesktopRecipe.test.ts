@@ -295,6 +295,8 @@ function cloudHostOver(
     uuid: randomUUID,
     teardownTimeoutMs: 1_000,
   });
+  // Billed desktops start only under a cap a person set.
+  leases.setSpendCap({ actor: person, monthlyCapUsdCents: 1_000_000 });
   const recipeKeys = createDesktopRecipeKeys({
     store: keys.store,
     leases: () => persistence.desktopLeaseProjection.list().map((record) => record.lease),
@@ -361,8 +363,14 @@ function runCloudHost<A>(
 }
 
 describe("a cloud desktop recipe's key", () => {
-  const cloudRecipe = { ...recipe, providerId: "fake-cloud" } as const;
-  const billedCaller = { ...caller, confirmedProvider: decodeDesktopProviderId("fake-cloud") };
+  // A billed recipe carries the person's own hourly figure.
+  const cloudRecipe = { ...recipe, providerId: "fake-cloud", hourlyCostUsdCents: 40 } as const;
+  // The estimate the person saw: $0.40 an hour over the recipe's two-hour maximum.
+  const billedCaller = {
+    ...caller,
+    confirmedProvider: decodeDesktopProviderId("fake-cloud"),
+    confirmedEstimateUsdCents: 80,
+  };
   const createProject = {
     kind: "create-code-project",
     projectId,

@@ -72,16 +72,24 @@ const agentOf = (threadId: string): EventActor =>
 /** The person's key for a cloud provider, by reference only. */
 const cloudCredential = "e1000000-0000-4000-8000-0000000000c1";
 
-const recipeFor = (providerId: string, credentialRef?: string): DesktopRecipe =>
+const recipeFor = (
+  providerId: string,
+  credentialRef?: string,
+  hourlyCostUsdCents?: number,
+): DesktopRecipe =>
   decodeDesktopRecipe({
     providerId,
     ...(credentialRef === undefined ? {} : { credentialRef }),
+    ...(hourlyCostUsdCents === undefined ? {} : { hourlyCostUsdCents }),
     screen: { width: 1280, height: 800 },
     network: "none",
     leaseMinutes: 30,
     maximumLeaseMinutes: 240,
     idleMinutes: 15,
   });
+
+/** The person's own figure for an hour of a billed desktop in these tests: $1.00. */
+const HOURLY_COST = 100;
 
 const directories: Array<string> = [];
 afterEach(() => {
@@ -163,6 +171,8 @@ function host(
   options: {
     readonly providers?: ReadonlyArray<{ readonly provider: DesktopProvider }>;
     readonly executionPolicy?: ProviderExecutionPolicy;
+    /** The monthly cap a person set at start, or `null` for none. */
+    readonly spendCap?: number | null;
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-desktop-lease-"));
@@ -193,18 +203,34 @@ function host(
         recipeFor(
           String(providers[0]?.provider.id ?? "fake-desktop"),
           providers[0]?.provider.locality === "cloud" ? cloudCredential : undefined,
+          // A billed provider's recipe carries the person's hourly figure.
+          providers[0]?.provider.billed === true ? HOURLY_COST : undefined,
         ),
       ]),
     ),
     providers: providers.map(({ provider }) => ({ provider, effective: true })),
     deniedScopes: new Set(),
   };
+  const service = serviceOver(connection, state);
+  // Billed desktops are off until a person sets a cap; a host with a billed
+  // provider or placement starts with one far above anything these tests
+  // spend, unless the test is about the cap itself.
+  const spendCap =
+    options.spendCap === undefined
+      ? providers.some(
+          ({ provider }) =>
+            provider.billed || provider.placements?.some((entry) => entry.billed) === true,
+        )
+        ? 1_000_000
+        : null
+      : options.spendCap;
+  if (spendCap !== null) service.setSpendCap({ actor: person, monthlyCapUsdCents: spendCap });
   return {
     state,
     backend: fake.backend,
     checkout,
     connection,
-    service: serviceOver(connection, state),
+    service,
     restart: () => serviceOver(connection, state),
   };
 }
@@ -314,9 +340,18 @@ describe("desktop lease service", () => {
     ).resolves.toEqual({ status: "refused", reason: "declined" });
     expect(cloud.backend.calls()).not.toContain("acquire");
 
+    // The estimate the person saw must still be the host's: $1.00 an hour
+    // over four hours.
+    await expect(
+      service.acquire({
+        ...caller,
+        confirmedProvider: decodeDesktopProviderId("cloud.example"),
+      }),
+    ).resolves.toEqual({ status: "refused", reason: "declined" });
     const started = await service.acquire({
       ...caller,
       confirmedProvider: decodeDesktopProviderId("cloud.example"),
+      confirmedEstimateUsdCents: 400,
     });
     expect(started).toMatchObject({ status: "acquired", lease: { billed: true } });
     // The person answered in their own tab; the host asks nobody else.
@@ -577,7 +612,7 @@ describe("desktop lease service", () => {
     });
     const last = connection
       .prepare(
-        "SELECT payload_json FROM event_journal WHERE aggregate_id = ? ORDER BY aggregate_version DESC LIMIT 1",
+        "SELECT payload_json FROM event_journal WHERE aggregate_id = ? AND event_name = 'desktop.lease-transitioned@1' ORDER BY aggregate_version DESC LIMIT 1",
       )
       .get(String(leaseId)) as { payload_json: string };
     expect(JSON.parse(last.payload_json)).toMatchObject({
@@ -934,7 +969,11 @@ describe("desktop lease service", () => {
     };
     const { service, state, checkout } = host({ providers: [{ provider: spaces }] });
     const inPlacement = (placementId: string, credentialRef?: string) =>
-      decodeDesktopRecipe({ ...recipeFor("spaces.example", credentialRef), placementId });
+      decodeDesktopRecipe({
+        ...recipeFor("spaces.example", credentialRef),
+        placementId,
+        ...(placementId === "own-cloud" ? { hourlyCostUsdCents: HOURLY_COST } : {}),
+      });
 
     await expect(
       service.acquire({ owner: code(threadA), actor: agentOf(threadA) }),
@@ -2211,6 +2250,350 @@ describe("desktop lease service for a person's Desktop tab", () => {
     state.threads.set(threadA, { active: true, executionPolicy: "approval-gated" });
     await expect(service.overview(at(threadA))).resolves.toMatchObject({
       start: { status: "available" },
+    });
+  });
+});
+
+function spendEvents(connection: SqliteConnection, eventName: string) {
+  return (
+    connection
+      .prepare(
+        "SELECT actor_kind, payload_json FROM event_journal WHERE event_name = ? ORDER BY global_sequence",
+      )
+      .all(eventName) as Array<{ actor_kind: string; payload_json: string }>
+  ).map((row) => ({ actor: row.actor_kind, payload: JSON.parse(row.payload_json) as unknown }));
+}
+
+describe("desktop lease service spend cap for billed desktops", () => {
+  const billedCloud = () =>
+    createFakeDesktopProvider({ id: "cloud.example", locality: "cloud", billed: true });
+  /** $1.00 an hour over the recipe's four-hour maximum. */
+  const ESTIMATE = 400;
+
+  it("starts no billed desktop until a person sets a cap, and journals the refusal with its figures", async () => {
+    const cloud = billedCloud();
+    const { service, connection } = host({ providers: [cloud], spendCap: null });
+
+    await expect(
+      service.acquire({ owner: code(threadA), actor: agentOf(threadA) }),
+    ).resolves.toEqual({ status: "refused", reason: "spend-cap-unset" });
+    expect(cloud.backend.calls()).not.toContain("acquire");
+    expect(spendEvents(connection, "desktop.billed-lease-refused@1")).toEqual([
+      {
+        actor: "agent",
+        payload: {
+          owner: code(threadA),
+          providerId: "cloud.example",
+          reason: "spend-cap-unset",
+          month: "2026-10",
+          estimateUsdCents: ESTIMATE,
+          spentUsdCents: 0,
+        },
+      },
+    ]);
+    // A person's Start shows the same refusal before it is pressed.
+    const overview = await service.overview({
+      owner: code(threadA),
+      actor: person,
+      scopeId: "window-1",
+    });
+    expect(overview).toMatchObject({ start: { status: "refused", reason: "spend-cap-unset" } });
+
+    service.setSpendCap({ actor: person, monthlyCapUsdCents: 1_000 });
+    const started = await service.acquire({ owner: code(threadA), actor: agentOf(threadA) });
+    expect(started).toMatchObject({
+      status: "acquired",
+      lease: { spend: { hourlyCostUsdCents: HOURLY_COST, estimateUsdCents: ESTIMATE } },
+    });
+  });
+
+  it("refuses a lease whose estimate would pass the cap, tells the person, and ends no running desktop", async () => {
+    const cloud = billedCloud();
+    const { service, state, connection } = host({ providers: [cloud], spendCap: 1_000 });
+
+    await acquired(service, threadA);
+    await acquired(service, threadB);
+    expect(service.spend({ actor: person })).toEqual({
+      status: "spend",
+      summary: { month: "2026-10", spentUsdCents: 2 * ESTIMATE, monthlyCapUsdCents: 1_000 },
+    });
+
+    await expect(
+      service.acquire({ owner: code(threadC), actor: agentOf(threadC) }),
+    ).resolves.toEqual({ status: "refused", reason: "spend-cap-reached" });
+    const overview = await service.overview({
+      owner: code(threadC),
+      actor: person,
+      scopeId: "window-1",
+    });
+    expect(overview).toMatchObject({ start: { status: "refused", reason: "spend-cap-reached" } });
+    expect(spendEvents(connection, "desktop.billed-lease-refused@1").at(-1)?.payload).toEqual({
+      owner: code(threadC),
+      providerId: "cloud.example",
+      reason: "spend-cap-reached",
+      month: "2026-10",
+      estimateUsdCents: ESTIMATE,
+      spentUsdCents: 2 * ESTIMATE,
+      monthlyCapUsdCents: 1_000,
+    });
+
+    // Lowering the cap below what runs ends neither desktop.
+    service.setSpendCap({ actor: person, monthlyCapUsdCents: 100 });
+    state.now += 5 * MINUTE;
+    await service.sweep();
+    expect(runningDesktops(cloud.backend)).toBe(2);
+    expect(
+      service
+        .overview({ owner: code(threadA), actor: person, scopeId: "window-1" })
+        .then((answer) => (answer.status === "overview" ? answer.leases[0]?.state : undefined)),
+    ).resolves.toBe("ready");
+  });
+
+  it("counts a released lease at its running time, so the room it frees starts the next one", async () => {
+    const cloud = billedCloud();
+    const { service, state } = host({ providers: [cloud], spendCap: 900 });
+
+    const first = await acquired(service, threadA);
+    await acquired(service, threadB);
+    await expect(
+      service.acquire({ owner: code(threadC), actor: agentOf(threadC) }),
+    ).resolves.toEqual({ status: "refused", reason: "spend-cap-reached" });
+
+    // Released after 30 minutes at $1.00 an hour: 50 cents, not the estimate.
+    state.now += 30 * MINUTE;
+    await service.release({ owner: code(threadA), actor: agentOf(threadA), leaseId: first });
+    expect(service.spend({ actor: person })).toMatchObject({
+      summary: { spentUsdCents: 50 + ESTIMATE },
+    });
+    await expect(
+      service.acquire({ owner: code(threadC), actor: agentOf(threadC) }),
+    ).resolves.toMatchObject({ status: "acquired" });
+  });
+
+  it("starts each month's spend at zero and keeps last month's leases in last month", async () => {
+    const cloud = billedCloud();
+    const { service, state, restart } = host({ providers: [cloud], spendCap: 400 });
+    state.now = Date.parse("2026-10-31T23:00:00.000Z");
+
+    const october = await acquired(service, threadA);
+    // Released after a minute, it counts the two cents that minute rounds up to.
+    state.now += MINUTE;
+    await service.release({ owner: code(threadA), actor: agentOf(threadA), leaseId: october });
+    state.now = Date.parse("2026-10-31T23:30:00.000Z");
+    await expect(
+      service.acquire({ owner: code(threadB), actor: agentOf(threadB) }),
+    ).resolves.toEqual({ status: "refused", reason: "spend-cap-reached" });
+
+    state.now = Date.parse("2026-11-01T00:00:00.000Z");
+    expect(service.spend({ actor: person })).toEqual({
+      status: "spend",
+      summary: { month: "2026-11", spentUsdCents: 0, monthlyCapUsdCents: 400 },
+    });
+    await expect(
+      service.acquire({ owner: code(threadB), actor: agentOf(threadB) }),
+    ).resolves.toMatchObject({ status: "acquired" });
+    // A restarted host rebuilds the same figures and the same cap from the journal.
+    expect(restart().spend({ actor: person })).toEqual({
+      status: "spend",
+      summary: { month: "2026-11", spentUsdCents: ESTIMATE, monthlyCapUsdCents: 400 },
+    });
+  });
+
+  it("refuses an agent, a paired device, and the host itself that try to change or read the cap, journaling nothing", async () => {
+    const cloud = billedCloud();
+    const { service, connection } = host({ providers: [cloud], spendCap: 400 });
+    const before = spendEvents(connection, "desktop.spend-cap-changed@1");
+    expect(before).toEqual([{ actor: "local-user", payload: { monthlyCapUsdCents: 400 } }]);
+
+    for (const actor of [agentOf(threadA), paired, system]) {
+      expect(service.setSpendCap({ actor, monthlyCapUsdCents: 1_000_000 })).toEqual({
+        status: "refused",
+        reason: "spend-cap-local-only",
+      });
+      expect(service.setSpendCap({ actor, monthlyCapUsdCents: undefined })).toEqual({
+        status: "refused",
+        reason: "spend-cap-local-only",
+      });
+      expect(service.spend({ actor })).toEqual({
+        status: "refused",
+        reason: "spend-cap-local-only",
+      });
+    }
+    expect(spendEvents(connection, "desktop.spend-cap-changed@1")).toEqual(before);
+    expect(service.spend({ actor: person })).toMatchObject({
+      summary: { monthlyCapUsdCents: 400 },
+    });
+
+    // The person clearing it turns billed desktops off again, journaled as theirs.
+    service.setSpendCap({ actor: person, monthlyCapUsdCents: undefined });
+    expect(spendEvents(connection, "desktop.spend-cap-changed@1").at(-1)).toEqual({
+      actor: "local-user",
+      payload: { previousMonthlyCapUsdCents: 400 },
+    });
+    await expect(
+      service.acquire({ owner: code(threadA), actor: agentOf(threadA) }),
+    ).resolves.toEqual({ status: "refused", reason: "spend-cap-unset" });
+  });
+
+  it("keeps a failed acquire's leftover desktop at its whole estimate until it is verified gone", async () => {
+    const leaky = createFakeDesktopProvider({
+      id: "leaky.example",
+      locality: "cloud",
+      billed: true,
+      behaviour: { omitProviderExpiry: true, lingerAfterRelease: true },
+    });
+    const other = createFakeDesktopProvider({
+      id: "other.example",
+      locality: "cloud",
+      billed: true,
+    });
+    const { service, state } = host({ providers: [leaky, other], spendCap: 600 });
+    state.recipes.set(threadB, recipeFor("other.example", cloudCredential, HOURLY_COST));
+
+    // The provider set no expiry, so the host fails the lease and destroys
+    // the desktop, which keeps running.
+    await expect(
+      service.acquire({ owner: code(threadA), actor: agentOf(threadA) }),
+    ).resolves.toMatchObject({ status: "not-acquired", lease: { state: "failed" } });
+    expect(runningDesktops(leaky.backend)).toBe(1);
+    expect(service.spend({ actor: person })).toMatchObject({
+      summary: { spentUsdCents: ESTIMATE },
+    });
+    // Another billed provider cannot take the room it may still be spending.
+    await expect(
+      service.acquire({ owner: code(threadB), actor: agentOf(threadB) }),
+    ).resolves.toEqual({ status: "refused", reason: "spend-cap-reached" });
+
+    // Once a destroy is verified, the lease counts only its running time.
+    leaky.backend.behaviour.lingerAfterRelease = false;
+    state.now += 60 * MINUTE;
+    await service.sweep();
+    expect(runningDesktops(leaky.backend)).toBe(0);
+    expect(service.spend({ actor: person })).toMatchObject({ summary: { spentUsdCents: 0 } });
+    await expect(
+      service.acquire({ owner: code(threadB), actor: agentOf(threadB) }),
+    ).resolves.toMatchObject({ status: "acquired" });
+  });
+
+  describe("a failed acquire's unverified leftover desktop across a host restart", () => {
+    function leakyHost() {
+      const leaky = createFakeDesktopProvider({
+        id: "leaky.example",
+        locality: "cloud",
+        billed: true,
+        behaviour: { omitProviderExpiry: true, lingerAfterRelease: true },
+      });
+      const other = createFakeDesktopProvider({
+        id: "other.example",
+        locality: "cloud",
+        billed: true,
+      });
+      const harness = host({ providers: [leaky, other], spendCap: 600 });
+      harness.state.recipes.set(threadB, recipeFor("other.example", cloudCredential, HOURLY_COST));
+      return { ...harness, leaky };
+    }
+
+    it("still counts the whole estimate after the host restarts", async () => {
+      const { service, restart, leaky } = leakyHost();
+      await service.acquire({ owner: code(threadA), actor: agentOf(threadA) });
+      expect(runningDesktops(leaky.backend)).toBe(1);
+
+      // Nothing in memory survives; only the journal does.
+      const restarted = restart();
+      expect(restarted.spend({ actor: person })).toMatchObject({
+        summary: { spentUsdCents: ESTIMATE },
+      });
+      await expect(
+        restarted.acquire({ owner: code(threadB), actor: agentOf(threadB) }),
+      ).resolves.toEqual({ status: "refused", reason: "spend-cap-reached" });
+
+      // Starting the restarted host retries the destroy; the provider still
+      // keeps the desktop, so it stays counted.
+      await restarted.start();
+      expect(restarted.spend({ actor: person })).toMatchObject({
+        summary: { spentUsdCents: ESTIMATE },
+      });
+    });
+
+    it("stops counting it after a verified destroy, also across a restart", async () => {
+      const { service, restart, leaky, state } = leakyHost();
+      await service.acquire({ owner: code(threadA), actor: agentOf(threadA) });
+
+      leaky.backend.behaviour.lingerAfterRelease = false;
+      state.now += 60 * MINUTE;
+      await restart().start();
+      expect(runningDesktops(leaky.backend)).toBe(0);
+
+      expect(restart().spend({ actor: person })).toMatchObject({ summary: { spentUsdCents: 0 } });
+      await expect(
+        restart().acquire({ owner: code(threadB), actor: agentOf(threadB) }),
+      ).resolves.toMatchObject({ status: "acquired" });
+    });
+
+    it("rebuilds the same spend however many times the journal is replayed", async () => {
+      const { service, restart, connection, leaky, state } = leakyHost();
+      await service.acquire({ owner: code(threadA), actor: agentOf(threadA) });
+      const counted = restart().spend({ actor: person });
+      expect(restart().spend({ actor: person })).toEqual(counted);
+
+      leaky.backend.behaviour.lingerAfterRelease = false;
+      state.now += 60 * MINUTE;
+      await service.sweep();
+      const cleared = restart().spend({ actor: person });
+      expect(cleared).toMatchObject({ summary: { spentUsdCents: 0 } });
+      expect(restart().spend({ actor: person })).toEqual(cleared);
+      // Verified gone is journaled once, not again by a later start.
+      await restart().start();
+      expect(spendEvents(connection, "desktop.leftover-cleared@1")).toHaveLength(1);
+    });
+  });
+
+  it("refuses a billed recipe with no hourly cost before any provider call", async () => {
+    const cloud = billedCloud();
+    const { service, state } = host({ providers: [cloud] });
+    state.recipes.set(threadA, recipeFor("cloud.example", cloudCredential));
+    await expect(
+      service.acquire({ owner: code(threadA), actor: agentOf(threadA) }),
+    ).resolves.toEqual({ status: "refused", reason: "spend-unestimated" });
+    expect(cloud.backend.calls()).not.toContain("acquire");
+  });
+
+  it("keeps a billed placement that declares its provider's stop without a provider expiry, and reserves that stop in the estimate", async () => {
+    const fake = createFakeDesktopProvider({ id: "spaces.example" });
+    const spaces: DesktopProvider = {
+      ...fake.provider,
+      placements: [
+        {
+          id: decodeDesktopPlacementId("own-cloud"),
+          displayName: "Your cloud account",
+          locality: "cloud",
+          billed: true,
+          billedIfHostStopsMinutes: 480,
+        },
+      ],
+    };
+    const { service, state } = host({ providers: [{ provider: spaces }] });
+    state.recipes.set(
+      threadA,
+      decodeDesktopRecipe({
+        ...recipeFor("spaces.example", cloudCredential, HOURLY_COST),
+        placementId: "own-cloud",
+      }),
+    );
+    // The fake sets no provider expiry for a provider that does not itself
+    // bill; the placement's declared worst case stands in for it.
+    const started = await service.acquire({ owner: code(threadA), actor: agentOf(threadA) });
+    expect(started).toMatchObject({
+      status: "acquired",
+      lease: { billed: true, spend: { estimateUsdCents: 800 } },
+    });
+    expect(state.asked).toEqual(["billed"]);
+    expect(service.destination()).toMatchObject({
+      leasable: [
+        {
+          placements: [{ placementId: "own-cloud", billed: true, billedIfHostStopsMinutes: 480 }],
+        },
+      ],
     });
   });
 });
