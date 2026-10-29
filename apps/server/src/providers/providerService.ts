@@ -101,7 +101,10 @@ import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { Cause, Effect, Exit, Fiber, Option, Schema, Stream } from "effect";
-import { admittedBundledProviderDriverKinds } from "@octant/plugin-host/provider-drivers";
+import {
+  admittedBundledProviderDriverKinds,
+  bundledProviderDriverWithheldReason,
+} from "@octant/plugin-host/provider-drivers";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
 import type { PersistenceService } from "../persistence/persistenceService";
@@ -357,13 +360,17 @@ export class ProviderService implements ProviderServiceApi {
       const catalogByInstance = new Map(
         (persistedCatalogs ?? []).map((catalog) => [String(catalog.instanceId), catalog]),
       );
-      const observedStates = this.#runtime
+      const runtimeObservedStates = this.#runtime
         .observedStates()
         .filter(({ instanceId }) => configuredIds.has(instanceId))
         .map((state) => {
           const instance = instanceById.get(String(state.instanceId));
           if (instance === undefined || !this.#isInstanceDriverAvailable(instance)) {
-            const unavailable = driverNotAdmittedObservation(state.instanceId, state.observedAt);
+            const unavailable = driverNotAdmittedObservation(
+              state.instanceId,
+              state.observedAt,
+              instance?.driverKind,
+            );
             return instance === undefined
               ? unavailable
               : withRuntimeIntegration(instance.driverKind, unavailable);
@@ -375,12 +382,35 @@ export class ProviderService implements ProviderServiceApi {
               catalogByInstance.get(String(state.instanceId))?.manualModelOrder ?? [],
             ),
           });
-        })
-        .sort(
-          (left, right) =>
-            (providerIndex.get(String(left.instanceId)) ?? Number.MAX_SAFE_INTEGER) -
-            (providerIndex.get(String(right.instanceId)) ?? Number.MAX_SAFE_INTEGER),
+        });
+      // A withheld driver's instance can be Off, and an Off instance has no
+      // observation; report why it is withheld so the card says so before
+      // anyone turns it on.
+      const observedIds = new Set(
+        runtimeObservedStates.map(({ instanceId }) => String(instanceId)),
+      );
+      const withheldObservedStates = orderedInstances
+        .filter(
+          (instance) =>
+            !observedIds.has(String(instance.id)) &&
+            bundledProviderDriverWithheldReason(instance.driverKind) !== undefined &&
+            !this.#isInstanceDriverAvailable(instance),
+        )
+        .map((instance) =>
+          withRuntimeIntegration(
+            instance.driverKind,
+            driverNotAdmittedObservation(
+              instance.id,
+              decodeTimestamp(this.#clock()),
+              instance.driverKind,
+            ),
+          ),
         );
+      const observedStates = [...runtimeObservedStates, ...withheldObservedStates].sort(
+        (left, right) =>
+          (providerIndex.get(String(left.instanceId)) ?? Number.MAX_SAFE_INTEGER) -
+          (providerIndex.get(String(right.instanceId)) ?? Number.MAX_SAFE_INTEGER),
+      );
       const outsideDrivers = this.#outsideDriverListings();
       return decodeProviderRegistrySnapshot({
         instances: orderedInstances,
@@ -1339,6 +1369,11 @@ export class ProviderService implements ProviderServiceApi {
             await this.#runtime.invalidateRuntime(current.id);
             eventName = "provider.instance-configuration-changed@1";
           } else {
+            const withheldReason =
+              command.kind === "set-provider-enabled" && command.enabled
+                ? bundledProviderDriverWithheldReason(current.driverKind)
+                : undefined;
+            if (withheldReason !== undefined) throw this.#unsupported(withheldReason);
             if (
               command.kind === "set-provider-enabled" &&
               command.enabled &&
@@ -1465,10 +1500,17 @@ export class ProviderService implements ProviderServiceApi {
         if (!this.#isInstanceDriverAvailable(instance)) {
           // Keep the block visible rather than leaving the instance unobserved.
           this.#runtime.setObservedState(
-            driverNotAdmittedObservation(instanceId, decodeTimestamp(this.#clock())),
+            driverNotAdmittedObservation(
+              instanceId,
+              decodeTimestamp(this.#clock()),
+              instance.driverKind,
+            ),
           );
           this.#clearRuntimeUsageLimits?.(instanceId);
-          throw this.#unsupported("This provider driver is not available.");
+          throw this.#unsupported(
+            bundledProviderDriverWithheldReason(instance.driverKind) ??
+              "This provider driver is not available.",
+          );
         }
         if (
           instance.driverKind === "outside-harness-endpoint" &&
@@ -1696,7 +1738,11 @@ export class ProviderService implements ProviderServiceApi {
     // admit (every outside driver, until its package is admitted) is never
     // built, so no driver code runs to describe its own block.
     if (!this.#isInstanceDriverAvailable(instance)) {
-      return driverNotAdmittedObservation(instance.id, decodeTimestamp(this.#clock()));
+      return driverNotAdmittedObservation(
+        instance.id,
+        decodeTimestamp(this.#clock()),
+        instance.driverKind,
+      );
     }
     // A journaled crash-limit hold is reported without starting the driver,
     // so a restarted host shows it before anyone checks the connection.
@@ -2933,6 +2979,7 @@ function probeFailureReadiness(
 function driverNotAdmittedObservation(
   instanceId: ProviderInstanceId,
   observedAt: ProviderObservedState["observedAt"],
+  driverKind?: ProviderDriverKind,
 ): ProviderObservedState {
   return decodeProviderObservedState({
     instanceId,
@@ -2940,7 +2987,9 @@ function driverNotAdmittedObservation(
     processState: "stopped",
     models: [],
     capabilities: unavailableCapabilities,
-    message: "This provider driver is not available.",
+    message:
+      (driverKind === undefined ? undefined : bundledProviderDriverWithheldReason(driverKind)) ??
+      "This provider driver is not available.",
     reason: "driver-not-admitted",
     observedAt,
   });

@@ -4136,6 +4136,48 @@ describe("ProviderSettingsView", () => {
     expect(within(card).queryByText(/not found by the latest scan/i)).toBeNull();
   });
 
+  it("shows why an Off fx provider is withheld and does not let it be turned on", () => {
+    const reason =
+      "fx is not offered yet: the current fx release cannot load certificates inside Octant's sandbox.";
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...fixture({
+          instance: decodeProviderInstance({
+            ...provider(),
+            displayName: "fx local",
+            driverKind: "fx",
+            configuration: {
+              kind: "fx-acp",
+              binaryPath: "/Users/example/.local/bin/fx",
+              authentication: "api-key",
+            },
+            enabled: false,
+          }),
+          observed: observation({
+            readiness: "unavailable",
+            processState: "stopped",
+            models: [],
+            reason: "driver-not-admitted",
+            message: reason,
+          }),
+          discoverySnapshot: discoverySnapshot({
+            candidates: [],
+            status: "partial",
+            searchedDirectories: searchedDirectoriesFor("codex", "/opt/homebrew/bin"),
+          }),
+        })}
+      />,
+    );
+
+    const card = screen.getByRole("article", { name: "fx local" });
+    expect(within(card).getByText(reason)).toBeVisible();
+    expect(within(card).queryByText(/you can still enable it/i)).toBeNull();
+    expect(within(card).getByRole("switch", { name: "Enable fx local" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  });
+
   it("keeps detected Ollama enablement visible after a repeated scan", () => {
     renderProviderSettings(
       <ModelEndpointSettingsView
