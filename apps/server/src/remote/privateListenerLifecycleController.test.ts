@@ -677,4 +677,19 @@ describe("private listener lifecycle controller with a tailnet certificate", () 
 
     expect(served[0]?.listener.tailnetTls).toBeUndefined();
   });
+
+  it("stops reporting a certificate held for a name the listener no longer has", async () => {
+    const { served, controller } = setup();
+    await controller.enable(SELF_MADE_TAILNET);
+    await controller.setTailnetCertificate(tailnetCertificate());
+
+    await controller.restart({
+      ...SELF_MADE_TAILNET,
+      hostname: OTHER_NAME,
+      origin: `https://${OTHER_NAME}:8443`,
+    });
+
+    expect(served.at(-1)?.listener.tailnetTls).toBeUndefined();
+    expect(controller.tailnetCertificateName()).toBeUndefined();
+  });
 });
