@@ -562,7 +562,10 @@ holds at most 32.
   from the endpoint's own page.
 - **Routine.** It waits for you, always. You choose its Project, and it is made by
   this computer under its own limits, as a routine you wrote would be. Apply it
-  with `octant hub apply <offer-id> --project <project-id>`.
+  with `octant hub apply <offer-id> --project <project-id>`. It must be a Work
+  Project. The routine is made paused, with approval-gated Work authority and
+  Work's default model, so it does nothing until you resume it in Automation
+  Center. A Code routine is not accepted yet.
 
 **Apply on arrival (a spoke).** Each of these is off until you turn it on:
 update channel, plugin install (untrusted and off), and agent profile. Turn them
