@@ -109,8 +109,22 @@ export function createHubOwnerRouteHandler(
 ): (request: Request) => Promise<Response | undefined> {
   const verifier = new HubLinkVerifier({ now: options.now ?? Date.now });
 
-  const scopeFor = (route: OwnerRoute): OwnerScope | Refusal => {
-    const hub = options.hub.ownerContext();
+  // A challenge belongs to the scope of the action it is for, so it is
+  // authenticated against the same owners that action will be.
+  const challengedRoute = (body: string): string | undefined => {
+    try {
+      return decodeOwnerChallengeRequest(JSON.parse(body)).path;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const scopeFor = (requested: OwnerRoute, body: string): OwnerScope | Refusal => {
+    const route =
+      requested === HUB_OWNER_ROUTES.challenge ? (challengedRoute(body) ?? requested) : requested;
+    // A hub whose role is off keeps its roster and owners, but they hold no
+    // owner powers: a former hub that joined another hub answers only as a spoke.
+    const hub = options.hub.status().enabled ? options.hub.ownerContext() : undefined;
     const spoke = options.spoke.ownerContext();
     const hubScope: OwnerScope | undefined =
       hub === undefined
@@ -150,7 +164,7 @@ export function createHubOwnerRouteHandler(
     const body = await readBody(request);
     if (body === undefined) return refused(413, "invalid");
 
-    const scope = scopeFor(route);
+    const scope = scopeFor(route, body);
     if ("kind" in scope) return refused(scope.status, scope.kind);
 
     // Who is asking: a roster member whose request is signed with the identity

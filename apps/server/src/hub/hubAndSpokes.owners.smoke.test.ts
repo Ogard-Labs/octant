@@ -745,6 +745,44 @@ describe("owner devices administering a hub", () => {
     expect(hub.state.load().hub?.joinTickets.length).toBe(ticketsBefore);
   });
 
+  it("answers a former hub's spoke owners and refuses its old hub owners once it joined another hub", async () => {
+    const { network, hub, spoke: laptop, phone, authenticator } = await startOwnerWorld();
+    const laptopKey = softwareAuthenticator();
+    const newHub = await startTablet(network);
+
+    expect(hub.hub.disable(window).status).toBe("disabled");
+    newHub.hub.enable(window);
+    await laptop.spoke.leave(window);
+    await joinHub(newHub, laptop, { owner: true, unlockPublicKey: laptopKey.publicKey });
+    await joinHub(newHub, hub, { owner: false });
+    await vi.waitFor(() => {
+      const held = hub.spoke.status();
+      if (held.membership !== "member") throw new Error("Not a member.");
+      expect(held.roster.roster.members.map((member) => member.name)).toContain("Laptop");
+    });
+    expect(listAsOwner(hub, laptop, laptopKey).status).toBe("changed");
+
+    const spokeOwner = await ownerCall({
+      device: laptop,
+      network,
+      target: hub,
+      route: HUB_OWNER_ROUTES.grant,
+      body: GRANT_WITH_STATUS,
+      unlock: { authenticator: laptopKey, shape: "raw" },
+    });
+    const oldHubOwner = await ownerCall({
+      device: phone,
+      network,
+      target: hub,
+      route: HUB_OWNER_ROUTES.grant,
+      body: GRANT_WITH_STATUS,
+      unlock: { authenticator, shape: "raw" },
+    });
+
+    expect(spokeOwner.status).toBe(200);
+    expect(oldHubOwner.status).toBeGreaterThanOrEqual(400);
+  });
+
   it("ignores an unlock key presented with a code that is not an owner code", async () => {
     const { hub, spoke } = await startOwnerWorld();
     const before = hub.hub.listOwners();
