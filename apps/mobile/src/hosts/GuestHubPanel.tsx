@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import {
   joinHubAsGuest,
   type GuestJoinRefusal,
@@ -17,6 +25,7 @@ import {
   type GuestHubStore,
   type GuestSpokeRefusal,
 } from "./hubGuestFlow";
+import type { PhoneUnlockKey, UnlockKeyIdentity } from "./ownerUnlockKey";
 
 const POLL_MS = 3_000;
 
@@ -40,8 +49,13 @@ type GuestPhase =
       readonly hubName: string;
       readonly comparisonCode: string;
       readonly finish: () => ReturnType<Parameters<typeof finishGuestJoin>[0]["finish"]>;
+      readonly unlock?: UnlockKeyIdentity;
     }
-  | { readonly kind: "joined"; readonly state: GuestHubState }
+  | {
+      readonly kind: "joined";
+      readonly state: GuestHubState;
+      readonly unlock?: UnlockKeyIdentity;
+    }
   | { readonly kind: "failed"; readonly message: string };
 
 export interface GuestHubPanelProps {
@@ -50,6 +64,8 @@ export interface GuestHubPanelProps {
   readonly guestHubStore: GuestHubStore;
   readonly removeHost: (hostId: string) => Promise<unknown>;
   readonly deviceLabel?: string;
+  /** Present on a build that can hold an unlock key; without it the phone joins as a plain guest. */
+  readonly unlockKey?: PhoneUnlockKey;
   /** Called once the spokes that admitted the phone are in the host list. */
   readonly onJoined: () => void;
 }
@@ -59,6 +75,7 @@ export function GuestHubPanel(props: GuestHubPanelProps) {
   const { colors } = useTheme();
   const [code, setCode] = useState("");
   const [scanning, setScanning] = useState(false);
+  const [asOwner, setAsOwner] = useState(false);
   const [phase, setPhase] = useState<GuestPhase>({ kind: "idle" });
   const deviceLabel = props.deviceLabel ?? `${MOBILE_PRODUCT_NAME} Mobile`;
   const lifetime = useRef(new AbortController());
@@ -106,6 +123,12 @@ export function GuestHubPanel(props: GuestHubPanelProps) {
         },
         boxTitle: { color: colors.textPrimary, fontWeight: "500" },
         body: { color: colors.textSecondary },
+        mono: { color: colors.textSecondary, fontFamily: "Menlo", fontSize: 11 },
+        switchRow: {
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+        },
         error: { color: colors.danger },
       }),
     [colors],
@@ -114,12 +137,15 @@ export function GuestHubPanel(props: GuestHubPanelProps) {
   const begin = async (hubCode: string) => {
     setPhase({ kind: "working" });
     try {
+      // Making the key asks for nothing; it is only used, after an unlock, to answer a computer's challenge.
+      const unlock = asOwner ? await props.unlockKey?.ensure() : undefined;
       const started = await joinHubAsGuest({
         code: hubCode,
         deviceLabel,
         transport: mobilePinnedListenerTransport,
         webBuildVersion: `${MOBILE_PRODUCT_NAME}-mobile/0.1.0`,
         deviceKeyStore: props.deviceKeyStore,
+        ...(unlock === undefined ? {} : { ownerUnlockPublicKey: unlock.publicKey }),
       });
       if (started.status !== "awaiting-approval") {
         setPhase({ kind: "failed", message: started.message });
@@ -130,6 +156,7 @@ export function GuestHubPanel(props: GuestHubPanelProps) {
         hubName: started.hubName,
         comparisonCode: started.comparisonCode,
         finish: started.finish,
+        ...(unlock === undefined ? {} : { unlock }),
       });
     } catch {
       setPhase({ kind: "failed", message: "Couldn't reach the hub." });
@@ -143,6 +170,7 @@ export function GuestHubPanel(props: GuestHubPanelProps) {
         const outcome = await finishGuestJoin({
           finish: current.finish,
           deviceLabel,
+          owner: current.unlock !== undefined,
           store: props.guestHubStore,
           transport: mobilePinnedListenerTransport,
           deviceKeyStore: props.deviceKeyStore,
@@ -158,7 +186,11 @@ export function GuestHubPanel(props: GuestHubPanelProps) {
           setPhase({ kind: "failed", message: GUEST_JOIN_REFUSAL[outcome.kind] });
           return;
         }
-        setPhase({ kind: "joined", state: outcome.state });
+        setPhase({
+          kind: "joined",
+          state: outcome.state,
+          ...(current.unlock === undefined ? {} : { unlock: current.unlock }),
+        });
         props.onJoined();
       } catch {
         if (!signal.aborted) setPhase({ ...current });
@@ -193,6 +225,23 @@ export function GuestHubPanel(props: GuestHubPanelProps) {
             testID="mobile-guest-hub-code"
             value={code}
           />
+          {props.unlockKey === undefined ? null : (
+            <View style={styles.switchRow}>
+              <Text style={styles.body}>This is an owner code</Text>
+              <Switch
+                accessibilityLabel="This is an owner code"
+                onValueChange={setAsOwner}
+                testID="mobile-guest-hub-owner"
+                value={asOwner}
+              />
+            </View>
+          )}
+          {props.unlockKey !== undefined && asOwner ? (
+            <Text style={styles.help}>
+              The phone makes an unlock key. Its private half stays in this phone's secure storage
+              and opens only after Face ID, a fingerprint, or your passcode.
+            </Text>
+          ) : null}
           <Pressable
             accessibilityRole="button"
             onPress={() => setScanning(true)}
@@ -236,6 +285,20 @@ export function GuestHubPanel(props: GuestHubPanelProps) {
               : `${phase.state.spokes.length} computers let this phone in.`}
           </Text>
           <GuestHubRefusals refused={phase.state.notAccepted} />
+          {phase.unlock === undefined ? null : (
+            <View testID="mobile-guest-hub-unlock-key">
+              <Text style={styles.help}>
+                To make this phone an owner on a computer, open that computer's Settings, Hub, and
+                confirm this key by its fingerprint.
+              </Text>
+              <Text selectable style={styles.mono}>
+                {phase.unlock.fingerprint}
+              </Text>
+              <Text selectable style={styles.mono}>
+                {phase.unlock.publicKey}
+              </Text>
+            </View>
+          )}
         </View>
       ) : null}
       {phase.kind === "failed" ? (

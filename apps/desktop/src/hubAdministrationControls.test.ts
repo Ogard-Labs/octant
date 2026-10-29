@@ -5,6 +5,7 @@ import {
 } from "./hubAdministrationControls";
 
 const MEMBER_ID = "77777777-7777-4777-8777-777777777777";
+const ALERT_ID = "88888888-8888-4888-8888-888888888888";
 
 function runtime(respond: (url: string, init: RequestInit | undefined) => Response) {
   const calls: Array<{ readonly url: string; readonly init: RequestInit | undefined }> = [];
@@ -98,6 +99,55 @@ describe("hub administration controls", () => {
       ["grant", { items: ["status"], actProjects: ["99999999-9999-4999-8999-999999999999"] }],
       ["enable", { anything: true }],
       ["leave", {}],
+    ];
+    for (const [operation, body] of refused) {
+      expect(await sendHubAdministrationOperation(controls, operation, body)).toMatchObject({
+        status: 400,
+      });
+    }
+    expect(calls).toEqual([]);
+  });
+
+  it("sends each owner operation to its fixed route with the decoded body", async () => {
+    const { calls, runtime: controls } = runtime(() => Response.json({ status: "changed" }));
+    const added = {
+      owners: [
+        { memberId: MEMBER_ID, identityKeyFingerprint: "a".repeat(64), unlockPublicKey: "MFkw" },
+      ],
+    };
+    const sent: ReadonlyArray<readonly [string, unknown, string]> = [
+      ["owners-add", added, "/api/desktop/hub/owners/add"],
+      ["owners-remove", { memberId: MEMBER_ID }, "/api/desktop/hub/owners/remove"],
+      ["confirm-new-members", { enabled: true }, "/api/desktop/hub/confirm-new-members"],
+      ["confirm-member", { memberId: MEMBER_ID }, "/api/desktop/hub/members/confirm"],
+      ["alert-dismiss", { alertId: ALERT_ID }, "/api/desktop/hub/alerts/dismiss"],
+      ["alert-remove", { alertId: ALERT_ID }, "/api/desktop/hub/alerts/remove"],
+    ];
+    for (const [operation, body, path] of sent) {
+      await sendHubAdministrationOperation(controls, operation, body);
+      expect(calls.at(-1)?.url).toBe(`http://127.0.0.1:4317${path}`);
+      expect(calls.at(-1)?.init?.method).toBe("POST");
+      expect(calls.at(-1)?.init?.body).toBe(JSON.stringify(body));
+    }
+    expect(calls).toHaveLength(sent.length);
+  });
+
+  it("refuses an owner request that fails its schema, sending nothing", async () => {
+    const { calls, runtime: controls } = runtime(() => Response.json({}));
+    const owner = { memberId: MEMBER_ID, identityKeyFingerprint: "a".repeat(64) };
+    const refused: ReadonlyArray<readonly [string, unknown]> = [
+      ["owners-add", { owners: [] }],
+      ["owners-add", { owners: [{ ...owner, unlockPublicKey: "not base64url!" }] }],
+      ["owners-add", { owners: [{ ...owner, unlockPublicKey: "MFkw", role: "hub" }] }],
+      ["owners-add", { owners: [{ ...owner, unlockPublicKey: "MFkw" }], extra: true }],
+      ["owners-add", undefined],
+      ["owners-remove", { memberId: "not-a-uuid" }],
+      ["owners-remove", { memberId: MEMBER_ID, force: true }],
+      ["confirm-new-members", { enabled: "yes" }],
+      ["confirm-new-members", {}],
+      ["confirm-member", { memberId: MEMBER_ID, signature: "x" }],
+      ["alert-dismiss", { alertId: "not-a-uuid" }],
+      ["alert-remove", { alertId: ALERT_ID, memberId: MEMBER_ID }],
     ];
     for (const [operation, body] of refused) {
       expect(await sendHubAdministrationOperation(controls, operation, body)).toMatchObject({

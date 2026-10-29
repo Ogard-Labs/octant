@@ -24,10 +24,17 @@ import {
   type RosterReplacement,
 } from "@octant/domain";
 import { openAppPairingCode, type PinnedListenerTransportPort } from "./appPairingCode";
+import {
+  HUB_LINK_HEADER,
+  base64UrlDecode,
+  base64UrlEncode,
+  hex,
+  linkHeader,
+  sha256,
+} from "./hubLinkSigning";
 import { listenerPinFromSha256 } from "./remoteListenerTrust";
 import type { RemoteDeviceKeyPair, RemoteDeviceKeyStore } from "./remotePairingClient";
 
-const HUB_LINK_HEADER = "x-octant-hub-link";
 const HUB_GUEST_ROUTES = {
   join: "/api/hub/join",
   guestRoster: "/api/hub/guest-roster",
@@ -36,35 +43,9 @@ const HUB_GUEST_ROUTES = {
 
 const encoder = new TextEncoder();
 
-function base64UrlEncode(bytes: ArrayBuffer | Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
-}
-
-function base64UrlDecode(text: string): Uint8Array<ArrayBuffer> {
-  const padded = text
-    .replaceAll("-", "+")
-    .replaceAll("_", "/")
-    .padEnd(Math.ceil(text.length / 4) * 4, "=");
-  const binary = atob(padded);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-  return bytes;
-}
-
-function hex(bytes: ArrayBuffer): string {
-  return [...new Uint8Array(bytes)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
 function bytesFromHex(digest: string): Uint8Array {
   return Uint8Array.from(digest.match(/../g) ?? [], (pair) => Number.parseInt(pair, 16));
 }
-
-const sha256 = async (bytes: BufferSource | string): Promise<ArrayBuffer> =>
-  crypto.subtle.digest("SHA-256", typeof bytes === "string" ? encoder.encode(bytes) : bytes);
 
 /** The key a guest signs with: the device key it paired with. */
 export interface GuestSigner {
@@ -95,27 +76,6 @@ export async function createGuestSigner(input: {
         ),
       ),
   };
-}
-
-async function linkHeader(input: {
-  readonly signer: GuestSigner;
-  readonly recipientMemberId: string;
-  readonly method: string;
-  readonly path: string;
-  readonly body: string;
-  readonly now: number;
-}): Promise<string> {
-  const nonce = base64UrlEncode(crypto.getRandomValues(new Uint8Array(16)));
-  const text = [
-    "octant-hub-link-v1",
-    input.recipientMemberId,
-    input.method.toUpperCase(),
-    input.path,
-    hex(await sha256(input.body)),
-    String(input.now),
-    nonce,
-  ].join("\n");
-  return `v1.${input.signer.memberId}.${input.now}.${nonce}.${await input.signer.sign(text)}`;
 }
 
 /** Whether `signature` is the key's signature over `payload`; a malformed key or signature is a no. */
@@ -190,6 +150,12 @@ export interface JoinHubAsGuestOptions {
   readonly transport: PinnedListenerTransportPort;
   readonly webBuildVersion: string;
   readonly deviceKeyStore: RemoteDeviceKeyStore;
+  /**
+   * The unlock public key (SubjectPublicKeyInfo, base64url) a device joining
+   * with an owner code presents. The hub records it only for an owner code and
+   * ignores it for any other.
+   */
+  readonly ownerUnlockPublicKey?: string;
   readonly now?: () => number;
 }
 
@@ -248,6 +214,9 @@ export async function joinHubAsGuest(options: JoinHubAsGuestOptions): Promise<Gu
       },
       identityPublicKey: signer.publicKey,
       asGuest: true,
+      ...(options.ownerUnlockPublicKey === undefined
+        ? {}
+        : { ownerUnlockPublicKey: options.ownerUnlockPublicKey }),
     });
     let response: Response;
     try {

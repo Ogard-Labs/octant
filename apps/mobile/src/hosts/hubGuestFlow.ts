@@ -37,6 +37,8 @@ export interface GuestHubState {
   readonly deviceLabel: string;
   readonly spokes: ReadonlyArray<GuestSpokeHost>;
   readonly notAccepted: ReadonlyArray<GuestSpokeRefusal>;
+  /** Set when the phone joined with an owner code and presented its unlock key. */
+  readonly owner?: true;
 }
 
 export interface GuestHubStore {
@@ -170,16 +172,19 @@ export async function finishGuestJoin(
     readonly finish: () => Promise<GuestJoinFinish>;
     readonly deviceLabel: string;
     readonly store: GuestHubStore;
+    /** The phone presented its unlock key with an owner code. */
+    readonly owner?: boolean;
   },
 ): Promise<GuestJoinOutcome> {
   const finished = await input.finish();
   if (finished.status === "awaiting-approval") return { status: "waiting" };
   if (finished.status === "refused") return { status: "refused", kind: finished.kind };
-  const state = await connectGuestSpokes({
+  const connected = await connectGuestSpokes({
     ...input,
     record: finished.record,
     signer: finished.signer,
   });
+  const state: GuestHubState = input.owner === true ? { ...connected, owner: true } : connected;
   await input.store.save(state);
   return { status: "joined", state };
 }
@@ -219,13 +224,14 @@ export async function reopenGuestHub(
   if (refreshed.status !== "accepted" && refreshed.status !== "unchanged") {
     return { status: "unchanged", state: held };
   }
-  const state = await connectGuestSpokes({
+  const connected = await connectGuestSpokes({
     ...input,
     record: refreshed.record,
     signer,
     deviceLabel: held.deviceLabel,
     previous: held,
   });
+  const state: GuestHubState = held.owner === true ? { ...connected, owner: true } : connected;
   await input.store.save(state);
   return { status: "updated", state };
 }

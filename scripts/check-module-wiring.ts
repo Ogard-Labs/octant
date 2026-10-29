@@ -97,6 +97,14 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
   ],
   // ── Delivered ahead of its first caller by a staged design ──
   [
+    "apps/web/src/host/BrowserOwnerSection.tsx",
+    "A browser owner's alerts, signed with a passkey, delivered with the unlock keys before the browser guest screen that joins a hub and supplies its owner clients (docs/design/hub-and-spokes.md, delivery plan slice 5). Remove once that screen mounts it.",
+  ],
+  [
+    "apps/web/src/host/ownerPasskey.ts",
+    "A browser owner's passkey: make one at owner join, ask for it on each action. Delivered with the unlock keys before the browser guest screen that calls it (docs/design/hub-and-spokes.md, delivery plan slice 5). Remove once that screen mounts it.",
+  ],
+  [
     "packages/domain/src/hostedRelayProtocol.ts",
     "Hosted relay route id derivation, registration message, and frame reader, delivered as the contracts-and-policy slice of docs/design/hosted-relay.md before the relay service and host connector that call it. Remove once the relay service reads frames with it.",
   ],
@@ -696,21 +704,6 @@ export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
   ...["/api/hub/guest", "/api/hub/guest-roster"].map((endpoint): [string, string] => [
     endpoint,
     "Served to a guest's signed request from the phone app, which builds the path inside the guest client in packages/client-runtime (hubGuestClient.ts); no window script names it. Remove when the checker counts packages/client-runtime as a caller of a host route.",
-  ]),
-  ...[
-    "/api/desktop/hub/alerts/dismiss",
-    "/api/desktop/hub/alerts/remove",
-    "/api/desktop/hub/confirm-new-members",
-    "/api/desktop/hub/members/confirm",
-    "/api/desktop/hub/owners/add",
-    "/api/desktop/hub/owners/remove",
-  ].map((endpoint): [string, string] => [
-    endpoint,
-    "Window administration of a host's owner list, Confirm new members, and new-member alerts, served ahead of the Settings screens that call them (docs/design/hub-and-spokes.md, delivery plan slice 5). Remove once those screens or `octant hub` call it.",
-  ]),
-  ...["/api/hub/owner", "/api/hub/owner/challenge"].map((endpoint): [string, string] => [
-    endpoint,
-    "Signed request from an owner device, built by the phone and browser clients that come with the unlock keys (docs/design/hub-and-spokes.md, delivery plan slice 5); no window script names it. Remove when a client in packages/client-runtime or apps/mobile calls it.",
   ]),
   [
     "/api/v1/shares",

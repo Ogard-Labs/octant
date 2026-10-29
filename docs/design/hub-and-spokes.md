@@ -15,16 +15,24 @@ network calls
 release scope
 ([Current Release Boundary](../architecture.md#current-release-boundary)).
 
-**Status: approved design 2026-10-28; the hub role, joining, and phone guests
-are built.** A host can act as hub, make a join code, approve and remove
-members, and keep the roster; another computer can join, change its hub grant,
-and leave. This works from Settings in a desktop window and from `octant hub`,
-and the hub can run as a boot service. A phone can join as a guest and reach
-each spoke that accepted it, and Settings and `octant hub certificate` turn on
-the Tailscale certificate request, which the listener serves to browsers beside
-the pinned one. A browser guest screen is not built. The phone flow has not been run on a real device. The hub
-uses only the Roster and Status grant items so far. Owners, failover, the wake
-service, push, provisioning, and delegation are not built. The maintainer
+**Status: approved design 2026-10-28; the hub role, joining, phone guests, and
+owner devices are built.** A host can act as hub, make a join code, approve and
+remove members, and keep the roster; another computer can join, change its hub
+grant, and leave. This works from Settings in a desktop window and from
+`octant hub`, and the hub can run as a boot service. A phone can join as a
+guest and reach each spoke that accepted it, and Settings and
+`octant hub certificate` turn on the Tailscale certificate request, which the
+listener serves to browsers beside the pinned one. Each host keeps its own owner
+list; an owner device acts on a host after a fresh unlock; Confirm new members
+and new-member alerts work; a window lists, adds, and removes owners and settles
+alerts; a phone that joined with an owner code makes an unlock key and removes,
+confirms, or dismisses alerts. The browser passkey and its alerts screen are
+written and tested with a faked authenticator, but no browser screen joins a hub
+yet, so nothing mounts them. Nothing here has been run on a real phone, a real
+passkey, or Android. Sign-in copy, posture routes, a Mac Touch ID unlock key,
+failover, the wake service, push, provisioning, and delegation are not built.
+The hub uses only the Roster and Status grant items, and the Owners item for
+owner devices. The maintainer
 asked for this design and authorized it as post-preview, design-first work on
 2026-10-28, and set its shape the same day: a running instance enabled as hub,
 members paired by QR or manual code over a private network such as Tailscale,
@@ -420,6 +428,41 @@ from their phone or laptop what they could do sitting at any of them. An
   id. The host accepts it for that one request, or, for administration screens
   only, for a short window ([decision H17](#decisions)). Without a fresh
   unlock, an owner device is an ordinary member.
+- **One unlock, one action, 60 seconds.** The host's challenge names the
+  owner, the method, the path, and the hash of the request body, ends 60
+  seconds after the host issued it, and is forgotten once any request answers
+  it, whether or not that request succeeds. This build asks for a new unlock
+  for every change; the five-minute reuse for administration screens in
+  [decision H17](#decisions) is not built. Rationale: a signature that names
+  its action cannot be replayed for another, and a client that never keeps an
+  unlock open has nothing to leak.
+- **Alerts live on spokes.** Each spoke compares a newer roster with the one it
+  held and keeps an alert for every member added, whatever Confirm new members
+  says. An owner device reads them from the spoke it concerns; the hub holds no
+  alert and cannot clear or write one. Rationale: the party that might be
+  compromised cannot be the one that reports.
+- **Confirming a new member is a raw signature.** The owner's unlock key signs
+  a note naming the spoke, the member, its identity-key fingerprint, the owner,
+  and the unlock key's fingerprint, and the spoke checks it against the key on
+  its own owner list. A passkey signs a host challenge, not text, so a
+  passkey-only owner cannot yet confirm; it removes or dismisses from the
+  alert, and confirms in the spoke's window or on a phone. Rationale: checking
+  a passkey's assertion for a confirmation would need a second challenge
+  round, which no screen needs yet.
+- **A spoke learns an owner's unlock key from the person.** When a spoke
+  confirms the hub's listed owner devices, the person pastes each device's
+  unlock key into the spoke's window and compares its fingerprint, and the
+  device's identity-key fingerprint, with what the device shows. The roster
+  carries neither unlock key. Rationale: a key that arrived through the hub
+  could be one the hub chose.
+- **The phone's unlock key is a biometric-gated secure-store key.** The phone
+  makes a P-256 key, keeps its private half only in the platform's secure
+  storage with user authentication required on every read, and asks for the
+  system prompt before reading it. It is not a Secure Enclave or Keystore key:
+  it is not bound to hardware, and it is in memory while it signs. Rationale:
+  the app has no native module for a hardware key yet; the narrower key still
+  keeps a thief without the person's face, finger, or passcode out of the owner
+  powers.
 - **What it allows,** on a host that honors owners: listener, pairing, and
   device administration (approving joins, revoking devices); setting provider
   keys and adding MCP servers with secrets; remembering Full access or an
