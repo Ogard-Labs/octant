@@ -629,7 +629,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   const [htmlFileMessage, setHtmlFileMessage] = useState<string | undefined>(undefined);
   const [htmlFileBusy, setHtmlFileBusy] = useState(false);
   const takeHtmlFile = useCallback(
-    async (action: "save-html" | "copy-html") => {
+    async (action: "save-html" | "copy-html" | "save-tsx") => {
       if (htmlFile === undefined || selectedVersionId === undefined) return;
       setHtmlFileBusy(true);
       setHtmlFileMessage(undefined);
@@ -638,17 +638,68 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
         kind: "canvas-html-file" as const,
         canvasId: props.tab.canvasId,
         versionId: selectedVersionId,
-        ...(holdsDesign ? { frameTheme: readWorkspaceFrameTheme(document.documentElement) } : {}),
+        ...(action === "save-tsx" ? { form: "mockups-tsx" as const } : {}),
+        ...(action !== "save-tsx" && holdsDesign
+          ? { frameTheme: readWorkspaceFrameTheme(document.documentElement) }
+          : {}),
       };
       setHtmlFileMessage(
-        action === "save-html"
-          ? await saveCanvasHtmlFile(htmlFile, request)
-          : await copyCanvasHtml(htmlFile, request),
+        action === "copy-html"
+          ? await copyCanvasHtml(htmlFile, request)
+          : await saveCanvasHtmlFile(htmlFile, request),
       );
       setHtmlFileBusy(false);
     },
     [holdsDesign, htmlFile, props.tab.canvasId, selectedVersionId],
   );
+
+  // One click: the host derives a deck from the version on screen and
+  // journals it. Like a drag, it targets the head only; on stale the surface
+  // reloads, and on nothing-to-present the person learns why.
+  const proposeDeck = useCallback(async () => {
+    const deckPropose = props.client?.proposeDeck;
+    if (deckPropose === undefined || selectedVersionId === undefined) return;
+    setHtmlFileBusy(true);
+    setHtmlFileMessage(undefined);
+    // A failed request or reload still frees the menu and says so; the busy
+    // flag never outlives the attempt.
+    try {
+      const result = await deckPropose({
+        kind: "canvas-deck-propose",
+        canvasId: props.tab.canvasId,
+        versionId: decodeCanvasVersionId(globalThis.crypto.randomUUID()),
+        actor: LOCAL_PERSON,
+        expectedSequence,
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        issuedAt: decodeUtcTimestamp(new Date().toISOString()),
+      });
+      if (result.kind === "accepted") {
+        await loadCanvas();
+        await loadHistory();
+        await loadExportOffers();
+        setHtmlFileMessage("A deck was added from this Canvas's screens and numbers.");
+      } else {
+        setHtmlFileMessage(result.message);
+        if (result.denialCode === "stale-version") {
+          await loadCanvas();
+          await loadHistory();
+          await loadExportOffers();
+        }
+      }
+    } catch {
+      setHtmlFileMessage("The deck could not be proposed. Try again.");
+    } finally {
+      setHtmlFileBusy(false);
+    }
+  }, [
+    expectedSequence,
+    loadCanvas,
+    loadExportOffers,
+    loadHistory,
+    props.client,
+    props.tab.canvasId,
+    selectedVersionId,
+  ]);
 
   const handleOpenShare = useCallback(
     async (request: CanvasShareAccessRequest) => {
@@ -747,6 +798,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   const openThreads = commentThreads.filter((thread) => thread.comment.resolvedAt === undefined);
   const openCounts = new Map<string, number>();
   const openRowCounts = new Map<string, Map<string, number>>();
+  const openNodeCounts = new Map<string, Map<string, number>>();
   for (const thread of openThreads) {
     const anchor = thread.comment.anchor;
     const blockId = String(anchor.blockId);
@@ -755,6 +807,11 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
       const rows = openRowCounts.get(blockId) ?? new Map<string, number>();
       rows.set(String(anchor.rowId), (rows.get(String(anchor.rowId)) ?? 0) + 1);
       openRowCounts.set(blockId, rows);
+    }
+    if (anchor.kind === "node") {
+      const nodes = openNodeCounts.get(blockId) ?? new Map<string, number>();
+      nodes.set(String(anchor.nodeId), (nodes.get(String(anchor.nodeId)) ?? 0) + 1);
+      openNodeCounts.set(blockId, nodes);
     }
   }
   const overflowItems = [
@@ -812,18 +869,48 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
           },
         ]
       : []),
-    // One file of the version on screen, to this device only.
+    // One file of the version on screen, to this device only. A Canvas with
+    // mockups also offers their TSX handoff: the same one-file flow, as
+    // dependency-free components.
     ...(htmlFile !== undefined && selectedVersionId !== undefined
-      ? (["save-html", "copy-html"] as const).map((value) => ({
-          label: value === "save-html" ? "Save as HTML file" : "Copy HTML",
-          value,
-          ...(htmlFileBusy || !versionSettled
-            ? {
-                disabled: true,
-                description: htmlFileBusy ? "Making the HTML file…" : "Loading this version…",
-              }
-            : {}),
-        }))
+      ? [
+          ...(["save-html", "copy-html"] as const).map((value) => ({
+            label: value === "save-html" ? "Save as HTML file" : "Copy HTML",
+            value,
+            ...(htmlFileBusy || !versionSettled
+              ? {
+                  disabled: true,
+                  description: htmlFileBusy ? "Making the HTML file…" : "Loading this version…",
+                }
+              : {}),
+          })),
+          ...(definition?.blocks.some((block) => block.kind === "mockup") !== true
+            ? []
+            : [
+                {
+                  label: "Save mockups as TSX",
+                  value: "save-tsx" as const,
+                  ...(htmlFileBusy || !versionSettled
+                    ? {
+                        disabled: true,
+                        description: htmlFileBusy ? "Making the file…" : "Loading this version…",
+                      }
+                    : {}),
+                },
+              ]),
+          ...(props.client?.proposeDeck === undefined ||
+          selectedVersionId === undefined ||
+          !versionSettled ||
+          definition?.blocks.some((block) => block.kind === "deck") === true
+            ? []
+            : [
+                {
+                  label: "Propose a deck",
+                  value: "propose-deck" as const,
+                  ...(htmlFileBusy ? { disabled: true, description: "Making the deck…" } : {}),
+                },
+              ]),
+        ]
       : []),
   ];
 
@@ -944,8 +1031,12 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
           <OctantMenu
             items={overflowItems}
             onValueChange={(value) => {
-              if (value === "save-html" || value === "copy-html") {
+              if (value === "save-html" || value === "copy-html" || value === "save-tsx") {
                 void takeHtmlFile(value);
+                return;
+              }
+              if (value === "propose-deck") {
+                void proposeDeck();
                 return;
               }
               const chosen = CANVAS_TOOL_DIALOGS.find((candidate) => candidate === value);
@@ -983,7 +1074,14 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
             {...(designAssetRuntime === undefined ? {} : { designAssetRuntime })}
             {...(designRunRuntime === undefined ? {} : { designRunRuntime })}
             {...(commentsAvailable
-              ? { comments: { openCounts, openRowCounts, onOpen: openCommentsOn } }
+              ? {
+                  comments: {
+                    openCounts,
+                    openRowCounts,
+                    openNodeCounts,
+                    onOpen: openCommentsOn,
+                  },
+                }
               : {})}
           />
         </div>

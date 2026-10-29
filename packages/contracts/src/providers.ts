@@ -5,6 +5,7 @@ import {
   ExtensionContentDigest,
   ExtensionPackageId,
   ExtensionPackageVersion,
+  ExtensionPublisherKeyFingerprint,
   ToolExtensionId,
 } from "./extensionIdentity";
 import { OctantMode } from "./modes";
@@ -1130,14 +1131,15 @@ export const ProviderInstanceConfigurationChanged = Schema.Struct({
     PiProviderInstance,
     OhMyPiProviderInstance,
     OllamaProviderInstance,
+    OutsideHarnessEndpointProviderInstance,
   ),
 }).annotations(strict);
 export type ProviderInstanceConfigurationChanged = typeof ProviderInstanceConfigurationChanged.Type;
 /**
  * An outside instance moved to another digest of its own driver. Only the host
- * writes it, once the person has trusted that digest; no command reconfigures
- * an outside instance, so `provider.instance-configuration-changed@1` never
- * carries one.
+ * writes it, once the person has trusted that digest; the person's own change
+ * of the instance's address, key placement, or models travels in
+ * `provider.instance-configuration-changed@1`, which keeps the driver as bound.
  */
 export const ProviderInstanceDriverRebound = Schema.Struct({
   instance: OutsideHarnessEndpointProviderInstance,
@@ -1781,8 +1783,8 @@ export type ProviderObservedState = typeof ProviderObservedState.Type;
  * One outside driver the activation ladder admits on this host, as the
  * provider catalog lists it: the exact package a provider would bind, the
  * package's own name, and the package facts the catalog repeats. Only a
- * local folder yields a driver today, so every listing is unsigned developer
- * input.
+ * local folder yields a driver today: developer input, unsigned unless its
+ * folder carries a signature the host verified, whose key is `publisherKey`.
  */
 export const OutsideProviderDriverListing = Schema.Struct({
   driver: OutsideProviderDriverReference,
@@ -1790,6 +1792,7 @@ export const OutsideProviderDriverListing = Schema.Struct({
   source: Schema.Literal("local-folder"),
   installed: Schema.Boolean,
   trusted: Schema.Boolean,
+  publisherKey: Schema.optional(ExtensionPublisherKeyFingerprint),
 }).annotations(strict);
 export type OutsideProviderDriverListing = typeof OutsideProviderDriverListing.Type;
 
@@ -1974,6 +1977,16 @@ export const ProviderRegistryCommand = Schema.Union(
     kind: Schema.Literal("create-outside-harness-endpoint-provider"),
     ...ProviderInstanceCommandFields,
     displayName: Schema.NonEmptyTrimmedString,
+    configuration: OutsideHarnessEndpointProviderConfiguration,
+  }).annotations(strict),
+  /**
+   * Changes the address, key placement, or listed models of an outside
+   * provider. The configuration must name the driver the provider already
+   * binds, exactly; it never installs, trusts, enables, or switches a driver.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("change-outside-harness-endpoint-configuration"),
+    ...ProviderInstanceCommandFields,
     configuration: OutsideHarnessEndpointProviderConfiguration,
   }).annotations(strict),
   Schema.Struct({

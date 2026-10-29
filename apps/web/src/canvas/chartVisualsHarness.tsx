@@ -607,6 +607,7 @@ const wideTable = decodeCanvasBlock({
 
 const tableComments = {
   openCounts: new Map([["table-services", 3]]),
+  openNodeCounts: new Map(),
   openRowCounts: new Map([
     [
       "table-services",

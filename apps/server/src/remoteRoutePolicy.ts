@@ -84,6 +84,11 @@ const LOCAL_ONLY_PREFIXES = [
   "/api/apple/device-leases",
   "/api/apple/device-actions",
   "/api/apple/device-screenshots",
+  // An upload to App Store Connect, and the read of what it would send, are a
+  // local person's acts; no remote principal starts or confirms one.
+  "/api/apple/distribution",
+  "/api/apple/distribution-preparations",
+  "/api/apple/distribution-versions",
 ] as const;
 
 /**

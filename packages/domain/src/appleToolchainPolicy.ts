@@ -530,6 +530,12 @@ export interface AppleProvisioningProfileFacts {
   readonly applicationIdentifier: string;
   readonly getTaskAllow: boolean;
   readonly provisionsAllDevices: boolean;
+  /**
+   * Whether the profile lists devices (`ProvisionedDevices`): development and
+   * ad hoc profiles do, an App Store profile does not. Undefined when the host
+   * could not tell, which no App Store signature accepts.
+   */
+  readonly listsDevices?: boolean;
   readonly expiresAtMs: number;
   readonly certificates: ReadonlyArray<AppleSigningIdentityFingerprint>;
 }
@@ -573,6 +579,34 @@ export type AppleDevelopmentSigningChoice =
 export function chooseAppleDevelopmentSigning(
   input: AppleDevelopmentSigningInput,
 ): AppleDevelopmentSigningChoice {
+  return chooseAppleSigning(
+    input,
+    (profile) => profile.getTaskAllow && !profile.provisionsAllDevices,
+  );
+}
+
+/**
+ * Chooses the person's own App Store distribution identity and provisioning
+ * profile for one app, by the development rule's ordering. A usable profile
+ * is the team's, for iOS, an App Store profile (no `get-task-allow`, no
+ * device list, not for every device), unexpired, and its app ID covers the
+ * bundle. `xcodebuild -exportArchive` then signs with exactly this pair, and
+ * Octant still never creates a certificate or profile.
+ */
+export function chooseAppleAppStoreSigning(
+  input: AppleDevelopmentSigningInput,
+): AppleDevelopmentSigningChoice {
+  return chooseAppleSigning(
+    input,
+    (profile) =>
+      !profile.getTaskAllow && !profile.provisionsAllDevices && profile.listsDevices === false,
+  );
+}
+
+function chooseAppleSigning(
+  input: AppleDevelopmentSigningInput,
+  ofKind: (profile: AppleProvisioningProfileFacts) => boolean,
+): AppleDevelopmentSigningChoice {
   if (input.identities.length === 0) return { kind: "missing", gap: "no-signing-identity" };
   const usable = input.profiles.flatMap((profile) => {
     const specificity = applicationIdentifierSpecificity(
@@ -583,8 +617,7 @@ export function chooseAppleDevelopmentSigning(
     return specificity !== undefined &&
       profile.teamIds.includes(input.teamId) &&
       profile.platforms.includes("iOS") &&
-      profile.getTaskAllow &&
-      !profile.provisionsAllDevices &&
+      ofKind(profile) &&
       profile.expiresAtMs > input.nowMs
       ? [{ profile, specificity }]
       : [];

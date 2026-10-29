@@ -260,7 +260,37 @@ need **Verify tools** again.
 
 ## Signing
 
-A driver added from a local folder is unsigned developer input, and its review
-says so; trust is bound to the exact contents you reviewed. Only local
-folders are accepted today: publisher signatures, and drivers from a
-marketplace source, are not supported yet.
+A driver added from a local folder may be unsigned developer input, and its
+review says so; trust is bound to the exact contents you reviewed. A
+publisher can also sign the package, and drivers from a marketplace source
+must be signed. Only local folders are accepted today; the npm source comes
+later.
+
+To sign, make an Ed25519 key once and keep it private:
+
+```sh
+openssl genpkey -algorithm ed25519 -out driver-signing-key.pem
+```
+
+Then sign the folder after its last change, with the signing tool from the
+author kit (plain JavaScript; it runs on Node or Bun):
+
+```sh
+node outsideDriverSign.mjs ./my-driver --key-file driver-signing-key.pem
+# or read the key from standard input
+node outsideDriverSign.mjs ./my-driver --key-stdin < driver-signing-key.pem
+```
+
+It writes `octant-signature.json` beside `octant-provider-driver.json` and
+prints the key's fingerprint (`ed25519:…`); it never writes or prints the
+private key. The file lists the SHA-256 of every other file in the folder and
+signs them with the driver's name (its slug), version, and protocol versions.
+Octant hashes every file again itself, so changing, adding, or removing a file
+after signing makes the signature invalid, and the folder is refused.
+
+The first time you trust a signed driver, Octant pins its publisher key for
+that name and source, and keeps the pin even if you uninstall it. A later
+version, or a reinstall, signed by another key is held: under Plugins, its
+card shows the pinned key and the new one side by side. **Trust new
+publisher** replaces the pin and clears what its providers verified, and you
+then trust the version as usual; **Forget publisher** drops the pin.

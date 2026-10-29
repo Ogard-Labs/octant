@@ -460,6 +460,17 @@ describe("extension package contracts", () => {
         ),
       ).components[0]?.debugAdapter?.debugPorts,
     ).toBe(0);
+    // An adapter that debugs the program's children names how it announces one.
+    for (const childAnnouncement of [
+      { kind: "event", event: "debugpyAttach" },
+      { kind: "start-debugging" },
+    ]) {
+      expect(
+        decodeExtensionPackageManifest(
+          debugAdapterManifest(debugAdapterDeclaration({ childSessions: 1, childAnnouncement })),
+        ).components[0]?.debugAdapter,
+      ).toMatchObject({ childSessions: 1, childAnnouncement });
+    }
   });
 
   it("refuses a debug adapter declaration with unknown fields, in-string placeholders, or an unfilled port", () => {
@@ -501,6 +512,22 @@ describe("extension package contracts", () => {
       debugAdapterDeclaration({ runtimes: ["Node.js"] }),
       debugAdapterDeclaration({
         importTypes: Array.from({ length: 9 }, (_, index) => `type-${index}`),
+      }),
+      // Children are declared together with how they are announced, or not at all.
+      debugAdapterDeclaration({ childSessions: 1 }),
+      debugAdapterDeclaration({ childAnnouncement: { kind: "start-debugging" } }),
+      debugAdapterDeclaration({
+        childSessions: 0,
+        childAnnouncement: { kind: "event", event: "debugpyAttach" },
+      }),
+      debugAdapterDeclaration({ childSessions: 2, childAnnouncement: { kind: "start-debugging" } }),
+      debugAdapterDeclaration({
+        childSessions: 1,
+        childAnnouncement: { kind: "event", event: "debugpy attach" },
+      }),
+      debugAdapterDeclaration({
+        childSessions: 1,
+        childAnnouncement: { kind: "request", command: "attach" },
       }),
     ];
     for (const declaration of refused) {

@@ -572,6 +572,46 @@ describe("journaled extension lifecycle and startup reconciliation", () => {
         )
       ).packages[0],
     ).toMatchObject(quarantined);
+
+    // Debugging the program's children, or announcing them another way, is a
+    // new grant too.
+    const childrenAdded = await reviewedAndEnabled(debugAdapterComponent());
+    expect(
+      (
+        await childrenAdded.makeService().update(
+          inspection(
+            "2.0.0",
+            "adapter 2",
+            [],
+            debugAdapterComponent({
+              childSessions: 1,
+              childAnnouncement: { kind: "event", event: "debugpyAttach" },
+            }),
+          ),
+        )
+      ).packages[0],
+    ).toMatchObject(quarantined);
+    const announcedBefore = await reviewedAndEnabled(
+      debugAdapterComponent({
+        childSessions: 1,
+        childAnnouncement: { kind: "event", event: "debugpyAttach" },
+      }),
+    );
+    expect(
+      (
+        await announcedBefore.makeService().update(
+          inspection(
+            "2.0.0",
+            "adapter 2",
+            [],
+            debugAdapterComponent({
+              childSessions: 1,
+              childAnnouncement: { kind: "start-debugging" },
+            }),
+          ),
+        )
+      ).packages[0],
+    ).toMatchObject(quarantined);
   });
 
   it("rejects desired state for unknown components without writing an event", async () => {

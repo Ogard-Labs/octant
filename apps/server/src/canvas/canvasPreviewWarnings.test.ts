@@ -295,4 +295,48 @@ describe("canvasPreviewWarnings", () => {
       expect(warnings.filter((warning) => warning.kind === "contrast-below-target")).toEqual([]);
     }
   });
+
+  it("warns about a flow screen no transition reaches, and not the first screen", () => {
+    const mockup = (blockId: string) =>
+      block({
+        blockId,
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        kind: "mockup",
+        device: "phone",
+        title: blockId,
+        nodes: [{ nodeId: "window", component: "window", label: blockId }],
+      });
+    const flow = block({
+      blockId: "app-flow",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "flow",
+      title: "Search flow",
+      screens: [
+        { screenId: "s1", blockId: "search" },
+        { screenId: "s2", blockId: "results" },
+        { screenId: "s3", blockId: "site", frameId: "about" },
+      ],
+      edges: [{ edgeId: "go", fromScreenId: "s1", toScreenId: "s2" }],
+    });
+    const design = block({
+      blockId: "site",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "design",
+      title: "Site",
+      size: "desktop",
+      frames: [
+        { frameId: "home", title: "Home", html: "<h1>Home</h1>" },
+        { frameId: "about", title: "About", html: "<h1>About</h1>" },
+      ],
+    });
+    const warnings = warningsFor([mockup("search"), mockup("results"), design, flow]);
+    expect(warnings).toEqual([
+      {
+        kind: "flow-unreachable-screen",
+        blockId: "app-flow",
+        screenId: "s3",
+        label: "About",
+      },
+    ]);
+  });
 });

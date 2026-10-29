@@ -3,7 +3,7 @@ import {
   CANVAS_MAX_BLOCKS,
   CANVAS_MAX_DESIGN_FRAMES,
 } from "@octant/contracts/canvas";
-import type { Frame, Page } from "playwright-core";
+import type { ElementHandle, Frame, Locator, Page } from "playwright-core";
 
 /**
  * What the host's browser measured in the design frames it drew for a preview.
@@ -243,8 +243,17 @@ export function boundedFrameReading(value: unknown): {
 }
 
 /**
+ * Where a drawn design's frames live: the design's own section, and each
+ * screen of a flow that places one of its frames. A design placed in a flow is
+ * not drawn again at its own position, so its frames are only on the board.
+ */
+const DESIGN_FRAME_HOSTS =
+  "section.canvas-design[data-canvas-design], .canvas-flow-board__design-frame[data-canvas-design]";
+
+/**
  * Every design the preview page drew, measured. A design in a tab that is not
- * open is not drawn and so is not measured.
+ * open is not drawn and so is not measured. A design shown as several flow
+ * screens is one reading over all of its drawn frames.
  */
 export async function readPreviewDesignFrames(
   page: Page,
@@ -255,16 +264,22 @@ export async function readPreviewDesignFrames(
     await page.getAttribute("html", CANVAS_PREVIEW_SCRIPT_ERRORS_ATTRIBUTE),
   );
   const deadline = now() + FRAME_READ_BUDGET_MS;
-  const designs = await page.locator("section.canvas-design[data-canvas-design]").all();
-  for (const design of designs.slice(0, CANVAS_MAX_BLOCKS)) {
-    const blockId = await design.getAttribute("data-canvas-design");
+  const hosts = new Map<string, Locator[]>();
+  for (const host of await page.locator(DESIGN_FRAME_HOSTS).all()) {
+    const blockId = await host.getAttribute("data-canvas-design");
     if (blockId === null) continue;
+    const known = hosts.get(blockId);
+    if (known !== undefined) known.push(host);
+    else if (hosts.size < CANVAS_MAX_BLOCKS) hosts.set(blockId, [host]);
+  }
+  for (const [blockId, designHosts] of hosts) {
     const scriptErrors = errors.get(blockId) ?? [];
     if (now() >= deadline) {
       readings.push({ blockId, measured: false, scriptErrors, overflow: [], contrast: [] });
       continue;
     }
-    const frames = await design.locator("iframe").elementHandles();
+    const frames: ElementHandle[] = [];
+    for (const host of designHosts) frames.push(...(await host.locator("iframe").elementHandles()));
     const answers = await readFramesWithinBudget(
       frames.slice(0, MAX_FRAMES_PER_DESIGN),
       async (element, remainingMs) => {

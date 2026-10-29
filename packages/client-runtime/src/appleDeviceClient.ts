@@ -1,6 +1,12 @@
 import { decodeHostAnswer } from "@octant/contracts";
 import { AppleDeviceResponse, type AppleDeviceRequest } from "@octant/contracts/apple-toolchain";
-import type { AppleArtifactRequest } from "@octant/contracts/apple-toolchain-rpc";
+import {
+  AppleStoreVersionPreparation,
+  AppleUploadPreparation,
+  type AppleArtifactRequest,
+  type AppleStoreVersionPreparationRequest,
+  type AppleUploadPreparationRequest,
+} from "@octant/contracts/apple-toolchain-rpc";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface AppleDeviceClientOptions {
@@ -27,9 +33,28 @@ export interface AppleDeviceClient {
     request: AppleArtifactRequest,
     signal?: AbortSignal,
   ): Promise<AppleDeviceScreenshotRead>;
+  /**
+   * What an upload of the project to App Store Connect would send, read
+   * before the person is asked to confirm it; for a local window only.
+   */
+  prepareUpload(
+    request: AppleUploadPreparationRequest,
+    signal?: AbortSignal,
+  ): Promise<AppleUploadPreparation>;
+  /**
+   * What App Store Connect holds for the project's version and which step it
+   * is ready for, read before the person is asked to confirm a submission or
+   * release; for a local window only.
+   */
+  prepareStoreVersion(
+    request: AppleStoreVersionPreparationRequest,
+    signal?: AbortSignal,
+  ): Promise<AppleStoreVersionPreparation>;
 }
 
 const decodeAnswer = decodeHostAnswer(AppleDeviceResponse);
+const decodePreparation = decodeHostAnswer(AppleUploadPreparation);
+const decodeVersionPreparation = decodeHostAnswer(AppleStoreVersionPreparation);
 
 export function createAppleDeviceClient(options: AppleDeviceClientOptions): AppleDeviceClient {
   const resolved = { ...options, fetch: bindFetchPort(options.fetch) };
@@ -41,6 +66,33 @@ export function createAppleDeviceClient(options: AppleDeviceClientOptions): Appl
         return decodeAnswer(await sent.response.json());
       } catch {
         return failure("invalid", "Apple device service returned an invalid response.");
+      }
+    },
+    prepareUpload: async (request, signal) => {
+      const sent = await send(resolved, "/api/apple/distribution-preparations", request, signal);
+      if (sent.kind === "failed") return { kind: "failed", message: sent.message };
+      if (!sent.response.ok) {
+        return { kind: "failed", message: "This window can't upload for this thread." };
+      }
+      try {
+        return decodePreparation(await sent.response.json());
+      } catch {
+        return { kind: "failed", message: "Apple device service returned an invalid response." };
+      }
+    },
+    prepareStoreVersion: async (request, signal) => {
+      const sent = await send(resolved, "/api/apple/distribution-versions", request, signal);
+      if (sent.kind === "failed") return { kind: "failed", message: sent.message };
+      if (!sent.response.ok) {
+        return {
+          kind: "failed",
+          message: "This window can't submit or release for this thread.",
+        };
+      }
+      try {
+        return decodeVersionPreparation(await sent.response.json());
+      } catch {
+        return { kind: "failed", message: "Apple device service returned an invalid response." };
       }
     },
     readScreenshot: async (request, signal) => {
@@ -62,6 +114,9 @@ export function createAppleDeviceClient(options: AppleDeviceClientOptions): Appl
 function routeFor(kind: AppleDeviceRequest["kind"]): string {
   if (kind === "discover" || kind === "status") return "/api/apple/devices";
   if (kind === "use-device" || kind === "release-device") return "/api/apple/device-leases";
+  if (kind === "upload" || kind === "submit-for-review" || kind === "release-version") {
+    return "/api/apple/distribution";
+  }
   return "/api/apple/device-actions";
 }
 

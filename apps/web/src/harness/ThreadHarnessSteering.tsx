@@ -107,7 +107,8 @@ export function ThreadHarnessSteering(props: ThreadHarnessSteeringProps) {
   }, [busy, client, threadId, reload]);
 
   if (view === null || view === undefined) return null;
-  const steerable = view.session.status === "running";
+  // A runtime provider has a session for recovery but never reads queued notes.
+  const steerable = view.session.status === "running" && view.steerable === true;
   const notes = view.steering ?? [];
   const unreached = !steerable && notes.some((note) => note.status === "queued");
   if (!steerable && notes.length === 0 && queue === undefined) return null;

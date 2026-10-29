@@ -2,12 +2,14 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { realpath, stat as statFromDisk } from "node:fs/promises";
 import { join } from "node:path";
+import { queueSteeringWhereDelivered, withSteerable } from "../harness/nativeHarnessSteerability";
 import {
   AggregateId,
   decodeCodeThreadId,
   decodeNativeHarnessTurnId,
   LOCAL_HOST_ID,
   type OctantMode,
+  type ProviderInstanceId,
   ToolEgressLaunchId,
 } from "@octant/contracts";
 import { Schema } from "effect";
@@ -37,7 +39,10 @@ import {
   type FollowUpSuggestionActionDependencies,
 } from "../followUps/followUpSuggestionRoutes";
 import { createSideTaskRouteHandler } from "../sideTasks/sideTaskRoutes";
-import { createNativeHarnessSessionRouteHandler } from "../harness/nativeHarnessSessionRoutes";
+import {
+  createNativeHarnessSessionRouteHandler,
+  type NativeHarnessSessionRouteDependencies,
+} from "../harness/nativeHarnessSessionRoutes";
 import { createNativeHarnessEgressRouteHandler } from "../harness/nativeHarnessEgressRoutes";
 import { NativeHarnessTurnObserver } from "../harness/nativeHarnessTurnObserver";
 import { toTurnMetricsRecord, type TurnEndSummary } from "../metrics/turnEnd";
@@ -298,8 +303,8 @@ export function wireHarness(deps: HarnessDependencies) {
   ): void => {
     pausedByPersonListeners.push(listener);
   };
-  // Lifting a session out of recovery lets the area that cut the thread's
-  // turns off settle them (the Code runtime), which subscribes here.
+  // Recovery lets the Code runtime settle its orphaned turns. A continuation
+  // does this while the session still holds dispatch, before queueing its next turn.
   const recoveryLiftedListeners: Array<
     (input: { readonly threadId: string; readonly mode: OctantMode }) => void
   > = [];
@@ -308,13 +313,21 @@ export function wireHarness(deps: HarnessDependencies) {
   ): void => {
     recoveryLiftedListeners.push(listener);
   };
+  const restartContinuation: {
+    current: NativeHarnessSessionRouteDependencies["continueRecovery"];
+  } = { current: undefined };
+  const leadDeliversSteering = (providerInstanceId: ProviderInstanceId): boolean => {
+    const instance = persistence.readProviderInstance(providerInstanceId);
+    return instance !== undefined && isNativeHarnessDriverKind(instance.driverKind);
+  };
   const nativeHarnessSessionRoutes = createNativeHarnessSessionRouteHandler({
     windowAuthorityStore,
     store: {
       read: (threadId) => {
         nativeHarnessApprovals.expireOverdue();
         nativeHarnessQuestions.expireOverdue();
-        const view = nativeHarnessSessions.read(threadId);
+        const read = nativeHarnessSessions.read(threadId);
+        const view = read === undefined ? undefined : withSteerable(read, leadDeliversSteering);
         const suggestions = threadFollowUpSuggestions.read(threadId);
         return view === undefined || suggestions === undefined
           ? view
@@ -331,9 +344,15 @@ export function wireHarness(deps: HarnessDependencies) {
     onPaused: (input) => {
       for (const listener of pausedByPersonListeners) listener(input);
     },
-    onRecoveryLifted: (input) => {
+    settleInterruptedTurns: (input) => {
       for (const listener of recoveryLiftedListeners) listener(input);
     },
+    continueRecovery: (input) =>
+      restartContinuation.current?.(input) ??
+      Promise.resolve({
+        kind: "refused",
+        message: "Restart continuation is unavailable on this host.",
+      }),
     recoveryBlockers: async ({ threadId }) => {
       const view = nativeHarnessSessions.read(threadId);
       if (view === undefined) return [];
@@ -374,7 +393,7 @@ export function wireHarness(deps: HarnessDependencies) {
       if (command.kind === "take") {
         return { taken: nativeHarnessSessions.takeSteering(threadId) };
       }
-      return nativeHarnessSessions.queueSteering(threadId, {
+      return queueSteeringWhereDelivered(nativeHarnessSessions, leadDeliversSteering, threadId, {
         id: command.noteId ?? randomUUID(),
         text: command.text,
         status: "queued",
@@ -604,6 +623,7 @@ export function wireHarness(deps: HarnessDependencies) {
   contributeChildTools((input) => nativeHarnessComposition.forAgentRun(input));
   return {
     followUpCreation,
+    restartContinuation,
     followUpSuggestionRoutes,
     nativeHarnessComposition,
     nativeHarnessEgressRoutes,

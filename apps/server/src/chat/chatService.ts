@@ -1893,6 +1893,38 @@ export class ChatService {
     }
   }
 
+  /** A restored question or approval has no runtime to receive it after recovery. */
+  settleCutOffTurns(threadId: ChatThreadId): void {
+    const view = this.#persistence.readChatThreadView(threadId);
+    if (view === undefined || this.isTurnActive(threadId)) return;
+    for (const turn of view.turns) {
+      for (const attempt of turn.attempts) {
+        if (
+          attempt.outcome !== "waiting" ||
+          attempt.usageLimit !== undefined ||
+          this.#activeAttempts.has(String(attempt.id))
+        )
+          continue;
+        const settled = transitionChatAttempt(attempt, {
+          outcome: "interrupted",
+          updatedAt: decodeTimestamp(this.#clock()),
+          failure: { code: decodeDiagnosticFailureCode("unavailable") },
+        });
+        this.#persistence.journal.append({
+          aggregate: { aggregateType: "chat-thread", aggregateId: threadId },
+          expectedVersion: readAggregateVersion(
+            this.#persistence.connection,
+            "chat-thread",
+            threadId,
+          ),
+          events: [
+            this.#pending("chat.attempt-updated@1", { kind: "attempt-updated", attempt: settled }),
+          ],
+        });
+      }
+    }
+  }
+
   async reapStaleProviderSessions(input?: {
     readonly staleAfterMs?: number;
   }): Promise<{ readonly reaped: number; readonly resumable: number }> {

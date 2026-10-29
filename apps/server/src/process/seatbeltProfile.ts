@@ -155,6 +155,15 @@ export interface ProcessConfinementPrepareInput {
    * shell needs; callers never pass Seatbelt text for it.
    */
   readonly terminal?: Readonly<{ shellStateDirectory: string }>;
+  /**
+   * Linux `proxied` only: the forwarder also listens on this Unix socket,
+   * which sits in a folder the launch writes, and relays each connection the
+   * host opens there to `port` on loopback inside the capsule's own network
+   * namespace, and nowhere else. A debug session's child connection uses it;
+   * the private namespace otherwise hides that loopback from the host. macOS
+   * refuses it: there the host reaches a port the profile opens on loopback.
+   */
+  readonly inboundRelay?: Readonly<{ socketPath: string; port: number }>;
 }
 
 export interface ProcessConfinementPort {
@@ -875,6 +884,12 @@ function prepareSeatbeltLaunch(
 ): ConfinedProcessLaunch {
   const sandboxPath = options.sandboxPath ?? DEFAULT_SANDBOX_PATH;
   requireSandboxExec({ platform: "darwin", sandboxPath });
+  if (input.inboundRelay !== undefined) {
+    throw new ProcessConfinementError(
+      "incompatible",
+      "Seatbelt launches have no inbound relay; the host reaches an opened loopback port.",
+    );
+  }
   const interpreterSearchPath =
     input.interpreterSearchPath ?? options.interpreterSearchPath ?? process.env.PATH;
   const executablePaths = confinedExecutableExecPaths(input.executable, interpreterSearchPath);

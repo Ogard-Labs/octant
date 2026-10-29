@@ -414,6 +414,7 @@ export const CanvasBoardDenialCode = Schema.Literal(
   "missing-position",
   "not-a-plan",
   "unknown-task",
+  "nothing-to-present",
 );
 export type CanvasBoardDenialCode = typeof CanvasBoardDenialCode.Type;
 
@@ -431,6 +432,26 @@ export const CanvasDiagramLayoutReviseResult = Schema.Union(
   }).annotations(strict),
 );
 export type CanvasDiagramLayoutReviseResult = typeof CanvasDiagramLayoutReviseResult.Type;
+
+// ── Deck proposal ─────────────────────────────────────────────────────────────
+//
+// A person's one click: the host derives a deck from the document's own
+// screens and readings and journals it as a new immutable version, exactly
+// as a plan task's status or a board drag does.
+
+export const CanvasDeckProposeCommand = Schema.Struct({
+  kind: Schema.Literal("canvas-deck-propose"),
+  canvasId: CanvasId,
+  versionId: CanvasVersionId,
+  actor: CanvasActor,
+  expectedSequence: Schema.Int.pipe(Schema.positive()),
+  schemaVersion: CanvasSchemaVersion,
+  issuedAt: UtcTimestamp,
+}).annotations(strict);
+export type CanvasDeckProposeCommand = typeof CanvasDeckProposeCommand.Type;
+
+export const CanvasDeckProposeResult = CanvasDiagramLayoutReviseResult;
+export type CanvasDeckProposeResult = CanvasDiagramLayoutReviseResult;
 
 // ── Plan task revision ───────────────────────────────────────────────────────
 //
@@ -493,6 +514,7 @@ export const decodeCanvasDiagramLayoutReviseResult = Schema.decodeUnknownSync(
 export const decodeCanvasPlanTaskReviseCommand = Schema.decodeUnknownSync(
   CanvasPlanTaskReviseCommand,
 );
+export const decodeCanvasDeckProposeCommand = Schema.decodeUnknownSync(CanvasDeckProposeCommand);
 export const decodeCanvasPlanTaskReviseResult = Schema.decodeUnknownSync(
   CanvasPlanTaskReviseResult,
 );

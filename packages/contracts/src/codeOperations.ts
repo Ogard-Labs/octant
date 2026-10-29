@@ -2398,6 +2398,22 @@ export const CodeApprovalEffect = Schema.Union(
       Schema.filter((request) => APPROVAL_GATED_DEVICE_KINDS.has(request.kind)),
     ),
   }).annotations(strict),
+  // An upload of exactly the confirmed build to App Store Connect asks a
+  // person at the Mac under every posture; Plan refuses it before asking.
+  Schema.Struct({
+    kind: Schema.Literal("apple-distribution-upload"),
+    request: AppleDeviceRequest.pipe(Schema.filter((request) => request.kind === "upload")),
+  }).annotations(strict),
+  // Submitting exactly the confirmed version for App Review, or releasing it,
+  // asks a person at the Mac under every posture; Plan refuses it before asking.
+  Schema.Struct({
+    kind: Schema.Literal("apple-distribution-version"),
+    request: AppleDeviceRequest.pipe(
+      Schema.filter(
+        (request) => request.kind === "submit-for-review" || request.kind === "release-version",
+      ),
+    ),
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("create-thread-full-access"),
     thread: CodeThread.pipe(Schema.filter((thread) => thread.executionPolicy === "full-access")),

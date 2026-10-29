@@ -41,7 +41,7 @@ function resumeFrom(status: "recovery-required" | "paused-by-user") {
     } as never,
     followUps: {} as never,
     authorizeThread: () => true,
-    onRecoveryLifted: lifted,
+    settleInterruptedTurns: lifted,
   });
   const request = new Request(`http://127.0.0.1/api/native-harness/sessions/${threadId}/commands`, {
     method: "POST",
@@ -59,6 +59,103 @@ function resumeFrom(status: "recovery-required" | "paused-by-user") {
 }
 
 describe("native harness session routes", () => {
+  function continuationFixture(
+    options: {
+      readonly authorized?: boolean;
+      readonly blockers?: () => Promise<ReadonlyArray<string>>;
+      readonly continuation?: () => Promise<
+        { readonly kind: "queued" } | { readonly kind: "refused"; readonly message: string }
+      >;
+    } = {},
+  ) {
+    let status = "recovery-required";
+    const resume = vi.fn(() => {
+      status = "idle";
+      return true;
+    });
+    const continuation = vi.fn(options.continuation ?? (async () => ({ kind: "queued" as const })));
+    const handler = createNativeHarnessSessionRouteHandler({
+      windowAuthorityStore: new WindowAuthorityStore(),
+      store: {
+        read: () => ({ session: { id: sessionId, version: 3, status, mode: "code" } }),
+        resume,
+        pause: () => false,
+        turnInFlight: () => false,
+      } as never,
+      followUps: {} as never,
+      authorizeThread: () => options.authorized ?? true,
+      recoveryBlockers: options.blockers ?? (async () => []),
+      continueRecovery: continuation,
+    });
+    const send = () => {
+      const request = new Request(
+        `http://127.0.0.1/api/native-harness/sessions/${threadId}/commands`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            kind: "resume-native-harness-session",
+            sessionId,
+            expectedVersion: 3,
+            continueInterrupted: true,
+          }),
+        },
+      );
+      bindPrincipalRouteContext(request, {
+        principal: { kind: "local-window" } as never,
+        scopeId: windowId,
+      });
+      return handler(request);
+    };
+    return { send, resume, continuation };
+  }
+
+  it("queues exactly one continuation before lifting recovery even when two windows resume together", async () => {
+    let release: () => void = () => undefined;
+    const waiting = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fixture = continuationFixture({
+      continuation: async () => {
+        await waiting;
+        return { kind: "queued" };
+      },
+    });
+    const first = fixture.send();
+    await vi.waitFor(() => expect(fixture.continuation).toHaveBeenCalledTimes(1));
+    expect(fixture.resume).not.toHaveBeenCalled();
+    expect((await fixture.send())?.status).toBe(409);
+    release();
+    expect((await first)?.status).toBe(200);
+    expect(fixture.resume).toHaveBeenCalledTimes(1);
+    expect((await fixture.send())?.status).toBe(409);
+    expect(fixture.continuation).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps recovery actionable when queueing is refused", async () => {
+    const fixture = continuationFixture({
+      continuation: async () => ({ kind: "refused", message: "Review the existing queue." }),
+    });
+    const response = await fixture.send();
+    expect(response?.status).toBe(409);
+    expect(await response?.json()).toMatchObject({
+      kind: "native-harness-session-refused",
+      message: "Review the existing queue.",
+    });
+    expect(fixture.resume).not.toHaveBeenCalled();
+  });
+
+  it("does not queue or lift recovery without thread authority or a usable checkout", async () => {
+    const unauthorized = continuationFixture({ authorized: false });
+    expect((await unauthorized.send())?.status).toBe(403);
+    expect(unauthorized.continuation).not.toHaveBeenCalled();
+    const blocked = continuationFixture({
+      blockers: async () => ["Open this thread to confirm its checkout."],
+    });
+    expect((await blocked.send())?.status).toBe(409);
+    expect(blocked.continuation).not.toHaveBeenCalled();
+    expect(blocked.resume).not.toHaveBeenCalled();
+  });
+
   it("tells the thread's other records the cut-off turn is settled once a resume clears a restart recovery", async () => {
     const { lifted, response } = resumeFrom("recovery-required");
     expect((await response)?.status).toBe(200);
@@ -69,6 +166,36 @@ describe("native harness session routes", () => {
     const { lifted, response } = resumeFrom("paused-by-user");
     expect((await response)?.status).toBe(200);
     expect(lifted).not.toHaveBeenCalled();
+  });
+
+  it("tells a person a withdrawn approval was withdrawn, not already decided", async () => {
+    const handler = createNativeHarnessSessionRouteHandler({
+      windowAuthorityStore: new WindowAuthorityStore(),
+      store: { read: () => undefined } as never,
+      followUps: {} as never,
+      authorizeThread: () => true,
+      decideApproval: () => "withdrawn",
+    });
+    const request = new Request(
+      `http://127.0.0.1/api/native-harness/sessions/${threadId}/approvals`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          approvalId: "00000000-0000-4000-8000-000000000031",
+          decision: "approve",
+        }),
+      },
+    );
+    bindPrincipalRouteContext(request, {
+      principal: { kind: "local-window" } as never,
+      scopeId: windowId,
+    });
+    const response = await handler(request);
+    expect(response?.status).toBe(409);
+    const body = (await response?.json()) as { reason?: string; message?: string };
+    expect(body.reason).toBe("withdrawn");
+    expect(body.message).toContain("withdrawn");
+    expect(body.message).not.toContain("already decided");
   });
 
   it("refuses an answer to the lead's question from a window that may not open the thread", async () => {
