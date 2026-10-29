@@ -128,13 +128,14 @@ export function createWorkDelegationHost(services: WorkDelegationServices): Peer
           workingDirectory: ".",
         });
         if (!wasCreated(created)) return { status: "refused", kind: "start-failed" };
+        const turnId = uuid();
         const started = await services.turns.startFirstTurn(
           services.scope,
           {
             kind: "start-work-thread-turn",
             requestId: decodeWorkTurnRequestId(uuid()),
             threadId,
-            turnId: decodeWorkTurnId(uuid()),
+            turnId: decodeWorkTurnId(turnId),
             prompt: input.task,
             authority: {
               hostId: LOCAL_HOST_ID,
@@ -151,15 +152,15 @@ export function createWorkDelegationHost(services: WorkDelegationServices): Peer
           { holdAskFirst: true },
         );
         return started.kind === "accepted"
-          ? { status: "started", threadId }
+          ? { status: "started", threadId, turnId }
           : { status: "refused", kind: "start-failed" };
       } catch {
         return { status: "refused", kind: "start-failed" };
       }
     },
 
-    readThread: async (threadId): Promise<ChildReading | undefined> => {
-      const turn = await latestTurn(services, threadId);
+    readThread: async (threadId, turnId): Promise<ChildReading | undefined> => {
+      const turn = await delegatedTurn(services, threadId, turnId);
       if (turn === undefined) return undefined;
       return {
         state: childStateOf(turn),
@@ -171,8 +172,8 @@ export function createWorkDelegationHost(services: WorkDelegationServices): Peer
       };
     },
 
-    interrupt: async (threadId) => {
-      const turn = await latestTurn(services, threadId);
+    interrupt: async (threadId, turnId) => {
+      const turn = await delegatedTurn(services, threadId, turnId);
       if (turn === undefined) return "unavailable";
       if (childStateOf(turn) !== "running" && childStateOf(turn) !== "waiting-for-approval") {
         return "already-finished";
@@ -192,12 +193,20 @@ export function createWorkDelegationHost(services: WorkDelegationServices): Peer
   };
 }
 
-async function latestTurn(
+/**
+ * The turn the delegation started, not the thread's latest: a person here may
+ * continue the thread, and their follow-up is neither the peer's result nor
+ * something the peer may cancel.
+ */
+async function delegatedTurn(
   services: WorkDelegationServices,
   threadId: string,
+  turnId: string,
 ): Promise<DelegationTurnFacts | undefined> {
   try {
-    return (await services.turns.turns(services.scope, decodeWorkThreadId(threadId))).at(-1);
+    return (await services.turns.turns(services.scope, decodeWorkThreadId(threadId))).find(
+      (turn) => String(turn.turnId) === turnId,
+    );
   } catch {
     return undefined;
   }

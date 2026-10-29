@@ -47,6 +47,8 @@ function fakeChildHost(
   authority: Partial<Pick<DelegationProjectAuthority, "modes" | "ceiling">> = {},
 ) {
   const threads = new Map<string, ChildReading>();
+  /** The turn each thread was started with; the host answers for that turn alone. */
+  const turnIds = new Map<string, string>();
   const started: Array<Parameters<PeerDelegationHost["startThread"]>[0]> = [];
   const interrupted: string[] = [];
   const host: PeerDelegationHost = {
@@ -61,12 +63,15 @@ function fakeChildHost(
     startThread: async (input) => {
       started.push(input);
       const threadId = randomUUID();
+      const turnId = randomUUID();
       threads.set(threadId, { state: "running", artifacts: [] });
-      return { status: "started", threadId };
+      turnIds.set(threadId, turnId);
+      return { status: "started", threadId, turnId };
     },
-    readThread: async (threadId) => threads.get(threadId),
-    interrupt: async (threadId) => {
-      const thread = threads.get(threadId);
+    readThread: async (threadId, turnId) =>
+      turnIds.get(threadId) === turnId ? threads.get(threadId) : undefined,
+    interrupt: async (threadId, turnId) => {
+      const thread = turnIds.get(threadId) === turnId ? threads.get(threadId) : undefined;
       if (thread === undefined) return "unavailable";
       if (thread.state !== "running" && thread.state !== "waiting-for-approval") {
         return "already-finished";

@@ -48,14 +48,22 @@ export interface PeerDelegationHost {
     readonly task: string;
     readonly authority: DelegatedAuthority;
   }) => Promise<StartedThread>;
-  readonly readThread: (threadId: string) => Promise<ChildReading | undefined>;
+  /** Reads the delegated turn, not whatever turn the thread has run since. */
+  readonly readThread: (threadId: string, turnId: string) => Promise<ChildReading | undefined>;
+  /** Interrupts the delegated turn only; a later turn on the thread is never touched. */
   readonly interrupt: (
     threadId: string,
+    turnId: string,
   ) => Promise<"interrupted" | "already-finished" | "unavailable">;
 }
 
 export type StartedThread =
-  | { readonly status: "started"; readonly threadId: string }
+  | {
+      readonly status: "started";
+      readonly threadId: string;
+      /** The turn that carries the delegated task. */
+      readonly turnId: string;
+    }
   | {
       readonly status: "refused";
       readonly kind:
@@ -194,6 +202,7 @@ export class PeerDelegationService {
         projectId: request.projectId,
         delegatedFrom: request.delegatedFrom,
         threadId: started.threadId,
+        turnId: started.turnId,
         authority: clamp.authority,
         receivedAt: decodeTimestamp(new Date(this.#options.now()).toISOString()),
       };
@@ -217,7 +226,10 @@ export class PeerDelegationService {
   async status(signed: SignedRequest): Promise<DelegationStatusReceipt> {
     const found = this.#find(signed);
     if (found.status === "refused") return found;
-    const reading = await this.#options.host.readThread(found.delegation.threadId);
+    const reading = await this.#options.host.readThread(
+      found.delegation.threadId,
+      found.delegation.turnId,
+    );
     if (reading === undefined) return refusal("thread-unavailable");
     const delegation: DelegationStatus = {
       requestId: found.delegation.requestId,
@@ -232,7 +244,10 @@ export class PeerDelegationService {
   async cancel(signed: SignedRequest): Promise<DelegationCancelReceipt> {
     const found = this.#find(signed);
     if (found.status === "refused") return found;
-    const outcome = await this.#options.host.interrupt(found.delegation.threadId);
+    const outcome = await this.#options.host.interrupt(
+      found.delegation.threadId,
+      found.delegation.turnId,
+    );
     if (outcome === "unavailable") return refusal("thread-unavailable");
     if (outcome === "interrupted") {
       this.#options.record({

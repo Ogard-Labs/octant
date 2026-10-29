@@ -41,11 +41,22 @@ function project(
   };
 }
 
-function turn(status: DelegationTurnFacts["status"], response?: string): DelegationTurnFacts {
+const DELEGATED_TURN = "99999999-9999-4999-8999-999999999999";
+const FOLLOW_UP_TURN = "12121212-1212-4212-8212-121212121212";
+
+function turn(
+  status: DelegationTurnFacts["status"],
+  response?: string,
+  turnId: string = DELEGATED_TURN,
+): DelegationTurnFacts {
   return {
-    requestId: decodeWorkTurnRequestId("77777777-7777-4777-8777-777777777777"),
+    requestId: decodeWorkTurnRequestId(
+      turnId === DELEGATED_TURN
+        ? "77777777-7777-4777-8777-777777777777"
+        : "13131313-1313-4313-8313-131313131313",
+    ),
     threadId: decodeThreadId("88888888-8888-4888-8888-888888888888"),
-    turnId: decodeWorkTurnId("99999999-9999-4999-8999-999999999999"),
+    turnId: decodeWorkTurnId(turnId),
     status,
     updatedAt: decodeTimestamp("2026-10-29T08:00:00.000Z"),
     ...(response === undefined ? {} : { response }),
@@ -108,7 +119,14 @@ describe("the Work thread a delegation becomes on the receiving spoke", () => {
 
     const started = await host.startThread(input);
 
-    expect(started).toEqual({ status: "started", threadId: THREAD });
+    expect(started).toEqual({
+      status: "started",
+      threadId: THREAD,
+      turnId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    });
+    expect(firstTurns[0]?.command).toMatchObject({
+      turnId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    });
     expect(executed[0]).toMatchObject({
       kind: "create-work-thread",
       projectId: PROJECT,
@@ -174,28 +192,97 @@ describe("the Work thread a delegation becomes on the receiving spoke", () => {
 
   it("reports the child's state and final message as its turn has them, and interrupts only a turn still going", async () => {
     const running = services();
-    expect(await running.host.readThread(THREAD)).toMatchObject({
+    expect(await running.host.readThread(THREAD, DELEGATED_TURN)).toMatchObject({
       state: "running",
       artifacts: [],
     });
-    expect(await running.host.interrupt(THREAD)).toBe("interrupted");
+    expect(await running.host.interrupt(THREAD, DELEGATED_TURN)).toBe("interrupted");
     expect(running.cancelled).toHaveLength(1);
 
     const waiting = services({
       turns: { ...baseTurns(), turns: async () => [turn("waiting")] },
     });
-    expect(await waiting.host.readThread(THREAD)).toMatchObject({ state: "waiting-for-approval" });
+    expect(await waiting.host.readThread(THREAD, DELEGATED_TURN)).toMatchObject({
+      state: "waiting-for-approval",
+    });
 
     const finished = services({
       turns: { ...baseTurns(), turns: async () => [turn("completed", "All done.")] },
     });
-    expect(await finished.host.readThread(THREAD)).toMatchObject({
+    expect(await finished.host.readThread(THREAD, DELEGATED_TURN)).toMatchObject({
       state: "completed",
       finalMessage: "All done.",
     });
-    expect(await finished.host.interrupt(THREAD)).toBe("already-finished");
+    expect(await finished.host.interrupt(THREAD, DELEGATED_TURN)).toBe("already-finished");
+  });
+
+  it("keeps reporting the delegated turn's own outcome after a person continues the thread", async () => {
+    const { host } = services({
+      turns: {
+        ...baseTurns(),
+        turns: async () => [
+          turn("completed", "All done."),
+          turn("running", "Working on the follow-up.", FOLLOW_UP_TURN),
+        ],
+      },
+    });
+
+    expect(await host.readThread(THREAD, DELEGATED_TURN)).toMatchObject({
+      state: "completed",
+      finalMessage: "All done.",
+    });
+  });
+
+  it("never interrupts a person's follow-up turn when the delegated turn already finished", async () => {
+    const cancelled: unknown[] = [];
+    const { host } = services({
+      turns: recordingTurns(
+        [turn("completed", "All done."), turn("running", undefined, FOLLOW_UP_TURN)],
+        cancelled,
+      ),
+    });
+
+    expect(await host.interrupt(THREAD, DELEGATED_TURN)).toBe("already-finished");
+    expect(cancelled).toEqual([]);
+  });
+
+  it("interrupts the delegated turn itself while a follow-up waits behind it", async () => {
+    const cancelled: unknown[] = [];
+    const { host } = services({
+      turns: recordingTurns(
+        [turn("running"), turn("accepted", undefined, FOLLOW_UP_TURN)],
+        cancelled,
+      ),
+    });
+
+    expect(await host.interrupt(THREAD, DELEGATED_TURN)).toBe("interrupted");
+    expect(cancelled).toEqual([expect.objectContaining({ turnId: DELEGATED_TURN })]);
+  });
+
+  it("reports a delegated turn that is no longer on the thread as unavailable", async () => {
+    const { host } = services({
+      turns: { ...baseTurns(), turns: async () => [turn("running", undefined, FOLLOW_UP_TURN)] },
+    });
+
+    expect(await host.readThread(THREAD, DELEGATED_TURN)).toBeUndefined();
+    expect(await host.interrupt(THREAD, DELEGATED_TURN)).toBe("unavailable");
   });
 });
+
+/** The thread's turns as given, with every cancel the host sends kept in `cancelled`. */
+function recordingTurns(
+  turns: ReadonlyArray<DelegationTurnFacts>,
+  cancelled: unknown[],
+): WorkDelegationServices["turns"] {
+  return {
+    ...baseTurns(),
+    turns: async () => turns,
+    cancelFirstTurn: async (_scope, command) => {
+      cancelled.push(command);
+      return { kind: "turn-cancelled" };
+    },
+  };
+}
 
 function baseTurns(): WorkDelegationServices["turns"] {
   return {

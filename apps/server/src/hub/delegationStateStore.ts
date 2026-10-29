@@ -33,6 +33,8 @@ export const ReceivedDelegation = Schema.Struct({
   projectId: ProjectId,
   delegatedFrom: DelegatingThreadReference,
   threadId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+  /** The turn that carries the task; a follow-up a person runs on the thread is a different turn. */
+  turnId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
   authority: DelegatedAuthority,
   receivedAt: UtcTimestamp,
 }).annotations(strict);
