@@ -10,6 +10,14 @@ import type { HubTransport } from "./pinnedHubTransport";
 
 export const HUB_LINK_HEADER = "x-octant-hub-link";
 
+/**
+ * The sender's identity public key, for a request to a member that holds only
+ * the fingerprint the signed roster lists. It is no secret and it proves
+ * nothing alone: the receiver accepts it only if its fingerprint is the one
+ * the roster lists for the sender, and then checks the signature against it.
+ */
+export const HUB_PEER_KEY_HEADER = "x-octant-hub-peer-key";
+
 /** How far a request's time may be from the receiver's clock. */
 const FRESHNESS_WINDOW_MS = 120_000;
 const MAX_REMEMBERED_NONCES = 4_096;
@@ -146,6 +154,7 @@ export async function sendHubLinkRequest(input: {
   readonly method: "GET" | "POST" | "PUT";
   readonly path: string;
   readonly body?: string;
+  readonly headers?: Readonly<Record<string, string>>;
   readonly now: number;
 }): Promise<HubLinkAnswer> {
   const pinned = input.transport(input.target);
@@ -163,6 +172,7 @@ export async function sendHubLinkRequest(input: {
     const response = await pinned(`${input.target.origin}${input.path}`, {
       method: input.method,
       headers: {
+        ...input.headers,
         [HUB_LINK_HEADER]: header,
         ...(input.body === undefined ? {} : { "content-type": "application/json" }),
       },

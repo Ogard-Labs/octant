@@ -192,7 +192,8 @@ export function createHubLinkRouteHandler(
   };
 }
 
-async function readBody(request: Request): Promise<string | undefined> {
+/** The request body as text, or undefined when it is over the member-link limit or cannot be read. */
+export async function readBody(request: Request): Promise<string | undefined> {
   const declared = Number(request.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return undefined;
   let text: string;
@@ -204,6 +205,6 @@ async function readBody(request: Request): Promise<string | undefined> {
   return Buffer.byteLength(text, "utf8") > MAX_BODY_BYTES ? undefined : text;
 }
 
-function refused(status: number, kind: string): Response {
+export function refused(status: number, kind: string): Response {
   return Response.json({ status: "refused", kind }, { status, headers: NO_STORE });
 }

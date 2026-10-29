@@ -705,6 +705,22 @@ export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
     endpoint,
     "Served to a guest's signed request from the phone app, which builds the path inside the guest client in packages/client-runtime (hubGuestClient.ts); no window script names it. Remove when the checker counts packages/client-runtime as a caller of a host route.",
   ]),
+  ...[
+    "/api/hub/peer/delegations",
+    "/api/hub/peer/delegations/status",
+    "/api/hub/peer/delegations/cancel",
+  ].map((endpoint): [string, string] => [
+    endpoint,
+    "A delegating spoke signs and sends this over the private listener from apps/server (delegatingSpokeService.ts), which builds the path itself; no window or device calls it. Remove when the checker counts apps/server as a caller of its own listener's routes.",
+  ]),
+  ...[
+    "/api/desktop/hub/delegations",
+    "/api/desktop/hub/delegations/read",
+    "/api/desktop/hub/delegations/cancel",
+  ].map((endpoint): [string, string] => [
+    endpoint,
+    "Starts, reads, and cancels a remote child run for one of this spoke's threads. It is the loopback entry point until the agent tool surface carries a target member (docs/design/hub-and-spokes.md, delivery plan slice 6); no window script or desktop bridge operation names it yet. Remove once the agent tool or a window calls it.",
+  ]),
   [
     "/api/desktop/hub/members/held",
     "Lists the members this host holds under Confirm new members. The window reads the same list from the hub status read (apps/web HubSettingsSection), because the desktop bridge's operation list (apps/desktop hubAdministrationControls.ts) does not name this route yet. Remove once the bridge forwards it.",

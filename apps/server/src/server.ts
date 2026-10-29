@@ -1162,6 +1162,7 @@ export function startOctantServer(
       composeHostDiagnostics,
       externalContentRoutes,
       hostControlRoutes,
+      delegationAdministrationRoutes,
       hubAdministrationRoutes,
       localDeviceAdministrationRoutes,
       privateListenerAdministrationRoutes,
@@ -1207,6 +1208,9 @@ export function startOctantServer(
       windowAuthorityStore,
       workAttachments,
       workThreadProjection,
+      workThreadServiceWithWorkflows,
+      workTurnService,
+      agentRunAdmission,
     });
 
     let remoteListenerError: PrivateListenerFailureCode | undefined;
@@ -1279,6 +1283,7 @@ export function startOctantServer(
               return (
                 (await privateListenerAdministrationRoutes(request)) ??
                 (await hubAdministrationRoutes(request)) ??
+                (await delegationAdministrationRoutes(request)) ??
                 (await sshTargetAdministrationRoutes(request)) ??
                 (await providerCredentialRoutes(request)) ??
                 (await localDeviceAdministrationRoutes(request)) ??

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import {
+  AgentRunParentThreadId,
   decodeChatThreadId,
   decodeCodeThreadId,
   decodeImageGenerationScopeId,
@@ -9,6 +10,7 @@ import {
   decodeWorkThreadId,
   LOCAL_HOST_ID,
 } from "@octant/contracts";
+import { Schema } from "effect";
 import { decodeBrowserThreadId } from "@octant/contracts/browser-automation";
 import { managedWorktreeRoot } from "../code/managedWorktreeService";
 import { purgeThreadArtifacts, removeMirrorFiles } from "../persistence/threadArtifactPurge";
@@ -22,6 +24,8 @@ import {
   threadStandingFromMessageQueue,
 } from "../externalContentRoutes";
 import { ExternalContentClearStore } from "../context/externalContentClearStore";
+import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { defaultShellSettings } from "@octant/domain";
 import {
   createRemoteGateway,
@@ -39,6 +43,13 @@ import { createHostControlRouteHandler } from "../hostControlRoutes";
 import { desktopCredentialStore } from "../hostDataMap";
 import { ThreadRetentionService } from "../threadRetentionService";
 import { createLiveHostExportService } from "../hostExportService";
+import { createDelegationAdministrationRouteHandler } from "../hub/delegationAdministrationRoutes";
+import { createDelegationJournal } from "../hub/delegationJournal";
+import { createDelegationStateStore } from "../hub/delegationStateStore";
+import { DelegatingSpokeService } from "../hub/delegatingSpokeService";
+import { PeerDelegationService } from "../hub/peerDelegationService";
+import { createPeerDelegationRouteHandler } from "../hub/peerDelegationRoutes";
+import { createWorkDelegationHost } from "../hub/workDelegationHost";
 import { createHubAdministrationRouteHandler } from "../hub/hubAdministrationRoutes";
 import { createHubLinkRouteHandler } from "../hub/hubLinkRoutes";
 import { createHubOwnerRouteHandler } from "../hub/hubOwnerRoutes";
@@ -92,7 +103,7 @@ export type RemoteDependencies = Pick<
   "options" | "persistence" | "serve" | "startedAt" | "version"
 > &
   Pick<AuthorityWiring, "browserCaptureStore" | "windowAuthorityStore"> &
-  Pick<AgentRunsWiring, "externalContentIngestionStore"> &
+  Pick<AgentRunsWiring, "agentRunAdmission" | "externalContentIngestionStore"> &
   Pick<IntegrationsWiring, "agentMessageService" | "toolEgressRules"> &
   Pick<ComputerUseWiring, "webAssets"> &
   Pick<CodeWiring, "codeAttachments" | "codeProjectAccess" | "workAttachments"> &
@@ -112,7 +123,13 @@ export type RemoteDependencies = Pick<
     | "languageServerApprovals"
     | "remoteServerGrants"
   > &
-  Pick<WorkWiring, "threadExportService" | "threadMessageQueue"> &
+  Pick<
+    WorkWiring,
+    | "threadExportService"
+    | "threadMessageQueue"
+    | "workThreadServiceWithWorkflows"
+    | "workTurnService"
+  > &
   Pick<CanvasWiring, "canvasRoutes" | "canvasPublicShareService"> &
   Pick<AutomationWiring, "pushNotificationTokenStore"> &
   Pick<RoutesWiring, "authenticatedProductDispatch"> &
@@ -120,6 +137,8 @@ export type RemoteDependencies = Pick<
   Pick<FoundationsWiring, "providerRuntimeRegistry"> &
   Pick<SshTargetsWiring, "sshTargetConnections" | "sshTargetStore"> &
   Pick<CodeRuntimeWiring, "codeOperationRuntime">;
+
+const decodeAgentRunParentThreadId = Schema.decodeUnknownSync(AgentRunParentThreadId);
 
 /** A paired device is active until revoked or expired; one this host no longer lists is not. */
 function deviceIsActive(
@@ -134,6 +153,7 @@ function deviceIsActive(
 export function wireRemote(deps: RemoteDependencies) {
   const {
     agentMessageService,
+    agentRunAdmission,
     authenticatedProductDispatch,
     browserCaptureStore,
     canvasPublicShareService,
@@ -143,6 +163,7 @@ export function wireRemote(deps: RemoteDependencies) {
     codeProjectAccess,
     credentialBroker,
     credentialResolver,
+    externalContentIngestionStore,
     generatedImageStore,
     debugConfigurationApprovals,
     debugService,
@@ -164,6 +185,8 @@ export function wireRemote(deps: RemoteDependencies) {
     windowAuthorityStore,
     workAttachments,
     workThreadProjection,
+    workThreadServiceWithWorkflows,
+    workTurnService,
   } = deps;
 
   // The proxy route's grant requests run under the paired device's own scope,
@@ -303,7 +326,10 @@ export function wireRemote(deps: RemoteDependencies) {
         productDispatch: services.productDispatch ?? authenticatedProductDispatch,
         hubLink:
           services.hubLink ??
-          (async (request) => (await hubLinkRoutes(request)) ?? hubOwnerRoutes(request)),
+          (async (request) =>
+            (await hubLinkRoutes(request)) ??
+            (await peerDelegationRoutes(request)) ??
+            hubOwnerRoutes(request)),
         remoteServerGrants: services.remoteServerGrants ?? remoteServerGrantGatewayPort,
         serve: options.remoteServe ?? serve,
         config,
@@ -414,6 +440,103 @@ export function wireRemote(deps: RemoteDependencies) {
     maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   });
   const hubLinkRoutes = createHubLinkRouteHandler({ hub: hubService, spoke: spokeLinkService });
+  // Delegation between spokes: the receiving side starts an ordinary Work
+  // thread under this host's own scope, and the sending side checks this host's
+  // rules for the parent thread before it asks another member.
+  const delegationState = createDelegationStateStore(providerDataDirectory);
+  const recordDelegation = createDelegationJournal({
+    journal: persistence.journal,
+    connection: persistence.connection,
+    hostId: () => String(resolveHubIdentity().hostId),
+    localActorId: OCTANT_LOCAL_ACTOR_ID,
+    uuid: randomUUID,
+    clock: () => new Date().toISOString(),
+  });
+  const peerDelegationRoutes = createPeerDelegationRouteHandler({
+    delegation: new PeerDelegationService({
+      authenticate: (input) => spokeLinkService.authenticatePeer(input),
+      host: createWorkDelegationHost({
+        readProject: (projectId) => persistence.readProject(projectId),
+        threads: {
+          execute: async (scope, command) =>
+            workThreadServiceWithWorkflows.execute(scope, command as never),
+          bootstrap: async (scope) => workThreadServiceWithWorkflows.bootstrap(scope),
+        },
+        turns: {
+          startFirstTurn: async (scope, command, startOptions) =>
+            workTurnService.startFirstTurn(scope, command, startOptions),
+          turns: async (scope, threadId) => workTurnService.turns(scope, threadId),
+          cancelFirstTurn: async (scope, command) =>
+            workTurnService.cancelFirstTurn(scope, command),
+        },
+        scope: ROUTINE_HOST_SCOPE_ID,
+      }),
+      state: delegationState,
+      record: recordDelegation,
+      now: Date.now,
+    }),
+  });
+  const delegatingSpoke = new DelegatingSpokeService({
+    state: delegationState,
+    identity: resolveHubIdentity,
+    target: (memberId) => spokeLinkService.memberTarget(memberId),
+    transport: hubTransport,
+    parent: {
+      check: ({ mode, threadId, windowId }) => {
+        if (agentRunAdmission.settings.current().creationPosture !== "automatic") {
+          return { status: "refused", kind: "subagents-off" };
+        }
+        const parent = agentRunAdmission.authorizeCreation({
+          parentThreadId: decodeAgentRunParentThreadId(threadId),
+          windowId,
+        });
+        if (parent === undefined) return { status: "refused", kind: "parent-unavailable" };
+        if (parent.parentMode !== mode) return { status: "refused", kind: "parent-mode-mismatch" };
+        if (!parent.parentAuthority.subagents || !parent.liveAuthority.subagents) {
+          return { status: "refused", kind: "subagents-not-allowed" };
+        }
+        // A thread that read outside content cannot start helpers, and a
+        // delegated result is outside content.
+        if (
+          readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested
+        ) {
+          return { status: "refused", kind: "parent-tainted" };
+        }
+        const policy = parent.liveAuthority.executionPolicy;
+        return {
+          status: "allowed",
+          ceiling:
+            policy === "full-access"
+              ? "full-access"
+              : policy === "plan"
+                ? "plan"
+                : "approval-gated",
+        };
+      },
+      ingest: ({ threadId, sourceLabel, contentReference, correlationId }) => {
+        const recorded = externalContentIngestionStore.record({
+          threadId,
+          provenance: { origin: "tool-result", sourceLabel },
+          contentReference,
+          correlationId,
+          authorized: true,
+        });
+        return recorded.kind === "recorded" || recorded.kind === "already-recorded"
+          ? recorded.kind
+          : "refused";
+      },
+    },
+    record: recordDelegation,
+    now: Date.now,
+  });
+  // A result arrives without anyone asking for it: the host reads each open
+  // delegation now and then. With none sent, a pass reads nothing.
+  setInterval(() => void delegatingSpoke.trackOpen().catch(() => undefined), 5_000).unref();
+  const delegationAdministrationRoutes = createDelegationAdministrationRouteHandler({
+    desktopBridgeSecret: options.desktopBridgeSecret,
+    windowAuthorityStore,
+    delegation: delegatingSpoke,
+  });
   const hubOwnerRoutes = createHubOwnerRouteHandler({
     hub: hubService,
     spoke: spokeLinkService,
@@ -724,6 +847,7 @@ export function wireRemote(deps: RemoteDependencies) {
   });
   return {
     composeHostDiagnostics,
+    delegationAdministrationRoutes,
     externalContentRoutes,
     hostControlRoutes,
     hubAdministrationRoutes,

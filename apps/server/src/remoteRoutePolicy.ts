@@ -11,7 +11,7 @@ import {
   WORK_ATTACHMENT_MEDIA_TYPES,
 } from "@octant/contracts";
 import { CANVAS_DESIGN_PAGE_POLICY } from "./canvas/canvasDesignPage";
-import { HUB_LINK_HEADER } from "./hub/hubLink";
+import { HUB_LINK_HEADER, HUB_PEER_KEY_HEADER } from "./hub/hubLink";
 import { withAdmissionRelease } from "./remote/remoteAdmissionPolicy";
 
 const DEFAULT_BODY_BYTES = 1_048_576;
@@ -113,6 +113,9 @@ export const REMOTE_HUB_LINK_ROUTE_IDS = {
   guestRoster: "hub-link-guest-roster",
   guest: "hub-link-guest",
   owner: "hub-link-owner",
+  delegate: "hub-link-delegate",
+  delegationStatus: "hub-link-delegation-status",
+  delegationCancel: "hub-link-delegation-cancel",
 } as const;
 
 const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
@@ -279,6 +282,43 @@ const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
     methods: ["POST"],
     allowQuery: false,
     allowedRequestHeaders: ["content-type", HUB_LINK_HEADER],
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: 4_096,
+    maxResponseBytes: 4_096,
+  },
+  // A member's delegation of work to this spoke: start a remote child run,
+  // read its state, cancel it. Signed like the routes above, with the sender's
+  // public key beside the signature, and held to the peer grant this spoke gave
+  // that member.
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.delegate,
+    match: { kind: "exact", path: "/api/hub/peer/delegations" },
+    surface: "pre-auth",
+    methods: ["POST"],
+    allowQuery: false,
+    allowedRequestHeaders: ["content-type", HUB_LINK_HEADER, HUB_PEER_KEY_HEADER],
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: 65_536,
+    maxResponseBytes: 4_096,
+  },
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.delegationStatus,
+    match: { kind: "exact", path: "/api/hub/peer/delegations/status" },
+    surface: "pre-auth",
+    methods: ["POST"],
+    allowQuery: false,
+    allowedRequestHeaders: ["content-type", HUB_LINK_HEADER, HUB_PEER_KEY_HEADER],
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: 4_096,
+    maxResponseBytes: 131_072,
+  },
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.delegationCancel,
+    match: { kind: "exact", path: "/api/hub/peer/delegations/cancel" },
+    surface: "pre-auth",
+    methods: ["POST"],
+    allowQuery: false,
+    allowedRequestHeaders: ["content-type", HUB_LINK_HEADER, HUB_PEER_KEY_HEADER],
     allowedContentTypes: ["application/json"],
     maxBodyBytes: 4_096,
     maxResponseBytes: 4_096,
