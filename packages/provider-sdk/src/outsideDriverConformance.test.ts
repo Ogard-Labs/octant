@@ -9,6 +9,7 @@ import {
   type OutsideDriverConformanceFixture,
 } from "./outsideDriverConformance";
 import type {
+  OutsideDriverHost,
   OutsideDriverImplementation,
   OutsideDriverLineIo,
   serveOutsideDriver,
@@ -178,6 +179,7 @@ const passed = {
   probeReportedAListedModel: true,
   answeredWithASettledResponse: true,
   keptServingAfterACancel: true,
+  keptServingAfterAMidBodyCancel: true,
   keptServingAfterARelease: true,
   everyMessageDecoded: true,
   brokeredCallsStayedOnTheConfiguredOrigin: true,
@@ -438,7 +440,7 @@ describe("outside driver conformance kit", () => {
       ...wellBehaved,
       send: (params, turn) => {
         sends += 1;
-        if (sends === 1) return wellBehaved.send(params, turn);
+        if (sends !== 2) return wellBehaved.send(params, turn);
         cancelledSignal = turn.signal;
         return new Promise(() => undefined);
       },
@@ -467,5 +469,95 @@ describe("outside driver conformance kit", () => {
         fixture(watched, fakeLocalModelServer().fetch, { timeoutMs: 200 }),
       ),
     ).rejects.toThrow("probe was not answered in time");
+  });
+
+  /** A driver whose send reads a brokered body, so a cancel can land in the middle of it. */
+  function readsABody(
+    pick: (tagged: OutsideDriverHost, untagged: OutsideDriverHost) => OutsideDriverHost,
+  ) {
+    const outcome: { error?: unknown; chunks: Array<string> } = { chunks: [] };
+    let untagged: OutsideDriverHost | undefined;
+    const driver: OutsideDriverImplementation = {
+      probe: (probeHost) => {
+        untagged = probeHost;
+        return { models: [{ id: "local-model" }] };
+      },
+      send: async (_params, turn) => {
+        const response = await pick(turn.host, untagged ?? turn.host).http({
+          url: `${baseUrl}chat/completions`,
+          method: "POST",
+          body: "{}",
+        });
+        try {
+          for await (const chunk of response.chunks()) outcome.chunks.push(chunk);
+        } catch (error) {
+          outcome.error = error;
+          throw error;
+        }
+        return { text: outcome.chunks.join(""), toolCalls: [] };
+      },
+    };
+    return { driver, outcome };
+  }
+
+  it("holds a driver to a cancel that lands after the head and the first piece of a brokered body", async () => {
+    const reading = readsABody((tagged) => tagged);
+    const channel = await served(reading.driver);
+    await expect(
+      runOutsideDriverConformance(fixture(channel, fakeLocalModelServer().fetch)),
+    ).resolves.toEqual(passed);
+    expect(reading.outcome.chunks.length).toBeGreaterThan(0);
+    expect(reading.outcome.error).toMatchObject({ category: "interrupted" });
+  });
+
+  it("fails a driver whose brokered call for a send does not name that send", async () => {
+    // The probe's host is tied to no send, so a call made through it from a send is untagged.
+    const reading = readsABody((_tagged, untagged) => untagged);
+    const channel = await served(reading.driver);
+    await expect(
+      runOutsideDriverConformance(fixture(channel, fakeLocalModelServer().fetch)),
+    ).rejects.toThrow("a brokered request made for a send did not name it with requestId");
+  });
+
+  it("fails a driver whose brokered call names a send the host never issued", async () => {
+    const reading = readsABody((tagged) => tagged);
+    const channel = await served(reading.driver);
+    // What a driver that numbers its own sends wrongly would write.
+    const forged: OutsideDriverConformanceChannel = {
+      write: channel.write,
+      onLine: (listener) =>
+        channel.onLine((line) => listener(line.replace(/"requestId":\d+/, '"requestId":999'))),
+    };
+    await expect(
+      runOutsideDriverConformance(fixture(forged, fakeLocalModelServer().fetch)),
+    ).rejects.toThrow("a brokered request named a send the host never issued");
+  });
+
+  it("settles a send's open brokered call as interrupted when the host cancels it, and drops what follows", async () => {
+    const { serveOutsideDriver } = await exampleModules();
+    const reading = readsABody((tagged) => tagged);
+    const channel = inProcessChannel();
+    serveOutsideDriver(reading.driver, channel.driver);
+    const lines: Array<Record<string, unknown>> = [];
+    channel.kit.onLine((line) => lines.push(JSON.parse(line)));
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+    const write = (message: unknown) => channel.kit.write(JSON.stringify(message));
+
+    write({ jsonrpc: "2.0", id: 1, method: "session/send", params: {} });
+    await tick();
+    const asked = lines.find((line) => line.method === "http/request");
+    expect(asked).toMatchObject({ params: { requestId: 1 } });
+    const httpId = asked?.id;
+    write({ jsonrpc: "2.0", id: httpId, result: { status: 200, headers: [] } });
+    write({ jsonrpc: "2.0", method: "http/chunk", params: { httpId, data: "first" } });
+    await tick();
+    write({ jsonrpc: "2.0", method: "session/cancel", params: { requestId: 1 } });
+    await tick();
+    write({ jsonrpc: "2.0", method: "http/chunk", params: { httpId, data: "late" } });
+    write({ jsonrpc: "2.0", method: "http/end", params: { httpId, outcome: "complete" } });
+    await tick();
+
+    expect(reading.outcome.chunks).toEqual(["first"]);
+    expect(reading.outcome.error).toMatchObject({ category: "interrupted" });
   });
 });

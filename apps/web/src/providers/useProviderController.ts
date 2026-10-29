@@ -48,6 +48,7 @@ import { parseClaudeAccountAccent } from "./configuration/claudeAccountValues";
 import { runProviderOAuthCommand } from "./providerOAuthClient";
 import type { ProviderOAuthCommand } from "./ProviderOAuthSignIn";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { providerWithheldReason } from "./providerSettingsPresentation";
 import { useRetainedRecord } from "../polling/useRetainedRecord";
 import { failureMessage } from "../lib/failureMessage";
 import {
@@ -2535,7 +2536,10 @@ function applyResult(
     // changes and enable/disable toggles, but NOT on a plain rename. Mirror
     // that here: only clear the observed state when the configuration or
     // enabled flag actually changed, so a rename does not cause a UI flicker
-    // where the observation disappears.
+    // where the observation disappears. The host's reason a driver is withheld
+    // does not depend on either, and the server keeps it when the instance is
+    // turned off, so it stays too; dropping it would show the plain Off copy
+    // until the next reload.
     const priorInstance = current.instances.find((value) => value.id === result.instance.id);
     const configChanged =
       priorInstance === undefined ||
@@ -2548,7 +2552,11 @@ function applyResult(
         value.id === result.instance.id ? result.instance : value,
       ),
       observedStates: configChanged
-        ? current.observedStates.filter((value) => value.instanceId !== result.instance.id)
+        ? current.observedStates.filter(
+            (value) =>
+              value.instanceId !== result.instance.id ||
+              providerWithheldReason(result.instance, value) !== undefined,
+          )
         : current.observedStates,
     });
   } else if (result.kind === "provider-removed") {

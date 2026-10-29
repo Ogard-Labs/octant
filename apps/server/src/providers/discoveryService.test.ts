@@ -887,6 +887,37 @@ describe("discoveryService", () => {
     expect(snapshot.candidates.map((candidate) => candidate.driverKind)).toEqual(["codex"]);
   });
 
+  it("does not offer fx, or run its binary, even when an fx binary is installed", async () => {
+    const fs = makeFakeFs(
+      new Map([
+        ["/usr/local/bin/codex", { file: true }],
+        ["/usr/local/bin/fx", { file: true }],
+      ]),
+    );
+    const started: string[] = [];
+    const responses = new Map([
+      ["/usr/local/bin/codex --version", { stdout: "codex-cli 0.1.0\n", stderr: "" }],
+      ["/usr/local/bin/codex login status", { stdout: "Logged in", stderr: "" }],
+      ["/usr/local/bin/fx --version", { stdout: "0.0.15\n", stderr: "" }],
+    ]);
+    const fakeExec = makeFakeExec(responses);
+    const service = makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
+      exec: async (file, args, options) => {
+        started.push(file);
+        return fakeExec(file, args, options);
+      },
+      fs,
+      environment: baseEnvironment,
+      now: () => 1753430400000,
+      hostId: "local",
+    });
+
+    const snapshot = await service.scan();
+    expect(snapshot.candidates.map((candidate) => candidate.driverKind)).toEqual(["codex"]);
+    expect(started).not.toContain("/usr/local/bin/fx");
+  });
+
   it("keeps a Claude auth probe off an isolated account overlay", async () => {
     const previousPath = process.env.PATH;
     const previousHome = process.env.HOME;

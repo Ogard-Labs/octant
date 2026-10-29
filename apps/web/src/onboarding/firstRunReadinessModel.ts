@@ -7,6 +7,7 @@ import type {
 } from "@octant/contracts";
 import { providerCanServeAnyModel } from "@octant/domain";
 import { thisComputerName } from "../platform";
+import { providerWithheldReason } from "../providers/providerSettingsPresentation";
 
 /**
  * How one configured provider looks to a user completing first run.
@@ -140,7 +141,7 @@ export function describeProviderReadiness(
   hostPlatform: HostPlatform | undefined,
 ): FirstRunProviderReadiness {
   const state = resolveProviderState(instance, observed);
-  const hostMessage = observed?.message;
+  const hostMessage = providerWithheldReason(instance, observed) ?? observed?.message;
   return {
     instanceId: instance.id,
     displayName: instance.displayName,
