@@ -9,6 +9,7 @@ import {
   WORK_ATTACHMENT_MEDIA_TYPES,
 } from "@octant/contracts";
 import { CANVAS_DESIGN_PAGE_POLICY } from "./canvas/canvasDesignPage";
+import { HUB_LINK_HEADER } from "./hub/hubLink";
 import { withAdmissionRelease } from "./remote/remoteAdmissionPolicy";
 
 const DEFAULT_BODY_BYTES = 1_048_576;
@@ -105,6 +106,13 @@ export const REMOTE_PROTOCOL_ROUTE_IDS = {
   pairing: "remote-protocol-pairing",
   pairingStatus: "remote-protocol-pairing-status",
   negotiate: "remote-protocol-negotiate",
+} as const;
+
+export const REMOTE_HUB_LINK_ROUTE_IDS = {
+  join: "hub-link-join",
+  leave: "hub-link-leave",
+  roster: "hub-link-roster",
+  status: "hub-link-status",
 } as const;
 
 const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
@@ -208,6 +216,52 @@ const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
     allowedContentTypes: ["application/json"],
     maxBodyBytes: 8_192,
     maxResponseBytes: 8_192,
+  },
+  // Member-to-member requests of a hub and its spokes. They carry no paired
+  // device's session: each is signed with the sender's identity key, and the
+  // handler answers only a sender it already trusts, within what the receiving
+  // host's hub role or hub grant allows.
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.join,
+    match: { kind: "exact", path: "/api/hub/join" },
+    surface: "pre-auth",
+    methods: ["POST"],
+    allowQuery: false,
+    allowedRequestHeaders: ["content-type", HUB_LINK_HEADER],
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: 16_384,
+    maxResponseBytes: 32_768,
+  },
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.leave,
+    match: { kind: "exact", path: "/api/hub/leave" },
+    surface: "pre-auth",
+    methods: ["POST"],
+    allowQuery: false,
+    allowedRequestHeaders: ["content-type", HUB_LINK_HEADER],
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: 4_096,
+    maxResponseBytes: 4_096,
+  },
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.roster,
+    match: { kind: "exact", path: "/api/hub/roster" },
+    surface: "pre-auth",
+    methods: ["PUT"],
+    allowQuery: false,
+    allowedRequestHeaders: ["content-type", HUB_LINK_HEADER],
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: 65_536,
+    maxResponseBytes: 4_096,
+  },
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.status,
+    match: { kind: "exact", path: "/api/hub/status" },
+    surface: "pre-auth",
+    methods: ["GET"],
+    allowQuery: false,
+    allowedRequestHeaders: [HUB_LINK_HEADER],
+    maxResponseBytes: 4_096,
   },
 ];
 

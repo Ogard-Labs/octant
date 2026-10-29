@@ -14,10 +14,13 @@ import {
 } from "@octant/contracts";
 import {
   admitNewMember,
+  authorizeHubRequest,
   authorizePeer,
   clampDelegation,
   decideRosterReplacement,
+  defaultHubGrant,
   honorOwner,
+  hubRosterSigningPayload,
   mergeStandInMembership,
   reconcileHeldGrants,
 } from "./hubAndSpokesPolicy";
@@ -543,5 +546,70 @@ describe("honorOwner", () => {
         identityKeyFingerprint: key(4),
       }),
     ).toEqual({ status: "not-owner", kind: "not-in-roster" });
+  });
+});
+
+describe("what the hub may use of a spoke's hub grant", () => {
+  it("allows an item the spoke ticked and nothing else", () => {
+    const grant = defaultHubGrant();
+
+    expect(authorizeHubRequest({ grant, item: "roster" })).toEqual({ status: "allowed" });
+    expect(authorizeHubRequest({ grant, item: "status" })).toEqual({
+      status: "refused",
+      kind: "item-not-granted",
+    });
+    expect(authorizeHubRequest({ grant, item: "act" })).toEqual({
+      status: "refused",
+      kind: "item-not-granted",
+    });
+  });
+
+  it("refuses everything when the spoke holds no hub grant", () => {
+    expect(authorizeHubRequest({ grant: undefined, item: "roster" })).toEqual({
+      status: "refused",
+      kind: "no-hub-grant",
+    });
+  });
+
+  it("starts a new grant with the roster, Introduce, and Owners ticked and Projects unnamed", () => {
+    expect(defaultHubGrant()).toEqual({
+      items: ["roster", "introduce", "owners"],
+      actProjects: [],
+    });
+  });
+});
+
+describe("the text a roster signature covers", () => {
+  it("is the same whatever order a decoder produced the fields in", () => {
+    const body = roster(3, baseMembers);
+    const reordered: HubRoster = {
+      failoverAfterSeconds: body.failoverAfterSeconds,
+      standbyOrder: body.standbyOrder,
+      members: body.members.map((entry) => ({
+        owner: entry.owner,
+        addresses: entry.addresses,
+        privateNames: entry.privateNames,
+        listenerPin: entry.listenerPin,
+        identityKeyFingerprint: entry.identityKeyFingerprint,
+        role: entry.role,
+        name: entry.name,
+        memberId: entry.memberId,
+      })),
+      sequence: body.sequence,
+    };
+
+    expect(hubRosterSigningPayload(reordered)).toBe(hubRosterSigningPayload(body));
+  });
+
+  it("changes when any member, role, or the sequence changes", () => {
+    const body = roster(3, baseMembers);
+
+    expect(hubRosterSigningPayload(roster(4, baseMembers))).not.toBe(hubRosterSigningPayload(body));
+    expect(hubRosterSigningPayload(roster(3, baseMembers.slice(0, 3)))).not.toBe(
+      hubRosterSigningPayload(body),
+    );
+    expect(
+      hubRosterSigningPayload(roster(3, [...baseMembers.slice(0, 3), member(4, "spoke")])),
+    ).not.toBe(hubRosterSigningPayload(body));
   });
 });

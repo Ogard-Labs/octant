@@ -112,19 +112,7 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "packages/contracts/src/hostedRelay.ts",
     "Hosted relay frame and grant schemas, reached only through hostedRelayProtocol.ts and hostedRelayPathPolicy.ts until the relay service and host connector decode frames with them. Remove once those policies' entries are removed.",
   ],
-  [
-    "packages/domain/src/hubAndSpokesPolicy.ts",
-    "Peer authorization, delegation clamp, roster replacement, stand-in merge, held-grant reconciliation, new-member admission, and owner honoring, delivered as the contracts-and-policy slice of docs/design/hub-and-spokes.md before the hub role and joining routes that call it. Remove once the server's hub routes consult it.",
-  ],
-  [
-    "packages/contracts/src/hubAndSpokes.ts",
-    "Hub and spokes roster, grant, confirmation, and delegation schemas, reached by product code only through the audit principal union and hubAndSpokesPolicy.ts until the hub role and joining routes decode them. Remove once that policy's entry is removed.",
-  ],
   // ── Reached only through another island, so an island with it ──
-  [
-    "packages/contracts/src/auditEvents.ts",
-    "Audit event schemas whose only consumer is evaluateEscapeSuite.ts. Remove once a product runner reaches the escape suite or the suite is retired.",
-  ],
   [
     "packages/domain/src/auditPolicy.ts",
     "Audit redaction assertions whose only consumer is evaluateEscapeSuite.ts. Remove once a product runner reaches the escape suite or the suite is retired.",
@@ -699,6 +687,12 @@ export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
     "/api/code/language/read",
     "Language services' diagnostics and definition reads, served by the host since 2026-10-26 ahead of the editor that calls them (docs/design/language-services.md, delivery plan slice 3). Remove once the Code editor shows diagnostics and jumps to definitions.",
   ],
+  ...["/api/hub/join", "/api/hub/leave", "/api/hub/roster", "/api/hub/status"].map(
+    (endpoint): [string, string] => [
+      endpoint,
+      "Member-to-member request that a hub or spoke signs and sends over the private listener from apps/server (hubService.ts, spokeLinkService.ts), which builds the path itself; no window or device calls it. Remove when the checker counts apps/server as a caller of its own listener's routes.",
+    ],
+  ),
   [
     "/api/v1/shares",
     "Served by the public Canvas share service (the octant-webapp repository) and called by the host's share-service port in apps/server, which builds the address from the configured service URL; no window or device calls it. Remove when the checker counts apps/server as a caller of an external service's routes.",

@@ -157,6 +157,7 @@ import { OpenInApplicationSettings } from "../settings/OpenInApplicationSettings
 import { ProviderUsageLimitsPanel } from "../usage/ProviderUsageLimitsPanel";
 import {
   pairedComputersOf,
+  hubAdministrationOf,
   remoteAccessAdministrationOf,
   sshTargetAdministrationOf,
   type OctantHostBridge,
@@ -1165,6 +1166,7 @@ function ActiveSectionContent({
       return administration !== undefined ? (
         <RemoteAccessSettingsSection
           bridge={administration}
+          hub={hubAdministrationOf(props.hostBridge)}
           pairedComputers={pairedComputersOf(props.hostBridge)}
         />
       ) : (

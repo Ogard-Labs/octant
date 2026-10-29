@@ -39,8 +39,19 @@ import { createHostControlRouteHandler } from "../hostControlRoutes";
 import { desktopCredentialStore } from "../hostDataMap";
 import { ThreadRetentionService } from "../threadRetentionService";
 import { createLiveHostExportService } from "../hostExportService";
+import { createHubAdministrationRouteHandler } from "../hub/hubAdministrationRoutes";
+import { createHubLinkRouteHandler } from "../hub/hubLinkRoutes";
+import { createHubMembershipJournal } from "../hub/hubMembershipJournal";
+import { HubService } from "../hub/hubService";
+import { createHubStateStore } from "../hub/hubStateStore";
+import { createPinnedHubTransport } from "../hub/pinnedHubTransport";
+import { createRosterSigningKeyStore } from "../hub/rosterSigningKey";
+import { SpokeLinkService } from "../hub/spokeLinkService";
 import { createPrivateListenerLifecycleController } from "../remote/privateListenerLifecycleController";
-import { resolvePrivateListenerHostIdentity } from "../remote/privateListenerHostIdentity";
+import {
+  resolvePrivateListenerHostIdentity,
+  type PrivateListenerHostIdentity,
+} from "../remote/privateListenerHostIdentity";
 import { createPrivateListenerAdministrationRouteHandler } from "../remote/privateListenerAdministrationRoutes";
 import { createPrivateListenerSetting } from "../remote/privateListenerSetting";
 import { createSelfMadeListenerCertificateStore } from "../remote/selfMadeListenerCertificate";
@@ -269,6 +280,7 @@ export function wireRemote(deps: RemoteDependencies) {
       const gateway = createRemoteGateway({
         ...services,
         productDispatch: services.productDispatch ?? authenticatedProductDispatch,
+        hubLink: services.hubLink ?? ((request) => hubLinkRoutes(request)),
         remoteServerGrants: services.remoteServerGrants ?? remoteServerGrantGatewayPort,
         serve: options.remoteServe ?? serve,
         config,
@@ -280,6 +292,72 @@ export function wireRemote(deps: RemoteDependencies) {
       dataDirectory: providerDataDirectory,
     }),
   });
+  // The hub role and this host's hub membership. The private listener is where
+  // members reach each other; the routes below are the loopback administration
+  // of both and the signed member-to-member routes the gateway serves.
+  let hostIdentity: PrivateListenerHostIdentity | undefined;
+  const resolveHubIdentity = (): PrivateListenerHostIdentity => {
+    hostIdentity ??= resolvePrivateListenerHostIdentity({
+      connection: persistence.connection,
+      dataDirectory: providerDataDirectory,
+    });
+    return hostIdentity;
+  };
+  const hubStateStore = createHubStateStore(providerDataDirectory);
+  const hubTransport = createPinnedHubTransport();
+  const recordHubMembership = createHubMembershipJournal({
+    journal: persistence.journal,
+    connection: persistence.connection,
+    hostId: () => String(resolveHubIdentity().hostId),
+    localActorId: OCTANT_LOCAL_ACTOR_ID,
+    uuid: randomUUID,
+    clock: () => new Date().toISOString(),
+  });
+  const hubService = new HubService({
+    state: hubStateStore,
+    rosterKey: createRosterSigningKeyStore(providerDataDirectory),
+    identity: resolveHubIdentity,
+    listener: () => privateListenerController.status(),
+    pairing: () => {
+      const gateway = currentRemoteGateway;
+      const administration = gateway?.localDeviceAdministration();
+      if (gateway === undefined || administration === undefined) return undefined;
+      return {
+        createTicket: (sourceClass) => {
+          const ticket = administration.createPairingTicket({ sourceClass });
+          return {
+            ticketId: String(ticket.ticketId),
+            ticketProof: ticket.ticketProof,
+            expiresAt: ticket.expiresAt,
+          };
+        },
+        approvedDeviceFor: (ticket) => gateway.approvedPairingDevice(ticket),
+        revokeDevice: (deviceId) => {
+          administration.revokeDevice({ deviceId });
+        },
+      };
+    },
+    transport: hubTransport,
+    record: recordHubMembership,
+    now: Date.now,
+  });
+  const spokeLinkService = new SpokeLinkService({
+    state: hubStateStore,
+    identity: resolveHubIdentity,
+    listener: () => privateListenerController.status(),
+    transport: hubTransport,
+    record: recordHubMembership,
+    serverBuildVersion: version,
+    now: Date.now,
+  });
+  const hubAdministrationRoutes = createHubAdministrationRouteHandler({
+    desktopBridgeSecret: options.desktopBridgeSecret,
+    windowAuthorityStore,
+    hub: hubService,
+    spoke: spokeLinkService,
+    maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
+  });
+  const hubLinkRoutes = createHubLinkRouteHandler({ hub: hubService, spoke: spokeLinkService });
   const localDeviceAdministrationRoutes = createLocalDeviceAdministrationRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
     windowAuthorityStore,
@@ -601,6 +679,7 @@ export function wireRemote(deps: RemoteDependencies) {
     composeHostDiagnostics,
     externalContentRoutes,
     hostControlRoutes,
+    hubAdministrationRoutes,
     localDeviceAdministrationRoutes,
     privateListenerAdministrationRoutes,
     privateListenerController,

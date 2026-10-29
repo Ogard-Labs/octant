@@ -37,6 +37,7 @@ import {
   createRemoteRouteHandler,
   createRemoteRoutePolicy,
   REMOTE_CANVAS_DESIGN_PAGE_ROUTE_ID,
+  REMOTE_HUB_LINK_ROUTE_IDS,
   REMOTE_PROTOCOL_ROUTE_IDS,
   REMOTE_SERVER_PROXY_RELAY_MAX_BODY_BYTES,
   type RemoteRouteDefinition,
@@ -98,6 +99,8 @@ const TRUST_ISSUING_PRE_AUTH_ROUTE_IDS: ReadonlySet<string> = new Set([
   REMOTE_AUTH_ROUTE_IDS.serverProxySession,
 ]);
 
+const HUB_LINK_ROUTE_IDS: ReadonlySet<string> = new Set(Object.values(REMOTE_HUB_LINK_ROUTE_IDS));
+
 /**
  * How often a ready gateway ends proxy sessions past their expiry, closing their
  * grants, and removes approved devices whose pairing window never finished.
@@ -147,6 +150,11 @@ export interface RemoteGatewayServices {
    * Undefined answers not found.
    */
   readonly designPage?: (request: Request) => Promise<Response | undefined>;
+  /**
+   * Member-to-member requests of a hub and its spokes. Each is signed with the
+   * sender's identity key and judged by the handler; undefined answers not found.
+   */
+  readonly hubLink?: (request: Request) => Promise<Response | undefined>;
   readonly serve: Serve;
   readonly now?: () => number;
   readonly uuid?: () => string;
@@ -202,6 +210,14 @@ export interface RemoteGateway {
   readonly listener: () => PrivateListener | undefined;
   /** Local packaged-host administration over the loopback desktop bridge. */
   readonly localDeviceAdministration: () => LocalDeviceAdministrationPort | undefined;
+  /**
+   * The device a pairing ticket made once the person approved it, for a ticket
+   * whose proof matches. A hub reads it to tie a joining member to that approval.
+   */
+  readonly approvedPairingDevice: (ticket: {
+    readonly ticketId: string;
+    readonly ticketProof: string;
+  }) => string | undefined;
 }
 
 /**
@@ -271,6 +287,7 @@ interface GatewayServices {
     readonly ticketId: string;
     readonly ticketProof: string;
   }) => boolean;
+  readonly approvedPairingDevice: RemoteGateway["approvedPairingDevice"];
 }
 
 interface RemoteCredentialInvalidationResult {
@@ -429,6 +446,7 @@ export function createRemoteGateway(options: RemoteGatewayOptions): RemoteGatewa
     restart,
     listener: () => listener,
     localDeviceAdministration: () => generation.services.localDeviceAdministration,
+    approvedPairingDevice: (ticket) => generation.services.approvedPairingDevice(ticket),
   };
 }
 
@@ -722,7 +740,9 @@ function assembleServices(
     preAuth: async (request, route, facts) =>
       route.id === REMOTE_CANVAS_DESIGN_PAGE_ROUTE_ID
         ? options.designPage?.(request)
-        : handlePreAuthRoute(request, route, facts, protocol, auth, clockPosture),
+        : HUB_LINK_ROUTE_IDS.has(route.id)
+          ? options.hubLink?.(request)
+          : handlePreAuthRoute(request, route, facts, protocol, auth, clockPosture),
     authenticatedProduct: async (request, route, facts) =>
       handleAuthenticatedRoute(request, route, facts, auth),
     hasServerProxySession: (request) => auth.hasServerProxySession(request),
@@ -813,6 +833,10 @@ function assembleServices(
         });
       }),
     pairingTicketIsLive: (ticket) => lifecycle.isLiveTicket(ticket),
+    approvedPairingDevice: (ticket) => {
+      const status = lifecycle.ticketStatus(ticket);
+      return status.status === "approved" ? String(status.deviceId) : undefined;
+    },
   };
 }
 

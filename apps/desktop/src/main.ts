@@ -237,6 +237,11 @@ import {
   type SshTargetControlRuntime,
 } from "./sshTargetControls";
 import {
+  HubAdministrationControlFailure,
+  sendHubAdministrationOperation,
+  type HubAdministrationControlRuntime,
+} from "./hubAdministrationControls";
+import {
   AppStoreConnectKeyControlFailure,
   sendAppStoreConnectKeyOperation,
   type AppStoreConnectKeyControlRuntime,
@@ -505,6 +510,36 @@ export function installPrivateListenerIpcHandlers(options: {
   options.handle(IPC_CHANNELS.privateListenerDisable, (event) =>
     run(event, (service) => service.disable(), "Octant could not disable the private listener."),
   );
+}
+
+/**
+ * Settings › Hub: an owned window's request goes to the host's loopback hub
+ * administration route it names, with that window's own capability.
+ */
+export function installHubAdministrationIpcHandlers(options: {
+  readonly handle: (
+    channel: string,
+    handler: (event: unknown, ...args: readonly unknown[]) => unknown,
+  ) => void;
+  readonly runtimeFor: (event: unknown) => HubAdministrationControlRuntime;
+}): void {
+  options.handle(IPC_CHANNELS.hubAdministrationRequest, async (event, operation, body) => {
+    let runtime: HubAdministrationControlRuntime;
+    try {
+      runtime = options.runtimeFor(event);
+    } catch {
+      throw new Error("Octant rejected an unauthorized hub request.");
+    }
+    try {
+      return await sendHubAdministrationOperation(runtime, operation, body);
+    } catch (error) {
+      throw new Error(
+        error instanceof HubAdministrationControlFailure
+          ? error.message
+          : "Octant hub controls are unavailable.",
+      );
+    }
+  });
 }
 
 export function installRemoteDeviceIpcHandlers(options: {
@@ -3016,6 +3051,21 @@ function installIpcHandlers(): void {
       const context = ownedWindowContext(event as IpcMainInvokeEvent);
       if (activeServerUrl === undefined) {
         throw new SshTargetControlFailure("Octant SSH target controls are unavailable.");
+      }
+      return {
+        serverUrl: activeServerUrl,
+        desktopBridgeSecret,
+        windowCapability: context.capability,
+        fetch: globalThis.fetch,
+      };
+    },
+  });
+  installHubAdministrationIpcHandlers({
+    handle: (channel, handler) => ipcMain.handle(channel, handler),
+    runtimeFor: (event) => {
+      const context = ownedWindowContext(event as IpcMainInvokeEvent);
+      if (activeServerUrl === undefined) {
+        throw new HubAdministrationControlFailure("Octant hub controls are unavailable.");
       }
       return {
         serverUrl: activeServerUrl,

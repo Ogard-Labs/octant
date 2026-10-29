@@ -268,6 +268,7 @@ describe("desktop preload bridge", () => {
       "getPrivateListenerStatus",
       "getRemoteDeviceInventory",
       "getRemoteHostIdentityRecovery",
+      "hubAdministrationRequest",
       "initialProjectTarget",
       "installAppUpdate",
       "listOpenInApplications",

@@ -70,6 +70,7 @@ export * from "./hostDataMap";
 export * from "./hostExport";
 export * from "./remoteAccess";
 export * from "./hubAndSpokes";
+export * from "./hubMembership";
 export * from "./remoteRequestProof";
 export * from "./remotePushNotifications";
 export * from "./launchSession";

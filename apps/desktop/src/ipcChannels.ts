@@ -95,6 +95,7 @@ export const DESKTOP_IPC_CHANNELS = {
   remoteDeviceRevokeAll: "octant:remote-device:revoke-all",
   remoteDeviceReconcileExpired: "octant:remote-device:reconcile-expired",
   sshTargetRequest: "octant:ssh-targets:request",
+  hubAdministrationRequest: "octant:hub-administration:request",
   appStoreConnectKeyRequest: "octant:app-store-connect-key:request",
   remoteHostIdentityStatus: "octant:remote-host-identity:status",
   remoteHostIdentityRotate: "octant:remote-host-identity:rotate",
