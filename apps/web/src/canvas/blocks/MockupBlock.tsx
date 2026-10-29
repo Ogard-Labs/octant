@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { MessageSquare } from "lucide-react";
 import {
   Bell,
   Calendar,
@@ -93,6 +94,16 @@ export type Callouts = ReadonlyMap<string, number>;
 export type MockupHotspots = ReadonlyMap<string, () => void>;
 
 /**
+ * Comment markers on a mockup's nodes: where the open threads are, and what
+ * opens the block's comment drawer. The marker is the table row's — a reader
+ * sees where the threads are before the drawer opens.
+ */
+export interface MockupNodeComments {
+  readonly openCounts: ReadonlyMap<string, number>;
+  readonly onOpen: () => void;
+}
+
+/**
  * One frame of a mockup: the device chrome and the screen tree of a single
  * variant. The block's own board draws one per variant; a flow board draws
  * the one variant a flow screen names, from the same piece.
@@ -103,6 +114,7 @@ export function MockupFrame({
   callouts,
   deviceDetail,
   hotspots,
+  nodeComments,
 }: {
   readonly block: CanvasMockupBlock;
   readonly frame: CanvasMockupFrame;
@@ -111,6 +123,8 @@ export function MockupFrame({
   readonly deviceDetail: string;
   /** The flow's named controls, made navigable on a click-through surface. */
   readonly hotspots?: MockupHotspots;
+  /** Where the open comment threads sit, drawn as a marker per node. */
+  readonly nodeComments?: MockupNodeComments;
 }) {
   return (
     <div className="canvas-mockup__frame" data-device={block.device} style={frameStyle(block)}>
@@ -133,6 +147,7 @@ export function MockupFrame({
               callouts={callouts}
               key={String(branch.node.nodeId)}
               {...(hotspots === undefined ? {} : { hotspots })}
+              {...(nodeComments === undefined ? {} : { nodeComments })}
             />
           ))}
         </ul>
@@ -154,7 +169,13 @@ function frameStyle(block: CanvasMockupBlock): CSSProperties | undefined {
   } as CSSProperties;
 }
 
-export function MockupBlock({ block }: { readonly block: CanvasMockupBlock }) {
+export function MockupBlock({
+  block,
+  nodeComments,
+}: {
+  readonly block: CanvasMockupBlock;
+  readonly nodeComments?: MockupNodeComments;
+}) {
   const fidelity = block.fidelity ?? "wireframe";
   const callouts = canvasMockupCallouts(block);
   const labels = new Map(block.nodes.map((node) => [String(node.nodeId), node.label]));
@@ -183,6 +204,7 @@ export function MockupBlock({ block }: { readonly block: CanvasMockupBlock }) {
                 frame={frame}
                 callouts={callouts}
                 deviceDetail={deviceDetail}
+                {...(nodeComments === undefined ? {} : { nodeComments })}
               />
             </figure>
           ))}
@@ -248,13 +270,30 @@ function MockupItem({
   branch,
   callouts,
   hotspots,
+  nodeComments,
 }: {
   readonly branch: CanvasMockupBranch;
   readonly callouts: Callouts;
   readonly hotspots?: MockupHotspots;
+  readonly nodeComments?: MockupNodeComments;
 }) {
   const { node } = branch;
   const hotspot = hotspots?.get(String(node.nodeId));
+  const openCount = nodeComments?.openCounts.get(String(node.nodeId)) ?? 0;
+  const marker =
+    nodeComments === undefined || openCount === 0 ? null : (
+      <OctantButton
+        aria-label={`${String(openCount)} open ${openCount === 1 ? "comment" : "comments"} on ${node.label}`}
+        className="canvas-block__row-comment-marker"
+        data-has-comments="true"
+        onClick={nodeComments.onOpen}
+        type="button"
+        variant="bare"
+      >
+        <MessageSquare aria-hidden="true" size={12} strokeWidth={1.8} />
+        <span>{String(openCount)}</span>
+      </OctantButton>
+    );
   const callout = callouts.get(String(node.nodeId));
   const common = {
     role: "treeitem",
@@ -271,10 +310,12 @@ function MockupItem({
             <CalloutMark number={callout} />
           </span>
         )}
+        {marker}
         <WindowBody
           branches={branch.children}
           callouts={callouts}
           {...(hotspots === undefined ? {} : { hotspots })}
+          {...(nodeComments === undefined ? {} : { nodeComments })}
         />
       </li>
     );
@@ -287,10 +328,12 @@ function MockupItem({
             <CalloutMark number={callout} />
             <span className="canvas-mockup__modal-title">{node.label}</span>
           </span>
+          {marker}
           <MockupGroup
             branches={branch.children}
             callouts={callouts}
             {...(hotspots === undefined ? {} : { hotspots })}
+            {...(nodeComments === undefined ? {} : { nodeComments })}
           />
         </div>
       </li>
@@ -329,10 +372,12 @@ function MockupItem({
           {node.label}
         </OctantButton>
       )}
+      {marker}
       <MockupGroup
         branches={panel}
         callouts={callouts}
         {...(hotspots === undefined ? {} : { hotspots })}
+        {...(nodeComments === undefined ? {} : { nodeComments })}
       />
     </li>
   );
@@ -347,10 +392,12 @@ function WindowBody({
   branches,
   callouts,
   hotspots,
+  nodeComments,
 }: {
   readonly branches: ReadonlyArray<CanvasMockupBranch>;
   readonly callouts: Callouts;
   readonly hotspots?: MockupHotspots;
+  readonly nodeComments?: MockupNodeComments;
 }) {
   const header = branches.filter((branch) => branch.node.component === "header");
   const sidebar = branches.filter((branch) => branch.node.component === "sidebar");
@@ -365,6 +412,7 @@ function WindowBody({
             branches={header}
             callouts={callouts}
             {...(hotspots === undefined ? {} : { hotspots })}
+            {...(nodeComments === undefined ? {} : { nodeComments })}
           />
         </div>
       )}
@@ -375,6 +423,7 @@ function WindowBody({
               branches={sidebar}
               callouts={callouts}
               {...(hotspots === undefined ? {} : { hotspots })}
+              {...(nodeComments === undefined ? {} : { nodeComments })}
             />
           </div>
         )}
@@ -383,6 +432,7 @@ function WindowBody({
             branches={main}
             callouts={callouts}
             {...(hotspots === undefined ? {} : { hotspots })}
+            {...(nodeComments === undefined ? {} : { nodeComments })}
           />
         </div>
       </div>
@@ -394,10 +444,12 @@ function MockupGroup({
   branches,
   callouts,
   hotspots,
+  nodeComments,
 }: {
   readonly branches: ReadonlyArray<CanvasMockupBranch>;
   readonly callouts: Callouts;
   readonly hotspots?: MockupHotspots;
+  readonly nodeComments?: MockupNodeComments;
 }) {
   if (branches.length === 0) return null;
   return (
@@ -408,6 +460,7 @@ function MockupGroup({
           callouts={callouts}
           key={String(branch.node.nodeId)}
           {...(hotspots === undefined ? {} : { hotspots })}
+          {...(nodeComments === undefined ? {} : { nodeComments })}
         />
       ))}
     </ul>

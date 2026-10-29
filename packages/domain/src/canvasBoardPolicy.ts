@@ -28,12 +28,15 @@ import {
   decodeCanvasComment,
   decodeCanvasCommentCommand,
   decodeCanvasCommentReply,
+  decodeCanvasDeckProposeCommand,
   decodeCanvasDiagramLayoutReviseCommand,
   decodeCanvasPlanTaskReviseCommand,
+  type CanvasDeckProposeCommand,
 } from "@octant/contracts/canvas-board";
-import { decodeCanvasVersionId } from "@octant/contracts/canvas";
+import { proposeCanvasDeck } from "./canvasDeckProposal";
+import { CANVAS_SCHEMA_VERSION, decodeCanvasVersionId } from "@octant/contracts/canvas";
 import type { UtcTimestamp } from "@octant/contracts/events";
-import { validateCanvasDefinition } from "./canvasPolicy";
+import { CanvasPolicyRejected, validateCanvasDefinition } from "./canvasPolicy";
 
 export type CanvasBoardRejectionCode =
   | "malformed-request"
@@ -50,7 +53,8 @@ export type CanvasBoardRejectionCode =
   | "unknown-node"
   | "missing-position"
   | "not-a-plan"
-  | "unknown-task";
+  | "unknown-task"
+  | "nothing-to-present";
 
 export interface CanvasBoardRejected {
   readonly kind: "rejected";
@@ -601,6 +605,90 @@ export function admitCanvasPlanTaskRevision(
     decodeCanvasVersion(next);
   } catch {
     return reject("malformed-request", "Canvas plan task revision produced an invalid version.");
+  }
+  return { kind: "accepted", next };
+}
+
+/**
+ * Record a person's one-click deck proposal as a new immutable version: the
+ * pure proposer derives the deck from the document's own screens and
+ * readings, the deck's block id is made unique among the document's blocks,
+ * and the whole definition revalidates, so the proposal journals only what
+ * the person could have authored by hand.
+ */
+export function admitCanvasDeckProposal(
+  input: unknown,
+  current: CanvasVersion,
+  nextVersionId: unknown,
+  now: UtcTimestamp,
+): CanvasDiagramLayoutRevisionAdmitResult {
+  let command: CanvasDeckProposeCommand;
+  try {
+    command = decodeCanvasDeckProposeCommand(input);
+  } catch {
+    return reject("malformed-request", "Canvas deck proposal is malformed.");
+  }
+  if (!isUserOrAgent(command.actor)) {
+    return reject("unauthorized", "Canvas deck proposal must be authored by a user or agent.");
+  }
+  if (command.expectedSequence !== current.sequence) {
+    return reject("stale-version", "Canvas deck proposal targets a stale Canvas sequence.");
+  }
+  let decodedNextVersionId: ReturnType<typeof decodeCanvasVersionId>;
+  try {
+    decodedNextVersionId = decodeCanvasVersionId(nextVersionId);
+  } catch {
+    return reject("malformed-request", "Canvas deck proposal version id is invalid.");
+  }
+  if (
+    String(command.canvasId) !== String(current.canvasId) ||
+    String(command.versionId) !== String(decodedNextVersionId) ||
+    String(decodedNextVersionId) === String(current.versionId)
+  ) {
+    return reject("malformed-request", "Canvas deck proposal targets the wrong version.");
+  }
+  const deck = proposeCanvasDeck(current.definition);
+  if (deck === undefined) {
+    return reject(
+      "nothing-to-present",
+      "This Canvas has too little to present: a deck needs at least two screens or readings that nothing else already places.",
+    );
+  }
+  // The proposer already chose a block id the document has not taken and
+  // kept to the deck's budgets; the whole definition revalidates, so the
+  // proposal journals only what the person could have written by hand.
+  const { omitted: _omitted, ...proposed } = deck;
+  let validatedDefinition: typeof current.definition;
+  try {
+    // A deck exists from its own schema version on, so a document written
+    // before it is declared at the current version once it holds one.
+    validatedDefinition = validateCanvasDefinition({
+      ...current.definition,
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      blocks: [...current.definition.blocks, { schemaVersion: CANVAS_SCHEMA_VERSION, ...proposed }],
+    });
+  } catch (error) {
+    if (error instanceof CanvasPolicyRejected && error.code === "payload-budget-exceeded") {
+      return reject("oversized-payload", error.message);
+    }
+    return reject(
+      "malformed-request",
+      error instanceof Error ? error.message : "Canvas deck proposal failed validation.",
+    );
+  }
+  const next: CanvasVersion = {
+    schemaVersion: current.schemaVersion,
+    canvasId: current.canvasId,
+    versionId: decodedNextVersionId,
+    sequence: current.sequence + 1,
+    definition: validatedDefinition,
+    createdBy: command.actor,
+    createdAt: now,
+  };
+  try {
+    decodeCanvasVersion(next);
+  } catch {
+    return reject("malformed-request", "Canvas deck proposal produced an invalid version.");
   }
   return { kind: "accepted", next };
 }

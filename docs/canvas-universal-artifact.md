@@ -862,3 +862,7 @@ governs over any number written earlier.
   own literal list. Share version gates stay a separate filter on the share
   document. The `app-flow` and `data-deck` seed fixtures were added. Delivered
   for review as #1843.
+- 2026-10-28: The TSX handoff control in the export menu, the one-click deck
+  proposal (command, policy, service, route, client, menu), per-node comment
+  markers on a mockup, and the deck picture export (one PNG or PDF page per
+  slide). Delivered for review as #1845.

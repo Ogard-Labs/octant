@@ -526,7 +526,7 @@ function readableMockupNode(node: CanvasMockupNode): CanvasMockupNode {
   };
 }
 
-function readableMockup(
+export function readableMockup(
   block: Extract<CanvasBlock, { readonly kind: "mockup" }>,
 ): Extract<CanvasBlock, { readonly kind: "mockup" }> {
   return {

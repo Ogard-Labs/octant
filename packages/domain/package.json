@@ -40,6 +40,8 @@
     "./canvas-flow-layout": "./src/canvasFlowLayout.ts",
     "./canvas-flow-site": "./src/canvasFlowSite.ts",
     "./canvas-mockup-html": "./src/canvasMockupHtml.ts",
+    "./canvas-mockup-tsx": "./src/canvasMockupTsx.ts",
+    "./canvas-deck-proposal": "./src/canvasDeckProposal.ts",
     "./canvas-comparison-matrix": "./src/canvasComparisonMatrix.ts",
     "./canvas-math-policy": "./src/canvasMathPolicy.ts",
     "./canvas-mockup-outline": "./src/canvasMockupOutline.ts",

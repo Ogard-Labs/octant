@@ -288,3 +288,77 @@ describe("mockup library", () => {
     expect(within(callouts).getByText(/One placed row/)).toBeInTheDocument();
   });
 });
+
+describe("mockup node comment markers", () => {
+  it("shows where the open threads are on the node that holds them", () => {
+    render(
+      <CanvasDocument
+        definition={{
+          ...canvasFixture,
+          blocks: [
+            decodeCanvasBlock({
+              blockId: "screen",
+              schemaVersion: canvasFixture.schemaVersion,
+              kind: "mockup",
+              device: "phone",
+              title: "Search",
+              nodes: [
+                { nodeId: "window", component: "window", label: "Search" },
+                { nodeId: "go", parentId: "window", component: "button", label: "Go" },
+              ],
+            }),
+          ],
+        }}
+        comments={{
+          openCounts: new Map([["screen", 2]]),
+          openRowCounts: new Map(),
+          openNodeCounts: new Map([["screen", new Map([["go", 2]])]]),
+          onOpen: () => {},
+        }}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "2 open comments on Go" })).toBeInTheDocument();
+  });
+
+  it("marks threads on a window, a modal, and a node inside the modal", () => {
+    render(
+      <CanvasDocument
+        definition={{
+          ...canvasFixture,
+          blocks: [
+            decodeCanvasBlock({
+              blockId: "screen",
+              schemaVersion: canvasFixture.schemaVersion,
+              kind: "mockup",
+              device: "phone",
+              title: "Search",
+              nodes: [
+                { nodeId: "window", component: "window", label: "Search" },
+                { nodeId: "dialog", parentId: "window", component: "modal", label: "Confirm" },
+                { nodeId: "ok", parentId: "dialog", component: "button", label: "OK" },
+              ],
+            }),
+          ],
+        }}
+        comments={{
+          openCounts: new Map([["screen", 3]]),
+          openRowCounts: new Map(),
+          openNodeCounts: new Map([
+            [
+              "screen",
+              new Map([
+                ["window", 1],
+                ["dialog", 1],
+                ["ok", 1],
+              ]),
+            ],
+          ]),
+          onOpen: () => {},
+        }}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "1 open comment on Search" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "1 open comment on Confirm" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "1 open comment on OK" })).toBeInTheDocument();
+  });
+});

@@ -115,6 +115,24 @@ export interface CanvasExportPictureRequest {
         readonly kind: "document";
         readonly definition: CanvasDefinition;
         readonly designPages?: ReadonlyArray<CanvasPreviewDesignPage>;
+      }
+    | {
+        /**
+         * A deck's slides, one per sheet: each slide is the definition of the
+         * block it places, drawn as the thread draws it. Design slides carry
+         * their frame's page, exactly as the frames subject does.
+         */
+        readonly kind: "slides";
+        readonly slides: ReadonlyArray<{
+          readonly definition: CanvasDefinition;
+          readonly designPages?: ReadonlyArray<CanvasPreviewDesignPage>;
+        }>;
+        /**
+         * Device-size design frames the deck does not place, drawn as the
+         * frames subject draws them: full sheets after the deck's slides, so
+         * presenting one Canvas drops no screens it holds beside it.
+         */
+        readonly frames?: ReadonlyArray<CanvasExportPictureFrame>;
       };
 }
 
@@ -409,7 +427,7 @@ export function createPlaywrightCanvasPreviewRenderer(
           height: Math.max(...subject.frames.map((frame) => frame.height)),
         };
         designPages = subject.frames.map((frame) => ({ html: frame.page }));
-      } else {
+      } else if (subject.kind === "document") {
         const pages = subject.designPages ?? [];
         const html = await previewPage({
           definition: subject.definition,
@@ -428,11 +446,127 @@ export function createPlaywrightCanvasPreviewRenderer(
           height: 600,
         };
         designPages = pages;
+      } else {
+        // A slides subject opens its own pages inside the try, below; the
+        // shared single-page opening never runs for it.
+        opened = { kind: "preview", html: "" };
+        viewport = { width: CANVAS_EXPORT_DOCUMENT_PICTURE_WIDTH, height: 600 };
+        designPages = [];
       }
       const drawsFramesAsImages = request.format === "pdf" && opened.kind === "sheets";
       let browser: Browser | undefined;
       try {
         browser = await launch(executable);
+        // A deck's slides each open as their own preview page: the slide's
+        // definition draws the block it places, the page is captured at the
+        // document width, and the PDF holds one page per slide at each
+        // slide's own drawn height.
+        if (subject.kind === "slides") {
+          const pictures: Uint8Array[] = [];
+          const sheets: CanvasExportPictureFrame[] = [];
+          for (const slide of subject.slides) {
+            const pages = slide.designPages ?? [];
+            const html = await previewPage({
+              definition: slide.definition,
+              theme: request.theme,
+              placement: "document",
+              designAssets: [],
+              designPages: pages,
+            });
+            if (html === undefined) return { kind: "unavailable", reason: "no-renderer" };
+            const context = await openContext(browser, {
+              viewport: { width: CANVAS_EXPORT_DOCUMENT_PICTURE_WIDTH, height: 600 },
+              theme: request.theme,
+              page: { name: CANVAS_PREVIEW_PAGE, html },
+              designPages: pages,
+            });
+            const tab = await openPreviewPage(context, pages.length > 0);
+            if (tab === undefined) {
+              await context.close();
+              return { kind: "unavailable", reason: "failed" };
+            }
+            const box = await tab.locator(".canvas-preview-page").boundingBox();
+            const height = Math.min(
+              CANVAS_EXPORT_DOCUMENT_PICTURE_MAX_HEIGHT,
+              Math.max(1, Math.ceil(box?.height ?? 1)),
+            );
+            pictures.push(
+              await tab.screenshot({
+                type: "png",
+                fullPage: true,
+                clip: { x: 0, y: 0, width: CANVAS_EXPORT_DOCUMENT_PICTURE_WIDTH, height },
+                timeout: SETTLE_TIMEOUT_MS,
+              }),
+            );
+            sheets.push({
+              page: "",
+              sandbox: "",
+              width: CANVAS_EXPORT_DOCUMENT_PICTURE_WIDTH,
+              height,
+            });
+            await context.close();
+          }
+          // Designs the deck does not place keep their own full-size sheets,
+          // captured exactly as the frames subject captures them, after the
+          // deck's slides.
+          const looseFrames = subject.frames ?? [];
+          if (looseFrames.length > 0) {
+            const sheetsContext = await openContext(browser, {
+              viewport: {
+                width: Math.max(...looseFrames.map((frame) => frame.width)),
+                height: Math.max(...looseFrames.map((frame) => frame.height)),
+              },
+              theme: request.theme,
+              page: { name: CANVAS_EXPORT_SHEETS_PAGE, html: canvasExportSheetsPage(looseFrames) },
+              designPages: looseFrames.map((frame) => ({ html: frame.page })),
+            });
+            const sheetsTab = await sheetsContext.newPage();
+            await sheetsTab.goto(`${CANVAS_PREVIEW_ORIGIN}/${CANVAS_EXPORT_SHEETS_PAGE}`, {
+              waitUntil: "load",
+              timeout: SETTLE_TIMEOUT_MS,
+            });
+            await sheetsTab.evaluate(() => document.fonts.ready.then(() => undefined));
+            for (let index = 0; index < looseFrames.length; index += 1) {
+              pictures.push(
+                await sheetsTab
+                  .locator(".octant-sheet")
+                  .nth(index)
+                  .screenshot({ type: "png", timeout: SETTLE_TIMEOUT_MS }),
+              );
+            }
+            for (const frame of looseFrames) {
+              sheets.push({
+                page: "",
+                sandbox: frame.sandbox,
+                width: frame.width,
+                height: frame.height,
+              });
+            }
+            await sheetsContext.close();
+          }
+          if (request.format === "png") return { kind: "rendered", files: pictures };
+          const printContext = await openContext(browser, {
+            viewport: { width: CANVAS_EXPORT_DOCUMENT_PICTURE_WIDTH, height: 600 },
+            theme: request.theme,
+            page: {
+              name: CANVAS_EXPORT_SHEETS_PAGE,
+              html: canvasExportSheetsPage(sheets, pictures),
+            },
+            designPages: [],
+          });
+          const printTab = await printContext.newPage();
+          await printTab.goto(`${CANVAS_PREVIEW_ORIGIN}/${CANVAS_EXPORT_SHEETS_PAGE}`, {
+            waitUntil: "load",
+            timeout: SETTLE_TIMEOUT_MS,
+          });
+          const pdf = await printTab.pdf({
+            printBackground: true,
+            preferCSSPageSize: true,
+            margin: NO_MARGIN,
+          });
+          await printContext.close();
+          return { kind: "rendered", files: [pdf] };
+        }
         const context = await openContext(browser, {
           viewport,
           theme: request.theme,
