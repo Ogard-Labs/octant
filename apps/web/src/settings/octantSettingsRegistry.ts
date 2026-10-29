@@ -1174,6 +1174,20 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "hub push sender phone notifications spokes sealed gateway forward standby off by default",
         },
         {
+          id: settingId("hub-offers"),
+          label: "Offers and proposals",
+          scope: "host",
+          keywords:
+            "hub offers proposals offered settings apply dismiss review pending spokes provisioning",
+        },
+        {
+          id: settingId("hub-auto-apply"),
+          label: "Apply offers automatically",
+          scope: "host",
+          keywords:
+            "hub auto apply automatically offers proposals apply dismiss switch kind provisioning",
+        },
+        {
           id: settingId("paired-computers-code"),
           label: "Pair with another computer",
           scope: "host",

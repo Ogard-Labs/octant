@@ -349,6 +349,7 @@ const COMPUTED_SETTING_ROWS: Readonly<Record<string, string>> = {
   "open-in-*": "open-in-applications",
   "managed-tool-*": "managed-tools-automatic-updates",
   "paired-computer-*": "paired-computers-code",
+  "hub-auto-apply-*": "hub-auto-apply",
   "ssh-target-*": "ssh-targets-list",
   "ssh-remote-project-*": "ssh-remote-projects",
   "ssh-remote-worktree-*": "ssh-remote-projects",
