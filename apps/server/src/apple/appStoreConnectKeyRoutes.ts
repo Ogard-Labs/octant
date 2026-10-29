@@ -11,10 +11,13 @@
 // never forwards `/api/desktop`, so a paired device cannot reach these routes.
 //
 // The key goes to the broker's own App Store Connect namespace, which has no
-// resolve route. It is never logged, journaled, or returned: the routes answer
+// resolve route. A person who keeps the key in 1Password saves its secret
+// reference instead; the broker reads the key with their `op` only when it
+// signs a token or writes an upload's key file. It is never logged, journaled, or returned: the routes answer
 // only `stored`, `missing`, `removed`, or a typed refusal.
 
 import { createPrivateKey } from "node:crypto";
+import { ONE_PASSWORD_REFERENCE } from "@octant/host-runtime";
 import type { ProviderCredentialStore } from "../providers/credentialBrokerClient";
 import { secretsEqual } from "../providers/providerCredentialRoutes";
 import { isLoopbackHostname } from "../shellRoutes";
@@ -67,7 +70,7 @@ const REFUSAL_MESSAGE: Readonly<Record<AppStoreConnectKeyRefusal, string>> = {
   invalid: "The App Store Connect key request is invalid.",
   "too-large": "That is larger than an App Store Connect key.",
   "invalid-key":
-    "Enter the issuer ID, the 10-character key ID, and the private key from the .p8 file App Store Connect gave you.",
+    "Enter the issuer ID, the 10-character key ID, and either the private key from the .p8 file App Store Connect gave you or its 1Password reference (op://vault/item/field).",
   "unsupported-host": "Distributing an app to App Store Connect needs a Mac host.",
   "distribution-not-enabled": "Uploading, submitting, and releasing are not available.",
   "already-stored": "This host already has an App Store Connect key.",
@@ -193,23 +196,44 @@ function decodeRequest(
     if (keys !== "") return { kind: "invalid" };
     return { kind: route === ROUTES.status ? "status" : "remove" };
   }
-  if (keys !== "issuerId,keyId,privateKey,replace") return { kind: "invalid" };
-  const { issuerId, keyId, privateKey, replace } = record;
+  if (
+    keys !== "issuerId,keyId,privateKey,replace" &&
+    keys !== "issuerId,keyId,onePasswordReference,replace"
+  ) {
+    return { kind: "invalid" };
+  }
+  const { issuerId, keyId, privateKey, onePasswordReference, replace } = record;
+  const source = privateKey ?? onePasswordReference;
   if (
     typeof issuerId !== "string" ||
     typeof keyId !== "string" ||
-    typeof privateKey !== "string" ||
+    typeof source !== "string" ||
     typeof replace !== "boolean"
   ) {
     return { kind: "invalid" };
   }
-  if (Buffer.byteLength(privateKey, "utf8") > MAX_PRIVATE_KEY_BYTES) return { kind: "too-large" };
+  if (Buffer.byteLength(source, "utf8") > MAX_PRIVATE_KEY_BYTES) return { kind: "too-large" };
   const issuer = issuerId.trim().toLowerCase();
   const key = keyId.trim().toUpperCase();
-  const pem = privateKey.trim();
-  if (!ISSUER_ID.test(issuer) || !KEY_ID.test(key) || !isAppStoreConnectPrivateKey(pem)) {
-    return { kind: "invalid-key" };
+  if (!ISSUER_ID.test(issuer) || !KEY_ID.test(key)) return { kind: "invalid-key" };
+  if (onePasswordReference !== undefined) {
+    // Only the reference is stored; the key stays in 1Password until the
+    // broker reads it for one signing or one upload.
+    const reference = source.trim();
+    if (!ONE_PASSWORD_REFERENCE.test(reference)) return { kind: "invalid-key" };
+    return {
+      kind: "set",
+      stored: JSON.stringify({
+        version: 1,
+        issuerId: issuer,
+        keyId: key,
+        onePasswordReference: reference,
+      }),
+      replace,
+    };
   }
+  const pem = source.trim();
+  if (!isAppStoreConnectPrivateKey(pem)) return { kind: "invalid-key" };
   return {
     kind: "set",
     stored: JSON.stringify({ version: 1, issuerId: issuer, keyId: key, privateKey: `${pem}\n` }),

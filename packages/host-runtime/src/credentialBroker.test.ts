@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createPublicKey, generateKeyPairSync, randomUUID, verify } from "node:crypto";
 import {
   mkdirSync,
   mkdtempSync,
@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CredentialStoreFailure, type CredentialStore } from "./credentialStore";
+import type { OnePasswordRead } from "./appStoreConnectKeySource";
 import { startCredentialBroker } from "./credentialBroker";
 import { CredentialPurgeFailure, type CredentialPurgeStore } from "./credentialStore";
 
@@ -858,6 +859,196 @@ describe("startCredentialBroker", () => {
       expect(response.status).toBe(404);
     } finally {
       await broker.close();
+    }
+  });
+});
+
+describe("App Store Connect request signing", () => {
+  const issuerId = "30000000-0000-4000-8000-000000000001";
+  const keyId = "ABCDE12345";
+  const reference = "op://Developer/App Store Connect/private key";
+  const nowMs = Date.parse("2026-10-28T12:00:00.000Z");
+
+  function p256(): string {
+    return generateKeyPairSync("ec", { namedCurve: "prime256v1" })
+      .privateKey.export({ format: "pem", type: "pkcs8" })
+      .toString();
+  }
+
+  async function brokerWith(entry: Record<string, unknown>, readOnePassword: OnePasswordRead) {
+    const credentialRef = randomUUID();
+    const keys = memoryStore();
+    await keys.set(credentialRef, JSON.stringify({ version: 1, issuerId, keyId, ...entry }));
+    const root = mkdtempSync(join(tmpdir(), "octant-asc-sign-"));
+    const broker = await startCredentialBroker(
+      memoryStore(),
+      undefined,
+      { now: () => nowMs },
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      keys,
+      root,
+      readOnePassword,
+    );
+    const call = async (path: string, body: Record<string, string>) =>
+      broker.fetchForTest(
+        brokerRequest(broker.url, broker.token, path, { body: JSON.stringify(body) }),
+      );
+    return { broker, call, credentialRef, root };
+  }
+
+  function decodeToken(token: string) {
+    const [header, claims, signature] = token.split(".");
+    if (header === undefined || claims === undefined || signature === undefined) {
+      throw new Error("not a JSON Web Token");
+    }
+    return {
+      header: JSON.parse(Buffer.from(header, "base64url").toString("utf8")) as unknown,
+      claims: JSON.parse(Buffer.from(claims, "base64url").toString("utf8")) as Record<
+        string,
+        unknown
+      >,
+      signingInput: `${header}.${claims}`,
+      signature: Buffer.from(signature, "base64url"),
+    };
+  }
+
+  const neverRead: OnePasswordRead = async () => {
+    throw new Error("op must not run for a stored key");
+  };
+
+  it("signs an ES256 token from the stored key and answers only that token", async () => {
+    const privateKey = p256();
+    const { broker, call, credentialRef } = await brokerWith({ privateKey }, neverRead);
+    try {
+      const response = await call("/v1/app-store-connect-keys/sign-token", { credentialRef });
+      expect(response.status).toBe(200);
+      const answer = (await response.json()) as Record<string, unknown>;
+      expect(Object.keys(answer)).toEqual(["token"]);
+      expect(JSON.stringify(answer)).not.toContain("PRIVATE KEY");
+      const token = decodeToken(String(answer.token));
+      expect(token.header).toEqual({ alg: "ES256", kid: keyId, typ: "JWT" });
+      expect(token.claims).toEqual({
+        iss: issuerId,
+        iat: nowMs / 1_000,
+        exp: nowMs / 1_000 + 15 * 60,
+        aud: "appstoreconnect-v1",
+      });
+      // App Store Connect refuses a token that lives longer than twenty minutes.
+      expect(Number(token.claims.exp) - Number(token.claims.iat)).toBeLessThanOrEqual(20 * 60);
+      expect(
+        verify(
+          "sha256",
+          Buffer.from(token.signingInput),
+          { key: createPublicKey(privateKey), dsaEncoding: "ieee-p1363" },
+          token.signature,
+        ),
+      ).toBe(true);
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("refuses a sign request that names anything but the credential reference", async () => {
+    const { broker, call, credentialRef } = await brokerWith({ privateKey: p256() }, neverRead);
+    try {
+      for (const body of [
+        { credentialRef, exp: "99999999999" },
+        { credentialRef, aud: "elsewhere" },
+        { credentialRef: "not-a-reference" },
+      ]) {
+        expect((await call("/v1/app-store-connect-keys/sign-token", body)).status).toBe(400);
+      }
+      expect(
+        (await call("/v1/app-store-connect-keys/sign-token", { credentialRef: randomUUID() }))
+          .status,
+      ).toBe(404);
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("reads a key kept in 1Password with op at each signing and each key-file write, and keeps none of it", async () => {
+    const privateKey = p256();
+    const reads: string[] = [];
+    const readOnePassword: OnePasswordRead = async (asked) => {
+      reads.push(asked);
+      return { kind: "read", value: privateKey };
+    };
+    const { broker, call, credentialRef, root } = await brokerWith(
+      { onePasswordReference: reference },
+      readOnePassword,
+    );
+    try {
+      for (let index = 0; index < 2; index += 1) {
+        const answer = (await (
+          await call("/v1/app-store-connect-keys/sign-token", { credentialRef })
+        ).json()) as Record<string, unknown>;
+        const token = decodeToken(String(answer.token));
+        expect(
+          verify(
+            "sha256",
+            Buffer.from(token.signingInput),
+            { key: createPublicKey(privateKey), dsaEncoding: "ieee-p1363" },
+            token.signature,
+          ),
+        ).toBe(true);
+      }
+      const folder = join(root, `upload-${randomUUID()}`);
+      mkdirSync(folder, { mode: 0o700 });
+      const written = (await (
+        await call("/v1/app-store-connect-keys/write-key-file", {
+          credentialRef,
+          directory: folder,
+        })
+      ).json()) as Record<string, unknown>;
+      expect(written).toEqual({ file: join(folder, `AuthKey_${keyId}.p8`), issuerId, keyId });
+      expect(readFileSync(join(folder, `AuthKey_${keyId}.p8`), "utf8")).toBe(privateKey);
+      // One op read per operation, nothing cached between them.
+      expect(reads).toEqual([reference, reference, reference]);
+    } finally {
+      await broker.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses as key-source-unavailable when op is missing, signed out, or declined, and asks only once", async () => {
+    const cases: ReadonlyArray<OnePasswordRead> = [
+      async () => ({ kind: "unavailable" }),
+      async () => {
+        throw new Error("spawn op ENOENT");
+      },
+      async () => ({ kind: "read", value: "not a private key" }),
+    ];
+    for (const answer of cases) {
+      let reads = 0;
+      const { broker, call, credentialRef, root } = await brokerWith(
+        { onePasswordReference: reference },
+        async (asked) => {
+          reads += 1;
+          return await answer(asked);
+        },
+      );
+      try {
+        const signed = await call("/v1/app-store-connect-keys/sign-token", { credentialRef });
+        expect(signed.status).toBe(424);
+        expect(await signed.json()).toEqual({ error: "key-source-unavailable" });
+        const folder = join(root, `upload-${randomUUID()}`);
+        mkdirSync(folder, { mode: 0o700 });
+        const written = await call("/v1/app-store-connect-keys/write-key-file", {
+          credentialRef,
+          directory: folder,
+        });
+        expect(await written.json()).toEqual({ error: "key-source-unavailable" });
+        expect(readdirSync(folder)).toEqual([]);
+        expect(reads).toBe(2);
+      } finally {
+        await broker.close();
+        rmSync(root, { recursive: true, force: true });
+      }
     }
   });
 });

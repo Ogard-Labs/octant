@@ -724,6 +724,11 @@ export interface CodeOperationRuntime {
     windowId: WindowId,
     request: AppleDeviceRequest,
   ): Promise<boolean>;
+  /** Whether a person at this window confirmed exactly this submission or release. */
+  validateAppleDistributionVersion?(
+    windowId: WindowId,
+    request: AppleDeviceRequest,
+  ): Promise<boolean>;
   /** Whether this window holds the one-use approval of exactly this device effect. */
   validateAppleDeviceAction?(windowId: WindowId, request: AppleDeviceRequest): Promise<boolean>;
   revokeApprovals(windowId: WindowId): void;
@@ -1186,6 +1191,12 @@ export function createCodeOperationRuntime(
         directContext = await approvalContext(options, undefined, upload.thread, upload.checkout);
         directThreadTitle = upload.thread.title;
         directPrompt = appleUploadPrompt(upload, request.effect.request);
+      } else if (request.effect.kind === "apple-distribution-version") {
+        const step = await resolveAppleUploadScope(options, windowId, request.effect.request);
+        if (step === undefined) return undefined;
+        directContext = await approvalContext(options, undefined, step.thread, step.checkout);
+        directThreadTitle = step.thread.title;
+        directPrompt = appleStoreVersionPrompt(step, request.effect.request);
       } else if (request.effect.kind === "create-thread-full-access") {
         thread = request.effect.thread;
         checkout = options.persistence.readCodeCheckout(thread.checkoutId);
@@ -1352,6 +1363,19 @@ export function createCodeOperationRuntime(
       return await approvalValidator.validate({
         windowId,
         effect: { kind: "apple-distribution-upload", request },
+        contextDigest: approvalContextDigest(context),
+        approvalId: request.approval.approvalId,
+      });
+    },
+    validateAppleDistributionVersion: async (windowId, request) => {
+      if (approvalValidator === undefined || request.approval.kind !== "approved") return false;
+      const step = await resolveAppleUploadScope(options, windowId, request);
+      if (step === undefined) return false;
+      const context = await approvalContext(options, undefined, step.thread, step.checkout);
+      if (context === undefined) return false;
+      return await approvalValidator.validate({
+        windowId,
+        effect: { kind: "apple-distribution-version", request },
         contextDigest: approvalContextDigest(context),
         approvalId: request.approval.approvalId,
       });
@@ -1972,9 +1996,10 @@ function appleDeviceActionPrompt(
 }
 
 /**
- * The thread and checkout an upload's confirmation names. Like a lease, it
- * does not depend on the thread's posture: an upload asks a person under every
- * posture, Full access included, and the device policy refuses it in Plan.
+ * The thread and checkout a distribution step's confirmation names: an
+ * upload, a submission for App Review, or a release. Like a lease, it does
+ * not depend on the thread's posture: each asks a person under every posture,
+ * Full access included, and the device policy refuses it in Plan.
  */
 async function resolveAppleUploadScope(
   options: CodeOperationRuntimeOptions,
@@ -1983,9 +2008,12 @@ async function resolveAppleUploadScope(
 ): Promise<{ readonly thread: CodeThread; readonly checkout: CodeCheckoutIdentity } | undefined> {
   const thread = options.persistence.readCodeThread(request.threadId);
   const checkout = options.persistence.readCodeCheckout(request.checkoutId);
+  const complete =
+    (request.kind === "upload" && request.upload !== undefined) ||
+    ((request.kind === "submit-for-review" || request.kind === "release-version") &&
+      request.storeVersion !== undefined);
   if (
-    request.kind !== "upload" ||
-    request.upload === undefined ||
+    !complete ||
     thread === undefined ||
     checkout === undefined ||
     thread.checkoutId !== checkout.id ||
@@ -2041,6 +2069,41 @@ function appleUploadPrompt(
         `Revision: ${revision}`,
         `Thread: ${scope.thread.title}`,
         "Octant archives this revision, signs it for the App Store with this identity and profile, and uploads that one build with your App Store Connect key. It does not submit the version for review or release it.",
+      ].join("\n"),
+    ),
+  };
+}
+
+/**
+ * Names exactly the version one submission or release acts on: the app, the
+ * version and its build, and the platform. A release says that it publishes
+ * the version to the App Store.
+ */
+function appleStoreVersionPrompt(
+  scope: { readonly thread: CodeThread },
+  request: AppleDeviceRequest,
+): { readonly message: string; readonly detail: string } {
+  const version = request.storeVersion;
+  const release = request.kind === "release-version";
+  const named =
+    version === undefined
+      ? "this thread's app"
+      : `${version.bundleIdentifier} ${version.version} (${version.buildNumber})`;
+  return {
+    message: release ? `Release ${named} on the App Store?` : `Submit ${named} for App Review?`,
+    detail: boundApprovalDetail(
+      [
+        ...(version === undefined
+          ? []
+          : [
+              `App: ${version.bundleIdentifier}`,
+              `Version: ${version.version} (build ${version.buildNumber})`,
+              "Platform: iOS",
+            ]),
+        `Thread: ${scope.thread.title}`,
+        release
+          ? "Octant releases this one approved version now, publishing it to the App Store with your App Store Connect key. It changes nothing else."
+          : "Octant submits this one version for App Review with what App Store Connect already holds for it, using your App Store Connect key. It does not change metadata, screenshots, pricing, availability, or export-compliance answers, and it does not release the version.",
       ].join("\n"),
     ),
   };
@@ -2142,7 +2205,8 @@ function approvalPrompt(
   } else if (
     effect.kind === "apple-device-lease" ||
     effect.kind === "apple-device-action" ||
-    effect.kind === "apple-distribution-upload"
+    effect.kind === "apple-distribution-upload" ||
+    effect.kind === "apple-distribution-version"
   ) {
     // prepareApproval words a device request from the device it names, which
     // this function is not given; reaching here is a wiring fault.
@@ -3463,7 +3527,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const localPersonOnly =
       effect.kind === "apple-device-lease" ||
       effect.kind === "apple-device-action" ||
-      effect.kind === "apple-distribution-upload";
+      effect.kind === "apple-distribution-upload" ||
+      effect.kind === "apple-distribution-version";
     const outcome = await this.#askToolApproval(active, summary, undefined, signal, {
       localPersonOnly,
       // A lease is asked under every posture: it opens the device to the
@@ -3528,6 +3593,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       return context === undefined
         ? undefined
         : { context, prompt: appleUploadPrompt(upload, effect.request) };
+    }
+    if (effect.kind === "apple-distribution-version") {
+      const step = await resolveAppleUploadScope(this.#options, active.windowId, effect.request);
+      if (step === undefined) return undefined;
+      const context = await approvalContext(this.#options, undefined, step.thread, step.checkout);
+      return context === undefined
+        ? undefined
+        : { context, prompt: appleStoreVersionPrompt(step, effect.request) };
     }
     if (effect.kind === "apple-device-action") {
       const action = await resolveAppleDeviceActionScope(

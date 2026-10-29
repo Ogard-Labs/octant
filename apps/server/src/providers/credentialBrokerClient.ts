@@ -122,6 +122,8 @@ export type AppStoreConnectKeyFileWrite =
       readonly keyId: string;
     }
   | { readonly kind: "missing" }
+  /** The key is kept in 1Password and `op` was missing, signed out, or declined. */
+  | { readonly kind: "key-source-unavailable" }
   | { readonly kind: "unavailable" };
 
 /**
@@ -158,6 +160,7 @@ export function makeAppStoreConnectKeyFileBrokerClient(
         return { kind: "unavailable" };
       }
       if (response.status === 404) return { kind: "missing" };
+      if (response.status === 424) return { kind: "key-source-unavailable" };
       if (!response.ok) return { kind: "unavailable" };
       try {
         const value = (await response.json()) as unknown;
@@ -185,6 +188,64 @@ export function makeAppStoreConnectKeyFileBrokerClient(
       } catch {
         // The host removes the whole upload folder after the launch anyway.
       }
+    },
+  });
+}
+
+/** What asking the broker for one App Store Connect API token found. */
+export type AppStoreConnectTokenSigning =
+  | { readonly kind: "signed"; readonly token: string }
+  | { readonly kind: "missing" }
+  /** The key is kept in 1Password and `op` was missing, signed out, or declined. */
+  | { readonly kind: "key-source-unavailable" }
+  | { readonly kind: "unavailable" };
+
+/**
+ * The broker's App Store Connect signer. The server names the credential
+ * reference and nothing else; the broker reads the key from its source,
+ * signs one short-lived token, and answers only the token, which the server
+ * sends in one request's `Authorization` header and never keeps.
+ */
+export interface AppStoreConnectTokens {
+  readonly sign: () => Promise<AppStoreConnectTokenSigning>;
+}
+
+export function makeAppStoreConnectTokenBrokerClient(
+  options: CredentialBrokerClientOptions,
+  credentialRef: string,
+): AppStoreConnectTokens {
+  const fetch = options.fetch ?? globalThis.fetch;
+  return Object.freeze({
+    sign: async (): Promise<AppStoreConnectTokenSigning> => {
+      let response: Response;
+      try {
+        response = await fetch(
+          new URL("/v1/app-store-connect-keys/sign-token", options.url).toString(),
+          {
+            method: "POST",
+            redirect: "error",
+            headers: {
+              "content-type": "application/json",
+              "x-octant-credential-broker-token": options.token,
+            },
+            body: JSON.stringify({ credentialRef }),
+          },
+        );
+      } catch {
+        return { kind: "unavailable" };
+      }
+      if (response.status === 404) return { kind: "missing" };
+      if (response.status === 424) return { kind: "key-source-unavailable" };
+      if (!response.ok) return { kind: "unavailable" };
+      try {
+        const value = (await response.json()) as unknown;
+        if (hasExactKeys(value, ["token"]) && typeof value.token === "string") {
+          return { kind: "signed", token: value.token };
+        }
+      } catch {
+        // An answer that does not decode signed nothing usable.
+      }
+      return { kind: "unavailable" };
     },
   });
 }

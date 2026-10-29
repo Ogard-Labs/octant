@@ -88,6 +88,7 @@ const LOCAL_ONLY_PREFIXES = [
   // local person's acts; no remote principal starts or confirms one.
   "/api/apple/distribution",
   "/api/apple/distribution-preparations",
+  "/api/apple/distribution-versions",
 ] as const;
 
 /**

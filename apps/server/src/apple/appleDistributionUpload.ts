@@ -141,41 +141,8 @@ export class AppleDistributionUpload {
     context: Pick<AppleDeviceExecutionContext, "checkoutRoot">,
     signal?: AbortSignal,
   ): Promise<AppleUploadPreparation> {
-    let projectPath: string;
-    try {
-      projectPath = await confinedProjectPath(
-        context.checkoutRoot,
-        input.projectPath,
-        this.#options.realpath,
-      );
-    } catch {
-      return { kind: "failed", message: "The project is not inside this thread's checkout." };
-    }
-    const settings = await this.#options.execute(
-      {
-        argv: [
-          ...archiveSelector(input.projectPath, projectPath, input.scheme),
-          "-showBuildSettings",
-          "-json",
-        ],
-        cwd: context.checkoutRoot,
-        environment: {},
-        timeoutMs: READ_TIMEOUT_MS,
-        isolatedRoots: this.#isolatedRoots(),
-      },
-      signal,
-    );
-    if (!succeeded(settings)) {
-      return { kind: "failed", message: "The project's build settings could not be read." };
-    }
-    const declared = declaredApp(text(settings.stdout));
-    if (declared === undefined) {
-      return {
-        kind: "failed",
-        message:
-          "The scheme does not build one iOS app with PRODUCT_BUNDLE_IDENTIFIER, MARKETING_VERSION, and CURRENT_PROJECT_VERSION set, so Octant cannot say exactly what it would upload.",
-      };
-    }
+    const declared = await this.readDeclaredApp(input, context, signal);
+    if (declared.kind === "failed") return declared;
     // The keychain listing runs in the host's private upload root, which a Mac
     // that never uploaded has not created yet; a launch cannot start in a
     // directory that does not exist.
@@ -220,6 +187,61 @@ export class AppleDistributionUpload {
         profileId: choice.profileId.toLowerCase(),
       }),
     };
+  }
+
+  /**
+   * The app, version, and build number the scheme declares, from `xcodebuild
+   * -showBuildSettings` (Release, `generic/platform=iOS`). It only reads.
+   */
+  async readDeclaredApp(
+    input: { readonly projectPath: string; readonly scheme?: string },
+    context: Pick<AppleDeviceExecutionContext, "checkoutRoot">,
+    signal?: AbortSignal,
+  ): Promise<
+    | {
+        readonly kind: "read";
+        readonly bundleIdentifier: AppleBundleIdentifier;
+        readonly version: string;
+        readonly buildNumber: string;
+      }
+    | { readonly kind: "failed"; readonly message: string }
+  > {
+    let projectPath: string;
+    try {
+      projectPath = await confinedProjectPath(
+        context.checkoutRoot,
+        input.projectPath,
+        this.#options.realpath,
+      );
+    } catch {
+      return { kind: "failed", message: "The project is not inside this thread's checkout." };
+    }
+    const settings = await this.#options.execute(
+      {
+        argv: [
+          ...archiveSelector(input.projectPath, projectPath, input.scheme),
+          "-showBuildSettings",
+          "-json",
+        ],
+        cwd: context.checkoutRoot,
+        environment: {},
+        timeoutMs: READ_TIMEOUT_MS,
+        isolatedRoots: this.#isolatedRoots(),
+      },
+      signal,
+    );
+    if (!succeeded(settings)) {
+      return { kind: "failed", message: "The project's build settings could not be read." };
+    }
+    const declared = declaredApp(text(settings.stdout));
+    if (declared === undefined) {
+      return {
+        kind: "failed",
+        message:
+          "The scheme does not build one iOS app with PRODUCT_BUNDLE_IDENTIFIER, MARKETING_VERSION, and CURRENT_PROJECT_VERSION set, so Octant cannot say exactly which app and version this is.",
+      };
+    }
+    return { kind: "read", ...declared };
   }
 
   /**
@@ -454,6 +476,15 @@ export class AppleDistributionUpload {
           stage: stopped(
             "failed",
             "No App Store Connect key is saved on this Mac. Add one in Settings › Device tools.",
+          ),
+          diagnostics: [],
+        };
+      }
+      if (key.kind === "key-source-unavailable") {
+        return {
+          stage: stopped(
+            "unavailable",
+            "The App Store Connect key could not be read from 1Password: op is missing or signed out, or the request was declined. Nothing was uploaded.",
           ),
           diagnostics: [],
         };

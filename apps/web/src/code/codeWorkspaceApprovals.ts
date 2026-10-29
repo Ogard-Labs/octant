@@ -32,6 +32,12 @@ export function nativeCodeWorkspaceApprovals(
     await request({
       effect: { kind: "apple-distribution-upload", request: uploadRequest } as never,
     });
+  const requestStoreVersion = async (
+    versionRequest: Parameters<NonNullable<CodeWorkspaceApprovals["appleStoreVersion"]>>[0],
+  ) =>
+    await request({
+      effect: { kind: "apple-distribution-version", request: versionRequest } as never,
+    });
   const requestAndroid = async (
     androidRequest: Parameters<NonNullable<CodeWorkspaceApprovals["android"]>>[0],
   ) => await request({ effect: { kind: "android-action", request: androidRequest } as never });
@@ -52,6 +58,8 @@ export function nativeCodeWorkspaceApprovals(
     appleDeviceLease: async (request) => await requestDeviceLease(request),
     // An upload is confirmed by the exact build it sends, under every posture.
     appleUpload: async (request) => await requestUpload(request),
+    // A submission or release is confirmed by the exact version, under every posture.
+    appleStoreVersion: async (request) => await requestStoreVersion(request),
     // Android Allow input is the same native confirmation, named by the
     // emulator action it authorizes.
     android: async (request) => await requestAndroid(request),

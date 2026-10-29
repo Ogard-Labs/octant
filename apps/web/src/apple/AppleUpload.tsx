@@ -28,7 +28,8 @@ export function AppleUpload(props: AppleUploadProps) {
       <h2 id={headingId}>App Store Connect</h2>
       <p>
         Upload this thread's app with the App Store Connect key saved on this Mac. You confirm the
-        exact version and build first; Octant does not submit it for review or release it.
+        exact version and build first. Submitting for App Review and releasing are separate steps
+        below.
       </p>
       <div className="apple-devices__team">
         <label htmlFor={teamId}>Team ID</label>

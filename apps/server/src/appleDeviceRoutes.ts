@@ -1,5 +1,8 @@
 import {
   decodeAppleArtifactRequest,
+  decodeAppleStoreVersionPreparationRequest,
+  type AppleStoreVersionPreparation,
+  type AppleStoreVersionPreparationRequest,
   decodeAppleUploadPreparationRequest,
   type AppleUploadPreparation,
   type AppleUploadPreparationRequest,
@@ -24,6 +27,7 @@ const ACTIONS_PATH = "/api/apple/device-actions";
 const SCREENSHOTS_PATH = "/api/apple/device-screenshots";
 const DISTRIBUTION_PATH = "/api/apple/distribution";
 const UPLOAD_PREPARATIONS_PATH = "/api/apple/distribution-preparations";
+const VERSION_PREPARATIONS_PATH = "/api/apple/distribution-versions";
 
 // Each route takes only its own kinds, so the remote listener's split between
 // the readable device route and the local-only lease and action routes cannot
@@ -48,7 +52,13 @@ const ROUTE_KINDS: ReadonlyMap<string, ReadonlySet<AppleDeviceRequest["kind"]>> 
   // An upload of the person's own app to App Store Connect: it targets no
   // device and runs only on a local person's confirmation of exactly the
   // build the preparation route read.
-  [DISTRIBUTION_PATH, new Set<AppleDeviceRequest["kind"]>(["upload"])],
+  // Submitting a version for App Review and releasing one take the same
+  // route: each runs only on a local person's confirmation of exactly the
+  // version the version route read.
+  [
+    DISTRIBUTION_PATH,
+    new Set<AppleDeviceRequest["kind"]>(["upload", "submit-for-review", "release-version"]),
+  ],
 ]);
 /**
  * Routes only a person at a local window may call. The screenshot read is one
@@ -61,6 +71,7 @@ const LOCAL_ONLY_PATHS: ReadonlySet<string> = new Set([
   SCREENSHOTS_PATH,
   DISTRIBUTION_PATH,
   UPLOAD_PREPARATIONS_PATH,
+  VERSION_PREPARATIONS_PATH,
 ]);
 
 export interface AppleDeviceRouteDependencies {
@@ -94,6 +105,15 @@ export interface AppleDeviceRouteDependencies {
     request: AppleUploadPreparationRequest,
     signal?: AbortSignal,
   ) => Promise<AppleUploadPreparation | undefined>;
+  /**
+   * What App Store Connect holds for this project's version, read in the
+   * window's thread scope before anyone is asked. Undefined refuses the read.
+   */
+  readonly prepareStoreVersion?: (
+    windowId: WindowId,
+    request: AppleStoreVersionPreparationRequest,
+    signal?: AbortSignal,
+  ) => Promise<AppleStoreVersionPreparation | undefined>;
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
 }
@@ -117,7 +137,8 @@ export function createAppleDeviceRouteHandler(dependencies: AppleDeviceRouteDepe
     if (
       kinds === undefined &&
       url.pathname !== SCREENSHOTS_PATH &&
-      url.pathname !== UPLOAD_PREPARATIONS_PATH
+      url.pathname !== UPLOAD_PREPARATIONS_PATH &&
+      url.pathname !== VERSION_PREPARATIONS_PATH
     ) {
       return undefined;
     }
@@ -168,6 +189,16 @@ export function createAppleDeviceRouteHandler(dependencies: AppleDeviceRouteDepe
     }
     if (url.pathname === UPLOAD_PREPARATIONS_PATH) {
       return await uploadPreparation({
+        parsed,
+        principal,
+        windowId,
+        origin,
+        dependencies,
+        signal: request.signal,
+      });
+    }
+    if (url.pathname === VERSION_PREPARATIONS_PATH) {
+      return await storeVersionPreparation({
         parsed,
         principal,
         windowId,
@@ -286,6 +317,41 @@ async function uploadPreparation(input: {
   let answer: AppleUploadPreparation | undefined;
   try {
     answer = await input.dependencies.prepareUpload?.(input.windowId, read, input.signal);
+  } catch {
+    answer = undefined;
+  }
+  if (answer === undefined) {
+    return failure("unauthorized", "Apple device request is unauthorized.", 403, origin);
+  }
+  return Response.json(answer, { status: 200, headers: corsHeaders(origin) });
+}
+
+/**
+ * What App Store Connect holds for the project's version, for a window on
+ * this Mac only. It reads the project and App Store Connect and changes
+ * nothing.
+ */
+async function storeVersionPreparation(input: {
+  readonly parsed: unknown;
+  readonly principal: ClientPrincipal;
+  readonly windowId: WindowId;
+  readonly origin: string | null;
+  readonly dependencies: AppleDeviceRouteDependencies;
+  readonly signal: AbortSignal;
+}): Promise<Response> {
+  const { origin } = input;
+  let read: AppleStoreVersionPreparationRequest;
+  try {
+    read = decodeAppleStoreVersionPreparationRequest(input.parsed);
+  } catch {
+    return failure("invalid", "Apple device request is invalid.", 400, origin);
+  }
+  if (input.principal.kind !== "local-window") {
+    return failure("unauthorized", "Apple device request is unauthorized.", 403, origin);
+  }
+  let answer: AppleStoreVersionPreparation | undefined;
+  try {
+    answer = await input.dependencies.prepareStoreVersion?.(input.windowId, read, input.signal);
   } catch {
     answer = undefined;
   }

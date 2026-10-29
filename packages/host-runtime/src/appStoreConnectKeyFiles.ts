@@ -1,14 +1,13 @@
 import { constants } from "node:fs";
 import { lstat, open, readdir, realpath, unlink } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
+import { readAppStoreConnectKey, type OnePasswordRead } from "./appStoreConnectKeySource";
 import { CredentialStoreFailure, type CredentialStore } from "./credentialStore";
 
 const BODY_LIMIT = 4 * 1_024;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** The only folders a key file may be written to: one per upload, named for its action. */
 const UPLOAD_FOLDER = /^upload-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const KEY_ID = /^[A-Z0-9]{10}$/;
-const ISSUER_ID = UUID_PATTERN;
 const KEY_FILE = /^AuthKey_[A-Z0-9]{10}\.p8$/;
 
 /**
@@ -30,6 +29,7 @@ export async function handleAppStoreConnectKeyFileRoute(
   request: Request,
   store: CredentialStore,
   root: string | undefined,
+  readOnePassword: OnePasswordRead,
 ): Promise<Response> {
   if (root === undefined) return failure("not-found", 404);
   const body = await readBody(request, operation === "write-key-file");
@@ -53,8 +53,12 @@ export async function handleAppStoreConnectKeyFileRoute(
     }
     return failure("failed", 503);
   }
-  const key = storedKey(stored);
-  if (key === undefined) return failure("invalid-stored-key", 500);
+  // A key kept in 1Password is read now, for this one upload, and dropped
+  // with this call.
+  const read = await readAppStoreConnectKey(stored, readOnePassword);
+  if (read.kind === "invalid-stored-key") return failure("invalid-stored-key", 500);
+  if (read.kind === "key-source-unavailable") return failure("key-source-unavailable", 424);
+  const key = read.key;
   const file = join(folder, `AuthKey_${key.keyId}.p8`);
   try {
     // `wx` refuses a file already there, link or not, so the key is written
@@ -147,30 +151,6 @@ async function removeKeyFiles(folder: string): Promise<void> {
     } catch {
       // Already gone; the server's sweep removes the folder itself.
     }
-  }
-}
-
-function storedKey(
-  stored: string,
-): { readonly issuerId: string; readonly keyId: string; readonly privateKey: string } | undefined {
-  try {
-    const value: unknown = JSON.parse(stored);
-    if (typeof value !== "object" || value === null) return undefined;
-    const { version, issuerId, keyId, privateKey } = value as Record<string, unknown>;
-    if (
-      version !== 1 ||
-      typeof issuerId !== "string" ||
-      typeof keyId !== "string" ||
-      typeof privateKey !== "string" ||
-      !ISSUER_ID.test(issuerId) ||
-      !KEY_ID.test(keyId) ||
-      !privateKey.startsWith("-----BEGIN PRIVATE KEY-----")
-    ) {
-      return undefined;
-    }
-    return { issuerId, keyId, privateKey };
-  } catch {
-    return undefined;
   }
 }
 

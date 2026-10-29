@@ -25,8 +25,13 @@ import { ValidationEventStore } from "../validation/validationEventStore";
 import { AppleRuntimeStore } from "../apple/appleRuntimeStore";
 import { AppleDeviceService, type AppleDeviceExecutionContext } from "../apple/appleDeviceService";
 import { AppleDistributionUpload } from "../apple/appleDistributionUpload";
+import { AppleStoreVersions } from "../apple/appleStoreVersions";
+import { createAppStoreConnectApi } from "../apple/appStoreConnectClient";
 import { APP_STORE_CONNECT_KEY_REF } from "../apple/appStoreConnectKeyRoutes";
-import { makeAppStoreConnectKeyFileBrokerClient } from "../providers/credentialBrokerClient";
+import {
+  makeAppStoreConnectKeyFileBrokerClient,
+  makeAppStoreConnectTokenBrokerClient,
+} from "../providers/credentialBrokerClient";
 import { createAppleDeviceRouteHandler } from "../appleDeviceRoutes";
 import type { ClientPrincipal } from "../clientPrincipal";
 import {
@@ -141,6 +146,11 @@ export interface DeviceApprovalChecks {
     windowId: WindowId,
     request: AppleDeviceRequest,
   ) => Promise<boolean> | undefined;
+  /** Whether a person at this window confirmed exactly this submission or release. */
+  readonly validateAppleDistributionVersion: (
+    windowId: WindowId,
+    request: AppleDeviceRequest,
+  ) => Promise<boolean> | undefined;
 }
 
 // Device effects a thread's posture decides, one approval per request.
@@ -183,7 +193,10 @@ export function createAppleDeviceScopes(deps: {
   readonly effectiveThread: (windowId: WindowId, thread: CodeThread) => CodeThread;
   readonly approvals: Pick<
     DeviceApprovalChecks,
-    "validateAppleDeviceLease" | "validateAppleDeviceAction" | "validateAppleDistributionUpload"
+    | "validateAppleDeviceLease"
+    | "validateAppleDeviceAction"
+    | "validateAppleDistributionUpload"
+    | "validateAppleDistributionVersion"
   >;
 }) {
   const { approvals } = deps;
@@ -195,15 +208,17 @@ export function createAppleDeviceScopes(deps: {
     const resolved = await deps.resolveThread(windowId, request);
     if (resolved === undefined) return undefined;
     const effectiveThread = deps.effectiveThread(windowId, resolved.thread);
-    // A lease start and an upload count only as a person's confirmation, which
-    // a receipt minted for a window on this Mac carries.
+    // A lease start and a distribution step count only as a person's
+    // confirmation, which a receipt minted for a window on this Mac carries.
     const confirmed =
       request.approval.kind === "approved" &&
       mayCarryReceipt &&
       ((request.kind === "use-device" &&
         ((await approvals.validateAppleDeviceLease(windowId, request)) ?? false)) ||
         (request.kind === "upload" &&
-          ((await approvals.validateAppleDistributionUpload(windowId, request)) ?? false)));
+          ((await approvals.validateAppleDistributionUpload(windowId, request)) ?? false)) ||
+        ((request.kind === "submit-for-review" || request.kind === "release-version") &&
+          ((await approvals.validateAppleDistributionVersion(windowId, request)) ?? false)));
     const effectApproved =
       APPLE_DEVICE_EFFECT_KINDS.has(request.kind) &&
       mayCarryReceipt &&
@@ -381,7 +396,8 @@ export function wireDevices(deps: DevicesDependencies) {
       evidence:
         | import("@octant/contracts").AppleBuildEvidence
         | import("@octant/contracts").AppleDeviceEvidence
-        | import("@octant/contracts").AppleUploadEvidence,
+        | import("@octant/contracts").AppleUploadEvidence
+        | import("@octant/contracts").AppleStoreVersionEvidence,
       startedAt: string,
     ) => {
       const composed = composeAppleValidationEvents({ evidence, startedAt, newId: randomUUID });
@@ -414,6 +430,19 @@ export function wireDevices(deps: DevicesDependencies) {
       recordEvidence: recordAppleEvidence,
       now: () => new Date().toISOString(),
     });
+    // A submission for App Review or a release: App Store Connect API requests
+    // to its one recorded host, each authorized by a token the broker signs.
+    const appleStoreVersions = new AppleStoreVersions({
+      readApp: (input, context, signal) =>
+        appleDistributionUpload.readDeclaredApp(input, context, signal),
+      tokens:
+        credentialBroker === undefined
+          ? undefined
+          : makeAppStoreConnectTokenBrokerClient(credentialBroker, APP_STORE_CONNECT_KEY_REF),
+      api: createAppStoreConnectApi(),
+      recordEvidence: recordAppleEvidence,
+      now: () => new Date().toISOString(),
+    });
     // A key file left by an upload the host did not see end is removed now.
     yield* Effect.promise(() => appleDistributionUpload.sweepKeyFolders());
     const appleDeviceService = new AppleDeviceService({
@@ -437,6 +466,7 @@ export function wireDevices(deps: DevicesDependencies) {
       readArtifact: (reference) => appleRuntimeStore.readArtifact(reference),
       recordEvidence: recordAppleEvidence,
       distribution: appleDistributionUpload,
+      storeVersions: appleStoreVersions,
       now: () => new Date().toISOString(),
       newId: randomUUID,
     });
@@ -636,6 +666,27 @@ export function wireDevices(deps: DevicesDependencies) {
           signal,
         );
       };
+      // What App Store Connect holds for this project's version, read in the
+      // thread's own checkout before anyone is asked to submit or release it.
+      const prepareAppleStoreVersion = async (
+        windowId: WindowId,
+        input: Parameters<typeof resolveAppleThread>[1] & {
+          readonly projectPath: string;
+          readonly scheme?: string | undefined;
+        },
+        signal?: AbortSignal,
+      ) => {
+        const resolved = await resolveAppleThread(windowId, input);
+        if (resolved === undefined || process.platform !== "darwin") return undefined;
+        return await appleStoreVersions.prepare(
+          {
+            projectPath: input.projectPath,
+            ...(input.scheme === undefined ? {} : { scheme: input.scheme }),
+          },
+          { checkoutRoot: resolved.rootPath },
+          signal,
+        );
+      };
       const appleDeviceRoutes = createAppleDeviceRouteHandler({
         windowAuthorityStore,
         service: appleDeviceService,
@@ -646,6 +697,7 @@ export function wireDevices(deps: DevicesDependencies) {
         // The workbench's upload reads what it would send in the same thread
         // scope, from a local window only; the route refuses anyone else first.
         prepareUpload: prepareAppleUpload,
+        prepareStoreVersion: prepareAppleStoreVersion,
       });
       const appleToolchainRoutes = createAppleToolchainRouteHandler({
         windowAuthorityStore,
@@ -802,6 +854,7 @@ export function wireDevices(deps: DevicesDependencies) {
         appleDeviceRoutes,
         appleToolchainRoutes,
         prepareAppleUpload,
+        prepareAppleStoreVersion,
         resolveAndroidContext,
         resolveAppleContext,
         resolveAppleDeviceAgentScope,

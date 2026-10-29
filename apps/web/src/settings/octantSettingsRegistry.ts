@@ -921,6 +921,20 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "app store connect private key p8 authkey api key apple distribution",
           nativeRequired: "nativeBoundsAvailable",
         },
+        {
+          id: settingId("app-store-connect-key-source"),
+          label: "App Store Connect private key from",
+          scope: "host",
+          keywords: "app store connect private key source keychain 1password op reference",
+          nativeRequired: "nativeBoundsAvailable",
+        },
+        {
+          id: settingId("app-store-connect-1password-reference"),
+          label: "App Store Connect 1Password reference",
+          scope: "host",
+          keywords: "app store connect 1password op reference secret vault item field private key",
+          nativeRequired: "nativeBoundsAvailable",
+        },
       ],
     },
     {

@@ -44,10 +44,12 @@ function scopes() {
   const validateAppleDeviceLease = vi.fn(async () => true);
   const validateAppleDeviceAction = vi.fn(async () => true);
   const validateAppleDistributionUpload = vi.fn(async () => true);
+  const validateAppleDistributionVersion = vi.fn(async () => true);
   return {
     resolveThread,
     validateAppleDeviceLease,
     validateAppleDistributionUpload,
+    validateAppleDistributionVersion,
     ...createAppleDeviceScopes({
       resolveThread,
       effectiveThread: (_windowId, current) => current,
@@ -55,6 +57,7 @@ function scopes() {
         validateAppleDeviceLease,
         validateAppleDeviceAction,
         validateAppleDistributionUpload,
+        validateAppleDistributionVersion,
       },
     }),
   };
@@ -130,5 +133,44 @@ describe("the agent's physical device scope", () => {
     const unconfirmed = await resolveAppleDeviceAgentScope(windowId, request);
     expect(unconfirmed).toMatchObject({ approvalValid: false });
     expect(unconfirmed).not.toHaveProperty("approvedBy");
+  });
+
+  it("counts the agent's submission or release as confirmed only with the receipt a person at the Mac minted for that version", async () => {
+    const {
+      resolveAppleDeviceAgentScope,
+      validateAppleDistributionUpload,
+      validateAppleDistributionVersion,
+    } = scopes();
+    for (const kind of ["submit-for-review", "release-version"] as const) {
+      const request = decodeAppleDeviceRequest({
+        actionId: "50000000-0000-4000-8000-000000000042",
+        correlationId: "50000000-0000-4000-8000-000000000043",
+        authority,
+        threadId,
+        checkoutId,
+        kind,
+        requestedBy: agent,
+        storeVersion: {
+          bundleIdentifier: "sh.octant.Fixture",
+          version: "1.0",
+          buildNumber: "7",
+          platform: "ios",
+        },
+        timeoutMs: 60_000,
+        approval: { kind: "approved", approvalId: "50000000-0000-4000-8000-000000000052" },
+      });
+      await expect(resolveAppleDeviceAgentScope(windowId, request)).resolves.toMatchObject({
+        approvalValid: true,
+        approvedBy: { kind: "local-user" },
+      });
+      expect(validateAppleDistributionVersion).toHaveBeenCalledWith(windowId, request);
+
+      validateAppleDistributionVersion.mockResolvedValueOnce(false);
+      const unconfirmed = await resolveAppleDeviceAgentScope(windowId, request);
+      expect(unconfirmed).toMatchObject({ approvalValid: false });
+      expect(unconfirmed).not.toHaveProperty("approvedBy");
+    }
+    // An upload's receipt is never what confirms a version step.
+    expect(validateAppleDistributionUpload).not.toHaveBeenCalled();
   });
 });

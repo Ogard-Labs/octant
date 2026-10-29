@@ -209,6 +209,7 @@ function threadAndProject(
     case "apple-device-lease":
     case "apple-device-action":
     case "apple-distribution-upload":
+    case "apple-distribution-version":
       return {
         projectId: undefined,
         threadId: String(request.effect.request.threadId),

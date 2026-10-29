@@ -45,6 +45,34 @@ describe("AppStoreConnectKeySection", () => {
     expect(screen.getByRole("button", { name: "Replace key" })).toBeInTheDocument();
   });
 
+  it("saves a 1Password reference in the key's place when the person keeps the key there", async () => {
+    const sent: unknown[] = [];
+    const host = bridge((operation, body) => {
+      if (operation === "status") return { status: 200, body: { outcome: "missing" } };
+      sent.push(body);
+      return { status: 200, body: { outcome: "stored" } };
+    });
+    render(<AppStoreConnectKeySection bridge={host} />);
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText("Issuer ID"), "issuer");
+    await user.type(screen.getByLabelText("Key ID"), "ABCDEFGHIJ");
+    await user.click(screen.getByRole("button", { name: "1Password" }));
+    expect(screen.queryByLabelText("Private key")).toBeNull();
+    await user.type(screen.getByLabelText("1Password reference"), "op://Dev/ASC/key");
+    await user.click(screen.getByRole("button", { name: "Save key" }));
+
+    expect(await screen.findByText("Key saved.")).toBeInTheDocument();
+    expect(sent).toEqual([
+      {
+        issuerId: "issuer",
+        keyId: "ABCDEFGHIJ",
+        onePasswordReference: "op://Dev/ASC/key",
+        replace: false,
+      },
+    ]);
+    expect(screen.getByLabelText("1Password reference")).toHaveValue("");
+  });
+
   it("shows the host's refusal and keeps nothing it was given", async () => {
     const host = bridge((operation) =>
       operation === "status"

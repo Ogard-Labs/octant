@@ -17,8 +17,10 @@ native smoke on a Mac with a paired device, slice 6 (App Store Connect key
 custody) is built and open since the maintainer admitted distribution on
 2026-10-28 (decision 7), slice 7 (person-confirmed upload) is built from
 fakes, from the workbench and for the agent's request, and waits on a
-maintainer-run upload, and slice 8 waits on the open choice
-recorded under it in the delivery plan.** The maintainer
+maintainer-run upload, and slice 8 (person-confirmed submission and
+release, with broker-signed App Store Connect requests and the 1Password key
+source of decision 9) is built from fakes and waits on a maintainer-run
+submission and release.** The maintainer
 authorized this scope as post-preview work and accepted the decisions below on
 2026-10-26. That authorizes this design and its slices; it does not by itself
 authorize spending, creating developer accounts,
@@ -112,6 +114,15 @@ TestFlight track for its mobile client is a separate operator runbook
   (`AppleUploadBuild`) and a person at the Mac has confirmed it. The broker
   writes the key file for it
   ([`appStoreConnectKeyFiles.ts`](../../packages/host-runtime/src/appStoreConnectKeyFiles.ts)).
+- A submission for App Review or a release
+  ([`appleStoreVersions.ts`](../../apps/server/src/apple/appleStoreVersions.ts))
+  is reached through the device service's `submit-for-review` and
+  `release-version` requests once a person at the Mac has confirmed the
+  version (`AppleStoreVersion`) the host read from App Store Connect. Its App
+  Store Connect API requests
+  ([`appStoreConnectClient.ts`](../../apps/server/src/apple/appStoreConnectClient.ts))
+  carry a token the broker signs
+  ([`appStoreConnectKeySource.ts`](../../packages/host-runtime/src/appStoreConnectKeySource.ts)).
 
 ## Three layers, three authorities
 
@@ -498,7 +509,13 @@ json`. The upload counts only when `altool` exits cleanly and answers with
   The host accepts a key only as a UUID issuer ID, a ten-character key ID,
   and a PKCS #8 P-256 private key (App Store Connect's ES256 keys); it
   refuses to overwrite a stored key without `replace`, and answers only
-  `stored`, `missing`, `removed`, or a typed refusal. On a host that is not a
+  `stored`, `missing`, `removed`, or a typed refusal. In the key's place the
+  person may save a 1Password secret reference
+  (`op://<vault>/<item>/<field>`, optionally with a section; no query or
+  fragment), from the same entry (**Private key from** › **1Password**) or
+  `octant apple key set --issuer <id> --key-id <id> --op-reference <ref>`;
+  the entry then holds the issuer ID, key ID, and that reference, and never
+  both a key and a reference (decision 9). On a host that is not a
   Mac, or were distribution not admitted (decision 7), `status` and `set` are
   refused (`unsupported-host`, `distribution-not-enabled`) and the desktop
   shows no key entry; `remove` always runs, so a stored key can always be
@@ -512,7 +529,15 @@ id>.p8`, created `0600` and never over an existing file, into that upload's
   broker answers with the file's path, the issuer ID, and the key ID, and
   refuses any folder that is not a real `0700` directory of this user
   directly in that root. Every Apple launch but the upload's own `altool` is
-  denied that root. When the launch ends, whatever happened, the server asks
+  denied that root. A third route, `sign-token`, takes the credential
+  reference and nothing else and answers only an App Store Connect API token:
+  ES256, the key ID in its header, the issuer ID, audience
+  `appstoreconnect-v1`, and an expiry fifteen minutes after issue (App Store
+  Connect accepts at most twenty). For a 1Password reference, the broker runs
+  the person's `op read` when it signs a token or writes a key file, for that
+  one operation, and keeps nothing; `op` missing, signed out, or declined, or
+  a field that is not a P-256 key, refuses as `key-source-unavailable` (HTTP
+  424 from the broker) and nothing retries. When the launch ends, whatever happened, the server asks
   the broker to remove the file (`remove-key-file`) and removes the folder,
   and a startup sweep removes any folder left behind. The server never reads
   the key's bytes. Linux and Windows broker stores have no such family,
@@ -521,6 +546,30 @@ id>.p8`, created `0600` and never over an existing file, into that upload's
   and App Store Connect's delivery identifier. Never the key, its issuer
   secret, or the signed archive's bytes. The archive stays in host-private
   evidence under existing retention and thread purge.
+- Before either step is offered, the host reads the version: the scheme's
+  `PRODUCT_BUNDLE_IDENTIFIER` and `MARKETING_VERSION` as for an upload, then
+  from App Store Connect the app with that bundle ID, its iOS version with
+  that version string, the build selected for it, and its state
+  (`appVersionState`, or `appStoreState` where only that is given). A version
+  App Store Connect does not hold, or one with no build selected, is
+  reported, not created or changed: selecting the build is the person's act
+  in App Store Connect. The workbench's **Check App Store Connect** (local-only
+  `POST /api/apple/distribution-versions`) and the agent's request make this
+  read; it answers the version (`AppleStoreVersion`: bundle ID, version,
+  build number, platform), App Store Connect's state, and the one step it is
+  ready for. Ready for a submission means a state App Store Connect takes into
+  a new review submission (`PREPARE_FOR_SUBMISSION`, `READY_FOR_REVIEW`,
+  `DEVELOPER_REJECTED`, `REJECTED`, `METADATA_REJECTED`) with the selected
+  build `VALID` and the version's `releaseType` `MANUAL`; ready for a release
+  means `PENDING_DEVELOPER_RELEASE`. A version App Store Connect would release
+  on its own once approved (`AFTER_APPROVAL`, `SCHEDULED`, or no release type)
+  is not offered for submission, and its submission is refused
+  (`release-not-manual`) when the step runs, since the confirmation says
+  submitting does not release; Octant does not change the release setting,
+  which stays the person's act in App Store Connect.
+  When the step runs, the host reads App Store Connect again and refuses
+  (`store-version-changed`) if the version no longer has the confirmed build
+  or is no longer ready for that step.
 - **Submit for App Review…** is offered for a version whose build App Store
   Connect has finished processing. Its confirmation names the app, version,
   build, and platform, and is bound to exactly those; one confirmation submits
@@ -534,10 +583,22 @@ id>.p8`, created `0600` and never over an existing file, into that upload's
   confirmation releases that one version. Octant never sets a version to
   release automatically after approval, so every release is a person's act at
   the moment they confirm it.
+- A submission is one review submission: Octant creates it for the app and
+  platform, adds that one version, and marks it submitted. If App Store
+  Connect refuses the item or the submission, Octant withdraws the draft it
+  created, once, so a refusal leaves nothing behind. An answer that times
+  out, is lost, or cannot be read says nothing about whether App Store
+  Connect took the submission, so Octant leaves it as it is, journals the
+  step as uncertain (`interrupted`) with the submission's identifier in its
+  note, and tells the person to check App Store Connect. A release is one release
+  request for that version. Every request goes to `api.appstoreconnect.apple.com`
+  with the step's broker-signed token and follows no redirect.
 - The journal records each submission and release like an upload: actor, app,
   version, build, result, and App Store Connect's identifier for the
-  submission. A failure or an answer Octant cannot classify is recorded as not
-  done and never retried on its own.
+  submission or release request, as `apple-distribution-submit-for-review` and
+  `apple-distribution-release-version` validation steps. Never the key, the
+  token, or the 1Password reference. A failure or an answer Octant cannot
+  classify is recorded as not done and never retried on its own.
 - Adding testers or tester groups, answering App Review, and phased-release
   controls stay the person's acts in App Store Connect.
 
@@ -570,8 +631,10 @@ id>.p8`, created `0600` and never over an existing file, into that upload's
   already sends every Code approval to the computer.
 - The private listener forwards `POST /api/apple/devices` (admitted as a
   Project read) and never `/api/apple/device-leases`,
-  `/api/apple/device-actions`, or `/api/apple/device-screenshots`, which are
-  local-only. Each
+  `/api/apple/device-actions`, `/api/apple/device-screenshots`, or the
+  distribution routes (`/api/apple/distribution`,
+  `/api/apple/distribution-preparations`, `/api/apple/distribution-versions`),
+  which are local-only. Each
   route takes only its own kinds, and refuses a request whose `requestedBy` is
   not the person behind the asking window: `local-user` for a local window, the
   paired device's own `remote-device` for a paired device.
@@ -590,6 +653,7 @@ id>.p8`, created `0600` and never over an existing file, into that upload's
 | Silent developer-account changes (new profiles, registered devices)             | Octant never passes `-allowProvisioningUpdates` (decision 3); Octant never registers devices or creates certificates |
 | Device identifiers tracked across journal, providers, or remotes                | Host-minted `AppleDeviceId`; UDID, serial, ECID stay host-local                                                      |
 | The App Store Connect key leaks during upload                                   | Broker storage; per-launch `0600` file denied to other launches; removed after; never journaled                      |
+| The App Store Connect key leaks while signing API requests                      | The broker signs; the server holds only a token that expires in fifteen minutes and is never journaled               |
 | A remote principal escalates                                                    | Lease, signing, provisioning, key, and distribution are local-only; remote never mints local receipts                |
 | A non-macOS host pretends                                                       | Refused before any process; family omitted; no cloud Mac                                                             |
 
@@ -803,7 +867,9 @@ accounts or hardware; its real-hardware acceptance is separate where noted.
    when it names a `deviceId`, `destination: "device"`, or a device-only
    operation, and its help text covers the device operations; Simulator input,
    `boot`, `open`, and `test` are refused on a device (`not-offered-on-device`),
-   and uninstall, provisioning, submission, and release are not offered to the agent (its `upload` arrived with slice 7).
+   and uninstall and provisioning are not offered to the agent (its `upload`
+   arrived with slice 7, and `submit-for-review` and `release-version` with
+   slice 8).
    On the host, `AppleDeviceService.check` answers the policy without carrying
    anything out and `readConsole` hands a thread back its own console read; the
    Code runtime asks a device lease or effect in the thread and accepts only a
@@ -846,7 +912,11 @@ accounts or hardware; its real-hardware acceptance is separate where noted.
    open: the Keychain helper gained the service but runs only on a Mac, so a
    maintainer-run save-status-remove from a desktop window on a Mac is its
    native check.
-   Not built: a 1Password reference as the key's source (decision 9).
+   Since slice 8, the entry also takes a 1Password reference in the key's
+   place (decision 9): the `App Store Connect key routes` test that stores a
+   reference and refuses a malformed one or both sources, the
+   `AppStoreConnectKeySection` test that sends a reference, and the
+   `octant apple key` test of `--op-reference`.
 7. **Person-confirmed upload** (maintainer account, a real app, and the
    decision-7 gate). Archive, export, and upload as one confirmed local action
    with a journaled record. _Accept:_ one confirmation uploads exactly the
@@ -908,9 +978,53 @@ accounts or hardware; its real-hardware acceptance is separate where noted.
    confirms, and no remote path reaches either. _Verify:_ server
    tests with a stubbed App Store Connect client, plus a maintainer-run
    submission and release of a test app.
-   Requests are authorized by a broker-signed token (decision 9). _Waits
-   on:_ recording the egress these calls need (the App Store Connect API
-   host only) in the architecture.
+   Requests are authorized by a broker-signed token (decision 9).
+   _State:_ built from fakes, from the workbench and for the agent's
+   request. The App Store Connect API host is recorded as host-initiated
+   egress in the architecture's local-first invariant, and the broker's
+   signing beside cloud request signing. The contracts (`AppleStoreVersion`,
+   the `storeVersion` request field, `store-version-changed`,
+   `key-source-unavailable`, `AppleStoreVersionEvidence`, the version
+   preparation) are in contracts; the broker's `sign-token` route and the
+   1Password key source in host-runtime; on the host `AppleStoreVersions`,
+   reached through `AppleDeviceService` once the policy has a local person's
+   confirmation, the stubbed-in-tests `AppStoreConnectApi`, the
+   `apple-distribution-version` approval asked as `localPersonOnly` under
+   every posture, the local-only `/api/apple/distribution-versions` read, and
+   `octant_apple` `submit-for-review` and `release-version`; in the workbench
+   **App Review and release** with **Check App Store Connect**,
+   **Submit for App Review…**, and **Release…**. Its evidence is the broker
+   tests (the token's header, claims, fifteen-minute expiry, and signature;
+   only the token answered; a sign request naming anything else refused; a
+   1Password key read once per signing and per key-file write; `op` missing,
+   failing, or answering something that is not a key refused as
+   `key-source-unavailable` and asked once), the `AppleStoreVersions` suite
+   (the step each state is ready for; a version set to release on its own
+   neither offered nor submitted, rechecked when the step runs; a lost answer
+   journaled as uncertain; exactly the confirmed version submitted
+   with one token; a release only for a version waiting for a manual release;
+   nothing sent for another build or an unreadable 1Password key; App Store
+   Connect's refusal recorded as not done and not retried; the journaled
+   record naming actor, app, version, result, and identifier without the
+   token), the App Store Connect client tests (the one API host, the bearer
+   token, no redirect; the submission's three requests and the draft
+   withdrawn on a refusal but not after a timed-out answer; a release request), the `AppleDeviceService` test
+   that only a confirmed step reaches it and Plan refuses it, the Code
+   runtime test that the agent's release asks a person at the Mac under Full
+   access, refuses a paired device's answer, and mints a one-use receipt bound
+   to that version and step, the scope test that the receipt is what counts
+   as the confirmation, the Apple tool tests (nothing sent on a decline,
+   nothing asked for a version not ready, Plan refuses before reading), the
+   routes' tests (both steps only on the distribution route, the version read
+   for a local window only, neither from a paired device), the device client's
+   routing test, and the `AppleStoreVersion` component tests (Release offered
+   only for an approved version and sent only with the answer; nothing sent
+   on a decline; no step for a version in review; nothing offered in a window
+   that cannot confirm). No test calls App Store Connect, uses a real key, or
+   runs `op`. Still open: a maintainer-run submission and release of a test
+   app on a Mac with an App Store Connect app, which also measures whether
+   1Password's desktop-app integration accepts the broker process as the
+   `op` caller (decision 9).
 
 Slices 1, 2, 4, and 5 can be built before any hardware or account exists;
 slices 3, 7, and 8 cannot be accepted without the maintainer's Mac, a paired
