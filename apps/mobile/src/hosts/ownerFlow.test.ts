@@ -170,7 +170,7 @@ describe("a phone that is an owner of its hub", () => {
     if (spoke === undefined) throw new Error("expected an owner client");
     w.order.length = 0;
 
-    const result = await runOwnerAlertAction(spoke, alert, "remove");
+    const result = await runOwnerAlertAction(spoke, { member: alert, alert }, "remove");
 
     expect(result.status).toBe("done");
     expect(w.order).toEqual([
@@ -187,7 +187,7 @@ describe("a phone that is an owner of its hub", () => {
     if (spoke === undefined) throw new Error("expected an owner client");
     w.order.length = 0;
 
-    const result = await runOwnerAlertAction(spoke, alert, "confirm");
+    const result = await runOwnerAlertAction(spoke, { member: alert, alert }, "confirm");
 
     expect(result.status).toBe("done");
     expect(w.order.filter((entry) => entry === "unlock-asked")).toHaveLength(1);
@@ -206,7 +206,7 @@ describe("a phone that is an owner of its hub", () => {
     if (spoke === undefined) throw new Error("expected an owner client");
     w.order.length = 0;
 
-    const result = await runOwnerAlertAction(spoke, alert, "remove");
+    const result = await runOwnerAlertAction(spoke, { member: alert, alert }, "remove");
 
     expect(w.order).toEqual(["unlock-asked"]);
     expect(ownerActionNotice(result, "Removed.")).toEqual({
@@ -221,7 +221,7 @@ describe("a phone that is an owner of its hub", () => {
 
     const reading = await readOwnerAlerts(spokes);
 
-    expect(reading.rows.map((row) => [row.spoke.name, row.alert.name, row.held])).toEqual([
+    expect(reading.rows.map((row) => [row.spoke.name, row.member.name, row.held])).toEqual([
       ["member 2", "Unknown tablet", true],
     ]);
     expect(reading.unanswered).toEqual(["member 3"]);
