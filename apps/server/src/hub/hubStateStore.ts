@@ -8,9 +8,15 @@
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  AppUpdateFeed,
   HardwareAddress,
+  HubAutoApplyKind,
   HubGrant,
   HubMemberId,
+  HubOfferBody,
+  HubOfferDeliveryResult,
+  HubOfferId,
+  HubProvisionReason,
   HubPushResult,
   HubWakeResult,
   HubWakeSpokeTimes,
@@ -129,10 +135,62 @@ export const HubPushState = Schema.Struct({
 }).annotations(strict);
 export type HubPushState = typeof HubPushState.Type;
 
+/** How the hub's last attempt to hand one spoke one offer ended. */
+export const ProvisionDeliveryRecord = Schema.Struct({
+  memberId: HubMemberId,
+  at: Schema.Int,
+  result: HubOfferDeliveryResult,
+  reason: Schema.optional(HubProvisionReason),
+}).annotations(strict);
+export type ProvisionDeliveryRecord = typeof ProvisionDeliveryRecord.Type;
+
+/**
+ * One offer the hub made, with the signed update feed document it mirrors (plain
+ * data the hub serves and never vouches for) and how each spoke took it. What a
+ * spoke later does with the proposal is the spoke's own and never told back.
+ */
+export const ProvisionOfferRecord = Schema.Struct({
+  offerId: HubOfferId,
+  createdAt: Schema.Int,
+  offer: HubOfferBody,
+  mirrorFeed: Schema.optional(AppUpdateFeed),
+  deliveries: Schema.Array(ProvisionDeliveryRecord),
+}).annotations(strict);
+export type ProvisionOfferRecord = typeof ProvisionOfferRecord.Type;
+
+/** The hub's provisioning: its own switch, off until the person turns it on, and the offers it holds. */
+export const HubProvisionState = Schema.Struct({
+  enabled: Schema.Boolean,
+  offers: Schema.Array(ProvisionOfferRecord),
+}).annotations(strict);
+export type HubProvisionState = typeof HubProvisionState.Type;
+
+/** An offer a spoke holds as a proposal until its person applies it, dismisses it, or it lapses. */
+export const ProvisionProposalRecord = Schema.Struct({
+  offerId: HubOfferId,
+  offer: HubOfferBody,
+  receivedAtMs: Schema.Int,
+  expiresAtMs: Schema.Int,
+}).annotations(strict);
+export type ProvisionProposalRecord = typeof ProvisionProposalRecord.Type;
+
+/**
+ * A spoke's side of provisioning: the proposals it holds, the kinds its person
+ * let apply without asking (all off until turned on), and the last mirrored
+ * update feed it verified, kept as the document the hub served.
+ */
+export const SpokeProvisionState = Schema.Struct({
+  proposals: Schema.Array(ProvisionProposalRecord),
+  autoApply: Schema.Array(HubAutoApplyKind),
+  verifiedFeed: Schema.optional(AppUpdateFeed),
+}).annotations(strict);
+export type SpokeProvisionState = typeof SpokeProvisionState.Type;
+
 export const HubSideState = Schema.Struct({
   enabled: Schema.Boolean,
   wake: Schema.optional(HubWakeState),
   push: Schema.optional(HubPushState),
+  provision: Schema.optional(HubProvisionState),
   roster: Schema.optional(SignedHubRoster),
   members: Schema.Array(HubMemberRecord),
   joinTickets: Schema.Array(HubJoinTicketRecord),
@@ -259,6 +317,8 @@ export const HubLinkState = Schema.Struct({
   wake: Schema.optional(SpokeWakeState),
   /** Whether the hub's push switch was on when it last told this standby, so a stand-in forwards only then. */
   pushCopy: Schema.optional(Schema.Struct({ enabled: Schema.Boolean }).annotations(strict)),
+  /** This spoke's side of provisioning: proposals, auto-apply choices, the verified mirrored feed. */
+  provision: Schema.optional(SpokeProvisionState),
 }).annotations(strict);
 export type HubLinkState = typeof HubLinkState.Type;
 

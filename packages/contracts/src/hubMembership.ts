@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import { AuditActingPrincipal } from "./auditEvents";
 import { HubGrantItem, HubMemberId, RosterMember, SignedHubRoster } from "./hubAndSpokes";
 import { HubPushReason } from "./hubPush";
+import { HubOfferId, HubOfferKind, HubProvisionMode, HubProvisionReason } from "./hubProvision";
 import { HUB_WAKE_MAX_SPOKES, HubWakeSpokeTimes } from "./hubWake";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -54,6 +55,14 @@ export const HubMembershipChange = Schema.Literal(
   "push-switch-changed",
   "push-forwarded",
   "push-refused",
+  "provision-switch-changed",
+  "provision-offered",
+  "provision-withdrawn",
+  "provision-offer-refused",
+  "provision-proposed",
+  "provision-applied",
+  "provision-dismissed",
+  "provision-refused",
 );
 export type HubMembershipChange = typeof HubMembershipChange.Type;
 
@@ -93,6 +102,11 @@ export const HubMembershipChangedPayload = Schema.Struct({
   pushBytes: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   /** For a push refusal: why. */
   pushReason: Schema.optional(HubPushReason),
+  /** For a provisioning change: the offer, its kind, whether a person or the standing choice applied it, and why one came to nothing. */
+  offerId: Schema.optional(HubOfferId),
+  provisionKind: Schema.optional(HubOfferKind),
+  provisionMode: Schema.optional(HubProvisionMode),
+  provisionReason: Schema.optional(HubProvisionReason),
 }).annotations(strict);
 export type HubMembershipChangedPayload = typeof HubMembershipChangedPayload.Type;
 export const decodeHubMembershipChangedPayload = Schema.decodeUnknownSync(

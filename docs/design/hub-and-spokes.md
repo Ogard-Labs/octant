@@ -38,8 +38,8 @@ own origin, with the browser's join and passkey held there; reaching spokes from
 the hub's page (decision H15's links, and a browser identity a spoke can accept)
 is not built. The browser flow is tested with a faked authenticator and has not
 been run against a real hub. Nothing here has been run on a real phone, a real
-passkey, or Android. Sign-in copy, posture routes, a Mac Touch ID unlock key,
-and provisioning are not built. The wake service is built (the hub's own
+passkey, or Android. Sign-in copy, posture routes, and a Mac Touch ID unlock key
+are not built. The wake service is built (the hub's own
 switch, spokes reporting opaque routine times, the Wake-on-LAN packet and signed
 nudge, standbys holding the times), read narrowly as the last item of slice 8
 records; it has run only between hosts on loopback with a fake socket, and a real
@@ -54,10 +54,19 @@ sealed, spoke-signed delivery requests, the hub forwarding them unchanged to the
 push gateway, and a standing-in standby doing the same), read narrowly as the
 last item of slice 9 records; it has run only between hosts on loopback against a
 local stand-in for the gateway, never against the real gateway or to a real
-phone, and it never sends to Apple or Google itself.
+phone, and it never sends to Apple or Google itself. Provisioning is built (the
+hub's own switch, offers as data, proposals the spoke's person applies or
+dismisses, and applying on arrival for three kinds), read narrowly as the last
+item of slice 10 records; it has run only between hosts on loopback with fake
+services behind each kind, and a routine proposal cannot be applied on a real
+host yet. After this slice every delivery-plan slice is built. What remains is
+the maintainer's: the live checks the slices name (a real Wake-on-LAN wake, a
+delivery to a real phone, a phone, passkey, and Touch ID run, a failover on a
+real network, a browser against a real hub), Windows, and the post-preview
+tracks.
 The hub uses only the Roster and Status grant items, the Owners item for
 owner devices, the Standby item for naming a standby, the Wake item for the
-wake service, and the Push item for push. The maintainer
+wake service, the Push item for push, and the Provision item for offers. The maintainer
 asked for this design and authorized it as post-preview, design-first work on
 2026-10-28, and set its shape the same day: a running instance enabled as hub,
 members paired by QR or manual code over a private network such as Tailscale,
@@ -1169,6 +1178,60 @@ maintainer's hardware, or names the maintainer gate.
 10. **Provisioning.** Update-feed mirror, catalog offers, profiles, and routine
     offers as proposals, with per-kind auto-apply per H5. Acceptance: nothing
     offered installs trusted, enables, or carries a secret. **Yes.**
+
+    Built, with these narrower readings:
+    - **Offers are data with closed fields.** An offer is one of five strict
+      shapes. An endpoint row has no key field and takes an https address with no
+      user, password, query, or fragment; no free-text field may look like a
+      credential. Anything else fails the schema, on the hub when it is made and on
+      the spoke when it arrives.
+    - **Hub switch, window only.** Offers are the hub's own switch, off by default
+      (`octant hub provision on|off`, Settings › Hub). Turning it off forgets the
+      offers and stops serving any mirror. Only a window on the hub makes or
+      withdraws an offer. A spoke whose person did not tick Provision refuses with
+      `provision-not-granted` and the hub keeps only that word.
+    - **Only the hub offers.** A spoke accepts an offer only from the key it joined
+      the hub with. A standing-in standby sends none: offers are not copied to a
+      standby, so the "or a standing-in standby" case of the grant is not
+      expressed, and a peer, a guest, or a stranger is refused as not the hub.
+    - **The spoke refuses what it cannot apply.** A kind with no service behind it
+      on that host is refused on arrival (`kind-unsupported`). Proposals lapse after
+      a week and a spoke holds at most 32; unticking Provision drops them.
+    - **Applying is the window's.** Apply and Dismiss are loopback administration
+      routes, so a remote device, the hub, a peer, and an owner device never apply;
+      an owner device applying is not built. Each kind goes through the service a
+      person would use: the plugin service's inspect then install (nothing trusts
+      or enables it), the profile service, the provider service (the row is made
+      switched off, with authentication that wants a key the person adds), and the
+      shell settings for the release channel. Applying a plugin checks the digest
+      the offer named against the catalog's.
+    - **Narrower than the grant text.** A profile that asks for Full access or a
+      remembered permission is refused, because only a person on the spoke chooses
+      those. The candidate channel is followed on an offer only by a spoke already
+      on it. The update-feed mirror's signature is checked with the release keys the
+      host holds; a host with none refuses a mirrored offer. The server wiring holds
+      no release keys yet (they are compiled into the desktop app), so a real host
+      refuses mirrored offers until the desktop hands them over. The verified feed
+      is kept as the document the hub served; the desktop updater does not read it.
+    - **Endpoint rows ask (the H5 reading).** H5 lists three kinds that may apply
+      on arrival: an update channel, an untrusted plugin install, and a profile
+      without secrets. An endpoint row is not among them, so it always asks, as a
+      routine does; the request that sets applying on arrival names only the three.
+    - **A routine needs a Project and a builder.** A routine offer names no
+      Project, host, profile, or authority. The person binds it to a Project when
+      applying it (`octant hub apply <id> --project <id>`; Settings points to that).
+      Building the definition needs the editor's receipts, which only a window
+      builds today, so the host's service for the kind refuses it
+      (`kind-unsupported`) until that builder moves to the server. The apply path is
+      proven with a fake service that records the principal.
+    - **Journal.** Offers made and withdrawn, proposals received, applied (the
+      principal and whether a person or the standing choice did it), dismissed, and
+      refused, each with a reason word and never an offer's text. Applying on arrival
+      is journaled with the window as principal and `auto` as the mode.
+    - **Window bridge and Settings.** The desktop's allow-list of hub operations
+      gained the six provisioning operations, each decoded against its contract.
+      Settings makes only stable and preview channel offers; the other kinds are
+      offered with `octant hub offer`.
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.

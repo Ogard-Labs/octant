@@ -175,6 +175,39 @@ describe("hub administration controls", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("sends an offer, and a proposal's apply, only with a body that carries no secret", async () => {
+    const { calls, runtime: controls } = runtime(() => Response.json({ status: "offered" }));
+    const offer = {
+      kind: "plugin",
+      catalogId: "octant",
+      entryId: "review-helper",
+      expectedDigest: `sha256:${"a".repeat(64)}`,
+    };
+
+    await sendHubAdministrationOperation(controls, "provision-offer", { offer });
+    await sendHubAdministrationOperation(controls, "provision-auto-apply", {
+      kind: "plugin",
+      enabled: true,
+    });
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://127.0.0.1:4317/api/desktop/hub/provision/offers",
+      "http://127.0.0.1:4317/api/desktop/hub/provision/auto-apply",
+    ]);
+
+    for (const [operation, body] of [
+      ["provision-offer", { offer: { ...offer, apiKey: "x" } }],
+      ["provision-offer", {}],
+      ["provision-auto-apply", { kind: "routine", enabled: true }],
+      ["provision-apply", { offerId: "not-an-id" }],
+      ["provision", { enabled: "yes" }],
+    ] as const) {
+      expect(await sendHubAdministrationOperation(controls, operation, body)).toMatchObject({
+        status: 400,
+      });
+    }
+    expect(calls).toHaveLength(2);
+  });
+
   it("sends the wake switch and the hardware address only with their decoded bodies", async () => {
     const { calls, runtime: controls } = runtime(() => Response.json({ status: "changed" }));
 

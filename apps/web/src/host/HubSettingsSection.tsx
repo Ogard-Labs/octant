@@ -160,6 +160,29 @@ const PUSH_RESULT_COPY: Readonly<Record<string, string>> = {
   refused: "the hub refused it",
 };
 
+/** How the hub's last offer to a spoke went, in words. */
+const OFFER_RESULT_COPY: Readonly<Record<string, string>> = {
+  proposed: "holds it as a proposal",
+  refused: "did not take it",
+  unreachable: "could not be reached",
+};
+
+/** What a proposal asks of this computer, in words, for the person who applies it. */
+function proposalSummary(offer: ProposalOffer): string {
+  switch (offer.kind) {
+    case "update-channel":
+      return `Follow the ${offer.channel} update channel${offer.mirror === true ? ", checking the hub's copy of the signed feed" : ""}.`;
+    case "plugin":
+      return `Install ${offer.entryId} from the ${offer.catalogId} catalog. It arrives untrusted and switched off.`;
+    case "agent-profile":
+      return `Add the profile “${offer.displayName}”.`;
+    case "model-endpoint":
+      return `Add the endpoint “${offer.displayName}” at ${offer.baseUrl}. It arrives switched off and without a key.`;
+    case "routine":
+      return `A routine, “${offer.displayName}”. You choose its Project and it runs under this computer's own limits.`;
+  }
+}
+
 interface Reply {
   readonly status: number;
   readonly body: unknown;
@@ -188,6 +211,7 @@ interface HubStatus {
   readonly standbyOrder: ReadonlyArray<string>;
   readonly wake?: WakeView;
   readonly push?: PushView;
+  readonly provision?: ProvisionView;
   readonly link?: {
     readonly membership: "member" | "removed";
     readonly hubName: string;
@@ -213,6 +237,51 @@ interface HubStatus {
     readonly alerts: ReadonlyArray<NewMemberAlertRow>;
   };
 }
+
+/** The fields of an offer a proposal shows; the host holds the rest. */
+interface ProposalOffer {
+  readonly kind: "update-channel" | "plugin" | "agent-profile" | "model-endpoint" | "routine";
+  readonly channel?: string;
+  readonly mirror?: boolean;
+  readonly catalogId?: string;
+  readonly entryId?: string;
+  readonly displayName?: string;
+  readonly baseUrl?: string;
+}
+
+/** Offers as this window sees them: the hub's offers and how each spoke took them, and this computer's proposals. */
+interface ProvisionView {
+  readonly hub: {
+    readonly enabled: boolean;
+    readonly offers: ReadonlyArray<{
+      readonly offerId: string;
+      readonly kind: string;
+      readonly deliveries: ReadonlyArray<{
+        readonly memberId: string;
+        readonly result: string;
+        readonly reason?: string;
+      }>;
+    }>;
+  };
+  readonly spoke: {
+    readonly offering: boolean;
+    readonly autoApply: ReadonlyArray<string>;
+    readonly proposals: ReadonlyArray<{
+      readonly offerId: string;
+      readonly offer: ProposalOffer;
+      readonly expiresAt: string;
+    }>;
+  };
+}
+
+const AUTO_APPLY_KINDS: ReadonlyArray<{
+  readonly kind: "update-channel" | "plugin" | "agent-profile";
+  readonly label: string;
+}> = [
+  { kind: "update-channel", label: "Update channel" },
+  { kind: "plugin", label: "Plugin install (untrusted and off)" },
+  { kind: "agent-profile", label: "Agent profile (no secrets)" },
+];
 
 /** The push sender as this window sees it: the hub's switch and what it counted, and whether this computer hands its notifications on. */
 interface PushView {
@@ -544,6 +613,69 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
     await refresh();
   };
 
+  const setOffers = async (on: boolean) => {
+    const reply = await act(
+      "provision",
+      { enabled: on },
+      "changed",
+      on ? "Octant could not turn on offers." : "Octant could not turn off offers.",
+    );
+    if (reply !== undefined) {
+      setMessage(
+        on
+          ? "Offers are on. A computer holds an offer only if its person ticked Provision."
+          : "Offers are off. The hub forgot the offers it held.",
+      );
+    }
+    await refresh();
+  };
+
+  const offerChannel = async (channel: "stable" | "preview") => {
+    const reply = await act(
+      "provision-offer",
+      { offer: { kind: "update-channel", channel } },
+      "offered",
+      "Octant could not make that offer.",
+    );
+    if (reply !== undefined) {
+      setMessage(`Offered the ${channel} update channel. Each computer's person applies it.`);
+    }
+    await refresh();
+  };
+
+  const withdrawOffer = async (offerId: string) => {
+    const reply = await act(
+      "provision-withdraw",
+      { offerId },
+      "withdrawn",
+      "Octant could not withdraw that offer.",
+    );
+    if (reply !== undefined)
+      setMessage("Offer withdrawn. Proposals already held stay with their person.");
+    await refresh();
+  };
+
+  const decideProposal = async (offerId: string, apply: boolean) => {
+    const reply = await act(
+      apply ? "provision-apply" : "provision-dismiss",
+      { offerId },
+      apply ? "applied" : "dismissed",
+      apply ? "Octant could not apply that proposal." : "Octant could not dismiss that proposal.",
+    );
+    if (reply !== undefined) setMessage(apply ? "Offer applied." : "Dismissed.");
+    await refresh();
+  };
+
+  const setAutoApply = async (kind: string, enabled: boolean) => {
+    await act(
+      "provision-auto-apply",
+      { kind, enabled },
+      "changed",
+      "Octant could not change that.",
+    );
+    await refresh();
+  };
+
   const saveHardwareAddress = async (address: string | null) => {
     const reply = await act(
       "wake-hardware-address",
@@ -830,7 +962,7 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
         {message === undefined ? null : (
           <SettingsState
             kind={
-              /^(Approved|Denied|Removed|Left|Added|Confirm|Dismissed|The hub grant is saved|Standby order saved|This computer is now the hub|Wake service is|Push sender is|Hardware address)/.test(
+              /^(Approved|Denied|Removed|Left|Added|Confirm|Dismissed|The hub grant is saved|Standby order saved|This computer is now the hub|Wake service is|Push sender is|Offers are|Offered|Offer withdrawn|Offer applied|Hardware address)/.test(
                 message,
               )
                 ? "success"
@@ -1145,6 +1277,77 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
       )}
 
       {!hubOn || status === undefined ? null : (
+        <SettingsSection title="Offers">
+          <div className="setgroup">
+            <SettingRow
+              description="Offer your spokes configuration: an update channel, a plugin from the catalog, an agent profile, a model endpoint, or a routine. Each lands on a computer as a proposal its own person applies or dismisses, and only on a computer whose person ticked Provision. An offer never installs trusted, switches anything on, or carries a key. Off by default."
+              label="Offers"
+              scope="host"
+              settingId="hub-offers"
+            >
+              <OctantSwitch
+                checked={status.provision?.hub.enabled === true}
+                disabled={busy}
+                label="Offers"
+                onCheckedChange={(on) => void setOffers(on)}
+              />
+            </SettingRow>
+          </div>
+          {status.provision?.hub.enabled !== true ? null : (
+            <>
+              <div className="host-settings__controls">
+                {(["stable", "preview"] as const).map((channel) => (
+                  <OctantButton
+                    disabled={busy}
+                    key={channel}
+                    onClick={() => void offerChannel(channel)}
+                    size="sm"
+                    type="button"
+                    variant="secondary"
+                  >
+                    {`Offer the ${channel} update channel`}
+                  </OctantButton>
+                ))}
+              </div>
+              <p className="settings-section-line">
+                Plugins, profiles, endpoints, and routines are offered with `octant hub offer`.
+              </p>
+              {status.provision.hub.offers.length === 0 ? (
+                <SettingsState kind="empty">The hub holds no offers.</SettingsState>
+              ) : (
+                <ul aria-label="Offers the hub holds" className="setgroup">
+                  {status.provision.hub.offers.map((offer) => (
+                    <li className="setrow" key={offer.offerId}>
+                      <span className="setrow-label">{offer.kind}</span>
+                      <p className="setrow-hint">
+                        {offer.deliveries.length === 0
+                          ? "Not handed to any computer."
+                          : offer.deliveries
+                              .map(
+                                (delivery) =>
+                                  `${nameOf(delivery.memberId)} ${OFFER_RESULT_COPY[delivery.result] ?? delivery.result}`,
+                              )
+                              .join(" · ")}
+                      </p>
+                      <OctantButton
+                        disabled={busy}
+                        onClick={() => void withdrawOffer(offer.offerId)}
+                        size="sm"
+                        type="button"
+                        variant="secondary"
+                      >
+                        Withdraw
+                      </OctantButton>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+        </SettingsSection>
+      )}
+
+      {!hubOn || status === undefined ? null : (
         <SettingsSection title="Owner devices">
           <p className="settings-section-line">
             An owner device can act on this hub with a window's powers after a fresh unlock. A
@@ -1272,6 +1475,66 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
                 </ul>
               )}
               {grantEditor(linked.grant, "Save the grant")}
+              {status?.provision?.spoke.offering !== true ? null : (
+                <div className="settings-panel__stack">
+                  <h4 className="settings-section-line">Offers from the hub</h4>
+                  {status.provision.spoke.proposals.length === 0 ? (
+                    <SettingsState kind="empty">The hub has offered nothing.</SettingsState>
+                  ) : (
+                    <ul aria-label="Proposals from the hub" className="setgroup">
+                      {status.provision.spoke.proposals.map((proposal) => (
+                        <li className="setrow" key={proposal.offerId}>
+                          <span className="setrow-label">{proposalSummary(proposal.offer)}</span>
+                          <p className="setrow-hint">{`Lapses ${proposal.expiresAt}`}</p>
+                          {proposal.offer.kind === "routine" ? (
+                            <p className="setrow-hint">
+                              Apply it with `octant hub apply {proposal.offerId} --project
+                              &lt;project-id&gt;`.
+                            </p>
+                          ) : (
+                            <OctantButton
+                              disabled={busy}
+                              onClick={() => void decideProposal(proposal.offerId, true)}
+                              size="sm"
+                              type="button"
+                              variant="secondary"
+                            >
+                              Apply
+                            </OctantButton>
+                          )}
+                          <OctantButton
+                            disabled={busy}
+                            onClick={() => void decideProposal(proposal.offerId, false)}
+                            size="sm"
+                            type="button"
+                            variant="secondary"
+                          >
+                            Dismiss
+                          </OctantButton>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <div className="setgroup">
+                    {AUTO_APPLY_KINDS.map((entry) => (
+                      <SettingRow
+                        description="Apply this kind of offer the moment it arrives, exactly as Apply does and never more. Off by default. A routine and an endpoint always ask."
+                        key={entry.kind}
+                        label={entry.label}
+                        scope="host"
+                        settingId={`hub-auto-apply-${entry.kind}`}
+                      >
+                        <OctantSwitch
+                          checked={status.provision?.spoke.autoApply.includes(entry.kind) === true}
+                          disabled={busy}
+                          label={entry.label}
+                          onCheckedChange={(on) => void setAutoApply(entry.kind, on)}
+                        />
+                      </SettingRow>
+                    ))}
+                  </div>
+                </div>
+              )}
               <OctantField>
                 <OctantFieldLabel htmlFor={addressId}>
                   Hardware address for Wake-on-LAN (optional)
@@ -1467,6 +1730,7 @@ function readStatus(body: unknown): HubStatus | undefined {
   const grant = readGrant(field(spoke, "grant"));
   const wake = readWake(field(body, "wake"));
   const push = readPush(field(body, "push"));
+  const provision = readProvision(field(body, "provision"));
   if (
     (membership === "member" || membership === "removed") &&
     typeof hubName === "string" &&
@@ -1491,6 +1755,7 @@ function readStatus(body: unknown): HubStatus | undefined {
       standbyOrder,
       ...(wake === undefined ? {} : { wake }),
       ...(push === undefined ? {} : { push }),
+      ...(provision === undefined ? {} : { provision }),
       link: {
         membership,
         hubName,
@@ -1520,6 +1785,86 @@ function readStatus(body: unknown): HubStatus | undefined {
     standbyOrder,
     ...(wake === undefined ? {} : { wake }),
     ...(push === undefined ? {} : { push }),
+    ...(provision === undefined ? {} : { provision }),
+  };
+}
+
+function readProvision(value: unknown): ProvisionView | undefined {
+  const hub = field(value, "hub");
+  const spoke = field(value, "spoke");
+  const enabled = field(hub, "enabled");
+  const rawOffers = field(hub, "offers");
+  const offering = field(spoke, "offering");
+  const rawProposals = field(spoke, "proposals");
+  if (
+    typeof enabled !== "boolean" ||
+    !Array.isArray(rawOffers) ||
+    typeof offering !== "boolean" ||
+    !Array.isArray(rawProposals)
+  ) {
+    return undefined;
+  }
+  const offers = rawOffers.flatMap((entry: unknown) => {
+    const offerId = field(entry, "offerId");
+    const kind = field(entry, "kind");
+    const rawDeliveries = field(entry, "deliveries");
+    if (typeof offerId !== "string" || typeof kind !== "string" || !Array.isArray(rawDeliveries)) {
+      return [];
+    }
+    const deliveries = rawDeliveries.flatMap((delivery: unknown) => {
+      const memberId = field(delivery, "memberId");
+      const result = field(delivery, "result");
+      const reason = field(delivery, "reason");
+      return typeof memberId === "string" && typeof result === "string"
+        ? [{ memberId, result, ...(typeof reason === "string" ? { reason } : {}) }]
+        : [];
+    });
+    return [{ offerId, kind, deliveries }];
+  });
+  const proposals = rawProposals.flatMap((entry: unknown) => {
+    const offerId = field(entry, "offerId");
+    const expiresAt = field(entry, "expiresAt");
+    const offer = readProposalOffer(field(entry, "offer"));
+    return typeof offerId === "string" && typeof expiresAt === "string" && offer !== undefined
+      ? [{ offerId, offer, expiresAt }]
+      : [];
+  });
+  const autoApply = field(spoke, "autoApply");
+  return {
+    hub: { enabled, offers },
+    spoke: {
+      offering,
+      autoApply: Array.isArray(autoApply)
+        ? autoApply.filter((kind): kind is string => typeof kind === "string")
+        : [],
+      proposals,
+    },
+  };
+}
+
+function readProposalOffer(value: unknown): ProposalOffer | undefined {
+  const kind = field(value, "kind");
+  if (
+    kind !== "update-channel" &&
+    kind !== "plugin" &&
+    kind !== "agent-profile" &&
+    kind !== "model-endpoint" &&
+    kind !== "routine"
+  ) {
+    return undefined;
+  }
+  const text = (key: string) => {
+    const found = field(value, key);
+    return typeof found === "string" ? { [key]: found } : {};
+  };
+  return {
+    kind,
+    ...text("channel"),
+    ...text("catalogId"),
+    ...text("entryId"),
+    ...text("displayName"),
+    ...text("baseUrl"),
+    ...(field(value, "mirror") === true ? { mirror: true } : {}),
   };
 }
 

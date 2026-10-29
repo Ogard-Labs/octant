@@ -15,6 +15,10 @@ import { decodeBrowserThreadId } from "@octant/contracts/browser-automation";
 import { managedWorktreeRoot } from "../code/managedWorktreeService";
 import { purgeThreadArtifacts, removeMirrorFiles } from "../persistence/threadArtifactPurge";
 import { readHostIdentity } from "../persistence/remoteAccessProjection";
+import { AgentProfileService } from "../agentProfileService";
+import { createProvisionHostPorts } from "../hub/provisionHostPorts";
+import { ProvisionService } from "../hub/provisionService";
+import { SpokeProvisionService } from "../hub/spokeProvisionService";
 import { createProviderCredentialRouteHandler } from "../providers/providerCredentialRoutes";
 import { makeAppStoreConnectKeyBrokerClient } from "../providers/credentialBrokerClient";
 import { createAppStoreConnectKeyRouteHandler } from "../apple/appStoreConnectKeyRoutes";
@@ -100,6 +104,7 @@ import type { ComputerUseWiring } from "./computerUse";
 import type { CodeWiring } from "./code";
 import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { ProvidersWiring } from "./providers";
+import type { WorkspaceWiring } from "./workspace";
 import type { CodeToolingWiring } from "./codeTooling";
 import type { WorkWiring } from "./work";
 import type { CanvasWiring } from "./canvas";
@@ -131,10 +136,12 @@ export type RemoteDependencies = Pick<
     | "chatAttachmentStore"
     | "credentialBroker"
     | "credentialResolver"
+    | "extensionApiService"
     | "generatedImageStore"
     | "providerDataDirectory"
     | "providerService"
   > &
+  Pick<WorkspaceWiring, "shellService"> &
   Pick<
     CodeToolingWiring,
     | "debugConfigurationApprovals"
@@ -193,6 +200,7 @@ export function wireRemote(deps: RemoteDependencies) {
     credentialBroker,
     credentialResolver,
     externalContentIngestionStore,
+    extensionApiService,
     generatedImageStore,
     debugConfigurationApprovals,
     debugService,
@@ -207,6 +215,7 @@ export function wireRemote(deps: RemoteDependencies) {
     pushNotificationTokenStore,
     remoteServerGrants,
     serve,
+    shellService,
     startedAt,
     threadExportService,
     threadMessageQueue,
@@ -518,6 +527,40 @@ export function wireRemote(deps: RemoteDependencies) {
     granted: () => spokePushService.granted(),
     hand: (delivery) => spokePushService.hand(delivery),
   });
+  // Provisioning is off until the person turns it on in the hub's window, and a spoke
+  // holds an offer only if its hub grant ticks Provision. Each kind applies through the
+  // service the person would use themselves; the host has no routine builder, so a
+  // routine offer is refused as a kind this host cannot apply.
+  const provisionService = new ProvisionService({
+    state: hubStateStore,
+    identity: resolveHubIdentity,
+    transport: hubTransport,
+    record: recordHubMembership,
+    now: Date.now,
+  });
+  const spokeProvisionService = new SpokeProvisionService({
+    state: hubStateStore,
+    identity: resolveHubIdentity,
+    transport: hubTransport,
+    spoke: spokeLinkService,
+    ports: createProvisionHostPorts({
+      shell: {
+        currentRing: () => persistence.readShellSettings()?.settings.releaseRing,
+        setReleaseRing: (ring) => shellService.setReleaseRing(ring),
+      },
+      extensions: { execute: (command) => extensionApiService.execute(command) },
+      profiles: new AgentProfileService({
+        persistence,
+        uuid: randomUUID,
+        clock: () => new Date().toISOString(),
+      }),
+      providers: providerService,
+      userScopeRef: OCTANT_LOCAL_ACTOR_ID,
+      uuid: randomUUID,
+    }),
+    record: recordHubMembership,
+    now: Date.now,
+  });
   const tailscaleCertificate = new TailscaleCertificateService({
     setting: createTailscaleCertificateSetting(providerDataDirectory),
     daemon: createTailscaleCliDaemon({
@@ -546,6 +589,8 @@ export function wireRemote(deps: RemoteDependencies) {
     spokeWake: spokeWakeService,
     push: pushService,
     spokePush: spokePushService,
+    provision: provisionService,
+    spokeProvision: spokeProvisionService,
     certificate: tailscaleCertificate,
     maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   });
@@ -557,6 +602,8 @@ export function wireRemote(deps: RemoteDependencies) {
     spokeWake: spokeWakeService,
     push: pushService,
     spokePush: spokePushService,
+    provision: provisionService,
+    spokeProvision: spokeProvisionService,
   });
   // Delegation between spokes: the receiving side starts an ordinary Work
   // thread under this host's own scope, and the sending side checks this host's

@@ -2,6 +2,7 @@ import {
   ActorId,
   AggregateVersion,
   CorrelationId,
+  type AppReleaseRing,
   type CodeThread,
   type WorkThread,
   type WorkThreadId,
@@ -180,6 +181,31 @@ export class ShellService implements ShellServiceApi {
         events: [this.#pendingEvent("shell.settings-replaced", { settings })],
       });
       return { kind: "settings-replaced", settings, version: committed.aggregateVersion };
+    } catch (error) {
+      throw this.#mapFailure(error);
+    }
+  }
+
+  /**
+   * The release ring this host follows, set by the host itself: a hub's offer
+   * the person applied (or let apply on arrival) has no window to name, and the
+   * ring is one field of the settings a window would have replaced. Every other
+   * setting is carried over as stored.
+   */
+  setReleaseRing(ring: AppReleaseRing): void {
+    this.#assertReady();
+    try {
+      const stored = this.#persistence.readShellSettings();
+      const current = stored?.settings ?? defaultShellSettings();
+      this.#persistence.journal.append({
+        aggregate: { aggregateType: "shell-settings", aggregateId: SHELL_SETTINGS_AGGREGATE_ID },
+        expectedVersion: stored?.aggregateVersion ?? decodeAggregateVersion(0),
+        events: [
+          this.#pendingEvent("shell.settings-replaced", {
+            settings: { ...current, releaseRing: ring },
+          }),
+        ],
+      });
     } catch (error) {
       throw this.#mapFailure(error);
     }

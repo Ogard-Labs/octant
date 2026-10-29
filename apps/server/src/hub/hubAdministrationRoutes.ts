@@ -15,6 +15,11 @@ import {
   decodeHubGrant,
   decodeHubMemberReference,
   decodeHubPromoteRequest,
+  decodeHubAutoApplyRequest,
+  decodeHubOfferRequest,
+  decodeHubOfferWithdrawRequest,
+  decodeHubProposalDecisionRequest,
+  decodeHubProvisionSwitchRequest,
   decodeHubPushSwitchRequest,
   decodeHubStandbyOrderRequest,
   decodeHubWakeHardwareAddressRequest,
@@ -29,8 +34,10 @@ import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import type { FailoverService } from "./failoverService";
 import type { HubService } from "./hubService";
+import type { ProvisionService } from "./provisionService";
 import type { PushService } from "./pushService";
 import type { SpokeLinkService } from "./spokeLinkService";
+import type { SpokeProvisionService } from "./spokeProvisionService";
 import type { SpokePushService } from "./spokePushService";
 import type { SpokeWakeService } from "./spokeWakeService";
 import type { TailscaleCertificateService } from "./tailscaleCertificate";
@@ -76,6 +83,15 @@ export const HUB_ADMINISTRATION_ROUTES = {
   wakeHardwareAddress: "/api/desktop/hub/wake/hardware-address",
   /** The hub's push switch: only a window on the hub turns it on or off. */
   push: "/api/desktop/hub/push",
+  /** The hub's offer switch: only a window on the hub turns it on or off. */
+  provision: "/api/desktop/hub/provision",
+  /** The hub's window makes an offer for its spokes. */
+  provisionOffer: "/api/desktop/hub/provision/offers",
+  provisionWithdraw: "/api/desktop/hub/provision/offers/withdraw",
+  /** A spoke's own window applies or dismisses a proposal, and sets which kinds apply on arrival. */
+  provisionApply: "/api/desktop/hub/provision/apply",
+  provisionDismiss: "/api/desktop/hub/provision/dismiss",
+  provisionAutoApply: "/api/desktop/hub/provision/auto-apply",
 } as const;
 
 type RouteValue = (typeof HUB_ADMINISTRATION_ROUTES)[keyof typeof HUB_ADMINISTRATION_ROUTES];
@@ -90,6 +106,8 @@ export interface HubAdministrationRouteOptions {
   readonly spokeWake: SpokeWakeService;
   readonly push: PushService;
   readonly spokePush: SpokePushService;
+  readonly provision: ProvisionService;
+  readonly spokeProvision: SpokeProvisionService;
   readonly certificate: TailscaleCertificateService;
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
@@ -141,6 +159,7 @@ export function createHubAdministrationRouteHandler(
         failover: options.failover.status(),
         wake: { hub: options.wake.status(), spoke: options.spokeWake.status() },
         push: { hub: options.push.status(), spoke: { handing: options.spokePush.granted() } },
+        provision: { hub: options.provision.status(), spoke: options.spokeProvision.view() },
       });
     }
     if (route === HUB_ADMINISTRATION_ROUTES.heldMembers) {
@@ -281,6 +300,32 @@ export function createHubAdministrationRouteHandler(
         case HUB_ADMINISTRATION_ROUTES.push: {
           const value = decodeHubPushSwitchRequest(parseJson(request, body.text));
           return outcome(await options.push.setEnabled(value.enabled, WINDOW_PRINCIPAL));
+        }
+        case HUB_ADMINISTRATION_ROUTES.provision: {
+          const value = decodeHubProvisionSwitchRequest(parseJson(request, body.text));
+          return outcome(options.provision.setEnabled(value.enabled, WINDOW_PRINCIPAL));
+        }
+        case HUB_ADMINISTRATION_ROUTES.provisionOffer: {
+          const value = decodeHubOfferRequest(parseJson(request, body.text));
+          return outcome(await options.provision.offer(value, WINDOW_PRINCIPAL));
+        }
+        case HUB_ADMINISTRATION_ROUTES.provisionWithdraw: {
+          const value = decodeHubOfferWithdrawRequest(parseJson(request, body.text));
+          return outcome(options.provision.withdraw(value.offerId, WINDOW_PRINCIPAL));
+        }
+        case HUB_ADMINISTRATION_ROUTES.provisionApply: {
+          const value = decodeHubProposalDecisionRequest(parseJson(request, body.text));
+          return outcome(
+            await options.spokeProvision.apply(value.offerId, WINDOW_PRINCIPAL, value.projectId),
+          );
+        }
+        case HUB_ADMINISTRATION_ROUTES.provisionDismiss: {
+          const value = decodeHubProposalDecisionRequest(parseJson(request, body.text));
+          return outcome(options.spokeProvision.dismiss(value.offerId, WINDOW_PRINCIPAL));
+        }
+        case HUB_ADMINISTRATION_ROUTES.provisionAutoApply: {
+          const value = decodeHubAutoApplyRequest(parseJson(request, body.text));
+          return outcome(options.spokeProvision.setAutoApply(value.kind, value.enabled));
         }
         case HUB_ADMINISTRATION_ROUTES.wakeHardwareAddress: {
           const value = decodeHubWakeHardwareAddressRequest(parseJson(request, body.text));

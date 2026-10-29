@@ -49,6 +49,8 @@ async function setup(
     spokeWake: host.spokeWake,
     push: host.push,
     spokePush: host.spokePush,
+    provision: host.provision,
+    spokeProvision: host.spokeProvision,
     certificate: new TailscaleCertificateService({
       setting: createTailscaleCertificateSetting(host.directory),
       daemon: unreachableTailscaleDaemon,
@@ -222,6 +224,98 @@ describe("hub administration over the loopback channel", () => {
       ["push-switch-changed", "local-window"],
       ["push-switch-changed", "local-window"],
     ]);
+  });
+
+  it("makes offers only in a window on a hub whose offer switch is on, and refuses an offer that could carry a secret", async () => {
+    const { host, handle } = await setup();
+    const offer = {
+      kind: "plugin",
+      catalogId: "octant",
+      entryId: "review-helper",
+      expectedDigest: `sha256:${"a".repeat(64)}`,
+    };
+
+    const beforeTheHub = await handle(post(HUB_ADMINISTRATION_ROUTES.provision, { enabled: true }));
+    expect(await beforeTheHub?.json()).toEqual({ status: "refused", kind: "hub-role-off" });
+    await handle(post(HUB_ADMINISTRATION_ROUTES.enable));
+    const switchedOff = await handle(post(HUB_ADMINISTRATION_ROUTES.provisionOffer, { offer }));
+    expect(await switchedOff?.json()).toEqual({
+      status: "refused",
+      kind: "provision-service-off",
+    });
+    const unauthenticated = await handle(
+      post(
+        HUB_ADMINISTRATION_ROUTES.provisionOffer,
+        { offer },
+        { "x-octant-window-capability": "B".repeat(43) },
+      ),
+    );
+    expect(unauthenticated?.status).toBe(401);
+
+    await handle(post(HUB_ADMINISTRATION_ROUTES.provision, { enabled: true }));
+    const secretField = await handle(
+      post(HUB_ADMINISTRATION_ROUTES.provisionOffer, {
+        offer: {
+          kind: "model-endpoint",
+          family: "openai-compatible",
+          displayName: "Gateway",
+          baseUrl: "https://gateway.example.test/v1",
+          protocol: "auto",
+          authentication: "key",
+          manualModelIds: [],
+          apiKey: "x",
+        },
+      }),
+    );
+    expect(secretField?.status).toBe(400);
+    const made = await handle(post(HUB_ADMINISTRATION_ROUTES.provisionOffer, { offer }));
+    expect(await made?.json()).toMatchObject({ status: "offered", delivered: 0 });
+    expect(host.provision.status().offers).toHaveLength(1);
+
+    const status = await handle(
+      new Request(`http://127.0.0.1${HUB_ADMINISTRATION_ROUTES.status}`, {
+        headers: { "x-octant-desktop-secret": secret, "x-octant-window-capability": capability },
+      }),
+    );
+    expect(await status?.json()).toMatchObject({
+      provision: { hub: { enabled: true }, spoke: { offering: false, proposals: [] } },
+    });
+    const [offered] = host.provision.status().offers;
+    if (offered === undefined) throw new Error("No offer.");
+    const withdrawn = await handle(
+      post(HUB_ADMINISTRATION_ROUTES.provisionWithdraw, { offerId: offered.offerId }),
+    );
+    expect(await withdrawn?.json()).toEqual({ status: "withdrawn" });
+    expect(host.provision.status().offers).toEqual([]);
+  });
+
+  it("applies, dismisses, and sets applying on arrival only for a window, and only for the three kinds", async () => {
+    const { handle } = await setup();
+
+    const notJoined = await handle(
+      post(HUB_ADMINISTRATION_ROUTES.provisionApply, {
+        offerId: "55555555-5555-4555-8555-555555555555",
+      }),
+    );
+    expect(await notJoined?.json()).toEqual({ status: "refused", kind: "not-a-spoke" });
+    const dismissed = await handle(
+      post(HUB_ADMINISTRATION_ROUTES.provisionDismiss, {
+        offerId: "55555555-5555-4555-8555-555555555555",
+      }),
+    );
+    expect(await dismissed?.json()).toEqual({ status: "refused", kind: "not-a-spoke" });
+    const routine = await handle(
+      post(HUB_ADMINISTRATION_ROUTES.provisionAutoApply, { kind: "routine", enabled: true }),
+    );
+    expect(routine?.status).toBe(400);
+    const unauthenticated = await handle(
+      post(
+        HUB_ADMINISTRATION_ROUTES.provisionAutoApply,
+        { kind: "plugin", enabled: true },
+        { "x-octant-window-capability": "B".repeat(43) },
+      ),
+    );
+    expect(unauthenticated?.status).toBe(401);
   });
 
   it("enters a hardware address only on a spoke and only when it is one", async () => {

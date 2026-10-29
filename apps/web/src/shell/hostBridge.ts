@@ -264,7 +264,13 @@ export type HubAdministrationOperation =
   | "promote"
   | "wake"
   | "wake-hardware-address"
-  | "push";
+  | "push"
+  | "provision"
+  | "provision-offer"
+  | "provision-withdraw"
+  | "provision-apply"
+  | "provision-dismiss"
+  | "provision-auto-apply";
 
 /**
  * The loopback hub administration, which only a local window reaches. Absent

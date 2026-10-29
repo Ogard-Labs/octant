@@ -416,6 +416,8 @@ describe("the hub-link routes the private listener serves", () => {
       [REMOTE_HUB_LINK_ROUTE_IDS.push, "POST", HUB_LINK_ROUTES.push],
       [REMOTE_HUB_LINK_ROUTE_IDS.pushGrant, "POST", HUB_LINK_ROUTES.pushGrant],
       [REMOTE_HUB_LINK_ROUTE_IDS.pushCopy, "PUT", HUB_LINK_ROUTES.pushCopy],
+      [REMOTE_HUB_LINK_ROUTE_IDS.provisionOffer, "POST", HUB_LINK_ROUTES.provisionOffer],
+      [REMOTE_HUB_LINK_ROUTE_IDS.provisionMirror, "POST", HUB_LINK_ROUTES.provisionMirror],
       [REMOTE_HUB_LINK_ROUTE_IDS.delegate, "POST", PEER_DELEGATION_ROUTES.create],
       [REMOTE_HUB_LINK_ROUTE_IDS.delegationStatus, "POST", PEER_DELEGATION_ROUTES.status],
       [REMOTE_HUB_LINK_ROUTE_IDS.delegationCancel, "POST", PEER_DELEGATION_ROUTES.cancel],
@@ -475,6 +477,12 @@ describe("the hub-link routes the private listener serves", () => {
       "/api/desktop/hub/wake",
       "/api/desktop/hub/wake/hardware-address",
       "/api/desktop/hub/push",
+      "/api/desktop/hub/provision",
+      "/api/desktop/hub/provision/offers",
+      "/api/desktop/hub/provision/offers/withdraw",
+      "/api/desktop/hub/provision/apply",
+      "/api/desktop/hub/provision/dismiss",
+      "/api/desktop/hub/provision/auto-apply",
     ]) {
       const decision = policy.inspect(
         new Request(`https://100.101.102.103:8443${path}`, {

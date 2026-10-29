@@ -10,6 +10,8 @@ import {
   decodeHubGuestAdmissionRequest,
   decodeHubJoinRequest,
   decodeHubLeaveRequest,
+  decodeHubMirrorRequest,
+  decodeHubOfferDelivery,
   decodeHubPushCopy,
   decodeHubStandInHandback,
   decodeHubWakeCopy,
@@ -22,8 +24,10 @@ import { HUB_HANDBACK_MAX_BODY_BYTES, HUB_WAKE_COPY_MAX_BODY_BYTES } from "../re
 import type { FailoverService } from "./failoverService";
 import { HUB_LINK_HEADER, HUB_PEER_KEY_HEADER, HubLinkVerifier } from "./hubLink";
 import type { HubService } from "./hubService";
+import type { ProvisionService } from "./provisionService";
 import type { PushService } from "./pushService";
 import type { SpokeLinkService } from "./spokeLinkService";
+import type { SpokeProvisionService } from "./spokeProvisionService";
 import type { SpokePushService } from "./spokePushService";
 import type { SpokeWakeService } from "./spokeWakeService";
 import type { WakeService } from "./wakeService";
@@ -55,6 +59,10 @@ export const HUB_LINK_ROUTES = {
   pushGrant: "/api/hub/push-grant",
   /** The hub tells a standby whether its push switch is on. */
   pushCopy: "/api/hub/push-copy",
+  /** The hub hands a spoke whose grant ticks Provision an offer, which the spoke holds as a proposal. */
+  provisionOffer: "/api/hub/provision-offer",
+  /** A spoke asks the hub for the signed update feed document an offer mirrors. */
+  provisionMirror: "/api/hub/provision-mirror",
 } as const;
 
 type RouteValue = (typeof HUB_LINK_ROUTES)[keyof typeof HUB_LINK_ROUTES];
@@ -80,6 +88,8 @@ export interface HubLinkRouteOptions {
   readonly spokeWake: SpokeWakeService;
   readonly push: PushService;
   readonly spokePush: SpokePushService;
+  readonly provision: ProvisionService;
+  readonly spokeProvision: SpokeProvisionService;
   readonly now?: () => number;
 }
 
@@ -275,6 +285,61 @@ export function createHubLinkRouteHandler(
       return result.status === "refused"
         ? refused(403, result.kind)
         : Response.json(result, { headers: NO_STORE });
+    }
+
+    if (route === HUB_LINK_ROUTES.provisionOffer) {
+      // Only the hub makes offers: a standby, a peer, and a guest are not the hub's key.
+      const authenticated = options.spoke.authenticateHub({
+        header,
+        method: request.method,
+        path: route,
+        body,
+      });
+      if (authenticated.status === "refused") return refused(401, authenticated.kind);
+      let delivery;
+      try {
+        delivery = decodeHubOfferDelivery(JSON.parse(body));
+      } catch {
+        // A secret-shaped field, an unknown field, or a malformed value never gets as far as a proposal.
+        return refused(400, "malformed");
+      }
+      const receipt = await options.spokeProvision.receive(
+        authenticated.principal.memberId,
+        delivery,
+      );
+      return receipt.status === "proposed"
+        ? Response.json(receipt, { status: 201, headers: NO_STORE })
+        : refused(
+            receipt.kind === "not-a-spoke" || receipt.kind === "hub-revoked" ? 401 : 403,
+            receipt.kind,
+          );
+    }
+
+    if (route === HUB_LINK_ROUTES.provisionMirror) {
+      const hubOn = options.hub.status().enabled;
+      if (!hubOn) return refused(403, "hub-role-off");
+      const verified = memberVerifier.verify({
+        header,
+        method: request.method,
+        path: route,
+        body,
+        recipientMemberId: options.hub.hubMemberId(),
+        publicKeyFor: (sender) => options.hub.memberKey(sender, presentedKey ?? undefined),
+      });
+      if (verified.status === "refused") return refused(401, verified.kind);
+      let mirrorRequest;
+      try {
+        mirrorRequest = decodeHubMirrorRequest(JSON.parse(body));
+      } catch {
+        return refused(400, "invalid");
+      }
+      const served = options.provision.serveMirror(verified.senderMemberId, mirrorRequest.offerId);
+      // The bytes go out exactly as the hub holds them; the spoke checks their signature.
+      return served.status === "served"
+        ? new Response(served.bytes, {
+            headers: { ...NO_STORE, "content-type": "application/json" },
+          })
+        : refused(403, served.kind);
     }
 
     if (route === HUB_LINK_ROUTES.pushCopy) {
